@@ -259,6 +259,10 @@ errors.
 checked base. Machine code constructors receive only the exact derived
 `ByteRange`; direct and named load/store helpers expose literal source
 expansion equal to those constructors and provide no semantic certificate.
+`Grass.Construct.StackObjectVerified` is the proof-bearing companion: its
+machine backend supplies each `VerifiedFragment` and exact equality to the
+transparent checked-slice source, while construction only projects those
+witnesses.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
