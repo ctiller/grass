@@ -43,6 +43,21 @@ inductive Steps {Event : Type u} (system : RelationalSystem Event) : system.Stat
       (transition : system.Step currentGraph current choice event next nextGraph) :
       Steps system state graph (events ++ [event]) next nextGraph
 
+/-- Compose two coherent finite suffixes that meet at the same state and graph. -/
+theorem Steps.trans {Event : Type u} {system : RelationalSystem Event}
+    {initialState middleState finalState : system.State}
+    {initialGraph middleGraph finalGraph : system.Graph}
+    {prefixEvents suffixEvents : List Event}
+    (first : system.Steps initialState initialGraph prefixEvents middleState middleGraph)
+    (suffix : system.Steps middleState middleGraph suffixEvents finalState finalGraph) :
+    system.Steps initialState initialGraph (prefixEvents ++ suffixEvents)
+      finalState finalGraph := by
+  induction suffix with
+  | refl => simpa using first
+  | step prior transition inductionHypothesis =>
+      simpa [List.append_assoc] using
+        (Steps.step inductionHypothesis transition)
+
 /-- An infinite coherent continuation from one exact frontier whose global
 consistency condition retains the event trace already taken to that frontier. -/
 structure InfiniteContinuation {Event : Type u} (system : RelationalSystem Event)
@@ -56,6 +71,52 @@ structure InfiniteContinuation {Event : Type u} (system : RelationalSystem Event
   step : forall index, system.Step (graphAt index) (stateAt index)
     (choiceAt index) (eventAt index) (stateAt (index + 1)) (graphAt (index + 1))
   consistent : system.InfiniteConsistent priorEvents stateAt graphAt choiceAt eventAt
+
+/-- Infinite continuations are determined by their state, graph, choice, and
+event streams; all coherence fields are proof-irrelevant. -/
+@[ext]
+theorem InfiniteContinuation.ext {Event : Type u}
+    {system : RelationalSystem Event} {state : system.State}
+    {graph : system.Graph} {priorEvents : List Event}
+    {left right : system.InfiniteContinuation state graph priorEvents}
+    (stateAt : left.stateAt = right.stateAt)
+    (graphAt : left.graphAt = right.graphAt)
+    (choiceAt : left.choiceAt = right.choiceAt)
+    (eventAt : left.eventAt = right.eventAt) : left = right := by
+  cases left
+  cases right
+  cases stateAt
+  cases graphAt
+  cases choiceAt
+  cases eventAt
+  rfl
+
+/-- The finite event trace observed in the first `length` transitions of an
+infinite continuation. -/
+def InfiniteContinuation.prefixEvents {Event : Type u}
+    {system : RelationalSystem Event} {state : system.State}
+    {graph : system.Graph} {priorEvents : List Event}
+    (execution : system.InfiniteContinuation state graph priorEvents) :
+    Nat → List Event
+  | 0 => []
+  | length + 1 => execution.prefixEvents length ++ [execution.eventAt length]
+
+/-- Every finite restriction of an infinite continuation is a coherent
+`Steps` witness from its exact frontier. -/
+theorem InfiniteContinuation.prefixSteps {Event : Type u}
+    {system : RelationalSystem Event} {state : system.State}
+    {graph : system.Graph} {priorEvents : List Event}
+    (execution : system.InfiniteContinuation state graph priorEvents)
+    (length : Nat) :
+    system.Steps state graph (execution.prefixEvents length)
+      (execution.stateAt length) (execution.graphAt length) := by
+  induction length with
+  | zero =>
+      simpa [InfiniteContinuation.prefixEvents, execution.stateZero,
+        execution.graphZero] using
+        (Steps.refl (system := system) (state := state) (graph := graph))
+  | succ length inductionHypothesis =>
+      exact Steps.step inductionHypothesis (execution.step length)
 
 /-- A genuine finite-terminal or trace-aware infinite continuation from a
 frontier. -/
@@ -115,6 +176,18 @@ theorem Runs.ofInitialSteps {Event : Type u} {system : RelationalSystem Event}
   | refl => exact .initial valid
   | step _ transition inductionHypothesis => exact .step inductionHypothesis transition
 
+/-- Append a coherent suffix to a finite execution while retaining its exact
+initial configuration. -/
+theorem Runs.append {Event : Type u} {system : RelationalSystem Event}
+    {initialState state finalState : system.State}
+    {initialGraph graph finalGraph : system.Graph}
+    {prefixEvents suffixEvents : List Event}
+    (execution : system.Runs initialState initialGraph state graph prefixEvents)
+    (suffix : system.Steps state graph suffixEvents finalState finalGraph) :
+    system.Runs initialState initialGraph finalState finalGraph
+      (prefixEvents ++ suffixEvents) :=
+  Runs.ofInitialSteps execution.initialValid (execution.steps.trans suffix)
+
 /-- A finite suffix monotonically extends its starting graph. -/
 theorem Steps.graphExtends
     {Event : Type u} {system : RelationalSystem Event}
@@ -126,6 +199,16 @@ theorem Steps.graphExtends
   | refl => exact system.extendsRefl _
   | step prior transition inductionHypothesis =>
       exact system.extendsTrans inductionHypothesis (system.stepExtends transition)
+
+/-- The graph at every finite restriction of an infinite continuation extends
+its exact frontier graph. -/
+theorem InfiniteContinuation.graphExtendsAt
+    {Event : Type u} {system : RelationalSystem Event}
+    {state : system.State} {graph : system.Graph}
+    {priorEvents : List Event}
+    (execution : system.InfiniteContinuation state graph priorEvents)
+    (length : Nat) : system.Extends graph (execution.graphAt length) :=
+  (execution.prefixSteps length).graphExtends
 
 /-- A prefix graph monotonically extends its exact initial graph. -/
 theorem Runs.graphExtends
@@ -148,6 +231,25 @@ structure ExecutionPrefix {Event : Type u} (system : RelationalSystem Event) whe
   graph : system.Graph
   events : List Event
   runs : system.Runs initialState initialGraph state graph events
+
+/-- Packaged prefixes are determined by their visible states, graphs, and
+event trace; the retained relational derivation is proof-irrelevant. -/
+@[ext]
+theorem ExecutionPrefix.ext {Event : Type u} {system : RelationalSystem Event}
+    {left right : system.ExecutionPrefix}
+    (initialState : left.initialState = right.initialState)
+    (initialGraph : left.initialGraph = right.initialGraph)
+    (state : left.state = right.state)
+    (graph : left.graph = right.graph)
+    (events : left.events = right.events) : left = right := by
+  cases left
+  cases right
+  cases initialState
+  cases initialGraph
+  cases state
+  cases graph
+  cases events
+  rfl
 
 /-- Every valid initial configuration supplies the empty execution prefix. -/
 def ExecutionPrefix.initial {Event : Type u} {system : RelationalSystem Event}
@@ -174,6 +276,50 @@ def ExecutionPrefix.step {Event : Type u} {system : RelationalSystem Event}
   graph := nextGraph
   events := prior.events ++ [event]
   runs := .step prior.runs transition
+
+/-- Append an already-proved coherent suffix to a packaged execution prefix. -/
+def ExecutionPrefix.append {Event : Type u} {system : RelationalSystem Event}
+    (prior : system.ExecutionPrefix)
+    {events : List Event} {finalState : system.State} {finalGraph : system.Graph}
+    (suffix : system.Steps prior.state prior.graph events finalState finalGraph) :
+    system.ExecutionPrefix where
+  initialState := prior.initialState
+  initialGraph := prior.initialGraph
+  state := finalState
+  graph := finalGraph
+  events := prior.events ++ events
+  runs := prior.runs.append suffix
+
+/-- Appending the empty suffix leaves a packaged prefix unchanged. -/
+@[simp]
+theorem ExecutionPrefix.append_refl {Event : Type u}
+    {system : RelationalSystem Event} (execution : system.ExecutionPrefix) :
+    execution.append (.refl) = execution := by
+  apply ExecutionPrefix.ext <;> simp [ExecutionPrefix.append]
+
+/-- Appending suffixes is associative. -/
+theorem ExecutionPrefix.append_assoc {Event : Type u}
+    {system : RelationalSystem Event} (execution : system.ExecutionPrefix)
+    {middleEvents finalEvents : List Event}
+    {middleState finalState : system.State}
+    {middleGraph finalGraph : system.Graph}
+    (middle : system.Steps execution.state execution.graph middleEvents
+      middleState middleGraph)
+    (final : system.Steps middleState middleGraph finalEvents
+      finalState finalGraph) :
+    (execution.append middle).append final =
+      execution.append (middle.trans final) := by
+  apply ExecutionPrefix.ext <;> simp [ExecutionPrefix.append, List.append_assoc]
+
+/-- The single-step constructor is suffix append specialized to one step. -/
+theorem ExecutionPrefix.step_eq_append {Event : Type u}
+    {system : RelationalSystem Event} (execution : system.ExecutionPrefix)
+    {choice : system.Choice} {event : Event}
+    {nextState : system.State} {nextGraph : system.Graph}
+    (transition : system.Step execution.graph execution.state choice event
+      nextState nextGraph) :
+    execution.step transition = execution.append (.step .refl transition) := by
+  apply ExecutionPrefix.ext <;> simp [ExecutionPrefix.step, ExecutionPrefix.append]
 
 end RelationalSystem
 

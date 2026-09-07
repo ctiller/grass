@@ -77,6 +77,29 @@ open Grass.Specification
 
 universe u w v r m o
 
+/--
+**The one-line coalescing policy: collapse identical payloads and nothing else.**
+
+`agent-bus` ruling `g-design:83` asks for this helper by name. It is what a
+channel writes when it wants the behaviour `ResolvesEscrow` used to impose on
+every channel — every source carries the carrier's message, so the merge is a
+deduplication rather than a combination — and `ProcessPlan.coalescing` is where
+it goes.
+
+Two policies the field admits and this one does not, named so a reader can see
+what the generalisation bought: *latest-wins*, which relates the family to its
+most recent member and discards the rest, and a *proved fold*, which relates the
+family to a carrier computed from all of them. Neither is expressible against a
+per-source `carrier.1 = source.1`, which is what made §10.118 a ruling rather
+than a tidy-up.
+
+Stated over any `Sigma` so it reads at `EdgeOccurrence`, whose first component is
+the message.
+-/
+def exactDedup {Message : Type u} {Occurrence : Message → Type v}
+    (sources : List (Sigma Occurrence)) (carrier : Sigma Occurrence) : Prop :=
+  ∀ source ∈ sources, source.1 = carrier.1
+
 set_option linter.checkUnivs false in
 /--
 A plan: a topology, the message family its channels carry, and a contract for
@@ -115,6 +138,90 @@ structure ProcessPlan (registry : ProtocolRegistry.{u, w, v})
   channel : (edge : topology.ChannelKind) →
     ChannelContract edge (message edge)
       (logicalWorldAgreement topology message Obligations) (steps edge)
+  /--
+  **Which merges each channel permits.**
+
+  `agent-bus` ruling `g-design:83` on `c-process:68`, and
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.127. Coalescing is *not* universally
+  same-payload. `ResolvesEscrow` used to carry `carrierCarriesTheMessage`, a
+  per-source `carrier.1 = occurrence.1`, and a reviewer proved generically that
+  two sources naming one carrier therefore had to carry the same message — so a
+  latest-wins or folding channel was unconstructible at every plan. That was not
+  a decision; it was a conjunct copied from `Reroutes.arrives`, where it *is*
+  right, because a reroute forwards one payload rather than combining several.
+
+  So the policy belongs to the channel. `sources` is the family this step
+  consumes and `carrier` is what replaces it;
+  `ResolvesEscrow.carrierIsPermitted` requires the family to be non-empty, to be
+  *exactly* those the step resolved into that carrier, and to satisfy this.
+
+  `exactDedup` below is the one-line policy for a channel that only collapses
+  identical payloads, and recovers the old conjunct verbatim — so a plan that
+  wants the previous behaviour writes `coalescing := fun _ => exactDedup`. A
+  latest-wins channel relates the family to its most recent member; a folding
+  channel relates it to a proved fold. This layer does not choose.
+
+  **The cost lands only on channels that coalesce.** A plan whose channels never
+  produce `ChannelResolution.coalesced` may set this to anything at all — the
+  field is never consumed — and `Tests/Process/FrontierFixtures.lean`'s
+  channel-less plan sets it by `elim`.
+
+  **What this field does not say**, recorded rather than implied: §3 asks a
+  coalesce to preserve custody, resource flux and obligations, and at this layer
+  an `EdgeOccurrence` carries a message and a nominal identity and nothing else,
+  while the obligation ledger is an opaque `Obligations` that a coalesce's own
+  `scope` already forbids it from touching. So the preservation §3 wants is
+  partly discharged by the scope and partly expressible only inside this
+  relation, by a channel whose message type carries the resources. §10.127
+  records the residue.
+  -/
+  coalescing : (edge : topology.ChannelKind) →
+    List (EdgeOccurrence topology message edge) →
+    EdgeOccurrence topology message edge → Prop
+  /--
+  **How a role's own step may move a shared region.**
+
+  `agent-bus` ruling `g-design:84` on `c-process:69`, and
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.128.
+  `StepsLocally.writesPermitted` bounds *which* regions a step may move and said
+  nothing about the value; `ProcessSpec.Step` never mentions `shared` and must
+  not, because a root specification prescribing a state partition is exactly what
+  `docs/FOUNDATION.md` law 15 forbids. So the relation belongs here, between the
+  two.
+
+  It is indexed by the acting kind and by the local transition data the ruling
+  names — the event, the local state either side, and what the step issued and
+  observed — so a plan can say "the accept counter goes up by one *when the
+  listener handles an accept*" rather than only "the counter may change".
+
+  `StepsLocally.sharedWritesAdmitted` is where it is spent, and only for regions
+  that actually moved. A kind with no writable region pays nothing: the field is
+  vacuous there, which `StepsLocally.sharedWritesAdmitted_of_no_writes` states so
+  that no author has to notice.
+  -/
+  sharedUpdate : (kind : topology.ProcessKind) →
+    (event : (topology.protocol kind).Event) →
+    (beforeLocal afterLocal : (topology.protocol kind).State) →
+    (issued : Bag (topology.protocol kind).Demand) →
+    (observed : ObservationSegment (topology.protocol kind).Observation) →
+    (region : topology.SharedRegion) →
+    topology.SharedState region → topology.SharedState region → Prop
+  /--
+  **And a permitted update preserves the region's invariant.**
+
+  The half that makes `ProcessGraph.sharedInvariant` worth declaring. Without it
+  the invariant is a clause of `WellFormed` that any step may break, so
+  `wellFormed_preserved` could not carry it and the guarantee would stop at the
+  transition's edge — §10.109's lesson, which this milestone has now had to apply
+  three times.
+
+  Quantified over every index, because a step's own data is what the relation
+  sees and there is nothing else for the preservation to depend on.
+  -/
+  sharedUpdatePreserves : ∀ kind event beforeLocal afterLocal issued observed region
+      (before after : topology.SharedState region),
+    sharedUpdate kind event beforeLocal afterLocal issued observed region before after →
+    topology.sharedInvariant region before → topology.sharedInvariant region after
   /--
   **And a contract's "open session" is the session the network records as open.**
 

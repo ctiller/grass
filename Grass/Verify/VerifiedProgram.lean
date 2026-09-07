@@ -33,6 +33,13 @@ theorem loadedBehavior_exact (verified : VerifiedProgram spec) :
   verified.artifact.format.loadExact
     (verified.artifact.format.writeParses verified.artifact.artifact)
 
+/-- The exact behavior loaded from emitted bytes inherits the artifact
+certificate's paired execution and completion adequacy guarantee. -/
+theorem loadedAdequate (verified : VerifiedProgram spec) :
+    (verified.artifact.format.loadedBehavior (emitProgram verified)).Adequate :=
+  ProgramBehavior.Adequate.cast verified.loadedBehavior_exact
+    verified.artifact.adequate
+
 /-- Loaded artifact behavior refines the portable process behavior. -/
 def refinement (verified : VerifiedProgram spec) :
     BehaviorRefinement
@@ -67,8 +74,7 @@ theorem execution_nonempty (verified : VerifiedProgram spec)
       (verified.artifact.format.loadedBehavior
         (emitProgram verified)).HasInput
           input execution } :=
-  verified.loadedBehavior_exact ▸
-    verified.artifact.adequate.execution input admitted
+  verified.loadedAdequate.execution input admitted
 
 /-- Every reachable finite frontier of the loaded behavior can either reach a
 terminal state or continue as an infinite execution. -/
@@ -78,8 +84,35 @@ theorem execution_completes (verified : VerifiedProgram spec)
     Nonempty ((verified.artifact.format.loadedBehavior
       (emitProgram verified)).system.Completion execution.state execution.graph
         execution.events) := by
-  exact (ProgramBehavior.Adequate.cast verified.loadedBehavior_exact
-    verified.artifact.adequate).completion execution
+  exact verified.loadedAdequate.completion execution
+
+/-- A loaded completion paired with the exact portable completion obtained by
+the verified refinement, retaining inspectable transport provenance. -/
+structure CompletionRefinement (verified : VerifiedProgram spec)
+    (execution : (verified.artifact.format.loadedBehavior
+      (emitProgram verified)).system.ExecutionPrefix) where
+  loaded : (verified.artifact.format.loadedBehavior
+    (emitProgram verified)).system.Completion execution.state execution.graph
+      execution.events
+  portable : verified.portable.behavior.system.Completion
+    (verified.refinement.mapPrefix execution).state
+    (verified.refinement.mapPrefix execution).graph
+    (verified.refinement.mapPrefix execution).events
+  exact : portable =
+    verified.refinement.mapCompletionAtPrefix execution loaded
+
+/-- Every loaded finite frontier has a completion whose exact image in the
+portable behavior is retained by `CompletionRefinement`. -/
+theorem completion_refinement_nonempty (verified : VerifiedProgram spec)
+    (execution : (verified.artifact.format.loadedBehavior
+      (emitProgram verified)).system.ExecutionPrefix) :
+    Nonempty (CompletionRefinement verified execution) := by
+  rcases verified.execution_completes execution with ⟨completion⟩
+  exact ⟨{
+    loaded := completion
+    portable := verified.refinement.mapCompletionAtPrefix execution completion
+    exact := rfl
+  }⟩
 
 end VerifiedProgram
 

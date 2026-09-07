@@ -432,6 +432,63 @@ def OccurrencesOnTheirSession : Prop :=
     occurrence ∈ (network.inFlight edge session).created → occurrence.2.1 = session
 
 /--
+**Every shared region holds what the graph says it must.**
+
+`ProcessGraph.sharedInvariant` declared; this is where a *world* is held to it,
+and it is the half `agent-bus` ruling `g-design:84` means by "network
+`WellFormed` must spend the shared invariant".
+
+Without a clause here the invariant would be a declaration no world had to
+satisfy, and `ProcessPlan.sharedUpdate` would be a bound on steps with nothing
+downstream consuming it — the shape §10.109 named, where a guarantee stops at the
+transition family's own edge and every theorem stated over `before.WellFormed`
+still admits the world the family refuses to reach.
+
+A graph with no regions discharges this by `elim`, and one whose invariant is
+`fun _ _ => True` by `trivial`; the cost lands on a plan that declares something
+about its shared state, which is the plan that wanted it.
+-/
+def SharedInvariantHolds : Prop :=
+  ∀ region, topology.sharedInvariant region (network.shared region)
+
+/--
+**No two entries in one escrow ledger share an occurrence identity.**
+
+The invariant `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.115 recorded as owed, and
+the eighth clause. `EscrowLedger.rankOrdersCreated`'s docstring used to claim it —
+"an occurrence escrowed twice would be a fabricated identity, and here it would
+need a rank strictly below itself" — and that was false. `created` holds an
+`EdgeOccurrence`, which is a *pair* of a message and a `MessageOccurrence`, and
+`docs/PROCESS.md` §3 says the occurrence "carries only its nominal identity". Two
+entries with the same nominal under *different messages* are distinct pairs, and
+`rank` is unconstrained between two entries that are not equal.
+
+What that costs is not a bookkeeping matter. `EscrowLedger.atMostOneRecordedEnding`
+and `outstanding_xor_settled` are keyed on the *pair*, while §3's affine
+`ResolveToken occurrence.id` is keyed on the *identity* — so one nominal can be
+`.dropped` in one entry and `Outstanding` in another, simultaneously, and every
+other clause is satisfied. A reviewer built it with two ordinary sends and a plain
+`drop`, three steps from the initial network.
+
+`SendsEscrow.identityIsFresh` closed the cause at the one constructor that
+escrows a new occurrence from outside. This is the other half, and §10.109 is why
+both are needed: "no reachable network is bad" and "no well-formed network is bad"
+are different theorems, and only the second is usable by a consumer.
+
+**Per ledger, not per edge.** Two entries in *different* sessions of one edge may
+share a nominal and this clause says nothing about it. That is deliberate: every
+law that could be confused by an alias — the two above, and every constructor's
+`onItsSession` — is keyed to one session's ledger, so one ledger is where the
+aliasing bites. A cross-session claim would also need `usedNominals` rather than
+`inFlight`, and law 22's freshness is already the history's job.
+-/
+def IdentitiesDistinct : Prop :=
+  ∀ (edge : topology.ChannelKind) (session : topology.ChannelId edge) first second,
+    first ∈ (network.inFlight edge session).created →
+    second ∈ (network.inFlight edge session).created →
+    first.2.2.id = second.2.2.id → first = second
+
+/--
 **Every instance's stored ending is one its protocol reaches.**
 
 `docs/DECISIONS.md` decision 129 puts this at the network: "Network
@@ -472,6 +529,10 @@ structure WellFormed
   reroutesLand : network.ReroutesLand
   /-- And every occurrence in flight is on the session holding it. -/
   occurrencesOnTheirSession : network.OccurrencesOnTheirSession
+  /-- And no two entries in one ledger share an occurrence identity. -/
+  identitiesDistinct : network.IdentitiesDistinct
+  /-- And every shared region holds what the graph requires. -/
+  sharedInvariantHolds : network.SharedInvariantHolds
 
 /--
 **And in a well-formed network the arrival is on its destination.**
