@@ -250,6 +250,33 @@ def specification_names() -> dict[str, str]:
     return found
 
 
+def module_names() -> set[str]:
+    """Every module path in the tree.
+
+    A docstring legitimately names a module: "`Grass.Platform.Win32.Console`
+    states handles as `BitVec 64`" is about a file, not a declaration, and there
+    is no declaration that sentence could name instead. Modules are the third
+    real namespace a docstring draws on, after declarations and the
+    specification, and they are the cheapest of the three to check -- a module
+    either exists on disk or it does not.
+
+    Exact paths only, with no suffix expansion. A docstring cites a module the
+    way an `import` spells it, so `Console` on its own is prose rather than a
+    reference, and expanding suffixes would make it resolve.
+
+    This cannot mask an invented theorem: `LEAN_STYLE_NAME` matches a
+    lowercase-initial name with an underscore, and no module path is spelled
+    that way.
+    """
+    names: set[str] = set()
+    for root in (Path("Grass"), Path("Tests"), Path("Tools")):
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*.lean"):
+            names.add(".".join(path.with_suffix("").parts))
+    return names
+
+
 def sentences(block: str) -> list[str]:
     text = " ".join(line.strip() for line in block.splitlines())
     # Split on sentence ends only. A semicolon joins a claim to the clause that
@@ -266,7 +293,7 @@ def doc_blocks(source: str):
 
 
 def check(path: Path, known: set[str], specs: dict[str, str],
-          cited: dict[str, str]) -> list[str]:
+          modules: set[str], cited: dict[str, str]) -> list[str]:
     source = path.read_text(encoding="utf-8")
     findings = []
     for line, block in doc_blocks(source):
@@ -287,10 +314,11 @@ def check(path: Path, known: set[str], specs: dict[str, str],
             ]
             resolved = [
                 ident for ident in named
-                if ident in known or ident in specs
+                if ident in known or ident in specs or ident in modules
             ]
             for ident in named:
-                if ident not in known and ident in specs:
+                if ident not in known and ident not in modules \
+                        and ident in specs:
                     cited.setdefault(
                         ident, f"{specs[ident]} (cited {path.as_posix()}"
                         f":{line})")
@@ -300,7 +328,7 @@ def check(path: Path, known: set[str], specs: dict[str, str],
             invented = [
                 ident for ident in named
                 if ident not in known and ident not in specs
-                and LEAN_STYLE_NAME.match(ident)
+                and ident not in modules and LEAN_STYLE_NAME.match(ident)
             ]
             if invented:
                 findings.append(
@@ -329,13 +357,14 @@ def main() -> int:
     roots = [Path("Grass")]
     known = declaration_names()
     specs = specification_names()
+    modules = module_names()
     cited: dict[str, str] = {}
     findings: list[str] = []
     for root in roots:
         if not root.is_dir():
             continue
         for path in sorted(root.rglob("*.lean")):
-            findings.extend(check(path, known, specs, cited))
+            findings.extend(check(path, known, specs, modules, cited))
     if findings:
         print("docstring audit: claims that name nothing enforcing them\n")
         for finding in findings:
