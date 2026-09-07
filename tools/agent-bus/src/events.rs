@@ -840,6 +840,15 @@ mod tests {
             serde_json::from_value::<Role>(serde_json::Value::String("auditor".into())).unwrap(),
             Role::Auditor
         );
+        // Gate 24 is discharged vacuously -- no `observer` was ever
+        // registered -- but the schema's deviation note rests entirely on
+        // "this helper rejects the string `observer` outright". A one-line
+        // `#[serde(alias = "observer")]` would silently reinstate the
+        // overlapping role and falsify that note without failing anything.
+        assert!(
+            serde_json::from_value::<Role>(serde_json::Value::String("observer".into())).is_err(),
+            "the version-one spelling must not parse; the schema says so in writing"
+        );
     }
 
     #[test]

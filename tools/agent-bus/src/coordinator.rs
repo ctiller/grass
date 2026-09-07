@@ -123,6 +123,36 @@ pub fn drain_outbox(
         }
     }
 
+    // The fetch above writes `refs/heads/agent-registry`, so the epoch read
+    // before it may now be superseded. Re-read it, and re-authorize custody
+    // against the fresh one.
+    //
+    // The comment above used to claim the fetch came first precisely so this
+    // could not happen; it did not, and the consequence is specific to a
+    // complete frontier. `build_frontier` below would have built one for the
+    // *older* epoch, and `apply::require_complete_frontier` validates against
+    // whatever epoch the frontier names -- which reduction deliberately keeps
+    // in `known_epochs` -- so the report would have been accepted while
+    // omitting exactly the members the fetch had just revealed. That is
+    // assurance without evidence, which is what requiring a complete frontier
+    // was meant to prevent. It also meant gate 6/7's custody check ran
+    // against a pre-fetch view.
+    let (registry_tip, epoch) = if fresh_state.is_some() {
+        let tip = crate::registry::read_registry_tip(repo)?
+            .ok_or_else(|| invalid("no registry root exists yet"))?;
+        let fresh_epoch = crate::registry::read_epoch(repo, &tip)?;
+        crate::registry::authorize_stream_write(
+            &fresh_epoch,
+            agent,
+            host,
+            coordinator_custody_epoch,
+        )?;
+        (tip, fresh_epoch)
+    } else {
+        (registry_tip, epoch)
+    };
+    let _ = registry_tip;
+
     let mut state = match fresh_state {
         Some(s) => s,
         None => crate::sync::cached_snapshot(repo, git_common_dir)?.state,
@@ -213,7 +243,32 @@ pub fn drain_outbox(
             });
             continue;
         }
-        let observed = build_frontier(repo, &epoch, agent, &candidate.extra_refs, &data)?;
+        // A frontier this host cannot build rejects *this* candidate, with a
+        // durable receipt, exactly like every other check in this loop.
+        //
+        // It used to be a `?`, which aborted the whole drain: nothing
+        // committed, nothing removed from the outbox, no receipt written --
+        // and since the condition is a property of the *roster*, not of the
+        // candidate, every later `coordinate` for this agent failed
+        // identically forever. No CLI command removes a pending candidate, so
+        // recovery meant hand-deleting the file. `audit.reported` is what
+        // makes that reachable in ordinary use: it is the only kind an
+        // ordinary agent publishes that needs a complete frontier, and
+        // `build_complete_frontier` fails whenever any active member has not
+        // yet published its stream root -- a state `sync.rs` explicitly calls
+        // "a real, expected state, not an error".
+        let observed = match build_frontier(repo, &epoch, agent, &candidate.extra_refs, &data) {
+            Ok(observed) => observed,
+            Err(e) => {
+                let reason = e.to_string();
+                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+                rejected.push(RejectedCandidate {
+                    kind: candidate.kind.clone(),
+                    reason,
+                });
+                continue;
+            }
+        };
         let env = Envelope::new(
             agent,
             next_seq,
@@ -1303,6 +1358,307 @@ mod tests {
         );
     }
 
+    /// M2 from round 3: the gate-17 fetch can advance the registry past the
+    /// epoch the frontier is built against.
+    ///
+    /// `registry_tip`/`epoch` are read before the fetch; `sync::synced_
+    /// snapshot` then fetches `refs/heads/agent-registry` into that same
+    /// local ref. Without re-reading, `build_frontier` builds a "complete"
+    /// frontier for the *superseded* epoch, and `apply::require_complete_
+    /// frontier` validates against whatever epoch the frontier names -- which
+    /// reduction deliberately keeps in `known_epochs`. So the report would be
+    /// accepted while omitting precisely the members the fetch just revealed:
+    /// assurance without evidence, which is what requiring a complete
+    /// frontier exists to prevent.
+    ///
+    /// Staged by advancing the registry on the *remote* only, then rewinding
+    /// the local ref -- which is what a second host having registered someone
+    /// looks like from here.
+    /// The Critical from round 3: a frontier this host cannot build must
+    /// reject one candidate, not poison the outbox forever.
+    ///
+    /// `build_frontier` was the only per-candidate failure in the drain loop
+    /// that used `?`. When it fired, nothing was committed, nothing was
+    /// removed from the outbox and no receipt was written -- and because the
+    /// condition is a property of the *roster* rather than of the candidate,
+    /// every later `coordinate` for that agent failed identically forever.
+    /// No CLI command removes a pending candidate, so recovery meant
+    /// hand-deleting the file.
+    ///
+    /// `audit.reported` is what makes it reachable in ordinary use: it is the
+    /// only kind an ordinary agent publishes that needs a complete frontier,
+    /// and `build_complete_frontier` fails whenever any active member has not
+    /// yet published its stream root -- which `sync.rs` calls "a real,
+    /// expected state, not an error".
+    #[test]
+    fn the_currency_fetch_advances_the_epoch_the_frontier_is_built_against() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let aud = a("aud");
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap()).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+
+        let tip = crate::registry::read_registry_tip(repo.path())
+            .unwrap()
+            .unwrap();
+        let epoch = crate::registry::read_epoch(repo.path(), &tip).unwrap();
+        let mut members = epoch.active_members.clone();
+        members.insert(
+            aud.clone(),
+            crate::registry::MemberBinding {
+                role: Role::Auditor,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "reg",
+            &Candidate::new(
+                &aud,
+                &EventData::AgentRegistered(crate::events::AgentRegistered {
+                    display_name: short("Auditor"),
+                    primary_role: Role::Auditor,
+                    purpose: text("auditor:whole-architecture"),
+                    product_base: None,
+                    product_branch: None,
+                    provider: None,
+                    model: None,
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+        drain_outbox(repo.path(), repo.path(), &aud, &short("host1"), 0, &remote).unwrap();
+        for r in [
+            crate::registry::REGISTRY_REF.to_string(),
+            crate::stream::stream_ref(&coord1).into_string(),
+            crate::stream::stream_ref(&aud).into_string(),
+        ] {
+            let push = crate::gitrepo::run(repo.path(), &["push", &remote, &r]).unwrap();
+            assert!(push.success, "{push:?}");
+        }
+
+        // The epoch this host currently knows, and will keep locally.
+        let stale_tip = crate::registry::read_registry_tip(repo.path())
+            .unwrap()
+            .unwrap();
+
+        // Another host registers `dave`: build the epoch, push it, then rewind
+        // the local ref so only the remote has it.
+        let epoch = crate::registry::read_epoch(repo.path(), &stale_tip).unwrap();
+        let mut members = epoch.active_members.clone();
+        members.insert(
+            a("dave"),
+            crate::registry::MemberBinding {
+                role: Role::Implementor,
+                host: short("host2"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
+        let push = crate::gitrepo::run(
+            repo.path(),
+            &["push", &remote, crate::registry::REGISTRY_REF],
+        )
+        .unwrap();
+        assert!(push.success, "{push:?}");
+        crate::gitrepo::run(
+            repo.path(),
+            &[
+                "update-ref",
+                crate::registry::REGISTRY_REF,
+                stale_tip.as_str(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            crate::registry::read_registry_tip(repo.path())
+                .unwrap()
+                .unwrap(),
+            stale_tip,
+            "fixture: the local registry must be behind the remote"
+        );
+
+        crate::outbox::submit(
+            repo.path(),
+            "audit-1",
+            &Candidate::new(
+                &aud,
+                &EventData::AuditReported(crate::events::AuditReported {
+                    inspected_commits: crate::scalars::StringSet::default(),
+                    areas: vec![text("coordination history")],
+                    methods: vec![text("replayed every stream")],
+                    limitations: vec![],
+                    issues: crate::scalars::StringSet::default(),
+                    summary: text("clean"),
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+
+        let drained =
+            drain_outbox(repo.path(), repo.path(), &aud, &short("host1"), 0, &remote).unwrap();
+
+        // Built against the *fetched* epoch, `dave` is a member with no stream,
+        // so the report is refused. Built against the stale one it would have
+        // published, silently omitting `dave` from what it claims to have seen.
+        assert!(
+            drained.published.is_empty(),
+            "the report must not publish against a superseded epoch: {drained:?}"
+        );
+        assert_eq!(drained.rejected.len(), 1, "{drained:?}");
+        assert!(
+            drained.rejected[0].reason.contains("dave"),
+            "the refusal must name the member the fetch revealed: {}",
+            drained.rejected[0].reason
+        );
+    }
+
+    #[test]
+    fn a_frontier_that_cannot_be_built_rejects_one_candidate_not_the_whole_drain() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let aud = a("aud");
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap()).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+
+        // Register the auditor properly, so it has a stream root.
+        let tip = crate::registry::read_registry_tip(repo.path())
+            .unwrap()
+            .unwrap();
+        let epoch = crate::registry::read_epoch(repo.path(), &tip).unwrap();
+        let mut members = epoch.active_members.clone();
+        members.insert(
+            aud.clone(),
+            crate::registry::MemberBinding {
+                role: Role::Auditor,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "reg",
+            &Candidate::new(
+                &aud,
+                &EventData::AgentRegistered(crate::events::AgentRegistered {
+                    display_name: short("Auditor"),
+                    primary_role: Role::Auditor,
+                    purpose: text("auditor:whole-architecture"),
+                    product_base: None,
+                    product_branch: None,
+                    provider: None,
+                    model: None,
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+        drain_outbox(repo.path(), repo.path(), &aud, &short("host1"), 0, &remote).unwrap();
+        for r in [
+            crate::registry::REGISTRY_REF.to_string(),
+            crate::stream::stream_ref(&coord1).into_string(),
+            crate::stream::stream_ref(&aud).into_string(),
+        ] {
+            let push = crate::gitrepo::run(repo.path(), &["push", &remote, &r]).unwrap();
+            assert!(push.success, "{push:?}");
+        }
+
+        // Now a member the roster knows and no stream exists for -- the state
+        // `sync.rs` calls expected.
+        let tip = crate::registry::read_registry_tip(repo.path())
+            .unwrap()
+            .unwrap();
+        let epoch = crate::registry::read_epoch(repo.path(), &tip).unwrap();
+        let mut members = epoch.active_members.clone();
+        members.insert(
+            a("dave"),
+            crate::registry::MemberBinding {
+                role: Role::Implementor,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
+        let push = crate::gitrepo::run(
+            repo.path(),
+            &["push", &remote, crate::registry::REGISTRY_REF],
+        )
+        .unwrap();
+        assert!(push.success, "{push:?}");
+
+        // An audit report (needs the complete frontier) plus an ordinary
+        // candidate that does not.
+        crate::outbox::submit(
+            repo.path(),
+            "audit-1",
+            &Candidate::new(
+                &aud,
+                &EventData::AuditReported(crate::events::AuditReported {
+                    inspected_commits: crate::scalars::StringSet::default(),
+                    areas: vec![text("coordination history")],
+                    methods: vec![text("replayed every stream")],
+                    limitations: vec![],
+                    issues: crate::scalars::StringSet::default(),
+                    summary: text("clean"),
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+        crate::outbox::submit(repo.path(), "note", &status_candidate(&aud, "still here")).unwrap();
+
+        let drained =
+            drain_outbox(repo.path(), repo.path(), &aud, &short("host1"), 0, &remote).unwrap();
+
+        // The audit is rejected, with a durable receipt naming the cause ...
+        assert_eq!(drained.rejected.len(), 1, "{drained:?}");
+        assert_eq!(drained.rejected[0].kind, "audit.reported");
+        assert!(
+            drained.rejected[0].reason.contains("complete frontier"),
+            "{}",
+            drained.rejected[0].reason
+        );
+        // ... and the unrelated candidate behind it still publishes.
+        assert!(!drained.published.is_empty(), "{drained:?}");
+
+        // The outbox is drained, not wedged: a second run has nothing left.
+        let again =
+            drain_outbox(repo.path(), repo.path(), &aud, &short("host1"), 0, &remote).unwrap();
+        assert!(
+            again.published.is_empty() && again.rejected.is_empty(),
+            "{again:?}"
+        );
+    }
+
     #[test]
     fn drain_outbox_rejects_an_audit_report_pinning_a_nonexistent_commit() {
         let repo = init_repo();
@@ -1531,7 +1887,7 @@ mod tests {
         assert_eq!(drained.rejected[0].kind, "issue.reassigned");
         assert!(
             drained.rejected[0].reason.contains("gate 17"),
-            "a reassignment must fail closed on the currency probe, not on some              later check: {}",
+            "a reassignment must fail closed on the currency probe, not on some later check: {}",
             drained.rejected[0].reason
         );
     }
@@ -2856,7 +3212,7 @@ mod tests {
         );
         assert!(
             !requires_complete_frontier(&reassign),
-            "fixture: if this ever needs a complete frontier, the first clause              would satisfy the assertion above and it would stop testing anything"
+            "fixture: if this ever needs a complete frontier, the first clause would satisfy the assertion above and it would stop testing anything"
         );
     }
 

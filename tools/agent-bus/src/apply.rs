@@ -361,6 +361,33 @@ fn apply_registered(state: &mut BusState, env: &Envelope, d: &AgentRegistered) -
             env.agent
         )));
     }
+    // The role the agent declares must be the role the registry binds it to.
+    //
+    // Every authority check in this crate reads `AgentState::primary_role`,
+    // which comes solely from this payload, while `cli::status` prints the
+    // registry's `MemberBinding::role` -- so a divergence is invisible in the
+    // one place an operator would look, and the declared value is the one
+    // that decides what the identity may do. An identity the roster binds as
+    // `auditor` could declare itself an implementor and hold every authority
+    // gates 20 and 21 deny it.
+    //
+    // Reachable without malice: `cli::register` lands the registry transition
+    // before draining the registration event, and refuses to run again once
+    // the member exists, so a failed drain leaves a hand-written `submit
+    // --kind agent.registered` as the only way forward -- and that payload
+    // may name any role.
+    if let Some(binding) = state
+        .roster_epoch
+        .as_ref()
+        .and_then(|e| e.active_members.get(&env.agent))
+    {
+        if binding.role != d.primary_role {
+            return Err(invalid(format!(
+                "{}: registers as {} but the roster epoch binds {} as {} -- the declared role must match the registry, since it is the declared one that grants authority",
+                env.id, d.primary_role, env.agent, binding.role
+            )));
+        }
+    }
     if d.primary_role != Role::Implementor
         && (d.product_base.is_some() || d.product_branch.is_some())
     {
@@ -697,14 +724,20 @@ fn apply_audit_reported(
     // to reference. See `coordinator::requires_complete_frontier`.
     require_complete_frontier(state, env)?;
     // A report that names no area, states no method, and says nothing is
-    // durable evidence of nothing, and `methods`/`limitations` exist
-    // precisely so a reader can judge what the absence of a finding is worth.
-    // `inspected_commits` and `issues` may be empty -- the schema licenses
-    // both, since an audit of coordination history inspects no product commit
-    // and a clean surface files no issue -- but these three may not.
+    // durable evidence of nothing, and `methods` exists precisely so a reader
+    // can judge what the absence of a finding is worth.
+    //
+    // Emptiness is measured after trimming, per entry: a length check alone
+    // accepted `areas: [""]` and `methods: ["   "]`, which is the same
+    // contentless report wearing a list. `limitations` is deliberately *not*
+    // required -- an audit may genuinely have no blind spot worth naming --
+    // and `inspected_commits`/`issues` may be empty because the schema
+    // licenses both: an audit of coordination history inspects no product
+    // commit, and a clean surface files no issue.
+    let has_content = |v: &[crate::scalars::Text]| v.iter().any(|t| !t.as_str().trim().is_empty());
     for (field, empty) in [
-        ("areas", d.areas.is_empty()),
-        ("methods", d.methods.is_empty()),
+        ("areas", !has_content(&d.areas)),
+        ("methods", !has_content(&d.methods)),
         ("summary", d.summary.as_str().trim().is_empty()),
     ] {
         if empty {
@@ -749,7 +782,7 @@ fn apply_issue_opened(state: &mut BusState, env: &Envelope, d: &IssueOpened) -> 
     // the rule is about what an auditor identity may author.
     if opener.primary_role == Role::Auditor && !d.blocks.is_empty() {
         return Err(invalid(format!(
-            "{}: an auditor-opened issue must carry an empty blocks set -- an auditor's finding              is evidence for the nominated reviewer to assess, not a merge verdict it can impose              (AGENT_COORDINATION_EVOLUTION.md section 2.2). Route the evidence to the reviewer              and coordinator urgently instead; the reviewer decides whether to publish a              merge-blocking finding.",
+            "{}: an auditor-opened issue must carry an empty blocks set. An auditor's finding is evidence for the nominated reviewer to assess, not a merge verdict it can impose (AGENT_COORDINATION_EVOLUTION.md section 2.2). Route the evidence to the reviewer and coordinator urgently instead; the reviewer decides whether to publish a merge-blocking finding.",
             env.id
         )));
     }
@@ -3104,6 +3137,273 @@ mod tests {
             err.to_string().contains("complete frontier"),
             "a report must pin what it observed, got: {err}"
         );
+    }
+
+    /// Gate 20, at its full width: "an auditor can publish `audit.reported`
+    /// and open issues without product scope, product authorship, nomination
+    /// acceptance, or merge authority", and section 2.2's prose "open or
+    /// reassign issues to the appropriate design steward or implementor".
+    ///
+    /// The narrow test above covers `issue.opened` and `audit.reported`. The
+    /// rest of what an auditor must be able to do to be useful -- work an
+    /// issue through its lifecycle, report progress, subscribe, acknowledge a
+    /// broadcast -- was only ever confirmed by a reviewer's throwaway probe
+    /// that was reverted afterwards. Over-restriction is as much a defect as
+    /// over-permission, and nothing here would have caught it.
+    ///
+    /// Deliberately one test over one auditor: these are the operations a
+    /// real auditing session performs in sequence, and running them against a
+    /// single evolving state is what would expose an ordering or lifecycle
+    /// restriction that each operation in isolation would miss.
+    #[test]
+    fn an_auditor_can_survey_report_and_work_its_own_findings() {
+        let mut state = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Implementor),
+            ("aud", Role::Auditor),
+        ]);
+        let (alice, bob, aud) = (a("alice"), a("bob"), a("aud"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Implementor));
+        apply_ok(&mut state, &register(&aud, Role::Auditor));
+
+        // Report a bug against an implementor.
+        let issue = open_issue(&aud, 1, &alice);
+        let issue_id = issue.id.clone();
+        apply_ok(&mut state, &issue);
+
+        // Reassign it -- section 2.2 names this explicitly. Legitimate here
+        // because the auditor is the opener; ordinary issue-lifecycle
+        // authority (opener-or-coordinator) still applies to everyone.
+        let reassign = Envelope::new(
+            &aud,
+            2,
+            frontier_seeing(&[&issue_id]),
+            &EventData::IssueReassigned(IssueReassigned {
+                issue: issue_id.clone(),
+                previous_assignment: issue_id.clone(),
+                previous_target: alice.clone(),
+                new_target: bob.clone(),
+                reason: text("bob owns this surface"),
+            }),
+            [issue_id.clone()],
+        );
+        apply_ok(&mut state, &reassign);
+
+        // Report progress, carrying no product commit -- that line is drawn
+        // by `progress.reported`'s own check, pinned separately in the
+        // refusal table.
+        apply_ok(
+            &mut state,
+            &Envelope::new(
+                &aud,
+                3,
+                no_frontier(),
+                &EventData::ProgressReported(ProgressReported {
+                    product_commit: None,
+                    completed: vec![text("swept every stream")],
+                    current: vec![],
+                    next: vec![],
+                    blockers: vec![],
+                    verification: vec![],
+                }),
+                [],
+            ),
+        );
+
+        // Subscribe to a coordination topic.
+        apply_ok(
+            &mut state,
+            &Envelope::new(
+                &aud,
+                4,
+                no_frontier(),
+                &EventData::SubscriptionSet(crate::events::SubscriptionSet {
+                    topics: StringSet::from_iter([crate::scalars::CoordinationTopic::parse(
+                        "proof.rebuild".into(),
+                    )
+                    .unwrap()]),
+                }),
+                [],
+            ),
+        );
+
+        // Work an issue that someone else targeted *at* the auditor.
+        let inbound = open_issue(&alice, 1, &aud);
+        let inbound_id = inbound.id.clone();
+        apply_ok(&mut state, &inbound);
+        apply_ok(
+            &mut state,
+            &Envelope::new(
+                &aud,
+                5,
+                frontier_seeing(&[&inbound_id]),
+                &EventData::IssueAcknowledged(IssueAcknowledged {
+                    issue: inbound_id.clone(),
+                    assignment: inbound_id.clone(),
+                    note: text("looking"),
+                }),
+                [inbound_id.clone()],
+            ),
+        );
+        apply_ok(
+            &mut state,
+            &Envelope::new(
+                &aud,
+                6,
+                frontier_seeing(&[&inbound_id]),
+                &EventData::IssueResolved(IssueResolved {
+                    issue: inbound_id.clone(),
+                    assignment: inbound_id.clone(),
+                    summary: text("not a defect; measured and explained"),
+                    fix_commit: None,
+                    verification: vec![],
+                }),
+                [inbound_id.clone()],
+            ),
+        );
+
+        // And publish the summary that ties it together.
+        let env = audit(&state, &aud, 7, &[&issue_id]);
+        apply_ok(&mut state, &env);
+        assert!(
+            state.audits.contains_key(&EventId::new(&aud, 7)),
+            "the report must be recorded"
+        );
+    }
+
+    /// M3: the frontier must be *validated*, not merely labelled complete.
+    ///
+    /// Replacing `require_complete_frontier` with a bare `FrontierKind::
+    /// Complete` check left the whole suite green, so a frontier naming an
+    /// unknown epoch, or omitting a member, was accepted -- pinning as little
+    /// as the sparse frontier round 2 rejected. `validate_complete` exists
+    /// precisely because the frontier "was constructed elsewhere and must be
+    /// re-checked rather than trusted", and this is the read-time
+    /// revalidation that matters for a foreign or hand-crafted envelope.
+    #[test]
+    fn an_audit_reports_complete_frontier_is_validated_not_merely_labelled() {
+        let mut state = empty_state(&[("alice", Role::Implementor), ("aud", Role::Auditor)]);
+        let (alice, aud) = (a("alice"), a("aud"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&aud, Role::Auditor));
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+
+        let report = |observed: ObservedFrontier| {
+            Envelope::new(
+                &aud,
+                1,
+                observed,
+                &EventData::AuditReported(crate::events::AuditReported {
+                    inspected_commits: StringSet::default(),
+                    areas: vec![text("coordination history")],
+                    methods: vec![text("replayed every stream")],
+                    limitations: vec![],
+                    issues: StringSet::default(),
+                    summary: text("clean"),
+                }),
+                [],
+            )
+        };
+
+        // Labelled complete, but omitting a member: rejected.
+        // Built field-by-field rather than through `complete()`, which
+        // validates -- the point is a frontier that only *claims* to be
+        // complete, exactly what a foreign or hand-crafted envelope can carry.
+        let missing_member = ObservedFrontier {
+            kind: crate::frontier::FrontierKind::Complete,
+            roster_epoch: epoch.id.clone(),
+            entries: BTreeMap::from([(
+                aud.clone(),
+                FrontierEntry {
+                    agent: aud.clone(),
+                    stream_tip: hash(1),
+                    through: EventId::new(&aud, 0),
+                },
+            )]),
+        };
+        let err = apply_event(&mut state.clone(), &report(missing_member)).unwrap_err();
+        assert!(
+            !err.to_string().is_empty(),
+            "a frontier omitting a member must be refused"
+        );
+
+        // Labelled complete, naming an epoch nobody knows: rejected.
+        let unknown_epoch = ObservedFrontier {
+            kind: crate::frontier::FrontierKind::Complete,
+            roster_epoch: hash(9999),
+            entries: epoch
+                .active_members
+                .keys()
+                .map(|agent| {
+                    (
+                        agent.clone(),
+                        FrontierEntry {
+                            agent: agent.clone(),
+                            stream_tip: hash(1),
+                            through: EventId::new(agent, 0),
+                        },
+                    )
+                })
+                .collect(),
+        };
+        let err = apply_event(&mut state.clone(), &report(unknown_epoch)).unwrap_err();
+        assert!(
+            err.to_string().contains("not a known epoch"),
+            "a frontier naming an unknown epoch must be refused, got: {err}"
+        );
+    }
+
+    /// M5: a list of blank strings is not content. A length-only check
+    /// accepted `areas: [""]`, which is the contentless report the rule was
+    /// added to refuse, wearing a list.
+    #[test]
+    fn an_audit_report_of_blank_entries_is_still_contentless() {
+        let mut state = empty_state(&[("aud", Role::Auditor)]);
+        let aud = a("aud");
+        apply_ok(&mut state, &register(&aud, Role::Auditor));
+        let frontier = complete_seeing(&state, &[]);
+
+        for (field, areas, methods) in [
+            ("areas", vec![text("")], vec![text("m")]),
+            ("methods", vec![text("a")], vec![text("   ")]),
+        ] {
+            let env = Envelope::new(
+                &aud,
+                1,
+                frontier.clone(),
+                &EventData::AuditReported(crate::events::AuditReported {
+                    inspected_commits: StringSet::default(),
+                    areas,
+                    methods,
+                    limitations: vec![],
+                    issues: StringSet::default(),
+                    summary: text("s"),
+                }),
+                [],
+            );
+            let err = apply_event(&mut state.clone(), &env).unwrap_err();
+            assert!(
+                err.to_string().contains(&format!("must state its {field}")),
+                "blank {field} must be refused, got: {err}"
+            );
+        }
+    }
+
+    /// M4: the role an agent declares must be the role the registry binds it
+    /// to. Every authority check reads the declared value, while `status`
+    /// prints the registry's -- so a divergence grants authority invisibly.
+    #[test]
+    fn a_registration_may_not_declare_a_role_the_registry_does_not_bind() {
+        let mut state = empty_state(&[("aud", Role::Auditor)]);
+        let aud = a("aud");
+        let err = apply_event(&mut state, &register(&aud, Role::Implementor)).unwrap_err();
+        assert!(
+            err.to_string().contains("must match the registry"),
+            "an auditor may not register as an implementor, got: {err}"
+        );
+        // The honest declaration still works.
+        apply_ok(&mut state, &register(&aud, Role::Auditor));
     }
 
     /// The role check is `require_active_role`, not merely a role
