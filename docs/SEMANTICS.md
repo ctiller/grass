@@ -483,6 +483,14 @@ structure RegisteredExtensionAuthority where
   registry : ExtensionAuthorityRegistry
   entry : registry.Entry
 
+def RegisteredExtensionAuthority.reindex
+    (embedding : ExtensionAuthorityEmbedding source target)
+    (authority : RegisteredExtensionAuthority)
+    (usesSource : authority.registry = source) : RegisteredExtensionAuthority
+theorem RegisteredExtensionAuthority.reindex_key ...
+theorem RegisteredExtensionAuthority.reindex_id ...
+theorem RegisteredExtensionAuthority.reindex_comp ...
+
 inductive RequirementAuthority
   | builtin (owner : BuiltinRequirementAuthority)
   | extension (owner : RegisteredExtensionAuthority)
@@ -523,6 +531,15 @@ def ProviderDemand.descriptor : ProviderDemand authority -> ProviderDemandDescri
 theorem ProviderDemand.introduce_origin_exact ...
 theorem ProviderDemand.introduce_descriptor_exact ...
 
+def RequirementOriginScope.reindex
+    (embedding : ExtensionAuthorityEmbedding source target) ...
+def ProviderDemand.reindex
+    (embedding : ExtensionAuthorityEmbedding source target) ...
+theorem ProviderDemand.reindex_originId ...
+theorem ProviderDemand.reindex_descriptor ...
+theorem ProviderDemand.reindex_id ...
+theorem ProviderDemand.reindex_comp ...
+
 structure SomeProviderDemand where
   authority : RequirementAuthority
   demand : ProviderDemand authority
@@ -548,6 +565,25 @@ def ProviderDemandFamily.union
     (left right : ProviderDemandFamily)
     (compatible : OriginsDisjointOrDescriptorsExact left right) :
     ProviderDemandFamily
+def ProviderDemandFamily.reindex
+    (family : ProviderDemandFamily)
+    (embedding : ExtensionAuthorityEmbedding family.authorityRegistry target) :
+    ProviderDemandFamily
+theorem ProviderDemandFamily.reindex_lookup ...
+theorem ProviderDemandFamily.reindex_id ...
+theorem ProviderDemandFamily.reindex_comp ...
+theorem ProviderDemandFamily.union_assoc_coherent ...
+
+structure ExtensionAuthorityMergeIso
+    (left middle right : ExtensionAuthorityRegistry) where
+  forward : ExtensionAuthorityEmbedding
+    (merge (merge left middle) right) (merge left (merge middle right))
+  backward : ExtensionAuthorityEmbedding
+    (merge left (merge middle right)) (merge (merge left middle) right)
+  leftInverse : EveryEntryReindexedBackwardAfterForwardIsIdentical
+  rightInverse : EveryEntryReindexedForwardAfterBackwardIsIdentical
+  preservesKeys : EveryReindexedEntryPreservesStableKey
+  preservesDescriptors : EveryReindexedDemandPreservesDescriptor
 
 def ProviderDemandFamily.CertifiedBy
     (demands : ProviderDemandFamily) (view : ProviderBindingView) : Prop :=
@@ -569,6 +605,13 @@ stable-key compatibility and returns origin-preserving embeddings. A larger
 composition reindexes extension authorities through those embeddings without
 changing their stable identity. Thus adding an extension does not edit a core
 sum or global registry, and a freely asserted `Contains` proof is not authority.
+Reindexing is functorial across scopes, demands, and families: identity is
+extensionally identity, successive embeddings equal their composition, and the
+two associations of a three-registry merge are connected by the canonical
+origin/descriptor-preserving `ExtensionAuthorityMergeIso`.
+`union_assoc_coherent` uses that isomorphism; no `Classical.choice`,
+proof-irrelevant registry cast, or ad hoc
+rewriting of dependent statements is part of the public construction.
 
 A tag is descriptive data, not itself authority. Every extension authority
 dependently packages its exact selected registry and entry.

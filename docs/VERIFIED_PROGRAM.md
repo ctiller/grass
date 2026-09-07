@@ -19,6 +19,17 @@ theorem so that provider-origin removal and a terminal-vacuous infinite loop are
 negative elaboration fixtures. This document defines that required destination;
 the implementation plan must land the connections before claiming completion.
 
+Before any Effect-derived program reaches the implementation, the current
+five-certificate structure and writer must be visibly type-separated as
+provisional (for example, `ProvisionalVerifiedProgram` and
+`emitProvisionalProgram` in an experimental namespace), or replaced outright by
+the complete gate below. The public names `VerifiedProgram` and `emitProgram`
+are reserved for a certificate carrying every closure demanded here. A comment,
+module status note, or convention at call sites is not type separation. The
+transition fixture constructs the current infinite nonterminal behavior and
+proves that it cannot inhabit the final public gate merely because terminal
+soundness has no premise to consume.
+
 ## 1. Conceptual interface
 
 ```lean
