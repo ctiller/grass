@@ -1041,6 +1041,10 @@ The first implementation is incomplete until checked fixtures demonstrate:
    atomic constructor, which owns its Unit start and history. A pending advance
    between distinct waiting occurrences is rejected because its history
    transport requires an equality of the dependent occurrences.
+   The complete displayed `PendingInteractionModel`, `atomic`,
+   `ProperExtends`, `SequentialWaitingState`, and `advanceExact` signatures are
+   copied into a checked Lean fixture with auto-implicit indices disabled; the
+   canonical model elaborates and one nontrivial indexed custom model constructs.
 5. A project-local effect family is added from another module without editing a
    core sum type.
    Three independently authored extension-authority registries compose under

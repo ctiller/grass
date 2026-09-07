@@ -457,12 +457,17 @@ inductive BuiltinRequirementAuthority
   | effect | process | memory | resource | obligation | abi | platform | isa
   deriving DecidableEq
 
+structure ExtensionAuthorityOwner where
+  Token : Type
+  stableId : StableId
+
 structure ExtensionAuthorityRegistry where
   Entry : Type
   entries : List Entry
   complete : forall entry, entry ∈ entries
   unique : entries.Nodup
-  key : Entry -> StableId
+  owner : Entry -> ExtensionAuthorityOwner
+  key : Entry -> StableId := fun entry => (owner entry).stableId
   keyInjective : Function.Injective key
   freshFromBuiltins : forall entry, key entry ∉ builtinRequirementAuthorityKeys
 
@@ -470,7 +475,18 @@ structure ExtensionAuthorityEmbedding
     (small large : ExtensionAuthorityRegistry) where
   entry : small.Entry -> large.Entry
   keyExact : forall source, large.key (entry source) = small.key source
+  ownerExact : forall source, large.owner (entry source) = small.owner source
   injective : Function.Injective entry
+
+structure ExtensionAuthorityKeysDisjointOrExact
+    (left right : ExtensionAuthorityRegistry) : Prop where
+  collisionOwnerExact : forall leftEntry rightEntry,
+    left.key leftEntry = right.key rightEntry ->
+      left.owner leftEntry = right.owner rightEntry
+
+def PairwiseExtensionAuthorityKeysDisjointOrExact
+    (registries : List ExtensionAuthorityRegistry) : Prop :=
+  registries.Pairwise ExtensionAuthorityKeysDisjointOrExact
 
 structure ExtensionAuthorityUnionPlan
     (registries : List ExtensionAuthorityRegistry)
@@ -626,6 +642,15 @@ structure ProviderDemandFamily.ExtEq
     (left right : ProviderDemandFamily) : Prop where
   sameOrigins : left.origins = right.origins
   sameViews : forall origin, left.lookupView origin = right.lookupView origin
+structure ProviderDemandFamily.AuthorityEquiv
+    (left right : ProviderDemandFamily) : Prop where
+  commonRegistry : ExtensionAuthorityRegistry
+  includeLeft : ExtensionAuthorityEmbedding left.authorityRegistry commonRegistry
+  includeRight : ExtensionAuthorityEmbedding right.authorityRegistry commonRegistry
+  semantic : left.ExtEq right
+  lookupCorrespondence : forall origin,
+    StructurallySameReindexedLookup
+      (left.lookup origin) includeLeft (right.lookup origin) includeRight
 theorem ProviderDemandFamily.ext_sameRegistry
     (sameRegistry : left.authorityRegistry = right.authorityRegistry)
     (sameOrigins : left.origins = right.origins)
@@ -705,13 +730,23 @@ same canonical three-way `ExtensionAuthorityUnionPlan`.
 proves equality there; no `Classical.choice`, proof-irrelevant registry cast, or ad hoc
 rewriting of dependent statements is part of the public construction.
 The normalized registry uses the finite subtype of stable keys occurring in the
-input registries as its `Entry`, rather than choosing a representative input
-entry. `includeCompatible` maps an entry to its key plus occurrence proof.
-Consequently normalization sorts the finite stable-key union by the specified
-lexicographic order on the `(owner, localName)` fields of `StableId` and is
-deterministic under proof irrelevance.
+input registries, paired with the nominal owner carried by that key, as its
+`Entry`. `includeCompatible` maps an entry to its key, owner, and occurrence
+proof. Normalization sorts the finite union by the specified lexicographic order
+on the `(owner, localName)` fields of `StableId` and is deterministic under
+proof irrelevance.
 `normalize_permutation` proves that permuting the input registries produces the
 same normalized registry and embeddings; no hidden representative is chosen.
+
+`StableId` is serialization and collision-diagnostic data, not extension
+authority. An extension owner publishes an `ExtensionAuthorityOwner` containing
+a nominal Lean `Token` type; independently declared tokens remain distinct even
+when their displayed stable IDs match. Equal-key compatibility therefore
+requires equality of the owner witnesses, and every embedding preserves it.
+Reusing an imported owner's published witness is an explicit adoption of that
+authority; reproducing its string key alone is insufficient. Normalization
+deduplicates equal keys only under that typed owner-equality proof and retains
+the nominal owner in the merged entry.
 
 A tag is descriptive data, not itself authority. Every extension authority is
 dependently indexed by its exact selected registry and packages an entry of
@@ -743,6 +778,11 @@ structural correspondence rather than an ill-typed raw equality between
 differently indexed packages. Raw family equality additionally requires equal
 `authorityRegistry` values through `ext_sameRegistry`. In particular reindexing
 into a larger registry is semantically equivalent, not equal, to its source.
+`AuthorityEquiv` is the stronger certificate-facing relation: it embeds both
+representations into one registry and requires dependent lookup correspondence
+there. Owner-specific disposition, forwarding, sharding, and final closure use
+`AuthorityEquiv`; bare `ExtEq` is only for semantic predicates already proved
+insensitive to registry representation.
 This prevents a well-typed requirement predicate from changing truth
 merely because composition embeds its extension into a larger registry.
 
