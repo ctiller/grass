@@ -98,8 +98,8 @@ was marked rather than smuggled.
 
 All three handoffs have been accepted. Two are finished; `Bag.lean`'s *move* is
 not — `Grass/Process/Bag.lean` is still on `main`, still custody-noted, and still
-what `Grass/Process/**` imports. §4.2 has the detail, and this table said "accepted
-and moved" until a reviewer checked it. `Grass/Std/Logical/Vec.lean` is new and is this plan's, not custody.
+what `Grass/Process/**` imports; §4.2 has the detail.
+`Grass/Std/Logical/Vec.lean` is new and is this plan's, not custody.
 
 The custody markers stayed until each handoff was accepted. Replacing them is
 part of accepting, not a precondition for offering: an implementor releasing a
@@ -616,22 +616,12 @@ S1 is complete when all of the following hold. All four hold on this branch in
 isolation. **Merged onto current `main`, two of them fail** — criteria 1 and 2,
 because `Grass/Build/Cache/Key.lean` needs the one-line import change §3.14
 describes, and both `lake build` and `Tools/AxiomAudit.lean` reach that module.
-**Three of the four fail**: 1, 2 and 3, because `Tools/DeclNames.lean` — which
-`Tools/DocstringAudit.py` reads — imports `Grass.Build.Cache.Key` just as
-`Tools/AxiomAudit.lean` does. Only criterion 4 holds, and it genuinely does: all
-eight `Tests/Std` fixtures build on the broken tree.
+**Three of the four fail** on the merged tree — 1, 2 and 3 — because
+`Tools/AxiomAudit.lean` and `Tools/DeclNames.lean` both import
+`Grass.Build.Cache.Key`, which needs the one-line import change of §3.14. Criterion
+4 holds: all eight `Tests/Std` fixtures build regardless.
 
-This sentence has now been wrong twice in opposite directions. It first said all
-four fail, asserted rather than checked. The correction said two fail and justified
-it with `Tools/CoverageAudit.lean`, which is not one of the criteria at all — the
-finding being answered had said "all four *audits*", and the rewrite swapped
-"audits" for "criteria" without re-mapping which was which. `CoverageAudit` does
-pass on the broken tree, since it imports only `Vec` and `Order`; that fact is true
-and was attached to the wrong claim.
-
-"Today" is also the wrong word for a criterion in a repository whose `main` moves
-hourly. These were last checked against `origin/main` at the merge recorded in the
-commit that added this sentence, and are re-checked per merge rather than asserted
+These are re-checked per merge rather than asserted re-checked per merge rather than asserted
 once; a bare "today" is exactly the claim this plan keeps having to retract.
 
 1. `lake build` is green with `warningAsError = true`, so no declaration uses
@@ -670,12 +660,10 @@ implemented §1 as written and put the question to the owner of
 `c-stdlib:7`.
 
 **Ruled** at `g-design:49`, and recorded as [DECISIONS.md](DECISIONS.md) decision
-133: keep `Grass.Std.Logical.ByteArray := Vec Byte`. Both are named and neither is
-described as landed. A ruling reaches its bus event and `DECISIONS.md` at
-different times, so for a window the decision number points at nothing; this plan
-asserted 133 while the list stopped at 130, then corrected itself to say 133 had
-not landed, and that correction was false within a day when the branch merged.
-Naming both and claiming nothing about merge status is the form that stays true.
+133: keep `Grass.Std.Logical.ByteArray := Vec Byte`. Both are cited, and neither is described as
+landed or unlanded: a ruling reaches its bus event and `DECISIONS.md` at different
+times, so any claim about which one a reader can currently follow goes stale on its
+own.
 
 Modules that also see the packed
 host type qualify the Grass one or take a narrow local alias, and the crossing
@@ -711,18 +699,12 @@ operations to what is now a `Vec`:
 | `Grass/Memory/Event.lean:390,396` | `Committed.truncate` tactics | `List.length_take` ×2 | `Vec.length_take` |
 | `Grass/Op/Step.lean:127,128` | `Oracle.zeroed` field values | `List.replicate` ×2 | `Vec.replicate` |
 
-**They are six *sites*, not six proof steps**, and the distinction matters to
-whoever applies this: only the two in `Committed.truncate` are proof steps. Two
-are definition bodies and two are ordinary data-construction expressions -- so
-"no edit at any use site" is true of *fields* and false of value expressions.
-`Committed.truncate` is named rather than the obligations `observedFits` and
-`writtenFits`, because those two names occur in four declarations across the two
-files and would send a reader to the wrong one: they appear on twelve lines of
-`Event.lean` across six declarations — `Committed`, `readCount_le`, `writeCount_le`,
-`inert`, `truncate` and `ofOutcome` — plus two lines of `Op/Step.lean` inside
-`Oracle.zeroed`. An earlier version said "four declarations across the two files"
-and a later one appended "across seven declarations" without removing the four,
-leaving a sentence that contradicted itself.
+**They are six *sites*, not six proof steps**: two are `Committed.truncate`
+tactics, two are definition bodies (`readCount`, `writeCount`), and two are
+data-construction expressions in `Oracle.zeroed`. So "no edit at any use site" is
+true of *fields* and false of value expressions. `Committed.truncate` is named
+rather than the `observedFits`/`writtenFits` obligations, which appear on twelve
+lines of `Event.lean` across six declarations and would misdirect a reader.
 
 Expect **thirteen diagnostics across eleven lines**, not six, and all of them in
 `Event.lean`: `Op/Step.lean` imports it, so its two errors cannot appear in the
@@ -730,10 +712,7 @@ same build. The other nine are downstream and need no edit of their own — two
 `unsolved goals` at `Event.lean:560` and `:568`, five `declaration uses 'sorry'`
 cascades, and two `This simp argument is unused` linter messages that
 `warningAsError` promotes to errors. Four named sites plus those nine is the
-thirteen. Two earlier versions of this sentence miscounted: the first said "the
-other seven" and omitted the two `unsolved goals`, and the second said "at nine
-locations", which is the count of the *downstream* diagnostics rather than of the
-lines — the thirteen sit on lines 348, 351, 353, 359, 390, 396, 560, 561, 568, 569
+thirteen; they sit on lines 348, 351, 353, 359, 390, 396, 560, 561, 568, 569
 and 579.
 
 Every counterpart already exists and no new name is needed, and the six do clear
@@ -766,34 +745,12 @@ occurrences on its 20 lines —
 fixtures. So the change spans `c-mem`, `c-x86`, and — for `ByteArray` rather than
 `ByteSeq` — `g-build`, and it was never `c-mem`'s to land atomically.
 
-**How this plan got it wrong. The first answer it gave was also wrong, and the
-correction matters more than the original error.** This section previously blamed
-`main`'s velocity: the figure was measured on a smaller tree and the ISA, ABI and
-Build layers arrived afterwards. A reviewer checked that excuse against the trees
-it names and it does not survive. This branch's own merge-base is `ca8e42f`, the
-54-module tree, and it already contained **all fourteen** `Grass/ISA` and
-`Grass/ABI` files with exactly today's `ByteSeq` distribution — `Decode.lean` 20,
-`Bytes.lean` 10, `UnwindBytes.lean` 8, six across three fixtures. The 41 ISA errors
-were discoverable on the tree this branch was cut from. Only `Grass/Build`, and so
-only §3.14's finding, arrived later.
-
-So the real cause is not staleness. **The search stopped at the scope boundary.**
-`c-stdlib` knew `ByteSeq`'s consumer was the memory layer, grepped `Grass/Memory/**`,
-found four fields, and never asked the repository-wide question — while writing
-that the change was confined to `c-mem`'s scope, which is the claim the
-repository-wide question would have refuted. A count is not made safe by stamping
-it with a tree; it is made safe by searching the whole tree.
-
-That distinction is why the wrong diagnosis was worth correcting rather than
-quietly improving. "`main` moves fast" prescribes re-measuring, which would not
-have helped: re-measuring the same grep on a newer tree gives the same four files.
-"The search was scoped to the answer expected" prescribes searching outside the
-scope you expect, which finds it on the first attempt and on any tree since.
-
-§4.0 above says in terms that neither count should be quoted without its tree, and
-this section quoted one without its date; that remains true and remains a smaller
-fault than the one above it. The recipe is retracted to `c-mem` at `c-stdlib:34`,
-`c-x86` is told at `c-stdlib:35`, and `g-build` at `c-stdlib:36`.
+**Cause.** The original figure came from grepping `Grass/Memory/**` — the consumer
+this plan expected — and never asking the repository-wide question, while asserting
+the change was confined to that scope. The merge-base already carried every
+`Grass/ISA` and `Grass/ABI` file, so this was not staleness; the search was scoped
+to the answer expected. A count is made safe by searching the whole tree, not by
+stamping it with one.
 
 **`c-x86` has since costed its half, at `c-x86:32`, and the answer changes the
 shape of the problem: the retirement is not all-or-nothing.** Their two halves
@@ -808,9 +765,8 @@ divide cleanly, which they say they did not expect before counting.
   patterns — five, not the seven reported, at lines 83, 103, 782, 818 and 868 — are
   over `List (BitVec n)` and `List RuntimeFunction`, neither of which a `ByteSeq`
   flip touches, and the `CountOfCodes` induction in `length_flatten_toBytes` is
-  over `List PlacedOp`. (An earlier version of this sentence put `List PlacedOp`
-  among the five and then listed that induction separately, which double-counted
-  it; `c-stdlib:37` carries the same error and is corrected at `c-stdlib:38`.) By `c-x86`'s
+  over `List PlacedOp`, which is a separate induction alternative rather than one
+  of the five (`c-stdlib:38` corrects `c-stdlib:37` on that point). By `c-x86`'s
   own criterion, "builds byte sequences and never takes them apart", it belongs on
   the cheap side. Reported back at `c-stdlib:37`.
 - `Grass/ISA/X86/Decode.lean` (three cons patterns) is **the only file that does
