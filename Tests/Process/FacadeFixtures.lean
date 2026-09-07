@@ -63,7 +63,7 @@ author writes one before anything else.
   Demand := Ask
   Result := Answer
   Observation := Note
-  InterruptReason := Given
+  InterruptReason := fun _ => Given
   LogicalFault := PEmpty
   EnvironmentViolation := PEmpty
 

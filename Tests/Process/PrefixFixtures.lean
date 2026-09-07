@@ -52,7 +52,7 @@ open Grass.Process
   Demand := PEmpty
   Result := fun demand => demand.elim
   Observation := PEmpty
-  InterruptReason := PEmpty
+  InterruptReason := fun _ => PEmpty
   LogicalFault := PEmpty
   EnvironmentViolation := PEmpty
 

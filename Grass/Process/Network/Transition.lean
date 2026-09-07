@@ -686,10 +686,19 @@ structure EndsInstance (before after : plan.LogicalProcessNetwork)
   classification. For two of the six endings it does, and this is those two.
 
   `.terminated result` is checkable against `ProcessSpec.Terminal`, which is the
-  specification's own word for finished. `.interrupted reason` is checkable
-  against the outstanding bag: `docs/PROCESS.md` §2 calls an interruption "an
-  outstanding demand of its own was abandoned", and a process holding none has
-  nothing to abandon.
+  specification's own word for finished. `.interrupted demand reason` is
+  checkable against the outstanding bag: `docs/PROCESS.md` §2 calls an
+  interruption "an outstanding demand of its own was abandoned", and the
+  ending now names *which* demand.
+
+  **That name is what demand-indexing bought here.** The field used to say only
+  `outstanding ≠ 0` -- a process holding something may abandon something -- and
+  under a flat `InterruptReason` that was all it could say, because the ending
+  carried no demand to compare against the bag. An instance holding a `Sleep`
+  could therefore be recorded as having abandoned a `WriteFile` it never issued.
+  Since `ProcessVocabulary.InterruptReason` is indexed by the demand abandoned
+  (`agent-bus` ruling `g-design:67`), the ending carries the demand and the
+  check is membership: the demand abandoned was one this instance actually held.
 
   The other four remain unchecked and are a different problem in each case.
   `.cancelled` wants a prior cancellation request, and no instance records one —
@@ -705,7 +714,8 @@ structure EndsInstance (before after : plan.LogicalProcessNetwork)
     (∀ result, ending = .terminated result →
       (plan.topology.protocol kind).Terminal (fromKind ▸ fromInstance.request)
         (fromKind ▸ fromInstance.localState) result) ∧
-    (∀ reason, ending = .interrupted reason → (fromKind ▸ fromInstance.outstanding) ≠ 0)
+    (∀ demand reason, ending = .interrupted demand reason →
+      demand ∈ (fromKind ▸ fromInstance.outstanding))
   /--
   **And the obligation ledger moves exactly as this ending declared.**
 
@@ -1752,10 +1762,11 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
   | timeout (edge session occurrence)
       (step : plan.ResolvesEscrow before after edge session occurrence .timedOut)
   /-- An instance's outstanding demand was abandoned. -/
-  | interrupt (kind slot) (reason : (plan.topology.protocol kind).InterruptReason)
+  | interrupt (kind slot) (demand : (plan.topology.protocol kind).Demand)
+      (reason : (plan.topology.protocol kind).InterruptReason demand)
       (custody : Bag (plan.topology.protocol kind).Demand →
         Obligations → Obligations → Prop)
-      (step : plan.EndsInstance before after kind slot (.interrupted reason) custody)
+      (step : plan.EndsInstance before after kind slot (.interrupted demand reason) custody)
   /-- An instance faulted. -/
   | fault (kind slot) (fault : (plan.topology.protocol kind).LogicalFault)
       (custody : Bag (plan.topology.protocol kind).Demand →
@@ -1890,7 +1901,7 @@ def scope : plan.NetworkTransition before after → NetworkFragment plan.topolog
   | .reroute edge session _ destination _ =>
       fun fragment => fragment = .escrow edge session ∨ fragment = .escrow edge destination
   | .coalesce edge session _ _ _ => fun fragment => fragment = .escrow edge session
-  | .interrupt kind slot _ _ _ =>
+  | .interrupt kind slot _ _ _ _ =>
       fun fragment => fragment = .instanceState kind slot ∨
         (before.obligations ≠ after.obligations ∧ fragment = .obligations)
   | .fault kind slot _ _ _ =>
@@ -1999,7 +2010,7 @@ theorem touchesOnly (transition : plan.NetworkTransition before after) :
   | drop _ _ _ step => exact step.scope
   | reroute _ _ _ _ step => exact step.scope
   | coalesce _ _ _ _ step => exact step.scope
-  | interrupt _ _ _ _ step => exact step.scope
+  | interrupt _ _ _ _ _ step => exact step.scope
   | fault _ _ _ _ step => exact step.scope
   | environmentViolation _ _ _ _ step => exact step.scope
   | childCancelled _ _ _ _ _ step => exact step.scope
@@ -2045,7 +2056,7 @@ theorem moving_the_ledger_ends_an_instance (transition : plan.NetworkTransition 
         Obligations → Obligations → Prop),
       plan.EndsInstance before after kind slot ending custody ∧ ending ≠ .running := by
   cases transition with
-  | interrupt kind slot _ custody step =>
+  | interrupt kind slot _ _ custody step =>
     exact ⟨kind, slot, _, custody, step, step.notRunning⟩
   | fault kind slot _ custody step =>
     exact ⟨kind, slot, _, custody, step, step.notRunning⟩

@@ -13,7 +13,7 @@ built over them.
 inductive ProcessEvent (v : ProcessVocabulary)
   | external (event : v.ExternalEvent)
   | result (demand : v.Demand) (result : v.Result demand)
-  | interrupted (demand : v.Demand) (reason : InterruptReason)
+  | interrupted (demand : v.Demand) (reason : InterruptReason demand)
   | fault (fault : LogicalFault)
   | environmentViolation (violation : EnvironmentViolation)
 ```
@@ -102,8 +102,21 @@ structure ProcessVocabulary : Type (u + 1) where
   Result : Demand → Type u
   /-- What the program's specification is entitled to observe. -/
   Observation : Type u
-  /-- Why an outstanding demand was abandoned without a result. -/
-  InterruptReason : Type u
+  /--
+  Why an outstanding demand was abandoned without a result, **indexed by the
+  demand abandoned**.
+
+  The same dependency shape as `Result`, and for the same reason
+  `docs/DECISIONS.md` decision 121 gives: an interruption abandons one exact
+  demand, so a reason that could not have applied to that demand must be
+  unrepresentable rather than merely unused. A single un-indexed class lets a
+  `Sleep`'s reason discharge a `WriteFile`'s interruption, which is law 5's
+  complaint about results one constructor over.
+
+  `agent-bus` ruling `g-design:67` on `c-process:66` is where this was decided;
+  `docs/PROCESS.md` §2 carries the normative spelling.
+  -/
+  InterruptReason : Demand → Type u
   /-- How this process itself can fail. See the module note. -/
   LogicalFault : Type u
   /-- How the environment can break a contract this process assumed. -/
@@ -137,7 +150,7 @@ def quiescent (ExternalEvent Demand : Type u) (Result : Demand → Type u)
   Demand := Demand
   Result := Result
   Observation := Observation
-  InterruptReason := PEmpty
+  InterruptReason := fun _ => PEmpty
   LogicalFault := PEmpty
   EnvironmentViolation := PEmpty
 
@@ -155,7 +168,7 @@ inductive ProcessEvent (v : ProcessVocabulary.{u}) : Type u
   /-- Exactly one outstanding demand was answered. -/
   | result (demand : v.Demand) (result : v.Result demand)
   /-- Exactly one outstanding demand was abandoned without a result. -/
-  | interrupted (demand : v.Demand) (reason : v.InterruptReason)
+  | interrupted (demand : v.Demand) (reason : v.InterruptReason demand)
   /-- The process itself failed. -/
   | fault (fault : v.LogicalFault)
   /-- The environment broke a contract the process was entitled to assume. -/
@@ -190,7 +203,7 @@ def settles : ProcessEvent v → Option v.Demand
     (ProcessEvent.result demand result).settles = some demand := rfl
 
 @[simp] theorem settles_interrupted (demand : v.Demand)
-    (reason : v.InterruptReason) :
+    (reason : v.InterruptReason demand) :
     (ProcessEvent.interrupted demand reason).settles = some demand := rfl
 
 @[simp] theorem settles_fault (fault : v.LogicalFault) :
@@ -254,7 +267,7 @@ def arrivesFromOutside : ProcessEvent v → Prop
     (ProcessEvent.result demand result).arrivesFromOutside := trivial
 
 @[simp] theorem not_arrivesFromOutside_interrupted (demand : v.Demand)
-    (reason : v.InterruptReason) :
+    (reason : v.InterruptReason demand) :
     ¬ (ProcessEvent.interrupted demand reason).arrivesFromOutside := fun h => h
 
 @[simp] theorem not_arrivesFromOutside_fault (fault : v.LogicalFault) :
@@ -280,7 +293,7 @@ theorem arrivesFromOutside_of_externalEntropy {event : ProcessEvent v}
     (ProcessEvent.result demand result).externalEntropy = none := rfl
 
 @[simp] theorem externalEntropy_interrupted (demand : v.Demand)
-    (reason : v.InterruptReason) :
+    (reason : v.InterruptReason demand) :
     (ProcessEvent.interrupted demand reason).externalEntropy = none := rfl
 
 @[simp] theorem externalEntropy_fault (fault : v.LogicalFault) :

@@ -74,7 +74,7 @@ something" because in its vocabulary the environment cannot.
   Demand := PEmpty
   Result := fun demand => demand.elim
   Observation := Chirp
-  InterruptReason := PEmpty
+  InterruptReason := fun _ => PEmpty
   LogicalFault := Unit
   EnvironmentViolation := PEmpty
 

@@ -470,6 +470,17 @@ one. `ProcessTopologyCore` is the graph, channels, and spawn authority — what 
 the facets `requiredTopologyFacets boundary` derives from the selected
 specification and exports the corresponding aggregate lifecycle theorems.
 
+**Implementation status.** The facet-carrying `ProcessTopology` above is target
+text, not current code. `Grass/`'s `ProcessPlan` carries a
+`topology : ProcessTopologyCore` field and there are no facet fields anywhere in
+the corpus. `agent-bus` ruling `g-design:67` deferred the facet family to an
+explicit later `c-process` milestone rather than expanding the M4 candidate, and
+recorded the consequence: until it lands, the implemented `ProcessPlan` is
+provisional. It may not claim to discharge cancellation or supervision
+requirements, and it may not be consumed as a complete `ProcessPlan` by
+`VerifiedProgram`. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §13 carries the owner
+and the acceptance gate. Decision 122 is unchanged; this is staging.
+
 The weaker object may not carry the unqualified name. A consumer holding a value
 called `ProcessTopology` is entitled to assume the lifecycle authority its type
 names, and the earlier declaration — one structure with `cancellation` and
@@ -529,7 +540,7 @@ inductive ProcessLifecycle (p : ProcessSpec)
   | running
   | terminated (result : p.TerminalResult)
   | cancelled (reason : CancelReason)
-  | interrupted (reason : p.InterruptReason)
+  | interrupted (demand : p.Demand) (reason : p.InterruptReason demand)
   | faulted (fault : p.LogicalFault)
   | violated (violation : p.EnvironmentViolation)
   | died (reason : ProcessDeathReason)
@@ -664,6 +675,13 @@ useful proposition-indexed families without improving the verified gate.
 The definitions above make each occurrence nominally indexed by the exact
 channel edge, sender and receiver incarnations, session epoch, message, and
 pre-send world.
+
+An ending records the demand it abandoned as well as the reason, because
+`ProcessVocabulary.InterruptReason` is indexed by that demand. That is not
+bookkeeping: a network well-formedness law can then require the abandoned demand
+to be one the instance was actually holding, which a payload naming no demand
+could not express. `Grass/Process/Network/Transition.lean`'s
+`EndsInstance.endingIsEarned` is that law.
 
 `ProcessLifecycle` is indexed by the instance protocol because an ending must
 remain recoverable from network state without replaying the parent transition.
@@ -1143,7 +1161,7 @@ inductive ChildLifecycleEvent (occurrence : ChildOccurrence plan request)
   | succeeded (result : TerminalSuccess request.key request.request)
   | failed (failure : TerminalFailure request.key request.request)
   | cancellationAcknowledged (reason : CancelReason)
-  | interrupted (reason : InterruptReason)
+  | interrupted (demand : Demand) (reason : InterruptReason demand)
   | faulted (fault : ChildFault)
   | environmentViolation (violation : EnvironmentViolation)
   | died (disposition : ChildDeathDisposition occurrence)

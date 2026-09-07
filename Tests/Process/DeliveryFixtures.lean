@@ -37,7 +37,7 @@ inductive WorkerInterrupt
   Demand := Unit
   Result := fun _ => Unit
   Observation := Unit
-  InterruptReason := WorkerInterrupt
+  InterruptReason := fun _ => WorkerInterrupt
   LogicalFault := WorkerFault
   EnvironmentViolation := PEmpty
 
@@ -52,7 +52,7 @@ inductive SupervisorFault
   Demand := Unit
   Result := fun _ => Unit
   Observation := Unit
-  InterruptReason := WorkerInterrupt
+  InterruptReason := fun _ => WorkerInterrupt
   LogicalFault := SupervisorFault
   EnvironmentViolation := PEmpty
 
@@ -68,9 +68,21 @@ every worker interrupt reason is a supervisor one.
 -/
 
 def workerToSupervisor : VocabularyDelivery worker supervisor where
-  interrupt := id
   fault := .childFailed
   violation := fun empty => empty.elim
+
+/--
+And the interruption half, which is a separate record since `InterruptReason`
+became demand-indexed.
+
+`demand := id` is the content that had nowhere to live before: it says which of
+the supervisor's demands a worker's abandoned demand becomes, and the reason
+classifier is indexed by it. The un-indexed version could classify a reason
+without saying anything about the demand at all.
+-/
+def workerInterruptsSupervisor : InterruptDelivery worker supervisor where
+  demand := id
+  reason := id
 
 /-- Classification is total: a fault the worker can raise has an image. -/
 theorem every_worker_fault_classified (value : WorkerFault) :
@@ -105,7 +117,7 @@ inductive LedgerFault
   Demand := PEmpty
   Result := fun demand => demand.elim
   Observation := Unit
-  InterruptReason := WorkerInterrupt
+  InterruptReason := fun _ => WorkerInterrupt
   LogicalFault := LedgerFault
   EnvironmentViolation := PEmpty
 
@@ -116,7 +128,6 @@ The interrupt classes line up, so this is an ordinary total classifier. The
 interesting field is the one that is *not* here: nothing about demands.
 -/
 def workerToLedger : VocabularyDelivery worker ledger where
-  interrupt := id
   fault := fun _ => LedgerFault.corrupted
   violation := fun empty => empty.elim
 
@@ -138,6 +149,25 @@ Stated so the previous theorem is not read as "a demand happened to be
 available". There is no such value, and the fault arrives regardless.
 -/
 theorem ledger_has_no_demand (demand : ledger.Demand) : False := demand.elim
+
+/--
+**And the same target can receive no interruption at all**, which is the
+distinction demand-indexing bought and the reason `InterruptDelivery` is a
+separate record.
+
+An interruption abandons one exact demand and arrives attributed to one exact
+demand of the receiver. The ledger has none, so there is nothing for an arriving
+interruption to be about — while a fault, which is about no demand, arrives
+perfectly well. Both facts hold of the same pair of vocabularies, and a single
+bundled record could state neither: adding the demand translation to
+`VocabularyDelivery` would have made `carries_fault_without_demand`
+unconstructible, and leaving it out left the reason classifier unable to say
+which demand it was talking about.
+-/
+theorem no_interrupt_delivery_worker_to_ledger :
+    ¬ Nonempty (InterruptDelivery worker ledger) := by
+  rintro ⟨delivery⟩
+  exact (delivery.demand ()).elim
 
 /-! ## Delivering into the auditor is impossible
 
@@ -161,8 +191,9 @@ uninhabited.
 -/
 theorem auditor_receives_nothing
     (delivery : VocabularyDelivery worker auditor)
+    (interrupts : InterruptDelivery worker auditor)
     (event : VocabularyDelivery.Deliverable worker) : False :=
-  VocabularyDelivery.nothing_deliverable_into_quiescent delivery event
+  VocabularyDelivery.nothing_deliverable_into_quiescent delivery interrupts event
 
 /--
 The auditor may still deliver into itself.
@@ -174,8 +205,73 @@ because there is nothing to carry.
 def auditorToItself : VocabularyDelivery auditor auditor :=
   VocabularyDelivery.refl auditor
 
+/-- Both halves of it. -/
+def auditorInterruptsItself : InterruptDelivery auditor auditor :=
+  InterruptDelivery.refl auditor
+
 theorem auditor_deliverables_uninhabited
     (event : VocabularyDelivery.Deliverable auditor) : False :=
-  VocabularyDelivery.nothing_deliverable_into_quiescent auditorToItself event
+  VocabularyDelivery.nothing_deliverable_into_quiescent auditorToItself
+    auditorInterruptsItself event
+
+/-! ## A reason that is valid for one demand and unrepresentable for another
+
+The whole point of the indexing, and the corpus had no fixture for it while the
+class was flat. `docs/DECISIONS.md` decision 121 asks the type to make a reason
+invalid for a demand unrepresentable; this is that, at a vocabulary with two
+demands whose interruption classes differ.
+-/
+
+inductive TwoDemands
+  | write
+  | compute
+  deriving DecidableEq, Repr
+
+inductive WriteInterrupt
+  | diskFull
+  deriving DecidableEq, Repr
+
+/--
+A process that can be interrupted while writing and not while computing.
+
+`compute`'s reason class is `PEmpty`, which is a claim: a computation of this
+process, once started, is never abandoned. Under the flat spelling there was no
+way to say that without also saying the write could not be abandoned either.
+-/
+@[reducible] def mixed : ProcessVocabulary.{0} where
+  ExternalEvent := Unit
+  Demand := TwoDemands
+  Result := fun _ => Unit
+  Observation := Unit
+  InterruptReason := fun demand =>
+    match demand with
+    | .write => WriteInterrupt
+    | .compute => PEmpty
+  LogicalFault := PEmpty
+  EnvironmentViolation := PEmpty
+
+/-- The write can be abandoned. -/
+theorem writing_can_be_interrupted : Nonempty (mixed.InterruptReason .write) :=
+  ⟨WriteInterrupt.diskFull⟩
+
+/-- The computation cannot, and that is a theorem rather than an omission. -/
+theorem computing_cannot_be_interrupted (reason : mixed.InterruptReason .compute) :
+    False :=
+  reason.elim
+
+/--
+**And a delivery proves it of the sender too, one demand at a time.**
+
+`InterruptDelivery.source_empty_of_target_empty` needs only the target's class
+at the demand in question, so a source delivering into `mixed` at `.compute`
+has no reason to abandon a computation either — while saying nothing about
+whether it can abandon a write. The flat lemma had to empty the target's whole
+interruption class to conclude anything.
+-/
+theorem no_reason_survives_into_compute
+    (delivery : InterruptDelivery mixed mixed)
+    (computeStays : delivery.demand .compute = .compute)
+    (reason : mixed.InterruptReason .compute) : False :=
+  (computeStays ▸ delivery.reason reason : mixed.InterruptReason .compute).elim
 
 end Grass.Process.Tests.Delivery

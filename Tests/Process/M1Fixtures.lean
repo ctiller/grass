@@ -80,7 +80,7 @@ construction; interruptions are not, because a fixture needs one. -/
   Demand := Demand
   Result := Result
   Observation := Observation
-  InterruptReason := Interrupt
+  InterruptReason := fun _ => Interrupt
   LogicalFault := PEmpty
   EnvironmentViolation := PEmpty
 

@@ -60,7 +60,7 @@ def theBinding :
     match outcome with
     | .succeeded _ _ => .event (.result Demand.tick ())
     | .pending => .event (.external .wake)
-    | .interrupted _ => .nonReturning .abandoned
+    | .interrupted _ _ => .nonReturning .abandoned
     | .faulted _ => .nonReturning .abandoned
     | .environmentViolation _ => .nonReturning .abandoned
     | .died _ => .nonReturning .detached
@@ -126,7 +126,7 @@ def theLogBinding :
     match outcome with
     | .succeeded _ _ => .event (.result Demand.log true)
     | .pending => .event (.external .wake)
-    | .interrupted _ => .nonReturning .abandoned
+    | .interrupted _ _ => .nonReturning .abandoned
     | .faulted _ => .nonReturning .abandoned
     | .environmentViolation _ => .nonReturning .abandoned
     | .died _ => .event (.result Demand.log false)

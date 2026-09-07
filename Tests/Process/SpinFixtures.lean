@@ -65,7 +65,7 @@ purpose: `spin` may not appeal to the entropy disjunct. -/
   Demand := Unit
   Result := fun _ => Unit
   Observation := PEmpty
-  InterruptReason := PEmpty
+  InterruptReason := fun _ => PEmpty
   LogicalFault := PEmpty
   EnvironmentViolation := PEmpty
 

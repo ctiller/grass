@@ -93,8 +93,12 @@ inductive ProcessLifecycle (protocol : ProcessSpec.{u, w}) : Type (max u w)
   /-- A cancellation was *acknowledged*, at this point. Requesting one does not
   reach here. -/
   | cancelled (reason : CancelReason)
-  /-- An outstanding demand of its own was abandoned, for this reason. -/
-  | interrupted (reason : protocol.InterruptReason)
+  /-- An outstanding demand of its own was abandoned, for this reason.
+
+  The demand is carried beside the reason because the reason's type names it:
+  `ProcessVocabulary.InterruptReason` is indexed by the demand abandoned, so an
+  ending cannot record a reason without recording which demand it abandoned. -/
+  | interrupted (demand : protocol.Demand) (reason : protocol.InterruptReason demand)
   /-- Ended by this logical fault of its own. -/
   | faulted (fault : protocol.LogicalFault)
   /-- Ended because its environment broke a contract, this way. -/

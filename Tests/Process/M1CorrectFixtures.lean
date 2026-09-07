@@ -42,7 +42,7 @@ obligation rather than about arithmetic. `M1Fixtures` covers the counting.
   Demand := PEmpty
   Result := fun demand => demand.elim
   Observation := Unit
-  InterruptReason := PEmpty
+  InterruptReason := fun _ => PEmpty
   LogicalFault := PEmpty
   EnvironmentViolation := PEmpty
 

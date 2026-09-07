@@ -100,7 +100,7 @@ this closes both.
   Demand := Unit
   Result := fun _ => Unit
   Observation := Sound
-  InterruptReason := PEmpty
+  InterruptReason := fun _ => PEmpty
   LogicalFault := Unit
   EnvironmentViolation := Unit
 

@@ -58,12 +58,42 @@ fault, violation, and death as the precise parent result/event" — and this is
 that requirement for the three classes that have no dependent result.
 -/
 structure VocabularyDelivery (source target : ProcessVocabulary.{u}) where
-  /-- Every reason the source can abandon a demand for is a reason here. -/
-  interrupt : source.InterruptReason → target.InterruptReason
   /-- Every way the source can fail is a way this process can fail. -/
   fault : source.LogicalFault → target.LogicalFault
   /-- Every environment contract the source can see broken is one this sees. -/
   violation : source.EnvironmentViolation → target.EnvironmentViolation
+
+/--
+**The interruption half, which needs a demand translation and therefore cannot
+live in `VocabularyDelivery`.**
+
+`ProcessVocabulary.InterruptReason` is indexed by the demand abandoned
+(`agent-bus` ruling `g-design:67`), so classifying a reason means saying which
+of the target's demands the abandoned one becomes. That is a translation
+`VocabularyDelivery` deliberately does not have: the module's own argument is
+that a fault "carries no dependent result", and `carries_fault_without_demand`
+is the fixture holding it — a target whose `Demand` is `PEmpty` still receives
+faults from a source that has demands.
+
+Bundling the two would destroy that. A `demand : source.Demand → target.Demand`
+field makes `VocabularyDelivery` unconstructible whenever the target names no
+demands, which would take the fault classification down with it. So the bundle
+splits along the line the indexing drew: the demand-free classes stay together,
+and the one that is now dependent gets its own record.
+
+Decision 121's totality is unchanged and now says more. Where a
+`VocabularyDelivery` says every fault is classified, this says every reason for
+abandoning *each particular demand* is classified as a reason for abandoning the
+demand it becomes — so a target cannot receive an interruption attributed to a
+demand it does not have.
+-/
+structure InterruptDelivery (source target : ProcessVocabulary.{u}) where
+  /-- Which of the target's demands an abandoned source demand becomes. -/
+  demand : source.Demand → target.Demand
+  /-- And every reason the source can abandon it for is a reason to abandon
+  that one. -/
+  reason : ∀ {abandoned : source.Demand},
+    source.InterruptReason abandoned → target.InterruptReason (demand abandoned)
 
 namespace VocabularyDelivery
 
@@ -71,7 +101,6 @@ variable {source target further : ProcessVocabulary.{u}}
 
 /-- Delivery into itself: the identity classification. -/
 def refl (vocabulary : ProcessVocabulary.{u}) : VocabularyDelivery vocabulary vocabulary where
-  interrupt := id
   fault := id
   violation := id
 
@@ -86,13 +115,12 @@ classification.
 def trans (first : VocabularyDelivery source target)
     (second : VocabularyDelivery target further) :
     VocabularyDelivery source further where
-  interrupt := second.interrupt ∘ first.interrupt
   fault := second.fault ∘ first.fault
   violation := second.violation ∘ first.violation
 
-@[simp] theorem refl_interrupt (vocabulary : ProcessVocabulary.{u})
-    (reason : vocabulary.InterruptReason) :
-    (refl vocabulary).interrupt reason = reason := rfl
+@[simp] theorem refl_fault (vocabulary : ProcessVocabulary.{u})
+    (value : vocabulary.LogicalFault) :
+    (refl vocabulary).fault value = value := rfl
 
 @[simp] theorem trans_fault (first : VocabularyDelivery source target)
     (second : VocabularyDelivery target further) (value : source.LogicalFault) :
@@ -105,13 +133,6 @@ target declares the class empty, then the source can produce no such value
 either. The process that declared `PEmpty` is therefore not ignoring an event it
 should handle — no such event can arrive.
 -/
-
-/-- A process that declares no interruption reason receives none. -/
-theorem interrupt_source_empty_of_target_empty
-    (delivery : VocabularyDelivery source target)
-    (targetEmpty : target.InterruptReason → False)
-    (reason : source.InterruptReason) : False :=
-  targetEmpty (delivery.interrupt reason)
 
 /-- A process that declares no fault class receives no fault. -/
 theorem fault_source_empty_of_target_empty
@@ -136,7 +157,7 @@ function. A demand crossing a boundary needs a child binding, not this.
 -/
 inductive Deliverable (vocabulary : ProcessVocabulary.{u}) : Type u
   /-- An outstanding demand was abandoned. -/
-  | interrupted (demand : vocabulary.Demand) (reason : vocabulary.InterruptReason)
+  | interrupted (demand : vocabulary.Demand) (reason : vocabulary.InterruptReason demand)
   /-- The process failed. -/
   | fault (value : vocabulary.LogicalFault)
   /-- The environment broke a contract. -/
@@ -172,38 +193,78 @@ def carryViolation (delivery : VocabularyDelivery source target)
     (violation : source.EnvironmentViolation) : Deliverable target :=
   .environmentViolation (delivery.violation violation)
 
-/--
-Carry an interruption, which *does* need the demand it settles on the receiving
-side.
+end VocabularyDelivery
 
-The translated demand is supplied by the caller rather than derived here,
-because that translation is a child binding: it correlates an occurrence and its
-dependent result, which is `Grass/Process/Network/Child.lean`'s job. What this
-function guarantees is that the *reason* is classified, totally.
+namespace InterruptDelivery
+
+variable {source target further : ProcessVocabulary.{u}}
+
+/-- Delivery into itself: the identity classification, at the identity demand
+translation. -/
+def refl (vocabulary : ProcessVocabulary.{u}) : InterruptDelivery vocabulary vocabulary where
+  demand := id
+  reason := id
+
+/-- These compose too, and the demand translations compose with them. -/
+def trans (first : InterruptDelivery source target)
+    (second : InterruptDelivery target further) :
+    InterruptDelivery source further where
+  demand := second.demand ∘ first.demand
+  reason := fun reason => second.reason (first.reason reason)
+
+/--
+**A process that declares no reason for abandoning the demand this one becomes
+receives no interruption of it.**
+
+`VocabularyDelivery.interrupt_source_empty_of_target_empty` was the un-indexed
+form and said less: it needed the target's *whole* interruption class empty.
+This needs only the class at the one demand, so a target that can be interrupted
+while writing but not while sleeping proves the sleeping case unreachable
+without claiming anything about writing.
 -/
-def carryInterrupted (delivery : VocabularyDelivery source target)
-    (demand : target.Demand) (reason : source.InterruptReason) :
-    Deliverable target :=
-  .interrupted demand (delivery.interrupt reason)
+theorem source_empty_of_target_empty (delivery : InterruptDelivery source target)
+    (targetEmpty : ∀ demand, target.InterruptReason demand → False)
+    {abandoned : source.Demand} (reason : source.InterruptReason abandoned) : False :=
+  targetEmpty _ (delivery.reason reason)
 
 /--
-Carry any deliverable, given a demand translation for the one case that needs
-one.
+Carry an interruption. The demand it settles on the receiving side is the
+delivery's own translation of the demand it abandoned here, not a value the
+caller chooses.
 
-Provided for a caller that has a child binding in hand and wants a single
-function. A caller that only has faults to carry uses `carryFault` and never
-mentions a demand.
+That is the substantive change demand-indexing made. The un-indexed version took
+the target demand as an argument and could attribute a `Sleep`'s interruption to
+a `WriteFile`; there was no field relating the two, because there could not be
+one while the reason's type did not mention a demand.
+-/
+def carryInterrupted (delivery : InterruptDelivery source target)
+    {abandoned : source.Demand} (reason : source.InterruptReason abandoned) :
+    VocabularyDelivery.Deliverable target :=
+  .interrupted (delivery.demand abandoned) (delivery.reason reason)
+
+end InterruptDelivery
+
+namespace VocabularyDelivery
+
+variable {source target : ProcessVocabulary.{u}}
+
+/--
+Carry any deliverable, given both classifications.
+
+The interruption case needs an `InterruptDelivery` and the other two do not,
+which is the split stated as a signature. A caller that only has faults to carry
+uses `carryFault` and never mentions a demand or an `InterruptDelivery` at all.
 -/
 def carry (delivery : VocabularyDelivery source target)
-    (demandOf : source.Demand → target.Demand) :
+    (interrupts : InterruptDelivery source target) :
     Deliverable source → Deliverable target
-  | .interrupted demand reason => delivery.carryInterrupted (demandOf demand) reason
+  | .interrupted _demand reason => interrupts.carryInterrupted reason
   | .fault value => delivery.carryFault value
   | .environmentViolation violation => delivery.carryViolation violation
 
 @[simp] theorem carry_fault (delivery : VocabularyDelivery source target)
-    (demandOf : source.Demand → target.Demand) (value : source.LogicalFault) :
-    delivery.carry demandOf (.fault value) = delivery.carryFault value := rfl
+    (interrupts : InterruptDelivery source target) (value : source.LogicalFault) :
+    delivery.carry interrupts (.fault value) = delivery.carryFault value := rfl
 
 /--
 Nothing is deliverable into a quiescent vocabulary except from one that can
@@ -219,10 +280,13 @@ theorem nothing_deliverable_into_quiescent
     {ExternalEvent Demand : Type u} {Result : Demand → Type u} {Observation : Type u}
     (delivery : VocabularyDelivery source
       (ProcessVocabulary.quiescent ExternalEvent Demand Result Observation))
+    (interrupts : InterruptDelivery source
+      (ProcessVocabulary.quiescent ExternalEvent Demand Result Observation))
     (event : Deliverable source) : False := by
   cases event with
   | interrupted _ reason =>
-    exact interrupt_source_empty_of_target_empty delivery (fun empty => empty.elim) reason
+    exact InterruptDelivery.source_empty_of_target_empty interrupts
+      (fun _ empty => empty.elim) reason
   | fault value =>
     exact fault_source_empty_of_target_empty delivery (fun empty => empty.elim) value
   | environmentViolation violation =>

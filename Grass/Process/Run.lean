@@ -367,7 +367,7 @@ theorem stepResult {state after : p.State}
 theorem stepInterrupted {state after : p.State}
     {outstanding remainder issued : Bag p.Demand}
     {observations : Trace p.Observation} {emitted : p.Segment}
-    {demand : p.Demand} {reason : p.InterruptReason}
+    {demand : p.Demand} {reason : p.InterruptReason demand}
     (consume : Bag.ConsumeExactlyOneMatching outstanding demand remainder)
     (transition : p.Step state (.interrupted demand reason) after issued emitted) :
     ProcessRunTransition law request

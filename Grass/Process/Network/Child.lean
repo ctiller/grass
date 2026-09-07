@@ -73,7 +73,7 @@ inductive ChildLifecycleOutcome (child : ProcessSpec.{u, w}) (request : child.Re
   /-- Finished, with the protocol's typed result. -/
   | succeeded (result : child.TerminalResult) (isTerminal : ∃ state, child.Terminal request state result)
   /-- An outstanding demand of the child's own was abandoned. -/
-  | interrupted (reason : child.InterruptReason)
+  | interrupted (demand : child.Demand) (reason : child.InterruptReason demand)
   /-- The child failed. -/
   | faulted (fault : child.LogicalFault)
   /-- The child's environment broke a contract. -/

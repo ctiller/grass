@@ -141,7 +141,7 @@ structure VocabularyEmbedding (part whole : ProcessVocabulary.{u}) : Type u wher
   fail, woven into a program that has declared no fault can occur. Totality is
   what makes the empty target *prove* unreachability rather than hide it.
   -/
-  interruptReason : part.InterruptReason → whole.InterruptReason
+  interruptReason : ∀ {own}, part.InterruptReason own → whole.InterruptReason (demand own)
   /-- Its faults. -/
   logicalFault : part.LogicalFault → whole.LogicalFault
   /-- And its environment violations. -/

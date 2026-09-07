@@ -322,7 +322,7 @@ theorem declared_slot_outcome (transition : plan.NetworkTransition before after)
       step.restartsAChild incarnation found⟩)
     obtain ⟨live, foundLive, isLive, _⟩ := step.nowLive
     exact Option.some.inj (foundLive.symm.trans found) ▸ isLive
-  | interrupt _ _ _ _ step =>
+  | interrupt _ _ _ _ _ step =>
     obtain ⟨same, sameSlot⟩ := instanceFragment_inj
       (by rcases declared with h | h
           · exact h
@@ -674,7 +674,7 @@ theorem ledgers_extend (transition : plan.NetworkTransition before after)
     | restart _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
     | join _ _ _ _ => exact absurd declared (by intro equal; cases equal)
     | detach _ _ _ => exact absurd declared (by intro equal; cases equal)
-    | interrupt _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | interrupt _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
     | fault _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
     | environmentViolation _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
     | childCancelled _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
@@ -814,7 +814,7 @@ theorem rerouting_stood_or_is_this_step (transition : plan.NetworkTransition bef
     | restart _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
     | join _ _ _ _ => exact absurd declared (by intro equal; cases equal)
     | detach _ _ _ => exact absurd declared (by intro equal; cases equal)
-    | interrupt _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | interrupt _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
     | fault _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
     | environmentViolation _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
     | childCancelled _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
@@ -968,7 +968,7 @@ theorem occurrencesOnTheirSession_preserved (transition : plan.NetworkTransition
     | restart _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
     | join _ _ _ _ => exact absurd declared (by intro equal; cases equal)
     | detach _ _ _ => exact absurd declared (by intro equal; cases equal)
-    | interrupt _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | interrupt _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
     | fault _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
     | environmentViolation _ _ _ _ _ =>
       exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)

@@ -181,7 +181,8 @@ abbrev Result := p.vocabulary.Result
 /-- What the specification may observe. -/
 abbrev Observation := p.vocabulary.Observation
 
-/-- Why an outstanding demand was abandoned. -/
+/-- Why an outstanding demand was abandoned, indexed by the demand it
+abandoned. -/
 abbrev InterruptReason := p.vocabulary.InterruptReason
 
 /-- How this process itself can fail. -/

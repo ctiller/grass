@@ -117,7 +117,7 @@ theorem an_honest_termination :
   endingIsEarned :=
     ⟨settling, rfl, holding_slot settling,
       fun result isTerminated => by cases isTerminated; exact rfl,
-      fun _ isInterrupted => by cases isInterrupted⟩
+      fun _ _ isInterrupted => by cases isInterrupted⟩
   custodyDeclared :=
     ⟨settling, holding_slot settling, rfl, trivial, fun other _ => by cases other; rfl⟩
   scope := holding_scope settling finished
@@ -151,37 +151,45 @@ abandoned". `counting`'s bag is empty, so there is nothing for the reason to be
 about — and until `endingIsEarned` the ending was a label a plan could write
 anyway.
 -/
-theorem nothing_to_abandon_is_not_an_interruption (reason : Interrupt) :
+theorem nothing_to_abandon_is_not_an_interruption (demand : Demand) (reason : Interrupt) :
     ¬ serverPlan.EndsInstance (holding counting)
-      (holding { counting with lifecycle := .interrupted reason }) .connection slot
-      (.interrupted reason) (fun _ _ _ => True) := by
+      (holding { counting with lifecycle := .interrupted demand reason }) .connection slot
+      (.interrupted demand reason) (fun _ _ _ => True) := by
   intro ends
   obtain ⟨fromInstance, _, found, _, interrupted⟩ := ends.endingIsEarned
   rw [holding_slot counting] at found
   injection found with same
   subst same
-  exact interrupted reason rfl rfl
+  exact Bag.mem_zero _ (interrupted demand reason rfl)
 
 /-- `waitingOnATick` really is holding one, which is what an interruption
 abandons. -/
-theorem holds_a_tick (empty : waitingOnATick.outstanding = 0) : False := by
-  have present : Demand.tick ∈ waitingOnATick.outstanding := by
-    show Demand.tick ∈ Bag.ofList [Demand.tick]
-    simp
-  rw [empty] at present
-  exact Bag.mem_zero _ present
+theorem holds_a_tick : Demand.tick ∈ waitingOnATick.outstanding := by
+  show Demand.tick ∈ Bag.ofList [Demand.tick]
+  simp
+
+/-- And it is holding *only* that one, which is what makes the falsifying case
+below constructible. -/
+theorem holds_no_log : Demand.log ∉ waitingOnATick.outstanding := by
+  show Demand.log ∉ Bag.ofList [Demand.tick]
+  simp
 
 /--
-**But a process that is holding one may.**
+**But a process that is holding one may abandon the one it is holding.**
 
 The positive half, so the field above is not merely a way of forbidding
-interruptions. `waitingOnATick` holds a `tick`, which is what an interruption
-abandons.
+interruptions. `waitingOnATick` holds a `tick`, and `Demand.tick` is the demand
+this ending names.
+
+The demand is `Demand.tick` rather than a parameter, and that is the whole
+strengthening: `endingIsEarned` now asks for membership rather than a non-empty
+bag, so an interruption naming a demand this instance never issued is
+unconstructible. `no_abandoning_a_demand_it_never_held` is that half.
 -/
 theorem an_honest_interruption (reason : Interrupt) :
     serverPlan.EndsInstance (holding waitingOnATick)
-      (holding { waitingOnATick with lifecycle := .interrupted reason })
-      .connection slot (.interrupted reason) (fun _ _ _ => True) where
+      (holding { waitingOnATick with lifecycle := .interrupted Demand.tick reason })
+      .connection slot (.interrupted Demand.tick reason) (fun _ _ _ => True) where
   notRunning := by intro equal; cases equal
   wasLive := ⟨waitingOnATick, holding_slot waitingOnATick, trivial⟩
   nowEnded := ⟨_, holding_slot _, rfl, rfl⟩
@@ -192,11 +200,33 @@ theorem an_honest_interruption (reason : Interrupt) :
     refine ⟨waitingOnATick, rfl, holding_slot waitingOnATick, ?_, ?_⟩
     · intro _ isTerminated
       exact absurd isTerminated (by simp)
-    · intro _ _ empty
-      exact holds_a_tick empty
+    · intro other _ equal
+      cases equal
+      exact holds_a_tick
   custodyDeclared :=
     ⟨waitingOnATick, holding_slot waitingOnATick, rfl, trivial,
       fun other _ => by cases other; rfl⟩
   scope := holding_scope waitingOnATick _
+
+/--
+**And it may not abandon a demand it never issued.**
+
+The falsifying case the strengthened `endingIsEarned` makes constructible.
+`waitingOnATick` holds a `tick` and no `log`, so an ending recording that it
+abandoned a `log` is refused — while the old field, which asked only that the
+bag be non-empty, admitted it. That gap was invisible while the ending carried
+no demand at all: there was nothing to compare against the bag, because a flat
+`InterruptReason` gave the lifecycle no demand to store.
+-/
+theorem no_abandoning_a_demand_it_never_held (reason : Interrupt) :
+    ¬ serverPlan.EndsInstance (holding waitingOnATick)
+      (holding { waitingOnATick with lifecycle := .interrupted Demand.log reason })
+      .connection slot (.interrupted Demand.log reason) (fun _ _ _ => True) := by
+  intro ends
+  obtain ⟨fromInstance, _, found, _, interrupted⟩ := ends.endingIsEarned
+  rw [holding_slot waitingOnATick] at found
+  injection found with same
+  subst same
+  exact holds_no_log (interrupted Demand.log reason rfl)
 
 end Grass.Process.Tests.Ending

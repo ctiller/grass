@@ -42,7 +42,7 @@ inductive TimerDemand
   Demand := LogDemand
   Result := fun _ => Nat
   Observation := String
-  InterruptReason := Empty
+  InterruptReason := fun _ => Empty
   LogicalFault := Empty
   EnvironmentViolation := Empty
 
@@ -52,7 +52,7 @@ inductive TimerDemand
   Demand := TimerDemand
   Result := fun _ => Unit
   Observation := Nat
-  InterruptReason := Empty
+  InterruptReason := fun _ => Empty
   LogicalFault := Empty
   EnvironmentViolation := Empty
 
@@ -70,7 +70,7 @@ def bothResults : BothDemands → Type
   Demand := BothDemands
   Result := bothResults
   Observation := String ⊕ Nat
-  InterruptReason := Empty
+  InterruptReason := fun _ => Empty
   LogicalFault := Empty
   EnvironmentViolation := Empty
 
@@ -178,7 +178,7 @@ inductive BetaDemand | only
   Demand := AlphaDemand
   Result := fun _ => Nat
   Observation := Unit
-  InterruptReason := Empty
+  InterruptReason := fun _ => Empty
   LogicalFault := Empty
   EnvironmentViolation := Empty
 
@@ -187,7 +187,7 @@ inductive BetaDemand | only
   Demand := BetaDemand
   Result := fun _ => Nat
   Observation := Unit
-  InterruptReason := Empty
+  InterruptReason := fun _ => Empty
   LogicalFault := Empty
   EnvironmentViolation := Empty
 
@@ -197,7 +197,7 @@ inductive BetaDemand | only
   Demand := Unit
   Result := fun _ => Nat
   Observation := Unit
-  InterruptReason := Empty
+  InterruptReason := fun _ => Empty
   LogicalFault := Empty
   EnvironmentViolation := Empty
 
