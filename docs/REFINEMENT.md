@@ -440,8 +440,8 @@ structure EquivalentProviderRealizesEffectPlan ... extends
   historyCoverage : EverySelectedHistoryHasAProviderOperationPrefix ...
 ```
 
-The Effect adapter stores this demand in the registered origin of every
-generated effect-operation site. Sequential, explicit, and blended sources
+The Effect adapter stores these demands in the exact registered origin subfamily
+of every generated effect-operation occurrence. Sequential, explicit, and blended sources
 derive one conservative provider-demand summary from the selected boundary and
 every protocol selected by a plan role, including roles unused by one execution.
 `ProjectedDriverCertificate.originRequirementConnections` consumes the
