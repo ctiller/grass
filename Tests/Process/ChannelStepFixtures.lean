@@ -583,6 +583,17 @@ theorem the_sender_death :
   ledgerExtends := by
     rw [sentWithDeadSender_wire, afterSenderDeath_wire]
     exact pending_extends_to senderDiedLedger rfl (by simp [pendingLedger])
+  -- And it creates nothing, so there is no new identity to be fresh:
+  -- `ResolvesEscrow.createdIdentityIsFresh` is vacuous at every resolution but
+  -- `.coalesced`, and this step's is not one.
+  createdIdentityIsFresh := by
+    intro created held fresh
+    refine absurd ?_ fresh
+    show created ∈ (sentWithDeadSender.inFlight () wire).created
+    rw [sentWithDeadSender_wire]
+    have inList : created ∈ (afterSenderDeath.inFlight () wire).created := held
+    rw [afterSenderDeath_wire] at inList
+    exact inList
   createsOnlyTheCarrier := by
     intro other held fresh
     refine absurd ?_ fresh
@@ -742,6 +753,17 @@ theorem the_receiver_death :
   ledgerExtends := by
     rw [sentWithDeadReceiver_wire, afterReceiverDeath_wire]
     exact pending_extends_to receiverDiedLedger rfl (by simp [pendingLedger])
+  -- And it creates nothing, so there is no new identity to be fresh:
+  -- `ResolvesEscrow.createdIdentityIsFresh` is vacuous at every resolution but
+  -- `.coalesced`, and this step's is not one.
+  createdIdentityIsFresh := by
+    intro created held fresh
+    refine absurd ?_ fresh
+    show created ∈ (sentWithDeadReceiver.inFlight () wire).created
+    rw [sentWithDeadReceiver_wire]
+    have inList : created ∈ (afterReceiverDeath.inFlight () wire).created := held
+    rw [afterReceiverDeath_wire] at inList
+    exact inList
   createsOnlyTheCarrier := by
     intro other held fresh
     refine absurd ?_ fresh
@@ -865,6 +887,17 @@ theorem the_drop : serverPlan.ResolvesEscrow sent afterDropping () wire escrowed
       cases isDeath
     · intro reason isDeath
       cases isDeath
+  -- And it creates nothing, so there is no new identity to be fresh:
+  -- `ResolvesEscrow.createdIdentityIsFresh` is vacuous at every resolution but
+  -- `.coalesced`, and this step's is not one.
+  createdIdentityIsFresh := by
+    intro created held fresh
+    refine absurd ?_ fresh
+    show created ∈ (sent.inFlight () wire).created
+    rw [sent_wire]
+    have inList : created ∈ (afterDropping.inFlight () wire).created := held
+    rw [afterDropping_wire] at inList
+    exact inList
   createsOnlyTheCarrier := by
     intro other held fresh
     exact absurd (by rw [sent_wire]; rw [afterDropping_wire] at held; exact held) fresh

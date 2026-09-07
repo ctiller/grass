@@ -180,6 +180,9 @@ theorem quiet_is_wellFormed : quiet.WellFormed where
   occurrencesOnTheirSession := by
     intro _ _ _ held
     exact absurd held (by simp [quiet, EscrowLedger.empty])
+  identitiesDistinct := by
+    intro _ _ _ _ held _ _
+    exact absurd held (by simp [quiet, EscrowLedger.empty])
   sharedInvariantHolds := by
     intro region
     cases region with

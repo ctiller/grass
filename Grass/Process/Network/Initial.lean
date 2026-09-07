@@ -26,10 +26,11 @@ program never starts in.
 
 ## The payoff
 
-`initial_is_wellformed` is why the exactness is worth the fields. Four of
-`WellFormed`'s six clauses are discharged *because* nothing else exists yet:
+`initial_is_wellformed` is why the exactness is worth the fields. Six of
+`WellFormed`'s eight clauses are discharged *because* nothing else exists yet:
 there is no second instance to violate root uniqueness, no recorded parent to
-be invalid, and no escrow to hold a reroute that never lands. The remaining two come from
+be invalid, and no escrow to hold a reroute that never lands, an occurrence on
+the wrong session, or two entries sharing a nominal. The remaining two come from
 the root's own record: `nominalsAllocated` from `rootAllocated`, and `slotsAgree`
 from `rootSlotAgrees`, which §10.106 added after a reviewer noticed the theorem
 was taking that clause as a hypothesis instead.
@@ -263,13 +264,16 @@ theorem nothing_has_a_parent {kind : plan.topology.ProcessKind}
 /--
 **An exact initial network is well formed.**
 
-Four of `WellFormed`'s six clauses hold *because* nothing else exists yet — that
+Six of `WellFormed`'s eight clauses hold *because* nothing else exists yet — that
 is what the exactness buys, and it is why a relation pinning only the root would
 not have been enough.
 
 * `rootUnique` — there is one live instance, so two roots are in one slot.
 * `parentageValid` — nothing has a parent, so no recorded parenthood is invalid.
 * `reroutesLand` — every ledger is empty, so no occurrence is rerouted.
+* `occurrencesOnTheirSession` — every ledger is empty, so nothing is in the wrong
+  one.
+* `identitiesDistinct` — every ledger is empty, so no two entries share a nominal.
 * `lifecyclesWitnessed` — the only instance is `running`, and the clause
   constrains `terminated` endings.
 
@@ -286,6 +290,10 @@ what a missing field looks like from the caller's side.
 theorem initial_is_wellformed : network.WellFormed where
   occurrencesOnTheirSession := by
     intro edge session occurrence held
+    rw [start.nothingInFlight edge session] at held
+    exact absurd held List.not_mem_nil
+  identitiesDistinct := by
+    intro edge session first _ held _ _
     rw [start.nothingInFlight edge session] at held
     exact absurd held List.not_mem_nil
   sharedInvariantHolds := start.sharedInvariantAtStart

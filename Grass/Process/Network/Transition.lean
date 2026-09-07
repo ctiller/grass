@@ -343,6 +343,28 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   -/
   createsOnlyTheCarrier : ∀ other, other ∈ (after.inFlight edge session).created →
     other ∉ (before.inFlight edge session).created → resolution = .coalesced other
+  /--
+  **And if it does create one, that entry's identity is new to this ledger.**
+
+  `SendsEscrow.identityIsFresh` at the other constructor that may create.
+  `createsOnlyTheCarrier` bounds *what* may appear and says nothing about its
+  nominal, so a coalesce could install a carrier reusing a nominal the ledger
+  already holds under a different message — two entries, one identity, which is
+  the alias `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.115 is about.
+
+  Freshness of the identity against the *before* ledger, not of the pair: the pair
+  is already new by hypothesis, and asking freshness of the pair is exactly the
+  weaker thing `SendsEscrow.wasFresh` used to ask.
+
+  Vacuous at every resolution but `.coalesced`, because `createsOnlyTheCarrier`
+  makes the hypothesis unsatisfiable there — a close, a drop, a timeout and the
+  two endpoint deaths create nothing, so this field costs them a `fun _ found
+  fresh => absurd …` they were already writing.
+  -/
+  createdIdentityIsFresh : ∀ created, created ∈ (after.inFlight edge session).created →
+    created ∉ (before.inFlight edge session).created →
+    ∀ other, other ∈ (before.inFlight edge session).created →
+      other.2.2.id ≠ created.2.2.id
   /-- And nothing outside this session's escrow changed. -/
   scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
 
@@ -1310,6 +1332,21 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
     arrival.1 = occurrence.1 ∧ arrival.2.1 = destination ∧
     ∀ other, other ∈ (after.inFlight edge destination).created →
       other ∉ (before.inFlight edge destination).created → other = arrival
+  /--
+  **And the arrival's identity is new to the destination's ledger.**
+
+  `arrives` says the destination gained exactly one entry and pins its message and
+  its session; it says nothing about the nominal. So a reroute could land a
+  payload under an identity the destination is already holding — the same alias
+  `ResolvesEscrow.createdIdentityIsFresh` and `SendsEscrow.identityIsFresh` close
+  at the other two ways into a ledger.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.115.
+  -/
+  arrivalIdentityIsFresh : ∀ arrival,
+    arrival ∈ (after.inFlight edge destination).created →
+    arrival ∉ (before.inFlight edge destination).created →
+    ∀ other, other ∈ (before.inFlight edge destination).created →
+      other.2.2.id ≠ arrival.2.2.id
   /-- Whose ledger also only moved forward. -/
   destinationExtends :
     LedgerExtends (before.inFlight edge destination) (after.inFlight edge destination)
