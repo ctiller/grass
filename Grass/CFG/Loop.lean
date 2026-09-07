@@ -68,35 +68,33 @@ structure LoopObligation (State : Type u) where
   progress : LoopProgress State
 
 /-- Raw loop-obligation selection over a graph. -/
-structure LoopSelection (State : Type u) (Terminal : Type v) where
-  graph : Graph State Terminal
+structure LoopSelection {State : Type u} {Terminal : Type v}
+    (graph : Graph State Terminal) where
   selected : List (LoopObligation State)
 
 namespace LoopSelection
 
-variable {State : Type u} {Terminal : Type v}
+variable {State : Type u} {Terminal : Type v} {graph : Graph State Terminal}
 
 /-- Selected cyclic-region identities in authored order. -/
-def selectedIds (selection : LoopSelection State Terminal) : List BlockId :=
+def selectedIds (selection : LoopSelection graph) : List BlockId :=
   selection.selected.map LoopObligation.region
 
 /-- Executable closure check requiring one obligation per discovered region. -/
-def wellFormed (selection : LoopSelection State Terminal) : Bool :=
-  selection.graph.wellFormed &&
-  decide (selection.selectedIds = selection.graph.discoveredLoopIds)
+def wellFormed (selection : LoopSelection graph) : Bool :=
+  graph.wellFormed && decide (selection.selectedIds = graph.discoveredLoopIds)
 
 /-- Certificate-facing statement for `LoopSelection.wellFormed`. -/
-def WellFormed (selection : LoopSelection State Terminal) : Prop :=
+def WellFormed (selection : LoopSelection graph) : Prop :=
   selection.wellFormed = true
 
-instance (selection : LoopSelection State Terminal) : Decidable selection.WellFormed :=
+instance (selection : LoopSelection graph) : Decidable selection.WellFormed :=
   inferInstanceAs (Decidable (selection.wellFormed = true))
 
 /-- Public decomposition of exact loop-obligation selection. -/
-@[simp] theorem wellFormed_iff (selection : LoopSelection State Terminal) :
+@[simp] theorem wellFormed_iff (selection : LoopSelection graph) :
     selection.WellFormed ↔
-      selection.graph.WellFormed ∧
-        selection.selectedIds = selection.graph.discoveredLoopIds := by
+      graph.WellFormed ∧ selection.selectedIds = graph.discoveredLoopIds := by
   simp [WellFormed, wellFormed, Graph.WellFormed]
 
 end LoopSelection

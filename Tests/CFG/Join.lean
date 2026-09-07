@@ -71,16 +71,15 @@ example : looped.discoverJoins = [{
     cyclic := true
   }] := by decide
 
-def selected : JoinSelection Nat Terminal where
-  graph := diamond
+def selected : JoinSelection diamond where
   selected := [blockId "join"]
 
 example : selected.WellFormed := by decide
 
-def missing : JoinSelection Nat Terminal := { selected with selected := [] }
+def missing : JoinSelection diamond := { selected with selected := [] }
 example : ¬ missing.WellFormed := by decide
 
-def extra : JoinSelection Nat Terminal := {
+def extra : JoinSelection diamond := {
   selected with selected := [
     blockId "join",
     blockId "left"
@@ -88,7 +87,7 @@ def extra : JoinSelection Nat Terminal := {
 }
 example : ¬ extra.WellFormed := by decide
 
-def duplicate : JoinSelection Nat Terminal := {
+def duplicate : JoinSelection diamond := {
   selected with selected := [
     blockId "join",
     blockId "join"
@@ -108,8 +107,7 @@ def twoJoins : Graph Nat Terminal where
     block "second" ["return"] [terminalEdge "return"]
   ]
 
-def reversed : JoinSelection Nat Terminal where
-  graph := twoJoins
+def reversed : JoinSelection twoJoins where
   selected := [
     blockId "second",
     blockId "first"

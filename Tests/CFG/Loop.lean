@@ -61,23 +61,22 @@ def doneObligation : LoopObligation Nat where
   invariant := fun _ => True
   progress := .frontier fun before after => before < after
 
-def selected : LoopSelection Nat Terminal where
-  graph := graph
+def selected : LoopSelection graph where
   selected := [headerObligation, doneObligation]
 
 example : selected.WellFormed := by decide
 
-def missing : LoopSelection Nat Terminal := {
+def missing : LoopSelection graph := {
   selected with selected := [headerObligation]
 }
 example : ¬ missing.WellFormed := by decide
 
-def duplicate : LoopSelection Nat Terminal := {
+def duplicate : LoopSelection graph := {
   selected with selected := [headerObligation, headerObligation, doneObligation]
 }
 example : ¬ duplicate.WellFormed := by decide
 
-def reordered : LoopSelection Nat Terminal := {
+def reordered : LoopSelection graph := {
   selected with selected := [doneObligation, headerObligation]
 }
 example : ¬ reordered.WellFormed := by decide

@@ -79,35 +79,33 @@ end Graph
 /-- Join-contract selection by identity.  Each identity denotes the contract
 already stored in the graph, avoiding a second value that could disagree with
 the block being selected. -/
-structure JoinSelection (State : Type u) (Terminal : Type v) where
-  graph : Graph State Terminal
+structure JoinSelection {State : Type u} {Terminal : Type v}
+    (graph : Graph State Terminal) where
   selected : List BlockId
 
 namespace JoinSelection
 
-variable {State : Type u} {Terminal : Type v}
+variable {State : Type u} {Terminal : Type v} {graph : Graph State Terminal}
 
 /-- Selected identities in authored order. -/
-def selectedIds (selection : JoinSelection State Terminal) : List BlockId :=
+def selectedIds (selection : JoinSelection graph) : List BlockId :=
   selection.selected
 
 /-- Executable closure check for a join selection. -/
-def wellFormed (selection : JoinSelection State Terminal) : Bool :=
-  selection.graph.wellFormed &&
-  decide (selection.selectedIds = selection.graph.discoveredJoinIds)
+def wellFormed (selection : JoinSelection graph) : Bool :=
+  graph.wellFormed && decide (selection.selectedIds = graph.discoveredJoinIds)
 
 /-- Certificate-facing statement of exact join selection. -/
-def WellFormed (selection : JoinSelection State Terminal) : Prop :=
+def WellFormed (selection : JoinSelection graph) : Prop :=
   selection.wellFormed = true
 
-instance (selection : JoinSelection State Terminal) : Decidable selection.WellFormed :=
+instance (selection : JoinSelection graph) : Decidable selection.WellFormed :=
   inferInstanceAs (Decidable (selection.wellFormed = true))
 
 /-- Public decomposition of the executable join-selection checker. -/
-@[simp] theorem wellFormed_iff (selection : JoinSelection State Terminal) :
+@[simp] theorem wellFormed_iff (selection : JoinSelection graph) :
     selection.WellFormed ↔
-      selection.graph.WellFormed ∧
-        selection.selectedIds = selection.graph.discoveredJoinIds := by
+      graph.WellFormed ∧ selection.selectedIds = graph.discoveredJoinIds := by
   simp [WellFormed, wellFormed, Graph.WellFormed]
 
 end JoinSelection
