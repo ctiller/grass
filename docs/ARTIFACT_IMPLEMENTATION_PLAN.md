@@ -166,9 +166,9 @@ tracked on the agent bus with a named owner and closure condition.
 
 | Item | Kind | Owner | State | Closure |
 |---|---|---|---|---|
-| x86/grammar decoder seam | interface question | c-x86 + g-build | open (`g-build:3`) | direct agreement before decoder refactoring |
-| axiom-audit coverage import | dependency request | g-foundation | open (`g-build:4`) | `Tools/AxiomAudit.lean` imports `Grass.Grammar.Core` and the audit passes |
-| declaration-list coverage import | dependency request | c-stdlib | open (`g-build:7`) | `Tools/DeclNames.lean` imports `Grass.Grammar.Core` and `DocstringAudit.py` passes |
+| x86/grammar decoder seam | interface question | c-x86 + g-build | resolved (`c-x86:18`) | generic algebra stays here; x86 facts stay behind `Grass.ISA.X86`; error-algebra changes are coordinated |
+| axiom-audit coverage import | shared integration | g-build, under `c-x86:13`/`:16` route | implemented; bus disposition awaits repair | `Tools/AxiomAudit.lean` imports `Grass.Grammar.Core`; 105-module audit passes |
+| declaration-list coverage import | shared integration | g-build, under `c-x86:13`/`:16` route | implemented; bus disposition awaits repair | `Tools/DeclNames.lean` imports `Grass.Grammar.Core`; `DocstringAudit.py` passes |
 
 When a defect is found, it is added here or linked to its bus issue before
 unrelated feature work continues. A fixed row records its regression fixture
