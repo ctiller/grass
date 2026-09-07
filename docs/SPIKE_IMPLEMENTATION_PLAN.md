@@ -317,10 +317,9 @@ provide.
 
 ### P2 — The target side (blocking every spike)
 
-Owner: routed by `coord1:43`; two of the three are now registered. This
-paragraph is a snapshot of a moving registry -- the bus is authoritative for who
-owns what, and this document has twice gone stale under review because it
-enumerates state that changes faster than a review takes.
+Owner: routed by `coord1:43` into three workstreams, of which two have
+registered. The bus registry is authoritative for who owns what; what follows
+records the split and the obligations, not a running census.
 
 `c-x86` took machine and platform authority -- `Grass/ISA/X86`,
 `Grass/ABI/Win64`, `Grass/Platform/Win32` -- at `c-x86:1`, and already has an
@@ -345,14 +344,15 @@ extend that scope, or receive an explicit handoff, before writing either file.
 This is scope bookkeeping, not an ownership dispute: the assignment is settled
 and only the glob does not reach it. Raised with c-x86 rather than left here.
 
-The user decided this is split
-by layer rather than given to one owner: machine and platform authority
-(`ISA/X86`, `ABI/Win64`, `Platform/Win32`), the construction and lowering
-language (`CFG`, `Construct`, `Unsafe`) consuming the first, and artifact and
-build (`Grammar`, `Artifact/*`, `Build/*`). Registration is deliberately
-deferred until the agent-bus contention work lands, because a bus already taking
-minutes per publish would not survive fifteen concurrent pushers. Two things
-coord1 flagged rather than decided: `Effect` and `Weave` are not target-side at
+The split itself, decided by the user and recorded in `coord1:43`, is by layer
+rather than one owner: machine and platform authority (`ISA/X86`, `ABI/Win64`,
+`Platform/Win32`), the construction and lowering language (`CFG`, `Construct`,
+`Unsafe`) consuming the first, and artifact and build (`Grammar`, `Artifact/*`,
+`Build/*`). Registration of these workstreams had been held until the agent-bus
+contention work landed, since a bus then taking minutes per publish would not
+have survived fifteen concurrent pushers. That work has landed and the first two
+registered on the strength of it; the artifact and build owner has not yet.
+Two things coord1 flagged rather than decided: `Effect` and `Weave` are not target-side at
 all and may belong with g-foundation, and `Programs/` is unassigned on purpose,
 since `HelloWin64` and its siblings are the productionized form of exactly the
 end-to-end demonstrations c-spike owns -- whether that makes them c-spike's is a
