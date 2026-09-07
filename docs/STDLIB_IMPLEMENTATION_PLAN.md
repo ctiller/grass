@@ -802,8 +802,13 @@ that builds one, which is a real asymmetry rather than a stylistic one.
 mixing `Vec.length v` with `v.toList.length`, which `omega` cannot bridge. The
 proof does not fail with a type error; it fails with a nonsense arithmetic goal.
 Adding `Vec.getElem?_eq_get?` to the normalising `simp` set turns the whole class
-into mechanical substitution. Note also that this repository has no mathlib, so
-`by_contra` is unavailable and contrapositives need `Nat.lt_or_ge`.
+into mechanical substitution. Note also that mathlib is not currently a
+dependency, so `by_contra` is not in scope and contrapositives need
+`Nat.lt_or_ge`. That is a fact about `lakefile.toml`, **not a prohibition**:
+[MODULES.md](MODULES.md)'s baseline paragraph allows "mathlib and other reviewed
+Lean dependencies", and adding one is a reviewed change that enters the TCB and
+build ledgers. Earlier drafts of this plan wrote the absence as though it were a
+ban, which is wrong and which this note exists to stop repeating.
 
 ### 4.1 `Byte.lean`
 

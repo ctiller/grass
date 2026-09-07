@@ -15,9 +15,13 @@ It answers three questions and nothing else. It deliberately does **not** define
 replacement for `Grass.Std.Logical.Vec`: §3.2's decision is not this file's to make,
 and a probe that shipped a second sequence type would be the churn §6 forbids.
 
-**One: do the laws re-prove against core's `Array` lemmas, with no mathlib?** Yes.
-Every law below is proved from `Array.getElem?_push`, `Array.size_append` and
-friends. This was the open risk — the restatement cost is only worth paying if the
+**One: do the laws re-prove against core's `Array` lemmas, without adding a
+dependency?** Yes. Every law below is proved from `Array.getElem?_push`,
+`Array.size_append` and friends. Mathlib is *permitted* — `docs/MODULES.md` allows
+"mathlib and other reviewed Lean dependencies" — and simply is not one today, so
+the question is whether the port would force a reviewed dependency addition, not
+whether it is allowed one. It would not. This was the open risk — the restatement
+cost is only worth paying if the
 restatement is possible.
 
 **Two: what does the emitter cost?** `Grass/Std/Logical/Vec.lean`'s `push` is
