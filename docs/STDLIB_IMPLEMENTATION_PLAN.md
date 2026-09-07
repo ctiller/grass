@@ -262,12 +262,38 @@ indexing, with every law re-proved against `Array` lemmas. It is the only one of
 the three that can emit a megabyte artifact, and it is the one this plan should
 have been comparing against all along.
 
-This plan is not changing the decision while the branch is under review. Flipping
-a foundational representation underneath a reviewer mid-review is worse than
-surfacing the evidence and letting the review weigh it, and the nomination
-already asks for exactly this argument to be attacked. It is recorded here so
-that the reviewer has the strongest version of the counter-case rather than the
-version this owner happened to think of first.
+**It has now been probed.** [Tools/VecRepresentationProbe.lean](../Tools/VecRepresentationProbe.lean)
+builds it and answers the three questions that were open. It is not a test and
+`lake` does not build it; run it with `lake env lean`.
+
+*Do the laws re-prove against core's `Array` lemmas with no mathlib?* Yes. That
+was the open risk, since the restatement cost is only worth paying if the
+restatement is possible at all, and this plan had assumed rather than checked it.
+
+*What does the emitter cost?* Building by repeated `push` and then reading every
+index — the shape `emitProgram` has — the `List`-backed `Vec` takes 4 ms, 63 ms,
+829 ms and 2890 ms at n = 1 000, 4 000, 16 000 and 32 000; the `Array`-backed one
+takes 2 ms, 2 ms, 8 ms and 14 ms. That is fourfold-per-doubling against
+twofold-per-doubling, the quadratic-versus-linear split the definitions predict,
+and a factor of 206 at 32 000 that widens with n.
+
+*What does the kernel cost?* This is the axis that cuts the other way, and it is
+the reason the decision is not simply "adopt `Array`". Deciding equality of two
+400-element sequences, with the 2.01 s of startup and elaboration subtracted,
+costs 0.6 s through a `toList`-routed instance and 26.1 s through core's derived
+`DecidableEq (Array α)` — a factor of 43. Since [HELLO_WORLD.md](HELLO_WORLD.md)
+forbids `native_decide`, an `Array`-backed arm is viable **only** if it carries a
+`toList`-routed `DecidableEq`. That is a constraint on how one instance is
+written, not an argument against the representation.
+
+**What this does not do is change the decision.** Flipping a foundational
+representation underneath a reviewer mid-review is worse than surfacing the
+evidence and letting the review weigh it, and the open nomination asks for exactly
+this argument to be attacked. What has changed since that sentence was first
+written is only that the counter-case is now measured instead of asserted: the
+option this plan never considered is viable, is the only one that can emit a large
+artifact, and carries one named constraint. Choosing it is a separate change with
+its own review, and §6's anti-churn rule applies to it in full.
 
 ### 3.3 Equality
 
