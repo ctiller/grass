@@ -236,7 +236,7 @@ def epilogue_for(steps: list[str]) -> str:
 ADDR32NB = 0x0003
 
 
-def xdata_of(obj: Path) -> tuple[bytes, list[tuple[int, int]]] | None:
+def section_of(obj: Path, want: str) -> tuple[bytes, list[tuple[int, int]]] | None:
     """The `.xdata` section's raw bytes and its relocations.
 
     The relocations are not a decoration. In an object file the handler
@@ -262,7 +262,7 @@ def xdata_of(obj: Path) -> tuple[bytes, list[tuple[int, int]]] | None:
         if off + 40 > len(data):
             return None
         name = data[off:off + 8].rstrip(b"\0").decode("latin-1")
-        if name != ".xdata":
+        if name != want:
             continue
         size, ptr = struct.unpack_from("<II", data, off + 16)
         if ptr == 0 or ptr + size > len(data):
@@ -278,6 +278,60 @@ def xdata_of(obj: Path) -> tuple[bytes, list[tuple[int, int]]] | None:
             relocs.append((va, kind))
         return data[ptr:ptr + size], relocs
     return None
+
+
+def xdata_of(obj: Path) -> tuple[bytes, list[tuple[int, int]]] | None:
+    """The `.xdata` section and its relocations."""
+    return section_of(obj, ".xdata")
+
+
+def check_pdata(obj: Path) -> str:
+    """Complain unless `.pdata` holds one well-formed `RUNTIME_FUNCTION`.
+
+    `RuntimeFunction.toBytes` was covered by nothing. It is checkable without a
+    linker, but not from the section's bytes: every address in an object file
+    is an unresolved relocation, so all twelve bytes of the entry read as the
+    addend alone and a model that emitted the three fields in any order would
+    produce the same zeros.
+
+    The relocation directory is what carries the structure. One function must
+    produce exactly three `ADDR32NB` relocations at offsets 0, 4 and 8 -- the
+    field order and the twelve-byte stride, measured rather than assumed -- and
+    the addend stored at offset 4 must be the function's length, because
+    `EndAddress` is one past its last byte and `BeginAddress` is its first. The
+    length is read from `.text`'s own size, which is an independent fact about
+    the object rather than anything this corpus predicted.
+
+    What this still does not reach is the table: `PdataSection.Separated` and
+    the ascending order `WellFormed` requires are properties of several entries
+    laid out together, and each object here holds one function. Those need a
+    link step, and they remain owed.
+    """
+    read = section_of(obj, ".pdata")
+    if read is None:
+        return "no .pdata section in the object"
+    data, relocs = read
+    if len(data) != 12:
+        return (f".pdata is {len(data)} bytes; one function should produce "
+                "exactly one 12-byte RUNTIME_FUNCTION")
+    offsets = sorted(off for off, _kind in relocs)
+    if offsets != [0, 4, 8]:
+        return (f".pdata relocations sit at {offsets}, not [0, 4, 8]; the "
+                "three fields are BeginAddress, EndAddress and "
+                "UnwindInfoAddress, each a 4-byte RVA")
+    wrong = [f"{off:#x}" for off, kind in relocs if kind != ADDR32NB]
+    if wrong:
+        return f".pdata relocations at {wrong} are not ADDR32NB"
+    text = section_of(obj, ".text$mn") or section_of(obj, ".text")
+    if text is None:
+        return "no .text section to measure the function length against"
+    begin, end = struct.unpack_from("<II", data, 0)
+    if begin != 0:
+        return f"BeginAddress addend is {begin}, expected 0 (start of function)"
+    if end != len(text[0]):
+        return (f"EndAddress addend is {end} but .text is {len(text[0])} "
+                "bytes; EndAddress must be one past the function's last byte")
+    return ""
 
 
 def check_handler_reloc(got: bytes, relocs: list[tuple[int, int]],
@@ -340,7 +394,7 @@ def assemble(ml64: str, workdir: Path, name: str, masm: str,
     if read is None:
         return None, "no .xdata section in the object"
     got, relocs = read
-    complaint = check_handler_reloc(got, relocs, tail)
+    complaint = check_handler_reloc(got, relocs, tail) or check_pdata(obj)
     if complaint:
         return None, complaint
     return got, ""
@@ -431,7 +485,8 @@ def main() -> int:
 
     print(
         f"win64 unwind differential: {len(rows)} prologues, .xdata "
-        f"byte-identical to ml64 on all of them")
+        f"byte-identical to ml64 on all of them; handler tails and .pdata "
+        f"field order checked against the relocation directory")
     return 0
 
 

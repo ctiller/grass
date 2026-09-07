@@ -33,8 +33,10 @@ described that session rather than the check. A reviewer caught it.
 
 The distinction matters because it changes what is covered. `UNWIND_INFO` for
 all nine operations this profile models is covered, on 107 prologues.
-`RuntimeFunction.toBytes`, `PdataSection.toBytes` and `SearchablePdata.toBytes`
-are covered by nothing: no corpus row emits `.pdata`.
+`RuntimeFunction.toBytes` is covered on every one of those rows, by the
+`.pdata` the same object already carries. `PdataSection.toBytes` and
+`SearchablePdata.toBytes` are still covered by nothing, because both are about
+a *table* and each object here holds one function.
 
 `UnwindTail.flags`, `UnwindTail.handlerRva` and `UnwindTail.toBytes` were also
 covered by nothing until seven rows were added for them, and the earlier note
@@ -100,11 +102,22 @@ needs a linked image is the ascending order `WellFormed` requires, because that
 is a fact about the layout the linker chooses and no object file has yet
 chosen it.
 
-None of this is done. The whole of it remains owed, and it is recorded at this
-length because the estimate here has now been wrong twice in the same
-direction -- first "no oracle at all", then "field order only" -- and both
-times because a zero was read as an absence rather than as an unresolved
-reference.
+The per-entry half is now done, on all 107 rows. Each object must hold exactly
+one twelve-byte entry carrying exactly three `ADDR32NB` relocations at offsets
+0, 4 and 8 -- which is the field order and the stride, measured rather than
+assumed -- with a `BeginAddress` addend of zero and an `EndAddress` addend equal
+to the size of `.text`. That last one is the check with teeth: it is read from
+the object's own section table rather than from anything the corpus predicted,
+so it fails if `EndAddress` stops being one past the function's last byte.
+Mutating each of the four expectations makes the differential fail, so none of
+them is decorative.
+
+The table half remains owed: `PdataSection.Separated` and the ascending order
+`WellFormed` requires are facts about several entries laid out together, and
+that needs a `link.exe` step this tool does not have. It is recorded at this
+length because the estimate here was wrong twice in the same direction --
+first "no oracle at all", then "field order only" -- and both times because a
+zero was read as an absence rather than as an unresolved reference.
 
 Every field order below was read off `ml64` output rather than inferred,
 including the two that a reader of the C struct declarations would most likely
