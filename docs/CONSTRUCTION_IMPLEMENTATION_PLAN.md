@@ -298,6 +298,12 @@ requires the inner declared scope's parent to equal the outer declared scope,
 and proves the two sequential tokens distinct. This supplies the nominal,
 lexical, and all-exit composition for nested binders while leaving the same
 provenance elimination obligation explicit.
+`Grass.Construct.Scratch` provides the generic term-level prerequisite for
+`withScratch`: it selects the first non-live register from an exact ordered,
+duplicate-free candidate set and passes a handle to a fixed-contract verified
+body without adding hidden source. It deliberately does not derive liveness;
+the machine backend must connect the supplied live set to its effect model
+before the final authored macro can rely on the selection.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
