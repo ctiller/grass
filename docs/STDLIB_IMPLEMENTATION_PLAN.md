@@ -1060,10 +1060,22 @@ reader will want a reason for:
    Review also found five holes in the prose version, of which the checker closes
    the ones that matter by construction: it does not accept an alias cycle
    (exemptions are a written list, not an inference), it does not infer clause
-   (ii) at all, and it reports the count of declarations outside the bar's reach
-   rather than silently passing them — currently 12 covered, 9 exempt, 43 outside.
-   That last number is the honest measure of how much of the module the rule
-   reaches, and it was invisible while the rule was prose.
+   (ii) at all, and it reports what it does not reach rather than silently
+   passing it — currently 14 covered, 7 exempt, 2 wrapped producers named, and 42
+   declarations whose result is not a `Vec`. Those numbers are the honest measure
+   of how much of the module the rule reaches, and they were invisible while the
+   rule was prose.
+
+   A sixth hole was found later, by auditing the checker rather than the rule.
+   The out-of-reach count was a single unnamed bucket, and `Vec.pop?` and
+   `Vec.splitAt` were sitting in it: both build sequences, but under an `Option`
+   and a pair, so a bar phrased over "the `length` of the result" never reached
+   them. Both happened to carry laws, which is luck rather than assurance — a
+   third such operation would have been a silent increment of a number nobody
+   could review. Wrapped producers are their own bucket now, printed by name and
+   failing closed against a written list. Negative-tested the same way as the
+   original: an `Option`-wrapped producer with no laws compiles under `lake build`
+   with zero errors and fails the audit.
 
    The earlier record, kept as history, not as current rules: It was asserted satisfied on the same page
    where `Vec.truncate` and `Vec.clear` shipped with no law naming either — now

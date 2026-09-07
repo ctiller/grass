@@ -47,15 +47,22 @@ worse than none:
   seen, since `GetElem?.getElem?` is a different constant. No law in the library
   is currently written that way, but the audit would produce a false failure if
   one were.
-
-
 - It does not check that a law is *correct*, only that it exists and is about the
   right thing. The kernel checks correctness.
-- It does not reach operations returning `Bool`, `Nat`, `Option`, or `Prop` —
-  roughly half the module. Decision 6's clause (i) is phrased over `length` and
-  `get?` of a result, which presupposes the result is a `Vec`. Those operations
-  are counted and listed as outside the bar rather than silently passed, so the
-  number is visible.
+- It does not reach operations returning `Bool`, `Nat`, or `Prop` — roughly half
+  the module. Decision 6's clause (i) is phrased over `length` and `get?` of a
+  result, which presupposes the result *is* a `Vec`. Those are counted, and the
+  count is printed, rather than silently passed.
+- An operation that builds a `Vec` *under a wrapper* — `Vec.pop?` returning
+  `Option (Vec α × α)`, `Vec.splitAt` returning a pair — is not reached by that
+  phrasing either, and used to fall into the same unnamed count as `Vec.length`
+  and the `Repr` instance. That was a hole: it hid the two cases where a sequence
+  really is produced and observations really are owed. They are a separate bucket
+  now, they are printed by name, and the bucket fails closed — a wrapped producer
+  must appear in `wrappedProducers` with a reason, so a third one is a build
+  failure rather than a silent increment. Negative-tested: an `Option`-wrapped
+  producer with no laws compiles under `lake build` with zero errors and fails
+  here.
 - It does not implement clause (ii), the `empty`/`push` recursion, nor the alias
   clause. Operations that pass on those are named in `recursionOrAlias` below and
   the exemption is explicit, which is the point: an exemption in a list is
@@ -85,10 +92,8 @@ def recursionOrAlias : List (Name × String) :=
   [ (`Grass.Std.Logical.Vec.foldl, "clause (ii): foldl_empty, foldl_push"),
     (`Grass.Std.Logical.Vec.foldr, "clause (ii): foldr_empty, foldr_push"),
     (`Grass.Std.Logical.Vec.flatten, "clause (ii): flatten_empty, flatten_push"),
-    (`Grass.Std.Logical.Vec.pop?, "clause (ii): pop?_empty, pop?_push"),
     (`Grass.Std.Logical.Vec.truncate, "alias: truncate_eq_take, and take passes (i)"),
     (`Grass.Std.Logical.Vec.clear, "alias: clear_eq_empty, and empty passes (i)"),
-    (`Grass.Std.Logical.Vec.splitAt, "alias: splitAt_eq, and take/drop pass (i)"),
     (`Grass.Std.Logical.Vec.fromList, "the constructor; toList_fromList characterises it"),
     (`Grass.Std.Logical.Vec.append,
       "laws stated over the `++` notation: length_append, get?_append_left, get?_append_right") ]
@@ -173,6 +178,47 @@ partial def returnsVec (e : Expr) : Bool :=
   | .forallE _ _ b _ => returnsVec b
   | _ => e.getAppFn.constName? == some `Grass.Std.Logical.Vec
 
+/-- Whether a type mentions `Vec` anywhere, at any depth. -/
+partial def mentionsVec (e : Expr) : Bool :=
+  if e.getAppFn.constName? == some `Grass.Std.Logical.Vec then true
+  else e.getAppArgs.any mentionsVec
+
+/--
+Whether a constant's result *contains* a `Vec` without *being* one.
+
+`returnsVec` reads the head of the result type, so it sees `Vec.take` and misses
+`Vec.pop? : Option (Vec α × α)` and `Vec.splitAt : Vec α × Vec α`. Both build
+sequences and both owe the same observations, but a bar phrased over "the
+`length` of the result" does not reach a result that is an `Option` or a pair.
+
+That hole was invisible while these declarations fell into the same unnamed
+"outside the bar" count as `Vec.length` and the `Repr` instance. It is a separate
+bucket now, and one that fails closed: a wrapped producer must appear in
+`wrappedProducers` with a reason, so adding a third one is a build failure rather
+than a silent increment.
+-/
+partial def wrapsVec (env : Environment) (e : Expr) : Bool :=
+  match e with
+  | .forallE _ _ b _ => wrapsVec env b
+  | _ =>
+    -- An instance's result is a class applied to `Vec` (`Append (Vec α)`), not a
+    -- sequence the operation built, so a class head is not a wrapper.
+    let headIsClass := match e.getAppFn.constName? with
+      | some c => Lean.isClass env c
+      | none => false
+    !returnsVec e && !headIsClass && mentionsVec e
+
+/--
+Operations whose result contains a `Vec` under a wrapper, each with the reason
+its observations are discharged some other way. Reviewable precisely because it
+is a list: an entry here is a claim a reader can check against the module.
+-/
+def wrappedProducers : List (Name × String) :=
+  [ (`Grass.Std.Logical.Vec.pop?,
+     "Option (Vec × α). Inverts push, so its laws are stated that way: pop?_empty,       pop?_push, length_of_pop? and pop?_isSome_iff together fix the result in       every case."),
+    (`Grass.Std.Logical.Vec.splitAt,
+     "Vec × Vec. splitAt_eq reduces it to (take, drop) by rfl, and both halves       carry the bar's laws, so observing it separately would restate them.") ]
+
 end Grass.Tools
 
 open Grass.Tools in
@@ -184,11 +230,18 @@ run_cmd do
   -- Every def in the Vec namespace, split by whether the bar reaches it.
   let mut ops : Array Name := #[]
   let mut outsideBar : Array Name := #[]
+  let mut wrapped : Array Name := #[]
   for (name, info) in env.constants.toList do
     unless vecNs.isPrefixOf name && !name.isInternal do continue
     match info with
     | .defnInfo d =>
-      if returnsVec d.type then ops := ops.push name else outsideBar := outsideBar.push name
+      -- `DecidableEq (Vec α)` unfolds to a pi ending in `Decidable (a = b)`, which
+      -- mentions `Vec` without producing one and whose head is not always a class
+      -- by the time it is inspected. Lean's `inst` convention settles it directly.
+      let isInstanceByName := "inst".isPrefixOf name.getString!
+      if returnsVec d.type then ops := ops.push name
+      else if !isInstanceByName && wrapsVec env d.type then wrapped := wrapped.push name
+      else outsideBar := outsideBar.push name
     | _ => pure ()
 
   -- Collect every theorem statement once.
@@ -212,10 +265,20 @@ run_cmd do
     else if !hasGet then
       missing := missing.push (op, "no law computing its get?")
 
+  -- A wrapped producer must be accounted for by name. Fails closed: a third one
+  -- is a build failure rather than a silent increment of an unnamed count.
+  let declaredWrapped := wrappedProducers.map Prod.fst
+  for w in wrapped do
+    unless declaredWrapped.contains w do
+      missing := missing.push (w, "builds a Vec under a wrapper and is not listed in \
+wrappedProducers; add it there with the reason its observations are discharged, or \
+give it a length law and a get? law")
+
   if missing.isEmpty then
     logInfo m!"observation-coverage audit: {checked} Vec-returning operations each carry a \
 length law and a get? law; {exempt.length} exempt by clause (ii) or the alias clause; \
-{outsideBar.size} declarations outside the bar's reach"
+{wrapped.size} wrapped producers named ({wrapped.qsort Name.lt}); \
+{outsideBar.size} declarations whose result is not a Vec"
   else
     let lines := missing.map fun (n, why) => m!"  {n}: {why}"
     throwError m!"observation-coverage audit failed; \
