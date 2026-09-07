@@ -445,6 +445,55 @@ noncomputable def sentWithDeadSender : ServerWorld :=
 theorem sentWithDeadSender_wire :
     sentWithDeadSender.inFlight () wire = pendingLedger := sent_wire
 
+/--
+**And from that world a send is refused**, which is §10.119 closed.
+
+The attack a reviewer built: `ResolvesEscrow`'s scope is the escrow ledger alone,
+so `the_sender_death` below cannot move the session status, and
+`ChannelContract.sendOnOpenSession` asks only that the *session* be open. The
+world it reaches has the sender present and dead and the wire still `.open`, and
+an ordinary second send of this plan was constructible from it — three steps from
+`withRoot`.
+
+`SendsEscrow.senderIsLive` refuses it, and `agent-bus` ruling `g-design:83` is
+why it is stated at the send rather than by making a death close the session:
+some channels permit buffered drain or half-close, and `SessionStatus` has no
+state to tell those apart, so whether a death ends a session belongs to a channel
+policy. What is true of every channel is that a send needs a live sender.
+
+Stated for *any* message and *any* after-world, so it is a fact about the world
+rather than about one send fixture.
+-/
+theorem a_dead_sender_may_not_send {after : ServerWorld}
+    {message : World.serverMessage ()}
+    {occurrence : serverTopology.ChannelOccurrence () message}
+    (onWire : occurrence.1 = wire)
+    (sends : serverPlan.SendsEscrow sentWithDeadSender after () message occurrence) :
+    False := by
+  obtain ⟨incarnation, found, _, live⟩ := sends.senderIsLive
+  rw [onWire] at found
+  have same : deadListener = incarnation := Option.some.inj found
+  subst same
+  exact deadListener_is_not_live live
+
+/--
+**And the same send is fine while the sender is alive**, so the refusal is about
+the death and not about the world's shape.
+
+Without this the theorem above would be evidence that `sentWithDeadSender` is
+unreachable-by-sends for some incidental reason. `Tests/Process/CloseFixtures.lean`'s
+`the_second_send` is the positive case at the same wire and the same payload,
+from `sent` — the world that differs from this one only in that its listener is
+running.
+-/
+theorem the_live_sender_may (message : World.serverMessage ())
+    (occurrence : serverTopology.ChannelOccurrence () message)
+    (onWire : occurrence.1 = wire) :
+    (sent.instances .listener occurrence.1.sender.instanceId = some World.rootListener) ∧
+      World.rootListener.Live := by
+  rw [onWire]
+  exact ⟨rfl, trivial⟩
+
 open Classical in
 /-- The ledger with the occurrence resolved by its sender's death. -/
 noncomputable def senderDiedLedger :
@@ -534,17 +583,11 @@ theorem the_sender_death :
   ledgerExtends := by
     rw [sentWithDeadSender_wire, afterSenderDeath_wire]
     exact pending_extends_to senderDiedLedger rfl (by simp [pendingLedger])
-  createsOnlyTheCarrier := by
-    intro other held fresh
-    refine absurd ?_ fresh
-    show other ∈ (sentWithDeadSender.inFlight () wire).created
-    rw [sentWithDeadSender_wire]
-    have inList : other ∈ (afterSenderDeath.inFlight () wire).created := held
-    rw [afterSenderDeath_wire] at inList
-    exact inList
-  carrierOnItsSession := by intro carrier isCoalesce; cases isCoalesce
-  carrierIsOutstanding := by intro carrier isCoalesce; cases isCoalesce
-  carrierCarriesTheMessage := by intro carrier isCoalesce; cases isCoalesce
+  -- Since §10.131 the coalesce has its own structure, so a resolution creates
+  -- nothing at all and this is the whole of what used to be four fields.
+  createsNothing := by
+    rw [sentWithDeadSender_wire, afterSenderDeath_wire]
+    rfl
   endpointDeathIsEarned := by
     constructor
     · intro reason isDeath
@@ -693,17 +736,11 @@ theorem the_receiver_death :
   ledgerExtends := by
     rw [sentWithDeadReceiver_wire, afterReceiverDeath_wire]
     exact pending_extends_to receiverDiedLedger rfl (by simp [pendingLedger])
-  createsOnlyTheCarrier := by
-    intro other held fresh
-    refine absurd ?_ fresh
-    show other ∈ (sentWithDeadReceiver.inFlight () wire).created
-    rw [sentWithDeadReceiver_wire]
-    have inList : other ∈ (afterReceiverDeath.inFlight () wire).created := held
-    rw [afterReceiverDeath_wire] at inList
-    exact inList
-  carrierOnItsSession := by intro carrier isCoalesce; cases isCoalesce
-  carrierIsOutstanding := by intro carrier isCoalesce; cases isCoalesce
-  carrierCarriesTheMessage := by intro carrier isCoalesce; cases isCoalesce
+  -- Since §10.131 the coalesce has its own structure, so a resolution creates
+  -- nothing at all and this is the whole of what used to be four fields.
+  createsNothing := by
+    rw [sentWithDeadReceiver_wire, afterReceiverDeath_wire]
+    rfl
   endpointDeathIsEarned := by
     constructor
     · intro reason isDeath
@@ -807,18 +844,17 @@ theorem the_drop : serverPlan.ResolvesEscrow sent afterDropping () wire escrowed
     show RequestsNothing (sent.inFlight () wire) (afterDropping.inFlight () wire)
     rw [sent_wire, afterDropping_wire]
     exact fun _ => rfl
-  carrierOnItsSession := by intro carrier isCoalesce; cases isCoalesce
-  carrierIsOutstanding := by intro carrier isCoalesce; cases isCoalesce
-  carrierCarriesTheMessage := by intro carrier isCoalesce; cases isCoalesce
   endpointDeathIsEarned := by
     constructor
     · intro reason isDeath
       cases isDeath
     · intro reason isDeath
       cases isDeath
-  createsOnlyTheCarrier := by
-    intro other held fresh
-    exact absurd (by rw [sent_wire]; rw [afterDropping_wire] at held; exact held) fresh
+  -- Since §10.131 the coalesce has its own structure, so a resolution creates
+  -- nothing at all and this is the whole of what used to be four fields.
+  createsNothing := by
+    rw [sent_wire, afterDropping_wire]
+    rfl
   ledgerExtends := by
     rw [sent_wire, afterDropping_wire]
     exact pending_extends_to droppedLedger rfl (by simp [pendingLedger])

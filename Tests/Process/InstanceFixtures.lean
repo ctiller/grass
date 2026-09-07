@@ -200,6 +200,7 @@ inductive Answerer
   observeAtRoot := rfl
   maySpawn := fun parent child => parent = .blind ∧ child = .determined
   sharedAccess := fun _ region => region.elim
+  sharedInvariant := fun region => region.elim
   population :=
     { bound := fun
         | .blind => .exactlyOne

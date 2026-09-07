@@ -34,7 +34,7 @@ namespace Grass.Process.Tests.Transition
 
 open Grass.Process
 open Grass.Process.Tests
-open Grass.Process.Tests.World (ServerWorld NoObligations quiet)
+open Grass.Process.Tests.World (ServerWorld NoObligations quiet withRoot rootListener)
 open Grass.Process.Tests.Channel (ServerMessage wire liveSteps liveChannel)
 
 /--
@@ -50,6 +50,24 @@ noncomputable def serverPlan : ProcessPlan graphRegistry fixtureBoundary NoOblig
   steps := fun _ => liveSteps
   channel := fun _ => liveChannel
   sessionOpenIsRecorded := fun _ _ _ open' => open'
+  -- The wire deduplicates: a merge collapses sources carrying the carrier's
+  -- message and does not combine different ones. `ProcessPlan.exactDedup` is
+  -- the one-line policy g-design:83 asks for, and it recovers exactly what
+  -- `carrierCarriesTheMessage` used to impose on every plan.
+  coalescing := fun _ => exactDedup
+  -- The plan's shared-update policy, §10.128. The route table only grows and
+  -- keeps its entries distinct; the accept counter goes up by exactly one, which
+  -- is what "one connection accepted" means and is the content an invariant
+  -- alone would not have.
+  sharedUpdate := fun _ _ _ _ _ _ region =>
+    match region with
+    | .routeTable => fun before after => after.down.Nodup ∧ before.down <+: after.down
+    | .acceptCount => fun before after => after.down = before.down + 1
+  sharedUpdatePreserves := by
+    intro _ _ _ _ _ _ region before after admitted _
+    cases region with
+    | routeTable => exact admitted.1
+    | acceptCount => trivial
   escrowImpliesOutstanding := fun _ _ _ _ escrowed => escrowed
 
 /-- The world a step of it moves through is the one the other fixtures use. -/
@@ -461,6 +479,32 @@ theorem nothing_can_be_sent_on_the_shut_wire
 
 /-! ## A send that the receive can follow -/
 
+/-!
+### The world a send starts from
+
+`SendsEscrow.senderIsLive` — `agent-bus` ruling `g-design:83` on §10.119 — asks
+the exact incarnation a session names to be alive before a send, and `quiet`
+holds nobody at all. `Tests/Process/WorldFixtures.lean`'s `withRoot` is that
+world and was already in the corpus: it holds `rootListener` at
+`Instances.listenerZero`, which is exactly `wire.sender`, with that generation in
+its history.
+
+Starting the send there rather than at a world built for the purpose is worth the
+churn. `Tests/Process/PreservationFixtures.lean` proves `withRoot` is an
+`ExactInitialNetwork` and derives its well-formedness from that, so the send now
+begins at a world an execution can actually begin at, rather than at one a
+fixture asserted.
+-/
+
+@[simp] theorem withRoot_holds_the_sender :
+    World.withRoot.instances .listener () = some World.rootListener := rfl
+
+@[simp] theorem withRoot_wire_is_empty (session : serverTopology.ChannelId ()) :
+    World.withRoot.inFlight () session = EscrowLedger.empty := rfl
+
+@[simp] theorem withRoot_sessions (session : serverTopology.ChannelId ()) :
+    World.withRoot.sessions () session = ⟨.open, 0⟩ := rfl
+
 /--
 The world one send reaches: the occurrence escrowed on the wire, nothing else
 moved.
@@ -472,7 +516,7 @@ A reviewer proved that **no** `SendsEscrow` of this plan could reach
 do with each other. The chain below is the composition.
 -/
 noncomputable def sent : ServerWorld :=
-  { quiet with inFlight := fun _ => ledgerAt false }
+  { World.withRoot with inFlight := fun _ => ledgerAt false }
 
 @[simp] theorem sent_wire : sent.inFlight () wire = pendingLedger := by simp [sent]
 
@@ -487,14 +531,15 @@ theorem quiet_holds_nothing (session : serverTopology.ChannelId ()) :
 *this* program rather than a shape that happens to typecheck — the same field
 `Delivers` waited four review rounds for.
 -/
-theorem the_send : serverPlan.SendsEscrow quiet sent () payload occurrenceOf where
+theorem the_send : serverPlan.SendsEscrow World.withRoot sent () payload occurrenceOf where
+  senderIsLive := ⟨World.rootListener, rfl, ⟨rfl, rfl⟩, trivial⟩
   contractual :=
-    ⟨rfl, rfl, by rw [quiet_holds_nothing]; exact List.not_mem_nil,
+    ⟨rfl, rfl, by rw [withRoot_wire_is_empty]; exact List.not_mem_nil,
       by rw [sent_wire]; exact ⟨List.mem_cons_self, rfl⟩⟩
   identityIsFresh := by
     intro other held
-    have inEmpty : other ∈ (quiet.inFlight () wire).created := held
-    rw [quiet_holds_nothing] at inEmpty
+    have inEmpty : other ∈ (World.withRoot.inFlight () wire).created := held
+    rw [withRoot_wire_is_empty] at inEmpty
     exact absurd inEmpty List.not_mem_nil
   nowEscrowed := by
     show (sent.inFlight () wire).Outstanding escrowed
@@ -557,7 +602,8 @@ been delivered on the wire — so this is the receive the send set up rather tha
 receive at a world nobody arrived at.
 -/
 noncomputable def received : ServerWorld :=
-  { quiet with inFlight := fun _ => ledgerAt true, sessions := fun _ => cursorAt true }
+  { World.withRoot with
+      inFlight := fun _ => ledgerAt true, sessions := fun _ => cursorAt true }
 
 @[simp] theorem received_wire : received.inFlight () wire = settledLedger := by simp [received]
 
@@ -567,7 +613,7 @@ theorem the_receive_after_the_send :
     refine ⟨rfl, ?_, rfl, ?_⟩
     · rw [sent_wire]
       exact ⟨List.mem_cons_self, rfl⟩
-    · simp [sent, received, cursorAt, Grass.Process.Tests.World.quiet]
+    · simp [sent, received, cursorAt, Grass.Process.Tests.World.withRoot, Grass.Process.Tests.World.quiet]
   onItsSession := rfl
   wasOutstanding := by
     rw [sent_wire]
@@ -596,8 +642,8 @@ theorem the_receive_after_the_send :
         cancelRequestMonotone := by
           intro occurrence requested
           exact absurd requested (by simp [pendingLedger]) }
-  cursorAdvances := by simp [sent, received, cursorAt, Grass.Process.Tests.World.quiet]
-  statusUnchanged := by simp [sent, received, cursorAt]
+  cursorAdvances := by simp [sent, received, cursorAt, Grass.Process.Tests.World.withRoot, Grass.Process.Tests.World.quiet]
+  statusUnchanged := by simp [sent, received, cursorAt, Grass.Process.Tests.World.withRoot, Grass.Process.Tests.World.quiet]
   scope := by
     intro fragment outside
     cases fragment with

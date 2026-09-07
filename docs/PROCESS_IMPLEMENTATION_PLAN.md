@@ -3013,6 +3013,24 @@ process layer and the network analogue was not, which a reviewer pointed out.
 
 Needs the same ruling as §10.49, and probably the same answer.
 
+**Narrowed, not closed, by §10.123.** `Tests/Process/ChimeFixtures.lean` moves the
+corpus off the `False` end — `chimingMeasure.demanded` is `· = Chime.chime`, and
+the production disjunct fires. It does not answer the ruling: `Chime` has one
+constructor, so that predicate is total on its type, which is the *permissive*
+end of the same complaint. A `demanded` that discriminates needs an observation
+type with something it does not demand, and no fixture has one. The two ends of
+§10.49 are now both exhibited at the network and the tie to a specification is
+still an author's choice.
+
+**Narrowed, not closed, by §10.120.** `Tests/Process/ChimeFixtures.lean` moves the
+corpus off the `False` end — `chimingMeasure.demanded` is `· = Chime.chime`, and
+the production disjunct fires. It does not answer the ruling: `Chime` has one
+constructor, so that predicate is total on its type, which is the *permissive*
+end of the same complaint. A `demanded` that discriminates needs an observation
+type with something it does not demand, and no fixture has one. The two ends of
+§10.49 are now both exhibited at the network and the tie to a specification is
+still an author's choice.
+
 ### 10.70 Every livelock this corpus knows about escapes through an author-supplied predicate
 
 `Tests/Process/ChatterFixtures.lean` is the fourth livelock with a full
@@ -3124,8 +3142,10 @@ before it was finished. But the plan is an *argument*, and this ledger has five
 entries recording defects that did not exist, every one filed from an argument
 rather than a construction. It should be read as owed work, not as a result.
 
-**Closed.** `ProcessPlan.wellFormed_preserved` is the theorem, all six clauses,
-`#print axioms` clean. Reading the entry back against what it took:
+**Closed.** `ProcessPlan.wellFormed_preserved` is the theorem, every clause,
+`#print axioms` clean. Six clauses then; eight now, since §10.109 and §10.115
+each added one after this entry was written. Reading the entry back against what
+it took:
 
 * The plan had the **layer wrong**. It said "transition"; `NominalsAllocated` is
   a law of `NetworkStep`, because `usedNominals` moves by `historyExact`, which
@@ -3328,7 +3348,7 @@ Two consequences it found, both worth more than the count:
 inhabited nowhere — `terminated_result_is_exact` took a `Sound` hypothesis
 nothing had ever supplied. `Tests/Process/FrontierFixtures.lean`'s
 `waiting_is_wellFormed` and `waiting_is_sound` are the witnesses, and the fixture
-says plainly that five of the six clauses cannot fail at that plan:
+says plainly that seven of the eight clauses cannot fail at that plan:
 `nominalsAllocated` is the one with content. Inhabited, not exercised — the same
 distinction §10.59 drew for `ExactInitialNetwork` at the same plan.
 
@@ -3538,7 +3558,7 @@ world.
 **A correction to the paragraph above, made the same way the rest of this ledger
 gets corrected — by looking rather than by agreeing.** `WellFormed` does not
 belong on that list. `Tests/Process/WorldFixtures.lean`'s `quiet_is_wellFormed`
-is a second witness, at `serverPlan`. It is *vacuous* — all six clauses are
+is a second witness, at `serverPlan`. It is *vacuous* — all eight clauses are
 `absurd found`, the empty network being well formed because there is nothing to
 be wrong about — which is a different complaint from having no witness, and the
 sweep's own table said so. Stating it as "no witness" would have been the same
@@ -3562,6 +3582,8 @@ What remains is **`NetworkProgressMeasure`**, which still has only `waitingPlan`
 — a plan whose `Observation` type is empty, so the "or produces a demanded
 observation" disjunct of `descendsOrProduces` can never fire. That is the largest
 single gap this milestone leaves, and it is a gap in the *progress* layer alone.
+
+**Closed** by `Tests/Process/ChimeFixtures.lean`. §10.123 is the entry.
 
 ### 10.89 A spawn can satisfy every field it has and not be a step
 
@@ -3589,7 +3611,7 @@ moved.
 **The general check this suggests**, and it is cheap: for every `NetworkTransition`
 witness in the corpus, is there a `NetworkStep` wrapping it? A transition nothing
 can wrap is a transition no execution contains, and every theorem stated over
-steps passes it by. Owed.
+steps passes it by. **Run to the end in §10.129**, which found eight more.
 
 ### 10.90 `ResolvesNothingElse` forbade the close it was meant to enable
 
@@ -3939,7 +3961,9 @@ This is the same family as §10.49 (`Demanded`), §10.56's original form, and
 §10.70: **an author-supplied predicate can always be made vacuous, and no field
 of the record can stop it.** What distinguishes the ones this milestone closed is
 that the vacuity was forced by the *signature* rather than chosen by the author.
-Needs a ruling on whether that distinction is worth a mechanism.
+
+**Ruled** by `g-design:84`: the distinction is not worth a mechanism, and the
+answer is a stated trust boundary. §10.126 is the entry.
 
 ### 10.103 Two things a step may write that nothing bounds
 
@@ -3963,6 +3987,10 @@ which is exactly the shape §10.87, §10.91 and §10.97 each had at a ledger fie
 before something downstream needed them. Closing it needs `ProcessSpec.Step` to
 mention shared state, which it does not, so this is a ruling rather than a patch.
 
+**Ruled** by `g-design:84`: not in `ProcessSpec.Step`, which would be weave
+leakage, but in the graph's invariant and the plan's update relation. §10.128 is
+the entry, and closes this half. The `EscrowLedger.rank` half below is unchanged.
+
 **`EscrowLedger.rank`.** No field of any structure mentions it and `LedgerExtends`
 says nothing about it, so a step may renumber freely. The reviewer tried and could
 not break it: `rankOrdersCreated` at the after-ledger forces rank to increase
@@ -3985,6 +4013,11 @@ is outstanding alongside sources that have not yet merged into it. Whether §3
 requires atomicity here is a ruling. If it does, `coalesce` needs its own
 structure taking a list of sources, and §10.95's revert is right for the wrong
 reason.
+
+**Ruled** by `g-design:83`: it does. **Closed** by `ProcessPlan.Coalesces`, and
+this paragraph's prediction was right down to the structure it names — §10.131 is
+the entry, and records that a docstring on `main` had meanwhile claimed the
+opposite.
 
 §10.111's first repair briefly made the decomposition *unconstructible*, and
 §10.113 is that being caught and undone — so this entry has been false once and is
@@ -4285,14 +4318,16 @@ now asks it of the identity, as `identityIsFresh` — `send` is the one construc
 that escrows a new occurrence from outside, so the two-ordinary-sends attack is
 refused at its source. `wasFresh` remains as a theorem.
 
-**The invariant is still owed**, and that is the ruling this entry is really
-about. There is no `WellFormed` clause saying the identities in a ledger are
-distinct, so nothing states the property in a form a consumer can use — which is
-§10.109's lesson exactly: "no reachable network is bad" and "no well-formed
-network is bad" are different theorems. The remaining routes into a ledger are a
-coalesce carrier and a reroute arrival, and neither is required to carry a fresh
+**The invariant was still owed**, and that was the substance of this entry.
+There was no `WellFormed` clause saying the identities in a ledger are distinct,
+so nothing stated the property in a form a consumer can use — which is §10.109's
+lesson exactly: "no reachable network is bad" and "no well-formed network is bad"
+are different theorems. The remaining routes into a ledger were a coalesce
+carrier and a reroute arrival, and neither was required to carry a fresh
 identity. `EscrowLedger` is generic over `Occurrence` and cannot project one, so
-the clause belongs at `ProcessPlan`, beside `OccurrencesOnTheirSession`.
+the clause belongs at the network, beside `OccurrencesOnTheirSession`.
+
+**Closed** by `IdentitiesDistinct`, an eighth clause. §10.124 is the entry.
 
 ### 10.116 Two more things declared and never spent
 
@@ -4370,7 +4405,10 @@ is an arbitrary type with no combining operation, so equality is the only payloa
 relation expressible, and a merge that genuinely combined two payloads would need
 a law `ProcessPlan` does not have.
 
-But it was not a decision, it was a consequence of copying a conjunct from
+**Ruled** by `g-design:83`: coalescing is not universally same-payload, and the
+policy moves to the channel. §10.127 is the entry.
+
+It was not a decision, it was a consequence of copying a conjunct from
 `Reroutes.arrives` — where it is right because a reroute *moves* one payload. A
 coalesce merges N into one. **Needs a ruling**: either §3's coalescing is
 same-payload and this should be said in `ChannelResolution.coalesced`'s docstring
@@ -4380,9 +4418,16 @@ payloads), or it is not and the field is the wrong shape.
 The reviewer confirmed the multi-source merge *is* constructible when the payloads
 coincide, so §10.104's decomposition survives — and also that
 `Tests/Process/CloseFixtures.lean`'s `a_second_source_may_name_the_same_carrier`
-restates the field rather than taking the second step. **§10.113's own new rule —
+restated the field rather than taking the second step. **§10.113's own new rule —
 a new field needs a witness of each thing the specification says it must permit —
-was stated and not run on itself.** That witness is owed.
+was stated and not run on itself.**
+
+**That witness is now built.** `the_second_coalesce` merges `stranded` into the
+carrier `the_coalesce` created, and `both_sources_merged` reads off the world two
+`coalesce` steps reach: both sources ended in the one carrier, which is still in
+flight. So the plural in §3's "consumes every source token" is served by a
+sequence, and the ruling this entry asks for is narrowed to the payload question
+alone.
 
 ### 10.119 A dead sender can still send
 
@@ -4396,6 +4441,9 @@ second occurrence on that session.
 §10.114's own write-up named this ("with the session still open to further
 sends") and `endpointDeathIsEarned` does not close it. Two shapes of fix, and the
 choice is a ruling:
+
+**Closed** by `SendsEscrow.senderIsLive`; §10.125 is the entry. The two options
+were:
 
 * `SendsEscrow` gains a `senderIsLive` field. Small to state, and it changes the
   most-used fixture in the corpus: `quiet` and `sent` hold no listener
@@ -4528,6 +4576,462 @@ outside its coverage — so the branch's own quality bar was enforced everywhere
 except on the branch. That is worth more than the 104 fixes: a gate that a new
 subtree silently escapes is a gate that reports success about work it never saw,
 which is §10.71's shape at the tooling layer rather than the proof layer.
+### 10.123 §7's third escape now has a plan that takes it
+
+§10.88's residue, closed. `NetworkProgressMeasure.descendsOrProduces` is a
+three-way disjunction — entropy, a descending rank, or a produced
+specification-demanded observation — and until now the corpus's only measure was
+`waitingMeasure`, at a plan whose `Observation` type is `PEmpty`. Its `demanded`
+is `observation.elim`, so its third disjunct was not merely unused: it was
+unreachable in principle. A disjunct no plan can reach is the same shape as a
+record nothing inhabits, and this milestone has spent eight rounds on that class
+of defect.
+
+`Tests/Process/ChimeFixtures.lean` is `waitingPlan`'s skeleton with two changes:
+the observation type is inhabited by one constructor, and `chimer.Initial` emits
+it. That second change is what makes the fixture an argument rather than a
+stipulation — `ExactInitialNetwork.pendingProjected` forces a start's pending
+trace to be the projection of what starting emitted, so `chiming` holds the chime
+because the specification says so, not because the fixture put it there.
+`the_chime_is_committed` publishes it and `the_chime_takes_the_production_disjunct`
+reads out that at that step the other two disjuncts are both *false*: a commit is
+not `DrivenByEntropy`, and `Commits.scope` forbids it from touching `instances`,
+which is what the rank reads — so nothing descends and the observation is the
+whole payment.
+
+**The design mistake this entry is really about.** The first version set
+`Reachable := fun _ => True` and claimed `commit` was the plan's only transition,
+on the strength of `chimer.Step := False`, `ChannelKind := PEmpty`,
+`maySpawn := False` and three empty exceptional classes. That claim is true at
+`chiming` and `chimed` and false at the plan: `LogicalProcessNetwork` is a record,
+its unreachable inhabitants include a world whose slot holds an *attached* child,
+and at such a world `detach`, `childCancelled` and `childDied` are ordinary steps
+that publish nothing. The widest `Reachable` owes `descendsOrProduces` there too,
+so the fixture as first written was a proof of a false statement and Lean said so.
+
+This is §10.109's lesson at a different seam — "no reachable network is bad" and
+"no world of the record is bad" are different theorems — and it is worth recording
+that it recurred *while writing the fixture that was meant to close a gap in the
+same layer*. The repair is not a narrower `Reachable`: it is
+`produces_or_descends`, which carries `Tests/Process/FrontierFixtures.lean`'s
+structural slack unchanged, so the three parent-spending steps pay with rank and
+the commit pays with the chime. That makes `chimingMeasure` the corpus's first
+measure that both descends and produces, which is strictly more than §10.88 asked
+for.
+
+**What it does not show**, stated in the fixture rather than left to a reader:
+this is not an infinite producing run and this plan cannot exhibit one. The
+root's initial segment is finite, `Commits.earned` publishes each observation
+once, and `chimed.pending` is empty, so `nothing_happens_after_the_chime` rules
+out every constructor at that world and `the_chimed_world_is_a_frontier` follows
+— vacuously, in §10.71's sense. A plan whose producing run does not terminate
+would need a `Step` relation that emits forever, which is the next thing worth
+building here and is not owed by §7.
+
+Between the two fixtures all three of §7's escapes are now inhabited:
+`waitingPlan` takes entropy and descent, `chimingPlan` takes descent and
+production.
+
+### 10.124 The eighth clause, and the two constructors that had to earn it
+
+§10.115's owed invariant, closed. `LogicalProcessNetworkCore.IdentitiesDistinct`
+says no two entries in one escrow ledger share an occurrence identity, and
+`ProcessPlan.wellFormed_preserved` now carries it.
+
+**Why a clause and not a fixed field.** `SendsEscrow.identityIsFresh` closed the
+*cause* — the constructor that escrows a new occurrence from outside — and that
+is a statement about what a run can reach. Every theorem stated over
+`before.WellFormed` still admitted the aliased world as an input, because
+`WellFormed` did not mention identities. §10.109 made exactly this argument for
+`OccurrencesOnTheirSession` and it is the second time this milestone has had to
+make it, which is worth recording as a pattern rather than as two incidents: a
+guard on the transition family and a clause of the network invariant are not
+substitutes, and finding the first does not discharge the second.
+
+**Two fields the proof demanded.** Three constructors can put an entry into a
+ledger. The send already had its freshness field. The other two did not, and both
+gaps were real:
+
+* `ResolvesEscrow.createdIdentityIsFresh`. `createsOnlyTheCarrier` bounds *what*
+  a coalesce may add and says nothing about its nominal, so a coalesce could
+  install a carrier reusing a nominal already in the ledger under a different
+  message. The field is vacuous at every resolution but `.coalesced`, because
+  `createsOnlyTheCarrier` makes its hypothesis unsatisfiable there — which is why
+  it costs the five non-creating resolutions one `absurd` line each and no
+  thought.
+* `Reroutes.arrivalIdentityIsFresh`. `arrives` pins the arrival's message, its
+  session and its uniqueness, and says nothing about its nominal.
+
+`Tests/Process/CloseFixtures.lean` is where the coalesce field is not vacuous,
+and it needed two new lemmas — `escrowed_id_ne_carrier` and
+`stranded_id_ne_carrier`. The fixture already had `carrier_ne_escrowed` and
+`carrier_ne_stranded`, and **those prove nothing about the identities**: two
+entries can be distinct pairs and share a nominal, which is the whole of §10.115.
+A fixture that proves the pairs differ and is read as proving the nominals differ
+is the same class of mistake as a docstring asserting what its type does not
+carry.
+
+**The falsifying fixture.** `Tests/Process/IdentityFixtures.lean` builds the
+world. `twin` is `escrowed`'s nominal under a different payload;
+`aliasedLedger` holds both and ranks them by payload, so `rankOrdersCreated` — the
+field whose docstring used to claim this world was impossible — is discharged.
+`aliasedLedger_breaks_the_token` is what the alias costs: one nominal
+simultaneously `.dropped` and `Outstanding`, with every field of `EscrowLedger`
+satisfied, because `atMostOneRecordedEnding` and `outstanding_xor_settled` are
+keyed on the pair while §3's affine `ResolveToken occurrence.id` is keyed on the
+identity. `identitiesDistinct_is_what_refuses_it` and
+`the_seventh_clause_is_satisfied` are the pair that matters: the new clause
+refuses the world and the old ones do not, so the eighth is not derivable from
+the seven.
+
+**And a claims audit came with it.** Every count of `WellFormed`'s clauses in the
+corpus said *six*, and the seventh had landed in §10.109 — so the numbers were
+already wrong before this entry made them wronger. Six sites corrected, in
+`Initial.lean`, `WellFormedness.lean`, `FrontierFixtures.lean` and three places in
+this document. The three occurrences of "six clauses" that remain are §10.73's
+account of a plan that really was written for six, and are history rather than
+claims. This is §10.105's lesson holding: a number in prose is a claim, and a
+clause added anywhere invalidates every count of them everywhere.
+
+### 10.125 A dead sender can still send — closed, at the send
+
+§10.119, ruled by `agent-bus` `g-design:83` on `c-process:68` and implemented.
+The ruling took option (i) of the two this plan offered: `SendsEscrow` gains a
+field, and endpoint death does *not* become a session-level event.
+
+**Why the other option was refused, which is the part worth keeping.** Option
+(ii) was to give `senderDeath` and `receiverDeath` their own structure with the
+session in scope, so a death could close the session it belongs to — the same
+repair §10.90 made for a close, and c-process's own preference. g-design refused
+it on a fact about the type: `SessionStatus` has no half-closed state, so
+treating every endpoint death as a `KillsSession` would forbid buffered drain and
+half-close, which are legitimate channel policies. A channel that wants a death
+to end its session says so explicitly; the layer must not decide it for every
+channel. `docs/PROCESS.md` §3 now records that limit beside the field.
+
+That is a better answer than the one this plan preferred, and the reason is worth
+naming: c-process argued from what would close the hole most tidily, and the
+ruling argued from what the hole's *neighbours* need. §10.90 is the same shape in
+reverse — a repair that closed one defect by forbidding the ordinary close the
+resolution exists for.
+
+**What the field says.** `SendsEscrow.senderIsLive` asks for the incarnation in
+the sender's slot, that it be *the* incarnation `ChannelId.sender` names —
+generation included, which is what stops a restart reviving a stale session — and
+that it be live. `Tests/Process/ChannelStepFixtures.lean`'s
+`a_dead_sender_may_not_send` refuses the reviewer's world for any message and any
+after-world, and `the_live_sender_may` is the positive case at the same wire, so
+the refusal is about the death rather than about the world's shape.
+
+**And it moved the corpus's send onto a start.** The field made `quiet` unusable
+as a send's before-world — it holds no incarnation at all — and the fixture that
+replaced it is not a new one. `Tests/Process/WorldFixtures.lean`'s `withRoot`
+already existed, holds `rootListener` at exactly `wire.sender`, and
+`Tests/Process/PreservationFixtures.lean` proves it is an `ExactInitialNetwork`
+and derives its well-formedness from that. So the corpus's send, receive, reroute
+and second-send now all begin at a world an execution can begin at, rather than
+at `quiet` with a ledger bolted on. A first attempt at this entry built a
+`listening` world for the purpose and was discarded when `withRoot` turned out to
+be it — which is the ordinary failure of not looking first, recorded because this
+ledger has a section about exactly that.
+
+### 10.126 `ViewAccepts` admits a vacuous clause, and that is a boundary rather than a defect
+
+§10.102, ruled by `agent-bus` `g-design:84` on `c-process:69`. The ruling is
+against a mechanism: **do not add a structural anti-vacuity field.** Any
+author-supplied `Prop` can intentionally be tautological, and Lean cannot
+distinguish one that is from one that merely holds; a field claiming to police it
+would be the same class of overclaim this milestone has spent eight rounds
+finding.
+
+So the answer is a stated boundary. `ProcessAcceptance`'s fields are trusted
+specification input under `docs/FOUNDATION.md` law 15 — "presentations and
+realizations remain reviewed replaceable inputs" — and
+`Grass/Process/Acceptance.lean` now says so, with the three consequences the
+ruling names: prefer derivation from the precious `BehaviorContract`, which
+inherits that contract's review; a standalone protocol library supplying one
+directly is *asserting* it and owes adequacy review of the acceptance itself; and
+a fixture showing that one acceptance rejects a wrong value is evidence about
+that acceptance and not a general guarantee.
+
+`Tests/Process/ViewFixtures.lean` kept every theorem and lost one sentence's
+worth of implication. It had read as though `a_view_that_disagrees_with_the_state_is_refused`
+established something about `ViewAccepts`; it establishes something about
+`gaugeAcceptance`, and the file now says which. `intendedView` is still textually
+what `remaining.render` computes, so a reader still takes the intent's priority
+on trust — and that, exactly, is the boundary.
+
+**What this closes and what it does not.** It closes §10.102, which asked whether
+the signature-forced/author-chosen distinction is worth a mechanism: it is not.
+It does not close §10.49 or §10.69, which ask the neighbouring question of how a
+`demanded` predicate is tied to a specification; those are about where the
+predicate comes from rather than about whether the record can police it.
+
+### 10.127 Coalescing is the channel's policy, not the layer's
+
+§10.118, ruled by `agent-bus` `g-design:83` on `c-process:68`. The question was
+whether `.coalesced` being a same-payload relation is a decision or an accident.
+The ruling: an accident, and coalescing is **not** universally same-payload.
+
+`ResolvesEscrow.carrierCarriesTheMessage` said `carrier.1 = occurrence.1`, per
+source. §10.113 added it for a real defect — without it a coalesce could merge
+`⟨7⟩` into a fresh carrier holding `⟨99⟩`, and the after-world passed every
+`WellFormed` clause — and it was copied from `Reroutes.arrives`, where the same
+conjunct is right because a reroute forwards *one* payload. A reviewer then
+proved generically what the copy cost: two sources naming one carrier are forced
+to carry the same message, so a latest-wins or folding channel is unconstructible
+at every plan.
+
+**What replaced it.** `ProcessPlan.coalescing` is a per-edge relation between a
+source family and its carrier, and `ResolvesEscrow.carrierIsPermitted` requires
+the family to be non-empty, to contain this step's own occurrence, to be
+*exactly* those the after-ledger resolves into that carrier, and to satisfy the
+channel's relation. `ProcessPlan.exactDedup` is the one-line policy the ruling
+asks for and recovers the old behaviour verbatim; `serverPlan` uses it, so
+`Tests/Process/CloseFixtures.lean`'s `a_coalesce_may_not_change_the_payload`
+survives — restated as a theorem about that plan rather than about coalescing.
+
+**The "exactly" conjunct is worth more than the relation.** An equality never
+mentioned a family, so nothing said which sources a merge consumed. The new field
+does, which is `docs/PROCESS.md` §3's "coalescing consumes every source token"
+stated where it can be checked: a step cannot satisfy the policy against a
+convenient subset and quietly merge more. The ruling's "no intermediate partially
+coalesced logical world is observable" is that conjunct; a concrete
+implementation may still realise the merge as finite silent steps under
+refinement.
+
+**What is exhibited and what is owed.** `latestWins_admits_a_real_merge` and
+`exactDedup_refuses_it` are the same source family and carrier permitted under
+one policy and refused under the other, so the field is a choice rather than a
+renaming. What is *not* here is a plan-level witness: a second channel-carrying
+plan whose `coalescing` is `latestWins`, with a `ResolvesEscrow` merging two
+different payloads through it. Until that exists, `ProcessPlan.coalescing` has
+one instantiation in the corpus and it is `exactDedup` — which is the "inhabited
+and not exercised" shape §10.88 named, and is recorded here rather than left for
+a reviewer to find. **Owed.**
+
+**Closed by §10.130**, which also records that the `latestWins` half of this
+paragraph was worse than it looks: the predicate it names is satisfiable by no
+coalesce at any plan, so the pair offered here proved nothing about coalescing at
+all.
+
+**And one thing the ruling asked for that this layer cannot carry.** g-design's
+wording is "plus the exact custody/resource/obligation preservation laws". An
+`EdgeOccurrence` is a message and a nominal identity; there is no resource or
+obligation attached to an occurrence at this layer to preserve, and the
+obligation ledger is an opaque `Obligations` that a coalesce's own `scope`
+already forbids it from touching. So that half is discharged partly by the scope
+and partly inside the relation, by a channel whose *message type* carries the
+resources. `Grass/Process/Network/Plan.lean` says so at the field. If the
+intended reading was stronger — a law this layer states about custody across a
+merge — it needs a way to attach custody to an occurrence, which is
+`Grass/Process/Network/Escrow.lean`'s §3 escrow assertion and is not modelled
+here. Recorded rather than assumed closed.
+
+### 10.128 A step could write any value into any writable region
+
+§10.103's first half, ruled by `agent-bus` `g-design:84` on `c-process:69` and
+implemented. `StepsLocally.writesPermitted` bounded *which* regions a step may
+move — those its role may write — and nothing bounded the value. `protocolStep`
+relates `localState`, `outstanding`, `ref`, `parentage` and `request`; `shared`
+appeared in `Grass/Process/` only in scope and capability positions. So a
+`processStep` could set any writable region to anything at all, unrelated to the
+event it was handling, and nothing broke because no clause of `WellFormed` was
+about shared regions.
+
+**The ruling refused the obvious fix and said why.** Putting shared state into
+`ProcessSpec.Step` would make the precious portable behaviour prescribe a weave
+and a state partition, which is `docs/FOUNDATION.md` law 15 — the same boundary
+§10.1 and `coord1:5` were about, one layer down. A root specification that wants
+logically shared behaviour models it in its own `State`, and the presentation
+relates that state to the partition.
+
+**So the gap is closed in three places, none of them the protocol.**
+
+* `ProcessGraph.sharedInvariant` — what each region must hold. §3 has always
+  asked for "read/write/atomic capabilities **and** interference invariants", and
+  `Grass/Process/Network/Graph.lean`'s own note said the invariant "is not here".
+  Now it is, beside the capability it was always paired with in the sentence.
+* `ProcessPlan.sharedUpdate` — how a role's step may move a region, indexed by
+  the acting kind and the local transition data the ruling names. Plus
+  `sharedUpdatePreserves`, without which the invariant would be a clause any step
+  could break.
+* `WellFormed.sharedInvariantHolds`, and `sharedInvariantHolds_preserved` in the
+  capstone. One constructor can move a region and it is `processStep`; every
+  other declares no `.region` fragment, so `touchesOnly` answers. The
+  `processStep` case is the two new fields composed, and neither alone would do:
+  the first is a bound with no consequence and the second is a fact about a
+  relation nothing ties to a step. `ExactInitialNetwork.sharedInvariantAtStart`
+  is the third piece — an execution keeps the invariant only if it begins with
+  it, which is §10.106's shape again.
+
+**And it is exercised, which is the part that took the longest.** Every
+`StepsLocally` in the corpus discharged `writesPermitted` by `absurd rfl moved`:
+no fixture step had ever moved a region, so a bound on the value would have been
+declared and never met. `Tests/Process/ProcessStepFixtures.lean`'s
+`the_listener_counts` is a step that writes the accept counter, and
+`the_listener_may_not_miscount` is the same step writing seven instead of one,
+refused. `writesPermitted` is satisfied in both — the listener *may* write that
+region — so the capability is demonstrably not what refuses the second.
+
+**What is still open from §10.103.** Its second half, `EscrowLedger.rank`, is
+unchanged: no field mentions it, and it is pinned only indirectly by
+`rankOrdersCreated`, `created`-monotonicity and `coalesceCarrierLater`. That was
+recorded as an observation rather than raised as a question, and it stays
+recorded.
+### 10.129 §10.89's check, run to the end
+
+§10.89 proposed a cheap general check and
+`Tests/Process/PreservationFixtures.lean` ran it against six constructors: *for
+every `NetworkTransition` witness in the corpus, is there a `NetworkStep`
+wrapping it?* A transition nothing can wrap is a transition no execution
+contains, and `ProcessPlan.wellFormed_preserved` is stated over steps, so every
+theorem about steps passes such a transition by. `the_spawn` failed the check
+when it was written, which is why the check exists.
+
+Running it over the whole corpus found **eight more** that had not been checked:
+`the_close`, `the_death`, `the_drop`, `the_request`, `the_sender_death`,
+`the_receiver_death`, `an_honest_termination` and `an_honest_interruption`. Every
+one now has a step.
+
+**None of the eight was hard, and that is the finding.** All are non-allocating,
+so `admissible` is vacuous and `historyExact` is `rfl`; each step is four lines.
+The check was not run to the end because running it is boring, not because it was
+difficult — and the same was true of §10.112, where a reviewer noticed that
+`the_coalesce` had landed in the same commit as the section stating the check and
+had not been put through it. That is twice. A check whose cost is four lines per
+case and which has now caught nine transitions is worth running as a sweep rather
+than per commit.
+
+**What the steps buy beyond the check.** Four of them chain from `quiet`, so the
+capstone now certifies four more worlds: `afterClosing`, `afterDying`,
+`afterDropping` and `afterRequesting` were worlds no theorem said anything about,
+and each is now well formed by `wellFormed_preserved` rather than by hand.
+
+**And four of them do not**, which is stated rather than glossed. The two
+endpoint deaths start from worlds holding a *dead* sender or receiver, and the
+two instance endings from an instance mid-countdown; none is reached by a step
+from `quiet`, so there is no chain to carry well-formedness along. The step is
+still the thing §10.89 asked for — the transition is one an execution can contain
+— but a step *from an unreachable world* is not a step of any run, which is
+§10.88's inhabited-versus-exercised distinction one level down. Reaching those
+before-worlds by steps is owed, and is a bigger job: it wants a `processStep`
+that puts an instance in each state, which is `Tests/Process/ProcessStepFixtures.lean`'s
+territory rather than this file's.
+
+### 10.130 The fixture that proved the generalisation had content could not be satisfied
+
+§10.127 landed `ProcessPlan.coalescing` and recorded, honestly, that the corpus
+instantiated it at `ProcessPlan.exactDedup` and nowhere else — a field with one
+instantiation being the generalisation in name only. It offered a pair of
+theorems as the stand-in: `latestWins sources carrier := carrier ∈ sources`
+admits a family `exactDedup` refuses.
+
+**Building the plan-level witness found that the stand-in was worse than
+under-exercised.** `ResolvesEscrow.carrierIsPermitted` takes the source family to
+be exactly those the after-ledger resolves into the carrier, and
+`EscrowLedger.coalesceCarrierLater` requires every such source to rank *strictly
+below* the carrier. So no coalesce, at any plan, can ever hand `latestWins` a
+family containing its own carrier: the predicate is satisfiable by nothing.
+`Tests/Process/MergeFixtures.lean`'s `latestWins_is_unsatisfiable` proves it in
+three lines.
+
+That is the failure this ledger has spent the whole milestone refusing — a record
+nothing inhabits, a law that cannot fail, a disjunct no plan can reach — arriving
+this time *inside the fixture written to rule it out*. The entry that recorded the
+gap honestly still shipped a witness that was not one, and no reviewer caught it
+because the two theorems it offered are both true.
+
+**What closes it.** `Tests/Process/MergeFixtures.lean` is the plan-level witness
+§10.127 said was owed:
+
+* `mergingPlan` is `serverPlan` with one field changed, so every world,
+  occurrence and ledger the other fixtures build is a world of it too, and the
+  comparison is a comparison rather than two unrelated stories;
+* `keepsOnePayload` replaces `latestWins` — the carrier agrees with *some* source
+  rather than with every source, which is the weakest policy that is not
+  deduplication;
+* `the_first_merge` and `the_merge_that_keeps_one_payload` are two real
+  `ResolvesEscrow`s into one carrier, and the second merges a source carrying a
+  *different* payload;
+* `serverPlan_refuses_it` shows the same step is unconstructible at the plan whose
+  policy is `exactDedup`.
+
+**A merge takes two steps, which is worth knowing.**
+`ResolvesEscrow.resolvesNothingElse` lets a step resolve exactly the occurrence it
+names, so §3's "coalescing consumes every source token" is a *sequence* of
+coalesces into one carrier rather than a single step — and because
+`carrierIsPermitted` reads the family off each step's own after-ledger, the
+family grows as the sequence proceeds. The first merge here would satisfy
+`exactDedup` too; only the second has a family whose members disagree. A policy
+is therefore checked against every prefix of the merge, not only against the
+whole, which is stronger than the ruling asked for and worth stating before
+someone assumes otherwise.
+
+**And one thing this does not settle.** `keepsOnePayload` is not latest-wins:
+pinning *which* source the carrier follows needs an order over the family, and
+`ProcessPlan.coalescing` receives a `List` whose order is the plan's to interpret
+rather than the ledger's rank. A genuine latest-wins policy is expressible — take
+the last element — but relating that list order to `EscrowLedger.rank` is not,
+because the relation never sees the ledger. Recorded rather than fixed: it is the
+same shape as §10.103's `rank`, which is pinned indirectly and by nothing that
+mentions it.
+
+### 10.131 A coalesce was a sequence, and the docstring said it was not
+
+§10.104, closed, and a defect of my own on `main` alongside it.
+
+**The ruling.** `agent-bus` `g-design:83` answered §10.104's question: "at the
+logical level the coalesce consumes all named sources and creates one fresh
+carrier atomically ... thus no intermediate partially coalesced logical world is
+observable". §10.104 had predicted the consequence exactly — "if §3 requires
+atomicity, `coalesce` needs its own structure taking a list of sources, and
+§10.95's revert is right for the wrong reason".
+
+**What was implemented instead, and the false sentence.** §10.127 implemented the
+ruling's *policy* half — `ProcessPlan.coalescing`, with `carrierIsPermitted`
+requiring the source family to be exactly those the after-ledger resolves into
+the carrier — and its docstring said: "what the ruling forbids, and what
+'exactly' forbids here, is a *logical* world in which the merge is half done."
+That is false, and it reached `main` through `c-process:74`.
+
+`carrierIsPermitted` constrained each step's family to be exactly what *that
+step's* after-ledger recorded. It said nothing about a later step adding more to
+the same carrier. And `ResolvesEscrow.resolvesNothingElse` lets a step resolve
+exactly the occurrence it names, so a multi-source merge was *necessarily* a
+sequence: the world between two of its steps — carrier outstanding, some sources
+merged, others still in flight — was a legal world of the plan. §10.104 said this
+in as many words and the docstring contradicted it without noticing.
+
+**How it was caught.** Building §10.130's plan-level witness. The witness needed
+two sources with different payloads, which under `ResolvesEscrow` had to be two
+steps, and writing the intermediate world down is what made it obvious that the
+intermediate world was the thing the ruling forbids. The fixture written to close
+one gap found that the entry which recorded it had asserted the opposite of the
+truth. That is twice in three entries — §10.130 was the same shape — and both
+times the fixture caught what the prose asserted.
+
+**What closes it.** `ProcessPlan.Coalesces`: its own structure, taking the whole
+source family. `nowResolved` says every member is resolved after the one step, so
+there is no step of this family that leaves part of it outstanding.
+`consumesExactly` says the family is everything the carrier collects, so a second
+step into the same carrier is refused — `Tests/Process/CloseFixtures.lean`'s
+`no_second_merge_into_the_same_carrier` is that, and it replaces a theorem which
+truthfully said the opposite under the old shape.
+
+**And `ResolvesEscrow` got smaller.** It was the coalesce's structure as well as
+the other five resolutions', so it carried `carrierOnItsSession`,
+`carrierIsOutstanding`, `carrierIsPermitted` and a `createsOnlyTheCarrier` that
+were vacuous at every resolution but `.coalesced` — four fields that five of six
+constructors discharged with `cases isCoalesce`. They are gone, and what remains
+is `createsNothing`. Four vacuous fields out of six is the generality-by-vacuity
+§10.105 names, and it was invisible while the sixth constructor needed them.
+
+**What this does not settle.** A merge is still *expressible* as a sequence in
+one sense: two `Coalesces` into two *different* carriers, the second consuming
+the first's carrier, is a chain and is not forbidden. That is a genuine coalesce
+chain rather than a half-done merge — `EscrowLedger.no_cycle` is what keeps it
+finite — and §3 appears to permit it. Recorded rather than ruled on.
 
 ## 11. The authoring facade
 
@@ -4617,7 +5121,7 @@ tables as a reader's index and the files themselves as the record.
 | `Network/Progress.lean` | §7's progress theorem, as a no-infinite-silent-run law, over what a run can reach |
 | `Network/Initial.lean` | §3's `ExactInitialNetwork`, and `initial_is_wellformed` |
 | `Progress.lean` | the per-process livelock theorem: no silent cycle, no infinite silent run |
-| `Network/WellFormedness.lean` | §3's capstone: a step of a well-formed network reaches a well-formed one, all six clauses |
+| `Network/WellFormedness.lean` | §3's capstone: a step of a well-formed network reaches a well-formed one, all eight clauses |
 | `Weave/Blend.lean` | §8's disjoint weave, and that routing is forced |
 
 `Grass/Process/Network/Transition.lean` was reworked six times over the same
@@ -4642,7 +5146,7 @@ carries no count, because the two counts it has carried were both wrong:
 | Record | Why it was empty | Witness |
 |---|---|---|
 | `ProcessCorrect` | `handlesEveryEvent` and `terminalNoStep` contradicted each other | `Tests/Process/M1CorrectFixtures.lean`, then `CountdownCorrectFixtures` and `PrefixFixtures` |
-| `NetworkProgressMeasure` | `Commits` had no provenance, so no network could be at a frontier under any measure | `Tests/Process/FrontierFixtures.lean` |
+| `NetworkProgressMeasure` | `Commits` had no provenance, so no network could be at a frontier under any measure | `Tests/Process/FrontierFixtures.lean`, `Tests/Process/ChimeFixtures.lean` |
 | `ExactInitialNetwork` | nothing; it had never been built, and had absorbed two new fields with no proof breaking | `Tests/Process/FrontierFixtures.lean` |
 | `EndsInstance` | nothing; it had absorbed three | `Tests/Process/EndingFixtures.lean` |
 | `Restarts` | nothing | `Tests/Process/RestartFixtures.lean` |
@@ -4679,7 +5183,7 @@ full `ProcessCorrect`; the first two are now excluded and the third is §10.70.
 ### The capstone, and what proving it cost
 
 `ProcessPlan.wellFormed_preserved` — a step of a well-formed network reaches a
-well-formed one — is proved, all six clauses, axioms clean. It is worth a
+well-formed one — is proved, all eight clauses, axioms clean. It is worth a
 paragraph here because of the ratio.
 
 §10.73 was a clause-by-clause *argument* for it, filed with a warning that it
@@ -4768,13 +5272,16 @@ because each found something the others did not:
 * **The proof-economics acceptance rule** — not started.
 * **`DirectProgramRealizes` transport** — §4 asks the adapter for it; the
   adapter delivers the syntax half only, and says so.
-* **A second plan-level `NetworkProgressMeasure`** — §10.88, narrowed. `Sound`,
-  `ExactInitialNetwork` and `WellFormed` now have witnesses at `serverPlan`, the
-  plan with real channels, slots and observations, in
-  `Tests/Process/PreservationFixtures.lean`. `NetworkProgressMeasure` still has
-  only `waitingPlan`, whose `Observation` type is empty — so the "or produces a
-  demanded observation" disjunct of `descendsOrProduces` has never been able to
-  fire. That is the largest gap the milestone leaves.
+* **A second plan-level `NetworkProgressMeasure`** — §10.88, **closed** by
+  §10.123. `Sound`, `ExactInitialNetwork` and `WellFormed` have witnesses at
+  `serverPlan`, the plan with real channels, slots and observations, in
+  `Tests/Process/PreservationFixtures.lean`, and `NetworkProgressMeasure` now has
+  `Tests/Process/ChimeFixtures.lean`'s `chimingMeasure` beside `waitingMeasure`.
+  Its `Observation` type is inhabited, its `demanded` is not an elimination, and
+  `the_chime_takes_the_production_disjunct` shows §7's production escape taken at
+  a step where the other two disjuncts are false. What is still owed is a
+  producing run that does not terminate: this plan's does, in one step, and says
+  so.
 
 ### Open findings by weight
 

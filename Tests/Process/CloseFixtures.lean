@@ -73,7 +73,7 @@ theorem twoPendingAt_off {session : serverTopology.ChannelId ()} (notWire : sess
 
 /-- The world after both sends. -/
 noncomputable def sent2 : ServerWorld :=
-  { quiet with inFlight := fun _ => twoPendingAt }
+  { World.withRoot with inFlight := fun _ => twoPendingAt }
 
 theorem sent2_wire : sent2.inFlight () wire = twoPending := twoPendingAt_wire
 
@@ -85,6 +85,7 @@ manufactures the world its own complaint needs is not evidence of anything. This
 is `liveSteps.Send` again, at the same plan, one step further on.
 -/
 theorem the_second_send : serverPlan.SendsEscrow sent sent2 () payload strandedOccurrence where
+  senderIsLive := ⟨World.rootListener, rfl, ⟨rfl, rfl⟩, trivial⟩
   contractual :=
     ⟨rfl, rfl,
       by rw [sent_wire]
@@ -444,16 +445,14 @@ send that power. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.91.
 theorem a_drop_that_conjures_a_message_is_refused :
     ¬ serverPlan.ResolvesEscrow sent afterFabricate () wire escrowed .dropped := by
   intro drops
-  have onlyCarrier := drops.createsOnlyTheCarrier stranded (by
+  have conjured : stranded ∈ (sent.inFlight () wire).created := by
+    rw [← drops.createsNothing]
     show stranded ∈ (afterFabricate.inFlight () wire).created
     rw [afterFabricate_wire]
-    exact List.mem_cons_of_mem _ List.mem_cons_self) (by
-    show stranded ∉ (sent.inFlight () wire).created
-    rw [sent_wire]
-    intro held
-    have inList : stranded ∈ [escrowed] := held
-    exact stranded_ne_escrowed (List.mem_singleton.mp inList))
-  exact absurd onlyCarrier (by intro equal; cases equal)
+    exact List.mem_cons_of_mem _ List.mem_cons_self
+  rw [sent_wire] at conjured
+  have inList : stranded ∈ [escrowed] := conjured
+  exact stranded_ne_escrowed (List.mem_singleton.mp inList)
 
 /--
 And what it would have escrowed is a message that really was not in flight
@@ -556,6 +555,25 @@ theorem carrier_ne_escrowed : carrier ≠ escrowed := by
   have ids := congrArg (fun occurrence => occurrence.2.2.id.carrier) same
   simp [carrier, escrowed, Transition.occurrenceOf] at ids
 
+/--
+**And the carrier's identity is new**, which is the stronger claim
+`ResolvesEscrow.createdIdentityIsFresh` asks for and which
+`carrier_ne_escrowed` does not give.
+
+Two entries can be distinct pairs and share a nominal — that is exactly the alias
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.115 is about, and it is why a fixture
+proving the pairs differ proves nothing about the identities.
+-/
+theorem escrowed_id_ne_carrier : escrowed.2.2.id ≠ carrier.2.2.id := by
+  intro same
+  have ids := congrArg (fun nominal => nominal.carrier) same
+  simp [carrier, escrowed, Transition.occurrenceOf] at ids
+/-- And the same for the second source. See `escrowed_id_ne_carrier`. -/
+theorem stranded_id_ne_carrier : stranded.2.2.id ≠ carrier.2.2.id := by
+  intro same
+  have ids := congrArg (fun nominal => nominal.carrier) same
+  simp [carrier, Reroute.stranded] at ids
+
 open Classical in
 /-- The wire's ledger after the merge: the carrier escrowed, the first source
 resolved into it, the second still in flight. -/
@@ -618,26 +636,49 @@ theorem afterCoalesce_off {session : serverTopology.ChannelId ()} (notWire : ses
   show (if session = wire then merged else EscrowLedger.empty) = EscrowLedger.empty
   rw [if_neg notWire]
 
+open Classical in
 /--
-**A coalesce: the constructor nothing in this corpus had ever built.**
+**A coalesce, as one step over its whole source family.**
 
-Every field of `ResolvesEscrow` at `.coalesced`, including §10.100's
-`carrierOnItsSession` — which had two refusals and no witness until this.
+Every field of `ProcessPlan.Coalesces`, at the one-source family — a merge of a
+single occurrence into a fresh carrier. `the_atomic_merge` below is the two-source
+one, and `no_second_merge_into_this_carrier` is why they are two separate steps
+into two different carriers rather than one carrier collected twice.
+
+This was a `ResolvesEscrow` at `.coalesced carrier` until §10.131. The change is
+not cosmetic: `ResolvesEscrow.resolvesNothingElse` let a step resolve exactly the
+occurrence it named, so a multi-source merge was a *sequence*, and the world
+between two of its steps — carrier outstanding, some sources merged, others not —
+was a legal world. `agent-bus` ruling `g-design:83` says no such world is
+observable.
 -/
 theorem the_coalesce :
-    serverPlan.ResolvesEscrow sent2 afterCoalesce () wire escrowed (.coalesced carrier) where
-  onItsSession := rfl
-  wasOutstanding := both_are_outstanding.1
-  nowResolved := by rw [afterCoalesce_wire]; exact merged_first
-  resolvesNothingElse := by
-    rw [sent2_wire, afterCoalesce_wire]
-    intro other notIt
-    rw [merged_other notIt]
+    serverPlan.Coalesces sent2 afterCoalesce () wire [escrowed] carrier where
+  sourcesNonempty := by simp
+  sourcesOnItsSession := by
+    intro source inList
+    rw [List.mem_singleton.mp inList]
     rfl
-  requestsNothing := by
-    show RequestsNothing (sent2.inFlight () wire) (afterCoalesce.inFlight () wire)
-    rw [sent2_wire, afterCoalesce_wire]
-    exact fun _ => rfl
+  wereOutstanding := by
+    intro source inList
+    rw [List.mem_singleton.mp inList]
+    exact both_are_outstanding.1
+  nowResolved := by
+    intro source inList
+    rw [List.mem_singleton.mp inList, afterCoalesce_wire]
+    exact merged_first
+  resolvesNothingElse := by
+    intro other notSource
+    have notIt : other ≠ escrowed := fun same => notSource (by rw [same]; exact List.mem_cons_self)
+    rw [afterCoalesce_wire, merged_other notIt, sent2_wire]
+    rfl
+  consumesExactly := by
+    intro other resolved
+    rw [afterCoalesce_wire] at resolved
+    by_cases isIt : other = escrowed
+    · rw [isIt]; exact List.mem_cons_self
+    · rw [merged_other isIt] at resolved
+      exact absurd resolved (by intro equal; cases equal)
   ledgerExtends := by
     rw [sent2_wire, afterCoalesce_wire]
     exact
@@ -648,6 +689,15 @@ theorem the_coalesce :
         cancelRequestMonotone := by
           intro occurrence requested
           exact absurd requested (by intro equal; cases equal) }
+  carrierOnItsSession := rfl
+  carrierIsOutstanding := by
+    rw [afterCoalesce_wire]
+    exact ⟨List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self),
+      merged_other carrier_ne_escrowed⟩
+  permitted := by
+    intro source inList
+    rw [List.mem_singleton.mp inList]
+    rfl
   createsOnlyTheCarrier := by
     intro other held fresh
     have inList : other ∈ (afterCoalesce.inFlight () wire).created := held
@@ -659,27 +709,19 @@ theorem the_coalesce :
       · refine absurd ?_ fresh
         rw [isSecond, sent2_wire]
         exact List.mem_cons_of_mem _ List.mem_cons_self
-      · rw [List.mem_singleton.mp last]
-  carrierOnItsSession := by
-    intro carrier' isMerge
-    cases isMerge
-    rfl
-  carrierIsOutstanding := by
-    intro carrier' isMerge
-    cases isMerge
-    rw [afterCoalesce_wire]
-    exact ⟨List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self),
-      merged_other carrier_ne_escrowed⟩
-  carrierCarriesTheMessage := by
-    intro carrier' isMerge
-    cases isMerge
-    rfl
-  endpointDeathIsEarned := by
-    constructor
-    · intro reason isDeath
-      cases isDeath
-    · intro reason isDeath
-      cases isDeath
+      · exact List.mem_singleton.mp last
+  createdIdentityIsFresh := by
+    intro other old
+    have oldList : other ∈ (sent2.inFlight () wire).created := old
+    rw [sent2_wire] at oldList
+    have two : other ∈ [escrowed, stranded] := oldList
+    rcases List.mem_cons.mp two with isFirst | rest
+    · rw [isFirst]; exact escrowed_id_ne_carrier
+    · rw [List.mem_singleton.mp rest]; exact stranded_id_ne_carrier
+  requestsNothing := by
+    show RequestsNothing (sent2.inFlight () wire) (afterCoalesce.inFlight () wire)
+    rw [sent2_wire, afterCoalesce_wire]
+    exact fun _ => rfl
   scope := by
     intro fragment outside
     cases fragment with
@@ -716,11 +758,11 @@ The field this replaced, `carrierIsFresh`, refused that too — and also refused
 -/
 theorem a_coalesce_may_not_launder_into_a_delivered_message
     {before after : ServerWorld}
+    {sources : List (EdgeOccurrence serverTopology World.serverMessage ())}
     {other : EdgeOccurrence serverTopology World.serverMessage ()}
     (delivered : (before.inFlight () wire).resolution other = some .received)
-    (merged : serverPlan.ResolvesEscrow before after () wire escrowed
-      (.coalesced other)) : False := by
-  have stillHere := (merged.carrierIsOutstanding other rfl).2
+    (merged : serverPlan.Coalesces before after () wire sources other) : False := by
+  have stillHere := merged.carrierIsOutstanding.2
   rw [merged.ledgerExtends.resolutionPermanent other .received delivered] at stillHere
   exact absurd stillHere (by intro equal; cases equal)
 
@@ -734,25 +776,299 @@ has carried the same conjunct since §10.98. §10.113.
 -/
 theorem a_coalesce_may_not_change_the_payload
     {before after : ServerWorld}
+    {sources : List (EdgeOccurrence serverTopology World.serverMessage ())}
     {other : EdgeOccurrence serverTopology World.serverMessage ()}
     (different : other.1 ≠ escrowed.1)
-    (merged : serverPlan.ResolvesEscrow before after () wire escrowed
-      (.coalesced other)) : False :=
-  different (merged.carrierCarriesTheMessage other rfl)
+    (isSource : escrowed ∈ sources)
+    (merged : serverPlan.Coalesces before after () wire sources other) : False :=
+  different (merged.permitted escrowed isSource).symm
 
 /--
-**And two sources may merge into one carrier**, which is what §3's "consumes
-every source token" asks and what `carrierIsFresh` made unconstructible.
+**And no second merge may add to a carrier that has already collected.**
 
-Stated as the general fact rather than built as a second fixture: a carrier that
-is outstanding after the first merge is still outstanding before the second, so
-nothing in `ResolvesEscrow` refuses it. §10.113.
+The atomicity §10.104 asked about and `agent-bus` ruling `g-design:83` settled:
+"the coalesce consumes all named sources and creates one fresh carrier
+atomically ... thus no intermediate partially coalesced logical world is
+observable".
+
+This is where the ruling bites, and `Coalesces.consumesExactly` is the field that
+does it. A second step into the same carrier would have to declare a family
+containing every occurrence the after-ledger resolves into it — including the
+ones the *first* merge consumed, whose resolutions `ledgerExtends` makes
+permanent. So a family that omits them is refused, and a family that includes
+them is not a second merge.
+
+The theorem this replaces said the opposite, and truthfully: under
+`ResolvesEscrow` a carrier outstanding after the first merge *was* available to a
+second, which is precisely how the half-merged world was reachable. §10.131.
 -/
-theorem a_second_source_may_name_the_same_carrier
-    {before middle : ServerWorld}
-    {other : EdgeOccurrence serverTopology World.serverMessage ()}
-    (first : serverPlan.ResolvesEscrow before middle () wire escrowed (.coalesced other)) :
-    (middle.inFlight () wire).Outstanding other :=
-  first.carrierIsOutstanding other rfl
+theorem no_second_merge_into_the_same_carrier
+    {before after : ServerWorld}
+    {sources : List (EdgeOccurrence serverTopology World.serverMessage ())}
+    {carrier already : EdgeOccurrence serverTopology World.serverMessage ()}
+    (collected : (before.inFlight () wire).resolution already = some (.coalesced carrier))
+    (omitted : already ∉ sources)
+    (second : serverPlan.Coalesces before after () wire sources carrier) : False :=
+  omitted (second.consumesExactly already
+    (second.ledgerExtends.resolutionPermanent already (.coalesced carrier) collected))
+
+open Classical in
+/-- The wire's ledger with *both* sources merged into the one carrier. -/
+noncomputable def bothMerged :
+    EscrowLedger (EdgeOccurrence serverTopology World.serverMessage ())
+      (serverTopology.ChannelId ()) where
+  created := [escrowed, stranded, carrier]
+  rank := fun occurrence => occurrence.2.2.id.carrier
+  rankOrdersCreated := by decide
+  resolution := fun occurrence =>
+    if occurrence = escrowed then some (.coalesced carrier)
+    else if occurrence = stranded then some (.coalesced carrier) else none
+  noFabrication := by
+    intro occurrence resolved
+    by_cases isFirst : occurrence = escrowed
+    · simp [isFirst]
+    · by_cases isSecond : occurrence = stranded
+      · simp [isSecond]
+      · simp [isFirst, isSecond] at resolved
+  coalesceCarrierLater := by
+    intro occurrence carrier' isMerge
+    by_cases isFirst : occurrence = escrowed
+    · subst isFirst
+      rw [if_pos rfl] at isMerge
+      cases isMerge
+      exact ⟨List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self), by decide⟩
+    · by_cases isSecond : occurrence = stranded
+      · subst isSecond
+        rw [if_neg isFirst, if_pos rfl] at isMerge
+        cases isMerge
+        exact ⟨List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self), by decide⟩
+      · rw [if_neg isFirst, if_neg isSecond] at isMerge
+        cases isMerge
+  cancelRequested := fun _ => false
+  acknowledgedWasRequested := by
+    intro occurrence reason acknowledged
+    by_cases isFirst : occurrence = escrowed
+    · simp [isFirst] at acknowledged
+    · by_cases isSecond : occurrence = stranded
+      · simp [isSecond, stranded_ne_escrowed] at acknowledged
+      · simp [isFirst, isSecond] at acknowledged
+
+open Classical in
+theorem bothMerged_first : bothMerged.resolution escrowed = some (.coalesced carrier) := by
+  show (if escrowed = escrowed then some (ChannelResolution.coalesced carrier)
+    else if escrowed = stranded then some (ChannelResolution.coalesced carrier) else none)
+      = some (.coalesced carrier)
+  rw [if_pos rfl]
+
+open Classical in
+theorem bothMerged_second : bothMerged.resolution stranded = some (.coalesced carrier) := by
+  show (if stranded = escrowed then some (ChannelResolution.coalesced carrier)
+    else if stranded = stranded then some (ChannelResolution.coalesced carrier) else none)
+      = some (.coalesced carrier)
+  rw [if_neg stranded_ne_escrowed, if_pos rfl]
+
+open Classical in
+theorem bothMerged_other {occurrence : EdgeOccurrence serverTopology World.serverMessage ()}
+    (notFirst : occurrence ≠ escrowed) (notSecond : occurrence ≠ stranded) :
+    bothMerged.resolution occurrence = none := by
+  show (if occurrence = escrowed then some (ChannelResolution.coalesced carrier)
+    else if occurrence = stranded then some (ChannelResolution.coalesced carrier) else none)
+      = none
+  rw [if_neg notFirst, if_neg notSecond]
+
+theorem carrier_ne_stranded : carrier ≠ stranded := by
+  intro same
+  have ids := congrArg (fun occurrence => occurrence.2.2.id.carrier) same
+  simp [carrier, Reroute.stranded] at ids
+
+open Classical in
+/-- The world after both merges. -/
+noncomputable def afterBothMerged : ServerWorld :=
+  { sent2 with
+      inFlight := fun _ session => if session = wire then bothMerged else EscrowLedger.empty }
+
+open Classical in
+theorem afterBothMerged_wire : afterBothMerged.inFlight () wire = bothMerged := by
+  show (if wire = wire then bothMerged else EscrowLedger.empty) = bothMerged
+  rw [if_pos rfl]
+
+open Classical in
+theorem afterBothMerged_off {session : serverTopology.ChannelId ()} (notWire : session ≠ wire) :
+    afterBothMerged.inFlight () session = EscrowLedger.empty := by
+  show (if session = wire then bothMerged else EscrowLedger.empty) = EscrowLedger.empty
+  rw [if_neg notWire]
+
+open Classical in
+/--
+**Both sources, one carrier, one step.**
+
+§3's "coalescing consumes every source token" with the plural taken seriously.
+§10.113 argued the plural was served by a *sequence* of `coalesce` steps and
+§10.118 recorded the second step as owed; the second step was taken, and
+`agent-bus` ruling `g-design:83` has since said the sequence is the wrong shape:
+"the coalesce consumes all named sources and creates one fresh carrier
+atomically ... thus no intermediate partially coalesced logical world is
+observable".
+
+So this reaches `afterBothMerged` from `sent2` directly rather than through
+`afterCoalesce`, and `no_second_merge_into_the_same_carrier` above says why there
+is no route through it. `the_coalesce` remains as the one-source merge, which is
+a different merge into a different carrier rather than half of this one. §10.131.
+-/
+theorem the_atomic_merge :
+    serverPlan.Coalesces sent2 afterBothMerged () wire [escrowed, stranded] carrier where
+  sourcesNonempty := by simp
+  sourcesOnItsSession := by
+    intro source inList
+    rcases List.mem_cons.mp inList with isFirst | rest
+    · rw [isFirst]; rfl
+    · rw [List.mem_singleton.mp rest]; rfl
+  wereOutstanding := by
+    intro source inList
+    rcases List.mem_cons.mp inList with isFirst | rest
+    · rw [isFirst]; exact both_are_outstanding.1
+    · rw [List.mem_singleton.mp rest]; exact both_are_outstanding.2
+  nowResolved := by
+    intro source inList
+    rw [afterBothMerged_wire]
+    rcases List.mem_cons.mp inList with isFirst | rest
+    · rw [isFirst]; exact bothMerged_first
+    · rw [List.mem_singleton.mp rest]; exact bothMerged_second
+  resolvesNothingElse := by
+    intro other notSource
+    have notFirst : other ≠ escrowed :=
+      fun same => notSource (by rw [same]; exact List.mem_cons_self)
+    have notSecond : other ≠ stranded :=
+      fun same => notSource (by rw [same]; exact List.mem_cons_of_mem _ List.mem_cons_self)
+    rw [afterBothMerged_wire, bothMerged_other notFirst notSecond, sent2_wire]
+    rfl
+  consumesExactly := by
+    intro other resolved
+    rw [afterBothMerged_wire] at resolved
+    by_cases isFirst : other = escrowed
+    · rw [isFirst]; exact List.mem_cons_self
+    · by_cases isSecond : other = stranded
+      · rw [isSecond]; exact List.mem_cons_of_mem _ List.mem_cons_self
+      · rw [bothMerged_other isFirst isSecond] at resolved
+        exact absurd resolved (by intro equal; cases equal)
+  ledgerExtends := by
+    rw [sent2_wire, afterBothMerged_wire]
+    exact
+      { createdPrefix := ⟨[carrier], rfl⟩
+        resolutionPermanent := by
+          intro occurrence resolution ended
+          exact absurd ended (by intro equal; cases equal)
+        cancelRequestMonotone := by
+          intro occurrence requested
+          exact absurd requested (by intro equal; cases equal) }
+  carrierOnItsSession := rfl
+  carrierIsOutstanding := by
+    rw [afterBothMerged_wire]
+    exact ⟨List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self),
+      bothMerged_other carrier_ne_escrowed carrier_ne_stranded⟩
+  permitted := by
+    intro source inList
+    rcases List.mem_cons.mp inList with isFirst | rest
+    · rw [isFirst]; rfl
+    · rw [List.mem_singleton.mp rest]; rfl
+  createsOnlyTheCarrier := by
+    intro other held fresh
+    have inList : other ∈ (afterBothMerged.inFlight () wire).created := held
+    rw [afterBothMerged_wire] at inList
+    have three : other ∈ [escrowed, stranded, carrier] := inList
+    rcases List.mem_cons.mp three with isFirst | rest
+    · exact absurd (by rw [isFirst, sent2_wire]; exact List.mem_cons_self) fresh
+    · rcases List.mem_cons.mp rest with isSecond | last
+      · refine absurd ?_ fresh
+        rw [isSecond, sent2_wire]
+        exact List.mem_cons_of_mem _ List.mem_cons_self
+      · exact List.mem_singleton.mp last
+  createdIdentityIsFresh := by
+    intro other old
+    have oldList : other ∈ (sent2.inFlight () wire).created := old
+    rw [sent2_wire] at oldList
+    have two : other ∈ [escrowed, stranded] := oldList
+    rcases List.mem_cons.mp two with isFirst | rest
+    · rw [isFirst]; exact escrowed_id_ne_carrier
+    · rw [List.mem_singleton.mp rest]; exact stranded_id_ne_carrier
+  requestsNothing := by
+    show RequestsNothing (sent2.inFlight () wire) (afterBothMerged.inFlight () wire)
+    rw [sent2_wire, afterBothMerged_wire]
+    exact fun _ => rfl
+  scope := by
+    intro fragment outside
+    cases fragment with
+    | escrow edge session =>
+      have sameEdge : edge = () := rfl
+      subst sameEdge
+      have notWire : session ≠ wire := by
+        intro isWire
+        subst isWire
+        exact outside rfl
+      show twoPendingAt session = afterBothMerged.inFlight () session
+      rw [twoPendingAt_off notWire, afterBothMerged_off notWire]
+    | _ => rfl
+
+/--
+**And both sources really did end in the one carrier, which is still in flight.**
+
+What §3's plural asks for, read off the world the one `coalesce` step reaches.
+-/
+theorem both_sources_merged :
+    (afterBothMerged.inFlight () wire).resolution escrowed = some (.coalesced carrier) ∧
+      (afterBothMerged.inFlight () wire).resolution stranded = some (.coalesced carrier) ∧
+      (afterBothMerged.inFlight () wire).Outstanding carrier := by
+  rw [afterBothMerged_wire]
+  exact ⟨bothMerged_first, bothMerged_second,
+    List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self),
+    bothMerged_other carrier_ne_escrowed carrier_ne_stranded⟩
+
+/-! ## A policy the old field forbade
+
+`agent-bus` ruling `g-design:83` generalised `carrierCarriesTheMessage` into
+`ProcessPlan.coalescing` because a per-source equality made latest-wins and
+folding channels unconstructible at *every* plan. A field only ever instantiated
+at `ProcessPlan.exactDedup` would be that generalisation in name only, so the
+distinction is exhibited rather than described.
+
+**What is here is the distinction between two predicates, and that is less than
+it looks.** The first version of this section offered `latestWins sources carrier
+:= carrier ∈ sources` and proved it admits a family `exactDedup` refuses. Both
+halves are true and the pair proves nothing about coalescing, because *no*
+`ResolvesEscrow` can hand that predicate a family containing its own carrier:
+`carrierIsPermitted` takes the sources to be exactly those the after-ledger
+resolves into the carrier, and `EscrowLedger.coalesceCarrierLater` requires each
+of them to rank strictly below it.
+`Tests/Process/MergeFixtures.lean`'s `latestWins_is_unsatisfiable` is that,
+proved. A fixture written to show a generalisation had content was itself a
+predicate no plan can meet — §10.130.
+
+So what remains here is the arithmetic, kept because it is still the cheapest
+statement of what `exactDedup` refuses, and the *plan-level* witness lives in
+`Tests/Process/MergeFixtures.lean`: a second plan over this same topology whose
+coalescing keeps one source's payload, two real merges through it, and
+`serverPlan_refuses_it` showing this plan could not have taken the second.
+-/
+
+/-- The two payloads a dedup channel may not merge. -/
+def otherPayload : World.serverMessage () := ⟨99⟩
+
+def otherCarrier : EdgeOccurrence serverTopology World.serverMessage () :=
+  ⟨otherPayload, ⟨wire, { id := ⟨.messageOccurrence, 6⟩, isMessage := rfl }⟩⟩
+
+/--
+**`exactDedup` refuses a family whose members disagree about the payload.**
+
+Which is what the old per-source conjunct imposed on every channel. The merge
+this refuses is constructible at a plan that permits it, and
+`Tests/Process/MergeFixtures.lean`'s `the_merge_that_keeps_one_payload` is that
+merge.
+-/
+theorem exactDedup_refuses_a_mixed_family :
+    ¬ exactDedup [escrowed, otherCarrier] otherCarrier := by
+  intro dedup
+  have payloads := dedup escrowed List.mem_cons_self
+  have counts : (7 : Nat) = 99 := congrArg (fun message => message.down) payloads
+  exact absurd counts (by decide)
 
 end Grass.Process.Tests.Close

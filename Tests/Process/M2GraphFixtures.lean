@@ -83,6 +83,15 @@ protocols. -/
     | .listener, .acceptCount => .readWrite
     | .connection, .routeTable => .readOnly
     | .connection, .acceptCount => .none
+  -- The interference invariant `docs/PROCESS.md` §3 asks for beside the access
+  -- capabilities, and which `ProcessGraph.sharedInvariant` finally has a place
+  -- for. The route table carries no duplicate route, which is a property a write
+  -- can break; the counter carries nothing, which is what a region with no
+  -- invariant looks like and is worth having one of.
+  sharedInvariant := fun region =>
+    match region with
+    | .routeTable => fun table => table.down.Nodup
+    | .acceptCount => fun _ => True
   population :=
     { bound := fun
         | .listener => .exactlyOne

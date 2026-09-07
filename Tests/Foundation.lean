@@ -217,11 +217,15 @@ def system : RelationalSystem Bool where
   extendsTrans := fun _ _ => trivial
   stepExtends := fun _ => trivial
 
+def emptyPrefix : system.ExecutionPrefix :=
+  RelationalSystem.ExecutionPrefix.initial (system := system)
+    (state := ()) (graph := ()) trivial
+
+theorem firstStep : system.Step emptyPrefix.graph emptyPrefix.state () true () () :=
+  trivial
+
 def samplePrefix : system.ExecutionPrefix :=
-  RelationalSystem.ExecutionPrefix.step
-    (RelationalSystem.ExecutionPrefix.initial (system := system)
-      (state := ()) (graph := ()) trivial)
-    (choice := ()) (event := true) (nextState := ()) (nextGraph := ()) trivial
+  emptyPrefix.step firstStep
 
 theorem falseSuffix : system.Steps samplePrefix.state samplePrefix.graph [false] () () :=
   .step (choice := ()) .refl trivial
@@ -302,6 +306,17 @@ example : refinement.mapPrefix samplePrefix = samplePrefix := by
   change (BehaviorRefinement.refl behavior).mapPrefix samplePrefix = samplePrefix
   exact BehaviorRefinement.mapPrefix_refl behavior samplePrefix
 
+example : toAbstract.mapPrefix emptyPrefix =
+    RelationalSystem.ExecutionPrefix.initial (system := abstractSystem)
+      (state := false) (graph := 0)
+      (toAbstract.initial (state := ()) (graph := ()) trivial) :=
+  BehaviorRefinement.mapPrefix_initial toAbstract trivial
+
+example : toAbstract.mapPrefix samplePrefix =
+    (toAbstract.mapPrefix emptyPrefix).step (toAbstract.step firstStep) := by
+  change toAbstract.mapPrefix (emptyPrefix.step firstStep) = _
+  exact BehaviorRefinement.mapPrefix_step toAbstract emptyPrefix firstStep
+
 example : (toAbstract.trans toHighest).mapPrefix samplePrefix =
     toHighest.mapPrefix (toAbstract.mapPrefix samplePrefix) :=
   BehaviorRefinement.mapPrefix_trans toAbstract toHighest samplePrefix
@@ -343,6 +358,42 @@ def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.g
   step := fun _ => trivial
   consistent := ⟨rfl, rfl⟩
 
+/-- A non-vacuous indexed continuation: state and graph both advance at every
+step, while its observable events alternate. -/
+abbrev indexedSystem : RelationalSystem Bool where
+  State := Nat
+  Choice := Unit
+  Graph := Nat
+  Initial := fun state graph => state = 0 ∧ graph = 0
+  Step := fun before state _ event next after =>
+    next = state + 1 ∧ after = before + 1 ∧ event = (state % 2 == 1)
+  Terminal := fun _ _ => False
+  InfiniteConsistent := fun _ _ _ _ _ => True
+  Extends := fun before after => before ≤ after
+  extendsRefl := Nat.le_refl
+  extendsTrans := Nat.le_trans
+  stepExtends := fun transition => transition.2.1 ▸ Nat.le_succ _
+
+abbrev indexedContinuation : indexedSystem.InfiniteContinuation 0 0 [] where
+  stateAt := fun index => index
+  graphAt := fun index => index
+  choiceAt := fun _ => ()
+  eventAt := fun index => index % 2 == 1
+  stateZero := rfl
+  graphZero := rfl
+  step := fun _ => ⟨rfl, rfl, rfl⟩
+  consistent := trivial
+
+theorem indexedPrefixEvents :
+    indexedContinuation.prefixEvents 3 = [false, true, false] := rfl
+
+example : indexedSystem.Steps 0 0 [false, true, false] 3 3 := by
+  rw [← indexedPrefixEvents]
+  exact indexedContinuation.prefixSteps 3
+
+example : indexedSystem.Extends 0 (indexedContinuation.graphAt 3) :=
+  indexedContinuation.graphExtendsAt 3
+
 def completion : system.Completion samplePrefix.state samplePrefix.graph samplePrefix.events :=
   .infinite continuation
 
@@ -359,6 +410,17 @@ example : (BehaviorRefinement.refl behavior).mapCompletion completion = completi
 example : (toAbstract.trans toHighest).mapCompletion completion =
     toHighest.mapCompletion (toAbstract.mapCompletion completion) :=
   BehaviorRefinement.mapCompletion_trans toAbstract toHighest completion
+
+example : (BehaviorRefinement.refl behavior).mapCompletionAtPrefix
+    samplePrefix completion = completion :=
+  BehaviorRefinement.mapCompletionAtPrefix_refl behavior samplePrefix completion
+
+example : (toAbstract.trans toHighest).mapCompletionAtPrefix
+    samplePrefix completion =
+    toHighest.mapCompletionAtPrefix (toAbstract.mapPrefix samplePrefix)
+      (toAbstract.mapCompletionAtPrefix samplePrefix completion) :=
+  BehaviorRefinement.mapCompletionAtPrefix_trans
+    toAbstract toHighest samplePrefix completion
 
 def mappedCompletion : abstractBehavior.system.Completion
     (toAbstract.mapPrefix samplePrefix).state
