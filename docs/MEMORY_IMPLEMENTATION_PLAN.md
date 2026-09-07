@@ -3080,7 +3080,7 @@ rather than assumed.
 **Four gates now have a stated scope, because they had an implied one.** `CitationAudit`,
 `ReachabilityAudit`, `FixtureAudit` and `ConsultedAudit` report a declaration, a
 constructor or a fixture as unread — and "unread" is a judgement only that code's owner
-can make. Over the merged tree they produced 219, 50, 8 and 4 findings, essentially all
+can make. Over the merged tree they produced 219, 50, 8 and 92 findings, essentially all
 in `Grass/ISA`, `Grass/ABI`, `Grass/Process` and their fixtures. Every one may be true and
 none is this branch's to adjudicate: **an allowlist entry records that somebody read the
 corpus and decided, and nobody here has read theirs.** The scope is a named constant now,
@@ -3106,10 +3106,111 @@ at integration rather than at authorship, and it is the strongest argument yet f
 qualified-entry form this branch adopted two rounds ago: `Structure.field` says which
 structure, and the scan still cannot.
 
-Reported to their owners rather than decided here: the six new unread fields in
+Reported to their owners rather than decided here: the five new unread fields in
 `Grass/Semantics` and the twelfth `RequirementKind` constructor (g-foundation, extending
 `c-mem:52` and `c-mem:53`); eighteen hedge entries in main's `DocstringAudit` that silence
 nothing in the merged tree; and the `Tests/` widening of `DeclNames.lean`.
+
+### 4.4.1d Round twenty-five: everything the merge commit got wrong
+
+Thirteen findings across two reviewers, and **every one is against the two commits that
+merged main and scoped the gates.** Nothing survived on the Lean side. That is the
+round's most useful result and it is why this section is separate: the model held, and
+the tooling built to police it did not.
+
+- ~~**The shared comment stripper was defeated in both directions**, and one defect
+  covered five gates.~~ Three regexes cannot express nesting and Lean nests block
+  comments. `/- outer /- inner -/ code -/` closed at the first `-/`, so `code` read as
+  source and a name used only inside a comment counted as a use. And `LINE` ran last, so
+  a `/-` inside a `--` comment opened a block that swallowed every line to the next `-/`
+  anywhere in the file — **review hid a real `MemoryState.alias` call behind one and all
+  nine gates stayed green**, which is the same demonstration that put `alias` in
+  `DOORS`.
+
+  Replaced with a depth-tracking scanner, written out in each of the five. Two rounds had
+  argued about which *order* to apply the three patterns in; both surviving orders were
+  wrong, which is what an argument about the order of a wrong mechanism looks like from
+  the outside.
+- ~~**`SCOPE` was a coverage claim with nothing behind it, and it was wrong in both
+  directions.**~~ Dropping one token switched three gates off for this layer while they
+  printed their success lines: no self-test reached `in_scope`, because every case writes
+  probes into a temporary directory and calls the scanner directly, and only total
+  emptiness was guarded, in three of six gates. And the hand-written list dropped three
+  of this branch's *own* pre-merge subtrees — `Grass/Certificate.lean`, `Grass/Verify/`,
+  `Tests/Foundation.lean` — which cost one live finding and made two allowlist entries
+  read as dead.
+
+  `SCOPE` is the pre-merge tree now, which is a fact rather than a recollection.
+  `in_scope` resolves relative to `ROOT` rather than scanning absolute components, which
+  also closes a checkout named `Grass` putting everything out of scope. Each self-test
+  asserts membership against four hard-coded paths.
+
+  **A floor derived from `SCOPE` cannot catch `SCOPE` shrinking** — deleting a token
+  deletes the check with it. The floor catches the globs or `in_scope` breaking under a
+  `SCOPE` that still names the subtree; the hard-coded self-test cases catch the rest,
+  and CI runs self-tests before gates. Saying which half is which is the whole content of
+  that paragraph, because the first version claimed both.
+- ~~**The four scoped gates said their coverage was stated in the module docstring, and
+  no docstring mentioned it.**~~ Three went further and asserted the *unscoped*
+  behaviour — "for each `inductive T` under `Grass/`", "for every `def` declared under
+  `Tests/`", "no declared field name is entirely absent from the sources". **A sentence
+  that delegates to text nobody wrote is worse than no sentence: it reads as a promise
+  kept.**
+
+  Also `CitationAudit`'s declaration set was narrowed along with its prose set, so a
+  memory docstring citing a real `Grass/ISA` theorem would have been reported as naming
+  nothing. Two lists now: the prose this gate adjudicates is scoped, and what a citation
+  may legitimately *name* is not.
+- ~~**Six allowlist entries were deleted under one explanation and they had three.**~~
+  Four went inert to same-name blindness. One — `ExecutionPrefix.initialGraph` — gained a
+  genuine reader in the merge, good news filed as a warning. And `ArtifactFormat.parseExact`
+  **never went inert at all**: it is declared once and constructed once in the whole
+  tree, and it stopped being reported because `Grass/Certificate.lean` fell out of
+  `SCOPE`. Deleting its entry turned a recorded, routed gap into one recorded nowhere.
+
+  **A cause read off a coincidence of timing is not a cause.** Six entries went quiet in
+  one commit and the note attributed all six to the mechanism that explained the first
+  one looked at.
+- ~~**The inert sweep was run on one gate of three.**~~ `ReachabilityAudit` had four dead
+  entries and `CitationAudit` one, unswept and unrecorded, in the commit whose own
+  subject is allowlist rot. `Disposition.transferred` is the one that costs something:
+  §3's terminal disposition vocabulary being unconstructed is a gap §4.4.1 records and
+  this gate can no longer state.
+
+  Five more `CitationAudit` entries went inert for the *good* reason — `Grass.ISA.X86`,
+  `Grass.ABI.Win64`, `Platform.Win32`, `Std.Process`, `ProcessSpec.Step` were "components
+  another owner will build" and those owners built them. That is the one way an entry in
+  that group is supposed to end, and it is worth distinguishing in the record from an
+  entry that went quiet because a lexical scan found a same-named declaration elsewhere.
+- ~~**`--inert` on `DocstringAudit` measured a substring where `HEDGE_RE` matches a
+  word.**~~ It reproduced, in the mode whose job is to police that list, the exact
+  substring bug the comment above `HEDGES` records fixing — review seeded a sentence
+  containing `XMM6` and watched `M6` stop being reported as inert while still silencing
+  nothing. It is a leave-one-out now, like every other gate's.
+
+  Writing it surfaced a second error of the same kind: the first version took its
+  baseline with hedges *disabled*, which makes every narrowed run a subset and every
+  entry read as inert — it reported all thirty-nine. A leave-one-out compares against the
+  run the gate actually makes.
+- ~~**`Tools/DeclNames.lean`'s exclusion list: eight entries, six `main`s, two inert.**~~
+  `Tests` itself is never enumerated, and `Tests/Memory/Spike1Reference.lean` defines no
+  `main` — the grep that put it there matched `mainThread` — is not a generator but this
+  layer's M1 freeze evidence, and was in the name set anyway through two importers.
+  **An exclusion list written by grepping for a keyword is a list of what the grep
+  matched.** The guard's error message also named only `Grass/` while its `Tests/` half is
+  the half that fires, and a comment said the guard stayed scoped to `Grass/` four lines
+  above code that filtered both.
+- ~~**`NOT_IDENT` cannot fire**, and `SCOPE`'s siblings in stale counts.~~ `IDENT`'s
+  capture class contains no slash, section mark or space, so no string it produces can
+  match any alternation of the pattern filtering it. Kept, with the reason written down —
+  the shape it describes is real and what makes it unreachable is upstream — but the
+  file's own header treats `SELF_NAMING`, "defined and never used", as a finding, and the
+  difference between the two is worth stating rather than leaving to be rediscovered.
+
+  And the counts: `ConsultedAudit`'s whole-tree finding count is 92, not 4;
+  `FixtureAudit`'s allowlist has three entries, not two; the `Grass/Semantics` fields new
+  in the merge are five, not six; "hundreds of findings" is true of one of the four gates
+  that say it.
 
 ### 4.4.1a Which profile inputs can weaken a rule
 
@@ -3862,7 +3963,7 @@ the field belongs beside it as something that can only add.
   from before that reallocation was refused, whose `.getD` silently returned the
   *unreallocated* state; and `currentProv` from the same commit. Both are deleted.
 
-  Its `ALLOWED` list has two entries and they are the interesting part:
+  Its `ALLOWED` list has three entries and two of them are the interesting part:
   `Tests/Foundation.lean`'s `aliasedVerified` and `inferredVerified` are consumed by
   an environment-walking audit rather than by name, so no lexical scan can see their
   consumer.

@@ -13,13 +13,28 @@ refused: after the refusal landed the definition still elaborated, still looked 
 fixture, and its `.getD` silently returned the *unreallocated* state. Nothing used it,
 so nothing failed. `currentProv` was the same story from the same commit.
 
-**What this checks, exactly.** For every `def` declared under `Tests/`, it counts
+**What this checks, exactly.** For every `def` declared under `Tests/`, within `SCOPE`,, it counts
 occurrences of that name in the comment- and string-stripped sources of `Grass/`,
 `Tests/` and `Tools/`. One occurrence is the declaration itself; zero further ones is
 a report.
 
 **What it does not check**, stated because every tool in this directory has been
 corrected for advertising a stronger reading:
+
+- **It covers this branch's tree, not the repository.** `SCOPE` below names the
+  subtrees, which are the ones this branch had before merging `origin/main`:
+  `Grass/{Certificate,Core,Memory,Obligation,Op,Resource,Semantics,Std,Trust,
+  Verify}` and `Tests/{Foundation,Memory,Op,Resource,Std}`. `Grass/ISA`,
+  `Grass/ABI`, `Grass/Process` and their fixtures are **not covered by this gate
+  or by anything of this kind** — not because they are clean, but because
+  reporting a declaration as unread is a judgement only that code's owner can
+  make. Four of the subtrees that *are* covered belong to other owners too; their
+  findings are allowlisted with the reason and reported rather than decided here.
+
+  The comment above `SCOPE` used to say "the honest statement of coverage is in
+  the module docstring", and there was no such statement in any of the four
+  docstrings. A sentence that delegates to text nobody wrote is worse than no
+  sentence: it reads as a promise kept.
 
 - Comments are stripped, so a fixture named only in prose counts as unused. That is
   deliberate: a docstring citing a state nothing tests is exactly what this is for.
@@ -49,30 +64,92 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# **Scope: the modules this gate was written for.**
+# **Scope: the tree this branch had before merging main.**
 #
 # Merging `origin/main` put three other owners' trees under these globs -- `Grass/ISA`,
 # `Grass/ABI`, `Grass/Process` and their fixtures -- and this gate immediately reported
-# hundreds of findings in them. Every one may be true and none is this branch's to
-# judge: an allowlist entry here records that *somebody read the corpus and decided*,
-# and nobody on this branch has read theirs. A gate that reports what its author cannot
-# adjudicate produces a list nobody acts on, which is how an allowlist fills with
-# entries that record nothing.
+# findings in them. Every one may be true and none is this branch's to judge: an
+# allowlist entry here records that *somebody read the corpus and decided*, and nobody
+# on this branch has read theirs.
 #
-# So the scope is named rather than implied, and widening it is one edit. The honest
-# statement of coverage is in the module docstring: this gate covers the memory layer,
-# and the rest of the tree is not covered by anything of this kind. That has been
-# reported to those owners rather than decided here.
-SCOPE = ("Memory", "Obligation", "Resource", "Op", "Core", "Std", "Trust", "Semantics")
+# **The first version of this list was written by hand and was wrong in both
+# directions.** It named eight subtrees from memory and dropped three that were in this
+# branch's own tree before the merge -- `Grass/Certificate.lean`, `Grass/Verify/` and
+# `Tests/Foundation.lean` -- which cost one live finding and made two allowlist entries
+# read as inert. A scope written from what the author remembered owning is the same
+# defect as a count written from reading rather than running. It is the pre-merge tree
+# now, which is a fact rather than a recollection: `git ls-tree b9d4200 Grass/ Tests/`.
+#
+# Widening it is one edit, and the module docstring says what is not covered.
+SCOPE = ("Certificate", "Core", "Memory", "Obligation", "Op", "Resource", "Semantics",
+         "Std", "Trust", "Verify", "Foundation")
 
 
 def in_scope(path) -> bool:
-    """Whether a path lies in one of `SCOPE`'s subtrees, or at a tree's root."""
-    parts = path.parts
-    for i, part in enumerate(parts):
-        if part in ("Grass", "Tests") and i + 1 < len(parts):
-            return parts[i + 1].removesuffix(".lean") in SCOPE
-    return True
+    """Whether a path lies in one of `SCOPE`'s subtrees.
+
+    Relative to `ROOT`, not by scanning absolute components for the first `Grass` or
+    `Tests`. The scanning form had two failures review demonstrated: a path under a
+    top-level directory this branch has not created yet fell out silently, and a
+    checkout directory *named* `Grass` -- which is what this project is called -- made
+    the repository root the first match and put every file out of scope.
+    """
+    try:
+        parts = path.resolve().relative_to(ROOT).parts
+    except ValueError:
+        # Outside the repository: not this gate's business, and not silently in scope.
+        return False
+    if len(parts) < 2 or parts[0] not in ("Grass", "Tests"):
+        return True
+    return parts[1].removesuffix(".lean") in SCOPE
+
+
+def scope_is_covered(paths, trees=("Grass", "Tests")) -> list[str]:
+    """Report if the scope filter has emptied the file list or lost a known subtree.
+
+    **`SCOPE` was a coverage claim with nothing behind it.** Review dropped one token
+    from it and three gates went silent for this layer while printing their success
+    lines; no self-test touched `in_scope`, because every self-test writes probe files
+    into a temporary directory and calls the scanner directly, so the path filter is
+    never on the tested path. Only total emptiness was guarded, and only in three of the
+    six gates.
+
+    A floor rather than an emptiness check, in the shape
+    `Tools/DocstringAudit.py`'s `declaration_names` already uses (`if len(known) <
+    1000`): every subtree named in `SCOPE` that exists on disk must contribute at
+    least one file.
+
+    **What this cannot catch, stated because the first version of this paragraph
+    claimed it could.** It derives its expectation from `SCOPE`, so deleting a token
+    from `SCOPE` deletes the check for that subtree along with it -- exactly the
+    attack it was written against, and it passes. What it does catch is the globs or
+    `in_scope` breaking under a `SCOPE` that still names the subtree, which is the
+    other half and the one no gate had.
+
+    The authority on `SCOPE`'s *contents* is `self_test`, which asserts membership
+    against four hard-coded paths rather than against `SCOPE`. CI runs every gate's
+    self-test before the gate, so a narrowed `SCOPE` fails there. A check derived
+    from the thing it is checking is not a check, and saying which half is which is
+    the whole content of this paragraph.
+
+    `trees` is which of `Grass/` and `Tests/` this gate's list actually covers;
+    asking about the other one reports every subtree of it as unreached, which
+    is the first thing this check did.
+    """
+    missing = []
+    for name in SCOPE:
+        for tree in trees:
+            candidate = ROOT / tree / name
+            if not (candidate.is_dir() or candidate.with_suffix(".lean").is_file()):
+                continue
+            prefix = (tree, name)
+            if not any(
+                    p.resolve().relative_to(ROOT).parts[:2] in
+                    (prefix, (tree, name + ".lean"))
+                    for p in paths):
+                missing.append(f"  {tree}/{name}: in SCOPE, on disk, and no file "
+                               "reached the scan")
+    return missing
 
 
 DECLARED_IN = [p for p in sorted((ROOT / "Tests").rglob("*.lean")) if in_scope(p)]
@@ -107,9 +184,6 @@ def blank(match: "re.Match[str]") -> str:
 # comment the next two patterns blank anyway. `blank` rather than deletion, because a
 # report that points at the wrong line is the defect this file's sibling was found
 # with twice.
-BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
-LINE = re.compile(r"--.*?$", re.MULTILINE)
-STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 
 # Fixtures deliberately carried without a user, each with its reason. The two entries
 # this tool was written against -- `currentProv` and `lentThenReused` in
@@ -139,9 +213,98 @@ ALLOWED: set[str] = {
 }
 
 
+# **A scanner rather than three regexes, because Lean nests block comments and a
+# regex cannot.** What stood here was `/-.*?-/` non-greedy, `--.*?$`, and a
+# single-line string, applied in an order two rounds argued about. Both remaining
+# orders were wrong, and review demonstrated both:
+#
+#   * `/- outer /- inner -/ code -/` -- the non-greedy block closes at the first
+#     `-/`, so `code` survives as source. A declaration referenced only inside a
+#     comment counted as used, and a fixture nothing consumes went unreported.
+#   * `-- a note mentioning /- something` -- `LINE` ran last, so a `/-` inside a
+#     line comment opened a block for `BLOCK`, which swallowed every line down to
+#     the next `-/` anywhere in the file. Review hid a real `MemoryState.alias`
+#     call in `Grass/Memory/Loan.lean` behind one and all nine gates stayed green
+#     -- the same demonstration that put `alias` in `DOORS`, reached through the
+#     stripper instead of through the allowlist.
+#
+# The scanner tracks block-comment depth, opens a line comment on `--` only at
+# depth zero and outside a string, and keeps a string literal from spanning lines.
+# Every consumed character becomes a space and every newline is kept, so offsets
+# and line numbers are the source's. Five gates share this; it is written out in
+# each rather than imported, which is the same duplication the three patterns had.
+#
+# `QUOTE` and `BACKSLASH` are spelled with `chr` so that this file's own source
+# carries neither where a reader might take it for the thing being matched.
+QUOTE = chr(34)
+BACKSLASH = chr(92)
+
+
 def strip(source: str) -> str:
     """Remove block comments, line comments and string literals."""
-    return LINE.sub(blank, BLOCK.sub(blank, STRING.sub(blank, source)))
+    out: list[str] = []
+    depth = 0
+    in_string = False
+    in_line_comment = False
+    index = 0
+    size = len(source)
+    while index < size:
+        char = source[index]
+        if char == chr(10):
+            out.append(chr(10))
+            in_line_comment = False
+            # A string literal does not span lines in Lean, so one left open at a
+            # newline is a lexical error in the source rather than licence to
+            # blank the rest of the file.
+            in_string = False
+            index += 1
+            continue
+        if in_line_comment:
+            out.append(chr(32))
+            index += 1
+            continue
+        if in_string:
+            if char == BACKSLASH and index + 1 < size:
+                out.append(chr(32) * 2)
+                index += 2
+                continue
+            out.append(chr(32))
+            if char == QUOTE:
+                in_string = False
+            index += 1
+            continue
+        if depth > 0:
+            if source.startswith(chr(47) + chr(45), index):
+                depth += 1
+                out.append(chr(32) * 2)
+                index += 2
+                continue
+            if source.startswith(chr(45) + chr(47), index):
+                depth -= 1
+                out.append(chr(32) * 2)
+                index += 2
+                continue
+            out.append(chr(32))
+            index += 1
+            continue
+        if source.startswith(chr(47) + chr(45), index):
+            depth = 1
+            out.append(chr(32) * 2)
+            index += 2
+            continue
+        if source.startswith(chr(45) * 2, index):
+            in_line_comment = True
+            out.append(chr(32) * 2)
+            index += 2
+            continue
+        if char == QUOTE:
+            in_string = True
+            out.append(chr(32))
+            index += 1
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
 
 
 def analyse(declared: dict[str, str], used: dict[str, str] | None = None) -> list[str]:
@@ -214,6 +377,17 @@ def self_test() -> int:
               f"comment above the fixture: {reports}")
         failures += 1
 
+    # A name that appears only inside a *nested* block comment is not a use. The
+    # old non-greedy `/-.*?-/` closed at the first `-/`, so the text after it read
+    # as source and a fixture nothing consumes went unreported.
+    commented = {"Tests/Memory/Loans.lean": "def orphan : Nat := 1" + chr(10),
+                 "Tests/Memory/Other.lean":
+                     "/- note /- aside -/ example : Nat := orphan -/" + chr(10)}
+    if not analyse(commented):
+        print("  SELF-TEST FAILED: a name used only inside a nested block comment "
+              "counts as a use")
+        failures += 1
+
     dead = {"Tests/Memory/Loans.lean": "def orphan : Nat := 1\n"}
     if not analyse(dead):
         print("  SELF-TEST FAILED: a fixture nothing uses is not reported")
@@ -276,6 +450,27 @@ def self_test() -> int:
         failures += 1
     ALLOWED = saved_allowed
 
+    # `in_scope`, both directions, and the floor. `SCOPE` was a coverage claim with
+    # nothing behind it: review dropped one token and this gate went silent for the
+    # memory layer while still printing its success line. No self-test reached the
+    # path filter, because every case here writes probes into a temporary directory
+    # and calls the scanner directly.
+    if not in_scope(ROOT / "Grass" / "Memory" / "State.lean"):
+        print("  SELF-TEST FAILED: Grass/Memory is out of scope")
+        failures += 1
+    if not in_scope(ROOT / "Tests" / "Memory" / "Loans.lean"):
+        print("  SELF-TEST FAILED: Tests/Memory is out of scope")
+        failures += 1
+    if in_scope(ROOT / "Grass" / "ISA" / "X86" / "Decode.lean"):
+        print("  SELF-TEST FAILED: Grass/ISA is in scope")
+        failures += 1
+    if in_scope(ROOT / "Grass" / "Process" / "Bag.lean"):
+        print("  SELF-TEST FAILED: Grass/Process is in scope")
+        failures += 1
+    if scope_is_covered(DECLARED_IN, ("Tests",)):
+        print("  SELF-TEST FAILED: a SCOPE subtree on disk reached no file")
+        failures += 1
+
     if failures:
         print(f"fixture audit self-test: {failures} failure(s)")
         return 1
@@ -298,6 +493,15 @@ def main() -> int:
         print("unknown option(s): " + " ".join(unknown), file=sys.stderr)
         print("known: " + ", ".join(sorted(KNOWN_OPTIONS)), file=sys.stderr)
         return 2
+    # The scope floor, before anything else runs. `SCOPE` is a coverage claim and
+    # review showed it was one nothing checked: dropping a single token from it
+    # switched this gate off for the memory layer and it printed its success line.
+    uncovered_scope = scope_is_covered(DECLARED_IN, ("Tests",))
+    if uncovered_scope:
+        print(chr(10).join(uncovered_scope))
+        print(chr(10) + "SCOPE names a subtree that reached no file. Widen the"
+              " globs or correct SCOPE -- a gate that scans nothing passes.")
+        return 1
     if "--self-test" in sys.argv:
         return self_test()
     if "--inert" in sys.argv:

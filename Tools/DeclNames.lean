@@ -10,14 +10,23 @@ import Lean
 -- those names and resolves them, which is how the disagreement surfaced.
 --
 -- This widens what the docstring audit will accept as enforcement, and the
--- coverage guard below stays scoped to `Grass/` because that is the tree whose
--- omission would be silent.
--- Seven `Tests` modules are deliberately absent: each defines a `main`, and two
+-- coverage guard below covers **both** trees: a missing `Tests` module shrinks the
+-- name set exactly as a missing `Grass` one does, and this comment said the guard
+-- stayed scoped to `Grass/` while the code four lines down already filtered both.
+-- **Six** `Tests` modules are deliberately absent: each defines a `main`, and two
 -- `main`s cannot share one environment. They are corpus generators and machine
 -- probes -- programs that *produce* evidence rather than declarations a docstring
 -- would cite as enforcement -- so excluding them costs the name set nothing. The
 -- guard below lists them by name rather than pattern, so a new one is a loud
 -- failure and a decision rather than a silent omission.
+--
+-- This said seven and the list held eight, and two of the eight suppressed
+-- nothing. `Tests` itself can never appear in the enumeration, which only
+-- produces `Tests.X` names. And `Tests.Memory.Spike1Reference` defines no `main`
+-- at all -- the grep that put it here matched `mainThread` -- is not a generator
+-- or a probe but this layer's M1 freeze evidence, and was in the name set anyway,
+-- transitively, through two modules that import it. Both are gone. An exclusion
+-- list written by grepping for a keyword is a list of what the grep matched.
 import Tests.Foundation
 import Tests.ISA.X86.CorpusCommon
 import Tests.ISA.X86.LedgerAudit
@@ -249,15 +258,17 @@ run_cmd do
   let imported := env.header.moduleNames
   let onDisk ← modulesOnDisk (System.FilePath.mk "Grass") `Grass
   let onDiskTests ← modulesOnDisk (System.FilePath.mk "Tests") `Tests
+  -- The six modules above, and only those. `Tests` is not enumerated by
+  -- `modulesOnDisk` and `Tests.Memory.Spike1Reference` has no `main`; both were
+  -- here and both suppressed nothing.
   let generators : Array Name :=
-    #[`Tests, `Tests.ABI.Win64.UnwindCorpus, `Tests.ISA.X86.DecodeCorpus,
+    #[`Tests.ABI.Win64.UnwindCorpus, `Tests.ISA.X86.DecodeCorpus,
       `Tests.ISA.X86.MachineProbes, `Tests.ISA.X86.NasmCorpus,
-      `Tests.ISA.X86.RipCorpus, `Tests.ISA.X86.SourceCorpus,
-      `Tests.Memory.Spike1Reference]
+      `Tests.ISA.X86.RipCorpus, `Tests.ISA.X86.SourceCorpus]
   let missing := (onDisk ++ onDiskTests.filter (fun m => !generators.contains m)).filter
     fun m => !imported.contains m
   unless missing.isEmpty do
-    throwError m!"declaration list coverage gap: these modules exist under Grass/ but are not imported by Tools/DeclNames.lean:
+    throwError m!"declaration list coverage gap: these modules exist under Grass/ or Tests/ but are not imported by Tools/DeclNames.lean:
 {MessageData.joinSep (missing.toList.map (m!"  {·}")) "
 "}"
   let mut out : Array String := #[]

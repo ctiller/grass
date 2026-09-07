@@ -175,9 +175,6 @@ DOORS = {
 # comment the next two patterns blank anyway. `blank` rather than deletion, because a
 # report that points at the wrong line is the defect this file's sibling was found
 # with twice.
-BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
-LINE = re.compile(r"--.*?$", re.MULTILINE)
-STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 
 
 # A tactic that names a declaration without applying it. `unfold f at h` was reported
@@ -202,6 +199,33 @@ def blank(match: "re.Match[str]") -> str:
     return "\n" * match.group(0).count("\n")
 
 
+# **A scanner rather than three regexes, because Lean nests block comments and a
+# regex cannot.** What stood here was `/-.*?-/` non-greedy, `--.*?$`, and a
+# single-line string, applied in an order two rounds argued about. Both remaining
+# orders were wrong, and review demonstrated both:
+#
+#   * `/- outer /- inner -/ code -/` -- the non-greedy block closes at the first
+#     `-/`, so `code` survives as source. A declaration referenced only inside a
+#     comment counted as used, and a fixture nothing consumes went unreported.
+#   * `-- a note mentioning /- something` -- `LINE` ran last, so a `/-` inside a
+#     line comment opened a block for `BLOCK`, which swallowed every line down to
+#     the next `-/` anywhere in the file. Review hid a real `MemoryState.alias`
+#     call in `Grass/Memory/Loan.lean` behind one and all nine gates stayed green
+#     -- the same demonstration that put `alias` in `DOORS`, reached through the
+#     stripper instead of through the allowlist.
+#
+# The scanner tracks block-comment depth, opens a line comment on `--` only at
+# depth zero and outside a string, and keeps a string literal from spanning lines.
+# Every consumed character becomes a space and every newline is kept, so offsets
+# and line numbers are the source's. Five gates share this; it is written out in
+# each rather than imported, which is the same duplication the three patterns had.
+#
+# `QUOTE` and `BACKSLASH` are spelled with `chr` so that this file's own source
+# carries neither where a reader might take it for the thing being matched.
+QUOTE = chr(34)
+BACKSLASH = chr(92)
+
+
 def strip(source: str) -> str:
     """Blank out block comments, line comments and string literals, keeping the line
     structure.
@@ -212,7 +236,69 @@ def strip(source: str) -> str:
     block comments — so this function now preserves newlines and the self-test seeds
     one.
     """
-    return LINE.sub(blank, BLOCK.sub(blank, STRING.sub(blank, source)))
+    out: list[str] = []
+    depth = 0
+    in_string = False
+    in_line_comment = False
+    index = 0
+    size = len(source)
+    while index < size:
+        char = source[index]
+        if char == chr(10):
+            out.append(chr(10))
+            in_line_comment = False
+            # A string literal does not span lines in Lean, so one left open at a
+            # newline is a lexical error in the source rather than licence to
+            # blank the rest of the file.
+            in_string = False
+            index += 1
+            continue
+        if in_line_comment:
+            out.append(chr(32))
+            index += 1
+            continue
+        if in_string:
+            if char == BACKSLASH and index + 1 < size:
+                out.append(chr(32) * 2)
+                index += 2
+                continue
+            out.append(chr(32))
+            if char == QUOTE:
+                in_string = False
+            index += 1
+            continue
+        if depth > 0:
+            if source.startswith(chr(47) + chr(45), index):
+                depth += 1
+                out.append(chr(32) * 2)
+                index += 2
+                continue
+            if source.startswith(chr(45) + chr(47), index):
+                depth -= 1
+                out.append(chr(32) * 2)
+                index += 2
+                continue
+            out.append(chr(32))
+            index += 1
+            continue
+        if source.startswith(chr(47) + chr(45), index):
+            depth = 1
+            out.append(chr(32) * 2)
+            index += 2
+            continue
+        if source.startswith(chr(45) * 2, index):
+            in_line_comment = True
+            out.append(chr(32) * 2)
+            index += 2
+            continue
+        if char == QUOTE:
+            in_string = True
+            out.append(chr(32))
+            index += 1
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
 
 
 TACTIC_OPENER = re.compile(r"(?:^|\bby\b|;|<;>|·|\|)[ \t]*$")
@@ -353,6 +439,25 @@ def self_test() -> int:
               + "-- registers the callee " + quote + "saves" + chr(10))
     if not analyse({OUTSIDE: quoted}):
         print("  SELF-TEST FAILED: a quote in a line comment hides a real door call")
+        failures += 1
+
+    # A `/-` inside a *line comment* used to open a block for the old regex
+    # stripper, which then swallowed every line down to the next `-/` -- real code
+    # included. Review hid a real `alias` call behind one and all nine gates stayed
+    # green, which is the same demonstration that put `alias` in `DOORS`.
+    hidden = ("-- a note mentioning /- something" + chr(10)
+              + "def f (s : MemoryState) := s.issue? id grant" + chr(10)
+              + "/- an ordinary closing note. -/" + chr(10))
+    if not analyse({OUTSIDE: hidden}):
+        print("  SELF-TEST FAILED: a `/-` in a line comment hides a real door call")
+        failures += 1
+
+    # And the other direction: a nested block comment must stay a comment all the
+    # way to its own closing `-/`, not to the first one.
+    nested = ("/- outer /- inner -/ def f (s : MemoryState) := s.issue? id g -/"
+              + chr(10))
+    if analyse({OUTSIDE: nested}):
+        print("  SELF-TEST FAILED: a call inside a nested block comment is reported")
         failures += 1
 
     focused = "theorem t : True := by\n  constructor <;> simp [MemoryState.issue?]\n"

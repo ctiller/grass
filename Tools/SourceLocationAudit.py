@@ -92,8 +92,6 @@ def uncovered(paths: list[str]) -> list[str]:
     return sorted(out)
 
 
-BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
-LINE = re.compile(r"--.*?$", re.MULTILINE)
 # Single-line deliberately. `STRING` runs *first* now, so that a `/-` inside a
 # string literal cannot open a comment in the scanner's eyes -- review wrote
 # `def a := "/-"` above an `axiom` and below `def b := "-/"` and the whole run of
@@ -101,7 +99,6 @@ LINE = re.compile(r"--.*?$", re.MULTILINE)
 # span lines, because a stray quote inside a comment would then eat real code, so
 # it cannot: a stray quote reaches the end of its own line and no further, and that
 # line is a comment `BLOCK` or `LINE` blanks anyway.
-STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 
 # What may not appear in a Lean file no build elaborates. `Tools/AxiomAudit.lean`
 # covers all of this inside the elaborated environment and cannot reach these files at
@@ -143,6 +140,33 @@ def blank(match: "re.Match[str]") -> str:
     return chr(10) * match.group(0).count(chr(10))
 
 
+# **A scanner rather than three regexes, because Lean nests block comments and a
+# regex cannot.** What stood here was `/-.*?-/` non-greedy, `--.*?$`, and a
+# single-line string, applied in an order two rounds argued about. Both remaining
+# orders were wrong, and review demonstrated both:
+#
+#   * `/- outer /- inner -/ code -/` -- the non-greedy block closes at the first
+#     `-/`, so `code` survives as source. A declaration referenced only inside a
+#     comment counted as used, and a fixture nothing consumes went unreported.
+#   * `-- a note mentioning /- something` -- `LINE` ran last, so a `/-` inside a
+#     line comment opened a block for `BLOCK`, which swallowed every line down to
+#     the next `-/` anywhere in the file. Review hid a real `MemoryState.alias`
+#     call in `Grass/Memory/Loan.lean` behind one and all nine gates stayed green
+#     -- the same demonstration that put `alias` in `DOORS`, reached through the
+#     stripper instead of through the allowlist.
+#
+# The scanner tracks block-comment depth, opens a line comment on `--` only at
+# depth zero and outside a string, and keeps a string literal from spanning lines.
+# Every consumed character becomes a space and every newline is kept, so offsets
+# and line numbers are the source's. Five gates share this; it is written out in
+# each rather than imported, which is the same duplication the three patterns had.
+#
+# `QUOTE` and `BACKSLASH` are spelled with `chr` so that this file's own source
+# carries neither where a reader might take it for the thing being matched.
+QUOTE = chr(34)
+BACKSLASH = chr(92)
+
+
 def strip(source: str) -> str:
     """Blank comments and string literals, keeping the line structure.
 
@@ -154,7 +178,69 @@ def strip(source: str) -> str:
     matters is blanking too much rather than too little, and a `/-` inside a string
     literal blanked every line to the next `-/`.
     """
-    return LINE.sub(blank, BLOCK.sub(blank, STRING.sub(blank, source)))
+    out: list[str] = []
+    depth = 0
+    in_string = False
+    in_line_comment = False
+    index = 0
+    size = len(source)
+    while index < size:
+        char = source[index]
+        if char == chr(10):
+            out.append(chr(10))
+            in_line_comment = False
+            # A string literal does not span lines in Lean, so one left open at a
+            # newline is a lexical error in the source rather than licence to
+            # blank the rest of the file.
+            in_string = False
+            index += 1
+            continue
+        if in_line_comment:
+            out.append(chr(32))
+            index += 1
+            continue
+        if in_string:
+            if char == BACKSLASH and index + 1 < size:
+                out.append(chr(32) * 2)
+                index += 2
+                continue
+            out.append(chr(32))
+            if char == QUOTE:
+                in_string = False
+            index += 1
+            continue
+        if depth > 0:
+            if source.startswith(chr(47) + chr(45), index):
+                depth += 1
+                out.append(chr(32) * 2)
+                index += 2
+                continue
+            if source.startswith(chr(45) + chr(47), index):
+                depth -= 1
+                out.append(chr(32) * 2)
+                index += 2
+                continue
+            out.append(chr(32))
+            index += 1
+            continue
+        if source.startswith(chr(47) + chr(45), index):
+            depth = 1
+            out.append(chr(32) * 2)
+            index += 2
+            continue
+        if source.startswith(chr(45) * 2, index):
+            in_line_comment = True
+            out.append(chr(32) * 2)
+            index += 2
+            continue
+        if char == QUOTE:
+            in_string = True
+            out.append(chr(32))
+            index += 1
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
 
 
 def untrusted(paths: list[str]) -> list[str]:

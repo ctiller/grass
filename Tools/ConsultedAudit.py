@@ -24,6 +24,20 @@ advertised the stronger reading and review corrected it:
   So an allowlist entry can record a judgement the tool could never have needed, and
   the gap it documents can be unreportable. Read an entry as a note to a human, not
   as a suppression the tool relies on.
+- **It covers this branch's tree, not the repository.** `SCOPE` below names the
+  subtrees, which are the ones this branch had before merging `origin/main`:
+  `Grass/{Certificate,Core,Memory,Obligation,Op,Resource,Semantics,Std,Trust,
+  Verify}` and `Tests/{Foundation,Memory,Op,Resource,Std}`. `Grass/ISA`,
+  `Grass/ABI`, `Grass/Process` and their fixtures are **not covered by this gate
+  or by anything of this kind** — not because they are clean, but because
+  reporting a declaration as unread is a judgement only that code's owner can
+  make. Four of the subtrees that *are* covered belong to other owners too; their
+  findings are allowlisted with the reason and reported rather than decided here.
+
+  The comment above `SCOPE` used to say "the honest statement of coverage is in
+  the module docstring", and there was no such statement in any of the four
+  docstrings. A sentence that delegates to text nobody wrote is worse than no
+  sentence: it reads as a promise kept.
 - It cannot tell a projection from a suffix that merely looks like one.
 - Comments and string literals are stripped before scanning, so prose mentioning
   `.owner` no longer counts as a reader. That was a real false negative.
@@ -31,7 +45,7 @@ advertised the stronger reading and review corrected it:
   was also a real false negative: an external constructor made an unread field
   pass.
 
-So a clean run means **no declared field name is entirely absent from the
+So a clean run means **no field name declared in `SCOPE` is entirely absent from the
 sources**. It does not mean every field is meaningfully consumed, and it is not
 evidence that the defect class is closed. It is one cheap net over a class that
 six rounds of human-style review kept missing, and it under-reports by design.
@@ -52,30 +66,92 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# **Scope: the modules this gate was written for.**
+# **Scope: the tree this branch had before merging main.**
 #
 # Merging `origin/main` put three other owners' trees under these globs -- `Grass/ISA`,
 # `Grass/ABI`, `Grass/Process` and their fixtures -- and this gate immediately reported
-# hundreds of findings in them. Every one may be true and none is this branch's to
-# judge: an allowlist entry here records that *somebody read the corpus and decided*,
-# and nobody on this branch has read theirs. A gate that reports what its author cannot
-# adjudicate produces a list nobody acts on, which is how an allowlist fills with
-# entries that record nothing.
+# findings in them. Every one may be true and none is this branch's to judge: an
+# allowlist entry here records that *somebody read the corpus and decided*, and nobody
+# on this branch has read theirs.
 #
-# So the scope is named rather than implied, and widening it is one edit. The honest
-# statement of coverage is in the module docstring: this gate covers the memory layer,
-# and the rest of the tree is not covered by anything of this kind. That has been
-# reported to those owners rather than decided here.
-SCOPE = ("Memory", "Obligation", "Resource", "Op", "Core", "Std", "Trust", "Semantics")
+# **The first version of this list was written by hand and was wrong in both
+# directions.** It named eight subtrees from memory and dropped three that were in this
+# branch's own tree before the merge -- `Grass/Certificate.lean`, `Grass/Verify/` and
+# `Tests/Foundation.lean` -- which cost one live finding and made two allowlist entries
+# read as inert. A scope written from what the author remembered owning is the same
+# defect as a count written from reading rather than running. It is the pre-merge tree
+# now, which is a fact rather than a recollection: `git ls-tree b9d4200 Grass/ Tests/`.
+#
+# Widening it is one edit, and the module docstring says what is not covered.
+SCOPE = ("Certificate", "Core", "Memory", "Obligation", "Op", "Resource", "Semantics",
+         "Std", "Trust", "Verify", "Foundation")
 
 
 def in_scope(path) -> bool:
-    """Whether a path lies in one of `SCOPE`'s subtrees, or at a tree's root."""
-    parts = path.parts
-    for i, part in enumerate(parts):
-        if part in ("Grass", "Tests") and i + 1 < len(parts):
-            return parts[i + 1].removesuffix(".lean") in SCOPE
-    return True
+    """Whether a path lies in one of `SCOPE`'s subtrees.
+
+    Relative to `ROOT`, not by scanning absolute components for the first `Grass` or
+    `Tests`. The scanning form had two failures review demonstrated: a path under a
+    top-level directory this branch has not created yet fell out silently, and a
+    checkout directory *named* `Grass` -- which is what this project is called -- made
+    the repository root the first match and put every file out of scope.
+    """
+    try:
+        parts = path.resolve().relative_to(ROOT).parts
+    except ValueError:
+        # Outside the repository: not this gate's business, and not silently in scope.
+        return False
+    if len(parts) < 2 or parts[0] not in ("Grass", "Tests"):
+        return True
+    return parts[1].removesuffix(".lean") in SCOPE
+
+
+def scope_is_covered(paths, trees=("Grass", "Tests")) -> list[str]:
+    """Report if the scope filter has emptied the file list or lost a known subtree.
+
+    **`SCOPE` was a coverage claim with nothing behind it.** Review dropped one token
+    from it and three gates went silent for this layer while printing their success
+    lines; no self-test touched `in_scope`, because every self-test writes probe files
+    into a temporary directory and calls the scanner directly, so the path filter is
+    never on the tested path. Only total emptiness was guarded, and only in three of the
+    six gates.
+
+    A floor rather than an emptiness check, in the shape
+    `Tools/DocstringAudit.py`'s `declaration_names` already uses (`if len(known) <
+    1000`): every subtree named in `SCOPE` that exists on disk must contribute at
+    least one file.
+
+    **What this cannot catch, stated because the first version of this paragraph
+    claimed it could.** It derives its expectation from `SCOPE`, so deleting a token
+    from `SCOPE` deletes the check for that subtree along with it -- exactly the
+    attack it was written against, and it passes. What it does catch is the globs or
+    `in_scope` breaking under a `SCOPE` that still names the subtree, which is the
+    other half and the one no gate had.
+
+    The authority on `SCOPE`'s *contents* is `self_test`, which asserts membership
+    against four hard-coded paths rather than against `SCOPE`. CI runs every gate's
+    self-test before the gate, so a narrowed `SCOPE` fails there. A check derived
+    from the thing it is checking is not a check, and saying which half is which is
+    the whole content of this paragraph.
+
+    `trees` is which of `Grass/` and `Tests/` this gate's list actually covers;
+    asking about the other one reports every subtree of it as unreached, which
+    is the first thing this check did.
+    """
+    missing = []
+    for name in SCOPE:
+        for tree in trees:
+            candidate = ROOT / tree / name
+            if not (candidate.is_dir() or candidate.with_suffix(".lean").is_file()):
+                continue
+            prefix = (tree, name)
+            if not any(
+                    p.resolve().relative_to(ROOT).parts[:2] in
+                    (prefix, (tree, name + ".lean"))
+                    for p in paths):
+                missing.append(f"  {tree}/{name}: in SCOPE, on disk, and no file "
+                               "reached the scan")
+    return missing
 
 
 DECLARED_IN = [p for p in sorted((ROOT / "Grass").rglob("*.lean")) if in_scope(p)]
@@ -174,14 +250,34 @@ STRUCTURE = re.compile(r"^\s*(?:private\s+)?structure\s+([A-Za-z_][A-Za-z0-9_.']
 # docs/MEMORY_IMPLEMENTATION_PLAN.md and in their own docstrings, which is where a
 # gap this tool cannot see belongs.
 ALLOWED = {
-    # --- Six entries left this list on merging `origin/main`, and the reason is a
-    # --- warning rather than good news. `label`, `observations`, `disposition`,
-    # --- `lifecycle`, `initialGraph` and `parseExact` all stopped suppressing
-    # --- anything -- not because the memory-layer field gained a reader, but
-    # --- because another tree now declares a field of the same name and projects
-    # --- *it*. `AccessDescriptor.observations` still has no reader; so does
-    # --- `PendingRender.observations`, and the projection of the latter satisfies
-    # --- the scan for both.
+    # --- Six entries left this list on merging `origin/main`, and they left for
+    # --- three different reasons, which the note that deleted them gave as one.
+    #
+    # --- FOUR to same-name blindness: `label`, `observations`, `disposition` and
+    # --- `lifecycle` stopped suppressing anything not because the memory-layer
+    # --- field gained a reader, but because another tree now declares a field of
+    # --- the same name and projects *it*. `AccessDescriptor.observations` still
+    # --- has no reader; so does `PendingRender.observations`; one projection
+    # --- satisfies the scan for both. That is the warning.
+    #
+    # --- ONE to a genuine reader: `ExecutionPrefix.initialGraph` gained one in the
+    # --- merge, `ExecutionPrefix.ext` in its own declaring module. Good news,
+    # --- reported as a warning, because the note counted causes by their number
+    # --- rather than checking them one at a time.
+    #
+    # --- AND ONE THAT NEVER WENT INERT AT ALL. `parseExact` is declared once in
+    # --- the whole tree and constructed once, and no other tree carries the name.
+    # --- It stopped being reported because `Grass/Certificate.lean` fell out of
+    # --- `SCOPE` -- a hand-written list that dropped three of this branch's own
+    # --- pre-merge subtrees. Deleting the entry turned a recorded, routed gap into
+    # --- one recorded nowhere and reportable nowhere. It is back, qualified, with
+    # --- the reason the group above gives: another owner's module, listed rather
+    # --- than silently skipped, and reported to them rather than decided here.
+    #
+    # --- **A cause read off a coincidence of timing is not a cause.** Six entries
+    # --- went inert in one commit and the note attributed all six to the one
+    # --- mechanism that explained the first it looked at.
+    "ArtifactFormat.parseExact",
     #
     # --- **Merging main widened this scan's same-name blind spot materially.** It
     # --- was a documented limitation with a handful of instances; over a tree three
@@ -293,8 +389,10 @@ ALLOWED = {
     # profile closure is the reader. Its own docstring says so.
     "issuer",
     # --- `Grass/Semantics/Execution.lean` is another owner's module, arrived by
-    # --- merging main. Five fields of `InfiniteContinuation` and `ExecutionPrefix`
-    # --- are unprojected there. Listed rather than silently skipped, and reported to
+    # --- merging main. Four fields of `InfiniteContinuation` are unprojected
+    # --- there. This said five and named `ExecutionPrefix` as a second structure;
+    # --- the fifth was `initialGraph`, `ExecutionPrefix`'s only entry here, which the
+    # --- merge deleted from this list without re-counting the sentence above it. Listed rather than silently skipped, and reported to
     # --- that owner rather than decided here: whether an infinite continuation's
     # --- witness fields are meant to be read is their call, not this layer's.
     "eventAt",
@@ -305,6 +403,22 @@ ALLOWED = {
     # *already* silenced, by the bare `origin` entry two groups above, whose reason
     # ("diagnostic identity, never dispatched on") is false of it. Reported to that
     # owner in `c-mem:53`, an addendum to `c-mem:52`, rather than decided here.
+    # --- And five more went inert one commit later, when `SCOPE` was corrected.
+    # --- `InfiniteContinuation.stateAt`, `.graphAt`, `.choiceAt`, `SpecProcess.admits`
+    # --- and `SpecProcess.observationProjection` are still declared and still
+    # --- projected nowhere in their own modules. They read as inert because the
+    # --- *declaration* side of this scan is scoped and the *reader* side is not, and
+    # --- must not be: a field may legitimately be read from another owner's code, so
+    # --- the corpus is the whole tree and a same-named projection anywhere satisfies
+    # --- the scan. That asymmetry is correct and it is what makes the blindness
+    # --- worse on a large tree than on a small one.
+    #
+    # --- They are recorded here rather than listed, on this branch's own rule: an
+    # --- entry that suppresses nothing records a decision about nothing, and one
+    # --- kept anyway reads as a judgement the gate is still making. `c-mem:55`
+    # --- reported them to `Grass/Semantics`'s owner as allowlisted; the correction
+    # --- is that they are reported and no longer allowlistable, which is a weaker
+    # --- position and the true one.
     "DerivedDemandFamily.origin",
     # Five more of the same, which merging `origin/main` brought in: three witness
     # fields of `InfiniteContinuation` beside the four already listed, and both fields
@@ -312,11 +426,6 @@ ALLOWED = {
     # skipped, reported to that owner rather than decided here. `SpecProcess.admits` is
     # the one worth their eye: a process specification whose admission relation nothing
     # projects is a specification nothing checks against.
-    "InfiniteContinuation.stateAt",
-    "InfiniteContinuation.graphAt",
-    "InfiniteContinuation.choiceAt",
-    "SpecProcess.admits",
-    "SpecProcess.observationProjection",
     # Diagnostic provenance carried into the trace for a report to read, never
     # dispatched on, like `id` and `origin` above. Two structures carry a field so
     # named and the reason is true of both, so both are listed -- which is the point of
@@ -370,9 +479,33 @@ def blank(match: "re.Match[str]") -> str:
 # comment the next two patterns blank anyway. `blank` rather than deletion, because a
 # report that points at the wrong line is the defect this file's sibling was found
 # with twice.
-BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
-LINE = re.compile(r"--.*?$", re.MULTILINE)
-STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+
+
+# **A scanner rather than three regexes, because Lean nests block comments and a
+# regex cannot.** What stood here was `/-.*?-/` non-greedy, `--.*?$`, and a
+# single-line string, applied in an order two rounds argued about. Both remaining
+# orders were wrong, and review demonstrated both:
+#
+#   * `/- outer /- inner -/ code -/` -- the non-greedy block closes at the first
+#     `-/`, so `code` survives as source. A declaration referenced only inside a
+#     comment counted as used, and a fixture nothing consumes went unreported.
+#   * `-- a note mentioning /- something` -- `LINE` ran last, so a `/-` inside a
+#     line comment opened a block for `BLOCK`, which swallowed every line down to
+#     the next `-/` anywhere in the file. Review hid a real `MemoryState.alias`
+#     call in `Grass/Memory/Loan.lean` behind one and all nine gates stayed green
+#     -- the same demonstration that put `alias` in `DOORS`, reached through the
+#     stripper instead of through the allowlist.
+#
+# The scanner tracks block-comment depth, opens a line comment on `--` only at
+# depth zero and outside a string, and keeps a string literal from spanning lines.
+# Every consumed character becomes a space and every newline is kept, so offsets
+# and line numbers are the source's. Five gates share this; it is written out in
+# each rather than imported, which is the same duplication the three patterns had.
+#
+# `QUOTE` and `BACKSLASH` are spelled with `chr` so that this file's own source
+# carries neither where a reader might take it for the thing being matched.
+QUOTE = chr(34)
+BACKSLASH = chr(92)
 
 
 def scannable(text: str) -> str:
@@ -381,7 +514,69 @@ def scannable(text: str) -> str:
     Prose mentioning `.owner` and a docstring quoting a field name are not
     readers, and counting them was a false negative review found.
     """
-    return LINE.sub(blank, BLOCK.sub(blank, STRING.sub(blank, text)))
+    out: list[str] = []
+    depth = 0
+    in_string = False
+    in_line_comment = False
+    index = 0
+    size = len(text)
+    while index < size:
+        char = text[index]
+        if char == chr(10):
+            out.append(chr(10))
+            in_line_comment = False
+            # A string literal does not span lines in Lean, so one left open at a
+            # newline is a lexical error in the source rather than licence to
+            # blank the rest of the file.
+            in_string = False
+            index += 1
+            continue
+        if in_line_comment:
+            out.append(chr(32))
+            index += 1
+            continue
+        if in_string:
+            if char == BACKSLASH and index + 1 < size:
+                out.append(chr(32) * 2)
+                index += 2
+                continue
+            out.append(chr(32))
+            if char == QUOTE:
+                in_string = False
+            index += 1
+            continue
+        if depth > 0:
+            if text.startswith(chr(47) + chr(45), index):
+                depth += 1
+                out.append(chr(32) * 2)
+                index += 2
+                continue
+            if text.startswith(chr(45) + chr(47), index):
+                depth -= 1
+                out.append(chr(32) * 2)
+                index += 2
+                continue
+            out.append(chr(32))
+            index += 1
+            continue
+        if text.startswith(chr(47) + chr(45), index):
+            depth = 1
+            out.append(chr(32) * 2)
+            index += 2
+            continue
+        if text.startswith(chr(45) * 2, index):
+            in_line_comment = True
+            out.append(chr(32) * 2)
+            index += 2
+            continue
+        if char == QUOTE:
+            in_string = True
+            out.append(chr(32))
+            index += 1
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
 
 
 def fields_in(text: str) -> list[tuple[str, str, int]]:
@@ -405,7 +600,7 @@ def fields_in(text: str) -> list[tuple[str, str, int]]:
     """
     out: list[tuple[str, str, int]] = []
     current: str | None = None
-    for number, line in enumerate(BLOCK.sub(blank, text).splitlines(), 1):
+    for number, line in enumerate(scannable(text).splitlines(), 1):
         stripped = line.strip()
         match = STRUCTURE.match(line)
         if match:
@@ -578,6 +773,27 @@ def self_test() -> int:
         print("  SELF-TEST FAILED: a missing `sealClauses` is not reported")
         failures_qualified += 1
 
+    # `in_scope`, both directions, and the floor. `SCOPE` was a coverage claim with
+    # nothing behind it: review dropped one token and this gate went silent for the
+    # memory layer while still printing its success line. No self-test reached the
+    # path filter, because every case here writes probes into a temporary directory
+    # and calls the scanner directly.
+    if not in_scope(ROOT / "Grass" / "Memory" / "State.lean"):
+        print("  SELF-TEST FAILED: Grass/Memory is out of scope")
+        failures_qualified += 1
+    if not in_scope(ROOT / "Tests" / "Memory" / "Loans.lean"):
+        print("  SELF-TEST FAILED: Tests/Memory is out of scope")
+        failures_qualified += 1
+    if in_scope(ROOT / "Grass" / "ISA" / "X86" / "Decode.lean"):
+        print("  SELF-TEST FAILED: Grass/ISA is in scope")
+        failures_qualified += 1
+    if in_scope(ROOT / "Grass" / "Process" / "Bag.lean"):
+        print("  SELF-TEST FAILED: Grass/Process is in scope")
+        failures_qualified += 1
+    if scope_is_covered(DECLARED_IN, ("Grass",)):
+        print("  SELF-TEST FAILED: a SCOPE subtree on disk reached no file")
+        failures_qualified += 1
+
     failures = failures_qualified
     for label, sources, should_report in cases:
         reported = any("Probe.quarry" in line for line in analyse(sources))
@@ -740,6 +956,15 @@ def main() -> int:
         print("unknown option(s): " + " ".join(unknown), file=sys.stderr)
         print("known: " + ", ".join(sorted(KNOWN_OPTIONS)), file=sys.stderr)
         return 2
+    # The scope floor, before anything else runs. `SCOPE` is a coverage claim and
+    # review showed it was one nothing checked: dropping a single token from it
+    # switched this gate off for the memory layer and it printed its success line.
+    uncovered_scope = scope_is_covered(DECLARED_IN, ("Grass",))
+    if uncovered_scope:
+        print(chr(10).join(uncovered_scope))
+        print(chr(10) + "SCOPE names a subtree that reached no file. Widen the"
+              " globs or correct SCOPE -- a gate that scans nothing passes.")
+        return 1
     if "--self-test" in sys.argv:
         return self_test()
     declared = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")

@@ -104,12 +104,26 @@ HEDGES = (
 # means. The reviewer read them as review scratch and this file briefly agreed;
 # both were wrong, and removing them would have suppressed a legitimate
 # exemption in `Grass/Memory/Event.lean`.
-HEDGE_RE = re.compile(
-    "|".join(
-        r"\b" + re.escape(h.lower()).replace(r"\ ", " ") + r"\b"
-        for h in HEDGES
+def _hedge_re(entries) -> "re.Pattern[str]":
+    """The hedge alternation, as a function so `--inert` can rebuild it.
+
+    `--inert` used to decide whether an entry was live by asking whether its text
+    appeared anywhere in the joined findings. `HEDGE_RE` matches on word boundaries
+    and that test did not, so the mode whose job is to police this list reproduced
+    the substring bug the comment above `HEDGES` records fixing -- review seeded a
+    sentence containing `XMM6` and watched `M6` stop being reported as inert while
+    still silencing nothing. It under-reported, which is the direction that leaves a
+    dead entry looking alive.
+    """
+    return re.compile(
+        "|".join(
+            r"\b" + re.escape(h.lower()).replace(r"\ ", " ") + r"\b"
+            for h in entries
+        )
     )
-)
+
+
+HEDGE_RE = _hedge_re(HEDGES)
 
 # Which unresolved names are worth reporting.
 #
@@ -136,7 +150,21 @@ LEAN_STYLE_NAME = re.compile(r"^[a-z][A-Za-z0-9']*(_[A-Za-z0-9'][A-Za-z0-9']*)+$
 
 # A backticked identifier is the "names the enforcing type or theorem" part.
 IDENT = re.compile(r"`([A-Za-z_][A-Za-z0-9_.?!']*)`")
-# Section references and prose in backticks are not identifiers.
+# Section references and prose in backticks are not identifiers -- **and this
+# cannot fire.** `IDENT`'s capture class is `[A-Za-z_][A-Za-z0-9_.?!']*`, which
+# contains no slash, no section mark and no space, so no string `IDENT` can produce
+# matches any of this pattern's three alternations. It is a dead constant filtering
+# a set it cannot intersect, and review proved it by construction rather than by
+# corpus.
+#
+# Kept rather than deleted, and this comment is the reason. The shape it describes
+# is real -- docstrings do write backticked document paths and section marks -- and
+# what makes it unreachable is `IDENT`'s class, which is upstream and load-bearing.
+# Widening `IDENT` to catch those and then filtering them here would be two changes
+# to reach today's behaviour. This file's header records a reviewer finding
+# `SELF_NAMING` "defined and never used" and treats that as a real finding; the
+# difference is that `SELF_NAMING` was a check somebody believed was running, and
+# this is a guard whose work is already done one line earlier.
 NOT_IDENT = re.compile(r"^(docs/|§|[a-z]+\s)")
 
 
@@ -302,6 +330,19 @@ def self_test() -> int:
             print(f"  SELF-TEST FAILED [{label}]: expected {want}")
             failures += 1
 
+    # The root walk, which nothing exercised. Every case above seeds a probe into
+    # a temporary directory and calls `check` directly, so narrowing the roots was
+    # invisible here -- and `c-mem:54` was answered on the assumption that a floor
+    # in this gate held the roots in place. It does now.
+    walked = sorted((ROOT / "Grass").rglob("*.lean"))
+    if roots_are_covered(walked):
+        print("  SELF-TEST FAILED: the root walk misses a subtree on disk")
+        failures += 1
+    if not roots_are_covered([p for p in walked
+                              if "Memory" not in p.parts]):
+        print("  SELF-TEST FAILED: a missing subtree is not reported")
+        failures += 1
+
     if failures:
         print(f"docstring audit self-test: {failures} failure(s)")
         return 1
@@ -314,6 +355,36 @@ def self_test() -> int:
 # line -- review swept the modes across the seven gates and got seven green lines, one
 # of which was not the check it named.
 KNOWN_OPTIONS = {"--self-test", "--inert", "--hedged"}
+
+
+def roots_are_covered(paths) -> list[str]:
+    """Report if the root walk has lost a subtree it is supposed to cover.
+
+    This gate is deliberately *unscoped*: it audits every docstring under `Grass/`,
+    other owners' included, because a claim-shaped sentence is a claim wherever it is
+    written. `Tools/DeclNames.lean`'s name oracle widened to `Tests/` and the roots did
+    not, which is the asymmetry `c-mem:54` settled -- a fixture's own prose is not held
+    to §3.10, while a `Grass/` docstring may cite a fixture.
+
+    An asymmetry is worth only as much as the thing that holds it in place. That answer
+    named floors "asserting what the gate walks"; there were none, in this gate or in
+    its self-test, which seeds probes into a temporary directory and calls `check`
+    directly so the walk is never exercised. This is that floor: a representative
+    subtree from each owner must reach the scan, so narrowing the roots fails rather
+    than quietening.
+    """
+    required = ("Memory", "Obligation", "Op", "ISA", "ABI", "Process")
+    reached = set()
+    for path in paths:
+        try:
+            parts = path.resolve().relative_to(ROOT).parts
+        except ValueError:
+            continue
+        if len(parts) > 1 and parts[0] == "Grass":
+            reached.add(parts[1].removesuffix(".lean"))
+    missing = [name for name in required
+               if (ROOT / "Grass" / name).is_dir() and name not in reached]
+    return [f"  Grass/{name}: on disk and no file reached the scan" for name in missing]
 
 
 def main() -> int:
@@ -333,6 +404,12 @@ def main() -> int:
     if not paths:
         print(f"docstring audit: no sources found under {root}", file=sys.stderr)
         return 1
+    uncovered_roots = roots_are_covered(paths)
+    if uncovered_roots:
+        print(chr(10).join(uncovered_roots), file=sys.stderr)
+        print("the root walk lost a subtree; narrowing the roots is not a "
+              "quieter run, it is a smaller claim", file=sys.stderr)
+        return 1
     known = declaration_names()
     if "--hedged" in sys.argv:
         listed: list[str] = []
@@ -345,15 +422,36 @@ def main() -> int:
               "and naming nothing enforcing them")
         return 0
     if "--inert" in sys.argv:
+        # Leave-one-out, the shape every other gate's `--inert` uses, rather than a
+        # substring test that disagreed with `HEDGE_RE` about what a match is.
+        #
+        # The baseline is the findings with the *full* hedge set. Taking it with
+        # hedges disabled instead makes every narrowed run a subset of it, so every
+        # entry reads as inert -- which is what the first version of this loop did,
+        # reporting all thirty-nine. A leave-one-out compares against the run the
+        # gate actually makes.
+        #
+        # Two entries that silence the *same* sentence and nothing else both read
+        # as inert here, because removing either leaves the other covering it.
+        # That is leave-one-out's known shape and it errs towards reporting, which
+        # is the safe direction for a list whose entries are supposed to be read.
         global HEDGE_RE
-        saved = HEDGE_RE
-        HEDGE_RE = re.compile(r"(?!)")
-        widened: list[str] = []
-        for path in paths:
-            widened.extend(check(path, known))
-        HEDGE_RE = saved
-        blob = " ".join(widened).lower()
-        inert = [entry for entry in HEDGES if entry.lower() not in blob]
+        global HEDGES
+        original = HEDGES
+        base = set()
+        for source in paths:
+            base.update(check(source, known))
+        inert = []
+        for entry in original:
+            HEDGES = tuple(h for h in original if h != entry)
+            HEDGE_RE = _hedge_re(HEDGES)
+            narrowed: list[str] = []
+            for source in paths:
+                narrowed.extend(check(source, known))
+            if not set(narrowed) - base:
+                inert.append(entry)
+        HEDGES = original
+        HEDGE_RE = _hedge_re(HEDGES)
         if inert:
             print("hedge entries that silence nothing: " + ", ".join(sorted(inert)))
             print("Delete them, or say why the entry is kept with no effect.")
