@@ -5,6 +5,11 @@ param(
     [string[]]$Declaration = @(
         "Grass.StableId.render_of_empty_namespace",
         "Grass.RequirementKind.extension_injective",
+        "Grass.DemandFamily.identity_mem_identities",
+        "Grass.DemandFamily.identities_nodup",
+        "Grass.DerivedDemandFamily.prior_mem_allKeys",
+        "Grass.DerivedDemandFamily.identity_mem_allKeys",
+        "Grass.DerivedDemandFamily.allKeys_nodup",
         "Grass.DemandCertificateFamily.get",
         "Grass.ObservationProjection.ext",
         "Grass.ObservationProjection.identity_project",
