@@ -56,6 +56,18 @@ to equal it *at that state*. `gaugeCorrect.viewAccepts` then obliges
 `remaining.render` to agree with `intendedView` everywhere, so any mutation of
 the render breaks it — constant, off-by-one or swapped alike.
 
+**Read that as evidence about this acceptance and not about acceptances.**
+`agent-bus` ruling `g-design:84` on `c-process:69` is explicit that a
+`ProcessAcceptance` field is trusted specification input under
+`docs/FOUNDATION.md` law 15: an author who wants a vacuous one can write the
+render graph, `fun facet state view => view = facet.render state`, and no field
+of the record refuses it. What this file exhibits is that `gaugeAcceptance` — an
+acceptance written intent-first — rejects a wrong render. `intendedView` is
+textually what `remaining.render` computes, so a reader still has to take on
+trust that the intent was written first; that is the boundary, and
+`Grass/Process/Acceptance.lean`'s module note states it rather than leaving this
+fixture to imply otherwise.
+
 It is still stated as `∀ same : facet = remaining, …`, because `ViewAccepts`
 receives a facet and a value of *that facet's* view type, so an agreement about
 this specification's view has to name the facet before it can compare values. At

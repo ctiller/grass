@@ -176,7 +176,11 @@ def userFacing (name : Name) : Name := (privateToUserName? name).getD name
 /-- Whether a declaration belongs to the audited namespace. -/
 def isAudited (name : Name) : Bool :=
   let n := userFacing name
-  (`Grass).isPrefixOf n && !n.isInternal
+  (`Grass).isPrefixOf n
+
+run_cmd do
+  unless isAudited `Grass._authoredUnderscoreProbe do
+    throwError "axiom audit would skip an authored underscore-prefixed Grass declaration"
 
 /--
 Attributes that make a declaration's compiled behaviour differ from its logical

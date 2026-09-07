@@ -147,6 +147,7 @@ incarnation recording any parent at all is rejected.
   observeAtRoot := rfl
   maySpawn := fun _ _ => False
   sharedAccess := fun _ region => region.elim
+  sharedInvariant := fun region => region.elim
   population :=
     { bound := fun _ => .exactlyOne
       identity := fun _ => .static }
@@ -172,6 +173,13 @@ type, which is what "no channels" costs. -/
   steps := fun edge => edge.elim
   channel := fun edge => edge.elim
   sessionOpenIsRecorded := fun edge => edge.elim
+  -- No channels, so nothing can coalesce and no shared regions, so nothing can
+  -- be written: `ProcessPlan.coalescing`, `sharedUpdate` and their laws are all
+  -- eliminations here. Both notes say the cost lands only on plans that use the
+  -- feature; this is what that looks like.
+  coalescing := fun edge => edge.elim
+  sharedUpdate := fun _ _ _ _ _ _ region => region.elim
+  sharedUpdatePreserves := fun _ _ _ _ _ _ region => region.elim
   escrowImpliesOutstanding := fun edge => edge.elim
 
 /-! ## The network that is waiting -/
@@ -534,6 +542,7 @@ def waiting_is_a_start : waitingPlan.ExactInitialNetwork () waiting where
   onlyTheRoot := fun _ _ _ _ => ⟨rfl, rfl⟩
   nothingInFlight := fun edge => edge.elim
   sessionsFresh := fun edge => edge.elim
+  sharedInvariantAtStart := fun region => region.elim
   historyFromEmpty := .extend (.refl _) theRootsGeneration theRootsGeneration_admissible
 
 
@@ -802,6 +811,7 @@ theorem the_tick_is_a_step : waitingPlan.StepsLocally waiting waiting () () (.ex
   emittedIsProjected := rfl
   producesPending := rfl
   writesPermitted := fun region _ => region.elim
+  sharedWritesAdmitted := fun region _ => region.elim
   scope := by
     intro fragment _
     cases fragment with
@@ -903,6 +913,7 @@ theorem waiting_is_wellFormed : waiting.WellFormed where
   reroutesLand := fun edge => edge.elim
   occurrencesOnTheirSession := fun edge _ _ _ => edge.elim
   identitiesDistinct := fun edge _ _ _ _ _ _ => edge.elim
+  sharedInvariantHolds := fun region => region.elim
 
 /-- **So it is sound**, which is what `terminated_result_is_exact` wanted. -/
 theorem waiting_is_sound : waitingPlan.Sound waiting :=

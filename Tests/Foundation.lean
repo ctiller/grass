@@ -358,6 +358,42 @@ def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.g
   step := fun _ => trivial
   consistent := ⟨rfl, rfl⟩
 
+/-- A non-vacuous indexed continuation: state and graph both advance at every
+step, while its observable events alternate. -/
+abbrev indexedSystem : RelationalSystem Bool where
+  State := Nat
+  Choice := Unit
+  Graph := Nat
+  Initial := fun state graph => state = 0 ∧ graph = 0
+  Step := fun before state _ event next after =>
+    next = state + 1 ∧ after = before + 1 ∧ event = (state % 2 == 1)
+  Terminal := fun _ _ => False
+  InfiniteConsistent := fun _ _ _ _ _ => True
+  Extends := fun before after => before ≤ after
+  extendsRefl := Nat.le_refl
+  extendsTrans := Nat.le_trans
+  stepExtends := fun transition => transition.2.1 ▸ Nat.le_succ _
+
+abbrev indexedContinuation : indexedSystem.InfiniteContinuation 0 0 [] where
+  stateAt := fun index => index
+  graphAt := fun index => index
+  choiceAt := fun _ => ()
+  eventAt := fun index => index % 2 == 1
+  stateZero := rfl
+  graphZero := rfl
+  step := fun _ => ⟨rfl, rfl, rfl⟩
+  consistent := trivial
+
+theorem indexedPrefixEvents :
+    indexedContinuation.prefixEvents 3 = [false, true, false] := rfl
+
+example : indexedSystem.Steps 0 0 [false, true, false] 3 3 := by
+  rw [← indexedPrefixEvents]
+  exact indexedContinuation.prefixSteps 3
+
+example : indexedSystem.Extends 0 (indexedContinuation.graphAt 3) :=
+  indexedContinuation.graphExtendsAt 3
+
 def completion : system.Completion samplePrefix.state samplePrefix.graph samplePrefix.events :=
   .infinite continuation
 
