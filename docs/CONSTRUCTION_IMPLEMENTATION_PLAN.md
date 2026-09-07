@@ -356,6 +356,12 @@ permissions, definitions, parameterized relocations and external identities,
 entry candidates, and exact source-map ranges, with executable structural
 validation. `.gobj`, COFF, PE, final placement, and relocation/import policy stay
 Artifact-owned; the ISA/ABI backend supplies the exact source/encoding relation.
+`Grass.Construct.Fragment.Registry` supplies C3's explicit constructor closure:
+one finite dependent input carries heterogeneous parameter types and verified
+generators, duplicate identities are rejected before resolution, and a typed
+application can only name a constructor resolved from that exact closure. The
+selected certificate is wrapped with its exact constructor origin without
+changing its instruction expansion; there is no ambient namespace registry.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
