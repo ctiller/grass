@@ -362,6 +362,14 @@ generators, duplicate identities are rejected before resolution, and a typed
 application can only name a constructor resolved from that exact closure. The
 selected certificate is wrapped with its exact constructor origin without
 changing its instruction expansion; there is no ambient namespace registry.
+`Grass.Construct.Source.ConstructorClosure` derives every generated constructor
+occurrence directly from the authored hierarchy, retaining its block, parent
+generator chain, and child path even when the generated body is empty. A source
+advances only with ordinary CFG closure and no occurrence unresolved by its
+exact checked constructor input; structural failures precede constructor
+diagnostics, preserving the staged-checking order. Nominal closure is not
+expansion authority: a separate `CertifiedConstructorSource` requires every
+generated node body to equal one typed application of its resolved constructor.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
