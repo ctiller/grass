@@ -107,6 +107,84 @@ import Grass.Std.Logical.Text
 import Grass.Std.Logical.Vec
 import Grass.Trust.Audit
 import Grass.Verify.VerifiedProgram
+import Tests.ABI.Win64.UnwindCorpus
+import Tests.Build.Cache.Key
+import Tests.Emit
+import Tests.Facade.Containment
+import Tests.Facade.ISAX86
+import Tests.Facade.PlatformWin32
+import Tests.Foundation
+import Tests.ISA.X86.CorpusCommon
+import Tests.ISA.X86.DecodeCorpus
+import Tests.ISA.X86.LedgerAudit
+import Tests.ISA.X86.MachineProbes
+import Tests.ISA.X86.NasmCorpus
+import Tests.ISA.X86.RipCorpus
+import Tests.ISA.X86.SourceCorpus
+import Tests.ISA.X86.Spike1Addressing
+import Tests.Memory.Spike1Reference
+import Tests.Op.FakeIsa
+import Tests.Process.AdapterFixtures
+import Tests.Process.AssertionFixtures
+import Tests.Process.BlendFixtures
+import Tests.Process.CancellationFixtures
+import Tests.Process.ChannelFixtures
+import Tests.Process.ChannelStepFixtures
+import Tests.Process.ChatterFixtures
+import Tests.Process.ChildBindingFixtures
+import Tests.Process.ChimeFixtures
+import Tests.Process.CloseFixtures
+import Tests.Process.CommitFixtures
+import Tests.Process.ComposeFixtures
+import Tests.Process.CountdownCorrectFixtures
+import Tests.Process.DeliveryFixtures
+import Tests.Process.DetachFixtures
+import Tests.Process.EndingFixtures
+import Tests.Process.EscrowFixtures
+import Tests.Process.FacadeCancellationFixtures
+import Tests.Process.FacadeFixtures
+import Tests.Process.FacetFixtures
+import Tests.Process.FrontierFixtures
+import Tests.Process.IdentityFixtures
+import Tests.Process.IndependenceFixtures
+import Tests.Process.InstanceFixtures
+import Tests.Process.LayeringFixtures
+import Tests.Process.LayeringSpecificationOnly
+import Tests.Process.LensFixtures
+import Tests.Process.LifecycleStepFixtures
+import Tests.Process.LinearizationFixtures
+import Tests.Process.M1CorrectFixtures
+import Tests.Process.M1Fixtures
+import Tests.Process.M2GraphFixtures
+import Tests.Process.MailboxFixtures
+import Tests.Process.MergeFixtures
+import Tests.Process.OscillateFixtures
+import Tests.Process.PrefixFixtures
+import Tests.Process.PreservationFixtures
+import Tests.Process.ProcessStepFixtures
+import Tests.Process.ProgressFixtures
+import Tests.Process.RerouteFixtures
+import Tests.Process.RestartFixtures
+import Tests.Process.RichAcceptanceFixtures
+import Tests.Process.SequentialEffectFixtures
+import Tests.Process.SerialFixtures
+import Tests.Process.SpinFixtures
+import Tests.Process.StandardFixtures
+import Tests.Process.StructuralNetworkFixtures
+import Tests.Process.TerminationFixtures
+import Tests.Process.TransitionFixtures
+import Tests.Process.ViewFixtures
+import Tests.Process.WeaveFixtures
+import Tests.Process.WorldFixtures
+import Tests.Resource.CompositionSplit
+import Tests.Std.Chunking
+import Tests.Std.HostBytes
+import Tests.Std.PartialWrite
+import Tests.Std.SpikeSurface
+import Tests.Std.StableSort
+import Tests.Std.Text
+import Tests.Std.VecInstances
+import Tests.Std.VecVocabulary
 
 /-!
 # Every declaration name the build knows
@@ -168,7 +246,8 @@ run_cmd do
   -- naming nothing. A loud failure beats a mystery finding.
   let imported := env.header.moduleNames
   let onDisk ← modulesOnDisk (System.FilePath.mk "Grass") `Grass
-  let missing := onDisk.filter fun m => !imported.contains m
+  let onDiskTests ← modulesOnDisk (System.FilePath.mk "Tests") `Tests
+  let missing := (onDisk ++ onDiskTests).filter fun m => !imported.contains m
   unless missing.isEmpty do
     throwError m!"declaration list coverage gap: these modules exist under Grass/ but are not imported by Tools/DeclNames.lean:
 {MessageData.joinSep (missing.toList.map (m!"  {·}")) "

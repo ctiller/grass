@@ -469,7 +469,8 @@ theorem commonProfileLedger_coherent : commonProfileLedger.Coherent := by decide
 /-!
 ### Coverage is not proved here
 
-There was a `commonProfileLedger_covers` theorem in this position, discharging
+There was a commonProfileLedger_covers theorem in this position -- named
+without backticks because it no longer exists to look up -- discharging
 `Covers` against a hand-written `Rules.Subject.modeled` list. It was circular:
 `modeled` and `commonProfileLedger.commonSubjects` were built from the same nine
 constants in this file and were equal by `rfl`, so the theorem said

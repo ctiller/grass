@@ -509,13 +509,125 @@ def is_checked_claim(sentence: str) -> bool:
     return True
 
 
+# Lean vocabulary that is neither a constant nor a specification name:
+# tactics and attributes live outside the environment's constant table, so they
+# resolve nowhere while looking exactly like declarations. Kept short and
+# explicit rather than pattern-matched, so adding one is a deliberate act.
+LEAN_VOCABULARY = {"implemented_by", "simp_all", "omega_nat", "decide_eq_true"}
+
+
+def documented_names(root: Path = Path("docs")) -> set[str]:
+    """Every backticked identifier appearing anywhere under `docs/`.
+
+    This is the citation check's resolution set, and it is deliberately wider
+    than `specification_names`, which reads only fenced Lean blocks. The two
+    checks ask different questions. A strong claim must name something that
+    *enforces* it, so it has to resolve to a declaration or to a specification
+    block. A citation only has to not be a typo.
+
+    That difference is what makes the check land. `docs/PROCESS.md` names
+    `no_egress_step_after_terminal` and `parser_chunking_invariant` in prose
+    without ever declaring them in a fenced block; those are honest references
+    to a specification that is ahead of the build, and failing them would just
+    teach authors to stop citing. Meanwhile `every_run_holds_the_root`, the
+    miss `c-process:107` reported, appears in no document and no module at all,
+    because the declaration is really named `every_run_holds_an_unkilled_root`.
+    A set built from documents separates those two cases; the declaration set
+    alone does not.
+    """
+    found: set[str] = set()
+    if not root.is_dir():
+        return found
+    for path in sorted(root.rglob("*.md")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for ident in IDENT.findall(text):
+            found.add(ident)
+        # Also the theorems and axioms declared in fenced Lean blocks, which
+        # `specification_names` withholds on purpose: it supplies nouns for the
+        # claim path, and a specification's planned theorem must never satisfy
+        # a claim of enforcement. A citation is the other case. `docs/PROCESS.md`
+        # declares `no_ingress_step_after_terminal` and `independent_diamond` in
+        # its fenced blocks, and the modules that cite them are pointing at the
+        # specification, not asserting that anything proves them. Accepting them
+        # here leaves that rule exactly where it was and stops the citation
+        # check from punishing a reference to the very document this project
+        # says is authoritative.
+        inside = False
+        for raw in text.splitlines():
+            line = raw.rstrip()
+            if line.startswith("```"):
+                inside = line[3:].strip().lower() == "lean"
+                continue
+            if not inside:
+                continue
+            decl = DOC_DECL.match(line)
+            if decl:
+                found.add(decl.group(2))
+    for name in list(found):
+        parts = name.split(".")
+        for i in range(1, len(parts)):
+            found.add(".".join(parts[i:]))
+    return found
+
+
+def stray_citations(path: Path, line: int, sentence: str, known: set[str],
+                    specs: dict[str, str], modules: set[str],
+                    documented: set[str]) -> list[str]:
+    """Backticked declaration names that resolve nowhere, outside a claim.
+
+    The identifier check used to run only inside sentences carrying a
+    strong-claim word, so a docstring could cite a declaration that does not
+    exist and the gate would exit zero. `c-process:107` reported three misses
+    on one branch -- `every_run_holds_the_root` for a declaration actually
+    named `every_run_holds_an_unkilled_root`, and two more naming declarations
+    the same commit had renamed -- and an earlier sweep of the corpus found
+    nine, one of them deleted three commits before it was cited. The gate
+    exists to stop a citation that looks checkable and is not, and citation rot
+    is that failure with the claim word removed.
+
+    Two things keep this from firing on honest prose, both raised in the same
+    report. Cross-layer and document citations resolve through `specs`, the
+    same set the claim path uses, so naming another layer's declaration is
+    still fine. And a sentence describing work not yet built is exempt through
+    `MILESTONE`, which is already how a claim about future work is excused;
+    reusing it avoids inventing a second vocabulary for the same idea.
+
+    The pattern is narrower than the claim path's. Only `LEAN_STYLE_NAME`
+    matches -- a lowercase word with an underscore in it -- so `RAX`, `INC` and
+    CamelCase field names out of a specification stay ordinary prose. That is
+    deliberate: this check reads every sentence in the corpus rather than the
+    small fraction that make claims, and a false positive here is paid for by
+    everyone.
+    """
+    if MILESTONE.search(sentence):
+        return []
+    stray = [
+        ident
+        for ident in IDENT.findall(sentence)
+        if not NOT_IDENT.match(ident) and ident not in modules
+        and ident not in SORTS and ident not in known and ident not in specs
+        and ident not in documented and ident not in LEAN_VOCABULARY
+        and LEAN_STYLE_NAME.match(ident)
+    ]
+    if not stray:
+        return []
+    return [
+        f"{path.as_posix()}:{line}: cites {stray}, which look like "
+        f"declarations and are not in the build: {sentence!r}"
+    ]
+
+
 def check(path: Path, known: set[str], specs: dict[str, str],
-          modules: set[str], cited: dict[str, str]) -> list[str]:
+          modules: set[str], cited: dict[str, str],
+          documented: set[str]) -> list[str]:
     source = path.read_text(encoding="utf-8")
     findings = []
     for line, block in doc_blocks(source):
         for sentence in sentences(block):
-            if not is_checked_claim(sentence):
+            claimed = is_checked_claim(sentence)
+            if not claimed:
+                findings += stray_citations(path, line, sentence, known,
+                                            specs, modules, documented)
                 continue
             named = [
                 ident
@@ -593,10 +705,12 @@ def main() -> int:
     known = declaration_names()
     specs = specification_names()
     modules = module_names()
+    documented = documented_names()
     cited: dict[str, str] = {}
     findings: list[str] = []
     for path in audited_files():
-        findings.extend(check(path, known, specs, modules, cited))
+        findings.extend(check(path, known, specs, modules, cited,
+                              documented))
     return report(findings, cited)
 
 

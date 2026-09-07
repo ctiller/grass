@@ -47,8 +47,37 @@ _spec.loader.exec_module(audit)
 # exercised every time the audit runs for real.
 KNOWN = {"encode", "Bag", "cons_injective_right", "Prop", "Type", "Sort"}
 
+# A stand-in for what `documented_names` reads out of `docs/`. Synthetic for the
+# same reason `KNOWN` is: these cases are about which resolution set a citation
+# is allowed to use, not about whether the reader of `docs/` works.
+DOCUMENTED = {"no_ingress_step_after_terminal"}
+
 # (name, sentence, expected finding substring or None, reaches the check)
 CASES = [
+    (
+        "citation rot outside a claim",
+        "See `every_run_holds_the_root` in the preservation fixtures.",
+        "cites",
+        False,
+    ),
+    (
+        "specification theorem cited outside a claim",
+        "See `no_ingress_step_after_terminal` for the shape of the argument.",
+        None,
+        False,
+    ),
+    (
+        "unbuilt name in a milestone note",
+        "`asm_source_is_lowered` arrives with M4 and is not here yet.",
+        None,
+        False,
+    ),
+    (
+        "prose word that is not a declaration name",
+        "The result is left in `RAX` and the flags are clobbered.",
+        None,
+        False,
+    ),
     (
         "invented theorem name",
         "`encode` ensures every address has one encoding, as proved by "
@@ -188,10 +217,17 @@ def reaches_check(sentence: str) -> bool:
     return audit.is_checked_claim(sentence)
 
 
+# A case declaring `is_claim=False` is no longer a case that goes unexamined.
+# Since `stray_citations` was added, every sentence is read: a claim goes to the
+# enforcement check, and everything else to the citation check. So `is_claim`
+# now says *which* check a case exercises rather than whether it is checked at
+# all, and the cases below use both settings deliberately.
+
+
 def run_one(tmp: Path, sentence: str, specs, modules, cited) -> list[str]:
     path = tmp / "Case.lean"
     path.write_text("/-!\n" + sentence + "\n-/\n", encoding="utf-8")
-    return audit.check(path, KNOWN, specs, modules, cited)
+    return audit.check(path, KNOWN, specs, modules, cited, DOCUMENTED)
 
 
 # What the gate must still be *looking at*. Every case above calls `check`
