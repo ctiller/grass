@@ -1072,6 +1072,9 @@ The first implementation is incomplete until checked fixtures demonstrate:
    `AuthorityEquiv.trans` succeeds for three empty families whose ambient
    registries contain unused mutually conflicting owners, because equivalence
    composes their exact empty support registries rather than ambient storage.
+   Replacing either input of a compatible family union by an
+   `AuthorityEquiv` family produces an authority-equivalent union; changing an
+   active owner while retaining its stable key fails that congruence theorem.
 6. Row membership embeds dependent results exactly; a forged name-only embedding
    is unconstructible.
 7. Duplicate family keys are rejected, and the lowering selection cannot carry

@@ -679,6 +679,13 @@ structure ProviderDemandFamily.AuthorityEquiv
 theorem ProviderDemandFamily.AuthorityEquiv.refl ...
 theorem ProviderDemandFamily.AuthorityEquiv.symm ...
 theorem ProviderDemandFamily.AuthorityEquiv.trans ...
+theorem ProviderDemandFamily.AuthorityEquiv.union
+    (left : firstLeft.AuthorityEquiv secondLeft)
+    (right : firstRight.AuthorityEquiv secondRight)
+    (firstCompatible : OriginsDisjointOrDescriptorsExact firstLeft firstRight)
+    (secondCompatible : OriginsDisjointOrDescriptorsExact secondLeft secondRight) :
+    (firstLeft.union firstRight firstCompatible).AuthorityEquiv
+      (secondLeft.union secondRight secondCompatible)
 theorem ProviderDemandFamily.ext_sameRegistry
     (sameRegistry : left.authorityRegistry = right.authorityRegistry)
     (sameOrigins : left.origins = right.origins)
