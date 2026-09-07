@@ -357,9 +357,11 @@ never reached memory. Review found both the defect and the false claim.
 **And it has no consumer.** `MemoryEvent.committedWriteRange` is the one the tree
 uses — same definition over an event's own range and count, consumed by
 `MemoryEvent.Conflicts` through `committedRange`. This one is applied nowhere; its
-only mention outside its own four theorems is a sentence in
+only mention outside its own six theorems was a sentence in
 `Tests/Memory/Spike1Reference.lean` saying "`AccessDescriptor.committedWriteRange` is
-what a later proof reads", which is not so. Two Lean encodings of one sentence in one
+what a later proof reads", which was not so and which that file has since corrected —
+this paragraph went on quoting the repaired-away text in the present tense and calling
+it false. Two Lean encodings of one sentence in one
 layer is the [FOUNDATION.md](../../docs/FOUNDATION.md) law 11 objection this document
 raises against `LoanConflicts`, and here the duplicate is the dead one.
 

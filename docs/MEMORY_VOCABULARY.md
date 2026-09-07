@@ -69,9 +69,9 @@ declaration listed here that no longer exists fails the citation audit.
 
 | Declaration | Shape | Note |
 |---|---|---|
-| `AllocationRecord` | `extent`, `epoch`, `space`, `permission`, `live`, `bytes`, `base` | `initialized` was removed as a second source of truth. `base` is an `Option` because a logical address space has unplaced allocations. |
-| `AllocationRecord.Metadata` | the six fields a decision reads | Kept in step with what `denialOf` reads; `base` joined it when the address check landed. |
-| `MemoryState` | `allocations`, `aliases`, private `grants` | The constructor and the grant field are private. Grants enter through `issue?` and leave through `returnGrant?`, and nothing else. |
+| `AllocationRecord` | `extent`, `epoch`, `space`, `source`, `owners`, `permission`, `live`, `bytes`, `base` | `initialized` was removed as a second source of truth. `base` is an `Option` because a logical address space has unplaced allocations. This row omitted `source` and `owners`, both load-bearing: `source` feeds `provenanceSourceMismatch` and `owners` feeds `refusalOf`'s owner exemption. |
+| `AllocationRecord.Metadata` | the seven fields a decision reads | Kept in step with what `denialOf` reads; `base` joined it when the address check landed. |
+| `MemoryState` | `allocations`, `aliases`, private `grants` | The constructor and the grant field are private. Five doors change the grant map -- `issue?`, `returnGrant?`, `splitGrant?`, `joinGrants?`, `transferGrant?` -- and `Tools/DoorAudit.py` is what says nothing else does. |
 | `MachineState` | as declared | |
 | `AuditViolation`, `AuditViolationLedger` | as declared | The ledger's records are private; `records?` is the read view. |
 
@@ -97,7 +97,7 @@ declaration listed here that no longer exists fails the citation audit.
 | Declaration | Shape | Note |
 |---|---|---|
 | `AdmittedVocabulary` | thirteen registries plus the address-space table | See *provisional*: registries have been added five times and will be again. |
-| `AdmissibilityFailure` | ten constructors | Tracks `admissibilityFailures` exactly; a clause can only be added in one place, because `Admits` is that list's emptiness. |
+| `AdmissibilityFailure` | twelve constructors | Tracks `admissibilityFailures` exactly; a clause can only be added in one place, because `Admits` is that list's emptiness. |
 | `MemoryProfile`, `RequiredProofPackage` | as declared | §10's eleven items, as fields. The package is a checklist of propositions, not evidence for them. |
 
 ### Shapes

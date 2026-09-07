@@ -431,8 +431,10 @@ them and the situation is an ordinary race, so the state is `frozen` and nothing
 proceeds. This is deliberately decided on the grants that are actually there rather
 than on `issue?` having refused the mixture.
 
-Not because another door exists — `issue?` is the only one, and `MemoryState.mk` is
-private so there is no fourth way in. Because a rule that holds *only* by an argument
+Not because another door exists — there are five, and `splitGrant?` and `joinGrants?`
+put identities into the map that `issue?` never saw, so an argument resting on "`issue?`
+refused the mixture" would be resting on the wrong premise as well as on the wrong kind
+of premise. Because a rule that holds *only* by an argument
 about how the map was built is one alias declaration away from not holding: two grants
 that do not conflict when issued become conflicting when a profile declares them the
 same storage afterwards, and `docs/MEMORY_MODEL.md` §7.5 makes that a real transition.

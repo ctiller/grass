@@ -334,7 +334,8 @@ type, the docstring says so and names what does enforce it.
 
 ### 3.11 Closure properties for the freeze
 
-Nine properties are required before M1 is called frozen. Each names what enforces
+Ten properties are required before M1 is called frozen — the table below has ten rows
+  and the paragraph under it confirms the tenth is one of them. Each names what enforces
 it, per §3.10; where a type makes the failure unrepresentable that is recorded
 instead of a theorem, because it is the stronger form.
 
@@ -743,9 +744,15 @@ one outright defect that had already merged — see §3.11's denial row.
   *names* are registered now (above), but `RequiresJustification` and
   `ClaimsAtomicity` exist so a §10 package can enumerate outstanding claims and
   nothing under `Grass/` enumerates them. `StepPolicy.unregisteredOnFaultRule?`
-  consults the registries directly rather than through `RequiresJustification`, so
-  that predicate's only consumer is `unregisteredOnFaultRule?_priorEffectsVisible`,
-  a theorem.
+  consults the registries directly rather than through `RequiresJustification`.
+
+  This sentence continued "so that predicate's only consumer is
+  `unregisteredOnFaultRule?_priorEffectsVisible`, a theorem", and it is false on either
+  reading of "that predicate". `RequiresJustification` is what
+  `SubstepSequence.ClaimsAtomicity` is defined as, in three places in
+  `Grass/Memory/Substep.lean`; and `unregisteredOnFaultRule?` is called by `step`
+  itself. What is true is the sentence before it: nothing enumerates outstanding claims,
+  which is the M10 gap.
 - **§10's proof package is closable by triviality, and its docstring calls that the
   mechanism.** ~~All eleven of~~ Eight of `RequiredProofPackage`'s fields are bare
   `Prop`s the profile owner chooses; nothing relates such a field to the profile, to
@@ -1206,10 +1213,15 @@ outside this layer. `ProtocolAuthority.issuer` is already recorded in its own
 docstring as M10 profile-closure work. `TerminalOutcome`'s fields await the
 terminal-accounting mechanism, which is a later milestone.
 
-That leaves `vocabularyVersion`, above, and the three device and retry fields
-below — `AccessIntent.isDevice`, `AccessDescriptor.observations`, and
-`Restartability` — which have a corpus requirement, no consumer, and no milestone
-that owns them.
+That leaves `vocabularyVersion`, `AccessDescriptor.observations` and
+`Restartability` — all three above rather than below — which have a corpus
+requirement, no consumer, and no milestone that owns them.
+
+This list named a fourth, `AccessIntent.isDevice`, which **does not exist**: §4.2 records
+seven hundred lines above that it was "removed from the vocabulary rather than owed", and
+`Grass/Memory/Rights.lean` says "There is no `isDevice`" in as many words. An inventory
+of unread fields that lists a field with nothing to read is the same class as the counts
+below it, one step worse: the number was not merely stale, the item was gone.
 
 Limits, stated rather than discovered later. It cannot see a field consumed by
 pattern matching rather than projection, so those are allowlisted structurally and
@@ -2616,8 +2628,10 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   cited name in backticks, which is precisely what `ReachabilityAudit`'s did not.
 
   §4.4.1's own count was wrong too: it said "the fifth of five allowlist-bearing gates".
-  There are seven allowlists across seven gates. **An exhaustiveness claim about a set
-  of gates is worth checking against the gates**, and this one was written from the list
+  There are **eight** allowlists across seven gates, which the same bullet's own
+  premise says two sentences earlier — `CitationAudit.py` has two. **An exhaustiveness
+  claim about a set of gates is worth checking against the gates**, and this one was
+  written from the list
   of gates that had been repaired rather than from the list that exists.
 - ~~**`Grass/Memory/Profile.lean`'s package docstring named a declaration that has never
   existed.**~~ "`PackageHolds` below is the only thing that turns it into a claim: a
@@ -2871,6 +2885,94 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   do not already do. Latent — no field under `Grass/` is written that way — which is what
   a blind spot looks like from inside, and is the second round running that this one
   pattern has been found too strict.
+
+- ~~**`permissionDenied` covered two corpus sentences**, three lines from the split that
+  closed the last collapse.~~ `denialOf` asked `record.permission.Grants
+  d.requiredPermission` and then `record.permission.Permits d.intent` on adjacent lines
+  and returned one class for both. They are §4's least privilege and §3's "atomics do not
+  grant ordinary non-atomic access", and neither implies the other: a *reading* access
+  declaring `readWrite` against a read-only page fails `Grants` while `Permits` passes,
+  and an ordinary write to an atomic-only page passes `Grants` and fails `Permits`.
+  `AuditViolationClass.intentNotPermitted` is the fourth split of this kind on the branch.
+
+  `Tests/Memory/AtomicAuthority.lean`'s `the_page_grants_but_does_not_permit` had been
+  deciding both conjuncts separately while the theorem beside it asserted the shared
+  class — the third time in four rounds that **the discriminating evidence was already
+  written down and the class name was throwing it away**. It now has a read-only page
+  beside it so each clause is pinned by the class the other cannot produce.
+
+  Found by the round *after* the commit that split `deadProvenance` into three, which
+  edited the same `match` six lines above and ended "a repair that names its own class
+  and then enumerates the instances is a repair that can miss one". The adjacent instance
+  was the one it missed.
+- ~~**Four places said the grant map has two doors, or one. It has five.**~~
+  `Grass/Memory/State.lean` twice, `Grass/Memory/Loan.lean` once and
+  `docs/MEMORY_VOCABULARY.md` once: "the two operations that change it", "reachable only
+  through the two mutators", "`issue?` is the only one, and there is no fourth way in",
+  "grants enter through `issue?` and leave through `returnGrant?`, and nothing else".
+  `splitGrant?`, `joinGrants?` and `transferGrant?` all write the map, all reach it from
+  `step`, and `Tools/DoorAudit.py` — the gate written to guard exactly this — says five in
+  its own docstring, as does §4.4.1 and as does `State.lean` itself sixteen hundred lines
+  below the first of the four.
+
+  Not a hole: the three extra doors are checked and guarded. But this is the **seal
+  argument**, and `Loan.lean`'s version rested its conclusion on a false premise —
+  `splitGrant?` and `joinGrants?` put identities into the map that `issue?` never saw, so
+  "`issue?` refused the mixture" is not available as an argument. A reader auditing "who
+  can change `grants`" was told two, checked two, and stopped.
+- ~~**Fifteen stale counts and enumerations in one round**, and the mechanism that would
+  have caught them.~~ `emittedByTransition` called fifteen in one file and fourteen in
+  another when it is eighteen; `denialOf`'s record fields called five in a framing
+  theorem's justification when they are seven, so the stated justification did not
+  follow from what is proved; `AdmittedVocabulary`'s registries called ten when it carries
+  fourteen, in the half of the sentence claiming it no longer spelled anything out;
+  `RequiredProofPackage`'s weak fields called nine and ten when they are eight;
+  `Tools/DoorAudit.py`'s own door set called "the five plus the two" when `DOORS` has
+  thirteen; `RequirementKind` called a "ten-name closed vocabulary" when it declares
+  twelve and carries an open `extension` escape — **a count written from an allowlist
+  counts the allowlist**; `Tools/DocstringAudit.py` calling itself one of four audits when
+  there are seven and saying it has no self-test 250 lines below its own; §4.4.1's own
+  "seven allowlists across seven gates" contradicted by that bullet's own premise two
+  sentences earlier; "nine properties" over a ten-row table; and an inventory of unread
+  fields listing `AccessIntent.isDevice`, which §4.2 records as *removed from the
+  vocabulary* seven hundred lines above and which `Grass/Memory/Rights.lean` says does not
+  exist.
+
+  Two mechanisms, because the class has produced findings in four consecutive rounds.
+  `AuditViolationClass.emittedByTransition_length` puts the number in a `by decide`
+  theorem, so adding a class breaks the build at the line the number lives on and every
+  sentence stating it cites the theorem instead of the digits.
+  `Tools/DoorAudit.py`'s `self_test` asserts `len(DOORS)`, which is the same trick where
+  the countable thing is a Python dict.
+
+  **`Tools/CitationAudit.py` resolves a cited *name*; nothing resolves a cited *number*,
+  and prose is where every count in this layer lives.** Where a count cannot be pinned by
+  a theorem or a self-test, the repair is to stop writing it: "one clause per registry an
+  access descriptor can name" is a rule, and "ten registries" is a number that will be
+  wrong again.
+- ~~**`grantsOver`'s one-line summary claimed an epoch filter its own docstring
+  retracts.**~~ "The grants outstanding over the same bytes as `provenance`, meeting
+  `range`, **in the epoch that provenance names**" — and twenty lines below, "**And no
+  epoch clause.** There was one, and it was wrong in the unsafe direction". The summary
+  also said three departures where there are four. `grantsOver` is what `AnyGrantOver`,
+  `LoanConflicts`, `WritableByAnother`, `NonAtomicHeldByAnother` and therefore
+  `authorityOf` and `refusalOf` all read, so a reader skimming the first line and
+  concluding "a stale grant is not in this list" reasons from the premise the deletion was
+  made against.
+- ~~**§4.4.1 carried an open bullet asserting the opposite of a struck one**, four
+  rounds.~~ "`MemoryEvent.WellFormed` has no consumer … nothing in the tree would notice
+  one becoming false" sat unstruck in the same section as the bullet ending "All thirteen
+  are caught now" and naming the file that closed it. §4.4.1's own text names the failure
+  three bullets earlier: "This bullet stayed on the owed list for two commits after the
+  work landed, which is the same failure as an overclaim pointing the other way."
+- **The authority applier checks no context set and the ledger applier does, and now says
+  why.** `LedgerDelta.Applicable` requires a transfer's `newOwner ∈ contexts`;
+  `applyAuthorityDelta?` requires nothing of a grant's holder or recipient. The stranding
+  argument does not carry across — a duty is discharged only by its owner, while
+  `returnGrant?` accepts the *lender*, and its docstring makes a non-stepping holder
+  deliberate. What is left is that the bytes stay frozen until the lender acts. Review
+  found the asymmetry rather than a consequence: two appliers written to be parallel
+  differed in a checked precondition with no sentence anywhere saying why.
 
 ### 4.4.1a Which profile inputs can weaken a rule
 
@@ -3392,18 +3494,17 @@ the field belongs beside it as something that can only add.
   violation. The rule against collapsing distinguishable failures is stated three
   times in this layer and was broken once. `conflictingAccess` is its own class, and
   `a_race_is_recorded_as_a_race` pins it with the nothing-is-held conjunct beside it.
-- **`MemoryEvent.WellFormed` has no consumer.** Review replaced all thirteen clauses
-  with an empty structure and the whole build stayed green, including
-  `step_events_wellFormed`, which holds because it says nothing about what well-formed
-  means. No clause is projected outside its own module: `ofOutcome` supplies all
-  thirteen unconditionally from `Committed`'s proof fields, and nothing reads one
-  back. So `ValidMemoryEvent`'s proof-carrying shape does not gate anything a caller
-  could otherwise produce — the gating is entirely in `Committed`, and sealing `mk`
-  stops a bypass of a check that cannot fail.
+- ~~**`MemoryEvent.WellFormed` has no consumer.**~~ Closed, and this bullet asserted
+  the opposite of the struck bullet above it — the one ending "All thirteen are caught
+  now" and naming `Tests/Memory/EventClauses.lean` as what landed — for four rounds, in
+  the same section list. Two entries in §4.4.1 saying opposite things about one
+  predicate is the failure §4.4.1 names three bullets earlier: "This bullet stayed on
+  the owed list for two commits after the work landed, which is the same failure as an
+  overclaim pointing the other way."
 
-  The clauses are not wrong and M8 will read them; what is wrong is that nothing in
-  the tree would notice one becoming false, including the two clauses a previous round
-  added *because* two records of one fact had no clause tying them.
+  The record above is the accurate one. The seal has eleven clauses now, not thirteen;
+  `sealClauses` restates each and `Tools/ConsultedAudit.py`'s `seal_labels` pins the
+  labels to the structure's field names from outside Lean.
 - ~~**`not_conflicts_of_untouched` was still vacuous, and its docstring said it was
   not.**~~ The correction from `EventKind.fence` to `touchesMemory` moved the vacuity
   rather than removing it: `kindOf` yields three kinds, all of which touch memory, and

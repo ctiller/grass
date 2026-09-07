@@ -270,8 +270,9 @@ theorem the_refused_block_access_changes_nothing :
 
 /-! ## The four clauses ahead of the bounds clause, which nothing discriminated
 
-`AuditViolationClass.emittedByTransition` declares fourteen classes a profile must
-recognize. Two of them -- `wrongAddressSpace` and `deadProvenance` -- appeared nowhere
+`AuditViolationClass.emittedByTransition` declares the classes a profile must
+recognize — `AuditViolationClass.emittedByTransition_length` is how many, stated as a
+theorem because this sentence carried the number and went stale four times. Two of them -- `wrongAddressSpace` and `deadProvenance` -- appeared nowhere
 under `Tests/` at all, and review switched off each of the four `denialOf` clauses that
 produce them with the tree staying green.
 

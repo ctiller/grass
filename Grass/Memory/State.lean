@@ -197,8 +197,10 @@ available to every caller — and two of this project's own fixtures used it. Re
 wrote the same attack again through the field. A comment saying "there is no second
 door" was in the file at the time.
 
-So the field is private and the two operations that change it are here:
-`issue?` and `returnGrant?`. `Grass/Memory/Loan.lean` states §3's laws over
+So the field is private and the five operations that change it are here: `issue?`,
+`returnGrant?`, `splitGrant?`, `joinGrants?` and `transferGrant?` — which is the door
+set `Tools/DoorAudit.py` guards, and this sentence said two for as long as there have
+been five. `Grass/Memory/Loan.lean` states §3's laws over
 them and adds the loan-specific refusals; `grantEntries` and `grantAt?` are the
 read-only views everything else uses.
 
@@ -218,7 +220,7 @@ review rebuilt `Tests/Op/StandardLoan.lean`'s own lent state with the loan filte
 out of `grantEntries`, and the thread's store committed. That is the same failure
 `Grass/Memory/ByteStore.lean`'s comment records for `ByteStore.rec`, and this module
 had it while claiming there was no second door. `MemoryState.rec` cannot construct,
-so with `mk` private the map is reachable only through the two mutators.
+so with `mk` private the map is reachable only through the five mutators above.
 -/
 
 /--
@@ -468,10 +470,14 @@ theorem currentEpoch_of_live {state : MemoryState} {provenance : Provenance}
       exact ((Bool.and_eq_true _ _).mp h).2
 
 /--
-The grants outstanding over the same *bytes* as `provenance`, meeting `range`, in
-the epoch that provenance names.
+The grants outstanding over the same *bytes* as `provenance`, meeting `range`.
 
-Three departures from the obvious filter, each of which review demonstrated:
+**No epoch filter**, which this sentence claimed for as long as there has not been one —
+the fourth departure below is the argument for deleting it, twenty lines under a summary
+asserting it. A reader skimming this line and concluding "a stale grant is not in this
+list" reasons from the premise the deletion was made against.
+
+Four departures from the obvious filter, each of which review demonstrated:
 
 **`MemoryState.SharesBytes`, not `Provenance.SameStorage`.** `Grass/Memory/State.lean`
 records that `Conflicts` used to require `SameStorage` and "declared every aliased
@@ -1718,7 +1724,7 @@ worth stating as one; naming it as a theorem is worth less than silence.
 Apply one declared authority change, or refuse.
 
 **The actor is the access's context**, and this is where a delta is *authorized* as
-opposed to merely accepted by the map. Two of the five doors take no actor —
+opposed to merely accepted by the map. Three of the five doors take no actor —
 `issue?` reads the lender from the grant it is given, and `splitGrant?` and
 `joinGrants?` are re-descriptions the map alone can check — so their actor rules are
 here:
@@ -3013,9 +3019,15 @@ so the two axes are "a different allocation" and "a disjoint range within the
 same one"; both are below. -/
 
 /-- A write changes no allocation's metadata: extent, epoch, space, permission,
-and liveness come back unchanged. `denialOf` reads exactly those five fields, so
-`write_preserves_metadata` is what says a write cannot quietly widen what a later
-access may reach. -/
+and liveness come back unchanged.
+
+`denialOf` reads **seven** record fields plus initialization, not five: `source` and
+`base` are the two this theorem does not mention, and `AllocationRecord.Metadata`
+carries all seven. So "a write cannot quietly widen what a later access may reach" does
+not follow from the five equalities below — it follows from `write`'s type, which
+returns a record differing in `bytes` alone. This theorem is the readable half of that
+and the sentence claiming otherwise overstated it; the paragraph above
+`AllocationRecord.Metadata` is where the seven are counted. -/
 theorem write_preserves_metadata (state : MemoryState) (id : AllocId) (start : Nat)
     (bytes : ByteSeq) (initializes : Bool) (other : AllocId) (record : AllocationRecord)
     (h : (state.write id start bytes initializes).allocations.lookup other = some record) :

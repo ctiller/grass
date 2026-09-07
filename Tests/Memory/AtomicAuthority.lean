@@ -336,10 +336,58 @@ theorem the_page_grants_but_does_not_permit :
     ¬ Permission.atomicReadWrite.Permits plainStore.intent := by
   exact ⟨by decide, by decide, by decide⟩
 
-/-- **So the ordinary write is denied**, by the clause §4.4.1 called unreachable. -/
+/-- **So the ordinary write is denied**, by the clause §4.4.1 called unreachable, and
+with its own class.
+
+`denialOf` returned `permissionDenied` from both this clause and the `Grants` clause
+above it, so this theorem named a class the least-privilege rule produces too — and the
+theorem above, which pins `Grants` true and `Permits` false, was carrying the whole
+distinction while the class threw it away. `a_declaration_beyond_the_page_is_denied`
+below is the other side of the pair. -/
 theorem the_ordinary_write_to_an_atomic_page_is_denied :
-    denialOf pagedAtomically plainStore = some AuditViolationClass.permissionDenied := by
+    denialOf pagedAtomically plainStore =
+      some AuditViolationClass.intentNotPermitted := by
   decide
+
+/-- A read-only page, so the other clause can be reached with this one passing. The
+atomic page cannot do it: `atomicReadWrite` permits no ordinary intent at all, so
+`Permits` fails there whatever the declaration says. -/
+def readOnlyPage : AllocId := allocs.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- Provenance of it. -/
+def readOnlyPageProv : Provenance := { counterProv with root := readOnlyPage }
+
+/-- A state holding it. -/
+def pagedReadOnly : MemoryState :=
+  (pagedAtomically.allocate? readOnlyPage
+    { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
+      source := .virtualAlloc, owners := [lender]
+      permission := .readOnly, live := true, bytes := .empty
+      base := some 0x4000 }).getD pagedAtomically
+
+/-- An ordinary **read** of it, declaring more than the page carries. -/
+def overDeclaredLoad : AccessDescriptor :=
+  { context := holder, address := .numeric 0x4000, space := .cpuVirtual
+    provenance := readOnlyPageProv, range := ⟨0, 8⟩, intent := .read
+    requiredPermission := .readWrite, alignment := 1
+    initialization := .readsNothing, producesInitialized := true }
+
+/-- **And a declaration the page does not grant is denied by the other class**, from a
+descriptor whose *intent* the page does permit. `Grants` refuses the declaration,
+`Permits` accepts the intent, so the two clauses are separated by evidence rather than
+by reading the code — without this the split would be two names for one rule. -/
+theorem a_declaration_beyond_the_page_is_denied :
+    ¬ Permission.readOnly.Grants overDeclaredLoad.requiredPermission ∧
+    Permission.readOnly.Permits overDeclaredLoad.intent ∧
+    denialOf pagedReadOnly overDeclaredLoad =
+      some AuditViolationClass.permissionDenied := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- And the same read declaring only what it uses is admitted, so the refusal above is
+the declaration and not the page. -/
+theorem the_same_read_declaring_what_it_uses_is_admitted :
+    denialOf pagedReadOnly { overDeclaredLoad with requiredPermission := .readOnly } =
+      Option.none := by decide
 
 /-- And the atomic access to the same page is admitted, so the page is not one that
 denies everything and the theorem above is the intent rather than the storage.

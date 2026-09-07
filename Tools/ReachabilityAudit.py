@@ -113,12 +113,22 @@ ALLOWED = {
     # --- and the reason differs per entry.
     #
     # Requirement vocabulary from another owner's modules, which arrived here by
-    # merging main. `RequirementKind` declares ten constructors and nothing in the
-    # tree builds one; `DemandFamily.kind`'s own docstring calls it "exact metadata
+    # merging main. `RequirementKind` declares **twelve** constructors and nothing in
+    # the tree builds one; `DemandFamily.kind`'s own docstring calls it "exact metadata
     # only", so unbuilt is consistent with its intent -- a demand provider supplies
-    # the kind, and no provider exists yet. Listed rather than silenced, and
-    # reported to that owner: whether a ten-name closed vocabulary with no producer
-    # and no consumer is the right shape is their decision, not this branch's.
+    # the kind, and no provider exists yet. Listed rather than silenced, and reported to
+    # that owner: whether a twelve-name vocabulary with no producer and no consumer is
+    # the right shape is their decision, not this branch's.
+    #
+    # This said "ten" and "a ten-name **closed** vocabulary", and both halves were
+    # written from the ten entries below rather than from the type. The other two,
+    # `memory` and `artifact`, pass this gate only through its own documented same-name
+    # blindness -- `.memory` matches `state.memory` on hundreds of lines -- so they are
+    # not listed here and cannot be, since an entry for a name this scanner is blind to
+    # reads as a judgement somebody made and is not one. And the vocabulary is not
+    # closed: `extension (owner kind : StableId)` is an open escape, which is the whole
+    # subject of the `g-design:13` ruling that module cites. **A count written from an
+    # allowlist counts the allowlist.**
     "RequirementKind.functional",
     "RequirementKind.safety",
     "RequirementKind.concurrency",

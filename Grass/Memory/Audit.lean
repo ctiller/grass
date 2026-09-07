@@ -93,8 +93,32 @@ docstrings, each asserting the same class -- the discriminating evidence was alr
 written down and the class name was throwing it away. -/
 def staleEpoch : AuditViolationClass := ⟨⟨"staleEpoch"⟩⟩
 
-/-- An access was attempted without the permission it requires. -/
+/-- The storage does not grant the permission the access **declared it requires**,
+which is §4's least privilege read at the access.
+
+About `AccessDescriptor.requiredPermission` and not about the intent: an access may
+declare more than it uses, and declaring more than the page carries is refused whether
+or not the intent would have needed it. -/
 def permissionDenied : AuditViolationClass := ⟨⟨"permissionDenied"⟩⟩
+
+/-- The storage grants what the access declared and does not permit what it **intends**,
+which is §3's "atomics do not grant ordinary non-atomic access" read at the access.
+
+Split from `permissionDenied`, and the fourth split of this kind on this branch after
+`conflictingAccess`, `authorityNotHeld` and `staleEpoch`. `denialOf` asked `Grants` and
+then `Permits` on two adjacent lines and returned one class for both, so a profile
+reading §8's ledger could not tell a least-privilege violation from an atomicity one.
+Neither implies the other: a *reading* access declaring `readWrite` against a read-only
+page fails `Grants` while `Permits` passes, and an ordinary write to an atomic-only page
+passes `Grants` and fails `Permits` — which
+`Tests/Memory/AtomicAuthority.lean`'s `the_page_grants_but_does_not_permit` had been
+deciding, conjunct by conjunct, while the theorem beside it asserted the shared class.
+
+**Found three lines from the previous split, by the round after it.** The commit that
+separated `deadProvenance` into three edited this same `match` six lines above and ended
+"a repair that names its own class and then enumerates the instances is a repair that
+can miss one". The adjacent instance was the one it missed. -/
+def intentNotPermitted : AuditViolationClass := ⟨⟨"intentNotPermitted"⟩⟩
 
 /-- A read was attempted of bytes that are not initialized. -/
 def uninitializedRead : AuditViolationClass := ⟨⟨"uninitializedRead"⟩⟩
@@ -152,10 +176,13 @@ Distinct from `authorityUnavailable`, and this class exists because it was not.
 clause, §3's holder clause, and this. Review demonstrated a race recorded as
 `authorityUnavailable` from a state where *nothing was held* — the ledger entry
 byte-identical in class to a genuine loan violation. The rule against collapsing
-distinguishable failures is stated five times in this layer — here for
-`wrongAddressSpace`, again for `authorityEffectRefused`, again for
-`faultWithUndeclaredAuthorityEffect`, again for `provenanceExtentMismatch`, and again
-for `authorityNotHeld`, which is the second split it produced — and §7.3's second
+distinguishable failures is stated once for each class that has needed it — for
+`wrongAddressSpace` here, and again wherever a split was made: `authorityEffectRefused`,
+`faultWithUndeclaredAuthorityEffect`, `provenanceExtentMismatch`, `authorityNotHeld`,
+`staleEpoch` and `intentNotPermitted`. It is not counted any more, because the count
+went stale three rounds running and once **in the same diff that added another
+statement of it** — a number that rises whenever the rule is applied is a number nobody
+will re-read at the moment they are applying it. And §7.3's second
 paragraph — race-freedom as a
 claim separate from an authority claim — could not be stated by a profile while it was
 broken.
@@ -286,11 +313,28 @@ this list.
 -/
 def emittedByTransition : List AuditViolationClass :=
   [outOfBounds, provenanceNotAllocated, deadProvenance, staleEpoch,
-   permissionDenied, uninitializedRead,
+   permissionDenied, intentNotPermitted, uninitializedRead,
    authorityUnavailable, authorityNotHeld, obligationNotAuthorized, wrongAddressSpace,
    machineAnswerIncomplete, provenanceExtentMismatch, provenanceSourceMismatch,
    addressDisagreesWithPlacement, placementWraps, authorityEffectRefused,
    conflictingAccess]
+
+/-- **The length, as a theorem, because nothing adjudicates a number in prose.**
+
+Review found fourteen stale counts in one round — this list called fifteen in one file
+and fourteen in another, `AdmittedVocabulary`'s registries called ten when they are
+fourteen, `RequiredProofPackage`'s weak fields called ten when they are eight, and
+`Tools/DoorAudit.py`'s door set called seven when it is thirteen. `CitationAudit`
+resolves a cited *name*; no gate resolves a cited *number*, and prose is where every
+count in this layer lives.
+
+This is the cheapest mechanism that exists: put the number in a `by decide` theorem, so
+adding a class breaks the build here and whoever adds it has to come to this line. Every
+sentence that states the count cites this theorem, so the sentence and the number are one
+edit apart rather than in different files. Where a count can be pinned this way it should
+be; where it cannot — a Python dict, a structure's fields — the gate's own `self_test` is
+the place, and `Tools/DoorAudit.py` has one now. -/
+theorem emittedByTransition_length : emittedByTransition.length = 18 := by decide
 
 end AuditViolationClass
 

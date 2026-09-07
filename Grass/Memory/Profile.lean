@@ -425,16 +425,19 @@ that, and a first attempt at this was too. Here the list is the definition and
 
 This is applicability, in the sense of `docs/MEMORY_MODEL.md` §9. An access naming an
 open nominal name that was never declared fails here, before any question of whether it
-would succeed — one clause per registry `AdmittedVocabulary` carries, which today is
-address space, allocation source, provenance step kind, fault class, obligation kind,
-obligation protocol, grant kind, ordering mode, scope and initialization rule.
+would succeed — **one clause per registry an access descriptor or its declared effects
+can name.**
 
-This sentence listed eight of the ten. `grantKindNotRecognized` and
-`protocolNotRecognized` are the two most recently added registries and nobody
-re-counted, while the two fixtures pinning them each say "which is where every other
-undeclared open name is caught" — pointing a reader at a list that omitted them. It is
-phrased over `AdmittedVocabulary`'s registries rather than spelled out now, which is
-the shape that does not go stale when the next registry lands.
+That boundary is the whole of it, and stating the boundary rather than the list is the
+third attempt at this sentence. `AdmittedVocabulary` carries fourteen registries; four
+of them — `auditViolationClasses`, `contextKinds`, `atomicityJustifications` and
+`faultVisibilityRules` — are named by a *step* or a *substep sequence* rather than by a
+descriptor, so they are gated in `Grass/Op/Step.lean` and not here. The first version of
+this sentence spelled out eight names when there were ten; the second spelled out ten
+when there are fourteen carriers, in the half of the sentence that claimed it no longer
+spelled anything out. **A rule phrased over a set is only as good as the set it names**,
+and the set here was never `AdmittedVocabulary`'s fields — it was always the ones a
+descriptor reaches.
 -/
 def admissibilityFailures (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) :
     List AdmissibilityFailure :=

@@ -16,8 +16,12 @@ argument or by the end of the line — so `state.issue? id grant` is a call, so 
 `id grant |> state.issue?`, so is a call whose arguments wrap to the next line, and
 `MemoryState.issue?` named in a `simp` set or after an `unfold` is not.
 
-The doors are the five that change the map plus the two effect appliers, and the
-allowed callers differ: only the two modules that own the field may reach the map's
+The doors are the five that change the grant map, the two effect appliers, the
+aliasing declaration, the authority minter, and the three allocation-table mutators --
+thirteen, which `DOORS` is and `self_test` now asserts. This sentence said "the five
+plus the two" for as long as there have been thirteen, in the file whose subject is
+which doors exist; each of the six it omitted is defended at length by a comment in
+`DOORS` itself. The allowed callers differ per door: only the two modules that own the field may reach the map's
 doors, while the transition may reach `applyAuthorityEffect?`, because that is the one
 place the acting context is not the caller's to choose.
 
@@ -312,6 +316,15 @@ def self_test() -> int:
     named_lemma = "theorem t : True := by exact MemoryState.issue?_eq_none_of_absent h\n"
     if analyse({OUTSIDE: named_lemma}):
         print("  SELF-TEST FAILED: `exact` naming a door's lemma is reported as a call")
+        failures += 1
+
+    # The door set's own size, because the module docstring named it and went stale:
+    # it said "the five that change the map plus the two effect appliers" for as long as
+    # there have been thirteen. A number in a comment is adjudicated by nothing; this is
+    # the cheapest place to put one that is.
+    if len(DOORS) != 13:
+        print(f"  SELF-TEST FAILED: DOORS has {len(DOORS)} entries and the module "
+              "docstring says thirteen -- update both together")
         failures += 1
 
     focused = "theorem t : True := by\n  constructor <;> simp [MemoryState.issue?]\n"

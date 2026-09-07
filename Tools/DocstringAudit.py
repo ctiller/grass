@@ -290,8 +290,11 @@ def main() -> int:
     # A tool that finds no files must fail, not pass. `roots = [Path("Grass")]` was
     # relative to the working directory and the miss was swallowed by an
     # `is_dir()` guard, so running from anywhere but the repo root printed the
-    # success line having read nothing. The other three audits anchor on
-    # `__file__`; this one, which has no self-test either, did not.
+    # success line having read nothing. Every other audit in this
+    # directory anchors on `__file__`; this one did not. It said "the other three" when
+    # there were six, and "which has no self-test either" -- this file has had one since
+    # `--self-test` went into its own module docstring 250 lines above, and the sentence
+    # was never re-read.
     if not paths:
         print(f"docstring audit: no sources found under {root}", file=sys.stderr)
         return 1

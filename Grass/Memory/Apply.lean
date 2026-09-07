@@ -152,7 +152,7 @@ def denialOf (state : MemoryState) (d : AccessDescriptor) : Option AuditViolatio
                 (fun b => d.address != Address.numeric (addressOf b d.range.start)) then
         some .addressDisagreesWithPlacement
       else if ¬ record.permission.Grants d.requiredPermission then some .permissionDenied
-      else if ¬ record.permission.Permits d.intent then some .permissionDenied
+      else if ¬ record.permission.Permits d.intent then some .intentNotPermitted
       else if d.initialization = .allBytesInitialized ∧
               ¬ state.RangeInitialized d.provenance.root d.range then
         some .uninitializedRead

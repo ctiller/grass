@@ -1000,8 +1000,11 @@ set_option maxHeartbeats 1000000 in
 /-- Every class `denialOf` can return is one the transition declares.
 
 The heartbeat bump is not decoration: the proof splits on every clause of
-`denialOf` and closes each by deciding membership in a fifteen-element list of
-`Name`-carrying structures, so its cost grows with the product. It crossed the
+`denialOf` and closes each by deciding membership in
+`AuditViolationClass.emittedByTransition`, a list of `Name`-carrying structures whose
+length `emittedByTransition_length` states, so its cost grows with the product. This
+said fifteen and the list has grown twice since; it names the theorem now, because a
+number in prose is the one thing in this layer no gate adjudicates. It crossed the
 default the round `provenanceSourceMismatch` was added. -/
 theorem denialOf_mem_emittedByTransition {state : MemoryState} {d : AccessDescriptor}
     {class_ : AuditViolationClass} (h : denialOf state d = some class_) :

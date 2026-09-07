@@ -125,6 +125,26 @@ class this branch has found in its own layer four times.
 
 Modelled on `LedgerDelta` deliberately: an operation declares its effect on the
 authority map the way it declares its effect on the obligation ledger.
+
+**With one deliberate asymmetry, which was undocumented.** `LedgerDelta.Applicable`
+requires a transfer's `newOwner ∈ contexts`; `MemoryState.applyAuthorityDelta?` takes
+only the actor and requires nothing of a grant's holder or a transfer's recipient, so
+a grant may be parked on a `ContextId` no context ever had.
+
+The stranding argument does not carry across. A duty is discharged only by its owner --
+`LedgerDelta.not_applicable_discharge_of_wrong_owner` is that -- so one handed to a
+context that never runs is unrecoverable, and `LedgerDelta.Applicable`'s context
+clause is what prevents it. A grant is not: `MemoryState.returnGrant?` accepts the **lender**, and
+its own docstring makes a non-stepping holder deliberate — "an external API agent,
+which never executes a Grass step" — so a grant on a phantom holder is still
+reclaimable by whoever lent it. What is left is that the bytes stay frozen until the
+lender acts, because `MemoryState.AnyGrantOver` is kind-blind and does not ask who
+holds. Requiring a context set here would refuse exactly the case `returnGrant?`
+exists for.
+
+Review found the asymmetry rather than a consequence, and the finding was that two
+appliers written to be parallel differ in a checked precondition with no sentence
+anywhere saying why. This is that sentence.
 -/
 inductive AuthorityDelta where
   /-- Lend authority the acting context holds or lent, under a fresh identity. -/
