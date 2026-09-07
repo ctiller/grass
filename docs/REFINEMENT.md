@@ -308,13 +308,16 @@ structure ClosedBlend
       partial) where
   realization : ProcessRealization spec
   provenance : ClosedBlendProvenance spec realization.boundary
-    realization.registry realization.plan realization.correct
+    realization.boundaryCertificate realization.registry
+    realization.registryCertificate realization.plan realization.providers
+    realization.correct
   exactSource : ProvenanceNamesExactPartialGraphAndCertificates
     provenance partial
   exactClosure : ProvenanceNamesExactClosureEvidence
     provenance complete coherent
   originExact : realization.origin = .blended
-    realization.registry realization.plan realization.correct provenance
+    realization.registry realization.registryCertificate realization.plan
+    realization.providers realization.correct provenance
 
 def PartialProcessRealization.close
     (partial : PartialProcessRealization shaped graph)
@@ -360,7 +363,7 @@ supports a second, machine-indexed blend:
 ```lean
 structure MachineSubsystemRealization
     (driver : ProjectedDriverCertificate portable projection)
-    (scope : ClosedProcessOriginScope driver.plan.processOrigin) where
+    (scope : ClosedProcessOriginScope driver.processOrigin) where
   source : HeterogeneousMachineSource driver.plan scope
   local : SourceRefinesExactClosedScope source scope
   boundary : MachineSourceExportsExactDriverBoundary source scope
@@ -368,16 +371,20 @@ structure MachineSubsystemRealization
 
 structure MachineBlend
     (driver : ProjectedDriverCertificate portable projection) where
-  origin : ProcessPlanSource spec driver.plan.boundary
-  originExact : origin = driver.plan.processOrigin
-  nodes : forall scope : ClosedProcessOriginScope origin,
-    MachineSubsystemRealization driver (originExact ▸ scope)
+  nodes : forall scope : ClosedProcessOriginScope driver.processOrigin,
+    MachineSubsystemRealization driver scope
   coverage : EveryReachableClosedScopeAppearsExactlyOnce nodes
   coherent : MachineSourcesAbiIsaAndProviderCoherent driver nodes
+
+def MachineBlend.exactSource
+    (blend : MachineBlend driver) : MachineSource driver.plan :=
+  MachineSource.compose blend.nodes blend.coverage blend.coherent
 ```
 
 `MachineCertificate` consumes this exact `MachineBlend`, whose dependent
-`origin` is the exact `ProcessPlanSource` value retained by the platform plan.
+`driver.processOrigin` is definitionally the exact `ProcessPlanSource` value
+retained by the portable process model; the platform plan has no origin field
+that it can re-author.
 For a `.blended` origin that value contains the exact graph and closure
 certificates; it cannot be reconstructed from a lookalike plan or replaced by
 an extensionally similar source. This is where one team may finish the Vulkan
@@ -416,7 +423,7 @@ transparent `plan.handoff : EffectProviderHandoff plan`. This Act owns the cross
 ```lean
 structure ProviderRealizesEffectPlan
     (providerEnv : PlatformPlan.ProviderEnv)
-    (plan : EffectLoweringPlan source sourceModel) where
+    (plan : EffectLoweringPlan identity source sourceModel) where
   viewRealization : EffectPlanRealizedByView plan providerEnv.bindingView
   environmentCoherence : SelectedViewEntriesAreTheExactProviderEnvDictionaries
     providerEnv
@@ -449,10 +456,14 @@ The Effect adapter stores these demands in the exact registered origin subfamily
 of every generated effect-operation occurrence. Sequential, explicit, and blended sources
 derive one conservative provider-demand summary from the selected boundary and
 every protocol selected by a plan role, including roles unused by one execution.
-`ProjectedDriverCertificate.originRequirementConnections` consumes the
-resulting dependent family against its exact `ProviderEnv`: provider-owned
-members are discharged, while every memory/resource/obligation/ABI/ISA or later
-member is forwarded with its original origin into the next staged family. For an
+`ProjectedDriverCertificate.summaryRequirementConnections` consumes the
+compact resulting family against its exact `ProviderEnv`.
+`originRequirementConnections` transports that disposition through the
+portable certificate's `AuthorityEquiv`, and
+`originForwardedRequirementsExact` connects the transported output to the exact
+driver-forwarded family: provider-owned members are discharged, while every
+memory/resource/obligation/ABI/ISA or later member is forwarded with its
+original origin into the next staged family. For an
 Effect origin, `requirementConnections` is the local constructor.
 `requirementConnections_forwardedExact` is the authority-preserving bridge from
 that returned disposition to the certificate summary; projected-driver

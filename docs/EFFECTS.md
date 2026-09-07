@@ -660,20 +660,29 @@ Effect lowering selects one local disposition for every source family. It does
 not select physical API providers:
 
 ```lean
-def EffectRequirementOriginScope
-    (key : ScopeId) (target : EffectRow) :
-    RequirementOriginScope (.builtin .effect)
+opaque EffectLoweringIdentity : Type
+def EffectLoweringIdentity.stableId : EffectLoweringIdentity -> StableId
+def EffectLoweringIdentity.scope : EffectLoweringIdentity -> ScopeId
+opaque EffectLoweringIdentitiesDisjoint
+    (left right : EffectLoweringIdentity) : Prop
+def EffectLoweringIdentity.child
+    (parent : EffectLoweringIdentity) (slot : StableId) : EffectLoweringIdentity
+theorem EffectLoweringIdentity.children_disjoint
+    (different : leftSlot ≠ rightSlot) :
+    EffectLoweringIdentitiesDisjoint
+      (parent.child leftSlot) (parent.child rightSlot)
+theorem EffectLoweringIdentity.child_disjoint_from_parent ...
 
-structure EffectLoweringPlan
+-- Generates one fresh nominal identity and its stable diagnostic projection.
+elab "declare_effect_lowering_identity" ident "=>" term : command
+
+structure EffectLoweringCore
+    (identity : EffectLoweringIdentity)
     (source : EffectRow) (sourceModel : EffectRowModel source) where
-  key : ScopeId
   Target : EffectRow
   targetModel : EffectRowModel Target
   selected : forall key : source.Key,
     SelectedCertifiedDisposition (sourceModel.theories.package key) targetModel
-  originFresh : RequirementOriginScopeFreshFor
-    (EffectRequirementOriginScope key Target)
-    (RequirementsOfSelection selected)
   targetCoverage : forall family,
     Target.Contains family <-> FamilyIntroducedOrRetained selected family
   Relation : sourceModel.World -> targetModel.World -> Prop
@@ -684,15 +693,69 @@ structure EffectLoweringPlan
   observations : ExactComposedPrefixObservationCorrespondence selected Relation
   pendingAndExtension : EverySelectedDispositionPreservesPendingIdentityAndPrefixExtension
     selected Relation
+
+def EffectRequirementOriginScope
+    (core : EffectLoweringCore identity source sourceModel) :
+    RequirementOriginScope (.builtin .effect)
+
+structure EffectLoweringPlan
+    (identity : EffectLoweringIdentity)
+    (source : EffectRow) (sourceModel : EffectRowModel source) where
+  core : EffectLoweringCore identity source sourceModel
+  originFresh : RequirementOriginScopeFreshFor
+    (EffectRequirementOriginScope core)
+    (RequirementsOfSelection core.selected)
+
+def EffectLoweringPlan.Target (plan : EffectLoweringPlan identity source sourceModel) :=
+  plan.core.Target
+def EffectLoweringPlan.targetModel (plan : EffectLoweringPlan identity source sourceModel) :=
+  plan.core.targetModel
+def EffectLoweringPlan.selected (plan : EffectLoweringPlan identity source sourceModel) :=
+  plan.core.selected
+def EffectLoweringPlan.Relation (plan : EffectLoweringPlan identity source sourceModel) :=
+  plan.core.Relation
+def EffectLoweringPlan.targetCoverage
+    (plan : EffectLoweringPlan identity source sourceModel) := plan.core.targetCoverage
+def EffectLoweringPlan.initial
+    (plan : EffectLoweringPlan identity source sourceModel) := plan.core.initial
+def EffectLoweringPlan.step
+    (plan : EffectLoweringPlan identity source sourceModel) := plan.core.step
+def EffectLoweringPlan.overlap
+    (plan : EffectLoweringPlan identity source sourceModel) := plan.core.overlap
+def EffectLoweringPlan.observations
+    (plan : EffectLoweringPlan identity source sourceModel) := plan.core.observations
+def EffectLoweringPlan.pendingAndExtension
+    (plan : EffectLoweringPlan identity source sourceModel) :=
+  plan.core.pendingAndExtension
+
+structure SameEffectOriginProvenance
+    (left : EffectLoweringPlan leftIdentity source sourceModel)
+    (right : EffectLoweringPlan rightIdentity source sourceModel) : Prop where
+  identityExact : leftIdentity = rightIdentity
+  planExact : identityExact ▸ left = right
+
+inductive EffectOriginComposition
+    (left : EffectLoweringPlan leftIdentity leftSource leftModel)
+    (right : EffectLoweringPlan rightIdentity rightSource rightModel) : Prop
+  | shared (same : SameEffectOriginProvenance left right)
+  | disjoint (separate : EffectLoweringIdentitiesDisjoint
+      leftIdentity rightIdentity)
 ```
 
-The plan's nominal `key` scopes its finite provider-demand origin slots; it is a
-construction identity, not a content hash or provider selection. Independent
-plans use distinct hierarchical scopes, so their demands compose without losing
-either exact origin even when both need the same provider capability.
+The plan's nominal identity scopes its finite provider-demand origin slots; its
+`stableId` is diagnostic data, not a content hash or provider selection.
+Ordinary top-level and hierarchical constructors generate fresh identities;
+child constructors generate pairwise-disjoint descendants. Composing two plans
+requires `EffectOriginComposition`: either their complete dependent plan values
+are proven to share the same origin, or their nominal identities are proven
+disjoint. Equal origin IDs and descriptors alone never authorize sharing.
+Independent plans therefore compose without losing either exact origin even
+when both need the same provider capability.
 `originFresh` is the checked premise used to derive
 `EffectRequirementOriginsCompatible`; ordinary hierarchical plan constructors
-generate it, while a reused/colliding scope fails locally.
+generate it for requirements inside one plan. It is not a substitute for the
+cross-plan `EffectOriginComposition` witness; a reused identity fails at the
+composition boundary unless the plans have exact shared provenance.
 
 The plan is indexed by the exact source row model, not merely by a bag of
 per-family theories. `Relation` is the one whole-row simulation invariant.
@@ -713,30 +776,48 @@ retained family's identity substitution; it is never plain set subtraction.
 The Act 3 handoff is indexed by this exact plan, not just its requirement keys:
 
 ```lean
-structure EffectProviderHandoff (plan : EffectLoweringPlan source sourceModel) where
+structure EffectProviderHandoff
+    (plan : EffectLoweringPlan identity source sourceModel) where
   theoryPackages : forall key, CertifiedEffectTheory (plan.Target.family key)
   model : EffectRowModel plan.Target
   requirements : ProviderDemandFamily
 
 def EffectLoweringPlan.handoff
-    (plan : EffectLoweringPlan source sourceModel) : EffectProviderHandoff plan :=
+    (plan : EffectLoweringPlan identity source sourceModel) : EffectProviderHandoff plan :=
   { theoryPackages := fun key => plan.targetModel.theories.package key
     model := plan.targetModel
     requirements := DerivedRequirementsOf plan }
 
 def EffectLoweringPlan.realizationDemands
-    (plan : EffectLoweringPlan source sourceModel) : ProviderDemandFamily :=
+    (plan : EffectLoweringPlan identity source sourceModel) : ProviderDemandFamily :=
   ProviderDemandFamily.ofScope
-    (EffectRequirementOriginScope plan.key plan.Target)
+    (EffectRequirementOriginScope plan.core)
     (EffectProviderDemandDescriptor plan.handoff)
 
 def EffectLoweringPlan.providerDemands
-    (plan : EffectLoweringPlan source sourceModel) : ProviderDemandFamily :=
+    (plan : EffectLoweringPlan identity source sourceModel) : ProviderDemandFamily :=
   ProviderDemandFamily.union plan.handoff.requirements plan.realizationDemands
     (EffectRequirementOriginsCompatible plan)
 
+theorem EffectOriginComposition.providerOriginsCompatible
+    (origins : EffectOriginComposition left right) :
+    OriginsDisjointOrSameOriginProvenance
+      left.providerDemands right.providerDemands
+
+def EffectLoweringPlan.composeProviderDemands
+    (left : EffectLoweringPlan leftIdentity leftSource leftModel)
+    (right : EffectLoweringPlan rightIdentity rightSource rightModel)
+    (origins : EffectOriginComposition left right) : ProviderDemandFamily :=
+  ProviderDemandFamily.union left.providerDemands right.providerDemands
+    (EffectOriginComposition.providerOriginsCompatible origins)
+
+theorem EffectLoweringPlan.composeProviderDemands_noCollapse
+    (origins : EffectOriginComposition left right) :
+    EveryIndependentOriginFromEitherPlanOccursExactlyOnce
+      (left.composeProviderDemands right origins)
+
 structure EffectPlanRealizedByView
-    (plan : EffectLoweringPlan source sourceModel)
+    (plan : EffectLoweringPlan identity source sourceModel)
     (view : ProviderBindingView) where
   dictionariesExact : EverySelectedViewDictionaryRealizesExactTheoryPackage
     view plan.handoff.theoryPackages
@@ -862,6 +943,49 @@ it uses, which may contain zero, one, or several independent origins. The
 certified wrapper's `originDemands` is extensionally fixed
 to that boundary envelope, so a continuation-only edit rebuilds local adapter provenance
 without changing an otherwise identical provider certificate.
+
+```lean
+declare_direct_operation_owner Effect.directOperationOwner =>
+  `grass.effect.direct-operation`
+
+structure EffectAdapterCertificate
+    (junction : EffectSpecJunction spec program)
+    (plan : EffectLoweringPlan identity source sourceModel) where
+  boundaryCertificate : CertifiedDriverBoundary spec.driverBoundary
+  directProgram : DirectRelationalProgram spec.driverBoundary
+  normalPrefixes : ExactBidirectionalNormalPrefixCorrespondence
+    junction plan directProgram
+  exceptionalCuts : EveryExceptionalCutPreservesExactPendingCustody
+    junction plan directProgram
+  pendingProgress : ExactRootedPendingHistoryProjection
+    junction plan directProgram
+  operationSelection : EveryDirectOccurrenceSelectsItsExactEffectLowering
+    junction plan directProgram
+
+def EffectProgram.registeredDirectOperationModel
+    (junction : EffectSpecJunction spec program)
+    (plan : EffectLoweringPlan identity source sourceModel)
+    (adapter : EffectAdapterCertificate junction plan) :
+    RegisteredDirectOperationModel
+      adapter.boundaryCertificate adapter.directProgram :=
+  RegisteredDirectOperationModel.register
+    (Effect.ownerIssuedModel junction plan adapter)
+    (Effect.requirementsExact junction plan adapter)
+    (Effect.requirementsContained junction plan adapter)
+    (Effect.requirementsAggregateExact junction plan adapter)
+    (Effect.modelConnectsProgramAndBoundary junction plan adapter)
+
+def EffectProgram.directDerivation ... :
+    DirectProgramDerivation adapter.boundaryCertificate adapter.directProgram :=
+  DirectProgramDerivation.certify
+    (EffectProgram.registeredDirectOperationModel junction plan adapter)
+```
+
+Effect owns the sealed package constructor; Process sees only the registered
+owner-neutral model. The derived predicate is definitionally the selected
+lowering plan's exact per-occurrence requirements. An application cannot swap
+in `False`, and a new DSL owner uses the same registration seam under its own
+fresh nominal owner rather than asking Process to add a constructor.
 
 The envelope is conservative: even `.pure` over a deliberately broad nonempty
 row retains the plan's requirements. Unused broad rows remain a proof-economy
@@ -1057,7 +1181,7 @@ The first implementation is incomplete until checked fixtures demonstrate:
 5. A project-local effect family is added from another module without editing a
    core sum type.
    Three independently authored extension-authority registries compose under
-   both family-union associations after all pairwise and outer descriptor
+   both family-union associations after all pairwise and outer origin-provenance
    compatibility witnesses are supplied. Reindexing either association into
    the same canonical three-way union plan produces extensionally identical
    origin IDs, descriptors, and lookups; a fixture which omits an outer witness
@@ -1082,6 +1206,12 @@ The first implementation is incomplete until checked fixtures demonstrate:
    `ProcessProviderCertificate.build` for a selected two-protocol plan whose
    families are empty; making either conflicting owner active rejects aggregate
    compatibility.
+   Two independently constructed equal-shaped Effect plans cannot compose after
+   reusing one serialized scope name or even one nominal identity: the normal
+   route supplies disjoint generated identities, while the shared-origin route
+   requires equality of the exact dependent plans. Replacing that witness with
+   descriptor equality must fail. The accepted disjoint composition retains
+   both origin occurrences.
 6. Row membership embeds dependent results exactly; a forged name-only embedding
    is unconstructible.
 7. Duplicate family keys are rejected, and the lowering selection cannot carry
@@ -1122,12 +1252,22 @@ The first implementation is incomplete until checked fixtures demonstrate:
     logical demand may select different registered lower paths; each opaque
     derivation-owned origin subfamily is exact for its own path, both are
     contained in the conservative boundary family, and their aggregate equals
-    the exact used lower-requirement views.
+    the exact used lower-requirement views. Completing one exact epoch leaves
+    the other live; substituting its sibling's epoch or replaying a consumed
+    token is rejected locally.
 17. A direct authored-assembly realization discharges the same specification
     requirement without constructing an effect-program witness.
 18. Removing any family-law proof, handler simulation direction, requirement
     substitution entry, derived operation-origin demand, or provider-connection witness
     fails at the corresponding local declaration.
+19. With `set_option autoImplicit false`, a checked signature fixture copies the
+    complete dependent indices of `ClosedBlendProvenance`, `ClosedBlend`,
+    `PortableProcessModel.processOrigin`, `ProjectedDriverCertificate.processOrigin`,
+    `MachineSubsystemRealization`, `MachineBlend`,
+    `RegisteredDirectOperationModel.register`, disposition transport, and the
+    final staged-family connection. Every displayed application elaborates.
+    Omitting a boundary certificate, registry certificate, provider certificate,
+    exact origin, or forwarded-family equivalence fails in that fixture.
 
 The implementation should begin with pure/request/bind, one two-operation test
 family, row membership, relational runs, and one identity/translation handler.

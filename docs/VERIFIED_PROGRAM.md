@@ -186,12 +186,35 @@ structure ProjectedDriverCertificate {R : Type u} [ResourceModel R]
   driverSummary : DriverBoundarySummary portable.boundary plan
   blendRequirementsExact :
     plan.requirements = portable.model.processOrigin.accumulatedRequirements
-  originRequirementConnections : ExactOriginRequirementDisposition
+  summaryRequirementConnections : ExactAuthorityRespectingRequirementDisposition
     portable.providerDemandSummary plan.providerEnv.bindingView
-    driverSummary.forwardedRequirements
+  forwardedRequirementsExact :
+    summaryRequirementConnections.exactForwardedFamily.AuthorityEquiv
+      driverSummary.forwardedRequirements
   providerCoherence : OneGloballyCoherentProviderAbiIsaEnvironment
     plan portable.model.processOrigin
   projectionCorrect : ProjectionAndDriverRefine portable projection driverSummary
+
+def ProjectedDriverCertificate.processOrigin
+    (driver : ProjectedDriverCertificate portable projection) :
+    ProcessPlanSource spec portable.model.realization.boundary
+      portable.model.realization.boundaryCertificate :=
+  portable.model.processOrigin
+
+def ProjectedDriverCertificate.originRequirementConnections
+    (driver : ProjectedDriverCertificate portable projection) :
+    ExactAuthorityRespectingRequirementDisposition
+      driver.processOrigin.providerDemands
+      driver.plan.providerEnv.bindingView :=
+  portable.providerDemandExtractionExact.transportDisposition
+    driver.summaryRequirementConnections
+
+theorem ProjectedDriverCertificate.originForwardedRequirementsExact
+    (driver : ProjectedDriverCertificate portable projection) :
+    driver.originRequirementConnections.exactForwardedFamily.AuthorityEquiv
+      driver.driverSummary.forwardedRequirements :=
+  (portable.providerDemandExtractionExact.transportDisposition_forwardedExact
+    driver.summaryRequirementConnections).trans driver.forwardedRequirementsExact
 
 structure MachineCertificate {R : Type u} [ResourceModel R]
     {resources : R} {spec : SpecProcess resources}
@@ -206,7 +229,7 @@ structure MachineCertificate {R : Type u} [ResourceModel R]
   implementationModels : ImplementationBundle source portable.model
   localCertificates : MachineDemandCertificateFamily source summary
   closedBlendCoverage : SourceCoversExactlyEveryClosedBlendScope
-    source driver.plan.processOrigin blend
+    source driver.processOrigin blend
   sourceAndMachineCorrect : SourceRefinesDriverExactly source summary driver
 
 structure ArtifactCertificate {R : Type u} [ResourceModel R]
@@ -226,22 +249,31 @@ structure VerifiedProgram {R : Type u} [ResourceModel R]
   artifact : ArtifactCertificate machine
   staged : StagedObligationFamily spec projection driver.plan
     driver.driverSummary.forwardedRequirements machine.source artifact.linked
+  stagedOrigin : OriginDispositionFeedsStagedFamilyExactly
+    driver.originRequirementConnections
+    driver.originForwardedRequirementsExact staged
   constraintIndex : ImplementationConstraintIndex staged
   requirementClosure : AllRequirementsDischarged
     staged constraintIndex machine.blend.ghostProgram
   endToEnd : LoadedBytesSatisfySpecification
     (write artifact.linked) spec portable projection driver machine artifact
-    requirementClosure
+    stagedOrigin requirementClosure
 ```
 
 `providerDemandExtractionExact` is the program-local proof that the compact
 stable summary is the coverage-complete union selected by the exact portable
-origin. `originRequirementConnections` is indexed by that summary, not by the whole
-program body and not by a lookup name. For an Effect-generated boundary it contains
-the applicable `ProviderRealizesEffectPlan.requirementConnections` (or its
-equivalence-strength extension). It discharges provider-owned members and feeds
-the exact forwarded family into the later staged obligation families; a memory,
+origin. `summaryRequirementConnections` performs the shard-sized provider
+work; `originRequirementConnections` is the definition that transports that
+disposition through `providerDemandExtractionExact` to the exact portable
+origin, and `originForwardedRequirementsExact` composes its transported
+forwarded family back to the driver summary. These are checked dependent
+bridges, not lookup by name. For an Effect-generated boundary the summary
+contains the applicable `ProviderRealizesEffectPlan.requirementConnections` (or
+its equivalence-strength extension). It discharges provider-owned members and feeds
+the authority-equivalent forwarded family into the later staged obligation families; a memory,
 resource, obligation, ABI, platform, or ISA origin cannot disappear at Act 3.
+`stagedOrigin` makes that composition an explicit input to final closure rather
+than leaving the end-to-end theorem to rediscover it.
 A direct operation contributes no member only when its exact registered origin
 subfamily is empty. Sequential, explicit, and blended sources all derive the union;
 changing or repackaging a correctness proof cannot erase it. Thus the effect

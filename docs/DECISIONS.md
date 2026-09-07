@@ -854,16 +854,25 @@ to imitate compiler-selected storage or CFG structure.
     Process sources derive one coverage-complete, conservative provider-demand
     family from a sidecar certificate over their stable selected boundary and a finite exact image of every
     selected plan role (without closing the open registry), with
-    bidirectional coverage/no-extra/descriptor-exactness proofs; local
+    bidirectional coverage/no-extra/origin-provenance-exactness proofs; local
     operation origins point into that family. A certified wrapper around the
     raw relational program also retains an exact dependent
     `DirectProgramDerivation`; the Effect adapter
     stores its program/model/progress/adapter proof there while provider demands
     remain indexed only by the stable plan/model boundary. Thus the handoff cannot be removed by repackaging a
-    correctness proof, and
-    `ProjectedDriverCertificate.originRequirementConnections` discharges the
-    provider-owned realization members and forwards every other authority with
-    its exact origin into the later staged families. Handler proofs preserve
+    correctness proof. The exact `ProcessPlanSource` projects definitionally
+    from the portable model through Act 3; a platform plan cannot re-author it.
+    Provider disposition may run over a compact authority-equivalent summary,
+    but a checked transport reconstructs the disposition over that exact origin
+    and proves its forwarded family equivalent to the family consumed by later
+    stages. Thus `ProjectedDriverCertificate.originRequirementConnections`
+    discharges the provider-owned realization members and forwards every other
+    authority with its exact origin into the later staged families. Equal
+    origin IDs and descriptors do not authorize union: collisions require the
+    opaque same-origin provenance retained by the originating scope and slot.
+    Effect plans use generated nominal lowering identities; distinct plans
+    compose only with disjoint identities, while sharing requires equality of
+    the exact dependent plans. Handler proofs preserve
     complete and pending-prefix behavior, ordered observations, and account for
     every discharged and introduced requirement, including both simulation
     directions whenever equivalence is claimed. Effect requirements do not
@@ -881,7 +890,14 @@ to imitate compiler-selected storage or CFG structure.
     the zero-ceremony atomic sequential adapter is valid only when no such
     progress exists. Adapters
     may embed well-founded effect programs without making Process core depend on the
-    Effect implementation. Direct serial functions and first-class authored
+    Effect implementation. Process owns one open
+    `RegisteredDirectOperationModel` seam: an operation/DSL owner supplies a
+    sealed owner-issued package and exact requirement, containment, aggregate,
+    and raw-program connection laws; Process derives occurrence origins rather
+    than accepting an origin function or caller predicate. Dynamic issued-bag
+    slots receive monotone realization-private epochs, so two equal-valued
+    pending demands remain separately completable and epochs cannot replay.
+    Direct serial functions and first-class authored
     assembly may refine the same specification requirements without constructing
     a decorative effect-program witness. This is the proposed resolution of
     `coord1:73`; the current Lean gate does not implement it, and the assigned
