@@ -158,7 +158,33 @@ fn topological_order(streams: &BTreeMap<Agent, Vec<Envelope>>) -> AbResult<Vec<&
                 d.push(events[i - 1].id.clone());
             }
             for r in e.refs.iter() {
-                if r.agent() != e.agent {
+                // Only events actually present here become ordering edges.
+                //
+                // A reference this host cannot resolve used to leave its
+                // referrer permanently un-ready, so the sort never completed
+                // and `reduce` returned `Err` -- taking down `status`, `tail`
+                // and `coordinate` for every agent at once. There are two
+                // ordinary ways to reach that:
+                //
+                //  - a partial fetch. Reducing a prefix is normal, and a host
+                //    that has not yet fetched some agent's stream must still
+                //    be able to read the bus.
+                //  - a published event naming an id that does not exist, as
+                //    `e-auditor:10` did (`c-reviewer:100`, one past that
+                //    stream's tip). The log is append-only, so nothing
+                //    published later can withdraw it: an outage of this shape
+                //    is permanent and fleet-wide.
+                //
+                // Dropping the edge is not a weakening. Ordering exists to
+                // make a referrer follow what it references *when both are
+                // present*; whether a referenced event exists at all is a
+                // separate question, and the handlers that genuinely need one
+                // already check for it and fail with a specific, local
+                // message rather than a whole-bus failure. Gate 4 enforces
+                // frontier coverage at submission, which is where a
+                // fabricated reference belongs caught. Cycles among events
+                // that *are* present are still detected below.
+                if r.agent() != e.agent && by_id.contains_key(r) {
                     d.push(r.clone());
                 }
             }
@@ -201,9 +227,7 @@ fn topological_order(streams: &BTreeMap<Agent, Vec<Envelope>>) -> AbResult<Vec<&
         }
     }
     if order.len() != by_id.len() {
-        return Err(invalid(
-            "event dependency graph has a cycle or an unresolvable reference",
-        ));
+        return Err(invalid("event dependency graph has a cycle"));
     }
     Ok(order.into_iter().map(|id| by_id[&id]).collect())
 }
@@ -8709,5 +8733,105 @@ mod tests {
             "GATE 15/16: two valid dependency-respecting orders of the same event set must \
              produce identical state"
         );
+    }
+    /// A reference to an event this host does not have must not take the
+    /// whole bus down.
+    ///
+    /// Reproduced from a live outage: `e-auditor:10` was published citing
+    /// `c-reviewer:100` as evidence, one past that stream's actual tip, so
+    /// the id named nothing. `topological_order` left the referrer
+    /// permanently un-ready, the sort never completed, and `reduce` returned
+    /// `Err` -- `status`, `tail` and `coordinate` went down for all
+    /// seventeen agents at once. The log is append-only, so nothing
+    /// published afterwards could withdraw the event: the outage was
+    /// permanent until the reducer changed.
+    ///
+    /// The same shape arises without anyone making a mistake, which is the
+    /// stronger reason for this test: reducing a partial fetch is ordinary,
+    /// and a host that has not yet fetched some agent's stream must still be
+    /// able to read the bus.
+    #[test]
+    fn a_reference_to_an_event_that_is_not_here_does_not_wedge_reduction() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let epoch = epoch_with(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
+        let mut known_epochs = BTreeMap::new();
+        known_epochs.insert(epoch.id.clone(), epoch.clone());
+
+        let alice_reg = register(&alice, Role::Implementor);
+        let bob_reg = register(&bob, Role::Implementor);
+
+        // bob has published exactly one event beyond its root, so `bob:9`
+        // names nothing -- the live case exactly.
+        let dangling = EventId::new(&bob, 9);
+        let mut issue_data = match open_issue(&alice, 1, &bob).typed_data().unwrap() {
+            EventData::IssueOpened(d) => d,
+            _ => unreachable!(),
+        };
+        issue_data.evidence = StringSet::from_iter([dangling.clone()]);
+        let citing = Envelope::new(
+            &alice,
+            1,
+            frontier_seeing(&[&dangling]),
+            &EventData::IssueOpened(issue_data),
+            [dangling.clone()],
+        );
+
+        let streams: BTreeMap<Agent, Vec<Envelope>> = BTreeMap::from([
+            (alice.clone(), vec![alice_reg, citing.clone()]),
+            (bob.clone(), vec![bob_reg]),
+        ]);
+        let state = reduce(config(), Some(epoch), known_epochs, &streams)
+            .expect("an unresolvable reference must not make the bus unreducible");
+
+        // Recorded, not skipped: the issue it opened is real work and must
+        // survive, and dropping it would make the outcome depend on which
+        // host had fetched what.
+        assert!(
+            state.issues.contains_key(&citing.id),
+            "the citing event must still be applied"
+        );
+    }
+
+    /// The tolerance above is narrow: a genuine cycle among events that are
+    /// all present is still a hard failure, because there is no order that
+    /// satisfies it and silently picking one would diverge between hosts.
+    #[test]
+    fn a_real_cycle_between_present_events_is_still_refused() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let epoch = epoch_with(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
+        let mut known_epochs = BTreeMap::new();
+        known_epochs.insert(epoch.id.clone(), epoch.clone());
+
+        // alice:1 references bob:1 and bob:1 references alice:1. Both exist,
+        // so both edges are real and neither can go first.
+        let mk = |who: &Agent, other: &EventId| {
+            Envelope::new(
+                who,
+                1,
+                frontier_seeing(&[other]),
+                &EventData::AgentStatus(AgentStatusEvent {
+                    status: LifecycleStatus::Active,
+                    note: text("n"),
+                    product_branch: None,
+                    product_commit: None,
+                }),
+                [other.clone()],
+            )
+        };
+        let alice_1 = mk(&alice, &EventId::new(&bob, 1));
+        let bob_1 = mk(&bob, &EventId::new(&alice, 1));
+
+        let streams: BTreeMap<Agent, Vec<Envelope>> = BTreeMap::from([
+            (
+                alice.clone(),
+                vec![register(&alice, Role::Implementor), alice_1],
+            ),
+            (bob.clone(), vec![register(&bob, Role::Implementor), bob_1]),
+        ]);
+        let err = reduce(config(), Some(epoch), known_epochs, &streams)
+            .expect_err("a genuine cycle has no valid order and must be refused");
+        assert!(err.to_string().contains("cycle"), "{err}");
     }
 }
