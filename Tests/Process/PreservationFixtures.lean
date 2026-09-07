@@ -220,129 +220,6 @@ open Grass.Process.Tests.Channel (wire)
 open Grass.Process.Tests.Transition
   (payload occurrenceOf escrowed sent received the_send the_receive_after_the_send)
 
-/-- The send is a step. -/
-def theSendStep : serverPlan.NetworkStep quiet sent where
-  transition := .send () payload occurrenceOf the_send
-  admissible := by intro _ nothing; cases nothing
-  historyExact := rfl
-
-/-- The receive after it is a step. -/
-def theReceiveStep : serverPlan.NetworkStep sent received where
-  transition := .receive () wire escrowed the_receive_after_the_send
-  admissible := by intro _ nothing; cases nothing
-  historyExact := rfl
-
-/-- And so is the reroute, which writes two ledgers. -/
-def theRerouteStep :
-    serverPlan.NetworkStep sent Grass.Process.Tests.Reroute.afterReroute where
-  transition := .reroute () wire escrowed Grass.Process.Tests.Reroute.sidewire
-    Grass.Process.Tests.Reroute.the_reroute
-  admissible := by intro _ nothing; cases nothing
-  historyExact := rfl
-
-/--
-**And the send/receive pair carries well-formedness the whole way.**
-
-`quiet` to `sent` to `received`, both steps, one certificate. The three channel
-clauses are the ones with content across a delivery: `ReroutesLand` in
-particular, since a delivery writes a resolution and `ResolvesNothingElse` is
-what stops it writing more than one.
--/
-theorem received_is_wellFormed : received.WellFormed :=
-  ProcessPlan.wellFormed_preserved theReceiveStep
-    (ProcessPlan.wellFormed_preserved theSendStep World.quiet_is_wellFormed)
-
-/-- And the reroute's after-world is well formed, which is where the sixth clause
-is the one doing work: the payload has to have landed somewhere. -/
-theorem afterReroute_is_wellFormed : Grass.Process.Tests.Reroute.afterReroute.WellFormed :=
-  ProcessPlan.wellFormed_preserved theRerouteStep
-    (ProcessPlan.wellFormed_preserved theSendStep World.quiet_is_wellFormed)
-
-/-- The second send is a step. -/
-def theSecondSendStep : serverPlan.NetworkStep sent Close.sent2 where
-  transition := .send () payload Close.strandedOccurrence Close.the_second_send
-  admissible := by intro _ nothing; cases nothing
-  historyExact := rfl
-
-/-- And so is the close that ends both messages. -/
-def theFullCloseStep : serverPlan.NetworkStep Close.sent2 Close.afterFullClose where
-  transition := .channelClose () wire escrowed Close.the_full_close
-  admissible := by intro _ nothing; cases nothing
-  historyExact := rfl
-
-/--
-**Three steps, one certificate**: `quiet` to `sent` to `sent2` to
-`afterFullClose`.
-
-The longest chain in the corpus, and the one where the escrow clauses do the most
-work: two messages go in flight and both come out ended.
--/
-theorem afterFullClose_is_wellFormed : Close.afterFullClose.WellFormed :=
-  ProcessPlan.wellFormed_preserved theFullCloseStep
-    (ProcessPlan.wellFormed_preserved theSecondSendStep
-      (ProcessPlan.wellFormed_preserved theSendStep World.quiet_is_wellFormed))
-
-/--
-**And the coalesce is a step too.**
-
-§10.89's check, run against the transition §10.110 added. A reviewer pointed out
-that `the_coalesce` landed in the same commit as the section stating that check
-and was not put through it — a transition with no `NetworkStep` is the weaker
-witness §10.89 warns about. §10.112.
--/
-def theCoalesceStep : serverPlan.NetworkStep Close.sent2 Close.afterCoalesce where
-  transition := .coalesce () wire escrowed Close.carrier Close.the_coalesce
-  admissible := by intro _ nothing; cases nothing
-  historyExact := rfl
-
-/-- Two sends and a merge, carried from `quiet`. -/
-theorem afterCoalesce_is_wellFormed : Close.afterCoalesce.WellFormed :=
-  ProcessPlan.wellFormed_preserved theCoalesceStep
-    (ProcessPlan.wellFormed_preserved theSecondSendStep
-      (ProcessPlan.wellFormed_preserved theSendStep World.quiet_is_wellFormed))
-
-/-- And the carrier is on its own session, read out of the seventh clause. -/
-theorem the_carrier_is_on_the_wire :
-    Close.carrier.2.1 = wire :=
-  afterCoalesce_is_wellFormed.occurrencesOnTheirSession () wire Close.carrier
-    (by rw [Close.afterCoalesce_wire]
-        exact List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self))
-
-/-- Read back out of it: the rerouted payload lands. -/
-theorem the_rerouted_payload_lands :
-    (Grass.Process.Tests.Reroute.afterReroute.inFlight () wire).ReroutedElsewhere
-      (fun occurrence destination arrival =>
-        arrival ∈ (Grass.Process.Tests.Reroute.afterReroute.inFlight () destination).created ∧
-          arrival.1 = occurrence.1) :=
-  afterReroute_is_wellFormed.reroutesLand () wire
-
-/--
-And the strong form, which the sixth clause no longer states and
-`WellFormed.rerouted_arrival_is_on_its_destination` recovers from the seventh:
-the arrival is on the session it was rerouted to. §10.112.
--/
-theorem the_arrival_is_on_its_destination {occurrence destination}
-    (rerouted : (Grass.Process.Tests.Reroute.afterReroute.inFlight () wire).resolution occurrence
-      = some (.rerouted destination)) :
-    ∃ arrival,
-      arrival ∈ (Grass.Process.Tests.Reroute.afterReroute.inFlight () destination).created ∧
-        arrival.1 = occurrence.1 ∧ arrival.2.1 = destination :=
-  afterReroute_is_wellFormed.rerouted_arrival_is_on_its_destination () wire rerouted
-
-/-! ## And a start at a plan with something in it
-
-§10.88: `ExactInitialNetwork` had one witness in the corpus,
-`Tests/Process/FrontierFixtures.lean`'s `waiting_is_a_start`, at a plan whose
-demand, observation, fault, violation, terminal-result, region and channel types
-are all `PEmpty` and whose kinds and slots are all `Unit`. Fifteen of its sixteen
-fields are `rfl`, `trivial` or `.elim`.
-
-`serverPlan` is the other fixture plan: two roles, a channel edge, a real
-observation type, `Nat`-indexed connection slots and a shared region. It had no
-start. `Tests/Process/WorldFixtures.lean`'s `withRoot` is one — a listener
-holding the root parentage, its generation allocated — and nothing had said so.
--/
-
 /--
 **A start at the plan with channels and slots in it.**
 
@@ -375,6 +252,11 @@ def withRoot_is_a_start :
     | connection => exact absurd found (by intro equal; cases equal)
   nothingInFlight := fun _ _ => rfl
   sessionsFresh := fun _ _ => rfl
+  sharedInvariantAtStart := by
+    intro region
+    cases region with
+    | routeTable => exact List.nodup_nil
+    | acceptCount => trivial
   historyFromEmpty :=
     NominalHistory.Reaches.extend (.refl _) LifecycleStep.theGeneration
       (by intro _ _; exact List.not_mem_nil)
@@ -383,6 +265,247 @@ def withRoot_is_a_start :
 instance rather than about an empty world. -/
 theorem withRoot_is_wellFormed : World.withRoot.WellFormed :=
   withRoot_is_a_start.initial_is_wellformed
+
+
+/-- The send is a step. -/
+def theSendStep : serverPlan.NetworkStep World.withRoot sent where
+  transition := .send () payload occurrenceOf the_send
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- The receive after it is a step. -/
+def theReceiveStep : serverPlan.NetworkStep sent received where
+  transition := .receive () wire escrowed the_receive_after_the_send
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- And so is the reroute, which writes two ledgers. -/
+def theRerouteStep :
+    serverPlan.NetworkStep sent Grass.Process.Tests.Reroute.afterReroute where
+  transition := .reroute () wire escrowed Grass.Process.Tests.Reroute.sidewire
+    Grass.Process.Tests.Reroute.the_reroute
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/--
+**And the send/receive pair carries well-formedness the whole way.**
+
+`quiet` to `sent` to `received`, both steps, one certificate. The three channel
+clauses are the ones with content across a delivery: `ReroutesLand` in
+particular, since a delivery writes a resolution and `ResolvesNothingElse` is
+what stops it writing more than one.
+-/
+theorem received_is_wellFormed : received.WellFormed :=
+  ProcessPlan.wellFormed_preserved theReceiveStep
+    (ProcessPlan.wellFormed_preserved theSendStep withRoot_is_wellFormed)
+
+/-- And the reroute's after-world is well formed, which is where the sixth clause
+is the one doing work: the payload has to have landed somewhere. -/
+theorem afterReroute_is_wellFormed : Grass.Process.Tests.Reroute.afterReroute.WellFormed :=
+  ProcessPlan.wellFormed_preserved theRerouteStep
+    (ProcessPlan.wellFormed_preserved theSendStep withRoot_is_wellFormed)
+
+/-- The second send is a step. -/
+def theSecondSendStep : serverPlan.NetworkStep sent Close.sent2 where
+  transition := .send () payload Close.strandedOccurrence Close.the_second_send
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- And so is the close that ends both messages. -/
+def theFullCloseStep : serverPlan.NetworkStep Close.sent2 Close.afterFullClose where
+  transition := .channelClose () wire escrowed Close.the_full_close
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/--
+**Three steps, one certificate**: `quiet` to `sent` to `sent2` to
+`afterFullClose`.
+
+The longest chain in the corpus, and the one where the escrow clauses do the most
+work: two messages go in flight and both come out ended.
+-/
+theorem afterFullClose_is_wellFormed : Close.afterFullClose.WellFormed :=
+  ProcessPlan.wellFormed_preserved theFullCloseStep
+    (ProcessPlan.wellFormed_preserved theSecondSendStep
+      (ProcessPlan.wellFormed_preserved theSendStep withRoot_is_wellFormed))
+
+/--
+**And the coalesce is a step too.**
+
+§10.89's check, run against the transition §10.110 added. A reviewer pointed out
+that `the_coalesce` landed in the same commit as the section stating that check
+and was not put through it — a transition with no `NetworkStep` is the weaker
+witness §10.89 warns about. §10.112.
+-/
+def theCoalesceStep : serverPlan.NetworkStep Close.sent2 Close.afterCoalesce where
+  transition := .coalesce () wire escrowed Close.carrier Close.the_coalesce
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- Two sends and a merge, carried from `quiet`. -/
+theorem afterCoalesce_is_wellFormed : Close.afterCoalesce.WellFormed :=
+  ProcessPlan.wellFormed_preserved theCoalesceStep
+    (ProcessPlan.wellFormed_preserved theSecondSendStep
+      (ProcessPlan.wellFormed_preserved theSendStep withRoot_is_wellFormed))
+
+/-- And the carrier is on its own session, read out of the seventh clause. -/
+theorem the_carrier_is_on_the_wire :
+    Close.carrier.2.1 = wire :=
+  afterCoalesce_is_wellFormed.occurrencesOnTheirSession () wire Close.carrier
+    (by rw [Close.afterCoalesce_wire]
+        exact List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self))
+
+/-- Read back out of it: the rerouted payload lands. -/
+theorem the_rerouted_payload_lands :
+    (Grass.Process.Tests.Reroute.afterReroute.inFlight () wire).ReroutedElsewhere
+      (fun occurrence destination arrival =>
+        arrival ∈ (Grass.Process.Tests.Reroute.afterReroute.inFlight () destination).created ∧
+          arrival.1 = occurrence.1) :=
+  afterReroute_is_wellFormed.reroutesLand () wire
+
+/--
+And the strong form, which the sixth clause no longer states and
+`WellFormed.rerouted_arrival_is_on_its_destination` recovers from the seventh:
+the arrival is on the session it was rerouted to. §10.112.
+-/
+theorem the_arrival_is_on_its_destination {occurrence destination}
+    (rerouted : (Grass.Process.Tests.Reroute.afterReroute.inFlight () wire).resolution occurrence
+      = some (.rerouted destination)) :
+    ∃ arrival,
+      arrival ∈ (Grass.Process.Tests.Reroute.afterReroute.inFlight () destination).created ∧
+        arrival.1 = occurrence.1 ∧ arrival.2.1 = destination :=
+  afterReroute_is_wellFormed.rerouted_arrival_is_on_its_destination () wire rerouted
+
+/-! ## The rest of §10.89's check, run
+
+The section above ran §10.89's check against the six constructors whose
+transitions this branch had built at the time. A claims audit of the corpus found
+eight more with a transition witness and no `NetworkStep` wrapping it: the two
+session enders, the two endpoint deaths, the drop, the cancel request, and the
+two instance endings. Each was the weaker witness §10.89 warns about — a
+transition nothing can wrap is a transition no execution contains, and
+`ProcessPlan.wellFormed_preserved` is stated over steps.
+
+None of the eight was hard, and that is the point rather than a complaint: every
+one of them is non-allocating, so `admissible` is vacuous and `historyExact` is
+`rfl`. The check is cheap and it had simply not been run to the end.
+
+Each step is paired with the well-formedness of the world it reaches, by the
+capstone rather than by hand. That is the part that was actually missing: before
+these, `afterClosing`, `afterDying`, `afterSenderDeath`, `afterReceiverDeath`,
+`afterDropping`, `afterRequesting` and the two ending worlds were worlds no
+theorem said anything about.
+-/
+
+open Grass.Process.Tests.ChannelStep
+  (afterClosing afterDying afterDropping afterRequesting the_close the_death the_drop
+   the_request)
+
+/-- An ordinary close is a step. -/
+def theCloseStep : serverPlan.NetworkStep sent afterClosing where
+  transition := .channelClose () wire escrowed the_close
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- The world every one of these four starts from, named once. -/
+theorem sent_is_wellFormed : sent.WellFormed :=
+  ProcessPlan.wellFormed_preserved theSendStep withRoot_is_wellFormed
+
+theorem afterClosing_is_wellFormed : afterClosing.WellFormed :=
+  ProcessPlan.wellFormed_preserved theCloseStep sent_is_wellFormed
+
+/-- And so is a channel death. -/
+def theDeathStep : serverPlan.NetworkStep sent afterDying where
+  transition := .channelDeath () wire escrowed the_death
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+theorem afterDying_is_wellFormed : afterDying.WellFormed :=
+  ProcessPlan.wellFormed_preserved theDeathStep sent_is_wellFormed
+
+/-- A drop is a step. -/
+def theDropStep : serverPlan.NetworkStep sent afterDropping where
+  transition := .drop () wire escrowed the_drop
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+theorem afterDropping_is_wellFormed : afterDropping.WellFormed :=
+  ProcessPlan.wellFormed_preserved theDropStep sent_is_wellFormed
+
+/-- And so is a cancellation request, which resolves nothing. -/
+def theRequestStep : serverPlan.NetworkStep sent afterRequesting where
+  transition := .requestCancel () wire escrowed the_request
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+theorem afterRequesting_is_wellFormed : afterRequesting.WellFormed :=
+  ProcessPlan.wellFormed_preserved theRequestStep sent_is_wellFormed
+
+/-! ### The four whose before-world is not `sent`
+
+The two endpoint deaths and the two instance endings start from worlds built by
+hand rather than reached by a step — a world holding a *dead* sender, or an
+instance mid-countdown — so there is no chain from `quiet` to carry
+well-formedness along. What §10.89's check asks for is still the step, and these
+are it: each transition is one an execution can contain, which is the claim a
+transition alone does not make.
+
+That the before-worlds are unreached is worth saying rather than leaving
+implicit. It is the same distinction §10.88 drew between inhabited and exercised,
+one level down: a step from an unreachable world is a real step, and it is not a
+step of any run.
+-/
+
+open Grass.Process.Tests.ChannelStep
+  (sentWithDeadSender afterSenderDeath sentWithDeadReceiver afterReceiverDeath
+   the_sender_death the_receiver_death)
+open Grass.Process.Tests.Ending (holding settling waitingOnATick
+  an_honest_termination an_honest_interruption)
+open Grass.Process.Tests.Instances (finished)
+
+/-- A sender's death is a step. -/
+def theSenderDeathStep : serverPlan.NetworkStep sentWithDeadSender afterSenderDeath where
+  transition := .senderDeath () wire escrowed .supervised the_sender_death
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- And a receiver's. -/
+def theReceiverDeathStep :
+    serverPlan.NetworkStep sentWithDeadReceiver afterReceiverDeath where
+  transition := .receiverDeath () wire escrowed .providerLost the_receiver_death
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- A termination is a step. -/
+def theTerminationStep :
+    serverPlan.NetworkStep (holding settling) (holding finished) where
+  transition := .processTermination Role.connection Ending.slot ⟨()⟩ (fun _ _ _ => True)
+    an_honest_termination
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-- And so is an interruption of the demand the instance is holding. -/
+def theInterruptionStep (reason : Interrupt) :
+    serverPlan.NetworkStep (holding waitingOnATick)
+      (holding { waitingOnATick with lifecycle := .interrupted Demand.tick reason }) where
+  transition := .interrupt Role.connection Ending.slot Demand.tick reason
+    (fun _ _ _ => True) (an_honest_interruption reason)
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-! ## And a start at a plan with something in it
+
+§10.88: `ExactInitialNetwork` had one witness in the corpus,
+`Tests/Process/FrontierFixtures.lean`'s `waiting_is_a_start`, at a plan whose
+demand, observation, fault, violation, terminal-result, region and channel types
+are all `PEmpty` and whose kinds and slots are all `Unit`. Fifteen of its sixteen
+fields are `rfl`, `trivial` or `.elim`.
+
+`serverPlan` is the other fixture plan: two roles, a channel edge, a real
+observation type, `Nat`-indexed connection slots and a shared region. It had no
+start. `Tests/Process/WorldFixtures.lean`'s `withRoot` is one — a listener
+holding the root parentage, its generation allocated — and nothing had said so.
+-/
 
 /--
 And sound, which at this plan is the same claim under another name — §10.82.

@@ -53,6 +53,7 @@ open Grass.Process.Tests.Channel (wire)
 open Grass.Process.Tests.Transition
   (serverPlan payload occurrenceOf escrowed pendingLedger sent sent_wire
    ledgerAt ledgerAt_off_wire_empty)
+open Grass.Process.Tests.World (withRoot)
 
 /-! ## A second session on the same edge -/
 
@@ -179,7 +180,7 @@ theorem reroutedLedger_resolves_nothing_else :
 
 /-- The world after the reroute. -/
 noncomputable def afterReroute : ServerWorld :=
-  { quiet with inFlight := fun _ => reroutedAt }
+  { withRoot with inFlight := fun _ => reroutedAt }
 
 /-! ## The step -/
 
@@ -244,6 +245,14 @@ theorem the_reroute : serverPlan.Reroutes sent afterReroute () wire escrowed sid
       rw [reroutedAt_sidewire] at inList
       have single : other ∈ [arrival] := inList
       exact List.mem_singleton.mp single
+  -- Vacuous here, and for the reason that makes this fixture the easy case: the
+  -- destination's ledger is empty before the reroute, so there is no identity for
+  -- the arrival's to collide with.
+  arrivalIdentityIsFresh := by
+    intro _ _ _ other held
+    have inList : other ∈ (ledgerAt false sidewire).created := held
+    rw [ledgerAt_off_wire_empty sidewire_ne_wire] at inList
+    exact absurd inList List.not_mem_nil
   destinationExtends := by
     show LedgerExtends (ledgerAt false sidewire) (reroutedAt sidewire)
     rw [ledgerAt_off_wire_empty sidewire_ne_wire, reroutedAt_sidewire]
@@ -523,7 +532,7 @@ theorem strandingLedger_strands :
 
 /-- The world after it. -/
 noncomputable def afterStranding : ServerWorld :=
-  { quiet with inFlight := fun _ => strandingAt }
+  { withRoot with inFlight := fun _ => strandingAt }
 
 theorem afterStranding_wire : afterStranding.inFlight () wire = strandingLedger :=
   strandingAt_wire

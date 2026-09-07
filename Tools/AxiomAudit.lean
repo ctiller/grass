@@ -4,7 +4,9 @@ import Grass.ABI.Win64.Unwind
 import Grass.ABI.Win64.UnwindBytes
 import Grass.Artifact.Binary.Primitive
 import Grass.Artifact.Binary.Realization
+import Grass.Build.Cache.Key
 import Grass.Certificate
+import Grass.Construct.Link.Raw
 import Grass.Core.Context
 import Grass.Core.Demand
 import Grass.Core.Generational
@@ -107,6 +109,12 @@ import Grass.Std.Logical.Text
 import Grass.Std.Logical.Vec
 import Grass.Trust.Audit
 import Grass.Verify.VerifiedProgram
+<<<<<<< HEAD
+=======
+>>>>>>> origin/agent/g-construct/link-raw-minimal
+<<<<<<< HEAD
+=======
+>>>>>>> origin/agent/g-construct/link-raw-minimal
 
 /-!
 # Axiom audit
@@ -176,7 +184,11 @@ def userFacing (name : Name) : Name := (privateToUserName? name).getD name
 /-- Whether a declaration belongs to the audited namespace. -/
 def isAudited (name : Name) : Bool :=
   let n := userFacing name
-  (`Grass).isPrefixOf n && !n.isInternal
+  (`Grass).isPrefixOf n
+
+run_cmd do
+  unless isAudited `Grass._authoredUnderscoreProbe do
+    throwError "axiom audit would skip an authored underscore-prefixed Grass declaration"
 
 /--
 Attributes that make a declaration's compiled behaviour differ from its logical
