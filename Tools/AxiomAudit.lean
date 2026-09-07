@@ -4,6 +4,7 @@ import Grass.ABI.Win64.Unwind
 import Grass.ABI.Win64.UnwindBytes
 import Grass.Build.Cache.Key
 import Grass.Build.Manifest.Core
+import Grass.Build.Manifest.Invalidation
 import Grass.Certificate
 import Grass.Core.Context
 import Grass.Core.Demand
