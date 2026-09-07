@@ -842,7 +842,7 @@ selected family's exact `supportRegistry`, never its larger ambient storage
 registry. Thus two empty-demand protocols aggregate even if their unused
 ambient registries contain conflicting owners, while an active collision still
 requires typed owner equality.
-constructor. `authorityExact` additionally embeds the generated summary and the
+`authorityExact` additionally embeds the generated summary and the
 canonical normalized union into one owner-preserving registry; coverage by
 stable origin/view alone is never accepted as aggregate authority evidence.
 
@@ -1858,6 +1858,22 @@ structure ProcessRealization {R : Type u} [ResourceModel R]
   requirementSubstitution : RequirementSubstitution spec
   origin : ProcessPlanSource spec boundary boundaryCertificate
   originSound : ElaboratesTo origin registryCertificate plan providers correct
+
+structure PortableProcessModel {R : Type u} [ResourceModel R]
+    {resources : R} (spec : SpecProcess resources) where
+  realization : ProcessRealization spec
+  behavior : ProgramBehavior spec
+  behaviorExact : behavior = realization.logicalBehavior
+
+def PortableProcessModel.processOrigin
+    (model : PortableProcessModel spec) :
+    ProcessPlanSource spec model.realization.boundary
+      model.realization.boundaryCertificate :=
+  model.realization.origin
+
+theorem PortableProcessModel.processOrigin_exact
+    (model : PortableProcessModel spec) :
+    model.processOrigin = model.realization.origin := rfl
 ```
 
 `origin.accumulatedRequirements` and `origin.providerDemands` are total
@@ -1869,6 +1885,10 @@ by `ClosedBlendProvenance`. `ElaboratesTo` proves the source and generated-plan
 views extensionally identical. They
 are never author-populated sibling fields and are never reconstructed from
 requirement names.
+`PortableProcessModel` likewise has no sibling origin field: `processOrigin` is
+the definition above, projecting the exact `ProcessRealization.origin` already
+connected by `originSound`. The final portable certificate cannot re-author a
+similar-looking source or provider family.
 
 The `.blended` case is the only origin produced by staged portable closure. It
 retains the exact dependent presentation, graph, local certificates, recursive
@@ -2161,8 +2181,22 @@ theorem DirectProgramDerivation.connectsExactly
     (derivation : DirectProgramDerivation boundaryCertificate program) :
     RegisteredDerivationConnectsExactProgramAndBoundary
       derivation.payload program boundaryCertificate
-def DirectProgramDerivation.fromDirect ...
-def DirectProgramDerivation.fromEffect ...
+
+structure DirectOperationRequirements
+    (boundaryCertificate : CertifiedDriverBoundary boundary)
+    (program : DirectRelationalProgram boundary) where
+  Requires : (occurrence : DynamicOccurrence program) ->
+    ProviderDemandView -> Prop
+  decidableRequires : forall occurrence, DecidablePred (Requires occurrence)
+  contained : forall occurrence view, Requires occurrence view ->
+    OriginOccursIn
+      (boundaryCertificate.providers.origins occurrence.demand) view
+
+def DirectProgramDerivation.certify
+    (requirements : DirectOperationRequirements boundaryCertificate program)
+    (connects : RegisteredOperationModelConnectsProgramAndBoundary
+      requirements program boundaryCertificate) :
+    DirectProgramDerivation boundaryCertificate program
 
 structure CertifiedDirectProgram
     (boundary : DriverBoundary)
@@ -2221,9 +2255,15 @@ not import Effect because it only stores the existential `Kind` and the generic
 requires constructing and proving a new derivation; the standard adapter cannot
 silently discard its payload.
 
-`DirectProgramDerivation` is opaque. Its standard direct and Effect builders
-derive occurrence requirements and origins from the selected operation/lowering
-model; no public constructor accepts a caller-authored origin function.
+`DirectProgramDerivation` is opaque. `certify` is the Process-owned, owner-neutral
+construction seam. It enumerates the finite boundary origin IDs, keeps exactly
+those whose views satisfy the decidable per-occurrence `Requires`, and derives
+`operationOrigins_exact`, containment, and aggregate exactness internally. Its
+public inputs contain no origin list or origin function. A direct/assembly owner
+provides its registered operation model and `connects`; the downstream Effect
+module projects its selected theory/lowering plan to
+`DirectOperationRequirements` and calls the same factory. Process imports
+neither Effect nor any closed operation-owner sum.
 `RegisteredDerivationConnectsExactProgramAndBoundary` consumes the bidirectional
 `operationOrigins_exact` law. This is not merely coverage relative to an already
 supplied sidecar. The final machine/source connection proves the

@@ -679,13 +679,18 @@ structure ProviderDemandFamily.AuthorityEquiv
 theorem ProviderDemandFamily.AuthorityEquiv.refl ...
 theorem ProviderDemandFamily.AuthorityEquiv.symm ...
 theorem ProviderDemandFamily.AuthorityEquiv.trans ...
+theorem ProviderDemandFamily.AuthorityEquiv.transportCompatibility
+    (left : firstLeft.AuthorityEquiv secondLeft)
+    (right : firstRight.AuthorityEquiv secondRight)
+    (compatible : OriginsDisjointOrDescriptorsExact firstLeft firstRight) :
+    OriginsDisjointOrDescriptorsExact secondLeft secondRight
 theorem ProviderDemandFamily.AuthorityEquiv.union
     (left : firstLeft.AuthorityEquiv secondLeft)
     (right : firstRight.AuthorityEquiv secondRight)
-    (firstCompatible : OriginsDisjointOrDescriptorsExact firstLeft firstRight)
-    (secondCompatible : OriginsDisjointOrDescriptorsExact secondLeft secondRight) :
+    (firstCompatible : OriginsDisjointOrDescriptorsExact firstLeft firstRight) :
     (firstLeft.union firstRight firstCompatible).AuthorityEquiv
-      (secondLeft.union secondRight secondCompatible)
+      (secondLeft.union secondRight
+        (left.transportCompatibility right firstCompatible))
 theorem ProviderDemandFamily.ext_sameRegistry
     (sameRegistry : left.authorityRegistry = right.authorityRegistry)
     (sameOrigins : left.origins = right.origins)
@@ -772,6 +777,13 @@ on the `(owner, localName)` fields of `StableId` and is deterministic under
 proof irrelevance.
 `normalize_permutation` proves that permuting the input registries produces the
 same normalized registry and embeddings; no hidden representative is chosen.
+
+Compatibility is semantic and therefore transports across
+`AuthorityEquiv`. The common `AuthorityEquiv.union` path asks the composer for
+only the compatibility witness on the families it actually has; it derives the
+reindexed side internally. Requiring both witnesses would expose proof
+representation churn as author ceremony and would permit the two sides to
+disagree about a fact that authority equivalence already fixes.
 
 `StableId` is serialization and collision-diagnostic data, not extension
 authority. `ExtensionAuthorityOwner` is opaque and has no public constructor.
