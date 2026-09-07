@@ -781,11 +781,23 @@ structure ProcessPlan (registry : ProtocolRegistry) (boundary : DriverBoundary)
       (logicalWorldAgreement toProcessTopology Message) edge
   boundaryProjection : RootLocalDemandProjection toProcessTopology boundary
 
+structure ProcessProviderCompatibility
+    (boundaryCertificate : CertifiedDriverBoundary boundary)
+    (registryCertificate : CertifiedProtocolRegistry registry)
+    (plan : ProcessPlan registry boundary)
+    (selected : SelectedProtocolImage registry plan.toProcessTopologyCore) : Prop where
+  authorities : EverySelectedProviderAuthorityPairIsDisjointOrSameOwner
+    boundaryCertificate registryCertificate plan selected
+  descriptors : EveryCollidingSelectedOriginHasExactDescriptor
+    boundaryCertificate registryCertificate plan selected
+
 def CanonicalProcessProviderUnion
     (boundaryCertificate : CertifiedDriverBoundary boundary)
     (registryCertificate : CertifiedProtocolRegistry registry)
     (plan : ProcessPlan registry boundary)
-    (selected : SelectedProtocolImage registry plan.toProcessTopologyCore) :
+    (selected : SelectedProtocolImage registry plan.toProcessTopologyCore)
+    (compatible : ProcessProviderCompatibility
+      boundaryCertificate registryCertificate plan selected) :
     ProviderDemandFamily
 
 opaque ProcessProviderCertificate
@@ -799,17 +811,24 @@ def ProcessProviderCertificate.selectedProtocols
 def ProcessProviderCertificate.providerDemands
     (certificate : ProcessProviderCertificate
       boundaryCertificate registryCertificate plan) : ProviderDemandFamily
+def ProcessProviderCertificate.compatibility
+    (certificate : ProcessProviderCertificate
+      boundaryCertificate registryCertificate plan) :
+    ProcessProviderCompatibility boundaryCertificate registryCertificate plan
+      certificate.selectedProtocols
 theorem ProcessProviderCertificate.authorityExact
     (certificate : ProcessProviderCertificate
       boundaryCertificate registryCertificate plan) :
     certificate.providerDemands.AuthorityEquiv
       (CanonicalProcessProviderUnion boundaryCertificate registryCertificate plan
-        certificate.selectedProtocols)
+        certificate.selectedProtocols certificate.compatibility)
 theorem ProcessProviderCertificate.providerCoverage ...
 theorem ProcessProviderCertificate.providerNoExtras ...
 theorem ProcessProviderCertificate.providerDescriptorsExact ...
 def ProcessProviderCertificate.build
-    (selected : SelectedProtocolImage registry plan.toProcessTopologyCore) :
+    (selected : SelectedProtocolImage registry plan.toProcessTopologyCore)
+    (compatible : ProcessProviderCompatibility
+      boundaryCertificate registryCertificate plan selected) :
     ProcessProviderCertificate boundaryCertificate registryCertificate plan
 
 abbrev LogicalProcessNetwork (plan : ProcessPlan registry boundary) :=
@@ -831,8 +850,10 @@ boundary plus every protocol in `selectedProtocols`. `providerCoverage`,
 `providerNoExtras`, and `providerDescriptorsExact` make that summary exact in
 both directions without deciding reachability or enumerating the registry. An
 unused selected role therefore remains conservatively included. Hierarchical
-plan/shard constructors generate the family and the three proofs; applications
-do not maintain a second list. A true origin collision fails at the composing
+plan/shard constructors generate the selected image, compatibility, family, and
+the three proofs; applications do not maintain a second list. A novel explicit
+plan supplies compatibility at its composition boundary, where a true owner or
+descriptor collision fails before the opaque certificate can be built.
 constructor. `authorityExact` additionally embeds the generated summary and the
 canonical normalized union into one owner-preserving registry; coverage by
 stable origin/view alone is never accepted as aggregate authority evidence.
