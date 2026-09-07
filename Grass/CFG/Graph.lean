@@ -18,13 +18,13 @@ terminal disposition. -/
 inductive EdgeTarget (Terminal : Type v) where
   | block (id : BlockId)
   | terminal (disposition : Terminal)
-deriving Repr, DecidableEq, BEq
+deriving Repr, DecidableEq
 
 /-- One named exit and its control-flow destination. -/
 structure Edge (Terminal : Type v) where
   exit : ExitTag
   target : EdgeTarget Terminal
-deriving Repr, DecidableEq, BEq
+deriving Repr, DecidableEq
 
 /-- A basic block with its contract and structurally authored outgoing edges. -/
 structure Block (State : Type u) (Terminal : Type v) where
@@ -93,7 +93,7 @@ def exitsCovered (block : Block State Terminal) : Bool :=
 
 /-- Each declared exit selects at most one destination. -/
 def outgoingUnique (block : Block State Terminal) : Bool :=
-  (outgoingTags block).eraseDups.length == (outgoingTags block).length
+  decide (outgoingTags block).Nodup
 
 /-- Every direct edge resolves to a block in the same graph.  Terminal
 dispositions are values supplied by the surrounding contract and need no label
@@ -112,7 +112,7 @@ unique block identities, a resolved entry, unique declared-and-covered exits,
 and resolved direct targets.  It does not claim local instruction correctness.
 -/
 def wellFormed (graph : Graph State Terminal) : Bool :=
-  graph.blockIds.eraseDups.length == graph.blockIds.length &&
+  decide graph.blockIds.Nodup &&
   (graph.findBlock? graph.entry).isSome &&
   (graph.blocks.all fun block =>
     block.contract.wellFormed &&
@@ -131,7 +131,7 @@ instance (graph : Graph State Terminal) : Decidable graph.WellFormed :=
 use these four facts rather than unfolding the checker implementation. -/
 @[simp] theorem wellFormed_iff (graph : Graph State Terminal) :
     graph.WellFormed ↔
-      ((graph.blockIds.eraseDups.length = graph.blockIds.length ∧
+      ((graph.blockIds.Nodup ∧
         (graph.findBlock? graph.entry).isSome = true) ∧
         (graph.blocks.all fun block =>
           block.contract.wellFormed &&

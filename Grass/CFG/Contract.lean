@@ -16,15 +16,24 @@ namespace Grass.CFG
 
 universe u
 
-/-- Stable identity of one authored or generated basic block. -/
+/-- Stable identity of one closed, alpha-normalized basic block.
+
+This is the manifest identity after elaboration.  Hygienic macro-local labels
+are minted as opaque construction tokens and receive a `BlockId` only during
+alpha-normalization; this type is not the macro label-minting API.
+-/
 structure BlockId where
   id : StableId
-deriving Repr, DecidableEq, BEq, Hashable
+deriving Repr, DecidableEq, Hashable
 
-/-- Stable identity of one exit from a block contract. -/
+/-- Stable identity of one exit from a block contract.
+
+Exit tags are scoped by their containing block contract, so conventional tags
+such as `normal` may occur in many blocks without becoming the same CFG edge.
+-/
 structure ExitTag where
   id : StableId
-deriving Repr, DecidableEq, BEq, Hashable
+deriving Repr, DecidableEq, Hashable
 
 /-- The postcondition associated with one named exit. -/
 structure ExitContract (State : Type u) where
@@ -57,7 +66,7 @@ def declaresExit (contract : BlockContract State) (tag : ExitTag) : Bool :=
 /-- A contract is structurally well formed exactly when exit identities are
 unique.  An empty family is permitted for a genuinely non-returning block. -/
 def wellFormed (contract : BlockContract State) : Bool :=
-  contract.exitTags.eraseDups.length == contract.exitTags.length
+  decide contract.exitTags.Nodup
 
 /-- Proposition consumed by certificate-bearing code.  It is definitionally
 the result of the small executable structural checker. -/
@@ -70,8 +79,7 @@ instance (contract : BlockContract State) : Decidable contract.WellFormed :=
 /-- Public elimination rule for the executable checker.  Consumers need not
 unfold the checker to recover exit-identity uniqueness. -/
 @[simp] theorem wellFormed_iff (contract : BlockContract State) :
-    contract.WellFormed ↔
-      contract.exitTags.eraseDups.length = contract.exitTags.length := by
+    contract.WellFormed ↔ contract.exitTags.Nodup := by
   simp [WellFormed, wellFormed]
 
 end BlockContract
