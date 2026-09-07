@@ -25,7 +25,7 @@ reading had.
   `ReroutesLand` with every field it had discharged. `ResolvesNothingElse` and
   `ResolvesNothing` are the fields. §10.87.
 * And `declared_slot_outcome`'s first payload dropped both the current parent and
-  the lifecycle, so two of the six clauses could not be proved from it at all.
+  the lifecycle, so two of the clauses could not be proved from it at all.
   Local adversarial review found that one by exhibiting the root that passes and
   the pair of incarnations that agree on everything reported while disagreeing on
   what the clause asks.
@@ -34,7 +34,7 @@ reading had.
 
 Every constructor declares at most one `.instanceState` fragment, and
 `NetworkTransition.touchesOnly` says a step changes nothing outside its scope. So
-**four** of the six clauses — `SlotsAgree`, `LifecyclesWitnessed`,
+**four** of the eight clauses — `SlotsAgree`, `LifecyclesWitnessed`,
 `ParentageValid` and `NominalsAllocated`, each a property of *one* incarnation in
 *one* slot — reduce to a single question per constructor: *at the slot you
 declared, does the property still hold?* `instanceProperty_preserved` is that
@@ -983,6 +983,204 @@ theorem occurrencesOnTheirSession_preserved (transition : plan.NetworkTransition
       rcases declared.2 with h | h <;> exact absurd h (by intro equal; cases equal)
   · exact holds edge session occurrence (ledger_unchanged transition declared ▸ held)
 
+
+/-! ### The two shapes every escrow case of the eighth clause takes -/
+
+/--
+A step that creates nothing in a ledger preserves that ledger's identity
+distinctness, because both entries were already there —
+`creates_nothing_distinct`.
+
+Nine of the twelve escrow-scoped constructors are this case, and stating it once
+is the difference between a readable proof and nine copies of the same three
+lines. `creates` is each constructor's own reason: `CreatesNothing` for the four
+that declare it, and an `absurd` against `createsOnlyTheCarrier` for the five
+whose resolution is not `.coalesced`.
+-/
+theorem creates_nothing_distinct {edge : plan.topology.ChannelKind}
+    {session : plan.topology.ChannelId edge}
+    {first second : EdgeOccurrence plan.topology plan.message edge}
+    (creates : ∀ other, other ∈ (after.inFlight edge session).created →
+      other ∉ (before.inFlight edge session).created → False)
+    (holds : before.IdentitiesDistinct)
+    (heldFirst : first ∈ (after.inFlight edge session).created)
+    (heldSecond : second ∈ (after.inFlight edge session).created)
+    (sameIdentity : first.2.2.id = second.2.2.id) : first = second := by
+  by_cases oldFirst : first ∈ (before.inFlight edge session).created
+  · by_cases oldSecond : second ∈ (before.inFlight edge session).created
+    · exact holds edge session first second oldFirst oldSecond sameIdentity
+    · exact (creates second heldSecond oldSecond).elim
+  · exact (creates first heldFirst oldFirst).elim
+
+/--
+And a step that creates *one* entry with a fresh identity preserves it too, as
+`created_identities_distinct`.
+
+The three constructors that can put something in a ledger — a send, a coalesce's
+carrier, and a reroute's arrival at its destination — differ in which field says
+"only one" and which says "fresh", and agree in everything else.
+-/
+theorem created_identities_distinct {edge : plan.topology.ChannelKind}
+    {session : plan.topology.ChannelId edge}
+    {first second created : EdgeOccurrence plan.topology plan.message edge}
+    (isFresh : ∀ entry, entry ∈ (after.inFlight edge session).created →
+      entry ∉ (before.inFlight edge session).created →
+      ∀ other, other ∈ (before.inFlight edge session).created →
+        other.2.2.id ≠ entry.2.2.id)
+    (only : ∀ other, other ∈ (after.inFlight edge session).created →
+      other ∉ (before.inFlight edge session).created → other = created)
+    (holds : before.IdentitiesDistinct)
+    (heldFirst : first ∈ (after.inFlight edge session).created)
+    (heldSecond : second ∈ (after.inFlight edge session).created)
+    (sameIdentity : first.2.2.id = second.2.2.id) : first = second := by
+  by_cases oldFirst : first ∈ (before.inFlight edge session).created <;>
+    by_cases oldSecond : second ∈ (before.inFlight edge session).created
+  · exact holds edge session first second oldFirst oldSecond sameIdentity
+  · exact absurd sameIdentity (isFresh second heldSecond oldSecond first oldFirst)
+  · exact absurd sameIdentity.symm (isFresh first heldFirst oldFirst second oldSecond)
+  · rw [only first heldFirst oldFirst, only second heldSecond oldSecond]
+
+
+/--
+**No two entries in one ledger share an occurrence identity, after the step
+either.**
+
+The eighth clause, and `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.115's owed
+invariant. Three constructors can put an entry into a ledger and each carries its
+own freshness field: `SendsEscrow.identityIsFresh`,
+`ResolvesEscrow.createdIdentityIsFresh` (vacuous at every resolution but
+`.coalesced`) and `Reroutes.arrivalIdentityIsFresh` at the destination. Every
+other constructor either creates nothing or does not scope the fragment at all.
+
+The proof of each creating case is one shape: both entries old, and the
+before-network's clause answers; one old and one new, and the freshness field
+refutes the identity equation; both new, and the uniqueness field makes them the
+same entry.
+-/
+theorem identitiesDistinct_preserved (transition : plan.NetworkTransition before after)
+    (holds : before.IdentitiesDistinct) : after.IdentitiesDistinct := by
+  intro edge session first second heldFirst heldSecond sameIdentity
+  by_cases declared : transition.scope (.escrow edge session)
+  · cases transition with
+    | send _ message occurrence' step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact created_identities_distinct (created := ⟨message, occurrence'⟩)
+        (fun entry found fresh other old => by
+          rw [step.createsOnlyTheMessage entry found fresh]
+          exact step.identityIsFresh other old)
+        step.createsOnlyTheMessage
+        holds heldFirst heldSecond sameIdentity
+    | coalesce _ _ _ carrier step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      refine created_identities_distinct (created := carrier)
+        step.createdIdentityIsFresh ?_ holds heldFirst heldSecond sameIdentity
+      intro other found fresh
+      have named := step.createsOnlyTheCarrier other found fresh
+      injection named with same
+      exact same.symm
+    | acknowledgeCancel _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact creates_nothing_distinct
+        (fun other found fresh =>
+          absurd (step.createsOnlyTheCarrier other found fresh) (by intro e; cases e))
+        holds heldFirst heldSecond sameIdentity
+    | timeout _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact creates_nothing_distinct
+        (fun other found fresh =>
+          absurd (step.createsOnlyTheCarrier other found fresh) (by intro e; cases e))
+        holds heldFirst heldSecond sameIdentity
+    | senderDeath _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact creates_nothing_distinct
+        (fun other found fresh =>
+          absurd (step.createsOnlyTheCarrier other found fresh) (by intro e; cases e))
+        holds heldFirst heldSecond sameIdentity
+    | receiverDeath _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact creates_nothing_distinct
+        (fun other found fresh =>
+          absurd (step.createsOnlyTheCarrier other found fresh) (by intro e; cases e))
+        holds heldFirst heldSecond sameIdentity
+    | drop _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact creates_nothing_distinct
+        (fun other found fresh =>
+          absurd (step.createsOnlyTheCarrier other found fresh) (by intro e; cases e))
+        holds heldFirst heldSecond sameIdentity
+    | requestCancel _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
+      cases same; cases sameSession
+      exact creates_nothing_distinct
+        (fun other found fresh => absurd (step.createsNothing ▸ found) fresh)
+        holds heldFirst heldSecond sameIdentity
+    | receive _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj
+        (by rcases declared with h | h
+            · exact h
+            · exact absurd h (by intro equal; cases equal))
+      cases same; cases sameSession
+      exact creates_nothing_distinct
+        (fun other found fresh => absurd (step.createsNothing ▸ found) fresh)
+        holds heldFirst heldSecond sameIdentity
+    | channelClose _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj
+        (by rcases declared with h | h
+            · exact h
+            · exact absurd h (by intro equal; cases equal))
+      cases same; cases sameSession
+      exact creates_nothing_distinct
+        (fun other found fresh => absurd (step.createsNothing ▸ found) fresh)
+        holds heldFirst heldSecond sameIdentity
+    | channelDeath _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj
+        (by rcases declared with h | h
+            · exact h
+            · exact absurd h (by intro equal; cases equal))
+      cases same; cases sameSession
+      exact creates_nothing_distinct
+        (fun other found fresh => absurd (step.createsNothing ▸ found) fresh)
+        holds heldFirst heldSecond sameIdentity
+    | reroute _ _ _ _ step =>
+      rcases declared with h | h
+      · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
+        cases same; cases sameSession
+        exact creates_nothing_distinct
+          (fun other found fresh => absurd (step.createsNothing ▸ found) fresh)
+          holds heldFirst heldSecond sameIdentity
+      · obtain ⟨same, sameSession⟩ := escrowFragment_inj h
+        cases same; cases sameSession
+        obtain ⟨arrival, _, _, _, _, unique⟩ := step.arrives
+        exact created_identities_distinct (created := arrival)
+          step.arrivalIdentityIsFresh unique
+          holds heldFirst heldSecond sameIdentity
+    | processStep _ _ _ _ _ _ _ =>
+      exact absurd declared (by rintro (h | ⟨_, h⟩ | ⟨_, _, h⟩) <;> cases h)
+    | spawn _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
+    | restart _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
+    | join _ _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | detach _ _ _ => exact absurd declared (by intro equal; cases equal)
+    | interrupt _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | fault _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | environmentViolation _ _ _ _ _ =>
+      exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | childCancelled _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | childDied _ _ _ _ _ _ => exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | processTermination _ _ _ _ _ =>
+      exact absurd declared (by rintro (h | ⟨_, h⟩) <;> cases h)
+    | commit _ _ =>
+      rcases declared.2 with h | h <;> exact absurd h (by intro equal; cases equal)
+  · have unchanged := ledger_unchanged transition declared
+    exact holds edge session first second (unchanged ▸ heldFirst) (unchanged ▸ heldSecond)
+      sameIdentity
+
 /-! ## The capstone -/
 
 /--
@@ -1004,6 +1202,8 @@ theorem wellFormed_preserved (step : plan.NetworkStep before after)
   reroutesLand := reroutesLand_preserved step.transition wellFormed.reroutesLand
   occurrencesOnTheirSession :=
     occurrencesOnTheirSession_preserved step.transition wellFormed.occurrencesOnTheirSession
+  identitiesDistinct :=
+    identitiesDistinct_preserved step.transition wellFormed.identitiesDistinct
 
 end ProcessPlan
 
