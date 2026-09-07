@@ -148,6 +148,19 @@ CASES = [
         False,
     ),
     (
+        # `sentences` used to split only on a bare period, so a sentence ending
+        # `.)` never terminated and its hedge carried into the next one.
+        "a hedge in a bracketed sentence does not carry to the next",
+        "(Partial writes are intended to be modelled here.) The console "
+        "ensures no caller observes a short write.",
+        "names no enforcing type",
+        # Two sentences, so the whole-text predicate is not meaningful for the
+        # case as written -- `check` splits it and judges the second. The split
+        # itself is asserted structurally in `parsers_do_not_lose_text`; this
+        # case checks that the second sentence is then reported.
+        False,
+    ),
+    (
         "claim naming nothing",
         "This ensures the encoding is unique.",
         "names no enforcing type",
@@ -234,6 +247,15 @@ def main_acts_on_findings() -> list[str]:
     try:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
+            # Two files, with the offending one *second* in sorted
+            # order. A reviewer truncated `main` to `audited_files()[:1]`;
+            # every floor stayed green, because the floors ask what the gate
+            # walks and `main` was free not to use it.
+            (root / "AClean.lean").write_text(
+                "/-!" + chr(10)
+                + "`cons_injective_right` ensures the remainder is unique."
+                + chr(10) + "-/" + chr(10),
+                encoding="utf-8")
             (root / "Bad.lean").write_text(
                 "/-!" + chr(10)
                 + "This ensures the encoding is unique." + chr(10)
@@ -250,6 +272,7 @@ def main_acts_on_findings() -> list[str]:
                     f"main() returned {code} over a corpus whose only "
                     "docstring is an unbacked claim; the gate cannot fail")
             (root / "Bad.lean").unlink()
+            (root / "AClean.lean").unlink()
             with contextlib.redirect_stdout(sink):
                 clean = audit.main()
             if clean != 0:
@@ -259,6 +282,69 @@ def main_acts_on_findings() -> list[str]:
     finally:
         (audit.declaration_names, audit.specification_names,
          audit.module_names, audit.audited_roots) = saved
+    return failures
+
+
+def parsers_do_not_lose_text() -> list[str]:
+    """The two parsers that decide what is even looked at.
+
+    Both had defects that made whole passages invisible, which no case in the
+    list above could reveal: a case is a sentence handed straight to `check`,
+    so it never exercises how sentences and blocks are found in the first
+    place.
+    """
+    failures = []
+    nested = ("/-- The width is 32. /- see docs -/" + chr(10)
+              + "The console ensures nothing. -/" + chr(10))
+    blocks = [text for _, text in audit.doc_blocks(nested)]
+    if len(blocks) != 1 or "ensures nothing" not in blocks[0]:
+        failures.append(
+            "doc_blocks lost text after a nested comment: Lean allows a block "
+            "comment inside a doc comment, and everything past the inner "
+            f"terminator would be audited by nothing. Got {blocks!r}")
+    bracketed = ("(Partial writes are intended to be modelled here.) The "
+                 "console ensures no caller observes a short write.")
+    parts = audit.sentences(bracketed)
+    if len(parts) != 2:
+        failures.append(
+            "sentences did not split at `.)`, so the first sentence's hedge "
+            f"would exempt the second's claim. Got {parts!r}")
+    return failures
+
+
+def oracle_failure_is_fatal() -> list[str]:
+    """A missing declaration list must stop the audit, not empty it.
+
+    `declaration_names` says an audit that passes because it could not obtain
+    the name list is worse than no audit. Nothing tested that, and a reviewer
+    showed the subprocess-failure exit and the size floor could both be deleted
+    together while every case stayed green.
+    """
+    import subprocess as _sub
+    failures = []
+    saved = _sub.run
+
+    class Result:
+        def __init__(self, code, out):
+            self.returncode = code
+            self.stdout = out
+            self.stderr = ""
+
+    for label, result in [
+        ("a failing oracle", Result(1, "")),
+        ("an oracle returning almost nothing", Result(0, "Grass.A" + chr(10))),
+    ]:
+        _sub.run = lambda *a, **k: result
+        try:
+            audit.declaration_names()
+            failures.append(
+                f"declaration_names accepted {label}; the audit would then "
+                "report every real name as invented, or pass by knowing "
+                "nothing")
+        except SystemExit:
+            pass
+        finally:
+            _sub.run = saved
     return failures
 
 
@@ -350,6 +436,8 @@ def main() -> int:
                     "specification-resolved citation must stay visible")
 
     failures.extend(corpus_shape())
+    failures.extend(parsers_do_not_lose_text())
+    failures.extend(oracle_failure_is_fatal())
     failures.extend(reporting_acts_on_findings())
     failures.extend(main_acts_on_findings())
 

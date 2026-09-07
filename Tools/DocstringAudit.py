@@ -305,14 +305,53 @@ def sentences(block: str) -> list[str]:
     # Split on sentence ends only. A semicolon joins a claim to the clause that
     # names its enforcement, so splitting there would report the claim as unbacked
     # while the name sits in the next fragment.
-    return [s.strip() for s in re.split(r"(?<=[.])\s+", text) if s.strip()]
+    # Closing punctuation may follow the period. Splitting on `[.]` alone meant
+    # a sentence ending `.)` or `."` never terminated, so its hedge carried
+    # into the next sentence -- "(Partial writes are intended to be modelled
+    # here.) The console ensures no caller observes a short write." was read as
+    # one hedged sentence, and a reviewer used it to pass a false claim.
+    return [s.strip() for s in re.split(r"""(?<=[.])['")\]]*\s+""", text)
+            if s.strip()]
 
 
 def doc_blocks(source: str):
-    """Yield (line number, text) for every `/-- ... -/` and `/-! ... -/` block."""
-    for match in re.finditer(r"/-[-!](.*?)-/", source, re.DOTALL):
-        line = source[: match.start()].count("\n") + 1
-        yield line, match.group(1)
+    """Yield (line number, text) for every `/-- ... -/` and `/-! ... -/` block.
+
+    Nesting-aware, which a non-greedy regex was not. Lean allows a block comment
+    inside a doc comment, and `/-- a /- b -/ c -/` is one docstring; the regex
+    stopped at the inner `-/`, so everything after it -- `c`, and any sentence
+    following -- belonged to no block and was never audited at all. A reviewer
+    hid a false claim there and the gate reported the file clean.
+    """
+    index = 0
+    length = len(source)
+    while index < length - 2:
+        if source[index:index + 3] not in ("/--", "/-!"):
+            index += 1
+            continue
+        start = index
+        depth = 1
+        scan = index + 2
+        while scan < length - 1:
+            window = source[scan:scan + 2]
+            if window == "/-":
+                depth += 1
+                scan += 2
+                continue
+            if window == "-/":
+                depth -= 1
+                scan += 2
+                if depth == 0:
+                    break
+                continue
+            scan += 1
+        else:
+            # Unterminated: yield the remainder rather than silently dropping
+            # it, so a malformed comment cannot hide a claim.
+            yield source[:start].count("\n") + 1, source[start + 3:]
+            return
+        yield source[:start].count("\n") + 1, source[start + 3:scan - 2]
+        index = scan
 
 
 # Where a claim word sits matters, and two exemptions used to ignore that.
@@ -373,6 +412,42 @@ def quotes_the_claim(sentence: str) -> bool:
                 return False
             start = lowered.find(word, start + 1)
     return True
+
+
+# ## Known ways through, measured rather than guessed
+#
+# Three of a reviewer's bypasses survive, and they are written down so that the
+# next reader does not have to rediscover them and nobody mistakes this gate for
+# airtight. Each was reproduced against the real corpora.
+#
+# 1. A hedge repurposed as a guarantee. `cannot read` is on HEDGES because
+#    "X cannot do Y" is a statement of limitation -- the honest alternative the
+#    rule asks for. That reading depends on the subject being the code. Give it
+#    an external subject and the same words assert a mechanism: "a caller cannot
+#    read a short byte count from a completed console write" is exempt and
+#    false. `cannot know`, `cannot fault` and `cannot answer` behave the same.
+#
+# 2. A hedge as an intensifier. `on its own` is a hedge in "this does not do it
+#    on its own", and strengthens the claim in "the console layer ensures on its
+#    own that every accepted write transfers the whole request".
+#
+# 3. A quotation that carries the claim word while the assertion sits outside
+#    it. `quotes_the_claim` requires every claim word to fall inside a quoted
+#    span, which "docs/X requires a console that "ensures every write transfers
+#    the whole request", and this module is one" satisfies -- the assertion is
+#    carried by "and this module is one", which contains no claim word at all.
+#
+# Why they are recorded rather than fixed. Removing the repurposable hedges is
+# the obvious fix, and each is load-bearing in one or two real sentences, all of
+# them in modules outside this gate's author's scope -- so the fix is a fleet
+# coordination, not an edit. Tightening (3) to "nothing follows the closing
+# quote" was measured against the four corpus sentences that rely on the
+# exemption and breaks two of them, both genuine citations.
+#
+# All three share a root the header already states: this gate matches claim
+# *words*, so a sentence that asserts without one is outside its reach entirely.
+# It closes the gap between a claim and a name, not the gap between a sentence
+# and its meaning.
 
 
 def is_checked_claim(sentence: str) -> bool:

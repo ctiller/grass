@@ -13,13 +13,21 @@ mention.
 
 `isaCone` is the whole of the `Grass` claim. Fourteen modules: the eleven
 shards, the facade itself, and outside `Grass.ISA.X86` exactly two leaves,
-`Grass.Core.Name` and `Grass.Std.Logical.Byte`. Any *`Grass`* edge added
-anywhere under those fourteen fails this fixture, including one nobody
-anticipated.
+`Grass.Core.Name` and `Grass.Std.Logical.Byte`. A `Grass` edge to a module
+*outside* those fourteen fails this fixture, including one nobody anticipated.
 
-Not any edge at all: `import Lean` added to a shard passes, and
-`Tests/Facade/Containment.lean` explains why that is structural rather than an
-oversight. An earlier draft of this paragraph claimed "any edge".
+Two kinds of edge do not, and this paragraph has now overclaimed twice, so both
+are written down rather than left to be discovered a third time.
+
+`import Lean` added to a shard passes: `Tests/Facade/Containment.lean` explains
+why non-`Grass` widening is structurally invisible here.
+
+And a cone is a *set of modules*, not a graph of edges, so an edge between two
+modules that are already in it changes nothing this fixture can see. Adding
+`import Grass.ISA.X86.Decode` to `Grass/ISA/X86/Performance.lean` -- the
+performance model reaching into the decoder, a layering violation of exactly the
+kind a cone fixture is expected to catch -- builds green. A reviewer
+demonstrated it; nothing here would notice.
 
 `isaPresent` is the other half: the vocabulary a machine-model author or
 `Grass.Assembly.X86` reaches for, which the facade may not quietly stop
