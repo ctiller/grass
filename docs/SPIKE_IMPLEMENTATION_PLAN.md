@@ -242,11 +242,20 @@ Neither can be settled by that principle alone yet, because the names the spikes
 actually use are not in the modules the repointing would name.
 `Spikes/5_Spinning_Cube/Process.lean` uses `BlendedProcessGraph`,
 `ClosedBlend` and `ProcessRealization.blend`, and none of the three is in
-`Grass/Process/Weave/Blend.lean` at `agent/c-process/m4-weave-and-composition`,
-which holds `VocabularyEmbedding`, `DisjointWeave` and `routing_is_forced`.
+`Grass/Process/Weave/Blend.lean`, which holds `VocabularyEmbedding`,
+`DisjointWeave` and `routing_is_forced`. That module reached main with
+`c-process:71` at 28a24f6, and each half of this claim was re-checked against
+main rather than carried forward: the three names it holds are there, and the
+three the spike wants are in no file under `Grass/` at all.
 `Spikes/4_Web_Server/Cancellation.lean` uses `CancellationPolicy`, which is in
 `Cancellation/Policy.lean`, but also `CancellationSummary` and
-`CancellationPolicyRealizes`, which are in none of the three leaves. Repointing
+`CancellationPolicyRealizes`, which are in none of the three leaves. Check that
+second pair by declaration and not by `grep -l`: `CancellationSummary` does
+appear in `Cancellation/Compose.lean`, but only at line 37 inside prose
+comparing that module to PROCESS.md §3, and a name found only in a docstring is
+not a declaration. `boundaryProjection` sets the same trap in
+`Grass/Process/Network/Plan.lean`, where the only match is the module note
+quoting the pre-128 shape of a structure that no longer has the field. Repointing
 an import at a module that will not contain the name is not a fix; it moves the
 error rather than removing it. The open question to c-process is therefore
 placement -- where these five names will live -- and the import lines follow
@@ -539,8 +548,14 @@ rulings such as `coord1:4` -- which g-design has been discharging in c-spike's
 absence and which now returns here. One sequencing consequence rather than an
 ownership one: `agent/g-design/normative-design` carries unmerged edits to
 `Spikes/4_Web_Server/Process.lean`, `Spikes/5_Spinning_Cube/Process.lean`,
-`docs/SPIKE_4.md` and `docs/SPIKE_5.md` at 136b20a, so c-spike takes custody of
-those four after that branch lands rather than racing it. It does not
+`docs/SPIKE_4.md` and `docs/SPIKE_5.md` -- at c09c82a as this is written, having
+moved from 136b20a, and still changing all four against its merge-base with
+main. So c-spike takes custody of those four after that branch lands rather than
+racing it. That sequencing now binds a second obligation: `g-design:96`'s
+resynchronization of Spikes 4 and 5, which `c-process:71` triggered by landing
+the author-facing shape, targets exactly these four files. It waits on this
+branch as well as on the two placement answers `c-spike:41` asks c-process for,
+and this is the constraint that decides which, not a preference. It does not
 implement the libraries. Where a phase above is unowned, the deliverable is a
 routing decision from the coordinator, not c-spike quietly taking the work: an
 agent that both authored the demonstration and the thing being demonstrated
