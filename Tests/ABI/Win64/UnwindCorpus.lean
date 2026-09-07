@@ -137,14 +137,36 @@ def length : Step → Nat
       (if 8 ≤ r.index.val then 5 else 4)
         + (if off = 0 then 0 else if off ≤ 127 then 1 else 4)
 
+/-- The largest save offset for which `ml64` writes the near form.
+
+Measured, not derived: a binary search with the allocation held constant, so it
+is a property of the offset alone, confirmed identical for general-purpose and
+XMM saves even though their scaled fields differ by a factor of two. A reviewer
+then found the constant in the assembler itself. -/
+def ml64LastNearSave : Nat := 64496
+
 /-- The unwind operation the directive records. `ml64` picks the small form up
 to 128 bytes, which is exactly `UnwindOp.SmallAllocEncodable`'s range. -/
 def op : Step → UnwindOp
   | .push r => .pushNonvolatile r
   | .alloc n => if n ≤ 128 then .allocSmall n else .allocLarge n
   | .setFrame r off => .setFramePointer r off
-  | .saveReg r off => .saveNonvolatile r off
-  | .saveXmm r off => .saveXmm128 r off
+  -- Which save form `ml64` writes, which is not the same question as which
+  -- forms the ABI permits. Both encode every offset the near form reaches, so
+  -- `UnwindOp.Encodable` allows either; `ml64` picks the far one from 64504
+  -- upward because of a hard-coded `cmp edi, 0FBF8h` applied before the shift
+  -- that scales the offset -- the same literal in both save paths, which is
+  -- why the threshold is the same byte value despite the divisors differing.
+  -- `Grass/ABI/Win64/Unwind.lean` records the cause.
+  --
+  -- The model must not adopt that rule; this corpus must, because its job is
+  -- to predict what `ml64` emits.
+  | .saveReg r off =>
+      if off ≤ ml64LastNearSave then .saveNonvolatile r off
+      else .saveNonvolatileFar r off
+  | .saveXmm r off =>
+      if off ≤ ml64LastNearSave then .saveXmm128 r off
+      else .saveXmm128Far r off
 
 /-- The header nibbles this step establishes, if any. `FrameOffset` is scaled by
 sixteen. -/
@@ -291,6 +313,27 @@ def saveXmmRows : List Row :=
     rowOf ("savexmm-xmm6-at-" ++ toString off)
       [.alloc (off + 4096), .saveXmm .xmm6 off])
 
+/-- The far save forms, at offsets where `ml64` writes them.
+
+These rows are the only ones that exercise `UWOP_SAVE_NONVOL_FAR` and
+`UWOP_SAVE_XMM128_FAR`, and they exist because the threshold above is now
+understood. Before that it was a measurement without a cause, and writing rows
+against a rule nobody could explain would have been encoding a coincidence.
+
+`64504` is the first offset past the threshold, so it checks the boundary from
+the far side; `Step.op` selects the near form one step below it. -/
+def farSaveRows : List Row :=
+  ([64504, 100000, 524288].filterMap fun off =>
+    rowOf ("savereg-far-rbx-at-" ++ toString off)
+      [.alloc (off + 8), .saveReg .rbx off])
+  ++ ([64512, 1048576].filterMap fun off =>
+    rowOf ("savexmm-far-xmm6-at-" ++ toString off)
+      [.alloc (off + 16), .saveXmm .xmm6 off])
+  ++ [ rowOf "savereg-far-r15-boundary"
+         [.alloc 64512, .saveReg .r15 64504]
+     , rowOf "savereg-near-rbx-boundary"
+         [.alloc 64504, .saveReg .rbx 64496] ].reduceOption
+
 /-- Saves mixed with the forms that already had coverage, so that a two-slot
 save has to agree on offsets with a push and an allocation on either side. -/
 def mixedSaveRows : List Row :=
@@ -312,7 +355,7 @@ def spike1Rows : List Row :=
 def corpus : List Row :=
   singlePushRows ++ pairPushRows ++ smallAllocRows ++ largeAllocRows ++
     pushAllocRows ++ frameRows ++ hugeAllocRows ++ saveRegRows ++
-    saveXmmRows ++ mixedSaveRows ++ spike1Rows
+    saveXmmRows ++ farSaveRows ++ mixedSaveRows ++ spike1Rows
 
 /-- The Spike 1 row agrees with the theorem in `UnwindBytes.lean`, so the
 differential and the proof are checking the same bytes rather than two

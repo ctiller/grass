@@ -147,6 +147,12 @@ def toBytes : PlacedOp → ByteSeq
   | ⟨.saveXmm128 r n, off⟩ =>
       [off, (UnwindOp.saveXmm128 r n).opInfo ++
         (UnwindOp.saveXmm128 r n).opcode] ++ le16 (BitVec.ofNat 16 (n / 16))
+  | ⟨.saveNonvolatileFar r n, off⟩ =>
+      [off, (UnwindOp.saveNonvolatileFar r n).opInfo ++
+        (UnwindOp.saveNonvolatileFar r n).opcode] ++ le32 (BitVec.ofNat 32 n)
+  | ⟨.saveXmm128Far r n, off⟩ =>
+      [off, (UnwindOp.saveXmm128Far r n).opInfo ++
+        (UnwindOp.saveXmm128Far r n).opcode] ++ le32 (BitVec.ofNat 32 n)
   | ⟨op, off⟩ => [off, op.opInfo ++ op.opcode]
 
 /--
@@ -167,6 +173,9 @@ unwinder would read whatever follows `.xdata` as unwind codes.
   | ⟨.setFramePointer _ _, _⟩ => simp [toBytes, UnwindOp.slots]
   | ⟨.saveNonvolatile _ _, _⟩ => simp [toBytes, UnwindOp.slots, le16]
   | ⟨.saveXmm128 _ _, _⟩ => simp [toBytes, UnwindOp.slots, le16]
+  | ⟨.saveNonvolatileFar _ _, _⟩ =>
+      simp [toBytes, UnwindOp.slots, le32]
+  | ⟨.saveXmm128Far _ _, _⟩ => simp [toBytes, UnwindOp.slots, le32]
 
 /-- The first byte written is the code offset. -/
 theorem toBytes_head (p : PlacedOp) : p.toBytes.head? = some p.codeOffset := by
@@ -179,6 +188,8 @@ theorem toBytes_head (p : PlacedOp) : p.toBytes.head? = some p.codeOffset := by
   | ⟨.setFramePointer _ _, _⟩ => rfl
   | ⟨.saveNonvolatile _ _, _⟩ => rfl
   | ⟨.saveXmm128 _ _, _⟩ => rfl
+  | ⟨.saveNonvolatileFar _ _, _⟩ => rfl
+  | ⟨.saveXmm128Far _ _, _⟩ => rfl
 
 end PlacedOp
 

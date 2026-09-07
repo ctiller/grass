@@ -52,7 +52,7 @@ models general-purpose registers only.
 
 ## What is still outside the model
 
-The `_FAR` save forms and `UWOP_PUSH_MACHFRAME`, which have no constructors.
+`UWOP_PUSH_MACHFRAME`, which has no constructor.
 
 `UWOP_ALLOC_LARGE` with `OpInfo = 1` -- the three-slot form carrying an unscaled
 32-bit size, which `char buf[600000]` produces at both optimisation levels -- is
@@ -76,10 +76,13 @@ shift that scales it, the same literal in both save paths. `.allocstack`, which
 has an identical 16-bit-scaled-by-8 field, switches at the correct 524280, so
 MASM makes the same decision correctly elsewhere.
 
-The consequence for anyone extending `Tests/ABI/Win64/UnwindCorpus.lean`: a row
-with a save offset at or above 64504 is `Encodable`, is legal per the ABI, and
-will still fail the differential, because `ml64` writes the far form there. The
-corpus stops well below it deliberately.
+The consequence is a split of responsibility rather than a hazard, now that
+both forms are modelled. `Encodable` permits either form at any offset either
+can hold, because the ABI does; `Tests/ABI/Win64/UnwindCorpus.lean` carries
+`ml64LastNearSave` and picks the form `ml64` will write, because its job is to
+predict that assembler. The threshold belongs in the thing that has to agree
+with `ml64`, not in the thing that has to be right about the ABI. Rows sit on
+both sides of it, so the prediction is checked in each direction.
 
 Those prologues are perfectly legal machine code and run correctly. What they
 cannot have is *derived* unwind data, and `Prologue.Encodable` is the predicate
@@ -148,6 +151,21 @@ inductive UnwindOp where
   eight, because the saved value is sixteen bytes wide. `ml64`'s `.savexmm128`
   directive emits it. -/
   | saveXmm128 (r : Xmm) (offset : Nat)
+  /-- `UWOP_SAVE_NONVOL_FAR` (5): the same save, with the offset stored
+  unscaled in two extra slots rather than divided by eight in one.
+
+  Separate from `saveNonvolatile` rather than derived from the offset, unlike
+  `allocLarge`, and the difference is worth stating because it looks
+  inconsistent. An allocation past `largeAllocScaledMax` has only one legal
+  encoding, so deriving the form from the size removes a way to be wrong.
+  Both save forms are legal for every offset the near form reaches, so which
+  one to write is a real choice the ABI leaves open, and a model that derived
+  it would be inventing a rule. `ml64` makes that choice badly -- see the
+  header -- which is exactly why the model should not copy whatever rule it
+  appears to follow. -/
+  | saveNonvolatileFar (r : Gpr) (offset : Nat)
+  /-- `UWOP_SAVE_XMM128_FAR` (9): the XMM save with an unscaled offset. -/
+  | saveXmm128Far (r : Xmm) (offset : Nat)
 deriving DecidableEq, Repr, Inhabited
 
 namespace UnwindOp
@@ -160,6 +178,8 @@ def opcode : UnwindOp → BitVec 4
   | .setFramePointer _ _ => 3
   | .saveNonvolatile _ _ => 4
   | .saveXmm128 _ _ => 8
+  | .saveNonvolatileFar _ _ => 5
+  | .saveXmm128Far _ _ => 9
 
 /-- The largest allocation the scaled `UWOP_ALLOC_LARGE` form encodes:
 `65535 * 8`, the ceiling of its 16-bit field. Above this the operation takes a
@@ -190,6 +210,8 @@ def slots : UnwindOp → Nat
   | .setFramePointer _ _ => 1
   | .saveNonvolatile _ _ => 2
   | .saveXmm128 _ _ => 2
+  | .saveNonvolatileFar _ _ => 3
+  | .saveXmm128Far _ _ => 3
 
 /-- Every operation occupies at least one slot. -/
 theorem slots_pos (op : UnwindOp) : 0 < op.slots := by
@@ -205,6 +227,8 @@ def stackDelta : UnwindOp → Nat
   -- reserved by whichever allocation precedes it.
   | .saveNonvolatile _ _ => 0
   | .saveXmm128 _ _ => 0
+  | .saveNonvolatileFar _ _ => 0
+  | .saveXmm128Far _ _ => 0
 
 /-- The `OpInfo` nibble.
 
@@ -243,6 +267,8 @@ def opInfo : UnwindOp → BitVec 4
   | .setFramePointer r _ => regNibble r
   | .saveNonvolatile r _ => regNibble r
   | .saveXmm128 r _ => BitVec.ofNat 4 r.index.val
+  | .saveNonvolatileFar r _ => regNibble r
+  | .saveXmm128Far r _ => BitVec.ofNat 4 r.index.val
 
 /--
 The allocation sizes `allocSmall` can encode: multiples of 8 from 8 to 128.
@@ -302,6 +328,15 @@ def Encodable : UnwindOp → Prop
       -- than as the literal `6` it used to be, so the ABI fact has one
       -- declaration rather than two hand-matched copies.
       6 ≤ r.index.val ∧ off % 16 = 0 ∧ off / 16 < 65536
+  | .saveNonvolatileFar r off =>
+      -- Alignment still applies: `ml64` rejects `.savereg rbx, 4` with
+      -- `A2219: Bad alignment for offset in unwind code` whichever form it
+      -- would use. The offset is stored raw, so the ceiling is the 32-bit
+      -- field rather than the scaled one.
+      volatility r = .nonvolatile ∧ r ≠ .rsp ∧ off % 8 = 0 ∧
+        off ≤ largeAllocRawMax
+  | .saveXmm128Far r off =>
+      6 ≤ r.index.val ∧ off % 16 = 0 ∧ off ≤ largeAllocRawMax
 
 instance (op : UnwindOp) : Decidable op.Encodable := by
   cases op <;> unfold Encodable <;> infer_instance
@@ -541,6 +576,8 @@ theorem frameSpecIs_iff (p : Prologue) (reg offset : BitVec 4) :
     | .allocLarge _ => rfl
     | .saveNonvolatile _ _ => rfl
     | .saveXmm128 _ _ => rfl
+    | .saveNonvolatileFar _ _ => rfl
+    | .saveXmm128Far _ _ => rfl
 
 /-- A register other than `RAX` has a nonzero four-bit number. `RAX` is 0, and 0
 is how `UNWIND_INFO.FrameRegister` spells "no frame pointer". -/
