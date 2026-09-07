@@ -121,6 +121,9 @@ at an explicit adapter; format semantics use `Grass.Std.Logical.ByteArray`.
 ### G3 — COFF and PE32+
 
 - Model the required canonical COFF object/library and PE32+ subset.
+- Land the fixed 20-byte COFF file header first, with typed-width fields,
+  exact truncation deficits, suffix preservation, and a grammar derivation for
+  every writer result; layer section and symbol tables on that checked prefix.
 - Cover headers, sections, symbols, imports/exports, relocations, alignment,
   padding, `.pdata`, and `.xdata` in parser/writer laws.
 - Consume c-x86 relocation and instruction-byte facts behind an explicit

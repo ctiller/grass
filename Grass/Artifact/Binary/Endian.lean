@@ -47,6 +47,16 @@ def takeLittleEndian (count : Nat) :
 def writeLittleEndian {count : Nat} : BitVec (8 * count) → Std.Logical.ByteArray :=
   isoWriter (littleEndianIsomorphism count) (@writeExact count)
 
+/-- A little-endian value written before any suffix is consumed exactly,
+leaving that suffix unchanged. -/
+@[simp] theorem takeLittleEndian_writeLittleEndian_append {count : Nat}
+    (value : BitVec (8 * count)) (rest : Std.Logical.ByteArray) :
+    takeLittleEndian count (writeLittleEndian value ++ rest) = .done value rest := by
+  unfold takeLittleEndian writeLittleEndian isoParser isoWriter
+  rw [takeExactSized_writeExact_append]
+  simp only [ParseResult.map, ParseResult.done.injEq, and_true]
+  exact (littleEndianIsomorphism count).forward_backward value
+
 /-- The concrete little-endian reader realizes the transported selected semantics. -/
 theorem takeLittleEndian_realizes (count : Nat) :
     ParserRealizes (littleEndianSemantics count) (takeLittleEndian count) :=
