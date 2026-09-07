@@ -154,6 +154,18 @@ theorem mem_toCanonicalList (requirements : RequirementSet)
         exact ⟨PlatformRequirementKey.toRep key,
           (Std.TreeSet.mem_toList).2 member, by simp⟩
 
+/-- Combine two independent requirement families. The result is defined through
+the public canonical representation, so quotient implementation details do not
+escape through the composition interface. -/
+def union (left right : RequirementSet) : RequirementSet :=
+  ofList (left.toCanonicalList ++ right.toCanonicalList)
+
+/-- A union demands exactly the keys demanded by either input. -/
+@[simp] theorem demands_union (left right : RequirementSet)
+    (key : PlatformRequirementKey) :
+    (left.union right).Demands key ↔ left.Demands key ∨ right.Demands key := by
+  simp [union, mem_toCanonicalList]
+
 /-- Insert a requirement. Quotient equality makes repeated insertion
 unobservable. -/
 def insert (requirements : RequirementSet) (key : PlatformRequirementKey) :
@@ -209,6 +221,66 @@ theorem Covers.refl (requirements : RequirementSet) :
 theorem Covers.trans {a b c : RequirementSet}
     (outer : a.Covers b) (inner : b.Covers c) : a.Covers c :=
   fun key demanded => outer key (inner key demanded)
+
+/-- A union covers its left input. -/
+theorem union_covers_left (left right : RequirementSet) :
+    (left.union right).Covers left := by
+  intro key demanded
+  exact demands_union left right key |>.2 (.inl demanded)
+
+/-- A union covers its right input. -/
+theorem union_covers_right (left right : RequirementSet) :
+    (left.union right).Covers right := by
+  intro key demanded
+  exact demands_union left right key |>.2 (.inr demanded)
+
+/-- `union` is the least requirement set covering both inputs. -/
+@[simp] theorem covers_union (larger left right : RequirementSet) :
+    larger.Covers (left.union right) ↔
+      larger.Covers left ∧ larger.Covers right := by
+  constructor
+  · intro covers
+    exact ⟨covers.trans (union_covers_left left right),
+      covers.trans (union_covers_right left right)⟩
+  · rintro ⟨coversLeft, coversRight⟩ key demanded
+    cases (demands_union left right key).1 demanded with
+    | inl leftDemanded => exact coversLeft key leftDemanded
+    | inr rightDemanded => exact coversRight key rightDemanded
+
+/-- Combining with no requirements on the left is unobservable. -/
+@[simp] theorem empty_union (requirements : RequirementSet) :
+    empty.union requirements = requirements := by
+  apply ext
+  intro key
+  simp [empty]
+
+/-- Combining with no requirements on the right is unobservable. -/
+@[simp] theorem union_empty (requirements : RequirementSet) :
+    requirements.union empty = requirements := by
+  apply ext
+  intro key
+  simp [empty]
+
+/-- Combining a requirement family with itself is unobservable. -/
+@[simp] theorem union_idempotent (requirements : RequirementSet) :
+    requirements.union requirements = requirements := by
+  apply ext
+  intro key
+  simp
+
+/-- Requirement-family combination is insensitive to input order. -/
+theorem union_comm (left right : RequirementSet) :
+    left.union right = right.union left := by
+  apply ext
+  intro key
+  simp [or_comm]
+
+/-- Requirement-family combination is associative. -/
+theorem union_assoc (first second third : RequirementSet) :
+    (first.union second).union third = first.union (second.union third) := by
+  apply ext
+  intro key
+  simp [or_assoc]
 
 @[simp] theorem not_empty_demands (key : PlatformRequirementKey) :
     ¬ empty.Demands key := by
