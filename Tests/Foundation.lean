@@ -217,11 +217,15 @@ def system : RelationalSystem Bool where
   extendsTrans := fun _ _ => trivial
   stepExtends := fun _ => trivial
 
+def emptyPrefix : system.ExecutionPrefix :=
+  RelationalSystem.ExecutionPrefix.initial (system := system)
+    (state := ()) (graph := ()) trivial
+
+theorem firstStep : system.Step emptyPrefix.graph emptyPrefix.state () true () () :=
+  trivial
+
 def samplePrefix : system.ExecutionPrefix :=
-  RelationalSystem.ExecutionPrefix.step
-    (RelationalSystem.ExecutionPrefix.initial (system := system)
-      (state := ()) (graph := ()) trivial)
-    (choice := ()) (event := true) (nextState := ()) (nextGraph := ()) trivial
+  emptyPrefix.step firstStep
 
 theorem falseSuffix : system.Steps samplePrefix.state samplePrefix.graph [false] () () :=
   .step (choice := ()) .refl trivial
@@ -302,6 +306,17 @@ example : refinement.mapPrefix samplePrefix = samplePrefix := by
   change (BehaviorRefinement.refl behavior).mapPrefix samplePrefix = samplePrefix
   exact BehaviorRefinement.mapPrefix_refl behavior samplePrefix
 
+example : toAbstract.mapPrefix emptyPrefix =
+    RelationalSystem.ExecutionPrefix.initial (system := abstractSystem)
+      (state := false) (graph := 0)
+      (toAbstract.initial (state := ()) (graph := ()) trivial) :=
+  BehaviorRefinement.mapPrefix_initial toAbstract trivial
+
+example : toAbstract.mapPrefix samplePrefix =
+    (toAbstract.mapPrefix emptyPrefix).step (toAbstract.step firstStep) := by
+  change toAbstract.mapPrefix (emptyPrefix.step firstStep) = _
+  exact BehaviorRefinement.mapPrefix_step toAbstract emptyPrefix firstStep
+
 example : (toAbstract.trans toHighest).mapPrefix samplePrefix =
     toHighest.mapPrefix (toAbstract.mapPrefix samplePrefix) :=
   BehaviorRefinement.mapPrefix_trans toAbstract toHighest samplePrefix
@@ -359,6 +374,17 @@ example : (BehaviorRefinement.refl behavior).mapCompletion completion = completi
 example : (toAbstract.trans toHighest).mapCompletion completion =
     toHighest.mapCompletion (toAbstract.mapCompletion completion) :=
   BehaviorRefinement.mapCompletion_trans toAbstract toHighest completion
+
+example : (BehaviorRefinement.refl behavior).mapCompletionAtPrefix
+    samplePrefix completion = completion :=
+  BehaviorRefinement.mapCompletionAtPrefix_refl behavior samplePrefix completion
+
+example : (toAbstract.trans toHighest).mapCompletionAtPrefix
+    samplePrefix completion =
+    toHighest.mapCompletionAtPrefix (toAbstract.mapPrefix samplePrefix)
+      (toAbstract.mapCompletionAtPrefix samplePrefix completion) :=
+  BehaviorRefinement.mapCompletionAtPrefix_trans
+    toAbstract toHighest samplePrefix completion
 
 def mappedCompletion : abstractBehavior.system.Completion
     (toAbstract.mapPrefix samplePrefix).state
