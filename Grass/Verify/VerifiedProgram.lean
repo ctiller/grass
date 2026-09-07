@@ -101,6 +101,17 @@ structure CompletionRefinement (verified : VerifiedProgram spec)
   exact : portable =
     verified.refinement.mapCompletionAtPrefix execution loaded
 
+/-- Mapping the retained loaded completion recovers the paired portable
+completion exactly. -/
+@[simp] theorem CompletionRefinement.map_loaded
+    {verified : VerifiedProgram spec}
+    {execution : (verified.artifact.format.loadedBehavior
+      (emitProgram verified)).system.ExecutionPrefix}
+    (completion : CompletionRefinement verified execution) :
+    verified.refinement.mapCompletionAtPrefix execution completion.loaded =
+      completion.portable :=
+  completion.exact.symm
+
 /-- Every loaded finite frontier has a completion whose exact image in the
 portable behavior is retained by `CompletionRefinement`. -/
 theorem completion_refinement_nonempty (verified : VerifiedProgram spec)

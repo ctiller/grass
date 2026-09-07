@@ -58,6 +58,7 @@ param(
         "Grass.VerifiedProgram.execution_nonempty",
         "Grass.VerifiedProgram.execution_completes",
         "Grass.VerifiedProgram.CompletionRefinement",
+        "Grass.VerifiedProgram.CompletionRefinement.map_loaded",
         "Grass.VerifiedProgram.completion_refinement_nonempty",
         "Grass.emitProgram_parses"
     ),

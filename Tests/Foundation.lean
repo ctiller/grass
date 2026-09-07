@@ -195,9 +195,9 @@ example : Nonempty (VerifiedProgram.CompletionRefinement verified
 
 example (completion : VerifiedProgram.CompletionRefinement verified
     (initialExecution true)) :
-    completion.portable = verified.refinement.mapCompletionAtPrefix
-      (initialExecution true) completion.loaded :=
-  completion.exact
+    verified.refinement.mapCompletionAtPrefix
+      (initialExecution true) completion.loaded = completion.portable :=
+  completion.map_loaded
 
 namespace InfinitePrefixFixture
 
@@ -422,11 +422,11 @@ example : (toAbstract.trans toHighest).mapCompletionAtPrefix
   BehaviorRefinement.mapCompletionAtPrefix_trans
     toAbstract toHighest samplePrefix completion
 
-def mappedCompletion : abstractBehavior.system.Completion
+example : Nonempty (abstractBehavior.system.Completion
     (toAbstract.mapPrefix samplePrefix).state
     (toAbstract.mapPrefix samplePrefix).graph
-    (toAbstract.mapPrefix samplePrefix).events :=
-  toAbstract.mapCompletionAtPrefix samplePrefix completion
+    (toAbstract.mapPrefix samplePrefix).events) :=
+  ⟨toAbstract.mapCompletionAtPrefix samplePrefix completion⟩
 
 example : samplePrefix.events = [true] := rfl
 
