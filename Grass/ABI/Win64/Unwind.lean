@@ -26,7 +26,9 @@ metadata that unwinds to the wrong place.
 The Windows unwind language describes a prologue as a list of operations from a
 fixed vocabulary — push a nonvolatile register, allocate a constant amount,
 establish a frame pointer, save a register or an XMM register at a constant
-offset, and push a machine frame. `UnwindOp` models the **first four**. So
+offset, and push a machine frame. `UnwindOp` models **all five**, in nine
+constructors -- the two saves and the allocation each have a near and a far or
+scaled and unscaled form. So
 `UnwindOp.Encodable` rejects a stack adjustment that is not a constant multiple
 of eight and a push of a volatile register, and a prologue interleaving other
 work between the pushes has no `Prologue` value at all.
@@ -42,7 +44,7 @@ modelled, 1 function of 25 without a `Prologue`.
 
 `saveNonvolatile` and `saveXmm128` close that gap: all 36 of those operations
 now have constructors. Both were added against `ml64` rather than against a
-manual, and the corpus checks 84 prologues byte-for-byte.
+manual, and the corpus checks 100 prologues byte-for-byte.
 
 `UWOP_SAVE_NONVOL` is not exotic: MSVC's standard optimised idiom is
 `mov [rsp+32], rbx` into the caller's shadow space rather than `push rbx`.

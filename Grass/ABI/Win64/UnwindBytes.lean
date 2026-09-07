@@ -32,14 +32,34 @@ used once by hand while working out the field orders, and the paragraph
 described that session rather than the check. A reviewer caught it.
 
 The distinction matters because it changes what is covered. `UNWIND_INFO` for
-the four operations this profile models is covered, on 52 prologues.
+all nine operations this profile models is covered, on 100 prologues.
 `RuntimeFunction.toBytes`, `PdataSection.toBytes`, `SearchablePdata.toBytes`,
 `UnwindTail.flags`, `UnwindTail.handlerRva` and `UnwindTail.toBytes` are covered
 by nothing: every corpus row uses `.noHandler` and none emits `.pdata`. A
 reviewer hand-checked one handler case -- `PROC FRAME:myhandler; push rbp` gives
 `19010100015000000000000000000000`, which `.bothHandlers 0 [0]` reproduces --
-but that measurement is not in any corpus and nothing re-runs it. Extending the
-corpus to the handler tails and to `.pdata` is an open obligation.
+but that measurement is not in any corpus and nothing re-runs it.
+
+## What a `.pdata` oracle can and cannot reach
+
+An earlier version of this paragraph said extending to `.pdata` was blocked for
+want of an oracle. That was not checked, and it is half wrong. `dumpbin
+/section:.pdata /rawdata:bytes` dumps the table from an object file: three
+functions produce three twelve-byte `RUNTIME_FUNCTION` entries, and the
+`EndAddress` of each is the real function length.
+
+What an object file cannot give is `BeginAddress`. Relocations are unapplied
+until link time, so every `BeginAddress` reads zero, and the properties this
+module actually proves about the table -- `PdataSection.Separated` and the
+ascending order `WellFormed` requires -- are exactly the ones that need
+addresses to be distinct. Checking those needs a linked image, which means a
+`link.exe` step the differential does not have.
+
+So the obligation splits. The per-entry field order and `EndAddress` are
+checkable against `dumpbin` today; the ordering and separation of the table are
+not, without linking. Both remain owed, and the second is the larger piece of
+work -- said precisely here rather than left as "no oracle", which would have
+discouraged the half that is reachable.
 
 Every field order below was read off `ml64` output rather than inferred,
 including the two that a reader of the C struct declarations would most likely
