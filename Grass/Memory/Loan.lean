@@ -118,8 +118,8 @@ write grants installed through a door that checked nothing, and two
 non-conflicting grants made to conflict by an alias declared afterwards. Both are
 facts about what *another* context holds, which is what `HeldByAnother` and
 `WritableByAnother` ask and a holder test does not;
-`Tests/Op/StandardLoan.lean`'s `the_identity_cannot_be_stolen` and
-`an_alias_declared_after_issue_is_refused` are those two states, stepped.
+`Tests/Op/StandardLoan.lean` builds those two states and steps them -- the stolen-identity
+case and the alias-declared-after-issue case.
 
 Refusal is still strictly wider than `frozen` — the provider also refuses an access
 to lent bytes by a context holding no covering loan, which `authorityOf` may call

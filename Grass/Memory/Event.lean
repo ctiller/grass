@@ -184,8 +184,9 @@ structure WellFormed (e : MemoryEvent) : Prop where
   Review found them the way it found `PreservationLaws`' sixth conjunct: by trying to
   build a neighbour that fails one and not the others, and finding that no such event
   exists. A clause that cannot be isolated is a clause the seal already had, and
-`Tests/Memory/EventClauses.lean`'s `each_neighbour_fails_exactly_one_clause` is what
-decides isolation for the eleven that remain. -/
+the per-clause isolation theorem in `Tests/Memory/EventClauses.lean` is what decides
+isolation for the eleven that remain -- one neighbour per clause, each failing that
+clause and no other. -/
   statusWellFormed : e.status.WellFormed e.range.size
   /-- **The status and the counts are the same two facts.**
 
