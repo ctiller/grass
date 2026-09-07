@@ -145,6 +145,12 @@ substitution is made.
 
 instance : Inhabited (Vec α) := ⟨empty⟩
 
+/-- `default` is the empty sequence, stated so `simp` can use the `empty` laws on
+a goal that reached `Vec` through an `Inhabited` obligation. Third instance of the
+same shape as `Vec.emptyCollection_eq_empty` and `Vec.get_eq_iff_get?_eq`: an
+instance makes a term typecheck without making `simp` see through it. -/
+@[simp] theorem default_eq_empty : (default : Vec α) = empty := rfl
+
 /-- The one-element sequence. -/
 def singleton (a : α) : Vec α := ⟨[a]⟩
 
