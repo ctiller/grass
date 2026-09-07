@@ -25,7 +25,8 @@ def ofLowered {State : Type u} {Terminal : Type v} {Instruction : Type w}
   | [] => .empty
   | instructions@(_ :: _) => .leaf instructions
 
-/-- Raw erasure preserves exactly the checked lowered instruction projection. -/
+/-- `RawHierarchy.flatten_ofLowered` states that raw erasure preserves the
+checked lowered instruction projection exactly. -/
 @[simp] theorem flatten_ofLowered
     {State : Type u} {Terminal : Type v} {Instruction : Type w}
     (lowered : LoweredProgram State Terminal Instruction) :
