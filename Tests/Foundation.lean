@@ -200,6 +200,67 @@ theorem falseSuffix : system.Steps samplePrefix.state samplePrefix.graph [false]
 theorem trueSuffix : system.Steps () () [true] () () :=
   .step (choice := ()) .refl trivial
 
+abbrev behavior : ProgramBehavior spec where
+  system := system
+  inputOf := fun _ => false
+
+def refinement : BehaviorRefinement behavior behavior :=
+  .refl behavior
+
+abbrev abstractSystem : RelationalSystem Bool where
+  State := Bool
+  Choice := Nat
+  Graph := Nat
+  Initial := fun _ _ => True
+  Step := fun _ _ _ _ _ _ => True
+  Terminal := fun _ _ => False
+  InfiniteConsistent := fun _ _ _ _ _ => True
+  Extends := fun _ _ => True
+  extendsRefl := fun _ => trivial
+  extendsTrans := fun _ _ => trivial
+  stepExtends := fun _ => trivial
+
+abbrev abstractBehavior : ProgramBehavior spec where
+  system := abstractSystem
+  inputOf := fun _ => false
+
+def toAbstract : BehaviorRefinement behavior abstractBehavior where
+  mapState := fun _ => false
+  mapGraph := fun _ => 0
+  mapChoice := fun _ => 0
+  input := fun _ => rfl
+  initial := fun _ => trivial
+  step := fun _ => trivial
+  terminal := fun terminal => False.elim terminal
+  infiniteConsistency := fun _ => trivial
+
+abbrev highestSystem : RelationalSystem Bool where
+  State := Nat
+  Choice := Bool
+  Graph := Bool
+  Initial := fun _ _ => True
+  Step := fun _ _ _ _ _ _ => True
+  Terminal := fun _ _ => False
+  InfiniteConsistent := fun _ _ _ _ _ => True
+  Extends := fun _ _ => True
+  extendsRefl := fun _ => trivial
+  extendsTrans := fun _ _ => trivial
+  stepExtends := fun _ => trivial
+
+abbrev highestBehavior : ProgramBehavior spec where
+  system := highestSystem
+  inputOf := fun _ => false
+
+def toHighest : BehaviorRefinement abstractBehavior highestBehavior where
+  mapState := Bool.toNat
+  mapGraph := fun _ => true
+  mapChoice := fun _ => false
+  input := fun _ => rfl
+  initial := fun _ => trivial
+  step := fun _ => trivial
+  terminal := fun terminal => False.elim terminal
+  infiniteConsistency := fun _ => trivial
+
 example : (samplePrefix.append falseSuffix).events = [true, false] := rfl
 
 example : (samplePrefix.append falseSuffix).append trueSuffix =
@@ -207,6 +268,20 @@ example : (samplePrefix.append falseSuffix).append trueSuffix =
   RelationalSystem.ExecutionPrefix.append_assoc samplePrefix falseSuffix trueSuffix
 
 example : samplePrefix.append (.refl) = samplePrefix := by simp
+
+example : refinement.mapPrefix samplePrefix = samplePrefix := by
+  change (BehaviorRefinement.refl behavior).mapPrefix samplePrefix = samplePrefix
+  exact BehaviorRefinement.mapPrefix_refl behavior samplePrefix
+
+example : (toAbstract.trans toHighest).mapPrefix samplePrefix =
+    toHighest.mapPrefix (toAbstract.mapPrefix samplePrefix) :=
+  BehaviorRefinement.mapPrefix_trans toAbstract toHighest samplePrefix
+
+example : toAbstract.mapPrefix (samplePrefix.append falseSuffix) =
+    (toAbstract.mapPrefix samplePrefix).append
+      (toAbstract.mapSteps falseSuffix) := by
+  exact BehaviorRefinement.mapPrefix_append
+    toAbstract samplePrefix falseSuffix
 
 def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.graph
     samplePrefix.events where
