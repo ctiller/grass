@@ -35,6 +35,9 @@ if ($Declaration.Count -eq 0) {
 }
 
 $moduleNames = @()
+$entrypointModuleNames = @()
+$topLevelMainPattern =
+    '(?m)^[\t ]*(?:(?:unsafe|partial|noncomputable)[\t ]+)*def[\t ]+main(?:[\t ]|:)'
 foreach ($root in $LibrarySourceRoot) {
     if (-not (Test-Path -LiteralPath $root -PathType Container)) {
         throw "Configured library source root '$root' does not exist."
@@ -52,10 +55,24 @@ foreach ($root in $TestSourceRoot) {
     foreach ($file in Get-ChildItem -LiteralPath $root -Filter '*.lean' -File -Recurse) {
         $relative = [System.IO.Path]::GetRelativePath((Get-Location).Path, $file.FullName)
         $withoutExtension = $relative.Substring(0, $relative.Length - '.lean'.Length)
-        $moduleNames += $withoutExtension.Replace([System.IO.Path]::DirectorySeparatorChar, '.')
+        $moduleName = $withoutExtension.Replace([System.IO.Path]::DirectorySeparatorChar, '.')
+        $source = Get-Content -LiteralPath $file.FullName -Raw
+
+        # Executable test modules intentionally share Lean's required top-level
+        # runner name `main`, so importing two of them into one environment is
+        # impossible. Audit each such module separately below. A false positive
+        # only creates an extra audit pass; a missed entrypoint makes the aggregate
+        # import fail, so this partition cannot silently drop a module.
+        if ($source -match $topLevelMainPattern) {
+            $entrypointModuleNames += $moduleName
+        }
+        else {
+            $moduleNames += $moduleName
+        }
     }
 }
 $moduleNames = @($moduleNames | Sort-Object -Unique)
+$entrypointModuleNames = @($entrypointModuleNames | Sort-Object -Unique)
 
 $temporaryPath = [System.IO.Path]::Combine(
     [System.IO.Path]::GetTempPath(),
@@ -108,6 +125,24 @@ try {
 
     if ($reported -ne $Declaration.Count) {
         throw "Expected $($Declaration.Count) axiom reports, received $reported."
+    }
+
+    foreach ($entrypointModule in $entrypointModuleNames) {
+        Write-Host "Auditing executable test module '$entrypointModule'."
+        $entrypointCommands = @(
+            "import Tests.Foundation",
+            "import $entrypointModule",
+            "#audit_verified_programs"
+        )
+        [System.IO.File]::WriteAllLines($temporaryPath, $entrypointCommands)
+
+        $entrypointOutput = @(& lake env lean $temporaryPath 2>&1)
+        if ($LASTEXITCODE -ne 0 -or
+            -not ($entrypointOutput -match "VerifiedProgram trust audit passed")) {
+            $entrypointOutput | ForEach-Object { Write-Error $_ }
+            throw "Trust audit failed for executable test module '$entrypointModule'."
+        }
+        $entrypointOutput | ForEach-Object { Write-Host $_ }
     }
 
     $irreducibleDiscoveryProbe = @(
@@ -309,7 +344,7 @@ try {
         throw "Trust audit ignored a scoped csimp replacement after its attribute state expired."
     }
 
-    Write-Host "Trust audit passed for $reported declaration(s)."
+    Write-Host "Trust audit passed for $reported declaration(s) and $($entrypointModuleNames.Count) executable test module(s)."
 }
 finally {
     if ([System.IO.File]::Exists($temporaryPath)) {
