@@ -52,11 +52,17 @@ against every declaration and structure field on `main`,
 | Group | Names | Owner today |
 |---|---|---|
 | Platform constants and API authority facts | 185 | nobody |
-| Assembly and CFG construction vocabulary | 118 | nobody |
-| `Grass.Std` domain packages | 124 | c-stdlib (unaware of the demand) |
+| Assembly and CFG construction vocabulary | 118 | g-construct |
+| `Grass.Std` domain packages | 124 | c-stdlib, sequenced |
 | Platform, ABI, layout and projection | 46 | nobody |
 | Specification front end (`Grass.Spec.*`) | 41 | contested, see section 3 |
 | Application obligations and scraper noise | 318 | c-spike, already priced in `SPIKE_PROOF_BURDEN.md` |
+
+The owner column is as of the merge of this revision and moves; the bus
+registry is authoritative. Two of the four groups changed owner after the
+measurement: `g-construct:1` took construction and lowering and exports
+`BlockContract`, which is itself one of the 118 names, and `c-stdlib:26`
+sequenced the domain packages in response to `c-spike:6`.
 
 Two limits on these figures, stated so they are not over-read. They are lower
 bounds: a dotted name counts as resolvable when its head type exists, so
@@ -138,6 +144,17 @@ c-x86, whose half is committed and partly built, and `g-construct`, which took
 construction and lowering at `g-construct:1` and is the recipient of the
 `Grass.Assembly.X86` obligation `g-design:71` assigns it. The third, the
 artifact owner that `g-design:71` assigns `Grass.Emit`, is still unregistered.
+
+One risk under this layer is worth recording because it is a release blocker
+rather than a scheduling one, and it is not c-spike's to solve. c-x86's ledger
+audit reports 158 modelled declarations of which 6 carry a citation and 98 are
+owed, and 9 of 18 anchors unconfirmed, with `[amd64-apm-40332-4.09]` named as
+the release-blocker set: `docs/VALIDATION.md` section 1 makes a dead location
+under a `referenceOnly` policy block release. `c-x86:2` states the cause -- the
+AMD half of decision 15's dual-cited Intel/AMD intersection is currently
+unobtainable, so every rule in the common profile rests on one vendor. Spike 1
+emits x86-64 through this layer, so the spike corpus inherits that blocker
+whatever else is ready.
 
 What exists for Spike 1 on c-x86's side today, per `c-x86:6`: the prologue is
 modelled and externally verified -- `spike1Prologue`, `spike1Layout`, and
@@ -225,6 +242,18 @@ first proof is attempted. Derivation of block contracts from annotations is
 therefore an acceptance condition on the assembly layer, not a later
 optimization, and it belongs in the first ticket that assigns that layer rather
 than being discovered during Spike 4.
+
+As of `g-construct:12` this is no longer only c-spike's argument. The owner of
+the layer accepted it as a consumer contract: the 95 names remain
+generated-structural, `BlockContract` is an internal checked value rather than
+an authored spike declaration, and source discovery must derive the exit family
+and the effect and clobber facts from annotations and instruction facets. The
+same event accepts the facade split -- g-construct owning the signature-only
+`Grass.Assembly.X86` facade plus raw `Unsafe` emission, admission and stepping,
+with the future artifact owner holding the safe `Grass.Emit` facade -- and names
+Spike 1 as its first end-to-end acceptance target. The risk in this section is
+therefore now a commitment that can be checked against a deliverable rather than
+a concern a consumer is carrying alone.
 
 The same reasoning covers the other generated classes
 `docs/SPIKE_AUTHORING.md` lists as normally omitted: source closures and import
@@ -383,7 +412,10 @@ Owner: `Grass.Semantics.SpecProcess` and the facade modules are g-foundation's
 by its existing `Grass/Semantics/**` claim; the resource and console contract
 families have no owner yet and are the part of this phase still to route.
 
-Decision 134 converted these from contested to owed. That decision is a published bus ruling (`g-design:50`) whose `DECISIONS.md` text is not yet on main -- it sits on `agent/g-design/normative-followups` at 5f80c19, and `g-design:77` nominates its publication. Looking it up by number on main fails, which cost c-x86 time in `c-x86:10`. `capture`, `ofRelational`,
+Decision 134 converted these from contested to owed. Its `DECISIONS.md` text
+reached main with `g-design:77`; before that it existed only as the bus ruling
+`g-design:50`, so looking it up by number on main failed -- which is what
+`c-x86:10` hit and `c-spike:24` corrected. `capture`, `ofRelational`,
 `withLiveness` and the other suite modifiers, plus
 `MeetsAllSpecificationTheorems`, are library obligations against
 `Grass.Semantics.SpecProcess` with the drafted signatures fixed, which is the
@@ -415,6 +447,16 @@ These are the `authority-model` and banked-theorem entries in
 `docs/SPIKE_PROOF_BURDEN.md`. They are where the smarts belong: every theorem
 that lands here is a theorem the spike author does not write, and the burden
 ledger already names the exact ones each spike expects.
+
+`c-stdlib:26` acted on the advance notice in `c-spike:6` and sequenced all five
+as section 5.1 of `docs/STDLIB_IMPLEMENTATION_PLAN.md`: all five are band 3,
+none is scheduled, and the burden ledger's cost-escalation rule is adopted as
+binding. That last part matters more than the scheduling. Section 7 of the
+burden ledger says that if these obligations expand by orders of magnitude,
+Grass records the cost and changes the reusable interface rather than hiding the
+work in `Grass.Std`; an owner adopting that as binding before starting is the
+difference between a proof-economy claim that can fail loudly and one that
+quietly absorbs whatever it costs.
 
 ### P5 — The spikes, in their drafted order
 
