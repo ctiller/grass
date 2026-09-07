@@ -24,6 +24,14 @@ example : Grass.Specification.ScopeId.mk ["A"] = scopeA := rfl
 
 example : Grass.Specification.ScopeId.path scopeA = ["A"] := rfl
 
+example : ScopeId.root.Contains ((ScopeId.root.child "A").child "B") :=
+  ScopeId.Contains.trans (ScopeId.contains_child ScopeId.root "A")
+    (ScopeId.contains_child (ScopeId.root.child "A") "B")
+
+example {left right : ScopeId} (leftRight : left.Contains right)
+    (rightLeft : right.Contains left) : left = right :=
+  ScopeId.Contains.antisymm leftRight rightLeft
+
 example (key : Grass.RequirementKey) : key.id = key.id := rfl
 
 example :
