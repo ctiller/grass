@@ -82,8 +82,12 @@ end Grass.Tests.ISA.X86.SourceC
 
 /-- Print the corpus as tab-separated `id<TAB>status<TAB>probe<TAB>url` lines.
 
-Top level rather than in the namespace because `lake env lean --run` looks for
-`main` there. -/
-def main : IO Unit := do
+Top level, and named for its corpus rather than `main`. Six of these
+modules declared a root `main`, so importing any two into one environment
+collided on it -- which is what `audit-trust.ps1` does, and `g-construct:58`
+reported the gate failing before it could audit anything. `Tests/Emit.lean`
+holds the single `main` that `lake env lean --run` needs and dispatches to
+these by name. -/
+def emitSourceCorpus : IO Unit := do
   for r in Grass.Tests.ISA.X86.SourceC.corpus do
     IO.println (r.id ++ "\t" ++ r.status ++ "\t" ++ r.probe ++ "\t" ++ r.url)

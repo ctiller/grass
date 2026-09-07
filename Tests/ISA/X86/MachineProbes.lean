@@ -327,7 +327,7 @@ end Grass.Tests.ISA.X86.Probe
 
 /-- Emit the corpus as `label TAB bytes TAB before TAB after TAB exception TAB note`,
 with register files as comma-separated hex in encoding order. -/
-def main : IO Unit := do
+def emitMachineProbes : IO Unit := do
   let hex64 (v : BitVec 64) : String :=
     Grass.Tests.ISA.X86.Corpus.hexBytes
       [BitVec.extractLsb' 56 8 v, BitVec.extractLsb' 48 8 v,

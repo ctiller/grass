@@ -17,7 +17,7 @@ finding; majority vote does not establish truth." A mismatch is a finding
 against Grass *or* against NASM, and is resolved by reading the vendor manual.
 
 Usage:
-    lake env lean --run Tests/ISA/X86/NasmCorpus.lean > corpus.txt
+    lake env lean --run Tests/Emit.lean nasm > corpus.txt
     python Tools/x86-nasm-differential.py corpus.txt
 
 Exit status is 1 on any mismatch.

@@ -57,7 +57,7 @@ User mode only. Ring 0 instructions cannot be reached from a process and are not
 attempted here; they need a bare-metal or hypervisor harness.
 
 Usage:
-    lake env lean --run Tests/ISA/X86/MachineProbes.lean > probes.txt
+    lake env lean --run Tests/Emit.lean probes > probes.txt
     python Tools/x86-machine-probe.py probes.txt
 
 Exit status is 1 if any probe disagrees with the model.

@@ -23,7 +23,7 @@ the instructions it actually assembled, so a wrong length model fails the row
 even though this code path never encodes an instruction.
 
 Usage:
-    lake env lean --run Tests/ABI/Win64/UnwindCorpus.lean > corpus.txt
+    lake env lean --run Tests/Emit.lean unwind > corpus.txt
     python Tools/win64-unwind-differential.py corpus.txt
 
 Exit status is 1 on any mismatch, and also on an oracle that could not be run:

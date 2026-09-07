@@ -34,7 +34,7 @@ instruction into a corrupt instruction stream; and it is the one NDISASM reports
 unambiguously, as the offset where the next instruction starts.
 
 Usage:
-    lake env lean --run Tests/ISA/X86/DecodeCorpus.lean > decode.txt
+    lake env lean --run Tests/Emit.lean decode > decode.txt
     python Tools/x86-decode-differential.py decode.txt
 
 Exit status is 1 on any length disagreement, and on a missing NDISASM: a

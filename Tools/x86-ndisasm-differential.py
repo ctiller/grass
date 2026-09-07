@@ -34,7 +34,7 @@ NDISASM is a fallible oracle, not authority. `docs/VALIDATION.md` section 2:
 truth."
 
 Usage:
-    lake env lean --run Tests/ISA/X86/RipCorpus.lean > rip.txt
+    lake env lean --run Tests/Emit.lean rip > rip.txt
     python Tools/x86-ndisasm-differential.py rip.txt
 
 Exit status is 1 on any mismatch.

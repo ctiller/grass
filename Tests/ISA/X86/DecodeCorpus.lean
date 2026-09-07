@@ -165,8 +165,12 @@ end Grass.Tests.ISA.X86.DecodeC
 
 /-- Print the corpus as tab-separated `bytes<TAB>length<TAB>label` lines.
 
-Top level rather than in the namespace because `lake env lean --run` looks for
-`main` there. -/
-def main : IO Unit := do
+Top level, and named for its corpus rather than `main`. Six of these
+modules declared a root `main`, so importing any two into one environment
+collided on it -- which is what `audit-trust.ps1` does, and `g-construct:58`
+reported the gate failing before it could audit anything. `Tests/Emit.lean`
+holds the single `main` that `lake env lean --run` needs and dispatches to
+these by name. -/
+def emitDecodeCorpus : IO Unit := do
   for r in Grass.Tests.ISA.X86.DecodeC.corpus do
     IO.println (r.bytes ++ "\t" ++ toString r.length ++ "\t" ++ r.label)

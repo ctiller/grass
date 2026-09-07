@@ -115,17 +115,17 @@ jobs:
 
       - name: Differential against NASM
         run: |
-          lake env lean --run Tests/ISA/X86/NasmCorpus.lean > "$RUNNER_TEMP/corpus.txt"
+          lake env lean --run Tests/Emit.lean nasm > "$RUNNER_TEMP/corpus.txt"
           python3 Tools/x86-nasm-differential.py "$RUNNER_TEMP/corpus.txt"
 
       - name: Differential against NDISASM
         run: |
-          lake env lean --run Tests/ISA/X86/RipCorpus.lean > "$RUNNER_TEMP/rip.txt"
+          lake env lean --run Tests/Emit.lean rip > "$RUNNER_TEMP/rip.txt"
           python3 Tools/x86-ndisasm-differential.py "$RUNNER_TEMP/rip.txt"
 
       - name: Decoder differential against NDISASM
         run: |
-          lake env lean --run Tests/ISA/X86/DecodeCorpus.lean > "$RUNNER_TEMP/decode.txt"
+          lake env lean --run Tests/Emit.lean decode > "$RUNNER_TEMP/decode.txt"
           python3 Tools/x86-decode-differential.py "$RUNNER_TEMP/decode.txt"
   unwind:
     runs-on: windows-latest
@@ -155,5 +155,5 @@ jobs:
 
       - name: Differential against ml64
         run: |
-          lake env lean --run Tests/ABI/Win64/UnwindCorpus.lean > "$RUNNER_TEMP/unwind.txt"
+          lake env lean --run Tests/Emit.lean unwind > "$RUNNER_TEMP/unwind.txt"
           python Tools/win64-unwind-differential.py "$RUNNER_TEMP/unwind.txt"

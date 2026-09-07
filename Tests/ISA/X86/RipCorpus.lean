@@ -123,7 +123,7 @@ end Grass.Tests.ISA.X86.Rip
 /-- Print the RIP corpus as
 `bytes<TAB>expectedTarget<TAB>expectedText<TAB>label` lines, with the target in
 lowercase hex without leading zeros, matching how NDISASM prints it. -/
-def main : IO Unit := do
+def emitRipCorpus : IO Unit := do
   for r in Grass.Tests.ISA.X86.Rip.corpus do
     IO.println (r.bytes ++ "\t" ++
       Grass.Tests.ISA.X86.Corpus.hexTrim r.expectedTarget ++ "\t" ++
