@@ -1964,10 +1964,44 @@ fn apply_review_merge_reconciled(
         .get(&auth.nomination)
         .cloned()
         .ok_or_else(|| invalid(format!("{}: unknown nomination chain", env.id)))?;
+    // Recorded even when a receipt already exists, rather than rejected.
+    //
+    // Reconciliation exists precisely for a reviewer that has gone quiet, so
+    // the coordinator doing it and the reviewer publishing its own
+    // `review.merged` have by construction not observed each other. Both
+    // reference the authorization; neither references the other. They are
+    // concurrent, both orders are valid linear extensions, and rejecting
+    // whichever arrives second returned `Err` -- which, with no per-event
+    // isolation in `reduce`, is every host unable to reduce the bus at all,
+    // decided by fetch order.
+    //
+    // Recording both is the only outcome that is total *and* confluent. A
+    // no-op is not: it would keep whichever receipt happened to reduce first,
+    // so two hosts fetching in different orders would disagree about which
+    // receipt the chain carries. And recording both is simply true -- both
+    // events were published, and reduction's job is to say what happened.
+    //
+    // Nothing downstream is confused by two: `audit_main` asks whether *any*
+    // receipt names the commit, which is exactly the question it should ask.
+    // Whether a second receipt indicates something worth a human looking at
+    // is an audit question, not a reduction one.
+    //
+    // A receipt this event has *causally observed*, though, is a different
+    // thing entirely and stays a hard error. Streams are single-writer, so an
+    // author always observes its own prior events: publishing a second receipt
+    // while already knowing about the first is not a race anybody lost, it is
+    // a caller doing something incoherent, and there is no fleet-wide cost to
+    // refusing it. That is the same line `exclusive::record` draws between its
+    // two branches.
     let chain = state.reviews.get(&root).expect("chain exists");
-    if !chain.merged.is_empty() || !chain.reconciled.is_empty() {
+    if let Some(observed) = chain
+        .merged
+        .iter()
+        .chain(chain.reconciled.iter())
+        .find(|existing| env.observed.validate_reference(existing).is_ok())
+    {
         return Err(invalid(format!(
-            "{}: a merged or reconciled receipt already exists",
+            "{}: receipt {observed} is already recorded and this event has observed it",
             env.id
         )));
     }
@@ -7762,10 +7796,17 @@ mod tests {
             &reconciled_data(),
             [],
         );
+        // Still refused, and for the reason that makes it a caller error
+        // rather than a race: this event's own frontier has observed the
+        // receipt it duplicates. A *concurrent* second receipt -- one whose
+        // author had not seen the first -- is recorded instead, since
+        // rejecting it would make reduction fail on every host depending on
+        // fetch order (see
+        // `a_merged_receipt_racing_a_reconciliation_reduces_in_either_order`).
         let err = apply_event(&mut state, &second_env).unwrap_err();
         assert!(
             err.to_string()
-                .contains("a merged or reconciled receipt already exists"),
+                .contains("already recorded and this event has observed it"),
             "{err}"
         );
     }
@@ -8646,6 +8687,15 @@ mod tests {
         );
     }
 
+    /// A reviewer's own `review.merged` racing a coordinator's
+    /// `review.merge_reconciled` for the same authorization must not make the
+    /// bus unreducible.
+    ///
+    /// Reconciliation exists precisely for a reviewer that went quiet, so the
+    /// two are published by different agents who have not observed each other.
+    /// Both reference the authorization; neither references the other. They
+    /// are concurrent, both orders are valid, and rejecting the second one is
+    /// fatal to reduction on every host.
     /// A blocking issue opened concurrently with an authorization must not
     /// make the bus unreducible.
     ///
@@ -8670,6 +8720,104 @@ mod tests {
     /// correct in isolation, but leaves `acknowledged_assignments` dependent
     /// on arrival order -- so two hosts that fetched the same streams in
     /// different orders diverge silently and permanently.
+    #[test]
+    fn a_merged_receipt_racing_a_reconciliation_reduces_in_either_order() {
+        let build = |reconcile_first: bool| {
+            let mut state = empty_state(&[
+                ("alice", Role::Implementor),
+                ("bob", Role::Reviewer),
+                ("coord1", Role::Coordinator),
+            ]);
+            let (alice, bob, coord1) = (a("alice"), a("bob"), a("coord1"));
+            apply_ok(&mut state, &register(&alice, Role::Implementor));
+            apply_ok(&mut state, &register(&bob, Role::Reviewer));
+            apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+            let (nominate_env, _accept) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+
+            let engine_epoch = EventId::new(&coord1, 0);
+            state.merge_engine_info.insert(
+                engine_epoch.clone(),
+                (
+                    short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                    short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                ),
+            );
+            state.current_merge_engine_epoch = Some(engine_epoch.clone());
+            let epoch = state.roster_epoch.as_ref().unwrap().clone();
+
+            let authorize = Envelope::new(
+                &bob,
+                2,
+                complete_frontier(&epoch),
+                &EventData::ReviewMergeAuthorized(merge_authorized(
+                    &nominate_env.id,
+                    StringSet::default(),
+                    &[],
+                )),
+                [nominate_env.id.clone(), engine_epoch.clone()],
+            );
+            apply_ok(&mut state, &authorize);
+
+            let merged = Envelope::new(
+                &bob,
+                3,
+                frontier_seeing(&[&authorize.id]),
+                &EventData::ReviewMerged(ReviewMerged {
+                    authorization: authorize.id.clone(),
+                    previous_main: hash(2),
+                    main_commit: hash(4),
+                    product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                    reviewed_commit: hash(3),
+                    summary: text("merged"),
+                }),
+                [authorize.id.clone()],
+            );
+            let reconciled = Envelope::new(
+                &coord1,
+                1,
+                frontier_seeing(&[&authorize.id]),
+                &EventData::ReviewMergeReconciled(ReviewMergeReconciled {
+                    authorization: authorize.id.clone(),
+                    previous_main: hash(2),
+                    main_commit: hash(4),
+                    product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                    reviewed_commit: hash(3),
+                    reason: text("reviewer went quiet"),
+                    user_authority: text("operator"),
+                }),
+                [authorize.id.clone()],
+            );
+
+            let order: Vec<&Envelope> = if reconcile_first {
+                vec![&reconciled, &merged]
+            } else {
+                vec![&merged, &reconciled]
+            };
+            for env in order {
+                apply_event(&mut state, env).unwrap_or_else(|e| {
+                    panic!(
+                        "reducing {} must not fail (reconcile_first={reconcile_first}): {e}",
+                        env.id
+                    )
+                });
+                state.kind_of_event_insert(env.id.clone(), &env.kind);
+                state.events.insert(env.id.clone(), env.clone());
+                if let Some(ag) = state.agents.get_mut(&env.agent) {
+                    ag.next_seq = env.seq + 1;
+                }
+            }
+            state
+        };
+
+        let merged_first = build(false);
+        let reconciled_first = build(true);
+        assert_eq!(
+            format!("{:#?}", merged_first.reviews),
+            format!("{:#?}", reconciled_first.reviews),
+            "both valid orders must converge on the same chain state"
+        );
+    }
+
     #[test]
     fn an_issue_blocking_a_chain_does_not_make_a_published_authorization_fatal() {
         let build = |issue_first: bool| {
