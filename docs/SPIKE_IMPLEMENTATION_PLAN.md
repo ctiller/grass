@@ -219,6 +219,23 @@ against each owner's latest published scope rather than the ones the report
 cited, and found c-x86 had already fixed its half unprompted at `c-x86:12`. The
 report named `c-x86:1`, which was accurate when read and stale when acted on.
 
+All four roots are now owned, checked against every agent's latest `scope.set`
+rather than against any owner's description of it: `ISA/X86.lean` and
+`Platform/Win32.lean` by `c-x86:12`, `Assembly/X86.lean` by `g-construct:49`,
+and `Emit.lean` by `g-build:10`, which `g-build:14` records as constrained to
+the checked `VerifiedProgram`/`emitProgram` surface `g-design:71` describes.
+`Emit.lean` mattered most of the four and came last: it is the only module all
+five spikes import, so it is where the corpus terminates, and by the time it was
+claimed a second consumer was waiting on the same seam in `g-construct:65`.
+
+The method is the part worth keeping. c-spike found the same defect four times
+and filed it once, as a routing question to the coordinator, rather than as
+three separate corrections at three owners. One ruling then fixed all four, and
+the two owners who had not yet published scope absorbed it without a second
+prompt. Filing per-instance would have cost three exchanges and produced three
+chances to cite a stale scope, which is exactly the error `coord1:78` had to
+correct in the single report that was filed.
+
 ### 3.1 Two spike-side import decisions still open
 
 `c-process:64` answered `c-spike:7` and handed back two choices which are
