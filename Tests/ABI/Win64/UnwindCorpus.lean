@@ -212,6 +212,14 @@ structure Row where
   masm : String
   /-- The predicted `.xdata` bytes, lowercase hex. -/
   xdata : String
+  /--
+  Which `UnwindTail` the row builds: `"none"` or `"handler"`.
+
+  The differential needs it to decide whether to declare a handler on the
+  `PROC FRAME` line, and it is a coverage column rather than a payload one:
+  a corpus that quietly stopped emitting handler rows changes the digest.
+  -/
+  tail : String
 
 /--
 Build a row, or nothing.
@@ -222,11 +230,13 @@ That is why the corpus is a `filterMap`: the model's refusals silently shrink
 the corpus rather than emitting rows it cannot justify, and the tool reports the
 row count it actually received.
 -/
-def rowOf (name : String) (steps : List Step) : Option Row :=
+def rowOfTail (name : String) (t : UnwindTail) (tailName : String)
+    (steps : List Step) : Option Row :=
   let placed := placeSteps steps
   let layout : Layout := ⟨placed.1, BitVec.ofNat 8 placed.2.1⟩
-  (UnwindInfo.mk? layout placed.2.2 .noHandler).map fun u =>
+  (UnwindInfo.mk? layout placed.2.2 t).map fun u =>
     { name := name
+      tail := tailName
       -- An empty instruction is dropped rather than joined: `.pushframe`
       -- describes what the processor did, so there is nothing to assemble,
       -- and the differential decides the test function's epilogue by counting
@@ -234,6 +244,34 @@ def rowOf (name : String) (steps : List Step) : Option Row :=
       masm := String.intercalate " | " (steps.flatMap fun st =>
         (if st.instr = "" then [] else [st.instr]) ++ [st.directive])
       xdata := hexBytes u.toBytes }
+
+/-- Build a row with no handler, which is what most of the corpus wants. -/
+def rowOf (name : String) (steps : List Step) : Option Row :=
+  rowOfTail name .noHandler "none" steps
+
+/--
+The tail `ml64` can be made to emit, and the only one.
+
+`PROC FRAME:handler` sets *both* handler bits -- the byte is `0x19`, so
+`Flags` reads 3 -- rather than `UNW_FLAG_EHANDLER` alone. There is no MASM
+syntax for a termination-only handler, and `.handlerdata`, which would supply
+language-specific data, is not a directive this assembler knows: it is refused
+with the same `A2008 syntax error : .` as an invented one, while `.pushreg` and
+`.savereg` on the same line assemble. So `ml64` emits exactly one
+language-specific dword and it is zero.
+
+That fixes the tail this corpus can predict to `.bothHandlers 0 [0]`, and it is
+why `.exceptionHandler`, `.terminationHandler` and `.chained` stay unexercised:
+not because they are uninteresting, but because this oracle cannot produce
+them. The handler address is `0` because it is unrelocated in an object file,
+which is why the differential checks the relocation rather than the four zero
+bytes.
+-/
+def ml64Tail : UnwindTail := .bothHandlers 0 [0]
+
+/-- Build a row whose prologue declares a handler. -/
+def rowOfHandler (name : String) (steps : List Step) : Option Row :=
+  rowOfTail name ml64Tail "handler" steps
 
 /-- The registers a prologue may push: nonvolatile and not `rsp`. -/
 def pushable : List Gpr :=
@@ -386,12 +424,40 @@ def spike1Rows : List Row :=
   [ rowOf "spike1"
       [.push .r12, .push .r13, .push .r14, .alloc 32] ].reduceOption
 
+/--
+Prologues carrying a handler, chosen to move the tail around.
+
+The point of the family is the *offset* of the handler field, which sits after
+the code array once that array has been padded to an even number of slots. So
+the interesting axis is `CountOfCodes` rather than which register is pushed:
+one and two codes both pad to two slots and put the handler at byte 8, three
+and four both pad to four and put it at byte 12. A model that forgot the
+padding, or that placed the tail before the codes, agrees with `ml64` on the
+even rows and disagrees on the odd ones.
+
+The last two rows carry operations that occupy more than one slot, so the slot
+count stops equalling the step count and the padding has to be computed from
+the former.
+-/
+def handlerRows : List Row :=
+  [ rowOfHandler "handler-1code" [.push .rbp]
+  , rowOfHandler "handler-2code" [.push .rbp, .push .rbx]
+  , rowOfHandler "handler-3code" [.push .rbp, .push .rbx, .push .rsi]
+  , rowOfHandler "handler-4code" [.push .rbp, .push .rbx, .push .rsi, .push .rdi]
+  , rowOfHandler "handler-frame" [.push .rbp, .alloc 32, .setFrame .rbp 0]
+  -- Two slots for the allocation, so three steps make four slots and no
+  -- padding, where three pushes would have made three slots and one pad.
+  , rowOfHandler "handler-largealloc" [.push .rbp, .alloc 4096]
+  -- `.savexmm128` is two slots as well, and reaches further down the array.
+  , rowOfHandler "handler-savexmm" [.push .rbp, .alloc 32, .saveXmm .xmm6 0]
+  ].reduceOption
+
 /-- The whole corpus. -/
 def corpus : List Row :=
   singlePushRows ++ pairPushRows ++ smallAllocRows ++ largeAllocRows ++
     pushAllocRows ++ frameRows ++ hugeAllocRows ++ saveRegRows ++
     saveXmmRows ++ farSaveRows ++ machineFrameRows ++ mixedSaveRows ++
-    spike1Rows
+    handlerRows ++ spike1Rows
 
 -- Evaluating a hundred rows to a length outruns the default depth.
 set_option maxRecDepth 8000
@@ -412,7 +478,7 @@ a satisfying green line.
 
 Raising this number is the ordinary way to add rows; lowering it means
 something stopped building and should be explained rather than accommodated. -/
-theorem corpus_length : corpus.length = 100 := by rfl
+theorem corpus_length : corpus.length = 107 := by rfl
 
 /-- The Spike 1 row agrees with the theorem in `UnwindBytes.lean`, so the
 differential and the proof are checking the same bytes rather than two
@@ -423,7 +489,7 @@ theorem spike1Row_matches_theorem :
 
 end Grass.Tests.ABI.Win64.Unwind
 
-/-- Print the corpus as tab-separated `xdata<TAB>name<TAB>masm` lines.
+/-- Print the corpus as tab-separated `xdata<TAB>name<TAB>masm<TAB>tail` lines.
 
 Top level, and named for its corpus rather than `main`. Six of these
 modules declared a root `main`, so importing any two into one environment
@@ -433,4 +499,4 @@ holds the single `main` that `lake env lean --run` needs and dispatches to
 these by name. -/
 def emitUnwindCorpus : IO Unit := do
   for r in Grass.Tests.ABI.Win64.Unwind.corpus do
-    IO.println (r.xdata ++ "\t" ++ r.name ++ "\t" ++ r.masm)
+    IO.println (r.xdata ++ "\t" ++ r.name ++ "\t" ++ r.masm ++ "\t" ++ r.tail)

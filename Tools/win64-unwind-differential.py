@@ -53,7 +53,7 @@ from pathlib import Path
 # means substituting a same-length corpus fails. Changing the corpus requires
 # updating this constant, which is the reviewed edit `docs/VALIDATION.md`
 # section 7 asks for rather than a silent change to what is being checked.
-EXPECTED_DIGEST = "4e3af0e5cd25ad941e1078640583b741d4dabad46aa3b2ecc8f62bfd75458594"
+EXPECTED_DIGEST = "01f37608b0dbdb863464569672550a06ea690ce33371e07b63db20e26a5fe82e"
 # The coverage this tool was reviewed at. Shrinking the corpus must be a
 # deliberate, reviewed edit rather than a side effect of regenerating it.
 #
@@ -76,18 +76,23 @@ EXPECTED_DIGEST = "4e3af0e5cd25ad941e1078640583b741d4dabad46aa3b2ecc8f62bfd75458
 # Every bucket is a minimum. Raising coverage is free; lowering it is a reviewed
 # edit, which is what `docs/VALIDATION.md` section 7's ratchet asks for.
 EXPECTED_COVERAGE = {
-    "distinct prologues": 100,
+    "distinct prologues": 107,
     "directives": 6,
     "registers pushed": 8,
     "allocation sizes": 40,
+    "handler field offsets": 2,
 }
 
 
 def coverage_buckets(rows):
     """What the corpus exercises, from each row's name and MASM text."""
-    prologues = {masm for _, _, masm in rows}
+    # Keyed on the tail as well as the text, because the tail changes the
+    # source ml64 is handed: the same prologue with and without a handler are
+    # two inputs, and counting them as one would let a handler row be added
+    # without the floor noticing.
+    prologues = {(row[2], row[3]) for row in rows}
     directives, pushed, allocs = set(), set(), set()
-    for masm in prologues:
+    for masm in {row[2] for row in rows}:
         for part in (p.strip() for p in masm.split("|")):
             if part.startswith("."):
                 directives.add(part.split()[0])
@@ -95,11 +100,18 @@ def coverage_buckets(rows):
                 pushed.add(part.split()[1])
             if part.startswith("sub rsp, "):
                 allocs.add(part.split(", ")[1])
+    # Counted as distinct handler-field offsets rather than as a count of
+    # handler rows. Seven rows that all put the handler at byte 8 exercise one
+    # placement, and the padding rule is the thing being tested: it only bites
+    # when the slot count is odd. Two offsets means both parities are present.
+    handler_offsets = {len(row[0]) // 2 - 8 for row in rows
+                       if row[3] == "handler"}
     return {
         "distinct prologues": len(prologues),
         "directives": len(directives),
         "registers pushed": len(pushed),
         "allocation sizes": len(allocs),
+        "handler field offsets": len(handler_offsets),
     }
 
 
@@ -114,6 +126,23 @@ def coverage_shortfall(rows):
 TEMPLATE = """\
 .CODE
 grassprobe PROC FRAME
+{prologue}
+    .endprolog
+    xor eax, eax
+{epilogue}
+    ret
+grassprobe ENDP
+END
+"""
+
+
+# `PROC FRAME:handler` is the only tail ml64 will emit, and it sets both handler
+# bits rather than UNW_FLAG_EHANDLER alone. The handler stays EXTERN so that its
+# address remains a relocation for `xdata_of` to read.
+TEMPLATE_HANDLER = """\
+EXTERN grasshandler:PROC
+.CODE
+grassprobe PROC FRAME :grasshandler
 {prologue}
     .endprolog
     xor eax, eax
@@ -202,8 +231,26 @@ def epilogue_for(steps: list[str]) -> str:
     return "\n".join(out)
 
 
-def xdata_of(obj: Path) -> bytes | None:
-    """Read the `.xdata` section's raw bytes out of a COFF object."""
+# IMAGE_REL_AMD64_ADDR32NB: a 32-bit RVA, which is how every address inside
+# `UNWIND_INFO` and `RUNTIME_FUNCTION` is stored.
+ADDR32NB = 0x0003
+
+
+def xdata_of(obj: Path) -> tuple[bytes, list[tuple[int, int]]] | None:
+    """The `.xdata` section's raw bytes and its relocations.
+
+    The relocations are not a decoration. In an object file the handler
+    address has not been resolved, so the four bytes where it will land read
+    zero -- and so does the language-specific dword beside it, and so does
+    the padding. Comparing those bytes against a model that predicted zero
+    confirms nothing: a model that omitted the handler field entirely agrees,
+    byte for byte, with one that placed it correctly, because both are
+    looking at zeros.
+
+    What separates them is the relocation, which names `grasshandler` and the
+    offset the linker will write it to. That offset is a real measurement of
+    where this assembler puts the handler field, and it needs no link step.
+    """
     data = obj.read_bytes()
     if len(data) < 20:
         return None
@@ -220,16 +267,63 @@ def xdata_of(obj: Path) -> bytes | None:
         size, ptr = struct.unpack_from("<II", data, off + 16)
         if ptr == 0 or ptr + size > len(data):
             return None
-        return data[ptr:ptr + size]
+        rel_ptr, = struct.unpack_from("<I", data, off + 24)
+        n_rel, = struct.unpack_from("<H", data, off + 32)
+        relocs = []
+        for r in range(n_rel):
+            r_off = rel_ptr + r * 10
+            if r_off + 10 > len(data):
+                return None
+            va, _sym, kind = struct.unpack_from("<IIH", data, r_off)
+            relocs.append((va, kind))
+        return data[ptr:ptr + size], relocs
     return None
 
 
-def assemble(ml64: str, workdir: Path, name: str, masm: str) -> tuple[bytes | None, str]:
+def check_handler_reloc(got: bytes, relocs: list[tuple[int, int]],
+                        tail: str) -> str:
+    """Complain unless the relocations match the tail the row declares.
+
+    A row with no handler must carry no `.xdata` relocation at all, and a row
+    with one must carry exactly one, of type ADDR32NB, at the offset just
+    before the single language-specific dword. Both halves matter: the first is
+    what would catch a handler leaking into a prologue that never asked for
+    one, and without it this would pass just as happily on an assembler that
+    emitted handlers everywhere.
+
+    The expected offset is derived from the length ml64 produced, not from the
+    model, so it stays an independent measurement. Computing it from the
+    predicted bytes would let a model that mislaid the handler move the
+    goalposts along with its prediction.
+    """
+    if tail != "handler":
+        if relocs:
+            return ("no handler was declared but .xdata carries "
+                    f"{len(relocs)} relocation(s) at {[o for o, _ in relocs]}")
+        return ""
+    if len(relocs) != 1:
+        kinds = sorted(k for _off, k in relocs)
+        return ("expected exactly one .xdata relocation for the handler, "
+                f"got {len(relocs)} (kinds {kinds})")
+    off, kind = relocs[0]
+    if kind != ADDR32NB:
+        return f"handler relocation is type {kind:#06x}, expected ADDR32NB"
+    want = len(got) - 8
+    if off != want:
+        return (f"handler relocation at offset {off}, but the section is "
+                f"{len(got)} bytes and the handler field belongs at {want} "
+                "(one language-specific dword follows it)")
+    return ""
+
+
+def assemble(ml64: str, workdir: Path, name: str, masm: str,
+             tail: str) -> tuple[bytes | None, str]:
     """Assemble one prologue and return its `.xdata` bytes."""
     parts = [p.strip() for p in masm.split("|")]
     instructions = [p for p in parts if not p.startswith(".")]
     prologue = "\n".join("    " + p for p in parts)
-    source = TEMPLATE.format(
+    template = TEMPLATE_HANDLER if tail == "handler" else TEMPLATE
+    source = template.format(
         prologue=prologue, epilogue=epilogue_for(instructions))
     asm = workdir / f"{name}.asm"
     obj = workdir / f"{name}.obj"
@@ -242,9 +336,13 @@ def assemble(ml64: str, workdir: Path, name: str, masm: str) -> tuple[bytes | No
         return None, f"ml64 failed: {detail[:300]}"
     if not obj.is_file():
         return None, "ml64 produced no object"
-    got = xdata_of(obj)
-    if got is None:
+    read = xdata_of(obj)
+    if read is None:
         return None, "no .xdata section in the object"
+    got, relocs = read
+    complaint = check_handler_reloc(got, relocs, tail)
+    if complaint:
+        return None, complaint
     return got, ""
 
 
@@ -268,8 +366,12 @@ def main() -> int:
         if not line.strip():
             continue
         fields = line.rstrip("\r").split("\t")
-        if len(fields) != 3:
+        if len(fields) != 4:
             print(f"malformed corpus row: {line!r}", file=sys.stderr)
+            return 1
+        if fields[3] not in ("none", "handler"):
+            print(f"unknown tail {fields[3]!r} in row: {line!r}",
+                  file=sys.stderr)
             return 1
         rows.append(tuple(fields))
     if not rows:
@@ -301,9 +403,9 @@ def main() -> int:
     errors = []
     with tempfile.TemporaryDirectory() as tmp:
         workdir = Path(tmp)
-        for expected_hex, name, masm in rows:
+        for expected_hex, name, masm, tail in rows:
             safe = re.sub(r"[^A-Za-z0-9_.-]", "_", name)
-            got, err = assemble(ml64, workdir, safe, masm)
+            got, err = assemble(ml64, workdir, safe, masm, tail)
             if got is None:
                 errors.append((name, err))
                 continue

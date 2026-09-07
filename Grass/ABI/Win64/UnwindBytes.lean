@@ -32,13 +32,46 @@ used once by hand while working out the field orders, and the paragraph
 described that session rather than the check. A reviewer caught it.
 
 The distinction matters because it changes what is covered. `UNWIND_INFO` for
-all nine operations this profile models is covered, on 100 prologues.
-`RuntimeFunction.toBytes`, `PdataSection.toBytes`, `SearchablePdata.toBytes`,
-`UnwindTail.flags`, `UnwindTail.handlerRva` and `UnwindTail.toBytes` are covered
-by nothing: every corpus row uses `.noHandler` and none emits `.pdata`. A
-reviewer hand-checked one handler case -- `PROC FRAME:myhandler; push rbp` gives
-`19010100015000000000000000000000`, which `.bothHandlers 0 [0]` reproduces --
-but that measurement is not in any corpus and nothing re-runs it.
+all nine operations this profile models is covered, on 107 prologues.
+`RuntimeFunction.toBytes`, `PdataSection.toBytes` and `SearchablePdata.toBytes`
+are covered by nothing: no corpus row emits `.pdata`.
+
+`UnwindTail.flags`, `UnwindTail.handlerRva` and `UnwindTail.toBytes` were also
+covered by nothing until seven rows were added for them, and the earlier note
+here -- that a reviewer had hand-checked `PROC FRAME:myhandler; push rbp` and
+nothing re-ran it -- is now out of date. The corpus carries that case and six
+more, chosen to move the handler field: it sits after the code array once that
+array is padded to an even slot count, so one and two codes put it at byte 8
+and three and four put it at byte 12. Both parities are present, which is what
+makes the padding rule observable rather than assumed.
+
+## What the handler rows do and do not establish
+
+`ml64` will emit exactly one tail and it is `.bothHandlers 0 [0]`. That is not a
+corpus choice but the assembler's limit, and it bounds the claim three ways.
+
+`PROC FRAME:handler` sets *both* handler bits: the first byte is `0x19`, so
+`Flags` reads 3. There is no MASM syntax for a termination-only handler, so
+`.exceptionHandler` and `.terminationHandler` -- flags 1 and 2 -- have no oracle
+here, and neither does `.chained`, which no directive produces. Those three
+constructors remain checked only by the theorems above.
+
+`.handlerdata`, which would supply language-specific data, is not a directive
+this assembler knows. It is refused with the same `A2008 syntax error : .` as an
+invented directive, on a line where `.pushreg` and `.savereg` assemble; so the
+language-specific data is always one dword and always zero, and a model that
+emitted a longer list would not be caught here.
+
+The handler address is `0` because it is unrelocated in an object file -- and so
+is the dword beside it, and so is the padding. Comparing those bytes to a model
+that predicted zero establishes nothing: a model that dropped the handler field
+entirely agrees, byte for byte, with one that placed it correctly. What
+separates them is the relocation, which names the handler symbol and the offset
+the linker will write it to, and which the differential reads out of the section
+header rather than inferring. It requires exactly one `ADDR32NB` relocation at
+that offset on a handler row and none at all on a row without one; both halves
+were checked by mutation, and the second is what would catch a handler leaking
+into a prologue that never asked for one.
 
 ## What a `.pdata` oracle can and cannot reach
 
@@ -48,18 +81,30 @@ want of an oracle. That was not checked, and it is half wrong. `dumpbin
 functions produce three twelve-byte `RUNTIME_FUNCTION` entries, and the
 `EndAddress` of each is the real function length.
 
-What an object file cannot give is `BeginAddress`. Relocations are unapplied
-until link time, so every `BeginAddress` reads zero, and the properties this
-module actually proves about the table -- `PdataSection.Separated` and the
-ascending order `WellFormed` requires -- are exactly the ones that need
-addresses to be distinct. Checking those needs a linked image, which means a
-`link.exe` step the differential does not have.
+The raw bytes stop there, because relocations are unapplied until link time and
+`RuntimeFunction.begin_` is one of them: the four bytes it will occupy read
+zero. An earlier version of this paragraph concluded from that that the table's
+addresses were out of reach until a link step, and that was too pessimistic in
+the same way the sentence before it was too pessimistic -- it read the zeros and
+stopped. The relocation directory carries what the zeros do not. Each entry
+contributes three `ADDR32NB` relocations naming the function symbol, the same
+symbol with the function's length as its addend, and the `UNWIND_INFO` symbol,
+in that field order.
 
-So the obligation splits. The per-entry field order and `EndAddress` are
-checkable against `dumpbin` today; the ordering and separation of the table are
-not, without linking. Both remain owed, and the second is the larger piece of
-work -- said precisely here rather than left as "no oracle", which would have
-discouraged the half that is reachable.
+So the obligation splits, and the reachable half is the larger one. Per-entry
+field order, the function length, and the pairing of each entry with its
+`UNWIND_INFO` are all measurable from an object file, as is the disjointness
+`PdataSection.Separated` asks for, since entries built from distinct function
+symbols cannot overlap whatever addresses the linker assigns. What genuinely
+needs a linked image is the ascending order `WellFormed` requires, because that
+is a fact about the layout the linker chooses and no object file has yet
+chosen it.
+
+None of this is done. The whole of it remains owed, and it is recorded at this
+length because the estimate here has now been wrong twice in the same
+direction -- first "no oracle at all", then "field order only" -- and both
+times because a zero was read as an absence rather than as an unresolved
+reference.
 
 Every field order below was read off `ml64` output rather than inferred,
 including the two that a reader of the C struct declarations would most likely
