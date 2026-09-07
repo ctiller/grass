@@ -1017,6 +1017,44 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
       ∃ region, before.shared region ≠ after.shared region ∧ fragment = .region region)
 
 /--
+**A role that may write no region owes `sharedWritesAdmitted` nothing.**
+
+Cited by `StepsLocally.sharedWritesAdmitted`'s own docstring and by
+`Grass/Process/Network/Plan.lean`'s note on `sharedUpdate`, and declared by
+neither until now — a dangling citation of mine, found by a mechanical sweep over
+every backticked name in the files this branch touches rather than by the
+docstring gate, which checks identifiers only inside sentences carrying a
+strong-claim word. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.136.
+
+The content is small and worth having anyway: `writesPermitted` says a region
+that moved is one this role may write, so at a role that may write nothing, no
+region moved, and the value bound is discharged from an impossible hypothesis.
+An author whose role has no write capability supplies `writesPermitted` and gets
+`sharedWritesAdmitted` for free, which is decision 134's small-authoring-surface
+constraint applied to the field `agent-bus` ruling `g-design:84` added.
+-/
+theorem sharedWritesAdmitted_of_no_writes {before after : plan.LogicalProcessNetwork}
+    {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
+    {event : (plan.topology.protocol kind).Event}
+    {issued : Bag (plan.topology.protocol kind).Demand}
+    {localEmitted : ObservationSegment (plan.topology.protocol kind).Observation}
+    (noWrites : ∀ region, (plan.topology.sharedAccess kind region).mayWrite = false)
+    (writesPermitted : ∀ region, before.shared region ≠ after.shared region →
+      (plan.topology.sharedAccess kind region).mayWrite = true) :
+    ∀ region, before.shared region ≠ after.shared region →
+      ∀ (fromInstance toInstance : ProcessInstance plan.topology)
+        (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
+        before.instances kind slot = some fromInstance →
+        after.instances kind slot = some toInstance →
+        plan.sharedUpdate kind event (fromKind ▸ fromInstance.localState)
+          (toKind ▸ toInstance.localState) issued localEmitted region
+          (before.shared region) (after.shared region) := by
+  intro region moved
+  have permitted := writesPermitted region moved
+  rw [noWrites region] at permitted
+  exact absurd permitted (by intro equal; cases equal)
+
+/--
 A new incarnation appears in a slot that was empty.
 
 `allocation` is what `docs/PROCESS.md` §3 calls the transition's
@@ -2194,14 +2232,14 @@ A slot nothing moved holds the same instance afterwards, so under
 `LogicalProcessNetworkCore.Agrees` an instance already recorded as not dead
 cannot be found dead there.
 
-The off-scope half of `dying_was_supervised`, factored out because every
-constructor whose scope does not name this slot discharges its case with it. It
-took a `Live` hypothesis and used `ProcessLifecycle.live_cast` until the theorem
-above was weakened to `notAlreadyDead`; now it needs neither, which is the point
-of the weakening.
+The off-scope half of `dying_was_supervised` below, factored out because that
+proof takes it once, in the branch where the transition's scope does not name
+this slot at all — which is the branch covering every constructor the split does
+not go on to examine.
 
-The off-scope half of `dying_was_supervised`, factored out because every
-constructor whose scope does not name this slot discharges its case with it.
+It took a `Live` hypothesis and used `ProcessLifecycle.live_cast` until
+`dying_was_supervised` was weakened to `notAlreadyDead`; now it needs neither,
+which is what the weakening bought.
 -/
 private theorem not_dead_where_nothing_moved
     {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
@@ -2243,11 +2281,17 @@ requirement and copies the lifecycle across, so a dead child detaches into a dea
 instance with no current parent —
 `Tests/Process/PreservationFixtures.lean`'s `a_corpse_may_be_orphaned`. Nothing
 was killed by that step, so this theorem is untouched; the *family admits a step
-into that state* all the same. Whether any run reaches such a world is a separate
-question, and at `serverPlan` the answer is no —
-`Tests/Process/PreservationFixtures.lean`'s `no_run_reaches_deadOrphanWorld`,
-written down rather than left as an aside, since leaving the inference to a
-reader is how two earlier rounds of this went wrong. Whether a supervisor may let go of a corpse is `agent-bus`
+into that state* all the same.
+
+Whether any run holds a dead orphan is a separate question and **this corpus does
+not answer it**. `Tests/Process/PreservationFixtures.lean`'s
+`no_run_reaches_deadOrphanWorld` refuses exactly one hand-built world, and it
+refuses it because that world's *root slot is empty* rather than because of
+anything about the corpse — `UnkilledRootAt` constrains only the slot it is
+applied at. A run reaching a dead orphan in some connection slot with the root
+intact is not ruled out by anything here, and saying otherwise is the
+over-generalisation three rounds of review have caught in this docstring's
+neighbourhood. Whether a supervisor may let go of a corpse is `agent-bus`
 `c-process:103`'s question for `g-design`.
 
 *It is not "no run reaches a dead root".* This is one step. Getting from here to

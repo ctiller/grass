@@ -5194,7 +5194,8 @@ ledger keeps finding does the work a proof should. It now assumes only that the
 instance was not *already* dead, every branch still goes through — `restart` now
 closes on `nowLive` rather than `wasEnded`, and `detach` carries the death
 backwards rather than liveness forwards — and the weaker form is what
-`parentless_slot_is_unkilled` needs.
+`parentless_slot_is_unkilled` needs — a lemma §10.135 later deleted, so the name
+is here as history rather than as a citation.
 
 ### 10.134 The correction left the sentences it corrected in place
 
@@ -5351,6 +5352,79 @@ fixture worlds; `Restarts` inhabited at `Tests/Process/RestartFixtures.lean`, so
 threading genuinely derived rather than assumed at each world; all 109 backticked
 identifiers in the new docstrings resolving; and `c-process:103` resolving to the
 event §10.133 says it is.
+
+### 10.136 Four rounds, no Lean defect, and every count written from memory was wrong
+
+Fourth fresh reviewer. The Lean survived a fourth time — it re-derived the
+constructor arithmetic, confirmed every hypothesis of every new theorem is
+jointly satisfiable, checked that each new declaration has a consumer, and
+verified §10.135's claims about this branch's own git history with `git show`.
+Six more defects, all prose, and the two that matter say the same thing about how
+this went wrong.
+
+**The commit that fixed a miscount introduced two more, in the sentence it was
+rewriting.** §10.135 corrected "the seven refusals below are read off this
+theorem" to "the three `no_run_reaches_*` … the four `*_is_no_world_of_a_run`".
+Both new numbers were wrong on arrival, because the same commit added
+`deadOrphanWorld_is_no_world_of_a_run` and `no_run_reaches_deadOrphanWorld`
+further down the same file. There are four and five.
+
+That is the third round in a row containing a miscount, and the second in which
+the miscount is *inside the correction of a miscount*. The pattern is specific
+enough to be a rule now, and it is not "be careful": **do not write a count you
+have not just measured, and prefer a sentence with no count in it.** Every number
+in this entry was produced by `grep -c` immediately before writing it, and the
+ones that were not load-bearing were removed rather than checked.
+
+**And "like every other world in this file" was false of the file.** The docstring
+on `no_run_reaches_deadOrphanWorld` — a declaration added *because* the previous
+round objected to an unproved reachability aside — closed with a reachability
+claim of its own, and the reviewer refuted it in two lines using this file's own
+`withRoot_is_a_start` and `theSendStep`. §10.135 boasts of that exact run one
+page earlier. So the remedy for an over-general sentence was a declaration whose
+docstring over-generalised.
+
+**The related finding is sharper and is the one worth keeping.**
+`dying_was_supervised`'s docstring said "whether any run reaches such a world …
+at `serverPlan` the answer is no", pointing at `no_run_reaches_deadOrphanWorld`.
+But that theorem refuses one hand-built world *because its listener slot is
+empty*, and says nothing whatever about the corpse: `UnkilledRootAt` constrains
+only the slot it is applied at. **Nothing in this corpus rules out a run reaching
+a world that holds a dead orphan at a connection slot with the root intact**, and
+the sentence now says so. That is a real open question about the family rather
+than a wording fix, and it is the substance behind `agent-bus` `c-process:103`'s
+request for a ruling on detaching a corpse.
+
+**Three smaller ones.** §10.135's own edit left a duplicated paragraph on
+`not_dead_where_nothing_moved` — the previous paragraph rewritten and the old one
+not removed, which is §10.134's title recurring inside the commit reporting that
+class. The surviving text also said the lemma is used by "every constructor whose
+scope does not name this slot"; it has one call site, in the single branch taken
+before the constructor split. And §10.133 still cited
+`parentless_slot_is_unkilled` in the present tense two entries after the branch
+deleted it, without the marker this ledger puts on every other superseded claim.
+
+**One dangling citation of my own, from before this branch.** The mechanical
+sweep this entry's rule prescribes — every backticked Lean-style name in every
+file the branch touches, resolved against the declaration set — turned up
+`sharedWritesAdmitted_of_no_writes`, cited by `StepsLocally`'s own docstring and
+by `Grass/Process/Network/Plan.lean`'s note on `sharedUpdate`, declared by
+neither, and landed in that state by my own commit `c373340`. It is declared
+here rather than the citations deleted, because the content is real: a role that
+may write no region discharges `sharedWritesAdmitted` from `writesPermitted`
+alone, which is decision 134's authoring-surface constraint applied to the field
+`g-design:84` added. `Tools/DocstringAudit.py` cannot see citations like this and
+that gap is reported to the gate's owner.
+
+**What four rounds have established, which is worth stating plainly.** No round
+found a defect in a proof. Every defect was a sentence asserting more than the
+declaration under it, a count written from memory, or a clause nothing could
+fail. Three of them were sentences invalidated by a *later commit on the same
+branch* — the fix landed and the prose describing the old state did not move. The
+working rule that comes out of it is to `git grep` the **claim's wording** after a
+fix, not the declaration's name: searching "world of a run" finds every
+paraphrase in one pass, and searching the renamed declaration is what missed
+`theReceiverIsKilledStep` in §10.135.
 
 ## 11. The authoring facade
 

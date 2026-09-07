@@ -657,7 +657,7 @@ theorem no_restart_at_the_root_slot {before after : ServerWorld}
 **So every run of `serverPlan` ends holding an unkilled root.**
 
 `ProcessPlan.execution_holds_an_unkilled_root` with its restart escape closed.
-The three `no_run_reaches_*` corollaries below apply it. The four
+The four `no_run_reaches_*` corollaries below apply it. The five
 `*_is_no_world_of_a_run` theorems do not — they are read off `UnkilledRootAt`
 directly and would stand without this theorem; it is what turns them into
 statements about executions. That is §10.129's actual question: not a step into
@@ -821,11 +821,16 @@ theorem deadOrphanWorld_is_no_world_of_a_run :
   rintro ⟨_, found, _⟩
   exact absurd found (by intro equal; cases equal)
 
-/-- **And no run reaches the dead orphan either**, which is the sentence
-`NetworkTransition.dying_was_supervised`'s docstring used to assert without a
-declaration behind it. The instance *shape* is what
-`a_corpse_may_be_orphaned` refutes a reading with; the *world* is a world of no
-run, like every other world in this file. §10.135. -/
+/-- **And no run reaches this particular dead-orphan world**, which is the
+sentence `NetworkTransition.dying_was_supervised`'s docstring used to assert
+without a declaration behind it.
+
+Read what it proves and not more. `deadOrphanWorld`'s *listener* slot is empty,
+and that is the whole proof; nothing here says a run cannot reach some other
+world holding a dead orphan at a connection slot with the root intact. Nor is
+"a world of no run" this file's norm — `World.withRoot` is a start,
+`theSendStep` reaches `sent` from it, and `sent_holds_an_unkilled_root` is above.
+§10.136. -/
 theorem no_run_reaches_deadOrphanWorld
     {request : (serverTopology.protocol serverTopology.root).Request} {start : ServerWorld}
     (isStart : serverPlan.ExactInitialNetwork request start)

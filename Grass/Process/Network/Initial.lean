@@ -376,9 +376,11 @@ theorem holds_along_every_execution_from_a_start (mixin : plan.WeaveInvariantMix
 /--
 A slot holds an instance that records no current parent and is not dead.
 
-The invariant `execution_holds_an_unkilled_root` carries. It is two claims and
-losing either loses the point: no current parent *and* not dead. A detached
-child satisfies the first and can fail the second —
+The invariant `execution_holds_an_unkilled_root` carries. Three conjuncts, and
+each does work: the slot is *occupied*, by an instance with *no current parent*,
+which is *not dead*. Four of the five refusals in
+`Tests/Process/PreservationFixtures.lean` falsify the first and one falsifies the
+third. A detached child satisfies the second and can fail the third —
 `Tests/Process/PreservationFixtures.lean`'s `a_corpse_may_be_orphaned` — so this
 is deliberately not "parentless" alone.
 
@@ -403,9 +405,9 @@ def UnkilledRootAt (network : plan.LogicalProcessNetwork)
 /--
 **Every start has one, in the root's slot.**
 
-`ExactInitialNetwork.rootParentage` says the root is a root and
-`rootRunning` says it is running, which are the two halves `UnkilledRootAt`
-wants. Nothing here is about steps.
+`ExactInitialNetwork.rootPresent` puts an incarnation in the slot,
+`rootParentage` says it is a root and `rootRunning` says it is running — the
+three conjuncts in order. Nothing here is about steps.
 -/
 theorem start_holds_an_unkilled_root {request : (plan.topology.protocol plan.topology.root).Request}
     {network : plan.LogicalProcessNetwork} (start : plan.ExactInitialNetwork request network) :
@@ -417,15 +419,16 @@ theorem start_holds_an_unkilled_root {request : (plan.topology.protocol plan.top
   cases dead
 
 /--
-**And every execution keeps one, unless a restart takes it away.**
+**And every execution keeps one, at any plan admitting no restart at that
+slot.**
 
 `NetworkTransition.parentless_slot_survives` at every step of a run for the
 parentage half, and `NetworkTransition.dying_was_supervised` for the death half,
 bridged by `WellFormed.slotsAgree` and `ProcessLifecycle.died_cast` — the bridge
 is why the well-formedness hypothesis is here rather than a convenience. The
-disjunct is `parentless_slot_survives`': `Restarts.restartsAChild` constrains
-only the new incarnation, so a restart at the root's slot is the single way an
-execution can end without a root. A plan at which that restart is unconstructible —
+disjunct is the one `parentless_slot_survives` concludes with:
+`Restarts.restartsAChild` constrains only the new incarnation, so a restart at
+the root's slot is the single way an execution can end without a root. A plan at which that restart is unconstructible —
 `ProcessGraph.maySpawn` permitting no parent for the root's role is the ordinary
 reason — therefore holds its root along every run, which is what
 `Tests/Process/PreservationFixtures.lean` discharges at `serverPlan`.
