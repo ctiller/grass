@@ -8772,27 +8772,38 @@ mod tests {
             } else {
                 vec![&published, &subscribe]
             };
-            for env in order {
-                apply_event(&mut state, env).unwrap_or_else(|e| {
-                    panic!(
-                        "reducing {} must not fail (subscribe_first={subscribe_first}): {e}",
-                        env.id
-                    )
-                });
-                state.kind_of_event_insert(env.id.clone(), &env.kind);
-                state.events.insert(env.id.clone(), env.clone());
-                if let Some(ag) = state.agents.get_mut(&env.agent) {
-                    ag.next_seq = env.seq + 1;
-                }
-            }
-            state
+            // The real incremental path, not a hand-rolled copy of it.
+            // These fixtures model exactly what `reduce_onto` does on a host
+            // that fetched one stream before the other, so anything else
+            // leaves the production path untested -- and the loop that stood
+            // here differed from it, assigning `next_seq` where `reduce_onto`
+            // takes a `max`.
+            let owned: Vec<Envelope> = order.into_iter().cloned().collect();
+            reduce_onto(state, &owned)
+                .expect("both orders are valid linear extensions and must reduce")
         };
 
         let publish_first = build(false);
         let subscribe_first = build(true);
+        // Converging on "the handler quietly did nothing" would satisfy any
+        // comparison, so pin that the broadcast was actually recorded first.
         assert_eq!(
-            format!("{:#?}", publish_first.broadcasts),
-            format!("{:#?}", subscribe_first.broadcasts),
+            publish_first.broadcasts.len(),
+            1,
+            "the broadcast must be recorded, not silently skipped"
+        );
+        // Compare the *whole* state, not one map. Gates 15/16 are about
+        // state, and an adversarial test review demonstrated the narrower
+        // form's cost: a deliberate order-dependent write into `state.issues`
+        // from inside `apply_review_merge_authorized` -- the very handler this
+        // work rewrote -- survived the entire suite, proptests included,
+        // because every convergence test here compared only `reviews` or only
+        // `broadcasts`. The events in each pair come from different agents, so
+        // `events`, `kind_of_event` and `next_seq` are order-insensitive too
+        // and the wider compare is just as valid.
+        assert_eq!(
+            format!("{publish_first:#?}"),
+            format!("{subscribe_first:#?}"),
             "both valid orders must converge on the same broadcast state"
         );
     }
@@ -8862,27 +8873,36 @@ mod tests {
             } else {
                 vec![&first, &second]
             };
-            for env in order {
-                apply_event(&mut state, env).unwrap_or_else(|e| {
-                    panic!(
-                        "reducing {} must not fail (second_first={second_first}): {e}",
-                        env.id
-                    )
-                });
-                state.kind_of_event_insert(env.id.clone(), &env.kind);
-                state.events.insert(env.id.clone(), env.clone());
-                if let Some(ag) = state.agents.get_mut(&env.agent) {
-                    ag.next_seq = env.seq + 1;
-                }
-            }
-            state
+            // The real incremental path, not a hand-rolled copy of it.
+            // These fixtures model exactly what `reduce_onto` does on a host
+            // that fetched one stream before the other, so anything else
+            // leaves the production path untested -- and the loop that stood
+            // here differed from it, assigning `next_seq` where `reduce_onto`
+            // takes a `max`.
+            let owned: Vec<Envelope> = order.into_iter().cloned().collect();
+            reduce_onto(state, &owned)
+                .expect("both orders are valid linear extensions and must reduce")
         };
 
         let coord1_first = build(false);
         let coord2_first = build(true);
+        // Both receipts recorded -- this is the commit message's own claim,
+        // and without it the test passes just as well against a handler that
+        // dropped one.
+        let chain = coord1_first.reviews.values().next().expect("a chain");
+        assert_eq!(chain.reconciled.len(), 2, "both receipts must be recorded");
+        // Compare the *whole* state, not one map. Gates 15/16 are about
+        // state, and an adversarial test review demonstrated the narrower
+        // form's cost: a deliberate order-dependent write into `state.issues`
+        // from inside `apply_review_merge_authorized` -- the very handler this
+        // work rewrote -- survived the entire suite, proptests included,
+        // because every convergence test here compared only `reviews` or only
+        // `broadcasts`. The events in each pair come from different agents, so
+        // `events`, `kind_of_event` and `next_seq` are order-insensitive too
+        // and the wider compare is just as valid.
         assert_eq!(
-            format!("{:#?}", coord1_first.reviews),
-            format!("{:#?}", coord2_first.reviews),
+            format!("{coord1_first:#?}"),
+            format!("{coord2_first:#?}"),
             "GATE 15/16: both receipts are recorded, and in an order-independent container"
         );
     }
@@ -8969,27 +8989,38 @@ mod tests {
             } else {
                 vec![&merged, &reconciled]
             };
-            for env in order {
-                apply_event(&mut state, env).unwrap_or_else(|e| {
-                    panic!(
-                        "reducing {} must not fail (reconcile_first={reconcile_first}): {e}",
-                        env.id
-                    )
-                });
-                state.kind_of_event_insert(env.id.clone(), &env.kind);
-                state.events.insert(env.id.clone(), env.clone());
-                if let Some(ag) = state.agents.get_mut(&env.agent) {
-                    ag.next_seq = env.seq + 1;
-                }
-            }
-            state
+            // The real incremental path, not a hand-rolled copy of it.
+            // These fixtures model exactly what `reduce_onto` does on a host
+            // that fetched one stream before the other, so anything else
+            // leaves the production path untested -- and the loop that stood
+            // here differed from it, assigning `next_seq` where `reduce_onto`
+            // takes a `max`.
+            let owned: Vec<Envelope> = order.into_iter().cloned().collect();
+            reduce_onto(state, &owned)
+                .expect("both orders are valid linear extensions and must reduce")
         };
 
         let merged_first = build(false);
         let reconciled_first = build(true);
+        let chain = merged_first.reviews.values().next().expect("a chain");
+        assert_eq!(chain.merged.len(), 1, "the merge receipt must be recorded");
         assert_eq!(
-            format!("{:#?}", merged_first.reviews),
-            format!("{:#?}", reconciled_first.reviews),
+            chain.reconciled.len(),
+            1,
+            "and so must the reconciliation -- recording both is the whole claim"
+        );
+        // Compare the *whole* state, not one map. Gates 15/16 are about
+        // state, and an adversarial test review demonstrated the narrower
+        // form's cost: a deliberate order-dependent write into `state.issues`
+        // from inside `apply_review_merge_authorized` -- the very handler this
+        // work rewrote -- survived the entire suite, proptests included,
+        // because every convergence test here compared only `reviews` or only
+        // `broadcasts`. The events in each pair come from different agents, so
+        // `events`, `kind_of_event` and `next_seq` are order-insensitive too
+        // and the wider compare is just as valid.
+        assert_eq!(
+            format!("{merged_first:#?}"),
+            format!("{reconciled_first:#?}"),
             "both valid orders must converge on the same chain state"
         );
     }
@@ -9024,7 +9055,7 @@ mod tests {
             apply_ok(&mut state, &register(&alice, Role::Implementor));
             apply_ok(&mut state, &register(&bob, Role::Reviewer));
             apply_ok(&mut state, &register(&carol, Role::Implementor));
-            let (nominate_env, _accept) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+            let (nominate_env, accept) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
             let epoch = state.roster_epoch.as_ref().unwrap().clone();
 
             // carol opens an issue that blocks the chain, having observed only
@@ -9051,8 +9082,16 @@ mod tests {
                     epoch.active_members.keys().map(|agent| FrontierEntry {
                         agent: agent.clone(),
                         stream_tip: hash(1),
+                        // bob's own entry runs through bob's real tip. Streams
+                        // are single-writer, so an agent has always observed
+                        // its own prior events; a frontier claiming otherwise
+                        // is an envelope production cannot emit, and
+                        // `validate_complete` would not catch it because it
+                        // checks the member set, not the positions.
                         through: if *agent == alice {
                             nominate_env.id.clone()
+                        } else if *agent == bob {
+                            accept.id.clone()
                         } else {
                             EventId::new(agent, 0)
                         },
@@ -9072,28 +9111,41 @@ mod tests {
             } else {
                 vec![&auth, &issue]
             };
-            for env in order {
-                apply_event(&mut state, env).unwrap_or_else(|e| {
-                    panic!(
-                        "reducing {} must not fail (issue_first={issue_first}): {e}",
-                        env.id
-                    )
-                });
-                state.kind_of_event_insert(env.id.clone(), &env.kind);
-                state.events.insert(env.id.clone(), env.clone());
-                if let Some(ag) = state.agents.get_mut(&env.agent) {
-                    ag.next_seq = env.seq + 1;
-                }
-            }
-            state
+            // The real incremental path, not a hand-rolled copy of it.
+            // These fixtures model exactly what `reduce_onto` does on a host
+            // that fetched one stream before the other, so anything else
+            // leaves the production path untested -- and the loop that stood
+            // here differed from it, assigning `next_seq` where `reduce_onto`
+            // takes a `max`.
+            let owned: Vec<Envelope> = order.into_iter().cloned().collect();
+            reduce_onto(state, &owned)
+                .expect("both orders are valid linear extensions and must reduce")
         };
 
         // Both orders must reduce, and must agree (gates 15/16).
         let auth_first = build(false);
         let issue_first = build(true);
+        // `apply_review_merge_authorized` has a live silent-`Ok(())` path for
+        // a stale nomination link; a refactor that widened it would turn this
+        // test green and meaningless without this assertion.
+        let chain = auth_first.reviews.values().next().expect("a chain");
         assert_eq!(
-            format!("{:#?}", auth_first.reviews),
-            format!("{:#?}", issue_first.reviews),
+            chain.authorizations.len(),
+            1,
+            "the authorization must be recorded, not silently skipped"
+        );
+        // Compare the *whole* state, not one map. Gates 15/16 are about
+        // state, and an adversarial test review demonstrated the narrower
+        // form's cost: a deliberate order-dependent write into `state.issues`
+        // from inside `apply_review_merge_authorized` -- the very handler this
+        // work rewrote -- survived the entire suite, proptests included,
+        // because every convergence test here compared only `reviews` or only
+        // `broadcasts`. The events in each pair come from different agents, so
+        // `events`, `kind_of_event` and `next_seq` are order-insensitive too
+        // and the wider compare is just as valid.
+        assert_eq!(
+            format!("{auth_first:#?}"),
+            format!("{issue_first:#?}"),
             "the two valid orders must converge on the same review state"
         );
     }

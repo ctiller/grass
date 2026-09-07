@@ -662,6 +662,33 @@ fn verify_review_merge_reconciled(
         Ok(crate::events::EventData::ReviewMergeAuthorized(_)) => {}
         _ => return Ok(()),
     }
+    // A receipt already exists for this chain and this host can see it.
+    //
+    // `apply` refuses only the author's *own* duplicate, which is all it can
+    // soundly do: a reviewer's `review.merged` and a coordinator's
+    // `review.merge_reconciled` come from different agents who need not have
+    // observed each other, so refusing that pairing during replay would make
+    // reduction depend on arrival order. Recording both is correct there --
+    // `audit_main` asks whether *any* receipt names the commit.
+    //
+    // But publishing a second one when this host can already see the first
+    // is a caller doing something incoherent, and here there is no ordering
+    // question: `state` is this host's fully-reduced view. Reconciliation
+    // exists for a reviewer that went quiet, so a chain that already carries
+    // a receipt is precisely the case that does not need reconciling.
+    if let Ok(crate::events::EventData::ReviewMergeAuthorized(auth)) = auth_env.typed_data() {
+        if let Some(chain) = state
+            .review_chain_by_nomination
+            .get(&auth.nomination)
+            .and_then(|root| state.reviews.get(root))
+        {
+            if let Some(existing) = chain.merged.iter().chain(chain.reconciled.iter()).next() {
+                return Err(invalid(format!(
+                    "this chain already carries receipt {existing}; reconciliation records a merge nobody receipted, not a second receipt for one already recorded"
+                )));
+            }
+        }
+    }
     const MAIN_PROBE_REF: &str = "refs/agent-bus/reconcile-main-probe";
     let fetch = crate::gitrepo::fetch_refspecs(
         repo,
@@ -704,6 +731,39 @@ fn verify_review_merge_reconciled(
 /// `base_code_commit`/`code_commit` are lower-stakes (correctable by a
 /// follow-up `scope.set`, or merely evidence rather than a binding field
 /// respectively) but the same silent-typo failure mode applies to both.
+fn verify_object_ids_resolve(repo: &Path, data: &crate::events::EventData) -> AbResult<()> {
+    let candidates: Vec<(&str, &crate::scalars::ObjectId)> = match data {
+        crate::events::EventData::AgentRegistered(d) => {
+            d.product_base.iter().map(|b| ("product_base", b)).collect()
+        }
+        crate::events::EventData::ScopeSet(d) => {
+            vec![("base_code_commit", &d.base_code_commit)]
+        }
+        crate::events::EventData::IssueOpened(d) => {
+            d.code_commit.iter().map(|c| ("code_commit", c)).collect()
+        }
+        // An audit report pins the revisions it inspected, which is the same
+        // class of evidence as the fields above and fails the same silent way
+        // if mistyped: the report reads as authoritative about a commit that
+        // does not exist. `apply` already refuses a report naming an issue
+        // that does not exist; this is the object-id half of the same rule.
+        crate::events::EventData::AuditReported(d) => d
+            .inspected_commits
+            .iter()
+            .map(|c| ("inspected_commits", c))
+            .collect(),
+        _ => vec![],
+    };
+    for (field, id) in candidates {
+        if crate::gitrepo::rev_parse_opt(repo, id.as_str())?.is_none() {
+            return Err(invalid(format!(
+                "{field} {id} does not resolve to an object in this repository"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// docs/AGENT_COORDINATION_EVOLUTION.md section 4.2, gate 12: the claimed
 /// `audience_snapshot` must equal `audience_selector` resolved against
 /// `audience_epoch`.
@@ -734,39 +794,6 @@ fn verify_broadcast_published(
             "audience_snapshot does not match audience_selector resolved against epoch {}: missing {:?}, unexpected {:?}",
             d.audience_epoch, missing, extra
         )));
-    }
-    Ok(())
-}
-
-fn verify_object_ids_resolve(repo: &Path, data: &crate::events::EventData) -> AbResult<()> {
-    let candidates: Vec<(&str, &crate::scalars::ObjectId)> = match data {
-        crate::events::EventData::AgentRegistered(d) => {
-            d.product_base.iter().map(|b| ("product_base", b)).collect()
-        }
-        crate::events::EventData::ScopeSet(d) => {
-            vec![("base_code_commit", &d.base_code_commit)]
-        }
-        crate::events::EventData::IssueOpened(d) => {
-            d.code_commit.iter().map(|c| ("code_commit", c)).collect()
-        }
-        // An audit report pins the revisions it inspected, which is the same
-        // class of evidence as the fields above and fails the same silent way
-        // if mistyped: the report reads as authoritative about a commit that
-        // does not exist. `apply` already refuses a report naming an issue
-        // that does not exist; this is the object-id half of the same rule.
-        crate::events::EventData::AuditReported(d) => d
-            .inspected_commits
-            .iter()
-            .map(|c| ("inspected_commits", c))
-            .collect(),
-        _ => vec![],
-    };
-    for (field, id) in candidates {
-        if crate::gitrepo::rev_parse_opt(repo, id.as_str())?.is_none() {
-            return Err(invalid(format!(
-                "{field} {id} does not resolve to an object in this repository"
-            )));
-        }
     }
     Ok(())
 }
