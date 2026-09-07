@@ -60,6 +60,40 @@ def deviceHostVisible64 : AddressSpace :=
   { id := .deviceHostVisible, repr := .numeric 64, memoryType := .notHostCached
     coherence := .requiresExplicitVisibility }
 
+/--
+Which clauses of the seal an event fails, by name.
+
+**The standing check, and the thing this file was missing.** Every theorem below says
+an event is refused; none of them could say *which clause refused it*, so five
+neighbours failed two or three clauses each while their docstrings named one, and a
+commit message said all thirteen were caught. `sealClauses` decides it, and
+`each_neighbour_fails_exactly_one_clause` asserts the property the file's argument
+rests on.
+
+The clause propositions are restated here rather than projected, because a field of a
+`Prop` structure cannot be projected from a value that does not satisfy it. That is a
+second source of truth and it is the acceptable kind: it is a *test* of the seal
+written against the seal, and if the two drift the theorem below stops matching the
+`Decidable` instance and fails.
+-/
+def sealClauses (e : MemoryEvent) : List String :=
+  (if e.kind.reads = true → e.valueRead.isSome then [] else ["readValuePresent"]) ++
+  (if e.kind.reads = false → e.valueRead = Option.none then [] else ["readValueAbsent"]) ++
+  (if e.kind.writes = true → e.valueWritten.isSome then [] else ["writeValuePresent"]) ++
+  (if e.kind.writes = false → e.valueWritten = Option.none then []
+   else ["writeValueAbsent"]) ++
+  (if e.kind.touchesMemory = false → e.range.IsEmpty then []
+   else ["noLocationWhenUntouched"]) ++
+  (if ∀ bytes ∈ e.valueWritten, bytes.length = e.committedWriteRange.size then []
+   else ["writtenLength"]) ++
+  (if ∀ bytes ∈ e.valueRead, bytes.length = e.committedReadRange.size then []
+   else ["readLength"]) ++
+  (if e.status.WellFormed e.range.size then [] else ["statusWellFormed"]) ++
+  (if e.status.committedReads = e.readCommitted then [] else ["statusAgreesWithReads"]) ++
+  (if e.status.committedWrites = e.writeCommitted then []
+   else ["statusAgreesWithWrites"]) ++
+  (if e.space.id = e.provenance.space then [] else ["spaceAgreesWithProvenance"])
+
 /-- **The baseline: a completed eight-byte write.** Every theorem below differs from
 this in one field, or says why it differs in more. -/
 def store : MemoryEvent :=
@@ -166,8 +200,8 @@ Distinct from the two clauses above, which bound the event's *own* counts: this 
 the status, and a partial commit is where the two can disagree. -/
 theorem a_status_claiming_more_than_the_range_is_refused :
     ¬ ({ store with
-          status := .partialCommit 0 16, writeCommitted := 16,
-          valueWritten := some (List.replicate 16 0xAB) } :
+          status := .completed 0 16, writeCommitted := 16,
+          valueWritten := some (List.replicate 8 0xAB) } :
       MemoryEvent).WellFormed := by decide
 
 /-- `statusAgreesWithReads`: the status and the counts are the same two facts. Review
@@ -189,5 +223,51 @@ theorem a_space_disagreeing_with_the_provenance_is_refused :
     ¬ ({ store with
           space := deviceHostVisible64 } : MemoryEvent).WellFormed := by
   decide
+
+/-- **Every neighbour fails exactly the clause it names, and both controls fail none.**
+
+This is the theorem the file's argument rests on and did not have. Each refusal above
+says an event is not well formed; only this says *which clause* refused it, and without
+it five of the neighbours were failing two or three clauses each while their docstrings
+named one. Round eighteen found the same thing in the sibling seal by hand; here it is
+decided.
+
+Read it as the file's index: left to right, the eleven clauses in declaration order,
+each with the neighbour that isolates it. -/
+theorem each_neighbour_fails_exactly_one_clause :
+    sealClauses store = [] ∧
+    sealClauses ({ store with
+      kind := .read, valueWritten := Option.none, status := .completed 8 0,
+      readCommitted := 8, writeCommitted := 0 }) = ["readValuePresent"] ∧
+    sealClauses ({ store with valueRead := some [] }) = ["readValueAbsent"] ∧
+    sealClauses ({ store with valueWritten := Option.none }) = ["writeValuePresent"] ∧
+    sealClauses ({ store with
+      kind := .fence, range := ByteRange.empty 0, valueWritten := some [],
+      status := .completed 0 0, writeCommitted := 0 }) = ["writeValueAbsent"] ∧
+    sealClauses ({ store with
+      kind := .fence, valueWritten := Option.none, status := .completed 0 0,
+      writeCommitted := 0 }) = ["noLocationWhenUntouched"] ∧
+    sealClauses ({ store with valueWritten := some (List.replicate 4 0xAB) }) =
+      ["writtenLength"] ∧
+    sealClauses ({ store with
+      kind := .read, valueRead := some (List.replicate 4 0xAB),
+      valueWritten := Option.none, status := .completed 8 0,
+      readCommitted := 8, writeCommitted := 0 }) = ["readLength"] ∧
+    sealClauses ({ store with
+      status := .completed 0 16, writeCommitted := 16,
+      valueWritten := some (List.replicate 8 0xAB) }) = ["statusWellFormed"] ∧
+    sealClauses ({ store with status := .completed 4 8 }) = ["statusAgreesWithReads"] ∧
+    sealClauses ({ store with status := .completed 0 4 }) = ["statusAgreesWithWrites"] ∧
+    sealClauses ({ store with space := deviceHostVisible64 }) =
+      ["spaceAgreesWithProvenance"] ∧
+    sealClauses ({ store with
+      kind := .read, valueRead := some (List.replicate 8 0xAB),
+      valueWritten := Option.none, status := .completed 8 0,
+      readCommitted := 8, writeCommitted := 0 }) = [] ∧
+    sealClauses ({ store with
+      kind := .fence, range := ByteRange.empty 0, valueWritten := Option.none,
+      status := .completed 0 0, writeCommitted := 0 }) = [] := by
+  refine ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide,
+    by decide, by decide, by decide, by decide, by decide, by decide, by decide⟩
 
 end Tests.Memory.EventClauses

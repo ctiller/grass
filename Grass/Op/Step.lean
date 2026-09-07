@@ -654,11 +654,17 @@ caught by the shape; both were caught by a reviewer.
 
 `MemoryState.applyAuthorityDelta?` is the shape that cannot diverge from itself. The
 ledger cannot be brought all the way to it without rewriting every fixture that
-states `LedgerEffectApplicable`, so it is brought as far as two theorems:
-`ledgerEffectApplicable_iff_isSome` says the predicate is exactly the applier
-succeeding, and `applyLedgerEffect?_eq_some_of_applicable` says that on the path the
-transition takes, the applier is the fold the transition installs. Tied by proof
-rather than by shape, which is second best and is stated as such.
+states `LedgerEffectApplicable`, so it is brought as far as one theorem and one
+construction: `ledgerEffectApplicable_iff_isSome` says the predicate is exactly the
+applier succeeding, and `performAccess` installs *that applier's own result* rather
+than recomputing the fold, so on the path the transition takes there is nothing for
+them to disagree about. Tied by proof and by construction rather than by shape, which
+is second best and is stated as such.
+
+The construction half was cited as a theorem, under a name nothing declares and never
+did. It was invisible for as long as it stood because `Tools/CitationAudit.py`'s
+citation pattern omitted `?` while its declaration pattern accepted it, so a citation
+of any `Option`-returning door matched nothing at all rather than matching a prefix.
 -/
 def applyLedgerDelta? (obligations : FiniteMap ObligationId Obligation)
     (contexts : List ContextId) (actor : ContextId) (delta : LedgerDelta) :

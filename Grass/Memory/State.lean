@@ -1646,9 +1646,17 @@ is a `Prop` saying a delta may be applied and `applyDelta` is a separate functio
 that applies it — two sources of truth, and a clause added to one and forgotten in the
 other is a silent divergence. An `Option`-returning applier cannot diverge from
 itself. The ledger cannot be brought all the way to this shape without rewriting every
-fixture that states `LedgerEffectApplicable`, so it is tied by two theorems instead:
-`Grass/Op/Step.lean`'s `ledgerEffectApplicable_iff_isSome` and
-`applyLedgerEffect?_eq_some_of_applicable`.
+fixture that states `LedgerEffectApplicable`, so it is tied by one theorem and one
+construction instead: `Grass/Op/Step.lean`'s `ledgerEffectApplicable_iff_isSome` says
+the predicate is exactly the applier succeeding, and the transition installs that
+applier's own result rather than recomputing the fold, so the two cannot disagree on
+the path the transition takes.
+
+This named a second theorem for the construction half, and no such theorem exists --
+one of three dead citations `Tools/CitationAudit.py` could not see because its
+citation pattern omitted `?` while its declaration pattern accepted it, so every
+citation of an `Option`-returning door was unadjudicated. A construction argument is
+worth stating as one; naming it as a theorem is worth less than silence.
 -/
 
 /--

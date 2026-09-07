@@ -171,11 +171,21 @@ structure WellFormed (e : MemoryEvent) : Prop where
   /-- Observed bytes number exactly what the event says it read. -/
   readLength :
     ∀ bytes, e.valueRead = some bytes → bytes.length = e.committedReadRange.size
-  /-- Neither count exceeds the range. -/
-  readWithinRange : e.readCommitted ≤ e.range.size
-  /-- Neither count exceeds the range. -/
-  writeWithinRange : e.writeCommitted ≤ e.range.size
-  /-- The status does not claim more bytes than the range covers. -/
+  /-- The status does not claim more bytes than the range covers.
+
+  **This is also what bounds the event's own counts**, and there were two more clauses
+  saying so directly -- `readCommitted ≤ range.size` and its write twin. They are
+  implied: `statusAgreesWithReads` below ties `status.committedReads` to
+  `readCommitted`, and this clause bounds the status, so the count is bounded by
+  transitivity and nothing about an event is needed to see it. `readCommitted_le_size`
+  and `writeCommitted_le_size` state the implication, which is what this branch asks of
+  a redundancy claim rather than an observation.
+
+  Review found them the way it found `PreservationLaws`' sixth conjunct: by trying to
+  build a neighbour that fails one and not the others, and finding that no such event
+  exists. A clause that cannot be isolated is a clause the seal already had, and
+`Tests/Memory/EventClauses.lean`'s `each_neighbour_fails_exactly_one_clause` is what
+decides isolation for the eleven that remain. -/
   statusWellFormed : e.status.WellFormed e.range.size
   /-- **The status and the counts are the same two facts.**
 
@@ -233,7 +243,6 @@ instance (e : MemoryEvent) : Decidable e.WellFormed :=
       (e.kind.touchesMemory = false → e.range.IsEmpty) ∧
       (∀ bytes ∈ e.valueWritten, bytes.length = e.committedWriteRange.size) ∧
       (∀ bytes ∈ e.valueRead, bytes.length = e.committedReadRange.size) ∧
-      e.readCommitted ≤ e.range.size ∧ e.writeCommitted ≤ e.range.size ∧
       e.status.WellFormed e.range.size ∧
       e.status.committedReads = e.readCommitted ∧
       e.status.committedWrites = e.writeCommitted ∧
@@ -244,21 +253,34 @@ instance (e : MemoryEvent) : Decidable e.WellFormed :=
         noLocationWhenUntouched := h.2.2.2.2.1
         writtenLength := fun bytes hb => h.2.2.2.2.2.1 bytes hb
         readLength := fun bytes hb => h.2.2.2.2.2.2.1 bytes hb
-        readWithinRange := h.2.2.2.2.2.2.2.1
-        writeWithinRange := h.2.2.2.2.2.2.2.2.1
-        statusWellFormed := h.2.2.2.2.2.2.2.2.2.1
-        statusAgreesWithReads := h.2.2.2.2.2.2.2.2.2.2.1
-        statusAgreesWithWrites := h.2.2.2.2.2.2.2.2.2.2.2.1
-        spaceAgreesWithProvenance := h.2.2.2.2.2.2.2.2.2.2.2.2 }
+        statusWellFormed := h.2.2.2.2.2.2.2.1
+        statusAgreesWithReads := h.2.2.2.2.2.2.2.2.1
+        statusAgreesWithWrites := h.2.2.2.2.2.2.2.2.2.1
+        spaceAgreesWithProvenance := h.2.2.2.2.2.2.2.2.2.2 }
   else
     .isFalse fun w =>
       h ⟨w.readValuePresent, w.readValueAbsent, w.writeValuePresent,
         w.writeValueAbsent, w.noLocationWhenUntouched,
         fun bytes hb => w.writtenLength bytes hb,
         fun bytes hb => w.readLength bytes hb,
-        w.readWithinRange, w.writeWithinRange, w.statusWellFormed,
+        w.statusWellFormed,
         w.statusAgreesWithReads, w.statusAgreesWithWrites,
         w.spaceAgreesWithProvenance⟩
+
+/-- **A well-formed event's read count is bounded by its range**, which is what the
+deleted `readWithinRange` clause said. The status is bounded and the count equals it. -/
+theorem readCommitted_le_size {e : MemoryEvent} (w : e.WellFormed) :
+    e.readCommitted ≤ e.range.size := by
+  have := w.statusWellFormed.1
+  rw [w.statusAgreesWithReads] at this
+  exact this
+
+/-- The write half. -/
+theorem writeCommitted_le_size {e : MemoryEvent} (w : e.WellFormed) :
+    e.writeCommitted ≤ e.range.size := by
+  have := w.statusWellFormed.2
+  rw [w.statusAgreesWithWrites] at this
+  exact this
 
 /--
 `Conflicts a b` holds when two events contend for the same bytes.
@@ -772,8 +794,6 @@ def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
                     show bytes.length = (d.range.take c.readCount).size
                     rw [ByteRange.take_size, hcount]
                     omega
-                  readWithinRange := c.readCount_le
-                  writeWithinRange := c.writeCount_le
                   statusWellFormed := outcome.status_wellFormed
                   statusAgreesWithReads := by
                     cases houtcome' : outcome with

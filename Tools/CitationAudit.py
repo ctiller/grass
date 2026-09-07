@@ -112,7 +112,14 @@ FIELD = re.compile(r"^\s{2,}(?:private\s+)?([a-z][A-Za-z0-9_']*)\s*:(?!=)")
 
 # A backticked token worth checking. Requires an underscore or a dot, so ordinary
 # prose words and single type names are skipped -- see the module docstring.
-CITATION = re.compile(r"`([A-Za-z][A-Za-z0-9_.']*[_.][A-Za-z0-9_.']*)`")
+#
+# **`?` and `!` are part of a name**, and this pattern omitted them while `DECL` above
+# accepts them. Because the pattern is backtick-anchored, a token containing `?`
+# matched *nothing at all* rather than matching a prefix -- so every citation of an
+# `Option`-returning door, and of every theorem named after one, was unadjudicated. In
+# a layer whose entire door convention is `?`, that was 151 citations over 84 distinct
+# names, and it hid three dead ones. `Tools/DocstringAudit.py` had it right.
+CITATION = re.compile(r"`([A-Za-z][A-Za-z0-9_.'!?]*[_.][A-Za-z0-9_.'!?]*)`")
 
 # Root namespaces of Lean core and its standard library. A citation rooted here is
 # not this tree's to declare. Enumerated rather than inferred: the alternative is

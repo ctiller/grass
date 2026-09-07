@@ -3148,8 +3148,13 @@ the field belongs beside it as something that can only add.
   replace an existing record while any grant is outstanding over that storage, which
   is §5.1's "reallocation requires the return of all live use loans" as a refusal
   rather than a sentence. A fresh identity is always accepted, and so is re-writing a
-  record with the metadata it already has, so an idempotent registration still works
-  — `allocate?_isSome_of_same_metadata` is that.
+  record it already has, so an idempotent registration still works —
+  `allocate?_isSome_of_same_record` is that, and
+  `allocate?_isSome_of_nothing_outstanding` is the other half.
+
+  This said "the metadata it already has" and named a theorem about metadata that was
+  renamed when the guard widened to the whole record. Both halves of the sentence
+  described the repaired-away version.
 
   An earlier version of this refusal, and of this paragraph, limited it to an epoch
   change or a teardown and said in as many words that "a permission, liveness or
