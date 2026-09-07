@@ -1,4 +1,4 @@
-import Grass.Std.Logical.Vec
+import Grass.Std.Logical.Byte
 
 /-!
 # The sanctioned crossing to Lean's host `ByteArray`

@@ -1,4 +1,4 @@
-import Grass.Std.Logical.Vec
+import Grass.Std.Logical.Byte
 
 /-!
 # The partial-write loop, reduced to sequence laws

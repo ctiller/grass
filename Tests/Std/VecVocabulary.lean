@@ -1,4 +1,4 @@
-import Grass.Std.Logical.Vec
+import Grass.Std.Logical.Byte
 
 /-!
 # The `Vec` vocabulary expresses what `docs/STDLIB.md` §1 and §3 ask of it

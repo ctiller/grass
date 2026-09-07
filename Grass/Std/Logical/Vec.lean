@@ -1,4 +1,3 @@
-import Grass.Std.Logical.Byte
 
 /-!
 # Finite ordered sequences
@@ -232,7 +231,11 @@ theorem eq_empty_iff_length_eq_zero (v : Vec α) : v = empty ↔ v.length = 0 :=
 Build a sequence of length `n` from a function on indices.
 
 A cross-agent review ran the `ByteSeq → Vec Byte` migration against `c-mem`'s
-real branches and found this to be the one genuine gap. `Grass/Memory/Apply.lean`
+real branches and found this to be the one genuine *vocabulary* gap -- the one
+place where no `Vec` spelling existed at all. Re-measured against merged `main`
+when the custody handoff landed, the rest of that migration costs six proof-step
+substitutions and no new names: `List.length`, `List.length_take` and
+`List.replicate` become their `Vec` counterparts, all of which already exist. `Grass/Memory/Apply.lean`
 defines `observedBytes` as `(List.range n).map (fun i => …)` and thirty-two sites
 reason about it; without `ofFn` there is no `Vec` way to write it, and the idiom
 that works — `(replicate n default).mapIdx …` — is neither guessable nor free,
@@ -1200,36 +1203,5 @@ theorem get?_eraseAt_ge (v : Vec α) {i j : Nat} (h : i ≤ j) :
 
 end Vec
 
-/-!
-## Bytes
-
-`docs/STDLIB.md` §1 fixes `ByteArray := Vec Byte`. `Byte` itself is defined in
-`Grass/Std/Logical/Byte.lean`, and §1 groups the two; the name is sited here
-rather than there only because that module is still under `c-mem`'s declared
-temporary custody (`c-mem:1`), and this module's owner does not edit it before
-the handoff lands. Merging the two declarations is part of accepting that
-handoff and is tracked in `docs/STDLIB_IMPLEMENTATION_PLAN.md`.
--/
-
-/--
-The canonical byte container of `docs/STDLIB.md` §1.
-
-**This name collides with Lean's `_root_.ByteArray`.** A module that opens
-`Grass.Std.Logical` and then writes a bare `ByteArray` gets an ambiguity error
-naming both candidates, so consumers must qualify. That is not a defect in the
-collision detection — §1 wants Grass's byte container and Lean's host one to stay
-distinct types related by a connection theorem, and an ambiguity error is a
-louder version of that than silent shadowing would be. It is a cost of §1's
-chosen name, it will be paid by every memory, artifact, and decoder module, and
-whether to pay it is the naming question this module's owner has put to the owner
-of `docs/STDLIB.md` rather than deciding unilaterally. `Tests/Std/VecVocabulary.lean`
-pins both halves: a `List Byte` is rejected here, and so is a host `_root_.ByteArray`.
-
-`ByteSeq` in `Grass/Std/Logical/Byte.lean` is the placeholder this retires. It is
-still the type the memory layer's fields use; migrating those uses is a change to
-`Grass/Memory/**`, which belongs to `c-mem`, so the two names coexist until that
-migration is agreed rather than one being deleted from under its consumers.
--/
-abbrev ByteArray := Vec Byte
 
 end Grass.Std.Logical

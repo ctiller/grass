@@ -1,39 +1,59 @@
+import Grass.Std.Logical.Vec
+
 /-!
 # Bytes
 
-`docs/STDLIB.md` §1 fixes the canonical eight-bit value type and forbids a second
-unrelated byte container:
+`docs/STDLIB.md` §1 fixes the canonical eight-bit value type and the byte
+container built from it:
 
 ```lean
 abbrev Byte := BitVec 8
 abbrev ByteArray := Vec Byte
 ```
 
-`Byte` is defined here exactly as specified. `Vec` is not: it is the flagship
-`Std.Logical` type, its design is the `Std.Logical` owner's, and inventing one
-under custody would be the over-reach `docs/MEMORY_IMPLEMENTATION_PLAN.md` §2
-warns against.
+Both are declared here. `ByteArray` was sited in `Grass/Std/Logical/Vec.lean`
+while this module was under `c-mem`'s temporary custody (`c-mem:1`), because the
+owner of `Vec` does not edit another agent's module; that custody transferred to
+`c-stdlib` at `c-mem:47`/`c-stdlib:19`, and merging the two declarations is the
+step that handoff was blocking. The import now runs `Byte -> Vec` rather than
+`Vec -> Byte`: `Vec` is a general container that has no business knowing what a
+byte is, and the byte-specific names belong beside `Byte`.
 
-`ByteSeq` is the placeholder the memory layer uses meanwhile. It is a single
-`abbrev` so that the migration to `Vec Byte` is one edit in one place rather than
-a change to every field that holds bytes. It is listed as **provisional** in the
-M1 freeze note; consumers should write `ByteSeq` and never `List Byte`, so that
-the migration does not become a rewrite.
-
-**Custody note.** `Grass.Std.Logical` is not owned by the memory agent. This
-module is temporary custody under `docs/MEMORY_IMPLEMENTATION_PLAN.md` §2.
+**`ByteArray` collides with Lean's `_root_.ByteArray`,** and that is deliberate.
+`docs/DECISIONS.md` decision 133 settled the naming question `c-stdlib:7` raised:
+the Grass type keeps the name, modules that also see the host type qualify it,
+and the crossing between them is by named adapters carrying connection theorems
+(`Grass/Std/Logical/HostBytes.lean`) rather than by a `Coe`. The ambiguity error
+is the representation-boundary guard doing its job, not a defect to route around.
+`Tests/Std/VecVocabulary.lean` pins both halves: a `List Byte` is rejected where a
+Grass `ByteArray` is required, and so is a host `_root_.ByteArray`.
 -/
-
 namespace Grass.Std.Logical
 
 /-- The canonical eight-bit value type. -/
 abbrev Byte := BitVec 8
 
-/--
-A finite ordered sequence of bytes.
+/-- The canonical byte container of `docs/STDLIB.md` §1. -/
+abbrev ByteArray := Vec Byte
 
-Provisional. This becomes `ByteArray := Vec Byte` when `Std.Logical` lands `Vec`,
-per `docs/STDLIB.md` §1. Write `ByteSeq`, not `List Byte`.
+/--
+The memory layer's name for a byte sequence. Still `List Byte`.
+
+Its own docstring promised this would become `Vec Byte` once `Std.Logical` landed
+`Vec`. `Vec` has landed and `ByteArray` above is the name §1 asks for, so the only
+thing still holding is that the flip is not free at the use sites, which are
+`c-mem`'s.
+
+`c-stdlib` measured it rather than assuming: flipping this one `abbrev` retypes
+every field without an edit, exactly as `c-mem` designed it to, but six proof
+steps then fail because they apply `List` operations to what is now a `Vec` --
+`List.length` in `Committed.readCount`/`writeCount`, `List.length_take` in the two
+`observedFits`/`writtenFits` obligations, and `List.replicate` twice in
+`Oracle.zeroed`. Every one has an exact `Vec` counterpart already in
+`Grass/Std/Logical/Vec.lean`, and with those six substitutions the whole build is
+green. The verified recipe is offered to `c-mem` in `c-stdlib:20`; this module
+does not flip the alias before those six lines land, because doing so would break
+`main` for the interval in between.
 -/
 abbrev ByteSeq := List Byte
 
