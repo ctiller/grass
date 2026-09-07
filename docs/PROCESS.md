@@ -1919,12 +1919,28 @@ structure SequentialMachine (boundary : DriverBoundary) where
   effectResumes : EveryEffectResultPreserves invariant decide
   progress : SequentialDecisionProgress decide
 
+inductive SequentialMachine.Reachable
+    {boundary : DriverBoundary} (machine : SequentialMachine boundary) :
+    machine.State -> Prop
+  | initial (request : machine.Request) : Reachable machine (machine.initial request)
+  | internal {state next observations} : Reachable machine state ->
+      machine.decide state = .internal next observations -> Reachable machine next
+  | result {state demand resume} : Reachable machine state ->
+      machine.decide state = .effect demand resume ->
+      (result : EffectResult demand) -> Reachable machine (resume result)
+
+theorem SequentialMachine.reachable_invariant
+    {boundary : DriverBoundary}
+    (machine : SequentialMachine boundary) {state : machine.State}
+    (reachable : machine.Reachable state) : machine.invariant state
+
 structure SequentialWaitingOccurrence
     {boundary : DriverBoundary}
     (machine : SequentialMachine boundary) where
   point : machine.State
   demand : EffectDemand boundary
   resume : EffectResult demand -> machine.State
+  reachable : machine.Reachable point
   isWaiting : machine.decide point = .effect demand resume
 
 structure PendingInteractionModel (boundary : DriverBoundary) where
@@ -2025,9 +2041,14 @@ protocol requires one reusable dependent result/boundary constructor, not a new
 proof for every program using it.
 
 `SequentialWaitingOccurrence` is the canonical dependent sigma of a machine
-point, demand, continuation, and the equality proving that `decide` waits there.
-It cannot be chosen as `Empty`; every actual effect decision constructs a
-member, and proof irrelevance gives uniqueness for the same point/demand/resume.
+reachable point, demand, continuation, and the equality proving that `decide`
+waits there. `SequentialMachine.Reachable` is generated from an initial request
+and the machine's actual internal/result decisions; its proof is transported
+automatically by the adapter using `initialInvariant`, `internalPreserves`, and
+`effectResumes`. Unreachable junk states and invariant-violating wait branches
+never enter the pending proof. The carrier cannot be chosen as `Empty`; every
+actually issued effect decision constructs a member, and proof irrelevance gives
+uniqueness for the same point/demand/resume.
 `rootState` is the only adapter constructor for a newly issued waiting
 occurrence, and the adapter stores the subtype satisfying `Reachable`. Arbitrary
 inhabitants of a history type are model values, not reachable waiting states;
@@ -2100,13 +2121,40 @@ structure DirectRelationalProgram (boundary : DriverBoundary) where
   terminal : Request -> State -> TerminalResult -> Prop
   terminalDisposition : EveryTerminalStateClassifiesEveryPendingOccurrence
 
-structure DirectProgramDerivation
+opaque DirectProgramDerivation
     (boundaryCertificate : CertifiedDriverBoundary boundary)
-    (program : DirectRelationalProgram boundary) where
-  Kind : Type
-  payload : Kind
-  connectsExactly : RegisteredDerivationConnectsExactProgramAndBoundary
-    payload program boundaryCertificate
+    (program : DirectRelationalProgram boundary) : Type
+def DirectProgramDerivation.Kind :
+    DirectProgramDerivation boundaryCertificate program -> Type
+def DirectProgramDerivation.payload
+    (derivation : DirectProgramDerivation boundaryCertificate program) :
+    derivation.Kind
+def DirectProgramDerivation.operationRequires
+    (derivation : DirectProgramDerivation boundaryCertificate program)
+    (occurrence : DynamicOccurrence program) : ProviderDemandView -> Prop
+def DirectProgramDerivation.operationOrigins
+    (derivation : DirectProgramDerivation boundaryCertificate program)
+    (occurrence : DynamicOccurrence program) :
+    RegisteredOperationOrigins boundaryCertificate.providers.demands
+      occurrence.demand
+theorem DirectProgramDerivation.operationOrigins_exact
+    (derivation : DirectProgramDerivation boundaryCertificate program) :
+    forall occurrence view,
+      OriginOccursIn (derivation.operationOrigins occurrence) view <->
+        derivation.operationRequires occurrence view
+theorem DirectProgramDerivation.operationOrigins_contained
+    (derivation : DirectProgramDerivation boundaryCertificate program) :
+    EveryOccurrenceOriginBelongsToItsBoundaryDemandEnvelope derivation
+theorem DirectProgramDerivation.operationOrigins_aggregateExact
+    (derivation : DirectProgramDerivation boundaryCertificate program) :
+    AggregateOccurrenceOriginViews derivation =
+      ExactUsedLowerRequirementViews derivation
+theorem DirectProgramDerivation.connectsExactly
+    (derivation : DirectProgramDerivation boundaryCertificate program) :
+    RegisteredDerivationConnectsExactProgramAndBoundary
+      derivation.payload program boundaryCertificate
+def DirectProgramDerivation.fromDirect ...
+def DirectProgramDerivation.fromEffect ...
 
 structure CertifiedDirectProgram
     (boundary : DriverBoundary)
@@ -2122,7 +2170,7 @@ def CertifiedDirectProgram.operationOrigins
     (certified : CertifiedDirectProgram boundary boundaryCertificate)
     (occurrence : DynamicOccurrence certified.program) :
     RegisteredOperationOrigins certified.originDemands occurrence.demand :=
-  boundaryCertificate.providers.origins occurrence.demand
+  certified.derivation.operationOrigins occurrence
 ```
 
 `Initial` and `Step` return the exact dynamic demand multiset and observation
@@ -2140,12 +2188,17 @@ code-generation site inventory with dynamic occurrences. A later code generator
 may attach its own finite site inventory as a separate certificate.
 
 `CertifiedDirectProgram.operationOrigins` is a definition, not a caller field.
-It projects the exact finite provider-demand subfamily selected by the certified
-boundary for the dynamic occurrence's dependent demand. The subfamily may be empty and may
-contain several independent demands; it is never collapsed to one privileged
-origin. `originDemands` is fixed extensionally to that boundary, never an
-unconnected author field. Dynamic occurrence provenance does not duplicate
-stable provider obligations once per call site.
+It projects the opaque derivation's exact finite subfamily for that dynamic
+occurrence. The boundary envelope is a conservative per-demand superset;
+`operationOrigins_contained` keeps every occurrence inside it, while
+`operationOrigins_exact` equates membership with the exact lower requirements
+of that occurrence's selected realization. Two occurrences of the same logical
+demand may therefore choose different legitimate buffered/direct/SIMD provider
+paths without adding the implementation choice to the precious demand. The
+subfamily may be empty and may contain several independent demands; it is never
+collapsed to one privileged origin. `originDemands` remains fixed extensionally
+to the boundary and is not an unconnected author field. Dynamic occurrence
+provenance does not duplicate stable provider obligations once per call site.
 A raw custom operation uses a
 registered direct origin and states its actual lower requirements; an Effect
 operation's origin points to its exact model/lowering handoff demand. No
@@ -2160,11 +2213,12 @@ not import Effect because it only stores the existential `Kind` and the generic
 requires constructing and proving a new derivation; the standard adapter cannot
 silently discard its payload.
 
-`RegisteredDerivationConnectsExactProgramAndBoundary` includes the bidirectional
-lower-requirement law: for every dynamic occurrence and provider origin, the
-selected operation model semantically requires that origin if and only if it is
-in `certified.operationOrigins occurrence`. This is not merely coverage relative
-to an already supplied sidecar. The final machine/source connection proves the
+`DirectProgramDerivation` is opaque. Its standard direct and Effect builders
+derive occurrence requirements and origins from the selected operation/lowering
+model; no public constructor accepts a caller-authored origin function.
+`RegisteredDerivationConnectsExactProgramAndBoundary` consumes the bidirectional
+`operationOrigins_exact` law. This is not merely coverage relative to an already
+supplied sidecar. The final machine/source connection proves the
 same law for each lowered API call or instruction, so a custom boundary may not
 declare an empty `Requires` relation while emitting provider-using operations.
 

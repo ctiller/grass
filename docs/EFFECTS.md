@@ -1048,6 +1048,9 @@ The first implementation is incomplete until checked fixtures demonstrate:
    A mutation that inserts an arbitrary non-root history directly into the
    adapter state fails because waiting state is restricted by
    `SequentialPendingSemantics.Reachable`.
+   A syntactic effect decision at a state unreachable from any initial request
+   cannot construct `SequentialWaitingOccurrence`; removing its reachability
+   field makes the negative fixture compile and is therefore rejected.
 5. A project-local effect family is added from another module without editing a
    core sum type.
    Three independently authored extension-authority registries compose under
@@ -1066,6 +1069,9 @@ The first implementation is incomplete until checked fixtures demonstrate:
    A second extension authority declared with the same serialized `StableId`
    cannot satisfy owner compatibility or `includeCompatible`; deliberately
    importing the first owner's opaque declaration is the only way to adopt it.
+   `AuthorityEquiv.trans` succeeds for three empty families whose ambient
+   registries contain unused mutually conflicting owners, because equivalence
+   composes their exact empty support registries rather than ambient storage.
 6. Row membership embeds dependent results exactly; a forged name-only embedding
    is unconstructible.
 7. Duplicate family keys are rejected, and the lowering selection cannot carry
@@ -1102,7 +1108,11 @@ The first implementation is incomplete until checked fixtures demonstrate:
 15. A blocking handler exposes a process frontier and cannot claim finite silent
     execution.
 16. `SequentialAdapter` generates distinct occurrence identities for two equal
-    demands and preserves pending multiplicity.
+    demands and preserves pending multiplicity. Two occurrences of that equal
+    logical demand may select different registered lower paths; each opaque
+    derivation-owned origin subfamily is exact for its own path, both are
+    contained in the conservative boundary family, and their aggregate equals
+    the exact used lower-requirement views.
 17. A direct authored-assembly realization discharges the same specification
     requirement without constructing an effect-program witness.
 18. Removing any family-law proof, handler simulation direction, requirement

@@ -652,15 +652,33 @@ structure ProviderDemandFamily.ExtEq
     (left right : ProviderDemandFamily) : Prop where
   sameOrigins : left.origins = right.origins
   sameViews : forall origin, left.lookupView origin = right.lookupView origin
+def ProviderDemandFamily.supportRegistry
+    (family : ProviderDemandFamily) : ExtensionAuthorityRegistry
+structure SupportedProviderDemand (registry : ExtensionAuthorityRegistry) where
+  view : ProviderDemandView
+  authorityWitness : ViewAuthorityRealizedByRegistry view registry
+def ProviderDemandFamily.supportEmbedding
+    (family : ProviderDemandFamily) :
+    ExtensionAuthorityEmbedding family.supportRegistry family.authorityRegistry
+def ProviderDemandFamily.supportLookup
+    (family : ProviderDemandFamily) (origin : RequirementOriginId) :
+    Option (SupportedProviderDemand family.supportRegistry)
+theorem ProviderDemandFamily.lookup_from_support ...
+theorem ProviderDemandFamily.support_exact ...
+theorem ProviderDemandFamily.support_noExtras ...
 structure ProviderDemandFamily.AuthorityEquiv
     (left right : ProviderDemandFamily) : Prop where
   commonRegistry : ExtensionAuthorityRegistry
-  includeLeft : ExtensionAuthorityEmbedding left.authorityRegistry commonRegistry
-  includeRight : ExtensionAuthorityEmbedding right.authorityRegistry commonRegistry
+  includeLeft : ExtensionAuthorityEmbedding left.supportRegistry commonRegistry
+  includeRight : ExtensionAuthorityEmbedding right.supportRegistry commonRegistry
   semantic : left.ExtEq right
   lookupCorrespondence : forall origin,
     StructurallySameReindexedLookup
-      (left.lookup origin) includeLeft (right.lookup origin) includeRight
+      (left.supportLookup origin) includeLeft
+      (right.supportLookup origin) includeRight
+theorem ProviderDemandFamily.AuthorityEquiv.refl ...
+theorem ProviderDemandFamily.AuthorityEquiv.symm ...
+theorem ProviderDemandFamily.AuthorityEquiv.trans ...
 theorem ProviderDemandFamily.ext_sameRegistry
     (sameRegistry : left.authorityRegistry = right.authorityRegistry)
     (sameOrigins : left.origins = right.origins)
@@ -794,9 +812,14 @@ structural correspondence rather than an ill-typed raw equality between
 differently indexed packages. Raw family equality additionally requires equal
 `authorityRegistry` values through `ext_sameRegistry`. In particular reindexing
 into a larger registry is semantically equivalent, not equal, to its source.
-`AuthorityEquiv` is the stronger certificate-facing relation: it embeds both
-representations into one registry and requires dependent lookup correspondence
-there. Owner-specific disposition, forwarding, sharding, and final closure use
+`supportRegistry` is the minimal owner registry induced by extension demands
+which actually occur in `lookup`; its no-extras theorem excludes unused ambient
+entries. `AuthorityEquiv` is the stronger certificate-facing relation: it
+embeds both support registries into one registry and requires dependent lookup
+correspondence there. It is reflexive, symmetric, and transitive. Transitivity
+normalizes only the three finite supports, so unrelated conflicting entries in
+larger storage registries cannot block certificate-DAG composition.
+Owner-specific disposition, forwarding, sharding, and final closure use
 `AuthorityEquiv`; bare `ExtEq` is only for semantic predicates already proved
 insensitive to registry representation.
 This prevents a well-typed requirement predicate from changing truth
