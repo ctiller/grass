@@ -18,6 +18,9 @@ def scopeB : ScopeId := ⟨["B"]⟩
 def keyA : PlatformRequirementKey := ⟨scopeA, "z"⟩
 def keyB : PlatformRequirementKey := ⟨scopeB, "a"⟩
 
+def requirementsA : RequirementSet := RequirementSet.ofList [keyA]
+def requirementsB : RequirementSet := RequirementSet.ofList [keyB]
+
 example : (scopeA : Grass.ScopeId) = ⟨["A"]⟩ := rfl
 
 example : Grass.Specification.ScopeId.mk ["A"] = scopeA := rfl
@@ -57,6 +60,50 @@ example :
 example :
     (RequirementSet.ofList [keyB, keyA, keyB]).toCanonicalList =
       [keyA, keyB] := by native_decide
+
+example : requirementsA.Demands keyA := by simp [requirementsA]
+
+example : ¬ requirementsA.Demands keyB := by
+  simp [requirementsA, keyA, keyB, scopeA, scopeB]
+
+example : requirementsB.Demands keyB := by simp [requirementsB]
+
+example : ¬ requirementsB.Demands keyA := by
+  simp [requirementsB, keyA, keyB, scopeA, scopeB]
+
+example : (requirementsA.union requirementsB).Demands keyA := by
+  apply RequirementSet.demands_union requirementsA requirementsB keyA |>.2
+  exact .inl (by simp [requirementsA])
+
+example : (requirementsA.union requirementsB).Demands keyB := by
+  apply RequirementSet.demands_union requirementsA requirementsB keyB |>.2
+  exact .inr (by simp [requirementsB])
+
+example : (requirementsA.union requirementsB).Covers requirementsA :=
+  RequirementSet.union_covers_left requirementsA requirementsB
+
+example : (requirementsA.union requirementsB).Covers requirementsB :=
+  RequirementSet.union_covers_right requirementsA requirementsB
+
+example (requirements : RequirementSet) :
+    requirements.Covers (requirementsA.union requirementsB) ↔
+      requirements.Covers requirementsA ∧ requirements.Covers requirementsB := by
+  simp
+
+example : requirementsA.union requirementsB =
+    RequirementSet.ofList [keyA, keyB] := by
+  apply RequirementSet.ext
+  intro key
+  simp [requirementsA, requirementsB]
+
+example : requirementsA.union requirementsB =
+    requirementsB.union requirementsA :=
+  RequirementSet.union_comm requirementsA requirementsB
+
+example :
+    (requirementsA.union requirementsB).union RequirementSet.empty =
+      requirementsA.union (requirementsB.union RequirementSet.empty) :=
+  RequirementSet.union_assoc requirementsA requirementsB RequirementSet.empty
 
 def boundary : DriverBoundary where
   ExternalEvent := Unit
