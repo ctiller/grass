@@ -58,13 +58,13 @@ private def indirectEvidence : IndirectTargetEvidence graph.blockIds where
 
 private def policy : TargetPolicy Nat String where
   graph := graph
-  graphWellFormed := by native_decide
+  graphWellFormed := by decide
   indirect := [indirectEvidence]
   indirectSitesUnique := by decide
 
 private def directOnlyPolicy : TargetPolicy Nat String where
   graph := graph
-  graphWellFormed := by native_decide
+  graphWellFormed := by decide
   indirect := []
   indirectSitesUnique := by decide
 

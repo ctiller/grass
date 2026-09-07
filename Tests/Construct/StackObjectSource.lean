@@ -32,16 +32,16 @@ private def word : Layout.StackObject profile :=
   ⟨⟨"word"⟩, ⟨8, 8⟩, 16, root⟩
 private def layout : StackLayout profile :=
   ⟨[⟨root, none⟩], [word], 32, 16, 64⟩
-private def checked : CheckedStackLayout profile := ⟨layout, by native_decide⟩
+private def checked : CheckedStackLayout profile := ⟨layout, by decide⟩
 private def slot : StackObjectRef checked := ⟨word, by decide⟩
-private def slice : CheckedStackSlice slot := ⟨⟨2, 4⟩, by native_decide⟩
+private def slice : CheckedStackSlice slot := ⟨⟨2, 4⟩, by decide⟩
 private def destination : Operand := .register "rax"
 private def source : Operand := .register "rbx"
 
 example : (backend.load slice destination).expand =
-    [.load ⟨18, 4⟩ destination] := by native_decide
+    [.load ⟨18, 4⟩ destination] := by decide
 example : (backend.store slice source).expand =
-    [.store ⟨18, 4⟩ source] := by native_decide
+    [.store ⟨18, 4⟩ source] := by decide
 
 private def namedRef : CheckedStackLayout.NamedStackObjectRef checked ⟨"word"⟩ :=
   ⟨slot, rfl⟩
@@ -50,8 +50,8 @@ private def named : NamedCheckedStackSlice checked ⟨"word"⟩ :=
 
 example : named.objectRef.slot.object.name = ⟨"word"⟩ := named.objectRef.nameExact
 example : (backend.loadNamed named destination).expand =
-    [.load ⟨18, 4⟩ destination] := by native_decide
+    [.load ⟨18, 4⟩ destination] := by decide
 example : (backend.storeNamed named source).expand =
-    [.store ⟨18, 4⟩ source] := by native_decide
+    [.store ⟨18, 4⟩ source] := by decide
 
 end Grass.Tests.Construct.StackObjectSource

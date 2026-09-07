@@ -35,17 +35,17 @@ def source : Grass.Construct.Source.Ast Nat String Nat String where
 
 example : source.blockIds = [blockId "first", blockId "second"] := by decide
 example : source.toGraph.blocks = [first.cfg, second.cfg] := by rfl
-example : source.toGraph.WellFormed := by native_decide
-example : source.WellFormed := by native_decide
+example : source.toGraph.WellFormed := by decide
+example : source.WellFormed := by decide
 example : (source.findBlock? (blockId "first")).map
     Grass.Construct.Source.Block.annotations =
-    some ["reviewed"] := by native_decide
+    some ["reviewed"] := by decide
 
 example : source.expandedBlocks.map (fun entry => (entry.1,
     entry.2.map LocatedInstruction.instruction)) =
-    [(blockId "first", [1, 2]), (blockId "second", [3, 4, 5])] := by native_decide
+    [(blockId "first", [1, 2]), (blockId "second", [3, 4, 5])] := by decide
 
-example : source.instructionCount = 5 := by native_decide
+example : source.instructionCount = 5 := by decide
 
 example : (source.findBlock? (blockId "first")).map
     Grass.Construct.Source.Block.cfg =

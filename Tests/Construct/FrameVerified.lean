@@ -65,7 +65,7 @@ private def object : StackObject profile := ⟨⟨"slot"⟩, ⟨8, 8⟩, 0, root
 private def layout : StackLayout profile :=
   ⟨[⟨root, none⟩], [object], 16, 16, 128⟩
 private def plan : Win64FramePlan profile := ⟨layout, [.rbx], 0, 32, 48⟩
-private def frame : CheckedWin64Frame profile := ⟨plan, by native_decide⟩
+private def frame : CheckedWin64Frame profile := ⟨plan, by decide⟩
 private def slot : FrameObjectRef frame := ⟨object, by simp [frame, plan, layout]⟩
 
 example : (backend.save frame).source = sourceBackend.save frame :=
@@ -77,8 +77,8 @@ example : (backend.enter frame).source = sourceBackend.enter frame :=
 example : (backend.leave frame).source = sourceBackend.leave frame :=
   backend.leaveSourceExact frame
 example : (backend.spill frame slot .rax).source.expand = [.spill .rax 32] := by
-  native_decide
+  decide
 example : (backend.reload frame slot .rax).source.expand = [.reload .rax 32] := by
-  native_decide
+  decide
 
 end Grass.Tests.Construct.FrameVerified

@@ -89,8 +89,8 @@ example : valid.ast.constructorNodes =
     [⟨blockId, ⟨⟨knownId, [], []⟩, .literal [.emit 7]⟩⟩] := rfl
 example : valid.availableIds = [knownId] := rfl
 example : valid.unresolved = [] := rfl
-example : valid.WellFormed := by native_decide
-example : (checkConstructorSource valid).isOk = true := by native_decide
+example : valid.WellFormed := by decide
+example : (checkConstructorSource valid).isOk = true := by decide
 
 private theorem validExact : valid.Exact := by
   intro located hlocated
@@ -126,17 +126,17 @@ example : missingEmpty.ast.constructorOccurrences = [
     ⟨blockId, ⟨missingId, [knownId], []⟩⟩
   ] := rfl
 example : missingEmpty.unresolved =
-    [⟨blockId, ⟨missingId, [knownId], []⟩⟩] := by native_decide
-example : ¬missingEmpty.WellFormed := by native_decide
-example : (checkConstructorSource missingEmpty).isOk = false := by native_decide
+    [⟨blockId, ⟨missingId, [knownId], []⟩⟩] := by decide
+example : ¬missingEmpty.WellFormed := by decide
+example : (checkConstructorSource missingEmpty).isOk = false := by decide
 
 private def structurallyInvalid :
     ConstructorSource Unit Unit Instruction Unit Nat semantics effects :=
   ⟨⟨missingBlockId, [block (.generated missingId .empty)]⟩,
     closure, checkedClosure⟩
 
-example : ¬structurallyInvalid.ast.WellFormed := by native_decide
-example : (checkConstructorSource structurallyInvalid).isOk = false := by native_decide
+example : ¬structurallyInvalid.ast.WellFormed := by decide
+example : (checkConstructorSource structurallyInvalid).isOk = false := by decide
 example : checkConstructorSource structurallyInvalid =
     .error (.structural missingBlockId [blockId]) := rfl
 

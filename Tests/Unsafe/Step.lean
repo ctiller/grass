@@ -24,7 +24,7 @@ private def graph : CFG.Graph Nat String where
 
 private def targetPolicy : TargetPolicy Nat String where
   graph := graph
-  graphWellFormed := by native_decide
+  graphWellFormed := by decide
   indirect := []
   indirectSitesUnique := by decide
 
@@ -51,10 +51,10 @@ private def adapter : StepAdapter SomeOperation where
 private def trace : StepTrace Nat SomeOperation program.instructions :=
   stepProgram adapter Grass.Tests.FakeIsa.policy state₀ program
 
-example : trace.attemptedOffsets = [0, 1] := by native_decide
-example : trace.rejections = [.facetsNotClosed .memoryEffects] := by native_decide
-example : trace.remainingOffsets = [2] := by native_decide
-example : trace.records.length = 2 := by native_decide
+example : trace.attemptedOffsets = [0, 1] := by decide
+example : trace.rejections = [.facetsNotClosed .memoryEffects] := by decide
+example : trace.remainingOffsets = [2] := by decide
+example : trace.records.length = 2 := by decide
 example : trace.records.map StepRecord.imported ++ trace.remaining =
     program.instructions := trace.coverage
 

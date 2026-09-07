@@ -28,9 +28,9 @@ def layout : StackLayout profile where
   alignment := 8
   maxSize := 64
 
-example : layout.WellFormed := by native_decide
+example : layout.WellFormed := by decide
 example : layout.objects.map (fun object => object.byteRange) = [⟨0, 8⟩, ⟨8, 8⟩] :=
-  by native_decide
+  by decide
 
 def overlapping : StackLayout profile :=
   { layout with objects := [
@@ -38,14 +38,14 @@ def overlapping : StackLayout profile :=
       ⟨⟨"scratch"⟩, word, 4, scope "child"⟩
     ] }
 
-example : ¬ overlapping.WellFormed := by native_decide
+example : ¬ overlapping.WellFormed := by decide
 
 def undeclared : StackLayout profile :=
   { layout with objects := [
       ⟨⟨"counter"⟩, word, 0, scope "missing"⟩
     ] }
 
-example : ¬ undeclared.WellFormed := by native_decide
+example : ¬ undeclared.WellFormed := by decide
 
 def duplicate : StackLayout profile :=
   { layout with objects := [
@@ -53,19 +53,19 @@ def duplicate : StackLayout profile :=
       ⟨⟨"counter"⟩, word, 8, scope "child"⟩
     ] }
 
-example : ¬ duplicate.WellFormed := by native_decide
+example : ¬ duplicate.WellFormed := by decide
 
 def oversized : StackLayout profile := { layout with size := 72 }
-example : ¬ oversized.WellFormed := by native_decide
+example : ¬ oversized.WellFormed := by decide
 
 def closed : ScopeExit String := ⟨[], [], []⟩
 def escaping : ScopeExit String := ⟨[⟨"counter"⟩], [], []⟩
 def loaned : ScopeExit String := ⟨[], ["loan"], []⟩
 def obligated : ScopeExit String := ⟨[], [], ["restore"]⟩
 
-example : closed.WellFormed := by native_decide
-example : ¬ escaping.WellFormed := by native_decide
-example : ¬ loaned.WellFormed := by native_decide
-example : ¬ obligated.WellFormed := by native_decide
+example : closed.WellFormed := by decide
+example : ¬ escaping.WellFormed := by decide
+example : ¬ loaned.WellFormed := by decide
+example : ¬ obligated.WellFormed := by decide
 
 end Grass.Tests.Construct.LayoutStack

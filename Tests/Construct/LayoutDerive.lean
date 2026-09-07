@@ -33,20 +33,20 @@ def derivationError (alignment : Nat) (input : List (FieldSpec profile)) :
   | .error error => some error
 
 example : derivedLayout?.map StructLayout.fieldNames =
-    some [⟨"tag"⟩, ⟨"value"⟩, ⟨"tail"⟩] := by native_decide
+    some [⟨"tag"⟩, ⟨"value"⟩, ⟨"tail"⟩] := by decide
 
 example : derivedLayout?.map (fun layout =>
     (layout.fields.map PlacedField.offset, layout.size, layout.alignment)) =
-    some ([0, 4, 8], 12, 4) := by native_decide
+    some ([0, 4, 8], 12, 4) := by decide
 
-example : derivationError 4 [] = some .emptyFields := by native_decide
+example : derivationError 4 [] = some .emptyFields := by decide
 example : derivationError 4 [tagField, tagField] =
-    some (.duplicateNames [⟨"tag"⟩, ⟨"tag"⟩]) := by native_decide
+    some (.duplicateNames [⟨"tag"⟩, ⟨"tag"⟩]) := by decide
 example : derivationError 4 [⟨⟨"bad"⟩, ⟨0, 1⟩⟩] =
-    some (.invalidField 0) := by native_decide
+    some (.invalidField 0) := by decide
 example : derivationError 3 fields = some (.invalidAggregateAlignment 3) := by
-  native_decide
+  decide
 example : derivationError 2 [⟨⟨"value"⟩, u32⟩] =
-    some (.aggregateAlignmentTooWeak 0) := by native_decide
+    some (.aggregateAlignmentTooWeak 0) := by decide
 
 end Grass.Tests.Construct.LayoutDerive

@@ -19,7 +19,7 @@ def model : ManifestModel Nat String where
     | 3 => ["call"]
     | _ => []
 
-example : source.itemManifest model = ["read", "read", "call"] := by native_decide
+example : source.itemManifest model = ["read", "read", "call"] := by decide
 
 example : (source.discoverItems model).map LocatedItem.item =
     source.itemManifest model := Ast.discoveredItems_exact source model
@@ -28,10 +28,10 @@ example : source.discoverItems model = [
     ⟨blockId "first", ⟨[fragmentId "pair"], [], 0⟩, 0, "read"⟩,
     ⟨blockId "first", ⟨[fragmentId "pair"], [], 0⟩, 1, "read"⟩,
     ⟨blockId "second", ⟨[], [0], 0⟩, 0, "call"⟩
-  ] := by native_decide
+  ] := by decide
 
 example : (source.discover model).graph = source.toGraph := rfl
-example : (source.discover model).joins = [] := by native_decide
-example : (source.discover model).loops = [] := by native_decide
+example : (source.discover model).joins = [] := by decide
+example : (source.discover model).loops = [] := by decide
 
 end Grass.Tests.Construct.SourceDiscover

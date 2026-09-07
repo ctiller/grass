@@ -23,46 +23,46 @@ private def dynamicObject : DynamicStackObject profile :=
 private def valid : BoundedStackLayout profile :=
   ⟨fixed, [dynamicObject]⟩
 
-example : valid.WellFormed := by native_decide
+example : valid.WellFormed := by decide
 
 example : dynamicObject.reservedRange.Contains dynamicObject.selectedRange := by
   exact dynamicObject.reservedRange_contains_selectedRange (by decide)
 
-example : (dynamicObject.selectSize? 16).isSome = true := by native_decide
+example : (dynamicObject.selectSize? 16).isSome = true := by decide
 
-example : dynamicObject.selectSize? 17 = none := by native_decide
+example : dynamicObject.selectSize? 17 = none := by decide
 
 example : dynamicObject.selectSize? 0 =
-    some { dynamicObject with selectedSize := 0 } := by native_decide
+    some { dynamicObject with selectedSize := 0 } := by decide
 
 private def overCapacity : BoundedStackLayout profile :=
   ⟨fixed, [{ dynamicObject with selectedSize := 17 }]⟩
 
-example : ¬ overCapacity.WellFormed := by native_decide
+example : ¬ overCapacity.WellFormed := by decide
 
 private def overlapsFixed : BoundedStackLayout profile :=
   ⟨fixed, [{ dynamicObject with offset := 4 }]⟩
 
-example : ¬ overlapsFixed.WellFormed := by native_decide
+example : ¬ overlapsFixed.WellFormed := by decide
 
 private def overlapsDynamic : BoundedStackLayout profile :=
   ⟨fixed, [dynamicObject, { dynamicObject with name := ⟨"second"⟩, offset := 16 }]⟩
 
-example : ¬ overlapsDynamic.WellFormed := by native_decide
+example : ¬ overlapsDynamic.WellFormed := by decide
 
 private def duplicateFixedName : BoundedStackLayout profile :=
   ⟨fixed, [{ dynamicObject with name := fixedObject.name }]⟩
 
-example : ¬ duplicateFixedName.WellFormed := by native_decide
+example : ¬ duplicateFixedName.WellFormed := by decide
 
 private def outsideFrame : BoundedStackLayout profile :=
   ⟨fixed, [{ dynamicObject with offset := 24 }]⟩
 
-example : ¬ outsideFrame.WellFormed := by native_decide
+example : ¬ outsideFrame.WellFormed := by decide
 
 private def unknownScope : BoundedStackLayout profile :=
   ⟨fixed, [{ dynamicObject with scope := ⟨⟨"missing"⟩⟩ }]⟩
 
-example : ¬ unknownScope.WellFormed := by native_decide
+example : ¬ unknownScope.WellFormed := by decide
 
 end Grass.Tests.Construct.LayoutDynamicStack

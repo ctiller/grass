@@ -16,23 +16,23 @@ private def frame : Win64FramePlan profile :=
 
 private def call : Win64CallFrame profile := ⟨frame⟩
 
-example : call.WellFormed := by native_decide
-example : call.shadowRange = ⟨0, 32⟩ := by native_decide
-example : call.stackArgumentRange = ⟨32, 16⟩ := by native_decide
-example : call.localRange = ⟨48, 16⟩ := by native_decide
+example : call.WellFormed := by decide
+example : call.shadowRange = ⟨0, 32⟩ := by decide
+example : call.stackArgumentRange = ⟨32, 16⟩ := by decide
+example : call.localRange = ⟨48, 16⟩ := by decide
 
 private def prepared : CallFrameUse profile := ⟨call, .prepared, [], [.rbx]⟩
 private def loaned : CallFrameUse profile := ⟨call, .loaned, [⟨"call"⟩], [.rbx]⟩
 private def returned : CallFrameUse profile := ⟨call, .returned, [], [.rbx]⟩
 private def closed : CallFrameUse profile := ⟨call, .closed, [], []⟩
 
-example : prepared.WellFormed := by native_decide
-example : loaned.WellFormed := by native_decide
-example : returned.WellFormed := by native_decide
-example : closed.WellFormed := by native_decide
-example : ¬ ({ loaned with liveCallLoans := [] }).WellFormed := by native_decide
+example : prepared.WellFormed := by decide
+example : loaned.WellFormed := by decide
+example : returned.WellFormed := by decide
+example : closed.WellFormed := by decide
+example : ¬ ({ loaned with liveCallLoans := [] }).WellFormed := by decide
 example : ¬ ({ loaned with liveCallLoans := [⟨"call"⟩, ⟨"call"⟩] }).WellFormed := by
-  native_decide
-example : ¬ ({ closed with restoreObligations := [.rbx] }).WellFormed := by native_decide
+  decide
+example : ¬ ({ closed with restoreObligations := [.rbx] }).WellFormed := by decide
 
 end Grass.Tests.Construct.CallFrame

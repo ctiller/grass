@@ -63,6 +63,6 @@ example : verified.lower.items.map (fun item => (item.block, item.origin)) = [
     (blockId "second", ⟨[], [0], 0⟩),
     (blockId "second", ⟨[], [1, 0], 0⟩),
     (blockId "second", ⟨[], [1, 0], 1⟩)
-  ] := by native_decide
+  ] := by decide
 
 end Grass.Tests.Construct.Lower

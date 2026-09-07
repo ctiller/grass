@@ -16,33 +16,33 @@ private def payload := member "payload" 8 8
 private def valid : OverlayLayout profile :=
   ⟨[tag, payload], 8, 8⟩
 
-example : valid.WellFormed := by native_decide
-example : valid.lookup? ⟨"payload"⟩ = some payload := by native_decide
-example : valid.lookup? ⟨"missing"⟩ = none := by native_decide
-example : OverlayLayout.memberRange tag = ⟨0, 4⟩ := by native_decide
-example : OverlayLayout.memberRange payload = ⟨0, 8⟩ := by native_decide
+example : valid.WellFormed := by decide
+example : valid.lookup? ⟨"payload"⟩ = some payload := by decide
+example : valid.lookup? ⟨"missing"⟩ = none := by decide
+example : OverlayLayout.memberRange tag = ⟨0, 4⟩ := by decide
+example : OverlayLayout.memberRange payload = ⟨0, 8⟩ := by decide
 
 private def empty : OverlayLayout profile := ⟨[], 8, 8⟩
-example : ¬ empty.WellFormed := by native_decide
+example : ¬ empty.WellFormed := by decide
 
 private def duplicate : OverlayLayout profile :=
   ⟨[tag, { payload with name := tag.name }], 8, 8⟩
-example : ¬ duplicate.WellFormed := by native_decide
+example : ¬ duplicate.WellFormed := by decide
 
 private def tooSmall : OverlayLayout profile :=
   ⟨[tag, payload], 4, 4⟩
-example : ¬ tooSmall.WellFormed := by native_decide
+example : ¬ tooSmall.WellFormed := by decide
 
 private def weakAlignment : OverlayLayout profile :=
   ⟨[tag, payload], 8, 4⟩
-example : ¬ weakAlignment.WellFormed := by native_decide
+example : ¬ weakAlignment.WellFormed := by decide
 
 private def invalidMember : OverlayLayout profile :=
   ⟨[tag, member "bad" 8 2], 8, 8⟩
-example : ¬ invalidMember.WellFormed := by native_decide
+example : ¬ invalidMember.WellFormed := by decide
 
 private def misalignedTail : OverlayLayout profile :=
   ⟨[tag], 6, 4⟩
-example : ¬ misalignedTail.WellFormed := by native_decide
+example : ¬ misalignedTail.WellFormed := by decide
 
 end Grass.Tests.Construct.LayoutOverlay

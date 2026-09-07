@@ -17,9 +17,9 @@ private def word : Layout.StackObject profile :=
   ⟨⟨"word"⟩, ⟨8, 8⟩, 16, root⟩
 private def layout : StackLayout profile :=
   ⟨[⟨root, none⟩], [word], 32, 16, 64⟩
-private def checked : CheckedStackLayout profile := ⟨layout, by native_decide⟩
+private def checked : CheckedStackLayout profile := ⟨layout, by decide⟩
 private def slot : StackObjectRef checked := ⟨word, by decide⟩
-private def slice : CheckedStackSlice slot := ⟨⟨2, 4⟩, by native_decide⟩
+private def slice : CheckedStackSlice slot := ⟨⟨2, 4⟩, by decide⟩
 
 example : checked.layout.objectWellFormed slot.object = true := slot.objectWellFormed
 example : slot.object.byteRange.WithinBound checked.layout.size := slot.withinLayout

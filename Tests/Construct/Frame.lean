@@ -11,12 +11,12 @@ private def layout : StackLayout profile :=
 
 private def checked := deriveWin64Frame layout [.rbx, .r12] 16
 
-example : checked.isOk = true := by native_decide
-example : (deriveWin64Frame layout [.rsp] 0).isOk = false := by native_decide
-example : (deriveWin64Frame layout [.rax] 0).isOk = false := by native_decide
-example : (deriveWin64Frame layout [.rbx, .rbx] 0).isOk = false := by native_decide
+example : checked.isOk = true := by decide
+example : (deriveWin64Frame layout [.rsp] 0).isOk = false := by decide
+example : (deriveWin64Frame layout [.rax] 0).isOk = false := by decide
+example : (deriveWin64Frame layout [.rbx, .rbx] 0).isOk = false := by decide
 example : (match deriveWin64Frame layout [] 7 with
     | .error (.invalidStackArgumentBytes 7) => true
-    | _ => false) = true := by native_decide
+    | _ => false) = true := by decide
 
 end Grass.Tests.Construct.Frame

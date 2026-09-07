@@ -51,7 +51,7 @@ private theorem containmentWellFormed (model : LabelAlphaModel) :
     PreAlphaAst.alphaNormalize, PreAlphaBlock.alphaNormalize]
   constructor
   · rfl
-  · native_decide
+  · decide
 
 private def result (model : LabelAlphaModel) :
     ContainmentElaborated source model :=
@@ -115,7 +115,7 @@ private theorem structurallyOpenInvalid (model : LabelAlphaModel) :
     ¬(structurallyOpen.alphaNormalize model).WellFormed := by
   change ¬(⟨blockId, []⟩ : Ast Nat String Nat
     (ContainmentAnnotation String Violation Int)).WellFormed
-  native_decide
+  decide
 example (model : LabelAlphaModel) : elaborateContainment structurallyOpen model =
     .error (.alpha ⟨blockId, [], []⟩) := by
   unfold elaborateContainment elaborate checkAlpha

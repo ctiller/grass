@@ -16,37 +16,37 @@ private def head : StructLayout profile :=
 private def valid : FlexibleTailLayout profile :=
   ⟨head, ⟨4, 4⟩, 8, 4, 3, 24, 8⟩
 
-example : valid.WellFormed := by native_decide
-example : valid.reservedRange = ⟨8, 16⟩ := by native_decide
-example : valid.selectedRange = ⟨8, 12⟩ := by native_decide
-example : valid.elementRange? 0 = some ⟨8, 4⟩ := by native_decide
-example : valid.elementRange? 2 = some ⟨16, 4⟩ := by native_decide
-example : valid.elementRange? 3 = none := by native_decide
-example : (valid.selectCount? 4).isSome = true := by native_decide
-example : valid.selectCount? 5 = none := by native_decide
+example : valid.WellFormed := by decide
+example : valid.reservedRange = ⟨8, 16⟩ := by decide
+example : valid.selectedRange = ⟨8, 12⟩ := by decide
+example : valid.elementRange? 0 = some ⟨8, 4⟩ := by decide
+example : valid.elementRange? 2 = some ⟨16, 4⟩ := by decide
+example : valid.elementRange? 3 = none := by decide
+example : (valid.selectCount? 4).isSome = true := by decide
+example : valid.selectCount? 5 = none := by decide
 
 private def overCapacity : FlexibleTailLayout profile :=
   { valid with selectedCount := 5 }
-example : ¬ overCapacity.WellFormed := by native_decide
+example : ¬ overCapacity.WellFormed := by decide
 
 private def overlapsPrefix : FlexibleTailLayout profile :=
   { valid with tailOffset := 4, size := 24 }
-example : ¬ overlapsPrefix.WellFormed := by native_decide
+example : ¬ overlapsPrefix.WellFormed := by decide
 
 private def wrongExtent : FlexibleTailLayout profile :=
   { valid with size := 32 }
-example : ¬ wrongExtent.WellFormed := by native_decide
+example : ¬ wrongExtent.WellFormed := by decide
 
 private def weakAlignment : FlexibleTailLayout profile :=
   { valid with alignment := 4 }
-example : ¬ weakAlignment.WellFormed := by native_decide
+example : ¬ weakAlignment.WellFormed := by decide
 
 private def misalignedTail : FlexibleTailLayout profile :=
   { valid with tailOffset := 10, size := 24 }
-example : ¬ misalignedTail.WellFormed := by native_decide
+example : ¬ misalignedTail.WellFormed := by decide
 
 private def invalidElement : FlexibleTailLayout profile :=
   { valid with element := ⟨4, 2⟩ }
-example : ¬ invalidElement.WellFormed := by native_decide
+example : ¬ invalidElement.WellFormed := by decide
 
 end Grass.Tests.Construct.LayoutFlexibleTail

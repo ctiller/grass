@@ -18,25 +18,25 @@ def closed : Closure source model where
   loops := ⟨[]⟩
   available := ["read", "call"]
 
-example : closed.WellFormed := by native_decide
+example : closed.WellFormed := by decide
 example : closed.unresolvedLocated = [] := Closure.unresolvedLocated_eq_nil closed (by
-  native_decide)
+  decide)
 
 def missing : Closure source model where
   joins := ⟨[]⟩
   loops := ⟨[]⟩
   available := ["read"]
 
-example : ¬ missing.WellFormed := by native_decide
+example : ¬ missing.WellFormed := by decide
 example : missing.unresolvedLocated = [
     ⟨blockId "second", ⟨[], [0], 0⟩, 0, "call"⟩
-  ] := by native_decide
+  ] := by decide
 
 def duplicate : Closure source model where
   joins := ⟨[]⟩
   loops := ⟨[]⟩
   available := ["read", "read", "call"]
 
-example : ¬ duplicate.WellFormed := by native_decide
+example : ¬ duplicate.WellFormed := by decide
 
 end Grass.Tests.Construct.SourceClose

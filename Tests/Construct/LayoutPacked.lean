@@ -17,24 +17,24 @@ private def payload := field "payload" 4 4 1
 private def valid : PackedLayout profile :=
   ⟨[tag, payload], 5, 1⟩
 
-example : valid.WellFormed := by native_decide
-example : PackedLayout.requiresUnalignedAccess payload = true := by native_decide
-example : valid.lookup? ⟨"payload"⟩ = some payload := by native_decide
+example : valid.WellFormed := by decide
+example : PackedLayout.requiresUnalignedAccess payload = true := by decide
+example : valid.lookup? ⟨"payload"⟩ = some payload := by decide
 
 private def overlap : PackedLayout profile :=
   ⟨[field "a" 2 1 0, field "b" 2 1 1], 4, 1⟩
-example : ¬ overlap.WellFormed := by native_decide
+example : ¬ overlap.WellFormed := by decide
 
 private def outside : PackedLayout profile :=
   ⟨[field "a" 4 4 2], 5, 1⟩
-example : ¬ outside.WellFormed := by native_decide
+example : ¬ outside.WellFormed := by decide
 
 private def duplicate : PackedLayout profile :=
   ⟨[field "a" 1 1 0, field "a" 1 1 1], 2, 1⟩
-example : ¬ duplicate.WellFormed := by native_decide
+example : ¬ duplicate.WellFormed := by decide
 
 private def invalidRepr : PackedLayout profile :=
   ⟨[field "a" 1 2 0], 1, 1⟩
-example : ¬ invalidRepr.WellFormed := by native_decide
+example : ¬ invalidRepr.WellFormed := by decide
 
 end Grass.Tests.Construct.LayoutPacked

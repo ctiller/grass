@@ -27,30 +27,30 @@ def accepted : ResidualReport where
   residuals := [symbolic, frame]
   reviewedAllowlist := [symbolic.key, frame.key]
 
-example : accepted.WellFormed := by native_decide
+example : accepted.WellFormed := by decide
 
 def reordered : ResidualReport where
   residuals := [frame, symbolic]
   reviewedAllowlist := [frame.key, symbolic.key]
 
-example : ¬ reordered.WellFormed := by native_decide
+example : ¬ reordered.WellFormed := by decide
 
 def duplicate : ResidualReport where
   residuals := [symbolic, symbolic]
   reviewedAllowlist := [symbolic.key, symbolic.key]
 
-example : ¬ duplicate.WellFormed := by native_decide
+example : ¬ duplicate.WellFormed := by decide
 
 def missing : ResidualReport where
   residuals := [symbolic, frame]
   reviewedAllowlist := [symbolic.key]
 
-example : ¬ missing.WellFormed := by native_decide
+example : ¬ missing.WellFormed := by decide
 
 def extra : ResidualReport where
   residuals := [symbolic]
   reviewedAllowlist := [symbolic.key, frame.key]
 
-example : ¬ extra.WellFormed := by native_decide
+example : ¬ extra.WellFormed := by decide
 
 end Grass.Tests.Construct.Report

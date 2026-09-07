@@ -44,28 +44,28 @@ example : text.content.virtualSize = 8 := by decide
 example : fragment.sectionIds = [textId] := by decide
 example : fragment.definedSymbolIds = [entryId] := by decide
 example : fragment.externalSymbolIds = [importId] := by decide
-example : fragment.WellFormed := by native_decide
-example : (checkRelocatableFragment fragment).isOk = true := by native_decide
+example : fragment.WellFormed := by decide
+example : (checkRelocatableFragment fragment).isOk = true := by decide
 
 private def dangling : RelocatableFragment RelocKind ImportIdentity :=
   { fragment with relocations := [⟨textId, 2, .pcRelative32,
       ⟨⟨"test.link", "missing"⟩⟩, 0⟩] }
-example : ¬dangling.WellFormed := by native_decide
-example : (checkRelocatableFragment dangling).isOk = false := by native_decide
+example : ¬dangling.WellFormed := by decide
+example : (checkRelocatableFragment dangling).isOk = false := by decide
 
 private def outOfBoundsMap : RelocatableFragment RelocKind ImportIdentity :=
   { fragment with sourceMap := [⟨textId, 4, 4, blockId, origin⟩] }
-example : ¬outOfBoundsMap.WellFormed := by native_decide
+example : ¬outOfBoundsMap.WellFormed := by decide
 
 private def duplicateSection : RelocatableFragment RelocKind ImportIdentity :=
   { fragment with sections := [text, text] }
-example : ¬duplicateSection.WellFormed := by native_decide
+example : ¬duplicateSection.WellFormed := by decide
 
 private def exactRelation
     (source : List Nat) (payload : RelocatableFragment RelocKind ImportIdentity) :
     Prop := source.length = payload.sourceMap.length
 private def certified : CertifiedRelocatableFragment exactRelation [42] fragment :=
-  ⟨⟨by native_decide⟩, rfl⟩
+  ⟨⟨by decide⟩, rfl⟩
 example : exactRelation [42] fragment := certified.exact
 
 end Grass.Tests.Construct.LinkRaw

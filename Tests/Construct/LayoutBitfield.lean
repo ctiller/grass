@@ -11,27 +11,27 @@ private def field (name : String) (start width : Nat) : BitField :=
 private def valid : BitfieldLayout profile :=
   ⟨[field "tag" 0 3, field "mode" 3 5, field "payload" 8 24], 4, 4⟩
 
-example : valid.WellFormed := by native_decide
-example : valid.lookup? ⟨"mode"⟩ = some (field "mode" 3 5) := by native_decide
+example : valid.WellFormed := by decide
+example : valid.lookup? ⟨"mode"⟩ = some (field "mode" 3 5) := by decide
 
 private def overlap : BitfieldLayout profile :=
   ⟨[field "a" 0 5, field "b" 4 4], 4, 4⟩
-example : ¬ overlap.WellFormed := by native_decide
+example : ¬ overlap.WellFormed := by decide
 
 private def outside : BitfieldLayout profile :=
   ⟨[field "a" 31 2], 4, 4⟩
-example : ¬ outside.WellFormed := by native_decide
+example : ¬ outside.WellFormed := by decide
 
 private def zeroWidth : BitfieldLayout profile :=
   ⟨[field "a" 0 0], 4, 4⟩
-example : ¬ zeroWidth.WellFormed := by native_decide
+example : ¬ zeroWidth.WellFormed := by decide
 
 private def duplicate : BitfieldLayout profile :=
   ⟨[field "a" 0 4, field "a" 4 4], 4, 4⟩
-example : ¬ duplicate.WellFormed := by native_decide
+example : ¬ duplicate.WellFormed := by decide
 
 private def badStorageAlignment : BitfieldLayout profile :=
   ⟨[field "a" 0 8], 3, 4⟩
-example : ¬ badStorageAlignment.WellFormed := by native_decide
+example : ¬ badStorageAlignment.WellFormed := by decide
 
 end Grass.Tests.Construct.LayoutBitfield

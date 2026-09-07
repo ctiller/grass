@@ -30,7 +30,7 @@ private def imported : Taint := ⟨.importedBytes, "origin is untrusted"⟩
 private def raw : UncheckedAst Nat String Nat String :=
   uncheckedAst (blockId "missing-exit") [malformedBlock] primary
 
-example : ¬raw.source.WellFormed := by native_decide
+example : ¬raw.source.WellFormed := by decide
 example : raw.taints = [primary] := rfl
 example : raw.taints ≠ [] := raw.taints_ne_nil
 example : (raw.addTaint imported).source = raw.source := rfl
