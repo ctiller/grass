@@ -28,4 +28,17 @@ example : Derives anyByteCodec.format
     (byte 7) (Vec.singleton (byte 8)) :=
   anyByteCodec.derives_with_suffix ..
 
+def bytePairCodec : BinaryCodec (Byte × Byte) :=
+  anyByteCodec.seq fun _ => anyByteCodec
+
+example : bytePairCodec.parse
+    (bytePairCodec.write (byte 7, byte 8) ++ Vec.singleton (byte 9)) =
+    .done (byte 7, byte 8) (Vec.singleton (byte 9)) :=
+  bytePairCodec.parseWritePrefix ..
+
+example : Derives bytePairCodec.format
+    (bytePairCodec.write (byte 7, byte 8) ++ Vec.singleton (byte 9))
+    (byte 7, byte 8) (Vec.singleton (byte 9)) :=
+  bytePairCodec.derives_with_suffix ..
+
 end Grass.Tests.Artifact.Binary.Codec
