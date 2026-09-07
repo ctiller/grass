@@ -133,10 +133,11 @@ metadata: the tables underneath that vocabulary, not the vocabulary. A single
 have looked like a fix without being one.
 
 The consequence for this plan is sharper than section 6's P2 first recorded.
-Spike 1 needs three of the target-side owners, not one, and two of them are
-still unregistered: the construction and lowering owner, which `g-design:71`
-assigns `Grass.Assembly.X86`, and the artifact owner, which it assigns
-`Grass.Emit`. c-x86's half is committed and partly built.
+Spike 1 needs three of the target-side owners, not one. Two are registered:
+c-x86, whose half is committed and partly built, and `g-construct`, which took
+construction and lowering at `g-construct:1` and is the recipient of the
+`Grass.Assembly.X86` obligation `g-design:71` assigns it. The third, the
+artifact owner that `g-design:71` assigns `Grass.Emit`, is still unregistered.
 
 What exists for Spike 1 on c-x86's side today, per `c-x86:6`: the prologue is
 modelled and externally verified -- `spike1Prologue`, `spike1Layout`, and
@@ -316,17 +317,35 @@ provide.
 
 ### P2 — The target side (blocking every spike)
 
-Owner: routed by `coord1:43`; the first of the three is now registered.
-`c-x86` took machine and platform authority -- `Grass/ISA/X86`, `Grass/ABI/Win64`,
-`Grass/Platform/Win32` -- at `c-x86:1`, and already has an encoder, a decoder and
-a byte-level round-trip theorem. The construction/lowering and artifact/build
-owners are still unregistered. One boundary surfaced immediately and is raised
-with c-x86 rather than assumed: no scope owns `Grass/Assembly/X86.lean`,
-`Grass/Platform/Win32.lean` or `Grass/Emit.lean`, which are the module names
-the authored spikes actually import and which decision 134 ratified as narrow
-signature-only facades. `c-x86:1` claims the `MODULES.md` names instead, so the
-facade layer between what an author types and what this owner builds has no
-owner yet. The user decided this is split
+Owner: routed by `coord1:43`; two of the three are now registered. This
+paragraph is a snapshot of a moving registry -- the bus is authoritative for who
+owns what, and this document has twice gone stale under review because it
+enumerates state that changes faster than a review takes.
+
+`c-x86` took machine and platform authority -- `Grass/ISA/X86`,
+`Grass/ABI/Win64`, `Grass/Platform/Win32` -- at `c-x86:1`, and already has an
+encoder, a decoder and a byte-level round-trip theorem. `g-construct` took
+construction and lowering at `g-construct:1` -- `Grass/CFG/**`,
+`Grass/Construct/**`, `Grass/Unsafe/**` -- with the explicit purpose of
+implementing the normative authored assembly surface, and is the current
+recipient of the `Grass.Assembly.X86` author-surface obligation. Only the
+artifact and build owner remains unregistered, and `Grass.Emit` is its
+obligation rather than `g-construct`'s: `g-design:71` is explicit that raw
+erasure, admission, linking and byte writing stay in `Unsafe` and `Artifact`
+while the checked `Grass.Emit` facade belongs to the artifact owner.
+
+Assigned delivery and published scope are not the same thing, and one gap
+between them is worth recording because it will block a delivery rather than a
+plan. `g-design:71` assigns `Grass.ISA.X86` and `Grass.Platform.Win32` to c-x86,
+but `c-x86:1`'s globs are `Grass/ISA/X86/**` and `Grass/Platform/Win32/**`,
+which match paths *underneath* those directories and not the root facade files
+`Grass/ISA/X86.lean` and `Grass/Platform/Win32.lean` themselves. Both facade
+roots therefore fall outside c-x86's published exclusive scope. c-x86 needs to
+extend that scope, or receive an explicit handoff, before writing either file.
+This is scope bookkeeping, not an ownership dispute: the assignment is settled
+and only the glob does not reach it. Raised with c-x86 rather than left here.
+
+The user decided this is split
 by layer rather than given to one owner: machine and platform authority
 (`ISA/X86`, `ABI/Win64`, `Platform/Win32`), the construction and lowering
 language (`CFG`, `Construct`, `Unsafe`) consuming the first, and artifact and
@@ -364,7 +383,7 @@ Owner: `Grass.Semantics.SpecProcess` and the facade modules are g-foundation's
 by its existing `Grass/Semantics/**` claim; the resource and console contract
 families have no owner yet and are the part of this phase still to route.
 
-Decision 134 converted these from contested to owed. `capture`, `ofRelational`,
+Decision 134 converted these from contested to owed. That decision is a published bus ruling (`g-design:50`) whose `DECISIONS.md` text is not yet on main -- it sits on `agent/g-design/normative-followups` at 5f80c19, and `g-design:77` nominates its publication. Looking it up by number on main fails, which cost c-x86 time in `c-x86:10`. `capture`, `ofRelational`,
 `withLiveness` and the other suite modifiers, plus
 `MeetsAllSpecificationTheorems`, are library obligations against
 `Grass.Semantics.SpecProcess` with the drafted signatures fixed, which is the
