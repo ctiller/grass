@@ -6,6 +6,23 @@ param(
         "Grass.StableId.render_of_empty_namespace",
         "Grass.RequirementKind.extension_injective",
         "Grass.DemandCertificateFamily.get",
+        "Grass.ScopeId.contains_self",
+        "Grass.ScopeId.root_contains",
+        "Grass.ScopeId.contains_child",
+        "Grass.ScopeId.child_ne",
+        "Grass.Specification.RequirementSet.toCanonicalList_ordered",
+        "Grass.Specification.RequirementSet.demands_ofList",
+        "Grass.Specification.RequirementSet.mem_toCanonicalList",
+        "Grass.Specification.RequirementSet.ext",
+        "Grass.Specification.RequirementSet.eq_iff_toCanonicalList_eq",
+        "Grass.Specification.RequirementSet.demands_insert",
+        "Grass.Specification.RequirementSet.insert_covers",
+        "Grass.Specification.RequirementSet.insert_idempotent",
+        "Grass.Specification.RequirementSet.insert_comm",
+        "Grass.Specification.DriverBoundary.demandAlso_covers",
+        "Grass.Specification.DriverBoundary.demandAlso_demands",
+        "Grass.Specification.DriverBoundary.demandAlso_idempotent",
+        "Grass.Specification.DriverBoundary.demandAlso_comm",
         "Grass.ObservationProjection.ext",
         "Grass.ObservationProjection.identity_project",
         "Grass.ObservationProjection.comp_project",
@@ -33,6 +50,41 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Assert-AxiomReports(
+    [string[]] $Lines,
+    [int] $Expected,
+    [string[]] $Allowed,
+    [switch] $Echo
+) {
+    if ($Echo) {
+        $Lines | ForEach-Object { Write-Host $_ }
+    }
+    $outputText = [string]::Join("`n", $Lines)
+    $noAxiomReports = [regex]::Matches(
+        $outputText,
+        "(?m)^'[^'`r`n]+' does not depend on any axioms$"
+    )
+    # Lean formats long axiom lists across terminal-width-dependent line
+    # breaks. Parse one complete bracketed report instead of assuming that
+    # every #print axioms result occupies one physical output line.
+    $axiomReports = [regex]::Matches(
+        $outputText,
+        "(?m)^'[^'`r`n]+' depends on axioms: \[([^\]]*)\]$"
+    )
+    $reported = $noAxiomReports.Count + $axiomReports.Count
+    foreach ($report in $axiomReports) {
+        $used = @($report.Groups[1].Value.Split(',') |
+            ForEach-Object { $_.Trim() })
+        $rejected = @($used | Where-Object { $_ -notin $Allowed })
+        if ($rejected.Count -ne 0) {
+            throw "Rejected transitive axiom(s): $($rejected -join ', ')"
+        }
+    }
+    if ($reported -ne $Expected) {
+        throw "Expected $Expected axiom reports, received $reported."
+    }
+}
 
 function Get-PathUnder([string] $Base, [string] $Full) {
     # [IO.Path]::GetRelativePath is unavailable on Windows PowerShell 5.1.
@@ -138,28 +190,30 @@ try {
         throw "Lean did not execute the generated trust-audit driver."
     }
 
-    $reported = 0
-    foreach ($line in $output) {
-        if ($line -match "^'[^']+' does not depend on any axioms$") {
-            $reported += 1
-            continue
+    Assert-AxiomReports -Lines $output -Expected $Declaration.Count `
+        -Allowed $AllowedAxiom -Echo
+
+    $multilineAllowedProbe = @(
+        "'AuditParser.Allowed' depends on axioms: [propext,",
+        " Classical.choice,",
+        " Quot.sound]"
+    )
+    Assert-AxiomReports -Lines $multilineAllowedProbe -Expected 1 `
+        -Allowed $AllowedAxiom
+
+    $multilineRejectedProbe = @(
+        "'AuditParser.Rejected' depends on axioms: [propext,",
+        " AuditParser.unallowed,",
+        " Quot.sound]"
+    )
+    try {
+        Assert-AxiomReports -Lines $multilineRejectedProbe -Expected 1 `
+            -Allowed $AllowedAxiom
+        throw "The multiline axiom parser accepted an unallowed axiom."
+    } catch {
+        if ($_.Exception.Message -notmatch '^Rejected transitive axiom') {
+            throw
         }
-
-        if ($line -match "^'[^']+' depends on axioms: \[(.*)\]$") {
-            $reported += 1
-            $used = @($Matches[1].Split(',') | ForEach-Object { $_.Trim() })
-            $rejected = @($used | Where-Object { $_ -notin $AllowedAxiom })
-            if ($rejected.Count -ne 0) {
-                throw "Rejected transitive axiom(s): $($rejected -join ', ')"
-            }
-            continue
-        }
-
-        Write-Host $line
-    }
-
-    if ($reported -ne $Declaration.Count) {
-        throw "Expected $($Declaration.Count) axiom reports, received $reported."
     }
 
     foreach ($entrypointModule in $entrypointModuleNames) {
@@ -379,7 +433,7 @@ try {
         throw "Trust audit ignored a scoped csimp replacement after its attribute state expired."
     }
 
-    Write-Host "Trust audit passed for $reported declaration(s) and $($entrypointModuleNames.Count) executable test module(s)."
+    Write-Host "Trust audit passed for $($Declaration.Count) declaration(s) and $($entrypointModuleNames.Count) executable test module(s)."
 }
 finally {
     if ([System.IO.File]::Exists($temporaryPath)) {
