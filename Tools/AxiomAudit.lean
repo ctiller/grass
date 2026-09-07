@@ -10,6 +10,7 @@ import Grass.Core.Identifiers
 import Grass.Core.Name
 import Grass.Core.Uid
 import Grass.Grammar.Core
+import Grass.Grammar.Realization
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.Citation

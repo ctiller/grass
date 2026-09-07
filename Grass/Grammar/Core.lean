@@ -96,6 +96,19 @@ suffix. This is the prefix law used by sequencing parsers. -/
     takeByte (writeByte value) = .done value Vec.empty := by
   simpa using takeByte_writeByte_append value Vec.empty
 
+/-- Every successful byte read consumed exactly the returned leading byte. -/
+theorem takeByte_done {input : Std.Logical.ByteArray} {value : Byte}
+    {rest : Std.Logical.ByteArray} (success : takeByte input = .done value rest) :
+    input = Vec.singleton value ++ rest := by
+  cases input with
+  | fromList bytes =>
+    cases bytes with
+    | nil => simp [takeByte, Vec.get?] at success
+    | cons first tail =>
+      simp only [takeByte, Vec.get?, Vec.drop, List.getElem?_cons_zero] at success
+      cases success
+      rfl
+
 /-- Exact-length consumption validates the length before taking or dropping.
 The deficit is exact and uses natural subtraction, so no host-sized arithmetic
 or unchecked index participates. -/
