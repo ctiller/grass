@@ -4,6 +4,7 @@ import Grass.Core.Demand
 import Grass.Core.Generational
 import Grass.Core.Identifiers
 import Grass.Core.Name
+import Grass.Core.Scope
 import Grass.Core.Uid
 import Grass.ABI.Win64.Convention
 import Grass.ABI.Win64.Unwind
