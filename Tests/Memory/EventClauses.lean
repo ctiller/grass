@@ -97,12 +97,18 @@ second source of truth, and the commit that added it argued the risk away — "i
 drift the theorem below stops matching the `Decidable` instance and fails" — which is
 an argument and not a check, in a file whose whole subject is the difference.
 
-`sealClauses_is_the_seal` is the check. It says this function returns the empty list on
-exactly the events the seal admits, so no drift in any clause proposition can survive:
-weaken one here and the forward direction stops proving; weaken one in the structure
-and the reverse direction does. What it does *not* say is that each name labels the
-clause beside it — two labels could be exchanged and both theorems would still hold —
-so the names are written in declaration order and read against the structure by eye.
+`sealClauses_is_the_seal` is the first check. It says this function returns the empty
+list on exactly the events the seal admits, so no drift in any clause proposition can
+survive: weaken one here and the forward direction stops proving; weaken one in the
+structure and the reverse direction does.
+
+It says nothing about the *names*, and `each_label_names_its_clause` is the second
+check, which closes that. Both docstrings here disclosed the gap for a round -- "two
+labels could be exchanged and both theorems would still hold" -- and review measured it:
+exchanging two labels in this function alone is caught by the index, and exchanging them
+in both places survived all nine gates, leaving the file attesting that the neighbour
+whose status disagrees about *reads* is caught by the *write* clause. A disclosed gap is
+better than a hidden one and is not the same as a closed one.
 -/
 def sealClauses (e : MemoryEvent) : List String :=
   (if e.kind.reads = true → e.valueRead.isSome then [] else ["readValuePresent"]) ++
@@ -162,7 +168,7 @@ with no fixture and why it was in `Tools/ReachabilityAudit.py`'s allowlist. Its 
 left that allowlist a round earlier for exactly the reason this file now mints one. -/
 def control : MemoryEvent := { fence with kind := .control }
 
-/-! ## The eleven neighbours, one per clause
+/-! ## The twelve neighbours: one per clause, and two for the clause naming two kinds
 
 Each is one `def`, named for the clause it isolates, and each is used twice below: once
 by the theorem that says the seal refuses it, and once by the index that says *which*
@@ -347,9 +353,8 @@ the seal. This is that risk closed rather than argued about. An event fails no c
 here exactly when it satisfies `MemoryEvent.WellFormed`, so a weakening on either side
 breaks one direction of the proof.
 
-It does not fix the *labels*: exchanging two names would leave both directions
-provable. The names are in declaration order, which is how the `Decidable` instance is
-written too, and that much is read by eye. -/
+It does not fix the *labels*: exchanging two names leaves both directions provable, and
+review confirmed by doing it. `each_label_names_its_clause` is what fixes them. -/
 theorem sealClauses_is_the_seal (e : MemoryEvent) : sealClauses e = [] ↔ e.WellFormed := by
   constructor
   · intro h
@@ -365,5 +370,43 @@ theorem sealClauses_is_the_seal (e : MemoryEvent) : sealClauses e = [] ↔ e.Wel
       w.writeValueAbsent⟩, w.noLocationWhenUntouched⟩, w.writtenLength⟩,
       w.readLength⟩, w.statusWellFormed⟩, w.statusAgreesWithReads⟩,
       w.statusAgreesWithWrites⟩, w.spaceAgreesWithProvenance⟩
+
+/-- **And each label names the clause it says it names.**
+
+`sealClauses_is_the_seal` pins the propositions and says nothing about the strings.
+Review exchanged `"statusAgreesWithReads"` and `"statusAgreesWithWrites"` in
+`sealClauses` *and* in the two matching entries of the index above, and all nine gates
+passed — leaving the file attesting that the neighbour whose status disagrees about
+reads is caught by the write clause. Exchanging them in one place alone is caught,
+because the index names the labels; the coordinated exchange is what survived, and both
+docstrings above disclosed it as unclosable by eye.
+
+Eleven biconditionals, one per label, each tying a string to the proposition it stands
+for. An exchange makes two of them false. This is a third statement of each clause and
+it earns that: the first says which events the seal admits, the second says which
+clauses an event fails, and only this one says what a clause *is called*. -/
+theorem each_label_names_its_clause (e : MemoryEvent) :
+    ("readValuePresent" ∈ sealClauses e ↔
+      ¬ (e.kind.reads = true → e.valueRead.isSome)) ∧
+    ("readValueAbsent" ∈ sealClauses e ↔
+      ¬ (e.kind.reads = false → e.valueRead = Option.none)) ∧
+    ("writeValuePresent" ∈ sealClauses e ↔
+      ¬ (e.kind.writes = true → e.valueWritten.isSome)) ∧
+    ("writeValueAbsent" ∈ sealClauses e ↔
+      ¬ (e.kind.writes = false → e.valueWritten = Option.none)) ∧
+    ("noLocationWhenUntouched" ∈ sealClauses e ↔
+      ¬ (e.kind.touchesMemory = false → e.range.IsEmpty)) ∧
+    ("writtenLength" ∈ sealClauses e ↔
+      ¬ (∀ bytes ∈ e.valueWritten, bytes.length = e.committedWriteRange.size)) ∧
+    ("readLength" ∈ sealClauses e ↔
+      ¬ (∀ bytes ∈ e.valueRead, bytes.length = e.committedReadRange.size)) ∧
+    ("statusWellFormed" ∈ sealClauses e ↔ ¬ e.status.WellFormed e.range.size) ∧
+    ("statusAgreesWithReads" ∈ sealClauses e ↔
+      ¬ (e.status.committedReads = e.readCommitted)) ∧
+    ("statusAgreesWithWrites" ∈ sealClauses e ↔
+      ¬ (e.status.committedWrites = e.writeCommitted)) ∧
+    ("spaceAgreesWithProvenance" ∈ sealClauses e ↔
+      ¬ (e.space.id = e.provenance.space)) := by
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> simp [sealClauses]
 
 end Tests.Memory.EventClauses

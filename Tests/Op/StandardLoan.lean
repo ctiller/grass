@@ -384,8 +384,33 @@ theorem a_read_against_shared_immutable_access_is_refused :
       AuthorityState.sharedImmutable ∧
     ¬ readLentToEngine.memory.OwnedBy engine₁ bufferProv ∧
     Grass.Op.refusalOf policy readLentToEngine strangerLoad Option.none =
-      some .authorityUnavailable := by
+      some .authorityNotHeld := by
   exact ⟨by decide, by decide, by decide, by decide⟩
+
+/-! ## The two authority refusals are distinguishable, and were one class
+
+`refusalOf` recorded three rules under `authorityUnavailable`. §7.3's race left first,
+as `conflictingAccess`; the other two shared the name for a further nine rounds. They
+are the authority-*state* clause -- `authorityOf` reports a state whose `PermitsIntent`
+is false, which is a fact about the storage -- and the holder clause, which is a fact
+about the accessor.
+
+Neither implies the other, and the two fixtures above are the proof: each pins
+`authorityOf` at a state that *permits* the intent and is still refused, so the state
+clause passed and the holder clause fired. A profile reading §8's ledger could not tell
+"the bytes refuse you" from "you hold nothing", which is the complaint §7.3's second
+paragraph made about the race.
+
+The pair below is one state each, from the same lend, differing in the rights lent. -/
+
+/-- **The authority-state refusal**, for contrast. `thread₀` lends `readWrite`, so a
+stranger's `authorityOf` is `frozen`, which permits no intent -- refused before the
+holder clause is reached. -/
+theorem a_frozen_stranger_is_refused_by_the_authority_state :
+    lentToEngine.memory.authorityOf engine₁ bufferProv ⟨0, 8⟩ = AuthorityState.frozen ∧
+    Grass.Op.refusalOf policy lentToEngine strangerLoad Option.none =
+      some .authorityUnavailable := by
+  exact ⟨by decide, by decide⟩
 
 /--
 **And the owner's own read of the bytes it lent read-only commits.**
@@ -496,7 +521,7 @@ theorem a_stranger_may_not_join_the_atomic_protocol :
       AuthorityState.atomicShared ∧
     ¬ atomicLentToEngine.memory.OwnedBy engine₁ bufferProv ∧
     Grass.Op.refusalOf policy atomicLentToEngine strangerAtomicAdd Option.none =
-      some .authorityUnavailable := by
+      some .authorityNotHeld := by
   exact ⟨by decide, by decide, by decide, by decide⟩
 
 /--

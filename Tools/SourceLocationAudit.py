@@ -16,17 +16,29 @@ The check is a `git ls-files` filter, so it sees exactly what is committed rathe
 than what happens to be on disk — an untracked scratch file is nobody's problem and
 is not reported.
 
+**And it scans what it exempts.** Reporting a stray file was only half the job. Review
+appended `theorem seededProbe : False := by sorry` to a tracked file under `Spikes/` and
+all nine gates passed: `lake build` does not elaborate it, `AxiomAudit` walks the
+elaborated environment, and the seven Python gates read `Grass/` and `Tests/`. The
+exemption's reason — those files import modules that do not exist yet — justifies not
+*building* them and does not justify not *reading* them, so every file `ALLOWED` covers
+is now scanned for `sorry`, `axiom`, `native_decide` and `unsafe`, and a hit fails.
+`False` provable inside a tracked tree is exactly the accident the paragraph above says
+this file exists for; it was closed for the repo root and left open for the exemption.
+
 **What it does not check.** It says nothing about whether a file *inside* the covered
 trees is reachable: a module under `Grass/` that nothing imports is still elaborated
 by the glob, which is what `Tools/AxiomAudit.lean`'s coverage check is for. And it
 cannot tell a deliberately-unbuilt file from an accident, which is what `ALLOWED` is
-for.
+for. The trust scan is lexical: it strips block comments, line comments and string
+literals, and it cannot see a token a macro produces.
 
 `--self-test` seeds each class and asserts the verdict.
 """
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -77,6 +89,60 @@ def uncovered(paths: list[str]) -> list[str]:
     return sorted(out)
 
 
+BLOCK = re.compile(r"/-.*?-/", re.DOTALL)
+LINE = re.compile(r"--.*?$", re.MULTILINE)
+STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+
+# What may not appear in a Lean file no build elaborates. `sorry` and `native_decide`
+# anywhere; `axiom` and `unsafe` only where a declaration can start, because both are
+# ordinary words. `Tools/AxiomAudit.lean` covers all four inside the elaborated
+# environment and cannot reach these files at all.
+UNTRUSTED = re.compile(
+    r"\bsorry\b|\bnative_decide\b|^\s*axiom\s|^\s*unsafe\s", re.MULTILINE)
+
+
+def blank(match: "re.Match[str]") -> str:
+    """Replace a match with as many newlines as it spanned, keeping line numbers."""
+    return chr(10) * match.group(0).count(chr(10))
+
+
+def strip(source: str) -> str:
+    """Blank comments and string literals, keeping the line structure.
+
+    Line numbers have to survive: a report that points at the wrong line is the defect
+    `Tools/CitationAudit.py` and `Tools/DoorAudit.py` were each found with.
+    """
+    return STRING.sub(blank, LINE.sub(blank, BLOCK.sub(blank, source)))
+
+
+def untrusted(paths: list[str]) -> list[str]:
+    """Trust tokens in tracked Lean files that no build target elaborates.
+
+    Only the exempted ones: a file under `Grass/` or `Tests/` is elaborated with
+    `warningAsError = true`, so `sorry` fails the build there, and `Tools/AxiomAudit.lean`
+    covers the rest of the vocabulary. These files have neither.
+    """
+    out: list[str] = []
+    for path in paths:
+        if path.startswith(COVERED_PREFIXES):
+            continue
+        covered = path in ALLOWED or any(
+            path.startswith(entry) for entry in ALLOWED if entry.endswith("/"))
+        if not covered:
+            continue
+        try:
+            text = (ROOT / path).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for number, line in enumerate(strip(text).splitlines(), start=1):
+            match = UNTRUSTED.search(line)
+            if match:
+                out.append(
+                    f"  {path}:{number}: `{match.group(0).strip()}` in a file no build "
+                    "target elaborates")
+    return sorted(out)
+
+
 def inert_entries(paths: list[str]) -> list[str]:
     """The `ALLOWED` entries whose removal would change nothing.
 
@@ -118,6 +184,32 @@ def self_test() -> int:
         if got != expected:
             print(f"  SELF-TEST FAILED [{label}]: expected {expected}, got {got}")
             failures += 1
+    # The trust scan, both directions, against the real exempted files. A seeded token
+    # is written to a temporary tracked-looking path rather than into the tree, so the
+    # case is exercised without a file ever being committed.
+    probe = ROOT / "Spikes" / "__self_test_probe.lean"
+    try:
+        probe.write_text("theorem p : False := by sorry" + chr(10), encoding="utf-8")
+        hits = untrusted(["Spikes/__self_test_probe.lean"])
+        if not hits or "Spikes/__self_test_probe.lean:1" not in hits[0]:
+            print("  SELF-TEST FAILED: a `sorry` in an exempted file is not reported")
+            failures += 1
+        probe.write_text("/-- a docstring mentioning sorry -/" + chr(10)
+                         + "-- and a line comment mentioning sorry" + chr(10)
+                         + "def f := " + chr(34) + "sorry" + chr(34) + chr(10),
+                         encoding="utf-8")
+        if untrusted(["Spikes/__self_test_probe.lean"]):
+            print("  SELF-TEST FAILED: `sorry` in a comment or a string is reported")
+            failures += 1
+    finally:
+        if probe.exists():
+            probe.unlink()
+    # A covered file is not scanned here, because `lake build` already fails on it.
+    if untrusted(["Grass/Memory/State.lean"]):
+        print("  SELF-TEST FAILED: a file inside a build target is scanned by the trust "
+              "check, which is the build's job")
+        failures += 1
+
     # The `--inert` sweep, both directions, including the prefix form.
     global ALLOWED
     saved_allowed = set(ALLOWED)
@@ -169,6 +261,16 @@ def main() -> int:
         else:
             print("source location audit: every allowlist entry suppresses a report")
         return 0
+    tainted = untrusted(paths)
+    if tainted:
+        print(chr(10).join(tainted))
+        print(chr(10) + "source location audit: an unelaborated file carries a trust "
+              "token" + chr(10))
+        print(
+            f"{len(tainted)} occurrence(s). These files are exempt from `lake build`, so "
+            "nothing else in the tree will ever report this."
+        )
+        return 1
     stray = uncovered(paths)
     if stray:
         print("\n".join(f"  {path}" for path in stray))
@@ -181,7 +283,7 @@ def main() -> int:
         return 1
     print(
         f"source location audit: all {len(paths)} tracked Lean sources are inside a "
-        "build target or a recorded exemption"
+        "build target or a recorded exemption, and no exempted file carries a trust token"
     )
     return 0
 

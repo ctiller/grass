@@ -474,12 +474,23 @@ theorem heldByAnother_of_nonAtomicHeldByAnother {state : MemoryState}
 /--
 The authority `context` holds over bytes that may be lent.
 
-Four cases, and every `AuthorityState` constructor is one of them — the type says
-that is a standing requirement, and this is where it is met. Dead, absent or
-stale-epoch storage is `unavailable`; nothing held by anyone else is `exclusive`;
-another context able to write is `frozen`, which is §3's "frozen owner fragments
-while loans exist"; and otherwise every outstanding grant is read-only, which is
-§3's shared immutable access.
+Five cases, one per `AuthorityState` constructor — the type says that is a standing
+requirement, and this is where it is met. In the order the code asks them: dead, absent
+or stale-epoch storage is `unavailable`; nothing held by anyone else is `exclusive`;
+held by another but no other holder may write is `sharedImmutable`, which is §3's shared
+immutable access; another holder may write **and some other grant is not atomic-only**
+is `frozen`, which is §3's "frozen owner fragments while loans exist"; and another
+holder may write and **every** other grant is atomic-only is `atomicShared`.
+
+This paragraph said "four cases" and described `frozen` as "another context able to
+write", for the nine rounds since `atomicShared` was added as a fifth branch. Both
+halves were wrong in the same direction: a writable other holder whose grants are all
+atomic-only gives `atomicShared`, not `frozen`, and
+`Tests/Memory/AtomicAuthority.lean`'s `the_atomic_grant_gives_the_lender_atomic_shared`
+had been deciding exactly that case the whole time. The omitted constructor is the one
+`AuthorityState`'s own docstring records as having been *deleted once for being
+unreachable*, so the enumeration that exists to assert reachability was silent about
+the constructor with the history.
 
 **It takes the context, and an earlier version did not.** Without it a context that
 lent to itself was reported frozen while the access-time rule let its

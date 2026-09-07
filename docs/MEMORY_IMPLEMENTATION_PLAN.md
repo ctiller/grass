@@ -2646,6 +2646,112 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   `Tests/Op/StandardLoan.lean`, which round twenty's rename missed and which had
   additionally kept `Grants` after the bound moved to `GrantsAsGrant`.
 
+- ~~**A `sorry` in a tracked file passed all nine gates.**~~ `Tools/SourceLocationAudit.py`
+  exists because two scratch probes were once swept into commits by a `git add -A` and one
+  contained a `sorry`; its module docstring says so and calls the case "not hypothetical".
+  It reported strays and did not read the files it *exempted*. Review appended
+  `theorem seededProbe : False := by sorry` to a tracked file under `Spikes/` and every
+  gate passed: `lake build` does not elaborate that tree, `AxiomAudit` walks the
+  elaborated environment, and the seven Python gates read `Grass/` and `Tests/`. `False`
+  was provable inside the repository and nothing in the tree would ever have said so.
+
+  Every file the allowlist covers is scanned now for `sorry`, `axiom`, `native_decide`
+  and `unsafe`, comments and string literals stripped, and a hit fails. The seeded line
+  is reported at the right file and line while `lake build` and `AxiomAudit` stay
+  correctly silent, and `self_test` seeds both directions including the
+  token-in-a-comment case.
+
+  **An exemption's reason is scoped to the thing it exempts from.** "They import modules
+  that do not exist yet" justifies not *building* those files. It was read as justifying
+  not *checking* them, which is a different sentence nobody wrote. The gate closed this
+  hole for the repo root and left it open for its own allowlist — and the allowlist is
+  one prefix entry, so it covers every file that will ever be put under that directory.
+- ~~**`Tools/ConsultedAudit.py` could not see a field whose type begins on the next
+  line.**~~ `DECL` required a non-`=` character after the colon *on the same line*, so a
+  field whose proposition wraps — which is what a long clause naturally does — was not a
+  field to the tool at all: not reported, not allowlistable, and invisible to
+  `inert_entries` and `overbroad_entries`, which read the same scan. Five in-scope fields
+  are written that way, two of them clauses of the event seal. So dropping the
+  `WellFormed` structure exemption put **nine** of that seal's eleven clauses in scope and
+  the commit doing it said eleven.
+
+  Widened to the lookahead form `Tools/CitationAudit.py`'s `FIELD` already used. Six
+  fields entered scope and produced no new report, because all six are projected — which
+  is exactly why the gap was invisible: **a scanner's blind spot is silent in both
+  directions**, and a clean run over a set you cannot see reads the same as a clean run
+  over the set you meant.
+- ~~**Two of the event seal's clause labels could be exchanged with all nine gates
+  green.**~~ Disclosed rather than hidden: both docstrings in
+  `Tests/Memory/EventClauses.lean` said so. Review measured the disclosure — exchanging
+  two labels in `sealClauses` alone is caught by the index, and the *coordinated* exchange
+  in both places survived, leaving the file attesting that the neighbour whose status
+  disagrees about reads is caught by the write clause.
+
+  `each_label_names_its_clause` closes it: eleven biconditionals, one per label, tying a
+  string to the proposition it stands for. A third statement of each clause, and it earns
+  the place: the first says which events the seal admits, the second which clauses an
+  event fails, and only this one says what a clause is *called*.
+
+  **A disclosed gap is better than a hidden one and is not the same as a closed one.**
+  This file has carried that sentence in its own docstring for two rounds while the gap
+  stayed open, which is the honest version of the failure and still a failure.
+- ~~**`refusalOf` still recorded two rules under `authorityUnavailable`.**~~
+  `conflictingAccess`'s docstring records that three rules once shared that name and that
+  §7.3's race was split out. It then said the collapse "was broken once", past tense, while
+  the other two — the authority-*state* clause and the holder clause — were still sharing
+  it. They are independently reachable: a stranger reading bytes lent read-only has
+  `authorityOf = sharedImmutable`, which *permits* the read, so the state clause passes and
+  the holder clause refuses; an accessor over `frozen` bytes is refused before the holder
+  clause is reached.
+
+  `AuditViolationClass.authorityNotHeld` is the second split. Two fixtures that already
+  pinned `authorityOf` at a permitting state — and were therefore already carrying the
+  discriminating evidence — now name the right class, and
+  `a_frozen_stranger_is_refused_by_the_authority_state` is the contrast.
+
+  **A repair that closes one of three and reports the class closed** is the shape, and the
+  count sat in a sentence that was re-read every round without being re-counted.
+- ~~**`authorityOf`'s exhaustiveness claim was four of five, and described `frozen`
+  backwards.**~~ "Four cases, and every `AuthorityState` constructor is one of them — the
+  type says that is a standing requirement, and this is where it is met." There are five
+  branches and five constructors; the omitted one is `atomicShared`, which
+  `AuthorityState`'s own docstring records as *deleted once for being unreachable*. And
+  "another context able to write is `frozen`" leaves out the `NonAtomicHeldByAnother`
+  guard: a writable other holder whose grants are all atomic-only gives `atomicShared`,
+  which `Tests/Memory/AtomicAuthority.lean` had been deciding the whole time.
+
+  Nine rounds since the fifth branch landed. **The one place a type-level standing
+  requirement is claimed discharged is the last place an enumeration should go stale**,
+  and it was silent about precisely the constructor with a history of vacuity.
+- ~~**Three more enumerations short by one, and two counts contradicting the paragraph
+  beside them.**~~ `denialOf`'s order named seven of its eight clause groups, omitting the
+  provenance-source clause — the same defect repaired in `issue?` one commit earlier and
+  not looked for in the sibling. `RequiredProofPackage`'s *own* docstring still said all
+  eleven fields are `Prop`s and that ten are weak, after the module header seven hundred
+  lines above was repaired to say eight and three; that is a repair applied to the
+  instance. `Grass/Resource/Algebra.lean` said "every lifecycle and exhaustion constructor
+  is on `ReachabilityAudit`'s allowlist" — seven of nine, and the two `profileSpecific`
+  constructors are worse off than the seven, since they are on no allowlist and are
+  silenced by same-name blindness, which leaves no record at all. And a paragraph written
+  to record that a guard's arity had been miscounted gave the arity as four when it is six.
+
+  `conflictsWithHistory_of_not_atomic`'s docstring named the incoming access as the
+  non-atomic one when the hypothesis is about the earlier event, and
+  `LedgerEffect.claimedProtocols` re-encoded a five-case match its own projection
+  `LedgerDelta.claimedProtocol` already performs — leaving that projection with no caller
+  anywhere, which is the between-two-gates class §4.4.1 records: `FixtureAudit` scans
+  `Tests/` and `ReachabilityAudit` looks at constructors, so a `def` under `Grass/` that
+  nothing calls falls between them.
+- **`AuthorizedAt`'s grant-epoch conjunct is unreachable, and now says so.** Five of its
+  six conjuncts have a negative theorem or a decided fixture. `CurrentEpoch
+  grant.provenance` — the *grant's* epoch, not the access's — has neither, for the same
+  reason `MayLend`'s identical conjunct has neither: `issue?` requires the provenance live,
+  `allocate?_eq_none_of_outstanding` refuses a record change under an outstanding grant,
+  and `MemoryState.mk` is private, so neither a door nor a fixture can build the state.
+  Kept in the narrowing direction, as `MayLend`'s is. The difference was that `MayLend`
+  argued it out at length and this said nothing, so review had to reconstruct the argument
+  from the sibling to decide the conjunct was deliberate.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than

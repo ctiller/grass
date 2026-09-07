@@ -1551,6 +1551,17 @@ state.
 **A self-transfer is refused** rather than treated as a no-op: it changes nothing, so
 a caller asking for one has made a mistake, and [FOUNDATION.md](../../docs/FOUNDATION.md)
 law 8 says reject rather than approximate.
+
+**The recipient is not checked against any context set, and the obligation ledger's
+transfer clause does check its own.** `LedgerDelta.Applicable` requires
+`newOwner ∈ contexts`; this door requires nothing of the recipient. The asymmetry is
+deliberate and was undocumented, which review noted rather than reported. A duty is
+discharged by running, so a duty handed to a context that never runs is a duty nobody
+can discharge — unrecoverable, and `LedgerDelta.Applicable` is what refuses it. A grant is
+not: `returnGrant?` lets the *lender* clear it, so a grant handed to a context that
+never steps can still be taken back, and `returnGrant?`'s own docstring makes a
+non-stepping holder deliberate ("an external API agent, which never executes a Grass
+step"). Requiring a context set here would refuse exactly the case that door exists for.
 -/
 def transferGrant? (state : MemoryState) (actor : ContextId) (id : GrantId)
     (recipient : ContextId) : Option MemoryState :=
@@ -2065,6 +2076,21 @@ over it.
 `Contains` compares offsets relative to a root, and aliased allocations are assumed
 to agree offset for offset — `MemoryState.aliases` records no offset mapping.
 `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records that.
+
+**Two epoch conjuncts, and only one is reachable.** `CurrentEpoch provenance` is the
+*access's* epoch and `not_authorizedAt_of_stale_epoch` states it. `CurrentEpoch
+grant.provenance` is the *grant's*, and no state the doors can build has a grant whose
+own epoch is stale: `issue?` requires the provenance live, and
+`allocate?_eq_none_of_outstanding` refuses a record change while any grant is
+outstanding over the bytes, so the epoch cannot move under one. `MemoryState.mk` is
+private, so no fixture can construct the state either.
+
+Kept for the same reason and in the same direction as `MayLend`'s identical conjunct,
+whose docstring argues it out at length: refusing is the narrowing direction, and a
+grant naming a defunct epoch should authorize nothing whether or not a door can build
+one. The difference from that case is that `MayLend` said so and this said nothing --
+review found the conjunct discriminated by nothing here and had to reconstruct the
+argument from the sibling.
 -/
 def AuthorizedAt (state : MemoryState) (grant : AuthorityGrant) (context : ContextId)
     (provenance : Provenance) (offset : Nat) (intent : AccessIntent) : Prop :=

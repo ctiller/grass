@@ -734,12 +734,20 @@ end AdmittedVocabulary
 /--
 The proof package every memory-capable profile must close.
 
-Exactly the eleven items of `docs/MEMORY_MODEL.md` §10, as fields. They are `Prop`s
-supplied by the profile owner, so a `MemoryProfile` value cannot be constructed with
-one missing.
+Exactly the eleven items of `docs/MEMORY_MODEL.md` §10, as fields, and all eleven must
+be supplied for a `MemoryProfile` to be constructed. **Eight are `Prop`s the profile
+owner names**; the other three carry *proofs* of propositions this layer states, so
+`:= trivial` does not typecheck for them and there is nothing for an owner to choose.
+`RequiredProofPackage.Holds` conjoins the eight, and an item that gains a statement
+moves from one group to the other.
 
-**Ten of the eleven are weaker than they read**, and an earlier version of this
-paragraph said all eleven were "the mechanical content of" §10's gate. For a bare
+**Eight of the eleven are weaker than they read** — the eight `Holds` conjoins, which
+is the group to phrase this over so that typing a fourth item cannot leave the count
+stale again. An earlier version of this paragraph said all eleven were "the mechanical
+content of" §10's gate, and the version after that said ten, having been written when
+one field had been typed and not revisited when the second and third were. The module
+docstring seven hundred lines above was repaired and this one was not, which is a repair
+applied to the instance rather than the class. For a bare
 `Prop` field all the elaborator asks is that a proposition be *named*, and the field
 list is that naming; nothing relates such a field to the profile, to its admitted
 operations, or to any theorem in the tree, so a profile supplying `True` closes the

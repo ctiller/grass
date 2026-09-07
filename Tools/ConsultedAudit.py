@@ -74,7 +74,17 @@ READERS_IN = DECLARED_IN + sorted((ROOT / "Tests").rglob("*.lean"))
 # and `HasResourceAxis.Value` were outside the scan entirely, and both are live
 # structure fields with no projection anywhere -- exactly what this tool reports,
 # missed by a character class. Review found it.
-DECL = re.compile(r"^\s{2,}(?:private\s+)?([A-Za-z][A-Za-z0-9_']*)\s*:\s*[^=]")
+# **The type may begin on the next line.** This required a non-`=` character after
+# the colon *on the same line*, so a field whose proposition wraps -- which is what a
+# long clause naturally does -- was not a field to this tool at all: not reported, not
+# allowlistable, and invisible to `inert_entries` and `overbroad_entries`, which read
+# the same `fields_in`. Five in-scope fields are written that way, two of them clauses
+# of the event seal, so dropping the `WellFormed` structure exemption put nine of its
+# eleven clauses in scope and the commit said eleven. `Tools/CitationAudit.py`'s
+# `FIELD` already used the lookahead form. Widening it brought six fields into scope
+# and produced no new report, because all six are projected -- which is why the gap
+# was invisible.
+DECL = re.compile(r"^\s{2,}(?:private\s+)?([A-Za-z][A-Za-z0-9_']*)\s*:(?!=)")
 STRUCTURE = re.compile(r"^\s*(?:private\s+)?structure\s+([A-Za-z_][A-Za-z0-9_.']*)")
 
 # Fields deliberately carried without a reader. Every entry states why, and the
@@ -398,6 +408,17 @@ def self_test() -> int:
          {"a.lean": decl, "b.lean": "-- reads .quarry eventually\ndef f := 1\n"}, True),
         ("string literal mentioning .quarry",
          {"a.lean": decl, "b.lean": 'def f := "look at .quarry"\n'}, True),
+        # A field whose type begins on the next line. The pattern required a non-`=`
+        # character after the colon on the same line, so a wrapped clause proposition
+        # was not a field at all -- silent in both directions, since an unread one was
+        # never reported and a read one was never counted.
+        ("field whose type is on the next line",
+         {"a.lean": "structure Probe where" + chr(10) + "  quarry :" + chr(10)
+                    + "    Nat" + chr(10)}, True),
+        # And a `:=` default is still not a field declaration, which is what the
+        # non-`=` requirement was there for.
+        ("a default value is not a declaration",
+         {"a.lean": "structure Probe where" + chr(10) + "  quarry := 3" + chr(10)}, False),
         ("construction only",
          {"a.lean": decl, "b.lean": "def p : Probe := { quarry := 3 }\n"}, True),
     ]

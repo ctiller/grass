@@ -77,8 +77,31 @@ def uninitializedRead : AuditViolationClass := ⟨⟨"uninitializedRead"⟩⟩
 /-- An access was attempted without satisfying its alignment demand. -/
 def misaligned : AuditViolationClass := ⟨⟨"misaligned"⟩⟩
 
-/-- An access was attempted without the authority its loan state requires. -/
+/-- The bytes' **authority state** refuses the access: `authorityOf` reports a state
+whose `PermitsIntent` is false for what the access intends.
+
+That is a question about the storage rather than about the accessor -- `frozen` because
+another context may write, `unavailable` because the storage is dead or in another
+epoch, `atomicShared` against an ordinary write. The accessor may hold a grant and still
+land here. -/
 def authorityUnavailable : AuditViolationClass := ⟨⟨"authorityUnavailable"⟩⟩
+
+/-- The accessor **holds nothing** over bytes somebody holds: authority is outstanding,
+this context is not granted what it intends, and it is not an unencumbered owner.
+
+Distinct from `authorityUnavailable`, and split out for the reason that class's
+docstring gives for `conflictingAccess`. `refusalOf` recorded three rules under one
+name; the first split took §7.3's race out and left two, and this is the second. They
+are reachable independently and neither implies the other: a stranger reading bytes lent
+read-only passes the authority-state clause, because `sharedImmutable` permits a read,
+and is refused here; an accessor over `frozen` bytes is refused there before this clause
+is reached.
+
+A profile reading §8's ledger could not tell those two apart, which is the same
+complaint §7.3's second paragraph made about the race -- "an authority claim" and "a
+race-freedom claim" have to be separable to be stated separately, and so do "the bytes
+refuse you" and "you hold nothing". -/
+def authorityNotHeld : AuditViolationClass := ⟨⟨"authorityNotHeld"⟩⟩
 
 /-- An access declared a ledger effect its protocol does not authorize against
 the obligations actually outstanding: consuming a duty that is not live,
@@ -97,9 +120,17 @@ clause, §3's holder clause, and this. Review demonstrated a race recorded as
 byte-identical in class to a genuine loan violation. The rule against collapsing
 distinguishable failures is stated three times in this layer (here for
 `wrongAddressSpace`, again for `authorityEffectRefused`, and again for
-`faultWithUndeclaredAuthorityEffect`) and was broken once, which is why §7.3's second
-paragraph — race-freedom as a claim separate from an authority claim — could not be
-stated by a profile. -/
+`faultWithUndeclaredAuthorityEffect`), and §7.3's second paragraph — race-freedom as a
+claim separate from an authority claim — could not be stated by a profile while it was
+broken.
+
+**It was broken three ways and this repair closed one of them.** The paragraph above
+said "was broken once" for a round after the split, while the other two rules were still
+sharing `authorityUnavailable`: the authority-state clause and the holder clause, which
+review showed are independently reachable. `authorityNotHeld` is the second split, and
+the count in a sentence like this one is worth re-reading whenever the thing it counts
+changes — a repair that closes one of three and reports the class closed is the shape
+this branch keeps finding. -/
 def conflictingAccess : AuditViolationClass := ⟨⟨"conflictingAccess"⟩⟩
 
 /-- An access declared a change to the authority map that the map refuses: lending
@@ -213,7 +244,7 @@ this list.
 -/
 def emittedByTransition : List AuditViolationClass :=
   [outOfBounds, deadProvenance, permissionDenied, uninitializedRead,
-   authorityUnavailable, obligationNotAuthorized, wrongAddressSpace,
+   authorityUnavailable, authorityNotHeld, obligationNotAuthorized, wrongAddressSpace,
    machineAnswerIncomplete, provenanceExtentMismatch, provenanceSourceMismatch,
    addressDisagreesWithPlacement, placementWraps, authorityEffectRefused,
    conflictingAccess]

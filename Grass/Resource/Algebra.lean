@@ -31,8 +31,17 @@ rewriting a twenty-law bundle later is worse than carrying it; what is not accep
 is carrying it while a reader assumes it is load-bearing. Two audit blind spots hide
 the extent from the gates: `ResourceAlgebra.compatible` is invisible to
 `Tools/ConsultedAudit.py` because `StepPolicy.compatible` satisfies the same name,
-and every lifecycle and exhaustion constructor is on `Tools/ReachabilityAudit.py`'s
-allowlist as declared-ahead-of-its-milestone.
+and **seven of the nine** lifecycle and exhaustion constructors are on
+`Tools/ReachabilityAudit.py`'s allowlist as declared-ahead-of-its-milestone.
+
+The other two are `ResourceExhaustionPolicy.profileSpecific` and
+`ResourceLifecyclePolicy.profileSpecific`, and they are worse off than the seven: they
+are on no allowlist and nothing reports them, because `FaultVisibility.profileSpecific`
+is built in `Tests/` and that tool matches short names. An allowlist entry at least
+leaves a record of a decision; same-name blindness leaves none, and entries for these
+two would be reported by `--inert` as suppressing nothing, so they are named here
+instead. This sentence said "every", which counted the constructors that leave a trace
+and not the two that do not.
 
 ## Reconciling two sketches
 

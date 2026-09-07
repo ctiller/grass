@@ -586,6 +586,15 @@ string in a foreign module and used it to discharge a duty the ISA family had cr
 under its own protocol: no violation, duty gone. The type index restricts nothing
 about where the value came from.
 
+**Through `LedgerDelta.claimedProtocol`, which it used to re-encode.** This wrote the
+same five-case match out again while its three siblings -- `consumes`, `produces` and
+`reowns` -- all delegate. The projection had no caller anywhere in the tree, which is
+the shape `Tools/FixtureAudit.py` and `Tools/ReachabilityAudit.py` between them cannot
+see: one scans `Tests/` and the other looks at constructors, so a `def` under `Grass/`
+that nothing calls falls between them. §4.4.1 records that gap and this was an
+instance of it, with the added cost that a second encoding of one match is a second
+place to keep in step.
+
 A profile checks these, exactly as it checks `createdKinds`, so an operation cannot
 act under a protocol the target never declared. That is not a capability either —
 `docs/OBLIGATIONS.md` §2's "only through the owning protocol theorem" needs a theorem
@@ -593,10 +602,7 @@ this layer cannot state — but it moves the claim from unchecked to declared, w
 what every other open nominal name in this tree got.
 -/
 def claimedProtocols (effect : LedgerEffect) : List ObligationProtocolId :=
-  effect.map fun delta =>
-    match delta with
-    | .create claimed _ _ | .discharge claimed _ _ | .split claimed _ _ _
-    | .join claimed _ _ _ | .transfer claimed _ _ _ => claimed
+  effect.map LedgerDelta.claimedProtocol
 
 /-- Every identity this effect reassigns to a new owner. -/
 def reowns (effect : LedgerEffect) : List ObligationId :=

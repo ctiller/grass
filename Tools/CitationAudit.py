@@ -206,6 +206,13 @@ ALLOWED = {
     # Names another owner declares, or has not yet: `Grass/Std` is the stdlib
     # agent's, and `Grass.Core.Id` is prose about a name deliberately not used.
     "Std.Owned", "Grass.Core.Id",
+    # Lean *tactic* names, likewise. `native_decide` is named by
+    # `Tools/AxiomAudit.lean` and by the trust scan in
+    # `Tools/SourceLocationAudit.py`, both of which exist to refuse it, and by
+    # §4.4.1 recording what that scan looks for. It is core Lean syntax with an
+    # underscore and no dot, so `worth_checking` adjudicates it and nothing in
+    # this tree declares it.
+    "native_decide",
     # Lean *attribute* names, which have the shape of a declaration and are not
     # one. `Grass/Trust/Audit.lean` cites `implemented_by` because rejecting an
     # unverified `@[implemented_by]` replacement is what that module does; this

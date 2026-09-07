@@ -86,9 +86,12 @@ Why the state refuses one access, or `none` if it authorizes it.
 
 Checked before anything commits, so a denial leaves the state exactly as it was
 (`docs/MEMORY_MODEL.md` §1). The order is deliberate: liveness, then space, then the provenance's declared
-extent, then bounds, then placement, then permission, then initialization — so the
-recorded class names the first thing that was wrong rather than an incidental
-consequence.
+allocation source, then its declared extent, then bounds, then placement, then
+permission, then initialization — so the recorded class names the first thing that was
+wrong rather than an incidental consequence. Eight groups, and this list named seven
+until review counted them against the body: `provenanceSourceMismatch` has its own
+violation class in `emittedByTransition` and was missing from the one enumeration a
+reader checks the code against.
 
 The placement clauses sit *after* bounds, and were inserted before it when they
 landed. `addressOf base d.range.start` is only meaningful once the range is known to

@@ -164,9 +164,10 @@ inductive StepRejection where
   impossible count on a compute substep was refused while an impossible count on an
   access was approximated.
 
-  **It is four guards, not two, and three rounds each closed one of them.** Each
-  conjunct is itself an `if` on the intent, so the descriptor arm asks four questions
-  and the arm below asks two more. Round nineteen gave the write conjunct's
+  **It is six guards, not two.** Each conjunct is itself an `if` on the intent, so the
+  descriptor arm asks four questions and the arm below asks two more; three rounds
+  closed them one, one and two, and a paragraph written to record that a guard's arity
+  had been miscounted gave the arity as four. Round nineteen gave the write conjunct's
   intent-true case a fixture; round twenty gave the compute arm's read conjunct one,
   after the round-nineteen lesson turned out to be about the other branch of this
   `match`; round twenty-one found that both remaining arms of the descriptor case
@@ -837,8 +838,12 @@ theorem conflicts_symm_of_state {policy : StepPolicy} {state : MemoryState}
       (fun x y => policy.compatible x y = true) b a :=
   conflicts_symm (fun _ _ hxy => MemoryState.sharesBytes_symm hxy) h
 
-/-- The same at the trace level: an earlier event from another context that a
-non-atomic access overlaps is a conflict, whatever the policy says. -/
+/-- The same at the trace level: an earlier **non-atomic** event from another context
+that an access overlaps is a conflict, whatever the policy says.
+
+The hypothesis is about the *earlier* event, and this sentence named the access. The
+symmetric case — an atomic earlier event and a non-atomic access — is
+`conflicts_of_not_atomic` with the arguments swapped, through `conflicts_symm`. -/
 theorem conflictsWithHistory_of_not_atomic {policy : StepPolicy} {state : MachineState}
     {event : MemoryEvent} {earlier : ValidMemoryEvent} (hmem : earlier ∈ state.events)
     (hcontext : earlier.event.context.id ≠ event.context.id)
@@ -921,7 +926,7 @@ def refusalOf (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor
         -- refuses its write. A bare owner exemption let that write commit. Taking a
         -- grant over your own bytes is a bound you chose; holding none leaves you the
         -- owner. A stranger fails the ownership conjunct either way.
-        some .authorityUnavailable
+        some .authorityNotHeld
       else
         match policy.authorities.find? (fun provider => provider.refuses state.memory d) with
         | some provider => some provider.violationClass
@@ -959,7 +964,7 @@ theorem refusalOf_refuses_the_unauthorized {policy : StepPolicy} {state : Machin
     (hnot : ¬ state.memory.Granted d.context d.provenance d.range d.intent)
     (howns : ¬ (state.memory.OwnedBy d.context d.provenance ∧
       ¬ state.memory.HeldBySelf d.context d.provenance d.range)) :
-    refusalOf policy state d prospective = some .authorityUnavailable := by
+    refusalOf policy state d prospective = some .authorityNotHeld := by
   unfold refusalOf
   rw [hclean, if_neg (by simpa using hledger),
     if_neg (by simpa [Option.isNone_iff_eq_none, Option.isSome_iff_ne_none] using hauth),
