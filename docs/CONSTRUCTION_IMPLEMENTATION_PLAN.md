@@ -246,6 +246,15 @@ saved-register restoration. Valid prepared and closed endpoints alone are
 insufficient. A literal call remains legal and is checked against the same
 pre-call contract without implicit rewriting.
 
+`Grass.Construct.StackObject` supplies the checked base for stack-object
+operations: a `StackObjectRef` carries membership in one exact
+`CheckedStackLayout`, and a `CheckedStackSlice` carries a nonempty relative
+range bounded by that object. Nominal lookup returns a `NamedStackObjectRef`
+carrying exact requested-name equality. The absolute frame-relative range is
+derived and proved to remain within the checked layout; malformed layouts,
+missing objects, zero-size slices, and out-of-bounds slices return structured
+errors.
+
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
 
