@@ -31,6 +31,29 @@ def spec : SpecProcess where
   accepts := fun _ _ => True
   requirements := noDemands
 
+namespace ObservationProjectionFixture
+
+def boolToNat : ObservationProjection Bool Nat where
+  project := List.map Bool.toNat
+
+def natToString : ObservationProjection Nat String where
+  project := List.map toString
+
+def stringLengths : ObservationProjection String Nat where
+  project := List.map String.length
+
+example : (ObservationProjection.identity Nat).comp boolToNat = boolToNat := by
+  simp
+
+example : boolToNat.comp (ObservationProjection.identity Bool) = boolToNat := by
+  simp
+
+example : (stringLengths.comp natToString).comp boolToNat =
+    stringLengths.comp (natToString.comp boolToNat) := by
+  simp
+
+end ObservationProjectionFixture
+
 def system : RelationalSystem spec.AuditEvent where
   State := Bool
   Choice := Unit
