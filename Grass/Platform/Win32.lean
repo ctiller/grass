@@ -4,44 +4,61 @@ import Grass.Platform.Win32.Profile
 /-!
 # The Win32 API facade
 
-`docs/MODULES.md` defines this as "the public facade for the Win32 API family",
-and replaces the spike spelling `Grass.Platform.Win10.X64` with it. The
-replacement is not a rename: a Windows version floor and an architecture/ABI
-selection "remain explicit profile values selected through this API; neither
-belongs in the module path".
+## Where the rule comes from, and where it is not yet
 
-`Grass.Platform.Win32.Profile` is where they went. `decision16` is the profile
-`docs/DECISIONS.md` 16 fixes -- Windows 10 baseline, x64, documented APIs rather
-than direct syscalls -- and `Profile.FollowsDecision16` is decidable, so a
-profile can be compared and discharged rather than spelled.
+The facade rules this module answers to are `g-design:71`, authored at commit
+`fff7344`. That commit is an ancestor of neither `main` nor this branch, and
+`docs/MODULES.md` in this tree contains no facade section at all. So the quoted
+phrases below are accurate to the ruling and *not* checkable from this
+repository until it merges. A reviewer flagged the first draft for quoting them
+as though they were present here; saying where they live is the fix.
+
+The ruling calls this "the public facade for the Win32 API family" and replaces
+the spike spelling `Grass.Platform.Win10.X64` with it. That is not a rename: a
+Windows version floor and an architecture/ABI selection "remain explicit profile
+values selected through this API; neither belongs in the module path".
+
+`Grass.Platform.Win32.Profile` is where they went, and its own header is candid
+about how little is enforced there: the only mechanism is that
+`TargetAbi.handleBits` is total. Nothing consumes the profile yet.
 
 This module declares nothing; it is the import list and this note.
 
 ## The cone
 
-Two shards, and through `Grass.Platform.Win32.Console` one further edge to
-`Grass.ABI.Win64.Convention`, which reaches `Grass.ISA.X86.Register`.
+Five Grass modules, listed exactly in `Tests/Facade/PlatformWin32.lean` and
+compared against the environment on every build, so this paragraph is checked
+rather than asserted.
 
-That last edge is worth stating plainly, because a first draft of this note
-denied it. A calling convention is partly a statement about registers --
-`Grass.ABI.Win64.volatility` and `Grass.ABI.Win64.argumentRegister` are
-functions of `Grass.ISA.X86.Gpr` -- so register vocabulary is inside this cone
-and is meant to be. What is outside is the instruction encoder and decoder:
-nothing about calling `WriteFile` depends on how a `mov` is spelled in bytes.
+`Grass.ISA.X86.Citation` is the only x86 module in it: the console entry points
+carry external-authority citations like every other machine-facing declaration
+here.
 
-`Tests/Facade/PlatformWin32.lean` pins that boundary in both directions, and it
-is the fixture that caught the draft's claim rather than a reviewer.
+An earlier draft claimed a different edge -- that `Grass.ABI.Win64.Convention`
+was in the cone because a calling convention is partly a statement about
+registers -- and pinned `Grass.ISA.X86.Gpr` as vocabulary this facade exports.
+`Console.lean` imported `Convention` and used nothing from it. The import was
+dead, and pinning `Gpr` had made it load bearing, so the cleanup `lake shake`
+exists to prompt would have failed the fixture. `Console.lean` now imports the
+module it actually needs.
 
 ## What is here, and what that is worth
 
-`Grass.Platform.Win32.Console` covers `GetStdHandle`, `WriteFile` against a
-console handle, and `ExitProcess`. Its `WriteRequest`/`WriteResponse` pair
-carries a decidable `Allowed` relation, and `writeAdequate` shows the relation is
-inhabited for every request, so a partial write and a zero-length write are both
-modelled rather than assumed away.
+`Grass.Platform.Win32.Console` covers `GetStdHandle`, `WriteFile`, and
+`ExitProcess`. `Allowed` is the decidable relation between a `WriteRequest` and
+a `WriteResponse`, and `partialWrite_allowed` and `zeroWrite_allowed` are what
+say a partial write and a zero-length write are modelled rather than assumed
+away.
 
-`GetStdHandle` and `ExitProcess` carry no `Allowed` relation. That is an open
-obligation recorded in `Grass/Platform/Win32/Console.lean`, not a claim that
-those calls cannot fail, and `StdHandleId.value` is pinned only by the mutual
-distinctness `StdHandleId.value_injective` states.
+`writeAdequate` is *not* that, though an earlier draft here said it was: it
+witnesses `∃ r, Allowed q r` with `.failure 0`, and `Console.lean` records a
+reviewer's point that this proves adequacy using the one response whose
+lawfulness is least certain. It shows the relation is inhabited and nothing
+more.
+
+`WriteRequest.handle` is an opaque `BitVec 64`; nothing in the model ties it to
+a console handle specifically. `GetStdHandle` and `ExitProcess` carry no
+`Allowed` relation at all -- an open obligation recorded in `Console.lean`, not
+a claim that those calls cannot fail -- and `StdHandleId.value` is pinned only
+by the mutual distinctness `StdHandleId.value_injective` states.
 -/

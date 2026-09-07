@@ -264,9 +264,20 @@ def module_names() -> set[str]:
     way an `import` spells it, so `Console` on its own is prose rather than a
     reference, and expanding suffixes would make it resolve.
 
-    This cannot mask an invented theorem: `LEAN_STYLE_NAME` matches a
-    lowercase-initial name with an underscore, and no module path is spelled
-    that way.
+    A module path is *dropped from the sentence* rather than counted as
+    resolving it. The first version counted it, on the argument that it could
+    not mask an invented theorem because `LEAN_STYLE_NAME` needs a
+    lowercase-initial name with an underscore and no module is spelled that
+    way. That argument covered one branch and missed the other. `named and not
+    resolved` is what catches a fabricated name in *dotted* form --
+    `StdHandleId.write_is_total`, which `LEAN_STYLE_NAME` never matches -- and
+    a module path in the same sentence satisfied `resolved` and suppressed it.
+    A cold reviewer planted exactly that sentence in a facade docstring and the
+    audit passed it.
+
+    So a module is neither enforcement nor invention. It names a file, which is
+    a real thing a sentence may point at, and it leaves the question of what
+    enforces the claim exactly where it was.
     """
     names: set[str] = set()
     for root in (Path("Grass"), Path("Tests"), Path("Tools")):
@@ -310,15 +321,14 @@ def check(path: Path, known: set[str], specs: dict[str, str],
             named = [
                 ident
                 for ident in IDENT.findall(sentence)
-                if not NOT_IDENT.match(ident)
+                if not NOT_IDENT.match(ident) and ident not in modules
             ]
             resolved = [
                 ident for ident in named
-                if ident in known or ident in specs or ident in modules
+                if ident in known or ident in specs
             ]
             for ident in named:
-                if ident not in known and ident not in modules \
-                        and ident in specs:
+                if ident not in known and ident in specs:
                     cited.setdefault(
                         ident, f"{specs[ident]} (cited {path.as_posix()}"
                         f":{line})")
@@ -328,7 +338,7 @@ def check(path: Path, known: set[str], specs: dict[str, str],
             invented = [
                 ident for ident in named
                 if ident not in known and ident not in specs
-                and ident not in modules and LEAN_STYLE_NAME.match(ident)
+                and LEAN_STYLE_NAME.match(ident)
             ]
             if invented:
                 findings.append(
@@ -350,11 +360,23 @@ def check(path: Path, known: set[str], specs: dict[str, str],
     return findings
 
 
+def audited_roots() -> list[Path]:
+    """The trees this audit reads.
+
+    `Tests/` is excluded: fixture comments describe values ("an identity that is
+    never live"), not mechanisms, and the fixtures are themselves the evidence a
+    claim would point at.
+
+    A function rather than a literal inside `main` so that
+    `Tools/DocstringAuditSelfTest.py` can assert what the gate is looking at.
+    Narrowing this to one subdirectory takes the audit from 57 modules to 7 and
+    was invisible to the case list.
+    """
+    return [Path("Grass")]
+
+
 def main() -> int:
-    # `Tests/` is excluded: fixture comments describe values ("an identity that
-    # is never live"), not mechanisms, and the fixtures are themselves the
-    # evidence a claim would point at.
-    roots = [Path("Grass")]
+    roots = audited_roots()
     known = declaration_names()
     specs = specification_names()
     modules = module_names()
@@ -365,6 +387,18 @@ def main() -> int:
             continue
         for path in sorted(root.rglob("*.lean")):
             findings.extend(check(path, known, specs, modules, cited))
+    return report(findings, cited)
+
+
+def report(findings: list[str], cited: dict[str, str]) -> int:
+    """Turn what the audit found into output and an exit code.
+
+    Separated from `main` so it can be tested. A reviewer mutated `main` to
+    discard its findings before reporting -- which makes the gate incapable
+    of failing, the worst defect a gate can have -- and every case in
+    `Tools/DocstringAuditSelfTest.py` stayed green, because none of them ran
+    this code at all.
+    """
     if findings:
         print("docstring audit: claims that name nothing enforcing them\n")
         for finding in findings:

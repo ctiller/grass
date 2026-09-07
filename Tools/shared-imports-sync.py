@@ -4,29 +4,52 @@
 module in the build: a name the declaration list cannot see is a name
 `Tools/DocstringAudit.py` reports as invented, and a module the axiom audit
 cannot see is a module whose axioms nobody counted. Both lists were maintained
-by hand, and that had two costs that showed up within a day of each other.
+by hand, and that had two costs.
 
-The first is drift. When this tool was written `Tools/AxiomAudit.lean` was
-three modules behind the tree, and therefore behind `Tools/DeclNames.lean` too.
+The first is drift. When this tool was written `Tools/AxiomAudit.lean` was three
+modules behind the tree, and therefore behind `Tools/DeclNames.lean` too.
 
-The second is worse, and is why this exists rather than a reminder in a header.
-Those two files sit in one agent's exclusive scope, so an agent adding a module
-anywhere else in `Grass/` could not add the line that keeps the gates honest.
-Five separate requests (`g-construct:7`, `:10`, `:15`, `:17`, `:19`) queued up
-behind a single owner, each one naming modules that the owner could not merge
+The second is worse. Those two files sit in one agent's exclusive scope, so an
+agent adding a module anywhere else in `Grass/` could not add the line that
+keeps the gates honest. Five requests (`g-construct:7`, `:10`, `:15`, `:17`,
+`:19`) queued behind one owner, each naming modules that owner could not merge
 anyway: the import must land in the same commit as the module it names, because
 `lake env lean` resolves imports against the current tree and an import of a
 module that is not there yet fails outright for everyone. `c-stdlib:25` reports
 hitting exactly that.
 
-So the route is mechanical rather than social. Any agent adding a module runs
-this with `--write` in the same commit, and the resulting diff is confined to a
-sorted import block. `--check` is the gate, and it fails loudly with the exact
-lines to add or drop.
+So the route is mechanical. Any agent adding a module runs this with `--write`
+in the same commit, and the diff is a sorted import block.
+
+## Why this rewrites so defensively
+
+The first version parsed the import block as "the leading run of lines that look
+like imports", stopping at the first line that did not, and then re-emitted that
+run. A cold reviewer destroyed it in four ways within one session, each of which
+ended with `--check` reporting success:
+
+* one CRLF line in an otherwise-LF file made the whole remainder of the file
+  parse as a single import line, so `--write` deleted every declaration in
+  `Tools/AxiomAudit.lean` and left an import list behind;
+* one blank line inside the block hid the imports after it, which `--write` then
+  re-added, producing 53 duplicates that `--check` could not see;
+* a module docstring above the imports made the block start at line 0, so the
+  new list was written before the docstring and the old one left after it.
+
+The lesson is that a rewriter must not be trusted to have parsed correctly. So:
+
+* lines are split with `splitlines`, which treats CRLF, LF and a mixture alike;
+* `import Grass.` lines are collected from anywhere in the file rather than from
+  a leading run, so a blank line or a comment cannot hide any;
+* **every other line is carried through untouched**, and that is asserted rather
+  than assumed -- `plan` returns the surviving lines and `process` checks they
+  are exactly the file's non-library-import lines, in order;
+* after writing, the result is re-parsed and must be a fixpoint with the same
+  non-import content. A failure raises before anything else is written.
 
 Sorted rather than grouped, because a sorted list is what two agents adding
-modules concurrently can both produce without a conflict that has to be
-resolved by taste.
+modules concurrently can both produce without a conflict resolved by taste.
+Order is compared, not just membership, so an unsorted list is drift.
 
 Run:
     python Tools/shared-imports-sync.py            # check, exits 1 on drift
@@ -34,11 +57,15 @@ Run:
 """
 
 import io
+import re
 import sys
 from pathlib import Path
 
 TARGETS = ("Tools/DeclNames.lean", "Tools/AxiomAudit.lean")
 LIBRARY_ROOT = "Grass"
+LIBRARY_IMPORT = re.compile(r"^import\s+(" + LIBRARY_ROOT + r"\.[A-Za-z0-9_.']*)\s*$")
+# Lean identifiers, so a stray file name cannot become a broken import line.
+MODULE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_']*(\.[A-Za-z_][A-Za-z0-9_']*)*$")
 
 
 def modules_on_disk() -> list[str]:
@@ -48,7 +75,7 @@ def modules_on_disk() -> list[str]:
         sys.exit(
             f"no {LIBRARY_ROOT}/ directory here. This tool rewrites import "
             "lists against the tree, and run from the wrong directory it would "
-            "compute an empty tree and delete every import; refusing.")
+            "compute a different tree; refusing.")
     names = sorted(
         ".".join(path.with_suffix("").parts)
         for path in root.rglob("*.lean")
@@ -56,52 +83,79 @@ def modules_on_disk() -> list[str]:
     if not names:
         sys.exit(f"{LIBRARY_ROOT}/ contains no .lean files; refusing to write "
                  "an empty import list")
+    bad = [name for name in names if not MODULE_NAME.match(name)]
+    if bad:
+        sys.exit(
+            f"these paths are not spellable as Lean module names: {bad}. "
+            "Writing them would produce a file that does not parse; rename the "
+            "files or teach this tool why they are acceptable.")
     return names
 
 
-def split_block(text: str, newline: str) -> tuple[list[str], list[str], str]:
-    """Return (leading non-library imports, current library imports, rest)."""
-    lines = text.split(newline)
-    other: list[str] = []
-    current: list[str] = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        if line.startswith(f"import {LIBRARY_ROOT}."):
-            current.append(line[len("import "):])
-        elif line.startswith("import "):
-            other.append(line)
-        elif line.strip() == "" and current == [] and index < len(lines) - 1:
-            # Blank lines before the block start are kept with the header.
-            other.append(line)
+def plan(text: str) -> tuple[list[str], list[str], int]:
+    """Return (library imports found, all other lines, where the block starts).
+
+    Library imports are collected from anywhere in the file: a blank line, a
+    comment or a stray carriage return must not be able to hide one.
+    """
+    lines = text.splitlines()
+    found: list[str] = []
+    others: list[str] = []
+    first: int | None = None
+    for index, line in enumerate(lines):
+        match = LIBRARY_IMPORT.match(line)
+        if match:
+            if first is None:
+                first = len(others)
+            found.append(match.group(1))
         else:
-            break
-        index += 1
-    return other, current, newline.join(lines[index:])
+            others.append(line)
+    return found, others, 0 if first is None else first
+
+
+def render(wanted: list[str], others: list[str], at: int, newline: str) -> str:
+    block = [f"import {name}" for name in wanted]
+    return newline.join(others[:at] + block + others[at:]) + newline
 
 
 def process(path: str, wanted: list[str], write: bool) -> list[str]:
     raw = io.open(path, encoding="utf-8", newline="").read()
-    newline = "\r\n" if "\r\n" in raw else "\n"
-    other, current, rest = split_block(raw, newline)
+    newline = "\r\n" if raw.count("\r\n") * 2 >= raw.count("\n") else "\n"
+    found, others, at = plan(raw)
 
-    missing = [name for name in wanted if name not in current]
-    extra = [name for name in current if name not in wanted]
-    duplicated = sorted({name for name in current if current.count(name) > 1})
+    if not found:
+        sys.exit(
+            f"{path} contains no `import {LIBRARY_ROOT}.` line. This tool "
+            "maintains that block and will not guess where to put a new one.")
 
-    problems = []
-    for name in missing:
-        problems.append(f"{path}: missing  import {name}")
-    for name in extra:
-        problems.append(
-            f"{path}: stale    import {name}  (no such file in the tree)")
-    for name in duplicated:
+    problems: list[str] = []
+    for name in wanted:
+        if name not in found:
+            problems.append(f"{path}: missing  import {name}")
+    for name in found:
+        if name not in wanted:
+            problems.append(
+                f"{path}: stale    import {name}  (no such file in the tree)")
+    for name in sorted({n for n in found if found.count(n) > 1}):
         problems.append(f"{path}: repeated import {name}")
+    if not problems and found != wanted:
+        problems.append(f"{path}: out of order (the block must be sorted)")
 
-    if write and (missing or extra or duplicated):
-        block = newline.join(f"import {name}" for name in wanted)
-        io.open(path, "w", encoding="utf-8", newline="").write(
-            newline.join(other) + newline + block + newline + rest)
+    if not (write and problems):
+        return problems
+
+    updated = render(wanted, others, at, newline)
+
+    # Nothing but the import block may move. Re-parse the rendered text and
+    # require a fixpoint with identical surviving lines before touching disk.
+    again, others_again, at_again = plan(updated)
+    if again != wanted or others_again != others or at_again != at:
+        raise SystemExit(
+            f"{path}: refusing to write. Re-parsing the rewritten file did not "
+            "reproduce it, which means this tool mis-read the original. "
+            "Nothing was changed. Report this with the file attached.")
+
+    io.open(path, "w", encoding="utf-8", newline="").write(updated)
     return problems
 
 
@@ -121,19 +175,21 @@ def main(argv: list[str]) -> int:
 
     if not problems:
         print(f"shared import lists: both registries import all "
-              f"{len(wanted)} modules under {LIBRARY_ROOT}/")
+              f"{len(wanted)} modules under {LIBRARY_ROOT}/, in order")
         return 0
 
+    lines = ["  " + problem for problem in problems]
     if write:
         print(f"shared import lists: rewrote {len(TARGETS)} registries to "
               f"{len(wanted)} modules. Changes:")
-        for problem in problems:
-            print("  " + problem)
+    else:
+        print("shared import lists are out of step with the tree:\n")
+    for line in lines:
+        # Windows consoles are cp1252 by default and a mis-parsed line can
+        # carry anything; a diagnosis must not die on its own output.
+        sys.stdout.buffer.write(line.encode("utf-8", "replace") + b"\n")
+    if write:
         return 0
-
-    print("shared import lists are out of step with the tree:\n")
-    for problem in problems:
-        print("  " + problem)
     print(
         "\nRun `python Tools/shared-imports-sync.py --write` in the same commit "
         "as the module change. The import must land with the module it names: "

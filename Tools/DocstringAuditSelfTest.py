@@ -29,6 +29,8 @@ case that stops reaching the check now fails rather than passing.
 Run: python Tools/DocstringAuditSelfTest.py
 """
 
+import contextlib
+import io as _io
 import sys
 import tempfile
 from pathlib import Path
@@ -74,9 +76,30 @@ CASES = [
         True,
     ),
     (
-        "module path the tree contains",
+        "module path alone does not enforce anything",
         "`Grass.Platform.Win32.Console` ensures every handle has a width.",
+        "names no enforcing type",
+        True,
+    ),
+    (
+        "module path beside a real enforcer",
+        "`Grass.Platform.Win32.Console` ensures the remainder is unique, by "
+        "`cons_injective_right`.",
         None,
+        True,
+    ),
+    (
+        "fabricated dotted theorem laundered through a module path",
+        "`Grass.Platform.Win32.Console` ensures every write transfers every "
+        "requested byte, as proved by `StdHandleId.write_is_total`.",
+        "knows no such declaration",
+        True,
+    ),
+    (
+        "bare claim laundered through a module path",
+        "`Tools.DeclNames` ensures no docstring can name a declaration that "
+        "does not exist.",
+        "names no enforcing type",
         True,
     ),
     (
@@ -112,6 +135,124 @@ def run_one(tmp: Path, sentence: str, specs, modules, cited) -> list[str]:
     path = tmp / "Case.lean"
     path.write_text("/-!\n" + sentence + "\n-/\n", encoding="utf-8")
     return audit.check(path, KNOWN, specs, modules, cited)
+
+
+# What the gate must still be *looking at*. Every case above calls `check`
+# directly, so none of them says anything about scope -- and a reviewer showed
+# how much that leaves open. Narrowing `doc_blocks` to `/-!` drops all 1717
+# declaration docstrings and 70% of the claim sentences; narrowing the audited
+# roots to one subdirectory audits 7 modules instead of 57; `main` discarding
+# its findings makes the gate unable to fail at all. Every one of those left the
+# case list green.
+#
+# Floors, not exact counts: the corpus grows, and a ratchet that had to be
+# edited on every commit would be edited without being read. Raise them in the
+# same reviewed change that grows the corpus.
+MINIMUM_FILES = 55
+MINIMUM_DOC_BLOCKS = 1800
+MINIMUM_CLAIM_SENTENCES = 110
+MINIMUM_DECLARATION_DOCSTRINGS = 1600
+
+
+def reporting_acts_on_findings() -> list[str]:
+    """A gate that cannot fail is worse than no gate."""
+    failures = []
+    # `report` writes through `sys.stdout.buffer`, so the sink needs a
+    # real byte layer; `StringIO` has none.
+    sink = _io.TextIOWrapper(_io.BytesIO(), encoding="utf-8")
+    with contextlib.redirect_stdout(sink):
+        with_findings = audit.report(["Some/File.lean:1: a finding"], {})
+        without = audit.report([], {})
+    if with_findings != 1:
+        failures.append(
+            f"reporting returned {with_findings} with a finding in hand; "
+            "the audit would exit 0 on a tree full of unbacked claims")
+    if without != 0:
+        failures.append(
+            f"reporting returned {without} with nothing found; a gate that "
+            "fails on a clean tree gets switched off")
+    return failures
+
+
+def main_acts_on_findings() -> list[str]:
+    """`main` must hand `report` what it actually found.
+
+    Testing `report` alone moved the untested boundary rather than closing
+    it: mutating `main` to call `report([], cited)` left the gate unable to
+    fail and left every other case green. So `main` is run here against a
+    one-file stub corpus, with the expensive oracles stubbed out, and its
+    exit code is the assertion.
+    """
+    failures = []
+    saved = (audit.declaration_names, audit.specification_names,
+             audit.module_names, audit.audited_roots)
+    sink = _io.TextIOWrapper(_io.BytesIO(), encoding="utf-8")
+    try:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / "Bad.lean").write_text(
+                "/-!" + chr(10)
+                + "This ensures the encoding is unique." + chr(10)
+                + "-/" + chr(10),
+                encoding="utf-8")
+            audit.declaration_names = lambda: set(KNOWN)
+            audit.specification_names = lambda: {}
+            audit.module_names = lambda: set()
+            audit.audited_roots = lambda: [root]
+            with contextlib.redirect_stdout(sink):
+                code = audit.main()
+            if code != 1:
+                failures.append(
+                    f"main() returned {code} over a corpus whose only "
+                    "docstring is an unbacked claim; the gate cannot fail")
+            (root / "Bad.lean").unlink()
+            with contextlib.redirect_stdout(sink):
+                clean = audit.main()
+            if clean != 0:
+                failures.append(
+                    f"main() returned {clean} over an empty corpus; a gate "
+                    "that fails on a clean tree gets switched off")
+    finally:
+        (audit.declaration_names, audit.specification_names,
+         audit.module_names, audit.audited_roots) = saved
+    return failures
+
+
+def corpus_shape() -> list[str]:
+    """Check the gate still reads the corpus it is credited with reading."""
+    failures = []
+    roots = audit.audited_roots()
+    if Path("Grass") not in roots:
+        failures.append(
+            f"the audit's roots are {roots}; Grass/ is the library and has to "
+            "be among them")
+    files = [path for root in roots if root.is_dir()
+             for path in sorted(root.rglob("*.lean"))]
+    blocks = 0
+    claims = 0
+    declaration_docstrings = 0
+    for path in files:
+        source = path.read_text(encoding="utf-8", errors="replace")
+        declaration_docstrings += source.count("/--")
+        for _, block in audit.doc_blocks(source):
+            blocks += 1
+            for sentence in audit.sentences(block):
+                if reaches_check(sentence):
+                    claims += 1
+    for name, have, want in [
+        ("files audited", len(files), MINIMUM_FILES),
+        ("doc blocks parsed", blocks, MINIMUM_DOC_BLOCKS),
+        ("claim sentences reaching the check", claims,
+         MINIMUM_CLAIM_SENTENCES),
+        ("declaration docstrings in the corpus", declaration_docstrings,
+         MINIMUM_DECLARATION_DOCSTRINGS),
+    ]:
+        if have < want:
+            failures.append(
+                f"{name}: {have}, below the reviewed floor of {want}. The gate "
+                "is reading less than it was reviewed against; if the "
+                "reduction is deliberate, lower the floor in the same change.")
+    return failures
 
 
 def main() -> int:
@@ -162,6 +303,10 @@ def main() -> int:
                 failures.append(
                     "vocabulary case resolved but was not reported; a "
                     "specification-resolved citation must stay visible")
+
+    failures.extend(corpus_shape())
+    failures.extend(reporting_acts_on_findings())
+    failures.extend(main_acts_on_findings())
 
     if failures:
         print("docstring audit self-test: FAILED\n")

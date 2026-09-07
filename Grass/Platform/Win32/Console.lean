@@ -1,4 +1,4 @@
-import Grass.ABI.Win64.Convention
+import Grass.ISA.X86.Citation
 
 /-!
 # Win32 standard-output API contracts

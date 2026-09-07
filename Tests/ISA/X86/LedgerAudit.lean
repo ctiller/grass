@@ -4,6 +4,7 @@ import Grass.ISA.X86.Decode
 import Grass.ISA.X86.Profile
 import Grass.ABI.Win64.UnwindBytes
 import Grass.Platform.Win32.Console
+import Grass.Platform.Win32.Profile
 
 /-!
 # Ledger coverage gate
@@ -88,7 +89,8 @@ def auditedModules : List Name :=
   [`Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.Unwind,
-   `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console]
+   `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
+   `Grass.Platform.Win32.Profile]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -102,7 +104,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 98
+def owedBaseline : Nat := 100
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -124,7 +126,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 54
+def notBehaviourBaseline : Nat := 56
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -168,7 +170,11 @@ real instruction in it.
 def notModelling : List Name :=
   [`Grass.ISA.X86.Citation, `Grass.ISA.X86.DualCitation,
    `Grass.ISA.X86.Sources, `Grass.ISA.X86.Ledger,
-   `Grass.ISA.X86.Profile, `Grass.ISA.X86.Performance]
+   `Grass.ISA.X86.Profile, `Grass.ISA.X86.Performance,
+   -- The two authoring facades. They declare nothing at all, so there
+   -- is no declaration under them that could owe a citation; the
+   -- shards they front are classified individually above and here.
+   `Grass.ISA.X86, `Grass.Platform.Win32]
 
 /--
 Every Lean module found under `root` on disk, as a module name.
@@ -262,6 +268,12 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- The platform selection itself. Choosing Windows 10, x64 and documented
+    -- APIs is a project decision recorded in `docs/DECISIONS.md` 16, not a
+    -- claim about how Windows behaves; the external content it implies is the
+    -- pair of widths in `owed` below.
+    `Grass.Platform.Win32.decision16,
+    `Grass.Platform.Win32.Profile.FollowsDecision16,
     -- Win64 and Win32: Grass's own constructions over the ABI types. The
     -- external content they are built from is in `owed` below.
     `Grass.ABI.Win64.Ascends, `Grass.ABI.Win64.ascends,
@@ -330,6 +342,13 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    -- The Win32 handle and pointer widths. A reviewer of the platform profile
+    -- pointed out that these are external ABI facts wearing the clothes of a
+    -- project selection: `docs/DECISIONS.md` 16 fixes x64, but it says nothing
+    -- about how wide a `HANDLE` is, and a consistently wrong pair would pass
+    -- every gate here. They owe a citation like any other machine fact.
+    `Grass.Platform.Win32.TargetAbi.handleBits,
+    `Grass.Platform.Win32.TargetAbi.pointerBits,
     -- Architectural facts that were in `notBehaviour` and should not have been.
     -- A reviewer pointed at the sharpest case: `ByteReg.Encodable` is one of the
     -- six cited declarations and is *defined from* `highCapable` and

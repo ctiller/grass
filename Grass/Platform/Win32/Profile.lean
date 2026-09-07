@@ -8,25 +8,49 @@ Windows 10 as API baseline and documented APIs rather than direct syscalls".
 
 `docs/MODULES.md` requires those to be *selections made through this API* rather
 than components of a module path, and replaces the spike spelling
-`Grass.Platform.Win10.X64` with `Grass.Platform.Win32` for exactly that reason:
-a path segment cannot be varied, compared, or discharged, so encoding a
-deployment floor and an architecture into one conflates four separate choices
-and makes none of them checkable.
+`Grass.Platform.Win10.X64` with `Grass.Platform.Win32`. A path segment is
+not a value, so it supports no comparison and nothing can be discharged
+against it, and one segment holding a deployment floor and an architecture
+conflates four separate choices. `Profile.FollowsDecision16` is decidable,
+which is what the change buys.
 
-## What is enforced here, and what is not
+## Mechanism, and its absence
 
-The three axes below are total functions of an inductive, and that totality is
-the whole of the mechanism: `TargetAbi.handleBits` cannot be extended with a
-second ABI without stating that ABI's handle width, because a missing case is a
-compile error under this repository's settings. The equations proved below are
-`rfl` and establish nothing on their own -- with one inhabitant per axis there
-is nothing yet for them to distinguish. They are here to fail later, when a
-second inhabitant arrives.
+One mechanism, on one axis: `TargetAbi.handleBits` and
+`TargetAbi.pointerBits` are total functions of `TargetAbi`, so a second ABI
+cannot be added without stating its widths: omitting a case is
+`error: Missing cases: x86` under this repository's settings. That was checked
+by adding an `x86` inhabitant, not assumed.
 
-`CallDiscipline` is the axis that is not yet degenerate. `docs/DECISIONS.md` 16
-chooses documented APIs *rather than* direct syscalls, so both are named and
-`decision16` selects one; `Profile.FollowsDecision16` is decidable and
-`decision16_follows` discharges it.
+Everything else here is vocabulary with no enforcement behind it, and an earlier
+version of this header claimed otherwise in three ways a reviewer falsified by
+running the mutations:
+
+* "the three axes are total functions" -- they are inductives, and only
+  `TargetAbi` has any total function over it. Adding `| windows11` to
+  `ApiBaseline`, or a fourth `CallDiscipline`, compiles with zero friction,
+  because nothing in the repository matches on either.
+* two `rfl` equations were said to be "here to fail later, when a second
+  inhabitant arrives". They cannot fail: they were about the ABI that
+  `decision16` selects, which stays `.x64` whatever else is added. They have been deleted rather than
+  reworded: an equation that holds by `rfl` under every extension is not a
+  safeguard.
+* the widths were said to be "a consequence of the selection" for
+  `Grass.Platform.Win32.Console`. Nothing consumes this module.
+  `Console.lean` writes `BitVec 64` literally and does not import it, so the
+  width is a constant that happens to be right -- the exact hazard `Console`
+  itself records for `StdHandleId.value`.
+
+`docs/DECISIONS.md` 16 fixes x64 but says nothing about how wide a `HANDLE` is,
+so `handleBits` and `pointerBits` are uncited external ABI facts and are carried
+as debt in `Tests/ISA/X86/LedgerAudit.lean`'s `owed` list. Wiring `Console` to
+this module, so the width follows the selection rather than agreeing with it by
+coincidence, is an open obligation and not something this file has done.
+
+`CallDiscipline` is the one axis that is not degenerate as *vocabulary*:
+`docs/DECISIONS.md` 16 chooses documented APIs *rather than* direct syscalls, so
+both are named, `Profile.FollowsDecision16` is decidable, `decision16_follows`
+discharges it, and `directSyscall_not_decision16` rules the alternative out.
 -/
 
 namespace Grass.Platform.Win32
@@ -55,10 +79,13 @@ inductive TargetAbi where
 
 /-- The width of a Win32 `HANDLE` under this ABI, in bits.
 
-Total by construction. A second ABI cannot be added without answering this,
-which is the point: `Grass.Platform.Win32.Console` states handles as
-`BitVec 64`, and that width is a consequence of the selection rather than a
-constant that happens to be right. -/
+`TargetAbi.handleBits` is total, so a second ABI cannot be added without
+answering this.
+
+That exhaustiveness is the only guarantee here. `Grass.Platform.Win32.Console`
+states handles as `BitVec 64` independently and does not import this module, so
+the two agree by inspection rather than by construction. An external ABI fact
+with no citation: carried in `owed` by `Tests/ISA/X86/LedgerAudit.lean`. -/
 def TargetAbi.handleBits : TargetAbi → Nat
   | .x64 => 64
 
@@ -124,15 +151,5 @@ theorem directSyscall_not_decision16 (p : Profile)
   intro ⟨_, _, hd⟩
   rw [h] at hd
   exact CallDiscipline.noConfusion hd
-
-/-- Handle width under the selected profile.
-
-`rfl` today, and stated so that a second `TargetAbi` inhabitant with a different
-handle width has to change this line rather than pass silently. -/
-theorem decision16_handleBits : decision16.abi.handleBits = 64 := rfl
-
-/-- Pointer width under the selected profile. Degenerate for the same reason as
-`decision16_handleBits`, and here for the same purpose. -/
-theorem decision16_pointerBits : decision16.abi.pointerBits = 64 := rfl
 
 end Grass.Platform.Win32
