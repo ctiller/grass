@@ -151,6 +151,7 @@ process produced reach the network's trace at all. -/
   observeAtRoot := rfl
   maySpawn := fun _ _ => False
   sharedAccess := fun _ region => region.elim
+  sharedInvariant := fun region => region.elim
   population :=
     { bound := fun _ => .exactlyOne
       identity := fun _ => .static }
@@ -176,6 +177,13 @@ process produced reach the network's trace at all. -/
   steps := fun edge => edge.elim
   channel := fun edge => edge.elim
   sessionOpenIsRecorded := fun edge => edge.elim
+  -- No channels, so nothing can coalesce and no shared regions, so nothing can
+  -- be written: `ProcessPlan.coalescing`, `sharedUpdate` and their laws are all
+  -- eliminations here. Both notes say the cost lands only on plans that use the
+  -- feature; this is what that looks like.
+  coalescing := fun edge => edge.elim
+  sharedUpdate := fun _ _ _ _ _ _ region => region.elim
+  sharedUpdatePreserves := fun _ _ _ _ _ _ region => region.elim
   escrowImpliesOutstanding := fun edge => edge.elim
 
 /-! ## The network that has something to publish -/
@@ -258,6 +266,7 @@ def chiming_is_a_start : chimingPlan.ExactInitialNetwork () chiming where
   onlyTheRoot := fun _ _ _ _ => ⟨rfl, rfl⟩
   nothingInFlight := fun edge => edge.elim
   sessionsFresh := fun edge => edge.elim
+  sharedInvariantAtStart := fun region => region.elim
   historyFromEmpty := .extend (.refl _) theRootsGeneration theRootsGeneration_admissible
 
 /-! ## The commit -/

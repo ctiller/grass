@@ -73,7 +73,7 @@ theorem twoPendingAt_off {session : serverTopology.ChannelId ()} (notWire : sess
 
 /-- The world after both sends. -/
 noncomputable def sent2 : ServerWorld :=
-  { quiet with inFlight := fun _ => twoPendingAt }
+  { World.withRoot with inFlight := fun _ => twoPendingAt }
 
 theorem sent2_wire : sent2.inFlight () wire = twoPending := twoPendingAt_wire
 
@@ -85,6 +85,7 @@ manufactures the world its own complaint needs is not evidence of anything. This
 is `liveSteps.Send` again, at the same plan, one step further on.
 -/
 theorem the_second_send : serverPlan.SendsEscrow sent sent2 () payload strandedOccurrence where
+  senderIsLive := ⟨World.rootListener, rfl, ⟨rfl, rfl⟩, trivial⟩
   contractual :=
     ⟨rfl, rfl,
       by rw [sent_wire]
@@ -637,6 +638,7 @@ theorem afterCoalesce_off {session : serverTopology.ChannelId ()} (notWire : ses
   show (if session = wire then merged else EscrowLedger.empty) = EscrowLedger.empty
   rw [if_neg notWire]
 
+open Classical in
 /--
 **A coalesce: the constructor nothing in this corpus had ever built.**
 
@@ -712,10 +714,24 @@ theorem the_coalesce :
     rw [afterCoalesce_wire]
     exact ⟨List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self),
       merged_other carrier_ne_escrowed⟩
-  carrierCarriesTheMessage := by
+  carrierIsPermitted := by
     intro carrier' isMerge
     cases isMerge
-    rfl
+    refine ⟨[escrowed], by simp, List.mem_cons_self, ?_, ?_⟩
+    · intro source
+      constructor
+      · intro inList
+        rw [List.mem_singleton.mp inList, afterCoalesce_wire]
+        exact merged_first
+      · intro resolved
+        rw [afterCoalesce_wire] at resolved
+        by_cases isFirst : source = escrowed
+        · rw [isFirst]; exact List.mem_cons_self
+        · rw [merged_other isFirst] at resolved
+          exact absurd resolved (by intro equal; cases equal)
+    · intro source inList
+      rw [List.mem_singleton.mp inList]
+      rfl
   endpointDeathIsEarned := by
     constructor
     · intro reason isDeath
@@ -779,8 +795,9 @@ theorem a_coalesce_may_not_change_the_payload
     {other : EdgeOccurrence serverTopology World.serverMessage ()}
     (different : other.1 ≠ escrowed.1)
     (merged : serverPlan.ResolvesEscrow before after () wire escrowed
-      (.coalesced other)) : False :=
-  different (merged.carrierCarriesTheMessage other rfl)
+      (.coalesced other)) : False := by
+  obtain ⟨sources, _, isSource, _, permitted⟩ := merged.carrierIsPermitted other rfl
+  exact different (permitted escrowed isSource).symm
 
 /--
 **A carrier that is outstanding after the first merge is available to a second.**
@@ -955,10 +972,29 @@ theorem the_second_coalesce :
     rw [afterBothMerged_wire]
     exact ⟨List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self),
       bothMerged_other carrier_ne_escrowed carrier_ne_stranded⟩
-  carrierCarriesTheMessage := by
+  carrierIsPermitted := by
     intro carrier' isMerge
     cases isMerge
-    rfl
+    refine ⟨[escrowed, stranded], by simp, List.mem_cons_of_mem _ List.mem_cons_self, ?_, ?_⟩
+    · intro source
+      constructor
+      · intro inList
+        rw [afterBothMerged_wire]
+        rcases List.mem_cons.mp inList with isFirst | rest
+        · rw [isFirst]; exact bothMerged_first
+        · rw [List.mem_singleton.mp rest]; exact bothMerged_second
+      · intro resolved
+        rw [afterBothMerged_wire] at resolved
+        by_cases isFirst : source = escrowed
+        · rw [isFirst]; exact List.mem_cons_self
+        · by_cases isSecond : source = stranded
+          · rw [isSecond]; exact List.mem_cons_of_mem _ List.mem_cons_self
+          · rw [bothMerged_other isFirst isSecond] at resolved
+            exact absurd resolved (by intro equal; cases equal)
+    · intro source inList
+      rcases List.mem_cons.mp inList with isFirst | rest
+      · rw [isFirst]; rfl
+      · rw [List.mem_singleton.mp rest]; rfl
   endpointDeathIsEarned := by
     constructor
     · intro reason isDeath
@@ -992,5 +1028,58 @@ theorem both_sources_merged :
   exact ⟨bothMerged_first, bothMerged_second,
     List.mem_cons_of_mem _ (List.mem_cons_of_mem _ List.mem_cons_self),
     bothMerged_other carrier_ne_escrowed carrier_ne_stranded⟩
+
+/-! ## A policy the old field forbade
+
+`agent-bus` ruling `g-design:83` generalised `carrierCarriesTheMessage` into
+`ProcessPlan.coalescing` because a per-source equality made latest-wins and
+folding channels unconstructible at *every* plan. A field that is only ever
+instantiated at `ProcessPlan.exactDedup` would be that generalisation in name
+only, which is the shape this ledger has spent eight rounds refusing, so the
+distinction is exhibited rather than described.
+
+What is here is the distinction at the level of the *policy*. A plan-level
+witness — a second channel-carrying plan whose `coalescing` is `latestWins`, with
+a `ResolvesEscrow` merging two different payloads through it — is owed and
+recorded in §10.127; this is the part that is cheap and still falsifiable.
+-/
+
+/-- A latest-wins policy: the carrier is one of the sources, and the others are
+discarded rather than required to agree with it. -/
+def latestWins (sources : List (EdgeOccurrence serverTopology World.serverMessage ()))
+    (carrier : EdgeOccurrence serverTopology World.serverMessage ()) : Prop :=
+  carrier ∈ sources
+
+/-- The two payloads a dedup channel may not merge and a latest-wins channel may. -/
+def otherPayload : World.serverMessage () := ⟨99⟩
+
+def otherCarrier : EdgeOccurrence serverTopology World.serverMessage () :=
+  ⟨otherPayload, ⟨wire, { id := ⟨.messageOccurrence, 6⟩, isMessage := rfl }⟩⟩
+
+/--
+**Latest-wins admits a merge of two different payloads.**
+
+`escrowed` carries `payload` and `otherCarrier` carries `otherPayload`; the
+carrier is one of the sources, and nothing asks the other to agree with it.
+-/
+theorem latestWins_admits_a_real_merge :
+    latestWins [escrowed, otherCarrier] otherCarrier :=
+  List.mem_cons_of_mem _ List.mem_cons_self
+
+/--
+**And `exactDedup` refuses exactly that merge**, which is what the old field
+imposed on every channel.
+
+The two theorems together are the ruling's content: the same source family and
+carrier are permitted under one policy and refused under the other, so
+`ProcessPlan.coalescing` is a choice a channel makes rather than a restatement of
+`carrier.1 = source.1`.
+-/
+theorem exactDedup_refuses_it :
+    ¬ exactDedup [escrowed, otherCarrier] otherCarrier := by
+  intro dedup
+  have payloads := dedup escrowed List.mem_cons_self
+  have counts := congrArg (fun message => message.down) payloads
+  simp [escrowed, Transition.payload, otherCarrier, otherPayload] at counts
 
 end Grass.Process.Tests.Close
