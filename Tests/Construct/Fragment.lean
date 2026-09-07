@@ -1,3 +1,4 @@
+import Grass.Construct.Fragment.Compose
 import Grass.Construct.Fragment.Generator
 
 /-!
@@ -29,9 +30,37 @@ def eval : List Instruction → Nat → Nat
 def semantics : Semantics Instruction Nat where
   Executes := fun instructions before after => eval instructions before = after
 
+def effectOf : Instruction → Nat
+  | .add amount => amount
+
 def effects : EffectModel Instruction Nat where
-  derive := fun instructions => instructions.foldl (fun total instruction =>
-    match instruction with | .add amount => total + amount) 0
+  derive := fun instructions => (instructions.map effectOf).sum
+
+theorem eval_append (left right : List Instruction) (state : Nat) :
+    eval (left ++ right) state = eval right (eval left state) := by
+  induction left generalizing state with
+  | nil => rfl
+  | cons instruction rest ih =>
+      simp only [List.cons_append, eval]
+      exact ih (evalInstruction instruction state)
+
+theorem effects_append (left right : List Instruction) :
+    effects.derive (left ++ right) =
+      effects.derive left + effects.derive right := by
+  simp [effects]
+
+def sequentialLaws : SequentialLaws semantics effects where
+  combine := Nat.add
+  executes_append := by
+    intro left right before after
+    constructor
+    · intro h
+      refine ⟨eval left before, rfl, ?_⟩
+      simpa [semantics, eval_append] using h
+    · rintro ⟨middle, hleft, hright⟩
+      simp only [semantics] at hleft hright ⊢
+      rw [eval_append, hleft, hright]
+  effects_append := effects_append
 
 def contract (amount : Nat) : BlockContract Nat where
   requires := fun state => state = 0
@@ -42,7 +71,7 @@ def addFragment (amount : Nat) : VerifiedFragment semantics effects (contract am
   contractWellFormed := by simp [contract, BlockContract.WellFormed,
     BlockContract.wellFormed, BlockContract.exitTags]
   effects := amount
-  effectsExact := by simp [effects]
+  effectsExact := by simp [effects, effectOf]
   localCorrect := by
     intro before after hbefore hexec
     subst before
@@ -88,5 +117,66 @@ def overlappingExits : BlockContract Nat where
 
 example : ¬ ClassifiesExactlyOneExit overlappingExits 0 := by
   simp [ClassifiesExactlyOneExit, overlappingExits] <;> decide
+
+def contractFrom (before amount : Nat) : BlockContract Nat where
+  requires := fun state => state = before
+  exits := [⟨exitTag "normal", fun state => state = before + amount⟩]
+
+def addFrom (before amount : Nat) :
+    VerifiedFragment semantics effects (contractFrom before amount) where
+  source := .literal [.add amount]
+  contractWellFormed := by
+    simp [contractFrom, BlockContract.WellFormed, BlockContract.wellFormed,
+      BlockContract.exitTags]
+  effects := amount
+  effectsExact := by simp [effects, effectOf]
+  localCorrect := by
+    intro initial after hinitial hexec
+    subst initial
+    simp [semantics, eval, evalInstruction] at hexec
+    subst after
+    refine ⟨⟨exitTag "normal", fun state => state = before + amount⟩,
+      ?_, rfl, ?_⟩
+    · simp [contractFrom]
+    · intro candidate hcandidate hholds
+      simp [contractFrom] at hcandidate
+      subst candidate
+      rfl
+
+def first := addFrom 0 2
+def second := addFrom 2 3
+def wrongSecond := addFrom 3 1
+
+theorem boundary : BoundaryCompatible (contractFrom 0 2) (contractFrom 2 3) := by
+  intro state classified
+  rcases classified with ⟨selected, hmem, hensures, _⟩
+  simp [contractFrom] at hmem
+  subst selected
+  exact hensures
+
+example : ¬ BoundaryCompatible (contractFrom 0 2) (contractFrom 3 1) := by
+  intro claimed
+  have firstExit : ClassifiesExactlyOneExit (contractFrom 0 2) 2 := by
+    apply first.localCorrect 0 2 rfl
+    rfl
+  have impossible := claimed 2 firstExit
+  simp [contractFrom] at impossible
+
+def composed := first.compose sequentialLaws second boundary
+
+example : composed.source.expand = [.add 2, .add 3] := by
+  simp [composed, first, second, addFrom]
+
+example : composed.effects = 5 := by
+  simp [composed, VerifiedFragment.compose, sequentialLaws, first, second, addFrom]
+
+example : ClassifiesExactlyOneExit (thenContract (contractFrom 0 2)
+    (contractFrom 2 3)) 5 := by
+  apply composed.localCorrect 0 5 rfl
+  have hexpand : composed.source.expand =
+      first.source.expand ++ second.source.expand := by
+    exact VerifiedFragment.compose_source_expand sequentialLaws first second boundary
+  rw [hexpand]
+  simp [semantics, first, second, addFrom, eval, evalInstruction]
 
 end Grass.Tests.Construct.Fragment
