@@ -45,17 +45,17 @@ private def isProjectModule (moduleName : Name) : Bool :=
 
 /-- A declaration from an imported Grass/Test module, or from the current file
 that invoked the command. The latter case is what makes negative probes and
-top-level declarations outside the conventional namespaces fail closed. -/
+top-level declarations outside the conventional namespaces fail closed.
+
+Module ownership, not `Name.isInternal`, is authoritative: Lean classifies
+ordinary authored names with underscore-prefixed components as internal too. -/
 private def isProjectDeclaration (environment : Environment) (name : Name) : Bool :=
-  if name.isInternal then
-    false
-  else
-    match environment.getModuleIdxFor? name with
-    | none => true
-    | some moduleIndex =>
-        match environment.header.moduleNames[moduleIndex.toNat]? with
-        | none => false
-        | some moduleName => isProjectModule moduleName
+  match environment.getModuleIdxFor? name with
+  | none => true
+  | some moduleIndex =>
+      match environment.header.moduleNames[moduleIndex.toNat]? with
+      | none => true
+      | some moduleName => isProjectModule moduleName
 
 /-- Declarations whose type or implementation depends on certificate authority
 or verified emission, closed transitively over the whole imported environment.
@@ -245,7 +245,7 @@ def auditVerifiedPrograms : CommandElabM Unit := do
     found.push (name, info)
   let mut roots := #[]
   for (name, info) in declarations do
-    if !name.isInternal && isRootCandidate info &&
+    if isRootCandidate info &&
         (← liftTermElabM <| producesVerifiedProgram info.type) then
       roots := roots.push (name, info)
   if roots.isEmpty then
