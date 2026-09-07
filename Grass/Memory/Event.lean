@@ -203,6 +203,64 @@ structure WellFormed (e : MemoryEvent) : Prop where
   spaceAgreesWithProvenance : e.space.id = e.provenance.space
 
 /--
+`MemoryEvent.WellFormed` decided.
+
+**The seal had no instance, so nothing could name one of its clauses**, and review
+found what that cost: eleven of the thirteen field names were projected nowhere, and
+replacing each clause's proposition with `True` -- co-editing `ofOutcome`'s discharge,
+so that the producer's proof is not what is being tested -- gave thirteen green builds.
+The structure exists to stop an event carrying two records of one fact, and nothing
+depended on any of it.
+
+`Tools/ConsultedAudit.py` could not report it either: its proof-bundle exemption
+skipped any structure whose name ends `WellFormed`, on the argument that a proof
+obligation's purpose is that a constructor had to discharge it. That argument is
+disproved in this module -- `touchesMemory_ofOutcome` proves no event `ofOutcome` can
+mint fails `noLocationWhenUntouched`, so discharging that clause proves nothing about
+it -- and `AccessDescriptor.WellFormedIn` was only ever swept because its name does not
+end that way.
+
+This instance is the mechanism that makes the clauses nameable, and
+`Tests/Memory/EventClauses.lean` is the sweep it enables. Every conjunct below is a
+field of the structure, in declaration order, so a clause added later is a type error
+here rather than a silently unchecked seal.
+-/
+instance (e : MemoryEvent) : Decidable e.WellFormed :=
+  if h : (e.kind.reads = true → e.valueRead.isSome) ∧
+      (e.kind.reads = false → e.valueRead = Option.none) ∧
+      (e.kind.writes = true → e.valueWritten.isSome) ∧
+      (e.kind.writes = false → e.valueWritten = Option.none) ∧
+      (e.kind.touchesMemory = false → e.range.IsEmpty) ∧
+      (∀ bytes ∈ e.valueWritten, bytes.length = e.committedWriteRange.size) ∧
+      (∀ bytes ∈ e.valueRead, bytes.length = e.committedReadRange.size) ∧
+      e.readCommitted ≤ e.range.size ∧ e.writeCommitted ≤ e.range.size ∧
+      e.status.WellFormed e.range.size ∧
+      e.status.committedReads = e.readCommitted ∧
+      e.status.committedWrites = e.writeCommitted ∧
+      e.space.id = e.provenance.space then
+    .isTrue
+      { readValuePresent := h.1, readValueAbsent := h.2.1
+        writeValuePresent := h.2.2.1, writeValueAbsent := h.2.2.2.1
+        noLocationWhenUntouched := h.2.2.2.2.1
+        writtenLength := fun bytes hb => h.2.2.2.2.2.1 bytes hb
+        readLength := fun bytes hb => h.2.2.2.2.2.2.1 bytes hb
+        readWithinRange := h.2.2.2.2.2.2.2.1
+        writeWithinRange := h.2.2.2.2.2.2.2.2.1
+        statusWellFormed := h.2.2.2.2.2.2.2.2.2.1
+        statusAgreesWithReads := h.2.2.2.2.2.2.2.2.2.2.1
+        statusAgreesWithWrites := h.2.2.2.2.2.2.2.2.2.2.2.1
+        spaceAgreesWithProvenance := h.2.2.2.2.2.2.2.2.2.2.2.2 }
+  else
+    .isFalse fun w =>
+      h ⟨w.readValuePresent, w.readValueAbsent, w.writeValuePresent,
+        w.writeValueAbsent, w.noLocationWhenUntouched,
+        fun bytes hb => w.writtenLength bytes hb,
+        fun bytes hb => w.readLength bytes hb,
+        w.readWithinRange, w.writeWithinRange, w.statusWellFormed,
+        w.statusAgreesWithReads, w.statusAgreesWithWrites,
+        w.spaceAgreesWithProvenance⟩
+
+/--
 `Conflicts a b` holds when two events contend for the same bytes.
 
 `docs/MEMORY_MODEL.md` §7.3: two events conflict when "their live byte ranges

@@ -79,10 +79,25 @@ STRUCTURE = re.compile(r"^\s*(?:private\s+)?structure\s+([A-Za-z_][A-Za-z0-9_.']
 
 # Fields deliberately carried without a reader. Every entry states why, and the
 # entry is the record that the decision was made.
-# A structure whose fields are propositions bundles proof obligations. Not reading
-# such a field is the normal case -- its purpose is that a constructor had to
-# discharge it -- so these are skipped by structure rather than field.
-PROOF_BUNDLES = ("WellFormed", "Recognized", "Laws")
+# A structure whose fields are propositions bundles proof obligations, and not
+# reading such a field can be the normal case -- but "the constructor discharged it"
+# is not the same as "the obligation has content", and this exemption was written as
+# though it were.
+#
+# `MemoryEvent.WellFormed` is the counterexample and it was hidden by exactly this
+# entry: eleven of its thirteen field names are projected nowhere, and review then
+# replaced each clause with `True`, co-editing the sole producer's discharge, and
+# got thirteen green builds. The structure's own module disproves the reason, too --
+# `touchesMemory_ofOutcome` proves no event `ofOutcome` can mint fails
+# `noLocationWhenUntouched`, so discharging that one proves nothing, and the file
+# says so in prose.
+#
+# Kept for `Recognized` and `Laws`, whose fields really are discharged-and-done, and
+# dropped for `WellFormed`, where the discharge is the whole of what a seal claims.
+# `AccessDescriptor.WellFormedIn` was never in scope here -- `endswith("WellFormed")`
+# does not match it -- which is the only reason the seal round eighteen swept was
+# ever reported.
+PROOF_BUNDLES = ("Recognized", "Laws")
 
 # Sixteen entries were deleted from this list after review checked, one at a time,
 # whether removing an entry changed the report. It changed nothing for any of them.
@@ -149,6 +164,39 @@ ALLOWED = {
     # than papered over with an allowlist entry `--inert` would then report.
     "allocatorFreshnessTeardownEpoch",
     "rangeProvenanceInitializationPreservation",
+    # The third of them, and it was invisible until the projection pattern stopped
+    # counting a construction. The theorem discharging it is named after the field,
+    # so `loanMapLaws := MemoryState.loanMapLaws` carried `.loanMapLaws` on its
+    # right-hand side and the scan read that as a reader. Its two siblings, whose
+    # theorems are named differently, were reported from the day they landed.
+    "loanMapLaws",
+    # --- Seals nothing requires, which is a different thing from a seal nothing
+    # --- projects. Recorded rather than exempted by structure: dropping the
+    # --- `WellFormed` structure exemption is what surfaced `MemoryEvent.WellFormed`'s
+    # --- thirteen unswept clauses, and these two should not be hidden by the same
+    # --- shape.
+    #
+    # `Footprint.WellFormed`'s own docstring says neither is load-bearing and that
+    # the padding theorem "deliberately does not require `WellFormed` at all", so
+    # unlike the event seal there is no consumer to disappoint. It is a seal a caller
+    # may demand and none does.
+    "namesUnique",
+    "fieldsContained",
+    # `ProtocolAuthority.issuer` records which profile minted authority so that a §10
+    # package has something to check. `mintedBy` is the one door and no rule yet says
+    # which profile may mint for which protocol; the field is the claim, and M10's
+    # profile closure is the reader. Its own docstring says so.
+    "issuer",
+    # --- `Grass/Semantics/Execution.lean` is another owner's module, arrived by
+    # --- merging main. Five fields of `InfiniteContinuation` and `ExecutionPrefix`
+    # --- are unprojected there. Listed rather than silently skipped, and reported to
+    # --- that owner rather than decided here: whether an infinite continuation's
+    # --- witness fields are meant to be read is their call, not this layer's.
+    "eventAt",
+    "stateZero",
+    "graphZero",
+    "consistent",
+    "initialGraph",
     # Diagnostic provenance carried into the trace for a report to read, never
     # dispatched on, like `id` and `origin` above.
     "cause",
@@ -247,8 +295,19 @@ def analyse(raw: dict[str, str],
                 continue
             if any(structure.endswith(suffix) for suffix in PROOF_BUNDLES):
                 continue
+            # A projection, on a line that does not also *construct* this field.
+            # `RequiredProofPackage.loanMapLaws` escaped the report because the
+            # theorem discharging it was named after it, so
+            # `loanMapLaws := MemoryState.loanMapLaws` carries `.loanMapLaws` on its
+            # right-hand side and the scan counted it. Its two sibling package
+            # fields, whose theorems are named differently, were reported and
+            # allowlisted. An eponymous discharge is not a reader.
             projection = re.compile(r"\.%s\b" % re.escape(field))
-            if not any(projection.search(body) for body in corpus.values()):
+            construction = re.compile(r"\b%s\s*:=" % re.escape(field))
+            def reads(body: str) -> bool:
+                return any(projection.search(line) and not construction.search(line)
+                           for line in body.splitlines())
+            if not any(reads(body) for body in corpus.values()):
                 unread.append(
                     f"  {name}:{line}: {structure}.{field} is declared and "
                     "its name is never projected"

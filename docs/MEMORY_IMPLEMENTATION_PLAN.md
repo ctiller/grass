@@ -2174,6 +2174,49 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   caveat: the ones over `Tests/`-only clauses stand, the ones over clauses with
   equation-lemma proofs may not.
 
+- ~~**Every clause of `MemoryEvent.WellFormed` was discriminated by nothing**, and the
+  one gate that could have said so was exempting it by name.~~ Thirteen clauses on the
+  seal that guards every event entering `MachineState.events`; each replaced by `True`,
+  with `ofOutcome`'s discharge co-edited so the producer's own proof is not what is
+  being tested, gave thirteen green builds. That is round eighteen's
+  `AccessDescriptor.WellFormedIn` result — twelve of fourteen — repeated in full on the
+  sibling seal no round had read.
+
+  `Tools/ConsultedAudit.py` skipped any structure whose name ends `WellFormed`, on the
+  argument that a proof obligation's purpose is that a constructor had to discharge it.
+  That argument is disproved *inside the module it exempted*:
+  `touchesMemory_ofOutcome` proves no event `ofOutcome` can mint fails
+  `noLocationWhenUntouched`, so discharging that clause proves nothing about it, and the
+  file says so in prose. `AccessDescriptor.WellFormedIn` was only ever in scope because
+  `endswith("WellFormed")` does not match it.
+
+  Three things landed together: the exemption narrowed to `Recognized` and `Laws`, where
+  discharge really is the point; a `Decidable` instance on the seal, which is the
+  mechanism that lets a fixture *name* a clause; and `Tests/Memory/EventClauses.lean`,
+  the thirteen-neighbour sweep the instance enables. All thirteen are caught now.
+
+  The lesson is the exemption's shape rather than its contents. **An exemption keyed on
+  a name pattern is a claim about every structure that will ever match it**, and this
+  one was written for two structures and inherited by a third that arrived later.
+- ~~**`RequiredProofPackage.loanMapLaws` escaped the unread-field report because the
+  theorem discharging it was named after the field.**~~
+  `loanMapLaws := MemoryState.loanMapLaws` carries `.loanMapLaws` on its right-hand
+  side, so a scan for a dotted projection read a construction as a reader — the one thing that
+  tool's own docstring says does not count. Its two sibling package fields, whose
+  theorems are named differently, were reported and allowlisted from the day they
+  landed. An eponymous discharge is not a reader.
+- **Two seals nothing requires, and one field awaiting M10.** Dropping the structure
+  exemption surfaced `Footprint.WellFormed`'s `namesUnique` and `fieldsContained` —
+  whose own docstring says neither is load-bearing and that the padding theorem
+  "deliberately does not require `WellFormed` at all", so unlike the event seal there is
+  no consumer to disappoint — and `ProtocolAuthority.issuer`, which records which
+  profile minted authority so a §10 package has something to check. All three are
+  allowlisted with those reasons rather than hidden by a pattern.
+- **`Grass/Semantics/Execution.lean` has five unprojected fields and belongs to another
+  owner.** Surfaced by the same change, allowlisted rather than silently skipped, and
+  owed to that owner as a report rather than decided here: whether an infinite
+  continuation's witness fields are meant to be read is their call.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than

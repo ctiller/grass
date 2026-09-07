@@ -363,7 +363,13 @@ def main() -> int:
         ALLOWED = set()
         reported = " ".join(analyse(declared, builders))
         ALLOWED = saved
-        inert = [entry for entry in listed if entry not in reported]
+        # Exact names rather than a substring of the joined report. An entry that
+        # is a strict prefix of some *other* reported name read as live: review
+        # added a deliberate prefix to each of these two lists and both passed,
+        # while `ConsultedAudit.inert_entries` -- which does a real leave-one-out --
+        # reported them. Latent here, since no currently listed entry is masked.
+        found = set(re.findall(r"`([^`]+)`", reported))
+        inert = [entry for entry in listed if entry not in found]
         if inert:
             print("allowlist entries that suppress nothing: " + ", ".join(inert))
             print("Delete them, or say why the entry is kept with no effect.")
