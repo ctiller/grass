@@ -93,18 +93,23 @@ structure StagedObligationFamily
     (spec : SpecProcess resources)
     (projection : TargetProjection spec profile)
     (plan : PlatformPlan spec.driverBoundary.requirements)
+    (forwarded : ProviderDemandFamily)
     (source : MachineSource plan)
     (artifact : Artifact plan) where
   portable : DemandFamily := spec.requirements
   projected : DerivedDemandFamily portable
-  provider : DerivedDemandFamily projected
+  providerInput : DemandFamily
+  forwardedIncorporation : ExactOriginPreservingUnionOfProjectedAndForwarded
+    projected forwarded providerInput
+  provider : DerivedDemandFamily providerInput.identities
   machine : DerivedDemandFamily provider
   artifact : DerivedDemandFamily machine
-  origins : EveryDerivedDemandHasOnePriorStageOrigin
-  disjoint : PairwiseDisjointKeys portable projected provider machine artifact
+  origins : EveryDerivedDemandHasOnePriorStageOrForwardedOrigin
+  disjoint : PairwiseDisjointStagedAndForwardedOrigins
+    portable projected forwarded provider machine artifact
 
 structure ImplementationConstraintIndex
-    (staged : StagedObligationFamily spec projection plan source artifact) where
+    (staged : StagedObligationFamily spec projection plan forwarded source artifact) where
   entries : (key : staged.disjointUnion.Key) ->
     ImplementationConstraint staged.disjointUnion[key]
   originExact : EveryEntryHasItsStagedOrigin staged entries
@@ -112,9 +117,9 @@ structure ImplementationConstraintIndex
     staged.disjointUnion.dependencyEdges
 
 structure AllRequirementsDischarged
-    (staged : StagedObligationFamily spec projection plan source artifact)
+    (staged : StagedObligationFamily spec projection plan forwarded source artifact)
     (index : ImplementationConstraintIndex staged)
-    (program : GhostProgram spec.driverBoundary realization) where
+    (program : GhostProgramFor staged) where
   witness : (key : index.entries.Key) ->
     index.entries[key].Witness program
   coverage : EveryCapturedOccurrenceUsesExactlyOneWitness spec index witness
@@ -129,6 +134,15 @@ the first stale closing term ill-typed; a prose checklist cannot independently
 strengthen or weaken it. Requirement closure is the meta-theorem over the union
 and is never one of the demands it closes.
 
+The exact family forwarded by Act 3 is an index of `StagedObligationFamily`, not
+an informal side output. `forwardedIncorporation` converts every origin-specific
+entry into the next-stage constraint while preserving its authority, descriptor,
+and origin ID. Machine and artifact stages may discharge or forward it only
+through the corresponding owner constructor. `VerifiedProgram.requirementClosure`
+then supplies `AllRequirementsDischarged` for the complete indexed family; the
+end-to-end theorem consumes that value. No later certificate can simply omit the
+forwarded family.
+
 ```lean
 structure PortableProgramCertificate {R : Type u} [ResourceModel R]
     {resources : R} (spec : SpecProcess resources) where
@@ -136,6 +150,9 @@ structure PortableProgramCertificate {R : Type u} [ResourceModel R]
   correctness : ModelSatisfiesSpecification model spec
   boundary : ProcessBoundary
   exportsBoundary : ModelExportsBoundary model boundary
+  providerDemandSummary : ProviderDemandFamily
+  providerDemandExtractionExact :
+    providerDemandSummary.ExtEq model.processOrigin.providerDemands
   demands : DemandCertificateFamily spec.requirements model
 
 structure ProjectedDriverCertificate {R : Type u} [ResourceModel R]
@@ -146,6 +163,9 @@ structure ProjectedDriverCertificate {R : Type u} [ResourceModel R]
   driverSummary : DriverBoundarySummary portable.boundary plan
   blendRequirementsExact :
     plan.requirements = portable.model.processOrigin.accumulatedRequirements
+  originRequirementConnections : ExactOriginRequirementDisposition
+    portable.providerDemandSummary plan.providerEnv.bindingView
+    driverSummary.forwardedRequirements
   providerCoherence : OneGloballyCoherentProviderAbiIsaEnvironment
     plan portable.model.processOrigin
   projectionCorrect : ProjectionAndDriverRefine portable projection driverSummary
@@ -156,7 +176,10 @@ structure MachineCertificate {R : Type u} [ResourceModel R]
   blend : MachineBlend driver
   source : MachineSource driver.plan
   sourceExact : source = blend.exactSource
-  summary : MachineBoundarySummary driver.driverSummary
+  summary : MachineBoundarySummary
+    driver.driverSummary driver.driverSummary.forwardedRequirements
+  forwardedIncorporated : OriginPreservingDemandIncorporation
+    driver.driverSummary.forwardedRequirements summary.requirements
   implementationModels : ImplementationBundle source portable.model
   localCertificates : MachineDemandCertificateFamily source summary
   closedBlendCoverage : SourceCoversExactlyEveryClosedBlendScope
@@ -178,9 +201,31 @@ structure VerifiedProgram {R : Type u} [ResourceModel R]
   driver : ProjectedDriverCertificate portable projection
   machine : MachineCertificate driver
   artifact : ArtifactCertificate machine
+  staged : StagedObligationFamily spec projection driver.plan
+    driver.driverSummary.forwardedRequirements machine.source artifact.linked
+  constraintIndex : ImplementationConstraintIndex staged
+  requirementClosure : AllRequirementsDischarged
+    staged constraintIndex machine.blend.ghostProgram
   endToEnd : LoadedBytesSatisfySpecification
     (write artifact.linked) spec portable projection driver machine artifact
+    requirementClosure
 ```
+
+`providerDemandExtractionExact` is the program-local proof that the compact
+stable summary is the coverage-complete union selected by the exact portable
+origin. `originRequirementConnections` is indexed by that summary, not by the whole
+program body and not by a lookup name. For an Effect-generated boundary it contains
+the applicable `ProviderRealizesEffectPlan.requirementConnections` (or its
+equivalence-strength extension). It discharges provider-owned members and feeds
+the exact forwarded family into the later staged obligation families; a memory,
+resource, obligation, ABI, platform, or ISA origin cannot disappear at Act 3.
+A direct operation contributes no member only when its registered origin demands
+nothing. Sequential, explicit, and blended sources all derive the union;
+changing or repackaging a correctness proof cannot erase it. Thus the effect
+plan, rooted histories, adapter proof, and provider dictionary remain adjacent in the final certificate without making
+the provider proof's theorem type depend on continuations or making
+`VerifiedProgram` itself Effect-specific. A program-body edit rebuilds extraction
+and adapter proofs; an unchanged handoff summary reuses its provider certificate.
 
 Each tier is compiled/exported through its small summary. Private process state
 changes reopen the portable proof but not a consumer whose boundary is

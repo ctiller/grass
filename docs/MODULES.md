@@ -23,7 +23,7 @@ Grass/
     Function/    direct terminating serial-call and exported callable bridges
   Memory/        regions, provenance, loans, events, concurrency, arenas
   Obligation/    existential obligations, ledger, dispositions
-  Effect/        abstract law-bearing monads and requirements
+  Effect/        open effect rows, law-bearing well-founded programs, requirements, handlers
   Refinement/    presentations and proofs connecting semantics to replaceable realizations
   Weave/         composition and noninteraction
   CFG/           block contracts, edges, loops, calls, stack shapes
@@ -153,10 +153,15 @@ Core
       -> Specification
           -> Semantics
           -> Process
+          -> Effect
       -> Memory / Obligation
           -> Std.Owned
 
 Semantics + Process
+  -> Refinement / Weave
+  -> higher consumers
+
+Effect + selected Process adapters
   -> Refinement / Weave
   -> higher consumers
 ```
@@ -169,7 +174,10 @@ trace, and program modules consume the lowest suitable layer and must not
 introduce competing byte-array or ordered-buffer foundations.
 
 `Specification` is neutral vocabulary, not precious program behavior and not a
-process realization. It imports neither `Semantics` nor `Process`.
+process realization. It owns the authority-indexed `ProviderDemandFamily` and
+dependent `ProviderBindingView` carrier used to transport lower-layer demands;
+it does not select or construct providers. It imports neither `Semantics` nor
+`Process`.
 `Semantics` owns `SpecProcess` and `BehaviorContract`; `Process` owns replaceable
 network shapes and execution machinery. Neither imports the other to state its
 core objects. `Refinement` or `Weave` imports both when proving that one selected
@@ -177,6 +185,14 @@ process presentation has exactly the behavior and requirements of a
 `SpecProcess`. This cut prevents a convenient boundary record from creating a
 Semantics/Process import cycle and keeps the non-precious process presentation
 out of precious program identity.
+
+`Effect` imports only `Core`, `Std.Logical`, and `Specification`. It owns the
+optional well-founded sequential authoring language and abstract handler laws in
+[EFFECTS.md](EFFECTS.md), not process scheduling, physical operations, or a
+second obligation ledger. Process core does not depend on Effect; only the
+adapter shards which embed effect programs into process occurrences do. This
+keeps direct serial functions and direct authored assembly available without a
+decorative monadic witness.
 
 Large instruction/API families are sharded mechanically without creating a
 closed master sum type or duplicating semantic facts. Generated reference or

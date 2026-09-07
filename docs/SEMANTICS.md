@@ -434,6 +434,133 @@ structure RequirementFamily where
   unique : demands.Keys.Nodup
 ```
 
+### Typed lower-layer requirements
+
+`Specification` also supplies a generic progress-policy carrier which semantic
+DSLs instantiate without importing `Semantics`:
+
+```lean
+structure MaximalExecutionPolicy (Execution : Type u) where
+  accepts : Execution -> Prop
+  namedFrontier : Execution -> Option StableId
+```
+
+The exact junction to one `SpecProcess` is owned by `Refinement`; the neutral
+record neither knows Effect nor selects a progress contract itself.
+
+Theorem demands above are not the same object as capabilities which a later
+lowering or provider must supply. `Specification` also owns the neutral carrier
+for those latter demands so Effect and Process need not import Platform:
+
+```lean
+inductive BuiltinRequirementAuthority
+  | effect | process | memory | resource | obligation | abi | platform | isa
+  deriving DecidableEq
+
+structure RegisteredExtensionAuthority where
+  key : StableId
+  registered : ExtensionAuthorityRegistry.Contains key
+  freshFromBuiltins : key ∉ builtinRequirementAuthorityKeys
+
+inductive RequirementAuthority
+  | builtin (owner : BuiltinRequirementAuthority)
+  | extension (owner : RegisteredExtensionAuthority)
+
+structure ProviderBindingView where
+  Entry : Type
+  entries : List Entry
+  complete : forall entry, entry ∈ entries
+  key : Entry -> ProviderKey
+  dictionary : Entry -> Type
+  selected : (entry : Entry) -> dictionary entry
+  unique : Function.Injective key
+
+structure RequirementOriginScope where
+  namespace : ScopeId
+  Slot : Type
+  slots : List Slot
+  complete : forall slot, slot ∈ slots
+  unique : slots.Nodup
+  slotKey : Slot -> StableId
+  slotKeyInjective : Function.Injective slotKey
+
+structure ProviderDemandDescriptor where
+  capabilityKey : ProviderRequirementKey
+  authority : RequirementAuthority
+  statement : ProviderBindingView -> Prop
+
+opaque ProviderDemand : Type
+def ProviderDemand.introduce
+    (scope : RequirementOriginScope) (slot : scope.Slot)
+    (descriptor : ProviderDemandDescriptor) : ProviderDemand
+def ProviderDemand.originId : ProviderDemand -> RequirementOriginId
+def ProviderDemand.descriptor : ProviderDemand -> ProviderDemandDescriptor
+theorem ProviderDemand.introduce_origin_exact ...
+theorem ProviderDemand.introduce_descriptor_exact ...
+
+opaque ProviderDemandFamily : Type
+
+def ProviderDemandFamily.origins :
+    ProviderDemandFamily -> Finset RequirementOriginId
+def ProviderDemandFamily.lookup :
+    ProviderDemandFamily -> RequirementOriginId -> Option ProviderDemand
+theorem ProviderDemandFamily.lookup_exact ...
+theorem ProviderDemandFamily.ext ...
+def ProviderDemandFamily.empty : ProviderDemandFamily
+def ProviderDemandFamily.singleton (demand : ProviderDemand) : ProviderDemandFamily
+def ProviderDemandFamily.ofScope
+    (scope : RequirementOriginScope)
+    (descriptor : scope.Slot -> ProviderDemandDescriptor) : ProviderDemandFamily
+def ProviderDemandFamily.union
+    (left right : ProviderDemandFamily)
+    (compatible : OriginsDisjointOrDescriptorsExact left right) :
+    ProviderDemandFamily
+
+def ProviderDemandFamily.CertifiedBy
+    (demands : ProviderDemandFamily) (view : ProviderBindingView) : Prop :=
+  forall originId demand, demands.lookup originId = some demand ->
+    demand.descriptor.statement view
+```
+
+`ProviderBindingView` is an exact dependent snapshot, not a string-keyed map or
+a provider-selection algorithm. `PlatformPlan.ProviderEnv` constructs one such
+view and proves that it contains exactly its selected dictionaries. Earlier
+layers can therefore carry statements about the future binding without knowing
+how a platform environment is built.
+
+The built-in tags and their pairwise-distinctness are ordinary finite inductive
+data centralized here; no downstream owner definition or axiom is required. An
+extension obtains a nominally fresh authority through the reviewed neutral
+registry. Owner layers export their substitution constructors, not competing
+authority values. `ProviderRequirementKey`, `ProviderKey`, and the theorem-demand
+`RequirementKey` are distinct nominal wrappers even when all contain a Core
+`ScopeId`. Equality in one domain cannot be used as equality in another.
+
+Origins are local dependent construction data, not entries in a global static
+registry: a finite scope can generate descriptors containing an arbitrary exact
+locally constructed lowering-plan value. `ProviderDemand` is opaque and its only
+constructor derives the origin ID from the selected scope and slot while storing
+that exact descriptor. A witness for one demand cannot be reused after changing
+its capability key or replacing its statement with `True`.
+`originId` identifies one exact proof-obligation occurrence, while
+`descriptor.capabilityKey` identifies the provider capability it needs. Several origins may
+legitimately demand one capability and all remain in the family; provider
+selection deduplicates capabilities separately.
+
+Requirement substitution is an indexed inductive family, not an unchecked map.
+Every entry is forwarded with a typed semantic implication, introduced with a
+reviewed authority, or discharged by a constructor owned by its exact
+`RequirementAuthority`. In particular Effect's discharge constructor requires
+the `.builtin .effect` index; it cannot discharge entries owned
+by the memory, resource, obligation, ABI, platform, or ISA authorities. There is deliberately no generic constructor
+which accepts an arbitrary proof and erases its owner. `ProviderDemandFamily`'s
+representation is hidden. Its public equality is extensional over `lookup`, and
+serialization alone chooses canonical order. `union` retains repeated capability
+keys and requires a compositional proof that origin scopes are disjoint or that
+equal origin IDs carry definitionally/theoremically exact descriptors. Standard
+hierarchical scopes derive this proof automatically; a collision is rejected at
+construction rather than leaving an `Except` inside a claimed total envelope.
+
 `VerifiedProgram` discharges every key separately and records the semantic
 facets actually consumed by its proof. Composition may derive a new demand from
 several old ones, but it cannot conflate them into one opaque “program correct”
