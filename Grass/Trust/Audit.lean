@@ -236,10 +236,9 @@ elab "#audit_runtime_dependencies " declaration:ident : command => do
 
 /-- Audit every project declaration and report direct `VerifiedProgram` roots.
 
-The callable implementation lets generated audit drivers bind a fresh local
-command token after importing the modules under inspection. Imported modules
-therefore cannot replace the public `#audit_verified_programs` syntax and make a
-repository gate report success without executing this function. -/
+`audit-trust.ps1` invokes `auditVerifiedPrograms` from a nonce-named local
+command declared after importing the modules under inspection, then requires
+that command's nonce marker instead of trusting the public syntax spelling. -/
 def auditVerifiedPrograms : CommandElabM Unit := do
   let environment ← getEnv
   let declarations := environment.constants.fold (init := #[]) fun found name info =>
