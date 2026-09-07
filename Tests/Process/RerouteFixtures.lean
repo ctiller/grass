@@ -53,6 +53,7 @@ open Grass.Process.Tests.Channel (wire)
 open Grass.Process.Tests.Transition
   (serverPlan payload occurrenceOf escrowed pendingLedger sent sent_wire
    ledgerAt ledgerAt_off_wire_empty)
+open Grass.Process.Tests.World (withRoot)
 
 /-! ## A second session on the same edge -/
 
@@ -179,7 +180,7 @@ theorem reroutedLedger_resolves_nothing_else :
 
 /-- The world after the reroute. -/
 noncomputable def afterReroute : ServerWorld :=
-  { quiet with inFlight := fun _ => reroutedAt }
+  { withRoot with inFlight := fun _ => reroutedAt }
 
 /-! ## The step -/
 
@@ -531,7 +532,7 @@ theorem strandingLedger_strands :
 
 /-- The world after it. -/
 noncomputable def afterStranding : ServerWorld :=
-  { quiet with inFlight := fun _ => strandingAt }
+  { withRoot with inFlight := fun _ => strandingAt }
 
 theorem afterStranding_wire : afterStranding.inFlight () wire = strandingLedger :=
   strandingAt_wire

@@ -237,21 +237,41 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   carrierIsOutstanding : ∀ carrier, resolution = .coalesced carrier →
     (after.inFlight edge session).Outstanding carrier
   /--
-  **And the carrier carries the source's message.**
+  **And the merge is one the channel permits.**
 
-  The other half of §10.111, and the half `carrierIsFresh` missed entirely.
-  Nothing related the carrier's *payload* to the source's, so a coalesce could
-  merge `⟨7⟩` into a fresh carrier holding `⟨99⟩`: the reviewer compiled it, and
-  the after-world passes all seven `WellFormed` clauses. The source's payload is
-  gone and a message nobody sent is in flight — which is §10.91's defect
+  This was `carrierCarriesTheMessage`, a per-source `carrier.1 = occurrence.1`,
+  and §10.113 added it for a good reason: nothing related the carrier's payload
+  to the source's, so a coalesce could merge `⟨7⟩` into a fresh carrier holding
+  `⟨99⟩` and the after-world passed every `WellFormed` clause — §10.91's defect
   reopened through the one exception `createsOnlyTheCarrier` grants.
 
-  `Reroutes.arrives` has carried exactly this conjunct since §10.98, for exactly
-  this reason. The two constructors that "pass a payload on" now say the same
-  thing about it. §10.113.
+  **But a reviewer then proved what it cost, generically.** Stated per source, it
+  forces any two sources naming one carrier to carry the same message, so a
+  latest-wins or folding channel is unconstructible at *every* plan. `agent-bus`
+  ruling `g-design:83` on `c-process:68` settles that coalescing is not
+  universally same-payload, and moves the policy to the channel:
+  `ProcessPlan.coalescing`, with `exactDedup` recovering the old behaviour in one
+  line for a channel that wants it.
+
+  **Three things `carrierIsPermitted` says beyond calling the relation.** The
+  family is non-empty, so a coalesce cannot invent a carrier out of nothing. This
+  step's own occurrence is in it, so the field is about *this* merge. And the
+  family is *exactly* those the after-ledger resolves into that carrier, which is
+  what `docs/PROCESS.md` §3 means by "coalescing consumes every source token": a
+  step cannot satisfy the channel's policy against a convenient subset and
+  quietly merge more. That last conjunct is the one an equality could not have
+  had, because an equality never mentioned a family at all.
+
+  A concrete implementation may realise the merge as finite silent steps under
+  refinement; what the ruling forbids, and what "exactly" forbids here, is a
+  *logical* world in which the merge is half done.
   -/
-  carrierCarriesTheMessage : ∀ carrier, resolution = .coalesced carrier →
-    carrier.1 = occurrence.1
+  carrierIsPermitted : ∀ carrier, resolution = .coalesced carrier →
+    ∃ sources : List (EdgeOccurrence plan.topology plan.message edge),
+      sources ≠ [] ∧ occurrence ∈ sources ∧
+        (∀ source, source ∈ sources ↔
+          (after.inFlight edge session).resolution source = some (.coalesced carrier)) ∧
+        plan.coalescing edge sources carrier
   /--
   **And an endpoint death is a death of that endpoint.**
 
@@ -556,6 +576,40 @@ structure SendsEscrow (before after : plan.LogicalProcessNetwork)
     (occurrence : plan.topology.ChannelOccurrence edge message) : Prop where
   /-- The edge's own send relation admits this step. -/
   contractual : (plan.steps edge).Send message occurrence before after
+  /--
+  **And the sender the session names is the live incarnation in its slot.**
+
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.119, ruled by `agent-bus`
+  `g-design:83`. `ChannelContract.sendOnOpenSession` asks only that the *session*
+  be open, and `ResolvesEscrow`'s scope is the escrow ledger alone, so a
+  `senderDeath` cannot move the session status. From the world
+  `Tests/Process/ChannelStepFixtures.lean`'s `the_sender_death` reaches — sender
+  present and dead, its death recorded against the session, session still
+  `.open` — a reviewer built an ordinary send of a second occurrence.
+
+  **Both halves are load-bearing.** The `instances` lookup alone would accept
+  *some* incarnation in the sender's slot, which a restart makes a different one;
+  `sameRef` pins it to the exact incarnation `ChannelId.sender` names, generation
+  included, so a stale session cannot be revived by whoever holds the slot now.
+
+  **Why this rather than making a death close the session.** The ruling is
+  explicit: an endpoint death must not generically kill or close the session,
+  because some channels permit buffered drain or half-close and `SessionStatus`
+  has no half-closed state to express the difference. Whether a death ends the
+  session belongs to an explicit channel or session policy. What this field says
+  is narrower and is true of every channel: a *send* needs a live sender.
+
+  It is transition-certificate evidence, which is where the ruling puts the cost:
+  a constructor or macro that emits a send derives it from the world it is
+  already stepping, and an ordinary `ProcessSpec` author writes nothing. The
+  fixtures pay for it because a fixture builds its world by hand.
+  -/
+  senderIsLive : ∃ incarnation,
+    before.instances (plan.topology.endpoints edge).1 occurrence.1.sender.instanceId
+        = some incarnation ∧
+      (∃ sameKind : incarnation.kind = (plan.topology.endpoints edge).1,
+        sameKind ▸ incarnation.ref = occurrence.1.sender) ∧
+      incarnation.Live
   /--
   **Its occurrence identity was not escrowed before.**
 
@@ -932,6 +986,35 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
   -/
   writesPermitted : ∀ region, before.shared region ≠ after.shared region →
     (plan.topology.sharedAccess kind region).mayWrite = true
+  /--
+  **And what it wrote is what the plan admits it to write.**
+
+  `writesPermitted` above bounds *which* regions may move.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.128 is the gap that leaves: nothing
+  bounded the *value*, so a `processStep` could set any writable region to
+  anything at all, unrelated to the event it was handling. `ProcessSpec.Step`
+  cannot close it — it never mentions `shared`, and `agent-bus` ruling
+  `g-design:84` is explicit that it must not, since a root specification
+  prescribing a state partition is what `docs/FOUNDATION.md` law 15 forbids.
+
+  So the bound is `ProcessPlan.sharedUpdate`, indexed by this step's own kind,
+  event, local states, issued bag and observed segment. Quantified over the
+  regions that *moved*, for the same reason `writesPermitted` is: a step that
+  names a region it did not write would make two disjoint steps fail to commute
+  in `Grass/Process/Trace/Independence.lean`.
+
+  A kind with no writable region owes nothing here — see
+  `sharedWritesAdmitted_of_no_writes`, which derives the whole field from
+  `writesPermitted`.
+  -/
+  sharedWritesAdmitted : ∀ region, before.shared region ≠ after.shared region →
+    ∀ (fromInstance toInstance : ProcessInstance plan.topology)
+      (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
+      before.instances kind slot = some fromInstance →
+      after.instances kind slot = some toInstance →
+      plan.sharedUpdate kind event (fromKind ▸ fromInstance.localState)
+        (toKind ▸ toInstance.localState) issued localEmitted region
+        (before.shared region) (after.shared region)
   /--
   Its slot, the regions it wrote, the observation trace **if it actually
   emitted**, and nothing else.
