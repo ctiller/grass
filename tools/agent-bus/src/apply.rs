@@ -321,10 +321,28 @@ fn require_agent<'a>(state: &'a BusState, a: &Agent) -> AbResult<&'a AgentState>
 
 /// `a` is registered with `role` and is still active.
 ///
-/// Sound only where `a` is the publisher itself: `active()` reads `status`
-/// and `retired`, which `agent.status`/`agent.retired` move, and those are
-/// ordered against this event only when they are on the *same* stream. For
-/// a subject named in someone else's event, use `require_role` and let
+/// **Known to be unsound even where `a` is the publisher itself, and left
+/// that way deliberately rather than fixed in passing.** The doc here used
+/// to say the publisher case was safe, reasoning that `active()` reads
+/// `status` and `retired`, and that `agent.status`/`agent.retired` are on
+/// the agent's own stream and therefore ordered ahead of its later events.
+/// That is true of `agent.status` and false of `agent.retired`: a
+/// *coordinator* retires someone else, from a different stream, causally
+/// unordered against anything the target published. So on a host that
+/// fetched the retirement, every one of the target's own already-published
+/// events that passes through here fails -- and `reduce` has no per-event
+/// isolation, so that is the whole bus, not one event.
+///
+/// `require_bootstrap_coordinator` no longer calls this, for exactly that
+/// reason (see its doc for the argument, and `coordinator::
+/// verify_author_active` for where the liveness question moved to). The
+/// remaining callers -- `scope.set`, `audit.reported`, `handoff.offered`,
+/// `review.nominated` -- carry the same defect and need the same treatment,
+/// each with its own publication-time counterpart and its own regression
+/// test. That is separate work, reported rather than done here.
+///
+/// For a subject named in someone else's event, this was never usable at
+/// all: use `require_role` and let
 /// `coordinator::verify_participants_active` ask about liveness.
 pub(crate) fn require_active_role<'a>(
     state: &'a BusState,
@@ -358,13 +376,79 @@ pub(crate) fn require_role<'a>(
     Ok(ag)
 }
 
+/// Coordinator authority, asked the only way replay can soundly ask it:
+/// "was this identity registered with `Role::Coordinator`?"
+///
+/// This used to ask two further questions, and both were fatal to the whole
+/// fleet rather than to one event (`reduce`/`reduce_onto` propagate with a
+/// bare `?` and have no per-event isolation):
+///
+///  - **"is it a coordinator in the *current* roster epoch?"** -- read off
+///    `state.roster_epoch`, i.e. whatever epoch the registry tip happens to
+///    name at *reduction* time, not the epoch that was current when the
+///    event was authored. `sync::reduce_local` re-reduces every event on
+///    every read, so the first registry epoch that dropped a coordinator
+///    made every coordinator-authored event in history permanently
+///    unreducible, on every host, forever. Retirement and coordinator
+///    succession are ordinary administrative acts (section 2.1 names them
+///    as epoch transitions), and adding or moving a host is exactly such an
+///    act -- so this was a total, unrecoverable outage one routine roster
+///    change away. It is the same defect `require_complete_frontier` was
+///    already fixed for, in the same file, for the same reason (gate 5: "a
+///    later registration does not invalidate it"); it simply survived here.
+///
+///  - **"is it still active?"** -- `AgentState::active()` reads `retired`,
+///    which is set by *someone else's* `agent.retired` on a *different*
+///    stream. That event is causally unordered against this one, so which
+///    of the two a given host applied first decided whether the bus
+///    reduced at all: a confluence violation of exactly the kind gates
+///    15/16 forbid (`require_active_role`'s own doc claims it is "sound
+///    where `a` is the publisher itself", which holds for `agent.status`
+///    -- same stream -- but not for `agent.retired`).
+///
+/// Neither is replaced by looking the epoch up from `env.observed.
+/// roster_epoch` instead of from `state.roster_epoch`. For a *sparse*
+/// frontier -- which is what every coordinator kind here except
+/// `schema.activated`/`merge_engine.activated` carries -- nothing validates
+/// that field against anything, so it is the author's own unchecked choice
+/// of which epoch to be judged by: an author could always name whichever
+/// epoch grants it authority. Since primary roles are immutable (section
+/// 2.2: "Primary roles remain immutable"), the best that self-selection can
+/// ever prove is "this identity was a coordinator in *some* epoch" -- which
+/// is precisely `primary_role`, already checked below, minus the new
+/// failure mode of an event naming an epoch this host has not fetched yet.
+///
+/// What is genuinely lost is the *membership and liveness* half, and that
+/// half moves to publication time, where the codebase already puts every
+/// question whose answer a concurrent event can change (`coordinator::
+/// verify_participants_active`, `verify_predecessor_not_contested`,
+/// `verify_broadcast_published`):
+///
+///  - membership was already enforced there, for every event and not just
+///    these -- `drain_outbox` calls `registry::authorize_stream_write`,
+///    which refuses to advance the stream of an agent that is not an active
+///    member of the *current* epoch holding the claimed custody. A dropped
+///    coordinator therefore cannot publish anything new; only its already
+///    -published history keeps the authority it genuinely had, which is
+///    section 2.3's "an event consumes the exact historical state it
+///    observed; later events do not rewrite that verdict."
+///  - liveness moves to `coordinator::verify_author_active`, added for this
+///    change, so a retired-but-still-bound coordinator is still refused at
+///    the gate where the question has one answer.
 fn require_bootstrap_coordinator(state: &BusState, a: &Agent) -> AbResult<()> {
-    if !state.is_bootstrap_coordinator(a) {
+    let ag = require_agent(state, a)?;
+    if ag.primary_role != Role::Coordinator {
+        // Deliberately not `require_role`'s generic wording: this is the
+        // one refusal an operator is most likely to hit by hand, and the
+        // actionable part is that no registry edit can fix it -- primary
+        // roles are immutable (section 2.2), so the answer is always
+        // "publish this from a coordinator identity instead."
         return Err(invalid(format!(
-            "{a} is not a coordinator in the current roster epoch"
+            "{a} is not a coordinator: it registered as {}, and primary roles are immutable -- \
+             publish this from a coordinator identity instead",
+            ag.primary_role
         )));
     }
-    require_active_role(state, a, Role::Coordinator)?;
     Ok(())
 }
 
@@ -2625,6 +2709,25 @@ mod tests {
         Envelope::new(agent, 0, no_frontier(), &data, [])
     }
 
+    /// `coordinator` retires `target`, citing `previous_lifecycle` (the
+    /// target's registration in these fixtures). Sequence 1 throughout:
+    /// every fixture using this gives its coordinator exactly one event
+    /// after its own registration.
+    fn retire_env(coordinator: &Agent, target: &Agent, previous_lifecycle: &EventId) -> Envelope {
+        Envelope::new(
+            coordinator,
+            1,
+            frontier_seeing(&[previous_lifecycle]),
+            &EventData::AgentRetired(AgentRetired {
+                target: target.clone(),
+                previous_lifecycle: previous_lifecycle.clone(),
+                reason: text("no longer reachable"),
+                user_authority: text("operator"),
+            }),
+            [],
+        )
+    }
+
     fn apply_ok(state: &mut BusState, env: &Envelope) {
         apply_event(state, env).unwrap_or_else(|e| panic!("{}: {e}", env.id));
         state.kind_of_event_insert(env.id.clone(), &env.kind);
@@ -3000,7 +3103,12 @@ mod tests {
             (
                 true,
                 "reconcile a merge",
-                "is not a coordinator in the current roster epoch",
+                // Refused on the auditor's own immutable primary role, not
+                // on its roster binding -- see `require_bootstrap_
+                // coordinator` for why replay may not read the live epoch.
+                // Gate 21 is unaffected either way: an auditor can never
+                // have registered as a coordinator.
+                "aud is not a coordinator",
                 EventData::ReviewMergeReconciled(ReviewMergeReconciled {
                     authorization: authorization.clone(),
                     previous_main: hash(1),
@@ -6342,6 +6450,134 @@ mod tests {
     }
 
     // ------------------------------------------------------- schema/merge engine
+
+    /// A coordinator-authored event, reduced against a later roster epoch
+    /// that no longer lists its author.
+    ///
+    /// This is the whole-fleet outage `require_bootstrap_coordinator`'s doc
+    /// describes, reproduced before it was fixed: the *identical* envelope
+    /// reduced `Ok(())` under the epoch that was live when it was published
+    /// and `Err("coord1 is not a coordinator in the current roster epoch")`
+    /// under a later one. Since `sync::reduce_local` re-reduces every event
+    /// from scratch on every read against the registry *tip*, "a later
+    /// epoch" is what every host has within moments of any retirement,
+    /// succession, or host move -- and `reduce` propagates with a bare `?`,
+    /// so one such epoch would have made the entire bus permanently
+    /// unreadable everywhere, from an ordinary administrative act.
+    ///
+    /// Falsification: restoring the `state.is_bootstrap_coordinator(a)`
+    /// check in `require_bootstrap_coordinator` fails the second assertion
+    /// with exactly that message.
+    #[test]
+    fn a_later_epoch_dropping_a_coordinator_cannot_unreduce_its_history() {
+        let reduce_under_epoch_dropping_coord1 = |drop_coord1: bool| -> AbResult<()> {
+            let mut state =
+                empty_state(&[("coord1", Role::Coordinator), ("dave", Role::Implementor)]);
+            let coord1 = a("coord1");
+            let dave = a("dave");
+            apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+            let dave_reg = register(&dave, Role::Implementor);
+            apply_ok(&mut state, &dave_reg);
+            if drop_coord1 {
+                // Exactly what `registry::propose_transition` writes when a
+                // coordinator is retired out of the roster: a child epoch
+                // without it. Nothing rewrites the event below, which keeps
+                // naming (and was authored under) the parent epoch.
+                let old = state.roster_epoch.as_ref().unwrap().clone();
+                let mut members = old.active_members.clone();
+                members.remove(&coord1);
+                let new_epoch = old.child(hash(1000), members);
+                state
+                    .known_epochs
+                    .insert(new_epoch.id.clone(), new_epoch.clone());
+                state.roster_epoch = Some(new_epoch);
+            }
+            apply_event(&mut state, &retire_env(&coord1, &dave, &dave_reg.id))
+        };
+        reduce_under_epoch_dropping_coord1(false)
+            .expect("the epoch that was live at publication reduces it");
+        reduce_under_epoch_dropping_coord1(true)
+            .expect("a later epoch that dropped coord1 must reduce it identically");
+    }
+
+    /// The same event, reduced after its author was retired by *another*
+    /// coordinator.
+    ///
+    /// Distinct from the sibling above because it needs no registry change
+    /// at all: `agent.retired` is an ordinary event on someone else's
+    /// stream, causally unordered against this one, so asking `active()`
+    /// during replay made the answer a function of fetch order. See
+    /// `the_order_of_a_retirement_against_its_targets_own_events_does_not_matter`
+    /// for the confluence half, which is what makes this a gate-15/16
+    /// violation and not merely a policy choice.
+    #[test]
+    fn a_coordinator_retired_by_another_cannot_unreduce_its_own_history() {
+        let mut state = empty_state(&[("coord1", Role::Coordinator), ("dave", Role::Implementor)]);
+        let coord1 = a("coord1");
+        let dave = a("dave");
+        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+        let dave_reg = register(&dave, Role::Implementor);
+        apply_ok(&mut state, &dave_reg);
+        state.agents.get_mut(&coord1).expect("registered").retired = true;
+        apply_event(&mut state, &retire_env(&coord1, &dave, &dave_reg.id))
+            .expect("a retired author's already-published event still reduces");
+    }
+
+    /// The confluence half of the two tests above, and the reason this is a
+    /// gate-15/16 violation rather than a policy choice: `coord2` retires
+    /// `coord1` while `coord1` independently retires `dave`, neither having
+    /// observed the other (they are on separate single-writer streams,
+    /// published without cross-observation -- section 2.1). Both orderings
+    /// are valid linear extensions of the same causal partial order, so
+    /// both must reduce, and to byte-identical state.
+    ///
+    /// Driven through `reduce_onto`, the real incremental path two hosts
+    /// actually take when they fetch the two streams in opposite orders --
+    /// which is the only way to *pick* an order, since `reduce` picks its
+    /// own. Before the fix, `retire_coord1`-first reduced to `Err` and the
+    /// other order to `Ok`: one host's bus became unreadable and the
+    /// other's did not, decided purely by fetch order.
+    #[test]
+    fn a_retirement_racing_its_targets_own_coordinator_event_reduces_in_either_order() {
+        let reduce_in_order = |retire_coord1_first: bool| -> AbResult<BusState> {
+            let mut state = empty_state(&[
+                ("coord1", Role::Coordinator),
+                ("coord2", Role::Coordinator),
+                ("dave", Role::Implementor),
+            ]);
+            let (coord1, coord2, dave) = (a("coord1"), a("coord2"), a("dave"));
+            let coord1_reg = register(&coord1, Role::Coordinator);
+            apply_ok(&mut state, &coord1_reg);
+            apply_ok(&mut state, &register(&coord2, Role::Coordinator));
+            let dave_reg = register(&dave, Role::Implementor);
+            apply_ok(&mut state, &dave_reg);
+
+            let retire_coord1 = retire_env(&coord2, &coord1, &coord1_reg.id);
+            let retire_dave = retire_env(&coord1, &dave, &dave_reg.id);
+            let order: Vec<Envelope> = if retire_coord1_first {
+                vec![retire_coord1, retire_dave]
+            } else {
+                vec![retire_dave, retire_coord1]
+            };
+            reduce_onto(state, &order)
+        };
+        let retire_first = reduce_in_order(true).expect("the bus must still reduce");
+        let retire_last = reduce_in_order(false).expect("the bus must still reduce");
+        assert!(
+            retire_first.agents[&a("dave")].retired,
+            "the retired coordinator's own already-published retirement still took effect"
+        );
+        // `events`/`kind_of_event` are keyed by event id and `next_seq` by
+        // agent, so the whole reduced state is order-insensitive here and
+        // the wide comparison is the honest one (see
+        // `two_coordinators_reconciling_the_same_authorization_converge`
+        // for why a narrow one hides real order-dependence).
+        assert_eq!(
+            format!("{retire_first:#?}"),
+            format!("{retire_last:#?}"),
+            "both valid orders must converge on the same state"
+        );
+    }
 
     /// Regression test for a bug caught in adversarial review: an earlier
     /// version of `require_complete_frontier` validated a complete frontier

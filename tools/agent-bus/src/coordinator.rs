@@ -252,6 +252,15 @@ pub fn drain_outbox(
                 continue;
             }
         }
+        if let Err(e) = verify_author_active(&state, agent, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
         if let Err(e) = verify_participants_active(&state, &data) {
             let reason = e.to_string();
             reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
@@ -749,6 +758,61 @@ fn verify_review_merge_reconciled(
         )));
     }
     Ok(())
+}
+
+/// The *author* of an event whose authority depends on being a live
+/// coordinator must still be active.
+///
+/// The sibling `verify_participants_active` below relocated exactly this
+/// question for the agents an event *names*; this is the same relocation
+/// for the agent that *writes* it, and it exists because
+/// `apply::require_bootstrap_coordinator` can no longer ask. `active()`
+/// reads `retired`, which only ever gets set by *another* coordinator's
+/// `agent.retired` on a *different* stream -- causally unordered against
+/// this event, so during replay the answer depended on fetch order and a
+/// retired coordinator's own back-history became fatal on some hosts and
+/// harmless on others. Here `state` is the publishing host's fully-reduced
+/// view, so there is one answer, and refusing costs nothing recoverable:
+/// the author resubmits after `agent.resumed`.
+///
+/// The listed kinds are every kind whose `apply` handler reaches
+/// `require_bootstrap_coordinator`. For the three reassignment kinds that
+/// reach it only when the author is *not* the item's opener/author, the
+/// check is deliberately unconditional rather than a duplicate of `apply`'s
+/// opener/author test: in the other branch the author is the opener or a
+/// named review author, and a retired one has no business reassigning its
+/// own work either. Kinds an inactive agent legitimately publishes --
+/// `agent.resumed` above all, which only a retired agent ever has cause to
+/// write -- are deliberately absent.
+fn verify_author_active(
+    state: &crate::state::BusState,
+    agent: &Agent,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    use crate::events::EventData as E;
+    let needs_live_author = matches!(
+        data,
+        E::AgentRetired(_)
+            | E::SchemaActivated(_)
+            | E::MergeEngineActivated(_)
+            | E::ReviewMergeReconciled(_)
+            | E::LifecycleConflictResolved(_)
+            | E::IssueReassigned(_)
+            | E::DependencyReassigned(_)
+            | E::ReviewReassigned(_)
+    );
+    if !needs_live_author {
+        return Ok(());
+    }
+    match state.agents.get(agent) {
+        // Unregistered is `apply`'s own refusal to make, with its own
+        // message; not duplicated here.
+        None => Ok(()),
+        Some(ag) if ag.active() => Ok(()),
+        Some(_) => Err(invalid(format!(
+            "{agent} is retired or otherwise inactive, so it cannot publish this event"
+        ))),
+    }
 }
 
 /// Every agent this event names must still be active.
