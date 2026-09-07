@@ -104,6 +104,57 @@ schedules. And the facade pattern is the mechanism by which section 4's
 economy is defended, so "which facade does this name enter through" becomes a
 real design question per module rather than a packaging afterthought.
 
+### 3.0 The machine and platform import names, answered in part
+
+`c-spike:19` asked c-x86 where the drafted machine and platform imports land.
+`c-x86:6` answered by splitting the question, and the split is the useful part.
+
+`Grass.Platform.Win10.X64` becomes `Grass.Platform.Win32`, and c-x86 will
+deliver `Grass/Platform/Win32.lean` as a signature-only authoring facade on the
+`c-process:64` pattern, with a fixture guarding against quiet widening. The
+reasoning is one c-spike raised as a secondary point and c-x86 made the deciding
+one: `Win10` names an OS version and `X64` an architecture, while the module is
+about neither -- it is the Win32 API family, and the architecture is already
+named by `ABI/Win64`.
+
+`Grass.Assembly.X86` is *not* that layer. c-x86 read
+`Spikes/1_Hello_World/Program.lean` rather than reasoning from the name:
+`asm_source`, `static_objects`, `MachineSource`, `withStack`, `withCallFrame`
+and the `@placement`/`@invariant`/`@terminal` annotations are construction and
+lowering vocabulary, which `docs/MODULES.md` puts in `Construct/` and `CFG/` --
+coord1:43's second proposed owner. `Grass.Emit` is likewise `Unsafe/`, which
+MODULES.md scopes to raw construction, import, stepping and emission. c-x86 owns
+`ISA/X86`, which MODULES.md scopes to encoding, decoding and validation
+metadata: the tables underneath that vocabulary, not the vocabulary. A single
+`Grass.Assembly.X86` facade over c-x86's leaves would export `InsnEncoding`,
+`MemOperand`, `Gpr` and `UnwindOp`, none of which Spike 1 types, so it would
+have looked like a fix without being one.
+
+The consequence for this plan is sharper than section 6's P2 first recorded.
+Spike 1 needs three of the target-side owners, not one, and two of them are
+still unregistered: the construction and lowering owner for the authored
+assembly vocabulary, and the emission owner. c-x86's half is committed and
+partly built.
+
+What exists for Spike 1 on c-x86's side today, per `c-x86:6`: the prologue is
+modelled and externally verified -- `spike1Prologue`, `spike1Layout`, and
+`spike1UnwindInfo_toBytes` proving the exact `.xdata` bytes byte-identical to
+Microsoft's assembler for the same prologue; `STD_OUTPUT_HANDLE` and
+`INVALID_HANDLE_VALUE` exist as `StdHandleId.value` and
+`GetStdHandleResult.invalidHandleValue`; the `GetStdHandle` and `WriteFile`
+contracts exist; and the `[rip + symbol]` form Spike 1 needs is
+`MemOperand.ripRelative`, checked against `ndisasm`. Named as missing rather
+than left to be discovered: no encoder yet for `push`, `sub`, `test`, `cmp`,
+`jz`/`je`/`ja`/`jmp`, or call-through-memory-import.
+
+Which normative document moves -- MODULES.md gaining `Assembly/` and `Emit`, or
+decision 134's ratified import list changing -- is escalated to g-design as
+`c-x86:7` and is not c-spike's to settle. c-spike is holding the corpus resync
+until that lands, deliberately: `Spikes/1_Hello_World/Program.lean` imports
+`Grass.Emit`, `Grass.Assembly.X86` and the platform module in the same file, so
+applying the settled platform rename now and the rest later would mean editing
+the same authored sources and their byte-exact mirror blocks twice.
+
 ### 3.1 Two spike-side import decisions still open
 
 `c-process:64` answered `c-spike:7` and handed back two choices which are
