@@ -178,6 +178,25 @@ def mapInfinite (refinement : BehaviorRefinement concrete abstract)
   step index := refinement.step (execution.step index)
   consistent := refinement.infiniteConsistency execution.consistent
 
+/-- Reflexive refinement leaves every infinite continuation unchanged. -/
+theorem mapInfinite_refl (behavior : ProgramBehavior spec)
+    {state : behavior.system.State} {graph : behavior.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    (execution : behavior.system.InfiniteContinuation state graph priorEvents) :
+    (refl behavior).mapInfinite execution = execution := by
+  apply RelationalSystem.InfiniteContinuation.ext <;> rfl
+
+/-- Mapping an infinite continuation through a composite refinement agrees
+with mapping it through the two adjacent refinements in order. -/
+theorem mapInfinite_trans (lowerMiddle : BehaviorRefinement lower middle)
+    (middleUpper : BehaviorRefinement middle upper)
+    {state : lower.system.State} {graph : lower.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    (execution : lower.system.InfiniteContinuation state graph priorEvents) :
+    (lowerMiddle.trans middleUpper).mapInfinite execution =
+      middleUpper.mapInfinite (lowerMiddle.mapInfinite execution) := by
+  apply RelationalSystem.InfiniteContinuation.ext <;> rfl
+
 /-- Map a terminal or infinite continuation coherently. -/
 def mapCompletion (refinement : BehaviorRefinement concrete abstract)
     {state : concrete.system.State} {graph : concrete.system.Graph}
@@ -189,6 +208,40 @@ def mapCompletion (refinement : BehaviorRefinement concrete abstract)
   | finite steps terminal =>
       exact .finite (refinement.mapSteps steps) (refinement.terminal terminal)
   | infinite execution => exact .infinite (refinement.mapInfinite execution)
+
+/-- Reflexive refinement leaves every finite or infinite completion unchanged. -/
+theorem mapCompletion_refl (behavior : ProgramBehavior spec)
+    {state : behavior.system.State} {graph : behavior.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    (completion : behavior.system.Completion state graph priorEvents) :
+    (refl behavior).mapCompletion completion = completion := by
+  cases completion with
+  | finite => rfl
+  | infinite execution =>
+      change RelationalSystem.Completion.infinite
+          ((refl behavior).mapInfinite execution) =
+        RelationalSystem.Completion.infinite execution
+      rw [mapInfinite_refl]
+      rfl
+
+/-- Mapping a completion through a composite refinement agrees with mapping it
+through the two adjacent refinements in order. -/
+theorem mapCompletion_trans (lowerMiddle : BehaviorRefinement lower middle)
+    (middleUpper : BehaviorRefinement middle upper)
+    {state : lower.system.State} {graph : lower.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    (completion : lower.system.Completion state graph priorEvents) :
+    (lowerMiddle.trans middleUpper).mapCompletion completion =
+      middleUpper.mapCompletion (lowerMiddle.mapCompletion completion) := by
+  cases completion with
+  | finite => rfl
+  | infinite execution =>
+      change RelationalSystem.Completion.infinite
+          ((lowerMiddle.trans middleUpper).mapInfinite execution) =
+        RelationalSystem.Completion.infinite
+          (middleUpper.mapInfinite (lowerMiddle.mapInfinite execution))
+      rw [mapInfinite_trans]
+      rfl
 
 /-- Map an initial finite derivation coherently. -/
 theorem mapRuns (refinement : BehaviorRefinement concrete abstract)
