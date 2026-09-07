@@ -216,8 +216,21 @@ A total read equals `a` exactly when the checked read yields `some a`.
 states the same correspondence in the other direction, which rewrites the
 accessor that has laws into the accessor that has none: this module states
 twenty-eight `get?` laws and no `get` law, so a goal driven towards `get` stops.
-Both `v[i]` and `v[i]?` elaborate through `get`, so without this the notation a
-consumer naturally writes cannot reach any of them.
+
+**What drives it there is Lean core's `simp` set, not elaboration.** `v[i]?`
+reaches `Vec.get?` definitionally, through the `GetElem?` instance and
+`Vec.getElem?_eq_get?`, which is `rfl`. It is `getElem?_pos` — core's, from
+`LawfulGetElem` — that rewrites `v[i]?` to `some v[i]`, and `Vec.getElem_eq_get`
+that turns the result into `get`. So the hazard is not in how the notation
+elaborates but in what the default `simp` set does to it afterwards, and a bare
+`get?` goal written without notation is never pushed towards `get` at all. An
+earlier version of this comment said both notations elaborate through `get`; the
+conclusion held and the mechanism was wrong.
+
+Two limits worth knowing. It fires only with `get` on the left, so
+`a = v.get i h` is untouched. And on a goal with `get` on both sides it produces
+the lopsided `v.get? i = some (w.get i hw)` rather than a `get?`-on-both-sides
+normal form — recoverable, and the shape `Vec.ext_of_get` obligations take.
 -/
 @[simp] theorem get_eq_iff_get?_eq {v : Vec α} {i : Nat} {h : i < v.length} {a : α} :
     v.get i h = a ↔ v.get? i = some a := by
@@ -497,6 +510,8 @@ owes a law, or a consumer cannot tell which pure operation it was given. -/
 @[simp] theorem clear_eq_empty (v : Vec α) : v.clear = (empty : Vec α) := rfl
 
 @[simp] theorem length_clear (v : Vec α) : v.clear.length = 0 := rfl
+
+@[simp] theorem toList_empty : (empty : Vec α).toList = [] := rfl
 
 @[simp] theorem toList_append (v w : Vec α) : (v ++ w).toList = v.toList ++ w.toList := rfl
 
@@ -988,6 +1003,14 @@ to the underlying list.
 -/
 instance {m : Type v → Type w} [Monad m] : ForIn m (Vec α) α where
   forIn v init f := ForIn.forIn v.toList init f
+
+/-- Iterating a sequence is iterating its list, stated so `simp` can use the
+`List` iteration laws. The same shape as `Vec.emptyCollection_eq_empty`: the
+instance makes the loop typecheck without making `simp` see through it. This one
+was missed when the other three landed, in the commit that stated the rule. -/
+@[simp] theorem forIn_eq_forIn_toList {m : Type v → Type w} [Monad m] {β : Type v}
+    (v : Vec α) (init : β) (f : α → β → m (ForInStep β)) :
+    forIn v init f = forIn v.toList init f := rfl
 
 /--
 Equality is agreement at every index, as an iff.
