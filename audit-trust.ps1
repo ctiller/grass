@@ -41,7 +41,11 @@ function Get-PathUnder([string] $Base, [string] $Full) {
     $normalizedBase = [IO.Path]::GetFullPath($Base).TrimEnd('\', '/')
     $normalizedFull = [IO.Path]::GetFullPath($Full)
     $separator = [IO.Path]::DirectorySeparatorChar
-    if (-not $normalizedFull.StartsWith($normalizedBase + $separator, [StringComparison]::Ordinal)) {
+    $comparison = [StringComparison]::Ordinal
+    if ($separator -eq '\') {
+        $comparison = [StringComparison]::OrdinalIgnoreCase
+    }
+    if (-not $normalizedFull.StartsWith($normalizedBase + $separator, $comparison)) {
         throw "$normalizedFull is not underneath $normalizedBase"
     }
     return $normalizedFull.Substring($normalizedBase.Length + 1).Replace('\', '/')
