@@ -37,12 +37,13 @@ membership, because membership is not what the constructor asks for.
 
 This module was written in the Grass.Process namespace as declared temporary
 custody: `Bag` is the multiset that `docs/PROCESS.md`'s process-step vocabulary
-cannot be stated without, and none existed in Lean core or on any branch. `docs/MODULES.md` gives pure collections to
-`Grass.Std.Logical`, `coord1:32` named this library the receiver, and
-`c-process:52` offered it. The transfer is what `c-process` designed it to be: a
-namespace change and nothing else. Every declaration, law and proof below is as
-that agent wrote it, and the module carries no process vocabulary — nothing here
-mentions a demand, an occurrence, or a transition.
+cannot be stated without, and none existed in Lean core or on any branch.
+`docs/MODULES.md` gives pure collections to `Grass.Std.Logical`, `coord1:32`
+named this library the receiver, and `c-process:52` offered it. The transfer is
+what `c-process` designed it to be: a namespace change and nothing else. Every
+declaration, law and proof below is as that agent wrote it, and the module
+carries no process vocabulary — nothing here mentions a demand, an occurrence,
+or a transition.
 
 ## The representation, ruled on in the open
 

@@ -170,6 +170,86 @@ def declaration_names() -> set[str]:
     return known
 
 
+DOC_DECL = re.compile(
+    r"^(structure|inductive|class|def|abbrev|theorem|axiom|opaque)\s+"
+    r"([A-Za-z_][A-Za-z0-9_.']*)")
+DOC_FIELD = re.compile(r"^\s+([a-zA-Z_][A-Za-z0-9_']*)\s*:")
+DOC_CTOR = re.compile(r"^\s*\|\s*([a-zA-Z_][A-Za-z0-9_']*)")
+
+
+def specification_names() -> dict[str, str]:
+    """Names declared in fenced Lean blocks under `docs/`, and where.
+
+    A docstring may legitimately cite a name the build does not have yet.
+    `ProcessSpec.Step` is a field of a structure `docs/PROCESS.md` declares,
+    and the Lean layer that will declare it is not merged. Rejecting that
+    outright asks the author to delete the name a reader most wants; accepting
+    it on an allowlist accepts it without ever checking, and keeps accepting it
+    if the specification later drops the field. Resolving it against the
+    specification checks it, and goes on checking it.
+
+    When that layer merges the name resolves as a declaration instead, and
+    nothing here needs editing.
+
+    Vocabulary only: `theorem` and `axiom` declarations in the specification
+    are deliberately *not* returned. The two roles a name plays in a docstring
+    are different. Naming a type or a field is describing what the sentence is
+    about, and the specification is a real authority for that. Naming a theorem
+    is claiming the sentence is enforced, and a theorem the specification plans
+    enforces nothing -- 93 such names are declared in fenced blocks under
+    `docs/`, including `emitted_sound` and `cubeFragment_refines_model`, and
+    accepting them would let "guaranteed, as proved by `emitted_sound`" pass
+    while nothing proves it. That is the exact defect this tool exists to catch,
+    so the specification may supply nouns and only the build may supply proofs.
+
+    One residual: a structure may carry a *proof field* whose type is a Prop,
+    and that field is vocabulary by this rule while being enforcement in fact.
+    `specEvent_iff` in `docs/PLATFORM_ABI.md` is the only one today. Every
+    specification-resolved citation is printed by name and source location, so
+    such a citation is visible in the report rather than silently accepted.
+
+    This is deliberately not a general markdown reader: only fenced `lean`
+    blocks count, so ordinary prose naming a type in backticks does not make
+    that type resolvable.
+    """
+    found: dict[str, str] = {}
+    for path in sorted(Path("docs").glob("*.md")):
+        inside = False
+        container = None
+        kind = None
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for number, raw in enumerate(text.splitlines(), start=1):
+            line = raw.rstrip()
+            if line.startswith("```"):
+                inside = line[3:].strip().lower() == "lean"
+                container = None
+                continue
+            if not inside or not line.strip():
+                continue
+            where = f"{path.as_posix()}:{number}"
+            decl = DOC_DECL.match(line)
+            if decl:
+                kind, name = decl.group(1), decl.group(2)
+                if kind not in {"theorem", "axiom"}:
+                    found.setdefault(name, where)
+                container = name if kind in {
+                    "structure", "inductive", "class"} else None
+                continue
+            if container is None:
+                continue
+            member = DOC_CTOR.match(line) if kind == "inductive" else None
+            if member is None and not line.startswith("|"):
+                member = DOC_FIELD.match(line)
+            if member:
+                found.setdefault(f"{container}.{member.group(1)}", where)
+    # The same suffix rule `declaration_names` uses, for the same reason.
+    for name in list(found):
+        parts = name.split(".")
+        for i in range(1, len(parts)):
+            found.setdefault(".".join(parts[i:]), found[name])
+    return found
+
+
 def sentences(block: str) -> list[str]:
     text = " ".join(line.strip() for line in block.splitlines())
     # Split on sentence ends only. A semicolon joins a claim to the clause that
@@ -185,7 +265,8 @@ def doc_blocks(source: str):
         yield line, match.group(1)
 
 
-def check(path: Path, known: set[str]) -> list[str]:
+def check(path: Path, known: set[str], specs: dict[str, str],
+          cited: dict[str, str]) -> list[str]:
     source = path.read_text(encoding="utf-8")
     findings = []
     for line, block in doc_blocks(source):
@@ -204,13 +285,22 @@ def check(path: Path, known: set[str]) -> list[str]:
                 for ident in IDENT.findall(sentence)
                 if not NOT_IDENT.match(ident)
             ]
-            resolved = [ident for ident in named if ident in known]
+            resolved = [
+                ident for ident in named
+                if ident in known or ident in specs
+            ]
+            for ident in named:
+                if ident not in known and ident in specs:
+                    cited.setdefault(
+                        ident, f"{specs[ident]} (cited {path.as_posix()}"
+                        f":{line})")
             # An unresolved name that *looks like a Lean declaration* is the
             # attack; an unresolved `RAX` or `INC` is ordinary prose. See
             # LEAN_STYLE_NAME.
             invented = [
                 ident for ident in named
-                if ident not in known and LEAN_STYLE_NAME.match(ident)
+                if ident not in known and ident not in specs
+                and LEAN_STYLE_NAME.match(ident)
             ]
             if invented:
                 findings.append(
@@ -238,12 +328,14 @@ def main() -> int:
     # evidence a claim would point at.
     roots = [Path("Grass")]
     known = declaration_names()
+    specs = specification_names()
+    cited: dict[str, str] = {}
     findings: list[str] = []
     for root in roots:
         if not root.is_dir():
             continue
         for path in sorted(root.rglob("*.lean")):
-            findings.extend(check(path, known))
+            findings.extend(check(path, known, specs, cited))
     if findings:
         print("docstring audit: claims that name nothing enforcing them\n")
         for finding in findings:
@@ -253,6 +345,17 @@ def main() -> int:
             "rewrite as an intended invariant or open obligation."
         )
         return 1
+    if cited:
+        print(
+            f"\n{len(cited)} name(s) the build does not declare, found instead in a\n"
+            "fenced Lean block under docs/ at the location shown. Each should\n"
+            "resolve as a declaration once its layer merges. This matches names,\n"
+            "not meanings: a short name can collide with a specification\n"
+            "constructor by accident -- `effect` below is a binder in the citing\n"
+            "file -- so a location is where to check, not evidence the sentence\n"
+            "is about that declaration.")
+        for name in sorted(cited):
+            print(f"    {name}  {cited[name]}")
     print("docstring audit: every strong claim names an enforcing type or theorem")
     return 0
 
