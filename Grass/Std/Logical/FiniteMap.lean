@@ -16,11 +16,16 @@ agree at every key. Representations are deliberately not normalized, so
 propositional equality of the underlying entry list is finer than `Equiv` and is
 never the right relation to use.
 
-**Custody note.** `Grass.Std.Logical` is not owned by the memory agent. This
-module is temporary custody under `docs/MEMORY_IMPLEMENTATION_PLAN.md` §2. It
-contains only what milestones M1 through M3 consume and is expected to transfer
-to the `Std.Logical` owner by rename and re-export. In particular the disjoint
-union and its split/join laws are deliberately absent until M3 needs them.
+**Custody note.** This module was written by `c-mem` under the temporary custody
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §2 describes, and that custody transferred to
+`c-stdlib` at `c-mem:47`/`c-stdlib:19`. It is now an ordinary `Std.Logical` module
+and the transfer is recorded here rather than deleted, per `coord1:32`.
+
+The shape it was left in is `c-mem`'s and is deliberate: it contains only what
+milestones M1 through M3 consume, so the disjoint union and its split/join laws
+are absent until M3 needs them. `c-stdlib` keeps that discipline rather than
+speculatively completing the algebra -- a law lands when a named consumer is
+blocked on it.
 -/
 
 namespace Grass.Std.Logical

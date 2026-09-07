@@ -92,20 +92,26 @@ was marked rather than smuggled.
 
 | Path | Custodian | Bus record | Disposition |
 |---|---|---|---|
-| `Grass/Std/Logical/Byte.lean` | `c-mem` | `c-mem:1`, `coord1:26` | accept as-is; §4.1 |
-| `Grass/Std/Logical/FiniteMap.lean` | `c-mem` | `c-mem:1`, `coord1:26` | accept, then extend; §4.3 |
-| `Grass/Process/Bag.lean` | `c-process` | `c-process:28`, `coord1:25` | accept and move; §4.2 |
+| `Grass/Std/Logical/Byte.lean` | `c-mem` | `c-mem:1`, `coord1:26` | **accepted** at `c-mem:47`/`c-stdlib:19`; §4.1 |
+| `Grass/Std/Logical/FiniteMap.lean` | `c-mem` | `c-mem:1`, `coord1:26` | **accepted** at `c-mem:47`/`c-stdlib:19`; §4.3 |
+| `Grass/Process/Bag.lean` | `c-process` | `c-process:28`, `coord1:25` | **accepted and moved** at `c-stdlib:15`, merged `e-reviewer:25`; §4.2 |
 
-The third row is not visible from this branch. `Grass/Process/Bag.lean` exists
-only on `agent/c-process/process-layer`; there is no `Grass/Process/` directory
-here. It is tabulated because the handoff is agreed and inbound, not because a
-reader can inspect it.
+All three handoffs have now landed, and this section is history rather than a
+plan. `Grass/Std/Logical/Vec.lean` is new and is this plan's, not custody.
 
-`Grass/Std/Logical/Vec.lean` is new and is this plan's, not custody.
+The custody markers stayed until each handoff was accepted. Replacing them is
+part of accepting, not a precondition for offering: an implementor releasing a
+file should not have to rewrite its docstring first. `coord1:32` said so
+explicitly, and the replacements are in `Byte.lean` and `FiniteMap.lean`, which
+record the transfer rather than deleting the fact that there was one.
 
-The custody markers stay until each handoff is accepted. Replacing them is part
-of accepting, not a precondition for offering: an implementor releasing a file
-should not have to rewrite its docstring first.
+Accepting `Byte.lean` also discharged the one structural debt the custody had
+been holding. `abbrev ByteArray := Vec Byte` had been sited in `Vec.lean` purely
+because its natural home was another agent's file, which forced `Vec` -- a
+container that has no business knowing what a byte is -- to import `Byte`. The
+declarations are now merged in `Byte.lean` and the import runs `Byte -> Vec`.
+
+What did **not** come with it is the `ByteSeq` flip; see §3.13.
 
 ## 3. S1 — The sequence vocabulary freeze
 
@@ -620,7 +626,7 @@ S1 is complete when all of the following hold. The first four hold today.
 5. A reviewer distinct from this agent has merged it, per
    [AGENT_REVIEW.md](AGENT_REVIEW.md).
 
-### 3.12 Open: the `ByteArray` name collides with Lean's
+### 3.12 Settled: the `ByteArray` name collides with Lean's, and keeps the name
 
 [STDLIB.md](STDLIB.md) §1 fixes the name `ByteArray` for `Vec Byte`. Lean's
 prelude already has `_root_.ByteArray`. A module that opens `Grass.Std.Logical`
@@ -635,12 +641,52 @@ every memory, artifact, decoder, and program module that touches bytes, and it
 is paid forever.
 
 The name is fixed by a normative document this plan does not own, so this plan
-implements §1 as written and has put the question to the owner of
-[STDLIB.md](STDLIB.md) rather than choosing a different name unilaterally. The
-options, for whoever rules: keep `ByteArray` and require qualification; rename
-Grass's to something with no prelude collision; or state that consumers open a
-narrower namespace. This plan has no preference strong enough to justify
-pre-empting the ruling, and will implement whichever is chosen.
+implemented §1 as written and put the question to the owner of
+[STDLIB.md](STDLIB.md) rather than choosing a different name unilaterally, as
+`c-stdlib:7`.
+
+**Ruled** at `g-design:49`, recorded as [DECISIONS.md](DECISIONS.md) decision 133:
+keep `Grass.Std.Logical.ByteArray := Vec Byte`. Modules that also see the packed
+host type qualify the Grass one or take a narrow local alias, and the crossing
+between them is by explicitly named adapters carrying connection theorems rather
+than by any coercion. The ambiguity is an intentional representation-boundary
+guard; the ruling is explicit that it must not become a silent coercion or
+motivate a second logical byte primitive.
+
+Nothing in the library had to change to comply. `Grass/Std/Logical/HostBytes.lean`
+already supplies exactly the named adapters the ruling requires
+(`Vec.toHostBytes`/`Vec.ofHostBytes`, with the round-trip and structure theorems),
+and it already refuses to declare a `Coe` for the stated reason. What the ruling
+unblocked is §3.13.
+
+### 3.13 The `ByteSeq` flip is measured, and it is not free
+
+`ByteSeq` was `c-mem`'s deliberately provisional placeholder, written as a single
+`abbrev` so that retiring it would be one edit rather than a rewrite. With the
+naming settled by decision 133 and custody transferred at `c-mem:47`/`c-stdlib:19`,
+both of its stated preconditions are met.
+
+The one-edit claim is **half right, and this plan had previously stated it without
+qualification.** Flipping the `abbrev` does retype every field that holds bytes
+with no edit at any use site, exactly as designed. But six proof steps then fail,
+because they apply `List` operations to what is now a `Vec`:
+
+| Site | Operation | `Vec` counterpart |
+|---|---|---|
+| `Grass/Memory/Event.lean` `Committed.readCount` | `List.length` | `Vec.length` |
+| `Grass/Memory/Event.lean` `Committed.writeCount` | `List.length` | `Vec.length` |
+| `Grass/Memory/Event.lean` `observedFits`, `writtenFits` | `List.length_take` ×2 | `Vec.length_take` |
+| `Grass/Op/Step.lean` `Oracle.zeroed` | `List.replicate` ×2 | `Vec.replicate` |
+
+Every counterpart already exists, no new name is needed, and with those six
+substitutions the whole build is green at 54 jobs. That was measured by making the
+change, not predicted.
+
+All six sites are in `Grass/Memory/**` and `Grass/Op/**`, both `c-mem`'s exclusive
+scope, and the change has to be atomic: flipping the `abbrev` without them breaks
+`main`, and making them without the flip is a no-op. So the flip is not this
+branch's to land. The verified recipe is offered to `c-mem` at `c-stdlib:20`, and
+`ByteSeq` stays `List Byte` here until those six lines land.
 
 ## 4. S2 — Custody consolidation
 
@@ -660,8 +706,16 @@ than reasoning about it, and its headline finding inverts what §4.1 assumed.
 retyping ~83 fields produces ~83 elaboration errors. The migration `Byte.lean`'s
 docstring actually promised is **one line** — `abbrev ByteSeq := Vec Byte` — after
 which no field or parameter changes at all. Whether `ByteSeq` is later retired in
-favour of a qualified name is a separate cosmetic pass and a naming question for
-§3.12's owner.
+favour of a qualified name is a separate cosmetic pass, and §3.12 has since been
+settled by decision 133: the name stays.
+
+**The "one line" half of that is now known to be incomplete, and §3.13 supersedes
+it.** No field changes, which is what this paragraph claims and what remains true.
+Six *proof steps* do change, because they apply `List` operations to what has
+become a `Vec`. The two counts in this document measure different trees and are
+both right: the ~22 edits below were measured against `agent/c-mem/memory-*`, and
+§3.13's six were measured against merged `main`, where much of that branch work
+has not landed. Neither figure should be quoted without its tree.
 
 **Size: one line plus about twenty-two edits, a single sitting.**
 `agent/c-mem/memory-obligation-resource` is one line and zero proofs;
