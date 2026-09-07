@@ -234,8 +234,13 @@ elab "#audit_runtime_dependencies " declaration:ident : command => do
   logInfo m!"runtime dependency audit passed for '{name}' across \
     {runtimeDependencies.size} declaration(s)"
 
-/-- Audit every project declaration and report direct `VerifiedProgram` roots. -/
-elab "#audit_verified_programs" : command => do
+/-- Audit every project declaration and report direct `VerifiedProgram` roots.
+
+The callable implementation lets generated audit drivers bind a fresh local
+command token after importing the modules under inspection. Imported modules
+therefore cannot replace the public `#audit_verified_programs` syntax and make a
+repository gate report success without executing this function. -/
+def auditVerifiedPrograms : CommandElabM Unit := do
   let environment ← getEnv
   let declarations := environment.constants.fold (init := #[]) fun found name info =>
     found.push (name, info)
@@ -281,5 +286,9 @@ elab "#audit_verified_programs" : command => do
     {runtimeDependencies.size} downstream runtime dependency declaration(s), and \
     {projectDeclarations.size} project declaration(s): \
     {roots.map (fun root => root.1) |>.toList}"
+
+/-- Run the complete `VerifiedProgram` and project-declaration trust audit. -/
+elab "#audit_verified_programs" : command =>
+  auditVerifiedPrograms
 
 end Grass.Trust

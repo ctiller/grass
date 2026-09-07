@@ -33,6 +33,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-PathUnder([string] $Base, [string] $Full) {
+    # [IO.Path]::GetRelativePath is unavailable on Windows PowerShell 5.1.
+    # Every caller supplies a path discovered underneath Base, so a checked
+    # prefix removal is both portable and fail-closed.
+    $normalizedBase = [IO.Path]::GetFullPath($Base).TrimEnd('\', '/')
+    $normalizedFull = [IO.Path]::GetFullPath($Full)
+    $separator = [IO.Path]::DirectorySeparatorChar
+    if (-not $normalizedFull.StartsWith($normalizedBase + $separator, [StringComparison]::Ordinal)) {
+        throw "$normalizedFull is not underneath $normalizedBase"
+    }
+    return $normalizedFull.Substring($normalizedBase.Length + 1).Replace('\', '/')
+}
+
 if ($Declaration.Count -eq 0) {
     throw "At least one declaration must be audited."
 }
@@ -46,9 +59,9 @@ foreach ($root in $LibrarySourceRoot) {
         throw "Configured library source root '$root' does not exist."
     }
     foreach ($file in Get-ChildItem -LiteralPath $root -Filter '*.lean' -File -Recurse) {
-        $relative = [System.IO.Path]::GetRelativePath((Get-Location).Path, $file.FullName)
+        $relative = Get-PathUnder (Get-Location).Path $file.FullName
         $withoutExtension = $relative.Substring(0, $relative.Length - '.lean'.Length)
-        $moduleNames += $withoutExtension.Replace([System.IO.Path]::DirectorySeparatorChar, '.')
+        $moduleNames += $withoutExtension.Replace('/', '.')
     }
 }
 foreach ($root in $TestSourceRoot) {
@@ -56,9 +69,9 @@ foreach ($root in $TestSourceRoot) {
         throw "Configured test source root '$root' does not exist."
     }
     foreach ($file in Get-ChildItem -LiteralPath $root -Filter '*.lean' -File -Recurse) {
-        $relative = [System.IO.Path]::GetRelativePath((Get-Location).Path, $file.FullName)
+        $relative = Get-PathUnder (Get-Location).Path $file.FullName
         $withoutExtension = $relative.Substring(0, $relative.Length - '.lean'.Length)
-        $moduleName = $withoutExtension.Replace([System.IO.Path]::DirectorySeparatorChar, '.')
+        $moduleName = $withoutExtension.Replace('/', '.')
         $source = Get-Content -LiteralPath $file.FullName -Raw
 
         # Executable test modules intentionally share Lean's required top-level
@@ -93,10 +106,21 @@ $csimpProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$csimpPro
 $runtimeConsumerModule = "AuditRuntimeConsumer$([System.Guid]::NewGuid().ToString('N'))"
 $runtimeConsumerPath = Join-Path (Get-Location).Path "$runtimeConsumerModule.lean"
 $runtimeConsumerOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$runtimeConsumerModule.olean"
+$auditNonce = [System.Guid]::NewGuid().ToString('N')
+$auditCommand = "grass_trust_audit_$auditNonce"
+$auditMarker = "grass-trust-audit-complete:$auditNonce"
+$auditMarkerPattern = [regex]::Escape($auditMarker)
+$auditInvocation = @(
+    "open Lean Elab Command",
+    "elab `"#$auditCommand`" : command => do",
+    "  Grass.Trust.auditVerifiedPrograms",
+    "  logInfo `"$auditMarker`"",
+    "#$auditCommand"
+)
 
 try {
     $commands = @($moduleNames | ForEach-Object { "import $_" })
-    $commands += "#audit_verified_programs"
+    $commands += $auditInvocation
     $commands += $Declaration | ForEach-Object { "#print axioms $_" }
     [System.IO.File]::WriteAllLines($temporaryPath, $commands)
 
@@ -104,6 +128,9 @@ try {
     if ($LASTEXITCODE -ne 0) {
         $output | ForEach-Object { Write-Error $_ }
         throw "Lean could not audit the requested declaration closure."
+    }
+    if (-not ($output -match $auditMarkerPattern)) {
+        throw "Lean did not execute the generated trust-audit driver."
     }
 
     $reported = 0
@@ -134,14 +161,14 @@ try {
         Write-Host "Auditing executable test module '$entrypointModule'."
         $entrypointCommands = @(
             "import Tests.Foundation",
-            "import $entrypointModule",
-            "#audit_verified_programs"
+            "import $entrypointModule"
         )
+        $entrypointCommands += $auditInvocation
         [System.IO.File]::WriteAllLines($temporaryPath, $entrypointCommands)
 
         $entrypointOutput = @(& lake env lean $temporaryPath 2>&1)
         if ($LASTEXITCODE -ne 0 -or
-            -not ($entrypointOutput -match "VerifiedProgram trust audit passed")) {
+            -not ($entrypointOutput -match $auditMarkerPattern)) {
             $entrypointOutput | ForEach-Object { Write-Error $_ }
             throw "Trust audit failed for executable test module '$entrypointModule'."
         }
