@@ -4,10 +4,10 @@ import Grass.CFG.Loop
 /-!
 # CFG boundary composition
 
-This module closes the structural seams between graph edges, stack shapes,
-join/loop selections, and explicitly supplied call sites.  Semantic block
-certificates remain a later input: structural closure cannot manufacture an
-`ImplementsBlock` proof.
+`Composition.wellFormed` closes the structural seams between graph edges, stack
+shapes, join/loop selections, and explicitly supplied call sites.  Semantic
+block certificates are intended as a later input; this module defines no
+semantic block-certificate constructor.
 -/
 
 namespace Grass.CFG

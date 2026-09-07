@@ -66,8 +66,8 @@ namespace LocatedCall
 
 variable {State : Type u} {Terminal : Type v}
 
-/-- Exact call projection; supported outcomes and routed returns stay separate,
-so malformed raw calls cannot be hidden by a truncating zip. -/
+/-- `LocatedCall.summary` projects supported outcomes and routed returns as
+separate lists rather than combining them with a truncating zip. -/
 def summary (call : LocatedCall State Terminal) : CallSummary Terminal where
   block := call.block
   target := call.site.target

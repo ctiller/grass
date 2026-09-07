@@ -88,8 +88,8 @@ def toBlockContract (contract : CallContract State) : BlockContract State where
     contract.toBlockContract.exitTags = contract.outcomeTags := by
   simp [toBlockContract, outcomeTags, BlockContract.exitTags]
 
-/-- Forgetting call-specific stack and outcome-class data preserves the exact
-block exit-family validity required by the generic CFG layer. -/
+/-- `CallContract.toBlockContract_wellFormed` shows that forgetting call-specific
+stack and outcome-class data preserves generic block exit-family validity. -/
 theorem toBlockContract_wellFormed (contract : CallContract State)
     (h : contract.WellFormed) : contract.toBlockContract.WellFormed := by
   rw [BlockContract.wellFormed_iff, toBlockContract_exitTags]
