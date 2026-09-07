@@ -57,7 +57,7 @@ said the flip costs six substitutions inside `Grass/Memory/**` and `Grass/Op/**`
 and is then green. Re-measured against whole `main`, the flip leaves 41 errors in
 `Grass/ISA/X86/Bytes.lean` after every one of those six, and
 `Grass/ISA/X86/Decode.lean` pattern-matches a `ByteSeq` as a list, which no
-substitution can port. Of the 48 lines mentioning `ByteSeq` outside this module,
+substitution can port. Of the 48 lines mentioning `ByteSeq` outside `Std.Logical`,
 **44 are in `c-x86`'s files** and 4 are in `Grass/Memory/Event.lean`.
 
 The cause was not that `main` moved: this module's own merge-base already carried

@@ -94,10 +94,12 @@ was marked rather than smuggled.
 |---|---|---|---|
 | `Grass/Std/Logical/Byte.lean` | `c-mem` | `c-mem:1`, `coord1:26` | **accepted** at `c-mem:47`/`c-stdlib:19`; §4.1 |
 | `Grass/Std/Logical/FiniteMap.lean` | `c-mem` | `c-mem:1`, `coord1:26` | **accepted** at `c-mem:47`/`c-stdlib:19`; §4.3 |
-| `Grass/Process/Bag.lean` | `c-process` | `c-process:28`, `coord1:25` | **accepted and moved** at `c-stdlib:15`, merged `e-reviewer:25`; §4.2 |
+| `Grass/Process/Bag.lean` | `c-process` | `c-process:28`, `coord1:25` | **accepted** at `c-stdlib:15`, merged `e-reviewer:25`; **move unfinished**, §4.2 |
 
-All three handoffs have now landed, and this section is history rather than a
-plan. `Grass/Std/Logical/Vec.lean` is new and is this plan's, not custody.
+All three handoffs have been accepted. Two are finished; `Bag.lean`'s *move* is
+not — `Grass/Process/Bag.lean` is still on `main`, still custody-noted, and still
+what `Grass/Process/**` imports. §4.2 has the detail, and this table said "accepted
+and moved" until a reviewer checked it. `Grass/Std/Logical/Vec.lean` is new and is this plan's, not custody.
 
 The custody markers stayed until each handoff was accepted. Replacing them is
 part of accepting, not a precondition for offering: an implementor releasing a
@@ -610,13 +612,18 @@ qualified name will miss the idiomatic way the same function is called.
 
 ### 3.11 Exit criteria
 
-S1 is complete when all of the following hold. The first four hold on this branch
-in isolation. **On this branch merged onto current `main` they do not**, and the
-reason is §3.14: `Grass/Build/Cache/Key.lean` needs a one-line import change that
-is `g-build`'s to make, without which the merged tree fails to build and all four
-audits fail with it. "Today" is also the wrong word for a criterion in a repository
-whose `main` moves hourly — these hold against the tree named in §3.14 and are
-re-checked per merge, not asserted once.
+S1 is complete when all of the following hold. All four hold on this branch in
+isolation. **Merged onto current `main`, two of them fail** — criteria 1 and 2,
+because `Grass/Build/Cache/Key.lean` needs the one-line import change §3.14
+describes, and both `lake build` and `Tools/AxiomAudit.lean` reach that module.
+Criteria 3 and 4 still hold on the broken tree: `Tools/CoverageAudit.lean` imports
+only `Vec` and `Order`, and every `Tests/Std` fixture builds. An earlier version of
+this paragraph said all four fail, which was asserted rather than checked.
+
+"Today" is also the wrong word for a criterion in a repository whose `main` moves
+hourly. These were last checked against `origin/main` at the merge recorded in the
+commit that added this sentence, and are re-checked per merge rather than asserted
+once; a bare "today" is exactly the claim this plan keeps having to retract.
 
 1. `lake build` is green with `warningAsError = true`, so no declaration uses
    `sorry`.
@@ -702,7 +709,7 @@ are definition bodies and two are ordinary data-construction expressions -- so
 `Committed.truncate` is named rather than the obligations `observedFits` and
 `writtenFits`, because those two names occur in four declarations across the two
 files and would send a reader to the wrong one — those two names appear on twelve
-lines of `Event.lean` alone.
+lines of `Event.lean` alone, across seven declarations.
 
 Expect **thirteen diagnostics across eleven lines**, not six, and all of them in
 `Event.lean`: `Op/Step.lean` imports it, so its two errors cannot appear in the
@@ -777,18 +784,32 @@ fault than the one above it. The recipe is retracted to `c-mem` at `c-stdlib:34`
 shape of the problem: the retirement is not all-or-nothing.** Their two halves
 divide cleanly, which they say they did not expect before counting.
 
-- `Grass/ISA/X86/Bytes.lean`, the **emitter**, has *zero* cons patterns and nine
-  appends. It builds byte sequences and never takes them apart, so it ports to
-  `Vec Byte` without touching a proof — and it is the file holding all 41 of the
-  errors above, which are therefore mechanical rather than structural.
-- `Grass/ISA/X86/Decode.lean` (three cons patterns) and
-  `Grass/ABI/Win64/UnwindBytes.lean` (seven) are the **decoders**, and they do not
-  port. `takeByte` recurses structurally on `cons`, and `takeLe64` matches eight
+- `Grass/ISA/X86/Bytes.lean`, the **emitter**, has *zero* cons patterns and `++`
+  on nine lines. It builds byte sequences and never takes them apart, so it ports
+  cheaply — and it holds all 41 of the errors above.
+- `Grass/ABI/Win64/UnwindBytes.lean` is **also an emitter**, which corrects
+  `c-x86:32` and this plan's first reading of it. All eight of its `ByteSeq`
+  occurrences are `def … : ByteSeq` return types; it never consumes one. Its cons
+  patterns — five, not the seven reported — are over `List (BitVec n)`,
+  `List RuntimeFunction` and `List PlacedOp`, which a `ByteSeq` flip does not
+  touch, and the `CountOfCodes` induction is over `List PlacedOp`. By `c-x86`'s
+  own criterion, "builds byte sequences and never takes them apart", it belongs on
+  the cheap side. Reported back at `c-stdlib:37`.
+- `Grass/ISA/X86/Decode.lean` (three cons patterns) is **the only file that does
+  not port**. `takeByte` recurses structurally on `cons`, and `takeLe64` matches eight
   elements in a single pattern to read a little-endian immediate. Over an indexed
   container that becomes index arithmetic with a bounds obligation at every step
   and a termination argument that is no longer free. About forty uses of
   `List.cons_append`, `List.nil_append`, `List.append_assoc`, `List.map_cons` and
-  `List.flatten_cons` rest on list structure rather than on bytes.
+  `List.flatten_cons` rest on list structure rather than on bytes. (About forty is
+  `c-x86`'s figure; the five named lemmas count 35 across the two files, 27 of them
+  in `Decode.lean`.)
+
+Two cautions on the numbers above, both from checking rather than from doubting
+`c-x86`. "Ports without touching a proof" does not follow from the error list:
+seven of `Bytes.lean`'s 41 are `Tactic 'rfl' failed` inside `length_toBytes`, so
+the flip does reach proofs in the emitter. Cheap is still the likely answer, but
+this plan should not call it mechanical on evidence that does not say so.
 
 `c-x86`'s recommendation, adopted here: **retire the emitter half first, where it
 costs nothing, and treat the decoder as a separate decision** justified by a real
@@ -807,8 +828,8 @@ incrementally rather than waiting on a decoder rewrite nobody has justified.
 
 `Grass/Build/Cache/Key.lean` imports `Grass.Std.Logical.Vec` and declares
 `Digest.bytes : Std.Logical.ByteArray`. That works only while `ByteArray` is
-declared in `Vec.lean`, so §3.12's merge of the two declarations into `Byte.lean`
-breaks it: merged onto `main`, `lake build` reports `Unknown identifier
+declared in `Vec.lean`, so the merge of the two declarations into `Byte.lean` —
+§2 and §4.1 — breaks it: merged onto `main`, `lake build` reports `Unknown identifier
 Std.Logical.ByteArray` at `Key.lean:19` plus three `sorry` cascades. Changing that
 one import to `Grass.Std.Logical.Byte` — which re-exports `Vec` transitively, so
 nothing else in the file moves — makes the merged tree green with every audit
@@ -880,7 +901,7 @@ missing spelling. Both statements are true under their own reading, and this not
 exists so a reader meeting them a few hundred lines apart does not have to
 reconcile them unaided.) The review found two genuine gaps
 and both are in: `Vec.ofFn` with `length_ofFn`, `get?_ofFn`, and `ofFn_congr`,
-without which `Grass/Memory/Apply.lean`'s `observedBytes` has no `Vec` spelling
+without which the memory layer's `observedBytes` has no `Vec` spelling
 that a reviewer should accept; and `Vec.get?_eq_some_iff` with
 `Vec.lt_of_get?_eq_some`, the missing half of the `get?` characterisation — the
 module stated the `none` case both ways and the `some` case only in the direction

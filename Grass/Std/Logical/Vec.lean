@@ -201,9 +201,10 @@ The module stated the `none` case as a biconditional and the `some` case only in
 the direction that builds one — so nothing gave `i < v.length` *from* a successful
 read. A cross-agent review found this is the one lemma in `c-mem`'s migration with
 no mechanical replacement, since the memory layer's byte-store reasoning derives
-exactly that. (That review read a `Grass/Memory/ByteStore.lean` that has never
-existed on `main`; the module is named here without a path for that reason.) The
-asymmetry was real rather than stylistic.
+exactly that. (The path is omitted deliberately: `Grass/Memory/ByteStore.lean`
+exists on `c-mem`'s branches, where that review ran, and has never existed on
+`main`, where this comment is read. The reviewer was not wrong; a reader of `main`
+following the path would be.) The asymmetry was real rather than stylistic.
 -/
 theorem get?_eq_some_iff {v : Vec α} {i : Nat} {a : α} :
     v.get? i = some a ↔ ∃ h : i < v.length, v.get i h = a := by
@@ -237,8 +238,8 @@ place where no `Vec` spelling existed at all. Re-measured against merged `main`
 when the custody handoff landed, the rest of that migration costs six
 substitutions and no new names: `List.length`, `List.length_take` and
 `List.replicate` become their `Vec` counterparts, all of which already exist.
-Only two of the six are proof steps; the rest are a definition body and two
-data-construction expressions. The memory layer's apply pass
+Only two of the six are proof steps; the other four are two definition bodies and
+two data-construction expressions. The memory layer's apply pass
 defines `observedBytes` as `(List.range n).map (fun i => …)` and thirty-two sites
 reason about it; without `ofFn` there is no `Vec` way to write it, and the idiom
 that works — `(replicate n default).mapIdx …` — is neither guessable nor free,
