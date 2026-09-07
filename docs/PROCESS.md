@@ -76,7 +76,7 @@ structure ProcessVocabulary where
   EnvironmentViolation : Type
 
 structure DemandProviderSemantics (Demand : Type) where
-  Requires : Demand -> SomeProviderDemand -> Prop
+  Requires : Demand -> ProviderDemandView -> Prop
 
 opaque DemandProviderEnvelope
     (semantics : DemandProviderSemantics Demand) : Type
@@ -88,7 +88,16 @@ def DemandProviderEnvelope.origins
 theorem DemandProviderEnvelope.origins_exact
     (envelope : DemandProviderEnvelope semantics) :
     OriginOccursIn (envelope.origins demand) origin <->
-      semantics.Requires demand origin
+      semantics.Requires demand origin.view
+def DemandProviderEnvelope.reindex
+    (envelope : DemandProviderEnvelope semantics)
+    (embedding : ExtensionAuthorityEmbedding
+      envelope.demands.authorityRegistry target) :
+    DemandProviderEnvelope semantics
+theorem DemandProviderEnvelope.reindex_demands ...
+theorem DemandProviderEnvelope.reindex_origins ...
+theorem DemandProviderEnvelope.reindex_id ...
+theorem DemandProviderEnvelope.reindex_comp ...
 
 opaque CertifiedProcessVocabulary (vocabulary : ProcessVocabulary) : Type
 def CertifiedProcessVocabulary.semantics :
@@ -97,6 +106,18 @@ def CertifiedProcessVocabulary.semantics :
 def CertifiedProcessVocabulary.providers
     (certificate : CertifiedProcessVocabulary vocabulary) :
     DemandProviderEnvelope certificate.semantics
+def CertifiedProcessVocabulary.reindexProviders
+    (certificate : CertifiedProcessVocabulary vocabulary)
+    (embedding : ExtensionAuthorityEmbedding
+      certificate.providers.demands.authorityRegistry target) :
+    CertifiedProcessVocabulary vocabulary
+theorem CertifiedProcessVocabulary.reindexProviders_semantics
+    (certificate : CertifiedProcessVocabulary vocabulary) :
+    (certificate.reindexProviders embedding).semantics = certificate.semantics
+theorem CertifiedProcessVocabulary.reindexProviders_envelope
+    (certificate : CertifiedProcessVocabulary vocabulary) :
+    (certificate.reindexProviders embedding).providers.demands =
+      certificate.providers.demands.reindex embedding
 
 inductive ProcessEvent (v : ProcessVocabulary)
   | external (event : v.ExternalEvent)
@@ -466,6 +487,18 @@ def CertifiedDriverBoundary.semantics
 def CertifiedDriverBoundary.providers
     (certificate : CertifiedDriverBoundary boundary) :
     DemandProviderEnvelope certificate.semantics
+def CertifiedDriverBoundary.reindexProviders
+    (certificate : CertifiedDriverBoundary boundary)
+    (embedding : ExtensionAuthorityEmbedding
+      certificate.providers.demands.authorityRegistry target) :
+    CertifiedDriverBoundary boundary
+theorem CertifiedDriverBoundary.reindexProviders_semantics
+    (certificate : CertifiedDriverBoundary boundary) :
+    (certificate.reindexProviders embedding).semantics = certificate.semantics
+theorem CertifiedDriverBoundary.reindexProviders_envelope
+    (certificate : CertifiedDriverBoundary boundary) :
+    (certificate.reindexProviders embedding).providers.demands =
+      certificate.providers.demands.reindex embedding
 
 structure ProcessGraph (registry : ProtocolRegistry)
     (boundary : DriverBoundary) where
@@ -1876,6 +1909,8 @@ structure PendingInteractionModel (boundary : DriverBoundary) where
   reflexive : Reflexive Extends
   transitive : Transitive Extends
   observations : History demand start -> List boundary.Observation
+  observations_congruent : Extends first second -> Extends second first ->
+    observations first = observations second
 
 def PendingInteractionModel.ProperExtends
     (model : PendingInteractionModel boundary)
@@ -1927,7 +1962,10 @@ reachable histories denote the same progress class and may not justify a
 pending-progress transition. The asymmetric definition rules out two-state
 cycles without demanding decidable equality or quotient ceremony from an
 ordinary machine author. Effect-theory projection proves that this strict
-relation is exactly semantic history growth.
+relation is exactly semantic history growth. `observations_congruent` makes the
+induced equivalence observationally honest: mutually reachable representatives
+cannot hide a new partial-write or streaming observation. The atomic constructor
+derives this field trivially; a custom model must prove it once.
 
 `SequentialAdapter.elaborateMachine` translates this syntax plus an exact
 selected `PendingInteractionModel` and its pending semantics to the more general
