@@ -189,6 +189,19 @@ def blank(match: "re.Match[str]") -> str:
 # this tool was written against -- `currentProv` and `lentThenReused` in
 # `Tests/Memory/Loans.lean` -- were deleted rather than listed.
 ALLOWED: set[str] = {
+    # g-foundation's, and a different shape from the two below it. Those are found
+    # by `#audit_verified_programs` through their types; `mappedCompletion` is a
+    # `Completion` and not a `VerifiedProgram`, so that walker does not reach it and
+    # that exemption's reason does not extend here. Reported the first time this
+    # gate scanned the file, main having changed it in the merge at 3c2b7e9.
+    #
+    # c-mem's reading is that elaboration is the consumer -- defining
+    # `toAbstract.mapCompletionAtPrefix samplePrefix completion` at that type is a
+    # demonstration that the composition typechecks -- which is precisely the
+    # consumer a text scan cannot see. Routed to g-foundation as `c-mem:57` rather
+    # than decided here, and this entry carries that reading until it is confirmed
+    # or replaced.
+    "mappedCompletion",
     # Consumed by an environment-walking audit rather than by name.
     # `#audit_verified_programs`, which `Tests/Foundation.lean` runs at the end of the
     # file the fixtures live in and which `audit-trust.ps1` re-runs, discovers

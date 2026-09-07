@@ -250,6 +250,19 @@ STRUCTURE = re.compile(r"^\s*(?:private\s+)?structure\s+([A-Za-z_][A-Za-z0-9_.']
 # docs/MEMORY_IMPLEMENTATION_PLAN.md and in their own docstrings, which is where a
 # gap this tool cannot see belongs.
 ALLOWED = {
+    # --- g-foundation's, and reported the first time this gate scanned the file:
+    # --- main changed `Grass/Verify/VerifiedProgram.lean` in the merge at 3c2b7e9
+    # --- and this gate is not on main. `CompletionRefinement.loaded` is declared
+    # --- and never projected; its sibling `portable` is. Every other `.loaded` in
+    # --- the tree is `loadedBehavior` or `loadedAdequate`, which are other names,
+    # --- so same-name blindness is not what is quieting it.
+    # ---
+    # --- Routed to g-foundation as `c-mem:57`, which asks whether the pairing of
+    # --- the two completions is itself the content. This entry is a placeholder
+    # --- for that answer and not a judgement c-mem is entitled to make about
+    # --- another owner's structure; when the answer lands, this reason is replaced
+    # --- by it or the entry goes.
+    "CompletionRefinement.loaded",
     # --- Six entries left this list on merging `origin/main`, and they left for
     # --- three different reasons, which the note that deleted them gave as one.
     #
@@ -389,15 +402,25 @@ ALLOWED = {
     # profile closure is the reader. Its own docstring says so.
     "issuer",
     # --- `Grass/Semantics/Execution.lean` is another owner's module, arrived by
-    # --- merging main. Four fields of `InfiniteContinuation` are unprojected
-    # --- there. This said five and named `ExecutionPrefix` as a second structure;
-    # --- the fifth was `initialGraph`, `ExecutionPrefix`'s only entry here, which the
-    # --- merge deleted from this list without re-counting the sentence above it. Listed rather than silently skipped, and reported to
-    # --- that owner rather than decided here: whether an infinite continuation's
-    # --- witness fields are meant to be read is their call, not this layer's.
-    "eventAt",
-    "stateZero",
-    "graphZero",
+    # --- merging main. This group held four fields of `InfiniteContinuation`, then
+    # --- five with `ExecutionPrefix.initialGraph`; **one is left**.
+    # ---
+    # --- `eventAt`, `stateZero` and `graphZero` went inert in the merge at 3c2b7e9
+    # --- and are deleted. They went for the *good* reason, which is worth
+    # --- separating from the four that went to same-name blindness a merge earlier:
+    # --- their declaring module grew genuine readers (`Grass/Semantics/Execution.lean`
+    # --- lines 102 and 115-116), and `Grass/Certificate.lean` projects all three
+    # --- when it maps a continuation through a refinement. The field became
+    # --- consulted; that is the one way an entry in this group is supposed to end.
+    # ---
+    # --- `consistent` stays, and *not* because nothing names it. `Grass/Certificate
+    # --- .lean:179` is `consistent := refinement.infiniteConsistency
+    # --- execution.consistent` -- a projection on the very line that constructs the
+    # --- field, which the rule three paragraphs down deliberately declines to count,
+    # --- for the reason `RequiredProofPackage.loanMapLaws` taught: an eponymous
+    # --- discharge is not a reader. Deleting this entry does report the field;
+    # --- that was checked by removing it and running the gate, not by reading it.
+    # --- Still another owner's call, routed with the rest as `c-mem:57`.
     "consistent",
     # And `Grass/Core/Demand.lean`, the same way and for the same reason. This one was
     # *already* silenced, by the bare `origin` entry two groups above, whose reason

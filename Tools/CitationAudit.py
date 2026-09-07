@@ -301,6 +301,16 @@ ALLOWED = {
     # made and is not one. `ByteStore.rec` is different and stays: `ByteStore` is this
     # tree's own type, so the root is not core and the generated recursor really is
     # unresolvable here.
+    # Lean core reached through `open Lean`, and the reason it needs a name rather
+    # than a root. `CORE_ROOTS` holds root namespaces, and `Name` cannot go there:
+    # `Grass/Core/Name.lean` declares this tree's own `Name`, so rooting it as core
+    # would stop adjudicating every citation of that one -- a guard wider than what
+    # it governs. `Grass/Trust/Audit.lean:68` cites Lean's, correctly;
+    # `Tools/AxiomAudit.lean:293` calls it. The gate reported it as naming nothing
+    # the first time an in-scope file cited it, which was main's edit to that file
+    # in the merge at 3c2b7e9 -- `Tests/ISA/X86/LedgerAudit.lean` cites it three
+    # times and is out of `SCOPE`, so the gap had never surfaced.
+    "Name.isInternal",
     "ByteStore.rec",
     # Recursors and eliminators Lean generates for this tree's own types. Cited in
     # `Grass/Core/Uid.lean` and `Grass/Memory/ByteStore.lean` precisely because they
