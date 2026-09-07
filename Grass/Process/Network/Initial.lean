@@ -419,10 +419,13 @@ theorem start_holds_an_unkilled_root {request : (plan.topology.protocol plan.top
 /--
 **And every execution keeps one, unless a restart takes it away.**
 
-`NetworkTransition.parentless_slot_is_unkilled` at every step of a run, and the
-disjunct is the same one: `Restarts.restartsAChild` constrains only the new
-incarnation, so a restart at the root's slot is the single way an execution can
-end without a root. A plan at which that restart is unconstructible —
+`NetworkTransition.parentless_slot_survives` at every step of a run for the
+parentage half, and `NetworkTransition.dying_was_supervised` for the death half,
+bridged by `WellFormed.slotsAgree` and `ProcessLifecycle.died_cast` — the bridge
+is why the well-formedness hypothesis is here rather than a convenience. The
+disjunct is `parentless_slot_survives`': `Restarts.restartsAChild` constrains
+only the new incarnation, so a restart at the root's slot is the single way an
+execution can end without a root. A plan at which that restart is unconstructible —
 `ProcessGraph.maySpawn` permitting no parent for the root's role is the ordinary
 reason — therefore holds its root along every run, which is what
 `Tests/Process/PreservationFixtures.lean` discharges at `serverPlan`.

@@ -479,7 +479,8 @@ What closes it is an invariant over executions rather than steps.
 holds, in the root's slot, an instance with no current parent that has not died —
 unless a `restart` at that slot took it away, which
 `no_restart_at_the_root_slot` shows is unconstructible here. So none of the seven
-worlds below is a world of any run, and each of them says so by name. §10.133.
+worlds below is a world of any run. Four theorems cover them: three name a world
+each and the fourth is quantified over every `holding` world. §10.133.
 -/
 
 open Grass.Process.Tests.ChannelStep
@@ -606,7 +607,11 @@ theorem the_live_receiver_is_a_child : ∀ incarnation,
   intro empty
   cases empty
 
-/-- And it is a step, which is what makes `sentWithDeadReceiver` a world of a run. -/
+/-- And it is a step, so the *family* admits one into `sentWithDeadReceiver`.
+
+Not a run: `no_run_reaches_sentWithDeadReceiver` below. A third reviewer found
+this sentence still claiming the opposite after the commit that reported fixing
+it had fixed its two neighbours and missed this one — which is §10.135. -/
 def theReceiverIsKilledStep :
     serverPlan.NetworkStep sentWithLiveReceiver sentWithDeadReceiver where
   transition := .childDied .connection wire.receiver.instanceId .providerLost
@@ -652,9 +657,11 @@ theorem no_restart_at_the_root_slot {before after : ServerWorld}
 **So every run of `serverPlan` ends holding an unkilled root.**
 
 `ProcessPlan.execution_holds_an_unkilled_root` with its restart escape closed.
-This is the theorem the seven refusals below are read off, and it is what
-§10.129 was actually asking for: not a step into each before-world, but a reason
-no execution is ever in one.
+The three `no_run_reaches_*` corollaries below apply it. The four
+`*_is_no_world_of_a_run` theorems do not — they are read off `UnkilledRootAt`
+directly and would stand without this theorem; it is what turns them into
+statements about executions. That is §10.129's actual question: not a step into
+each before-world, but a reason no execution is ever in one.
 -/
 theorem every_run_holds_an_unkilled_root
     {request : (serverTopology.protocol serverTopology.root).Request}
@@ -808,6 +815,23 @@ def theOrphaningStep : serverPlan.NetworkStep sentWithDeadReceiver deadOrphanWor
   transition := .detach .connection wire.receiver.instanceId a_corpse_may_be_orphaned
   admissible := by intro _ nothing; cases nothing
   historyExact := rfl
+
+theorem deadOrphanWorld_is_no_world_of_a_run :
+    ¬ serverPlan.UnkilledRootAt deadOrphanWorld .listener () := by
+  rintro ⟨_, found, _⟩
+  exact absurd found (by intro equal; cases equal)
+
+/-- **And no run reaches the dead orphan either**, which is the sentence
+`NetworkTransition.dying_was_supervised`'s docstring used to assert without a
+declaration behind it. The instance *shape* is what
+`a_corpse_may_be_orphaned` refutes a reading with; the *world* is a world of no
+run, like every other world in this file. §10.135. -/
+theorem no_run_reaches_deadOrphanWorld
+    {request : (serverTopology.protocol serverTopology.root).Request} {start : ServerWorld}
+    (isStart : serverPlan.ExactInitialNetwork request start)
+    (execution : serverPlan.StepsTo start deadOrphanWorld) : False :=
+  deadOrphanWorld_is_no_world_of_a_run
+    (every_run_holds_an_unkilled_root isStart execution)
 
 /-! #### And the two instance endings
 

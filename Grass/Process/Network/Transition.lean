@@ -2190,8 +2190,15 @@ theorem moving_the_ledger_ends_an_instance (transition : plan.NetworkTransition 
   | detach _ _ step => exact absurd (step.onlyThatSlot.scope .obligations (by simp)) moved
 
 /--
-`ProcessLifecycle.live_cast` is why a live instance that a step leaves dead
-cannot have been the same instance.
+A slot nothing moved holds the same instance afterwards, so under
+`LogicalProcessNetworkCore.Agrees` an instance already recorded as not dead
+cannot be found dead there.
+
+The off-scope half of `dying_was_supervised`, factored out because every
+constructor whose scope does not name this slot discharges its case with it. It
+took a `Live` hypothesis and used `ProcessLifecycle.live_cast` until the theorem
+above was weakened to `notAlreadyDead`; now it needs neither, which is the point
+of the weakening.
 
 The off-scope half of `dying_was_supervised`, factored out because every
 constructor whose scope does not name this slot discharges its case with it.
@@ -2214,7 +2221,7 @@ private theorem not_dead_where_nothing_moved
   exact notAlreadyDead reason sameKind dead
 
 /--
-**A step that leaves an instance dead found it recording a current parent.**
+**A step that kills an instance found it recording a current parent.**
 
 `docs/PROCESS.md` §3's supervision half, stated over the whole family rather than
 over one constructor: `.died` is written by `childDied` alone and `childDied`
@@ -2236,9 +2243,11 @@ requirement and copies the lifecycle across, so a dead child detaches into a dea
 instance with no current parent —
 `Tests/Process/PreservationFixtures.lean`'s `a_corpse_may_be_orphaned`. Nothing
 was killed by that step, so this theorem is untouched; the *family admits a step
-into that state* all the same. Whether any run reaches one is a further question
-and this corpus does not answer it — at `serverPlan` it does not, since both ends
-of that detach have an empty root slot. Whether a supervisor may let go of a corpse is `agent-bus`
+into that state* all the same. Whether any run reaches such a world is a separate
+question, and at `serverPlan` the answer is no —
+`Tests/Process/PreservationFixtures.lean`'s `no_run_reaches_deadOrphanWorld`,
+written down rather than left as an aside, since leaving the inference to a
+reader is how two earlier rounds of this went wrong. Whether a supervisor may let go of a corpse is `agent-bus`
 `c-process:103`'s question for `g-design`.
 
 *It is not "no run reaches a dead root".* This is one step. Getting from here to
@@ -2641,45 +2650,6 @@ theorem parentless_slot_survives (transition : plan.NetworkTransition before aft
       intro inScope; rcases inScope with isScope | isScope <;> exact absurd isScope (by simp)
     | coalesce _ _ _ _ step =>
       intro inScope; exact absurd inScope (by intro equal; cases equal)
-
-/--
-**And what it still holds has not been killed.**
-
-`parentless_slot_survives` with `dying_was_supervised` spent on the result: the
-instance the slot holds afterwards is parentless, so if it were dead this step
-would have killed a parentless instance, which `dying_was_supervised` refuses.
-
-This is the invariant the earlier docstring on `dying_was_supervised` claimed and
-did not have. Local adversarial review found the gap by building a *dead orphan*
-— `Detaches` has no liveness requirement and copies the lifecycle across, so a
-dead child detaches into a dead parentless one — which means "a dead instance has
-a current parent" is false of the network as a whole while "a parentless
-instance was never killed" is true of every step. The difference is that a
-detach does not kill anything; it relabels something already dead.
-`Tests/Process/PreservationFixtures.lean`'s `a_corpse_may_be_orphaned` is that
-witness, kept because the distinction is easy to lose.
--/
-theorem parentless_slot_is_unkilled (transition : plan.NetworkTransition before after)
-    {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
-    {was : ProcessInstance plan.topology}
-    (found : before.instances kind slot = some was)
-    (parentless : was.parentage.currentParent = none)
-    (unkilled : ∀ (earlier : ProcessDeathReason) (wasKind : was.kind = kind),
-      (wasKind ▸ was.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
-        ≠ .died earlier) :
-    (∃ now, after.instances kind slot = some now ∧
-        now.parentage.currentParent = none ∧
-        ∀ (reason : ProcessDeathReason) (nowKind : now.kind = kind),
-          (nowKind ▸ now.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
-            ≠ .died reason) ∨
-      ∃ allocation emitted localEmitted,
-        plan.Restarts before after kind slot allocation emitted localEmitted := by
-  rcases transition.parentless_slot_survives found parentless with
-    ⟨now, foundNow, stillParentless⟩ | restarted
-  · refine Or.inl ⟨now, foundNow, stillParentless, ?_⟩
-    intro reason nowKind dead
-    exact transition.dying_was_supervised found unkilled foundNow nowKind dead parentless
-  · exact Or.inr restarted
 
 /--
 The nominals a step allocates.

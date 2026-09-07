@@ -4919,9 +4919,13 @@ before-worlds by steps is owed, and is a bigger job: it wants a `processStep`
 that puts an instance in each state, which is `Tests/Process/ProcessStepFixtures.lean`'s
 territory rather than this file's.
 
-**Ran down** in §10.132. Three of the four are reachable and now are; the fourth
-holds a dead *root*, and `NetworkTransition.dying_was_supervised` says no step of
-any plan reaches it. The guess above was right for three cases out of four.
+**Ran down** in §10.132, whose answer was then refuted in §10.133 and §10.134.
+The guess above — four `processStep`s — was wrong about all four. Three of the
+four before-worlds have a step into them and none of the six worlds involved is a
+world of a run; the fourth holds a dead *root*, and what refuses it is not a
+step-local theorem but `ProcessPlan.execution_holds_an_unkilled_root`, an
+invariant over whole executions. §10.133 is where that lands and §10.134 and
+§10.135 are the two further rounds it took.
 
 ### 10.130 The fixture that proved the generalisation had content could not be satisfied
 
@@ -5204,9 +5208,12 @@ file.
 **The commit fixed the section headers and not the declarations.**
 `theReceiverIsKilledStep`'s docstring still said "which is what makes
 `sentWithDeadReceiver` a world of a run"; `theLogStep`'s and `theLastTickStep`'s
-still said their before-worlds were worlds of a run. Sixty lines below,
+still said their before-worlds were worlds of a run. Further down the same file,
 `sentWithDeadReceiver_is_no_world_of_a_run` and `holding_is_no_world_of_a_run`
-say the opposite, in the same file, added by the same commit. The ledger entry
+say the opposite, added by the same commit.
+
+> **And the commit that reported fixing these fixed two of the three.**
+> `theReceiverIsKilledStep`'s survived another round. §10.135. The ledger entry
 knew and the source did not, which is the exact shape §10.131 recorded — a
 docstring contradicting a recorded fact without noticing — and it recurred inside
 the entry written to fix it.
@@ -5240,7 +5247,10 @@ add the guard as a conjunct but to *drop the transport*:
 `NetworkTransition.dying_was_supervised`, which is stated at the slot's kind, and
 `execution_holds_an_unkilled_root` now carries `WellFormed` alongside — through
 `wellFormed_preserved` — so that `slotsAgree` supplies the bridge where the proof
-needs it. Well-formedness is where the kind agreement belongs; the invariant
+needs it. `parentless_slot_is_unkilled`, which combined the two halves in the
+transported form, was deleted in §10.135 rather than repaired: nothing consumed
+it, and the repair would have been to give it the same `WellFormed` hypothesis
+the theorem that does the work already has. Well-formedness is where the kind agreement belongs; the invariant
 should not have been asserting it by accident.
 
 **Three dangling declaration names, and a gate that cannot see them.**
@@ -5261,14 +5271,86 @@ and "nine constructors pin the parentage" for seven — the second contradicting
 from the file.
 
 **What the round did not break**, recorded because a clean result is evidence
-too: `no_restart_at_the_root_slot` survived an independent reconstruction from
-`Restarts`' four fields and `serverTopology.maySpawn`; the invariant is
+too: `no_restart_at_the_root_slot` survived an independent reconstruction from four of
+`Restarts`' ten fields and `serverTopology.maySpawn`; the invariant is
 non-vacuous, since `withRoot_is_a_start` inhabits `ExactInitialNetwork` and
 `serverTopology.InstanceId .listener` is `Unit` so `start.rootSlot` really is
 `()`; `noRestart`'s quantifiers are correctly scoped; the weakened
 `notAlreadyDead` hypothesis is strictly implied by `Live`, so the theorem did get
 stronger; and `a_corpse_may_be_orphaned` is a genuine `Detaches` with all three
 fields checked against the structure.
+
+### 10.135 The entry reporting corrections that did not land reported one that did not land
+
+Third fresh reviewer, third round, no sight of the other two. The Lean survived
+again — it verified the cluster is non-vacuous end to end, building a real run
+`.more .still theSendStep` from `withRoot_is_a_start` and firing the invariant on
+it, and confirmed every one of §10.134's counts. What it found was nine more
+things, and the first is the worst thing in this whole sequence.
+
+**§10.134 reported a fix that did not land, in the entry whose subject is fixes
+that did not land.** §10.134 named three docstrings claiming a world was a world
+of a run, and the commit message said "Corrected". Two of the three were.
+`theReceiverIsKilledStep`'s was not: the commit rewrote the docstring on the
+*neighbouring* declaration and left this one saying "which is what makes
+`sentWithDeadReceiver` a world of a run", eighty-three lines above the theorem
+refuting it. So the ledger asserted a correction the diff does not contain, which
+is the same failure one level up, and it is the fourth consecutive round in which
+the prose was wrong and the Lean was not.
+
+The lesson is mechanical rather than moral. Three of these four rounds found a
+stale sentence that a *targeted* re-read would have caught and a from-memory edit
+did not, and the fix each time was two words. §10.129 recorded the same thing
+about a check that is four lines per case: the cost of running it is not the
+problem, remembering to is. So the discipline this adopts is `git grep` for the
+claim rather than for the declaration — searching for "world of a run" would have
+found all three in one pass, and searching for the declaration names found two.
+
+**And the vacuous form survived in the lemma nothing consumed.** §10.134 removed
+the uninhabited-guard shape from `UnkilledRootAt` and left it standing in
+`parentless_slot_is_unkilled`, whose conclusion still transported the lifecycle
+across `now.kind = kind` and which therefore said nothing at exactly the worlds
+the fix was made for. The reviewer machine-checked both halves: the transport-free
+form is *false* of the branch's own `orphanedDeadConnection`, and the transported
+form is *true* of it.
+
+It is deleted rather than repaired, and the reason is the finding next to it:
+`execution_holds_an_unkilled_root`'s docstring cited it as the lemma applied at
+every step, and the proof does not use it at all — it spends
+`parentless_slot_survives` and `dying_was_supervised` separately, bridged by
+`slotsAgree` and `died_cast`. A declaration with no consumers, in the vacuous
+form the previous entry says it removed, cited as load-bearing by a theorem that
+does not consume it, is three defects in one place. Repairing it would have meant
+giving it the `WellFormed` hypothesis the working theorem already carries, to
+produce a lemma still nobody calls.
+
+**One more inference written down instead of asserted.**
+`dying_was_supervised`'s docstring said of the dead-orphan world "at `serverPlan`
+it does not [reach one]", with nothing proving it —
+`no_run_reaches_deadOrphanWorld` is now that, one line, and the sentence points
+at it. The same remedy §10.134 adopted for the other worlds, applied to the one
+it missed. The reviewer also noted the sentence contradicted itself: "this corpus
+does not answer it", immediately followed by an answer.
+
+**And four smaller ones, all counts or attributions.** §10.129's forward
+reference still restated §10.132's refuted headline unmarked and repeated the
+"no step of any plan reaches it" claim that §10.133 itself calls literally false —
+the banner went on §10.132 and not on the sentence a reader meets first.
+`not_dead_where_nothing_moved`'s docstring still described the `Live` hypothesis
+and the `live_cast` it stopped using. "The seven refusals below are read off"
+this theorem — four of them are not, and would stand if it were deleted. And
+§10.134 said `Restarts` has four fields; it has ten, four of which the proof
+uses. That is a miscount inside the entry reporting two miscounts, which is
+becoming the shape of this sequence rather than a coincidence.
+
+**What survived, again.** Non-vacuity end to end, with an inhabited start and a
+real execution; all three `UnkilledRootAt` conjuncts individually falsifiable at
+fixture worlds; `Restarts` inhabited at `Tests/Process/RestartFixtures.lean`, so
+`no_restart_at_the_root_slot` refuses something the corpus can build and
+`parentless_slot_survives`' right disjunct is not a dead branch; the `WellFormed`
+threading genuinely derived rather than assumed at each world; all 109 backticked
+identifiers in the new docstrings resolving; and `c-process:103` resolving to the
+event §10.133 says it is.
 
 ## 11. The authoring facade
 
