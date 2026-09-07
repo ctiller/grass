@@ -26,12 +26,45 @@ def emitProgram (verified : VerifiedProgram spec) : ByteArray :=
 
 namespace VerifiedProgram
 
+/-- Emission is byte-for-byte the selected machine profile's encoding of the
+exact raw instructions elaborated from the selected authored source. -/
+theorem emitProgram_eq_encodedBytes (verified : VerifiedProgram spec) :
+    emitProgram verified = verified.machine.encodedBytes :=
+  verified.artifact.representationExact
+
+/-- Decoding verified emission under its selected profile recovers exactly the
+raw instruction list elaborated from its selected authored source. -/
+theorem decode_emitProgram (verified : VerifiedProgram spec) :
+    verified.machine.code.decode verified.machine.profile
+        (emitProgram verified) =
+      some verified.machine.instructions := by
+  rw [verified.emitProgram_eq_encodedBytes]
+  exact verified.machine.decode_encodedBytes
+
 /-- Parsing the emitted bytes selects the exact certified artifact behavior. -/
 theorem loadedBehavior_exact (verified : VerifiedProgram spec) :
     verified.artifact.format.loadedBehavior (emitProgram verified) =
       verified.artifact.format.artifactBehavior verified.artifact.artifact :=
   verified.artifact.format.loadExact
     (verified.artifact.format.writeParses verified.artifact.artifact)
+
+/-- Loading verified emission yields exactly the selected target semantics of
+the decoded source expansion, not an independently authored lookalike. -/
+theorem loadedMachineBehavior_exact (verified : VerifiedProgram spec) :
+    verified.artifact.format.loadedBehavior (emitProgram verified) =
+      verified.machine.behavior :=
+  verified.artifact.loadedBehaviorExact
+
+/-- The behavior loaded from exact emitted bytes refines the selected target
+semantics of the exact authored-source expansion. Together with
+`VerifiedProgram.emitProgram_eq_encodedBytes`, this is the public connection
+from source through encoding and artifact loading to target behavior. -/
+def emittedMachineRefinement (verified : VerifiedProgram spec) :
+    BehaviorRefinement
+      (verified.artifact.format.loadedBehavior (emitProgram verified))
+      verified.machine.behavior :=
+  BehaviorRefinement.castConcrete verified.loadedMachineBehavior_exact
+    (BehaviorRefinement.refl verified.machine.behavior)
 
 /-- The exact behavior loaded from emitted bytes inherits the artifact
 certificate's paired execution and completion adequacy guarantee. -/

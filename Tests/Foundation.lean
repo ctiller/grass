@@ -134,17 +134,77 @@ def provider : ProviderCertificate driver where
   stage := noDerivedDemands
   requirements := noDemandCertificates
 
+/-- A behavior with an admitted initial execution but no finite or infinite
+completion, used to make stale target-semantics proofs uninhabitable. -/
+def rejectedSystem : RelationalSystem spec.AuditEvent where
+  State := Bool
+  Choice := Unit
+  Graph := Nat
+  Initial := fun _ graph => graph = 0
+  Step := fun _ _ _ _ _ _ => False
+  Terminal := fun _ _ => False
+  InfiniteConsistent := fun _ _ _ _ _ => False
+  Extends := Nat.le
+  extendsRefl := Nat.le_refl
+  extendsTrans := Nat.le_trans
+  stepExtends := fun transition => False.elim transition
+
+def rejectedBehavior : ProgramBehavior spec where
+  system := rejectedSystem
+  inputOf := id
+
+def rejectedInitial : rejectedSystem.ExecutionPrefix :=
+  @RelationalSystem.ExecutionPrefix.initial spec.AuditEvent rejectedSystem
+    true (0 : Nat) rfl
+
+theorem rejectedBehavior_not_adequate : ¬ rejectedBehavior.Adequate := by
+  intro adequate
+  rcases adequate.completion rejectedInitial with ⟨completion⟩
+  cases completion with
+  | finite _ terminal => exact terminal
+  | infinite execution => exact execution.consistent
+
+def machineCode : MachineCodeFormat spec where
+  Source := Bool
+  Instruction := Bool
+  EncodingProfile := Bool
+  elaborate source := [source]
+  semantics profile instructions :=
+    if profile = true ∧ instructions = [true] then behavior
+    else rejectedBehavior
+  encode profile instructions :=
+    ⟨(((if profile then [1] else [0]) : List UInt8) ++
+      instructions.map fun instruction =>
+        if instruction = true then 1 else 0).toArray⟩
+  decode profile bytes :=
+    match profile, bytes.data.toList with
+    | true, [1, 1] => some [true]
+    | true, [1, 0] => some [false]
+    | false, [0, 1] => some [true]
+    | false, [0, 0] => some [false]
+    | _, _ => none
+
+def machineEncoding : MachineEncodingCertificate machineCode true
+    (machineCode.elaborate true) where
+  bytes := ⟨#[1, 1]⟩
+  encoded := rfl
+  decoded := rfl
+
 def machine : MachineCertificate provider where
-  behavior := behavior
-  refinement := behaviorRefinesItself
-  adequate := behaviorAdequate
+  code := machineCode
+  source := true
+  profile := true
+  encoding := machineEncoding
+  refinement := by simpa [machineCode, provider] using behaviorRefinesItself
+  adequate := by simpa [machineCode] using behaviorAdequate
   stage := noDerivedDemands
   requirements := noDemandCertificates
 
 def artifactFormat : ArtifactFormat spec where
-  Artifact := Unit
-  write := fun _ => ByteArray.empty
-  Parses := fun bytes _ => bytes = ByteArray.empty
+  Artifact := Bool
+  write artifact := if artifact then ⟨#[1, 1]⟩ else ByteArray.empty
+  Parses := fun bytes artifact =>
+    bytes = if artifact then ⟨#[1, 1]⟩ else ByteArray.empty
   writeParses := fun _ => rfl
   parseExact := fun parsed => parsed
   artifactBehavior := fun _ => behavior
@@ -153,9 +213,11 @@ def artifactFormat : ArtifactFormat spec where
 
 def artifact : ArtifactCertificate machine where
   format := artifactFormat
-  artifact := ()
-  refinement := behaviorRefinesItself
-  adequate := behaviorAdequate
+  artifact := true
+  representationExact := rfl
+  loadedBehaviorExact := by
+    simp [artifactFormat, MachineCertificate.behavior, machine,
+      MachineCertificate.instructions, machineCode]
   stage := noDerivedDemands
   requirements := noDemandCertificates
 
@@ -171,6 +233,138 @@ abbrev Certified := VerifiedProgram spec
 def aliasedVerified : Certified := verified
 
 def inferredVerified := verified
+
+namespace ExactArtifactFixture
+
+example : machine.instructions = [true] := rfl
+
+example : machine.encodedBytes = ⟨#[1, 1]⟩ := rfl
+
+example : machineCode.decode machine.profile machine.encodedBytes =
+    some machine.instructions :=
+  machine.decode_encodedBytes
+
+example : machineCode.decode machine.profile (emitProgram verified) =
+    some machine.instructions :=
+  verified.decode_emitProgram
+
+example : artifactFormat.loadedBehavior (emitProgram verified) =
+    machine.behavior :=
+  verified.loadedMachineBehavior_exact
+
+example : emitProgram verified = machine.encodedBytes :=
+  verified.emitProgram_eq_encodedBytes
+
+example : BehaviorRefinement
+    (artifactFormat.loadedBehavior (emitProgram verified)) machine.behavior :=
+  verified.emittedMachineRefinement
+
+/-- Changing the authored source changes its exact raw instruction expansion. -/
+theorem source_mutation_rejected :
+    machine.instructions ≠ machineCode.elaborate false := by
+  simp [MachineCertificate.instructions, machine, machineCode]
+
+/-- Replacing one raw instruction changes the selected profile's encoding. -/
+theorem instruction_mutation_rejected :
+    machine.encodedBytes ≠ machineCode.encode machine.profile [false] := by
+  intro exact
+  have data := congrArg ByteArray.data exact
+  simp [MachineCertificate.encodedBytes, machine, machineEncoding,
+    machineCode] at data
+
+/-- Replacing the encoding profile changes the exact artifact bytes. -/
+theorem profile_mutation_rejected :
+    machine.encodedBytes ≠ machineCode.encode false machine.instructions := by
+  intro exact
+  have data := congrArg ByteArray.data exact
+  simp [MachineCertificate.encodedBytes, MachineCertificate.instructions,
+    machine, machineEncoding, machineCode] at data
+
+/-- The source-mutated target semantics cannot reuse the selected machine's
+adequacy proof: it has an admitted prefix with no completion. -/
+theorem source_mutation_semantics_uninhabited :
+    ¬ (machineCode.semantics true (machineCode.elaborate false)).Adequate := by
+  simpa [machineCode] using rejectedBehavior_not_adequate
+
+/-- The raw-instruction-mutated target semantics cannot reuse the selected
+machine's adequacy proof. -/
+theorem instruction_mutation_semantics_uninhabited :
+    ¬ (machineCode.semantics true [false]).Adequate := by
+  simpa [machineCode] using rejectedBehavior_not_adequate
+
+/-- The profile-mutated target semantics cannot reuse the selected machine's
+adequacy proof. -/
+theorem profile_mutation_semantics_uninhabited :
+    ¬ (machineCode.semantics false machine.instructions).Adequate := by
+  simpa [MachineCertificate.instructions, machine, machineCode] using
+    rejectedBehavior_not_adequate
+
+/-- A one-byte mutation cannot be identified with verified emission. -/
+theorem byte_mutation_rejected :
+    emitProgram verified ≠ ⟨#[1, 0]⟩ := by
+  intro exact
+  have data := congrArg ByteArray.data exact
+  simp [emitProgram, verified, artifact, artifactFormat] at data
+
+/-- The stale artifact choice cannot supply `ArtifactCertificate.representationExact`
+for the selected machine certificate. -/
+theorem stale_artifact_rejected :
+    ¬ artifactFormat.write false = machine.encodedBytes := by
+  intro exact
+  have sizes := congrArg ByteArray.size exact
+  simp [artifactFormat, MachineCertificate.encodedBytes,
+    machine, machineEncoding, machineCode] at sizes
+  change 0 = 2 at sizes
+  omega
+
+/-- After a source mutation, no value of the old artifact format can provide
+the mandatory exact-representation field for the mutated encoding. -/
+theorem source_mutation_rejects_stale_artifact :
+    ¬ ∃ stale : artifactFormat.Artifact,
+      artifactFormat.write stale =
+        machineCode.encode true (machineCode.elaborate false) := by
+  rintro ⟨stale, exact⟩
+  cases stale with
+  | false =>
+      have sizes := congrArg ByteArray.size exact
+      simp [artifactFormat, machineCode] at sizes
+      change 0 = 2 at sizes
+      omega
+  | true => simp [artifactFormat, machineCode] at exact
+
+/-- After a raw-instruction mutation, no value of the old artifact format can
+provide the mandatory exact-representation field. -/
+theorem instruction_mutation_rejects_stale_artifact :
+    ¬ ∃ stale : artifactFormat.Artifact,
+      artifactFormat.write stale = machineCode.encode true [false] := by
+  rintro ⟨stale, exact⟩
+  cases stale with
+  | false =>
+      have sizes := congrArg ByteArray.size exact
+      simp [artifactFormat, machineCode] at sizes
+      change 0 = 2 at sizes
+      omega
+  | true => simp [artifactFormat, machineCode] at exact
+
+/-- After a profile mutation, no value of the old artifact format can provide
+the mandatory exact-representation field. -/
+theorem profile_mutation_rejects_stale_artifact :
+    ¬ ∃ stale : artifactFormat.Artifact,
+      artifactFormat.write stale =
+        machineCode.encode false machine.instructions := by
+  rintro ⟨stale, exact⟩
+  cases stale with
+  | false =>
+      have sizes := congrArg ByteArray.size exact
+      simp [artifactFormat, MachineCertificate.instructions,
+        machine, machineCode] at sizes
+      change 0 = 2 at sizes
+      omega
+  | true =>
+      simp [artifactFormat, MachineCertificate.instructions,
+        machine, machineCode] at exact
+
+end ExactArtifactFixture
 
 example : spec.accepts true
     ((artifactFormat.loadedBehavior ByteArray.empty).observe (initialExecution true)) :=
@@ -432,7 +626,7 @@ example : samplePrefix.events = [true] := rfl
 
 end InfinitePrefixFixture
 
-example : artifactFormat.Parses (emitProgram verified) () :=
+example : artifactFormat.Parses (emitProgram verified) true :=
   emitProgram_parses verified
 
 #audit_verified_programs

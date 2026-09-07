@@ -452,16 +452,94 @@ structure ProviderCertificate {spec : SpecProcess}
   stage : DerivedDemandFamily driver.stage.allKeys
   requirements : DemandCertificateFamily stage.demands
 
-/-- A machine realization and its exact refinement to selected providers. -/
+/-- The exact authored-source, expanded-instruction, selected-profile, semantic,
+and encoding functions for one machine family.
+`MachineCertificate.instructions` applies `MachineCodeFormat.elaborate`
+directly to the reviewed source selected by its certificate. -/
+structure MachineCodeFormat (spec : SpecProcess) where
+  Source : Type u
+  Instruction : Type u
+  EncodingProfile : Type u
+  elaborate : Source -> List Instruction
+  semantics : EncodingProfile -> List Instruction -> ProgramBehavior spec
+  encode : EncodingProfile -> List Instruction -> ByteArray
+  decode : EncodingProfile -> ByteArray -> Option (List Instruction)
+
+/-- Exact encoding evidence for one selected profile and raw instruction list.
+The encoded bytes are data in the package, and the selected decoder must recover
+that same list rather than a merely equivalent program. -/
+structure MachineEncodingCertificate {spec : SpecProcess}
+    (code : MachineCodeFormat spec) (profile : code.EncodingProfile)
+    (instructions : List code.Instruction) where
+  bytes : ByteArray
+  encoded : bytes = code.encode profile instructions
+  decoded : code.decode profile bytes = some instructions
+
+/-- A machine realization indexed by its exact authored source and selected
+encoding profile, with refinement from the semantics of its exact expansion. -/
 structure MachineCertificate {spec : SpecProcess}
     {portable : PortableProgramCertificate spec}
     {driver : ProjectedDriverCertificate portable}
     (provider : ProviderCertificate driver) where
-  behavior : ProgramBehavior spec
-  refinement : BehaviorRefinement behavior provider.behavior
-  adequate : behavior.Adequate
+  code : MachineCodeFormat spec
+  source : code.Source
+  profile : code.EncodingProfile
+  encoding : MachineEncodingCertificate code profile (code.elaborate source)
+  refinement : BehaviorRefinement
+    (code.semantics profile (code.elaborate source)) provider.behavior
+  adequate : (code.semantics profile (code.elaborate source)).Adequate
   stage : DerivedDemandFamily provider.stage.allKeys
   requirements : DemandCertificateFamily stage.demands
+
+namespace MachineCertificate
+
+/-- The exact raw instruction sequence derived from the selected source. -/
+def instructions {spec : SpecProcess}
+    {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    {provider : ProviderCertificate driver}
+    (machine : MachineCertificate provider) : List machine.code.Instruction :=
+  machine.code.elaborate machine.source
+
+/-- The target semantics of the selected profile and exact source expansion. -/
+def behavior {spec : SpecProcess}
+    {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    {provider : ProviderCertificate driver}
+    (machine : MachineCertificate provider) : ProgramBehavior spec :=
+  machine.code.semantics machine.profile machine.instructions
+
+/-- The exact bytes encoded from the selected profile and source expansion. -/
+def encodedBytes {spec : SpecProcess}
+    {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    {provider : ProviderCertificate driver}
+    (machine : MachineCertificate provider) : ByteArray :=
+  machine.encoding.bytes
+
+/-- The bytes retained by a machine certificate are exactly the selected
+profile's encoding of its exact source expansion. -/
+theorem encodedBytes_exact {spec : SpecProcess}
+    {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    {provider : ProviderCertificate driver}
+    (machine : MachineCertificate provider) :
+    machine.encodedBytes =
+      machine.code.encode machine.profile machine.instructions :=
+  machine.encoding.encoded
+
+/-- Decoding the retained bytes under the selected profile recovers the exact
+raw instructions elaborated from the selected authored source. -/
+theorem decode_encodedBytes {spec : SpecProcess}
+    {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    {provider : ProviderCertificate driver}
+    (machine : MachineCertificate provider) :
+    machine.code.decode machine.profile machine.encodedBytes =
+      some machine.instructions :=
+  machine.encoding.decoded
+
+end MachineCertificate
 
 /-- Selected artifact syntax, canonical writer/parser, and loaded semantics. -/
 structure ArtifactFormat (spec : SpecProcess) where
@@ -483,9 +561,54 @@ structure ArtifactCertificate {spec : SpecProcess}
     (machine : MachineCertificate provider) where
   format : ArtifactFormat spec
   artifact : format.Artifact
-  refinement : BehaviorRefinement (format.artifactBehavior artifact) machine.behavior
-  adequate : (format.artifactBehavior artifact).Adequate
+  representationExact : format.write artifact = machine.encodedBytes
+  loadedBehaviorExact :
+    format.loadedBehavior (format.write artifact) = machine.behavior
   stage : DerivedDemandFamily machine.stage.allKeys
   requirements : DemandCertificateFamily stage.demands
+
+namespace ArtifactCertificate
+
+/-- The parsed artifact behavior is exactly the selected source/profile target
+semantics, derived through the selected writer and loader laws. -/
+theorem artifactBehavior_exact {spec : SpecProcess}
+    {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    {provider : ProviderCertificate driver}
+    {machine : MachineCertificate provider}
+    (certificate : ArtifactCertificate machine) :
+    certificate.format.artifactBehavior certificate.artifact =
+      machine.behavior := by
+  rw [← certificate.format.loadExact
+    (certificate.format.writeParses certificate.artifact)]
+  exact certificate.loadedBehaviorExact
+
+/-- Exact artifact behavior therefore refines the selected target semantics
+without a separately authored simulation twin. -/
+def refinement {spec : SpecProcess}
+    {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    {provider : ProviderCertificate driver}
+    {machine : MachineCertificate provider}
+    (certificate : ArtifactCertificate machine) :
+    BehaviorRefinement
+      (certificate.format.artifactBehavior certificate.artifact)
+      machine.behavior := by
+  exact BehaviorRefinement.castConcrete certificate.artifactBehavior_exact
+    (BehaviorRefinement.refl machine.behavior)
+
+/-- Artifact adequacy is transported from the exact machine semantics rather
+than supplied as an independent proof. -/
+theorem adequate {spec : SpecProcess}
+    {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    {provider : ProviderCertificate driver}
+    {machine : MachineCertificate provider}
+    (certificate : ArtifactCertificate machine) :
+    (certificate.format.artifactBehavior certificate.artifact).Adequate :=
+  ProgramBehavior.Adequate.cast certificate.artifactBehavior_exact
+    machine.adequate
+
+end ArtifactCertificate
 
 end Grass
