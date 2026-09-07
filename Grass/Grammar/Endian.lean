@@ -125,4 +125,76 @@ def bigEndianIsomorphism (count : Nat) :
 def bigEndianFormat (count : Nat) : Format (BitVec (8 * count)) :=
   (fixedBytesFormat count).iso (bigEndianIsomorphism count)
 
+/-- Reverse exact-length bytes without discarding their length index. -/
+def reverseSized {count : Nat} (bytes : SizedByteArray count) :
+    SizedByteArray count :=
+  ⟨Vec.fromList bytes.1.toList.reverse, by
+    simpa [Vec.length] using bytes.2⟩
+
+/-- `reverseSized_reverseSized` states that reversing sized bytes twice returns
+the original value. -/
+@[simp] theorem reverseSized_reverseSized {count : Nat}
+    (bytes : SizedByteArray count) : reverseSized (reverseSized bytes) = bytes := by
+  apply SizedVec.ext
+  apply Vec.toList_injective
+  simp [reverseSized]
+
+/-- Interpret sized bytes as a little-endian integer bitvector. -/
+def littleEndianToBitVec {count : Nat} (bytes : SizedByteArray count) :
+    BitVec (8 * count) :=
+  bigEndianToBitVec (reverseSized bytes)
+
+/-- Split a bitvector into a sized little-endian byte sequence. -/
+def bitVecToLittleEndian {count : Nat} (value : BitVec (8 * count)) :
+    SizedByteArray count :=
+  reverseSized (bitVecToBigEndian value)
+
+/-- `bitVecToLittleEndian_littleEndianToBitVec` states that little-endian
+splitting after packing preserves every sized byte exactly. -/
+@[simp] theorem bitVecToLittleEndian_littleEndianToBitVec {count : Nat}
+    (bytes : SizedByteArray count) :
+    bitVecToLittleEndian (littleEndianToBitVec bytes) = bytes := by
+  unfold bitVecToLittleEndian littleEndianToBitVec
+  rw [bitVecToBigEndian_bigEndianToBitVec]
+  exact reverseSized_reverseSized bytes
+
+/-- `littleEndianToBitVec_bitVecToLittleEndian` states that little-endian
+packing after splitting preserves every fixed-width bitvector. -/
+@[simp] theorem littleEndianToBitVec_bitVecToLittleEndian {count : Nat}
+    (value : BitVec (8 * count)) :
+    littleEndianToBitVec (bitVecToLittleEndian value) = value := by
+  unfold littleEndianToBitVec bitVecToLittleEndian
+  rw [reverseSized_reverseSized]
+  exact bigEndianToBitVec_bitVecToBigEndian value
+
+/-- Total little-endian view of a fixed byte sequence as an integer bitvector. -/
+def littleEndianIsomorphism (count : Nat) :
+    Isomorphism (SizedByteArray count) (BitVec (8 * count)) where
+  forward := littleEndianToBitVec
+  backward := bitVecToLittleEndian
+  backward_forward := bitVecToLittleEndian_littleEndianToBitVec
+  forward_backward := littleEndianToBitVec_bitVecToLittleEndian
+
+/-- Fixed-width bytes interpreted as a little-endian integer value. -/
+def littleEndianFormat (count : Nat) : Format (BitVec (8 * count)) :=
+  (fixedBytesFormat count).iso (littleEndianIsomorphism count)
+
+/-- Two-byte big-endian unsigned integer format. -/
+def bigEndianU16Format : Format (BitVec 16) := bigEndianFormat 2
+
+/-- Four-byte big-endian unsigned integer format. -/
+def bigEndianU32Format : Format (BitVec 32) := bigEndianFormat 4
+
+/-- Eight-byte big-endian unsigned integer format. -/
+def bigEndianU64Format : Format (BitVec 64) := bigEndianFormat 8
+
+/-- Two-byte little-endian unsigned integer format. -/
+def littleEndianU16Format : Format (BitVec 16) := littleEndianFormat 2
+
+/-- Four-byte little-endian unsigned integer format. -/
+def littleEndianU32Format : Format (BitVec 32) := littleEndianFormat 4
+
+/-- Eight-byte little-endian unsigned integer format. -/
+def littleEndianU64Format : Format (BitVec 64) := littleEndianFormat 8
+
 end Grass.Grammar
