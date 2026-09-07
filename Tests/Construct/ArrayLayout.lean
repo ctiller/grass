@@ -25,6 +25,12 @@ example : (ByteRange.mk 16 4).WithinBound padded.size :=
   padded.elementRange?_withinBound (index := 2) (range := ⟨16, 4⟩)
     (by decide) (by decide)
 
+example : (ByteRange.mk 0 4).Disjoint ⟨8, 4⟩ :=
+  padded.elementRange?_disjoint
+    (leftIndex := 0) (rightIndex := 1)
+    (leftRange := ⟨0, 4⟩) (rightRange := ⟨8, 4⟩)
+    (by decide) (by decide) (by decide) (by decide) (by decide) (by decide)
+
 def zeroCount : ArrayLayout profile := ⟨u32, 0, 4⟩
 example : ¬ zeroCount.WellFormed := by decide
 

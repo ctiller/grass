@@ -89,6 +89,33 @@ theorem elementRange?_withinBound {layout : ArrayLayout profile}
         Nat.mul_le_mul_right layout.stride (Nat.succ_le_iff.mpr inBounds)
   · contradiction
 
+/-- Distinct ordered indices in a valid array select disjoint byte ranges. -/
+theorem elementRange?_disjoint {layout : ArrayLayout profile}
+    (valid : layout.WellFormed) {leftIndex rightIndex : Nat}
+    {leftRange rightRange : ByteRange}
+    (leftInBounds : leftIndex < layout.count)
+    (rightInBounds : rightIndex < layout.count)
+    (ordered : leftIndex < rightIndex)
+    (leftSelected : layout.elementRange? leftIndex = some leftRange)
+    (rightSelected : layout.elementRange? rightIndex = some rightRange) :
+    leftRange.Disjoint rightRange := by
+  rw [wellFormed_iff] at valid
+  rw [elementRange?_eq_some layout leftInBounds] at leftSelected
+  rw [elementRange?_eq_some layout rightInBounds] at rightSelected
+  cases leftSelected
+  cases rightSelected
+  apply Or.inr
+  apply Or.inr
+  apply Or.inl
+  simp only [ByteRange.stop]
+  have fits : layout.element.size ≤ layout.stride := valid.1.2
+  calc
+    leftIndex * layout.stride + layout.element.size ≤
+        leftIndex * layout.stride + layout.stride := Nat.add_le_add_left fits _
+    _ = (leftIndex + 1) * layout.stride := by simp [Nat.add_mul]
+    _ ≤ rightIndex * layout.stride :=
+      Nat.mul_le_mul_right layout.stride (Nat.succ_le_iff.mpr ordered)
+
 end ArrayLayout
 
 end Grass.Construct.Layout
