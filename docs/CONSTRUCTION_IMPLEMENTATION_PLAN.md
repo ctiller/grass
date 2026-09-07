@@ -340,6 +340,11 @@ from that ordinary AST: canonical block and exit identities, exact outgoing
 edges, structural instruction origins, and counts remain in authored order.
 Projection and lookup theorems tie every field back to the single AST, so the
 manifest cannot become a second independently maintained source description.
+`Grass.Construct.Source.Elaborate` composes alpha-normalization, structural graph
+closure, and manifest derivation into one checked term-level result. Its fields
+and public theorems retain the exact normalized AST, manifest, instruction list,
+annotations, entry, block identities, and counts. A future command/parser layer
+may construct the pre-alpha value but cannot bypass these closure checks.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
