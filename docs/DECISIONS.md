@@ -837,17 +837,22 @@ to imitate compiler-selected storage or CFG structure.
     `PlatformPlan.ProviderEnv`; only that later owner selects physical providers
     and establishes global dictionary coherence. Neutral Specification owns the
     dependent, authority-indexed `ProviderDemandFamily` and exact binding-view
-    carrier; owner-specific substitution constructors prevent Effect from
+    carrier. Opaque origin scopes and demands carry the authority as a type
+    index rather than a caller-filled descriptor tag; owner-specific
+    substitution constructors prevent Effect from
     discharging memory, resource, obligation, ABI, platform, or ISA demands.
     The handoff retains the exact
     upstream effect theory/model identity, so equal requirement names cannot
     substitute a different dictionary semantics. Every effect-generated
-    operation has a registered origin, and sequential, explicit, and blended
+    operation has an exact, possibly empty or multi-origin registered subfamily,
+    and sequential, explicit, and blended
     Process sources derive one coverage-complete, conservative provider-demand
-    family from their selected boundary and every selected plan role, with
+    family from their selected boundary and a finite exact image of every
+    selected plan role (without closing the open registry), with
     bidirectional coverage/no-extra/descriptor-exactness proofs; local
-    operation origins point into that family. The generic sequential source also
-    retains an exact dependent `DirectProgramDerivation`; the Effect adapter
+    operation origins point into that family. A certified wrapper around the
+    raw relational program also retains an exact dependent
+    `DirectProgramDerivation`; the Effect adapter
     stores its program/model/progress/adapter proof there while provider demands
     remain indexed only by the stable plan/model boundary. Thus the handoff cannot be removed by repackaging a
     correctness proof, and
@@ -866,12 +871,17 @@ to imitate compiler-selected storage or CFG structure.
     extend or begin an allowed infinite chain, and provider refinement includes
     request/domain coverage in addition to provider-to-model soundness.
     Long-running scheduling, channels, pending occurrences,
-    cancellation, faults, and supervision remain Process concerns; adapters
+    cancellation, faults, and supervision remain Process concerns. General
+    Effect adapters preserve proper pending-history progress and its observations;
+    the zero-ceremony atomic sequential adapter is valid only when no such
+    progress exists. Adapters
     may embed well-founded effect programs without making Process core depend on the
     Effect implementation. Direct serial functions and first-class authored
     assembly may refine the same specification requirements without constructing
-    a decorative effect-program witness. This resolves `coord1:73` before the
-    assigned foundation implementation begins.
+    a decorative effect-program witness. This is the proposed resolution of
+    `coord1:73`; the current Lean gate does not implement it, and the assigned
+    foundation implementation is gated on the explicit negative fixtures in
+    `EFFECTS.md` and `VERIFIED_PROGRAM.md`.
 
 ## Explicitly rejected shortcuts
 

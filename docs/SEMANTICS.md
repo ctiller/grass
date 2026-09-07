@@ -475,41 +475,50 @@ structure ProviderBindingView where
   selected : (entry : Entry) -> dictionary entry
   unique : Function.Injective key
 
-structure RequirementOriginScope where
-  namespace : ScopeId
-  Slot : Type
-  slots : List Slot
-  complete : forall slot, slot ∈ slots
-  unique : slots.Nodup
-  slotKey : Slot -> StableId
-  slotKeyInjective : Function.Injective slotKey
+opaque RequirementOriginScope (authority : RequirementAuthority) : Type
+
+namespace RequirementOriginScope
+def namespace : RequirementOriginScope authority -> ScopeId
+def Slot : RequirementOriginScope authority -> Type
+def slots (scope : RequirementOriginScope authority) : List scope.Slot
+theorem complete (scope : RequirementOriginScope authority) :
+  forall slot, slot ∈ scope.slots
+theorem unique (scope : RequirementOriginScope authority) : scope.slots.Nodup
+def slotKey (scope : RequirementOriginScope authority) : scope.Slot -> StableId
+theorem slotKeyInjective (scope : RequirementOriginScope authority) :
+  Function.Injective scope.slotKey
+end RequirementOriginScope
 
 structure ProviderDemandDescriptor where
   capabilityKey : ProviderRequirementKey
-  authority : RequirementAuthority
   statement : ProviderBindingView -> Prop
 
-opaque ProviderDemand : Type
+opaque ProviderDemand (authority : RequirementAuthority) : Type
 def ProviderDemand.introduce
-    (scope : RequirementOriginScope) (slot : scope.Slot)
-    (descriptor : ProviderDemandDescriptor) : ProviderDemand
-def ProviderDemand.originId : ProviderDemand -> RequirementOriginId
-def ProviderDemand.descriptor : ProviderDemand -> ProviderDemandDescriptor
+    (scope : RequirementOriginScope authority) (slot : scope.Slot)
+    (descriptor : ProviderDemandDescriptor) : ProviderDemand authority
+def ProviderDemand.originId : ProviderDemand authority -> RequirementOriginId
+def ProviderDemand.descriptor : ProviderDemand authority -> ProviderDemandDescriptor
 theorem ProviderDemand.introduce_origin_exact ...
 theorem ProviderDemand.introduce_descriptor_exact ...
+
+structure SomeProviderDemand where
+  authority : RequirementAuthority
+  demand : ProviderDemand authority
 
 opaque ProviderDemandFamily : Type
 
 def ProviderDemandFamily.origins :
     ProviderDemandFamily -> Finset RequirementOriginId
 def ProviderDemandFamily.lookup :
-    ProviderDemandFamily -> RequirementOriginId -> Option ProviderDemand
+    ProviderDemandFamily -> RequirementOriginId -> Option SomeProviderDemand
 theorem ProviderDemandFamily.lookup_exact ...
 theorem ProviderDemandFamily.ext ...
 def ProviderDemandFamily.empty : ProviderDemandFamily
-def ProviderDemandFamily.singleton (demand : ProviderDemand) : ProviderDemandFamily
+def ProviderDemandFamily.singleton
+    (demand : ProviderDemand authority) : ProviderDemandFamily
 def ProviderDemandFamily.ofScope
-    (scope : RequirementOriginScope)
+    (scope : RequirementOriginScope authority)
     (descriptor : scope.Slot -> ProviderDemandDescriptor) : ProviderDemandFamily
 def ProviderDemandFamily.union
     (left right : ProviderDemandFamily)
@@ -518,8 +527,8 @@ def ProviderDemandFamily.union
 
 def ProviderDemandFamily.CertifiedBy
     (demands : ProviderDemandFamily) (view : ProviderBindingView) : Prop :=
-  forall originId demand, demands.lookup originId = some demand ->
-    demand.descriptor.statement view
+  forall originId packed, demands.lookup originId = some packed ->
+    packed.demand.descriptor.statement view
 ```
 
 `ProviderBindingView` is an exact dependent snapshot, not a string-keyed map or
@@ -529,19 +538,31 @@ layers can therefore carry statements about the future binding without knowing
 how a platform environment is built.
 
 The built-in tags and their pairwise-distinctness are ordinary finite inductive
-data centralized here; no downstream owner definition or axiom is required. An
-extension obtains a nominally fresh authority through the reviewed neutral
-registry. Owner layers export their substitution constructors, not competing
-authority values. `ProviderRequirementKey`, `ProviderKey`, and the theorem-demand
-`RequirementKey` are distinct nominal wrappers even when all contain a Core
-`ScopeId`. Equality in one domain cannot be used as equality in another.
+data centralized here; no downstream owner definition or axiom is required. A
+tag is descriptive data, not itself authority. `RequirementOriginScope` is
+opaque and indexed by its authority; its raw constructor is not public. Each
+built-in owner exports only typed scope constructors for its own index, and an
+extension obtains the corresponding indexed scope through the reviewed neutral
+registry. `ProviderDemand` retains that index, while a heterogeneous family
+stores `SomeProviderDemand`. Hence an existing memory demand cannot be
+repackaged as Effect-owned merely by filling an `authority` field: no such field
+or raw scope constructor exists. Owner layers export their indexed substitution
+constructors, not competing unindexed tags. `ProviderRequirementKey`,
+`ProviderKey`, and the theorem-demand `RequirementKey` are distinct nominal
+wrappers even when all contain a Core `ScopeId`. Equality in one domain cannot
+be used as equality in another.
 
 Origins are local dependent construction data, not entries in a global static
-registry: a finite scope can generate descriptors containing an arbitrary exact
-locally constructed lowering-plan value. `ProviderDemand` is opaque and its only
-constructor derives the origin ID from the selected scope and slot while storing
-that exact descriptor. A witness for one demand cannot be reused after changing
-its capability key or replacing its statement with `True`.
+registry: an authority-indexed finite scope can generate descriptors containing
+an arbitrary exact locally constructed lowering-plan value. `ProviderDemand`
+is opaque and its only constructor derives the origin ID and authority from the
+selected scope and slot while storing that exact descriptor. A witness for one
+demand cannot be reused after changing its capability key, replacing its
+statement with `True`, or changing its authority index. This is proof
+provenance, not an attempt to infer the semantic subject of an arbitrary `Prop`:
+mandatory memory, obligation, ABI, and ISA gates generate their own indexed
+origins independently of the precious application spec, so inventing a
+redundant Effect-owned assertion never removes the owner-generated demand.
 `originId` identifies one exact proof-obligation occurrence, while
 `descriptor.capabilityKey` identifies the provider capability it needs. Several origins may
 legitimately demand one capability and all remain in the family; provider
@@ -557,7 +578,8 @@ which accepts an arbitrary proof and erases its owner. `ProviderDemandFamily`'s
 representation is hidden. Its public equality is extensional over `lookup`, and
 serialization alone chooses canonical order. `union` retains repeated capability
 keys and requires a compositional proof that origin scopes are disjoint or that
-equal origin IDs carry definitionally/theoremically exact descriptors. Standard
+equal origin IDs carry the same authority index and definitionally/theoremically
+exact descriptors. Standard
 hierarchical scopes derive this proof automatically; a collision is rejected at
 construction rather than leaving an `Except` inside a claimed total envelope.
 

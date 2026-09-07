@@ -8,6 +8,17 @@ There is exactly one precious semantic index: the root `SpecProcess`. Other
 specification DSLs and semantic subprocesses have already been composed and
 captured into that value; implementation process graphs merely realize it.
 
+**Implementation status.** The Lean `Grass.Verify.VerifiedProgram` currently in
+the repository is an earlier vertical skeleton and does not yet implement every
+field in this document. In particular its current five-certificate gate does not
+retain `ProviderDemandFamily`, `StagedObligationFamily`, Effect progress, or
+`AllRequirementsDischarged`. It therefore is not evidence that an Effect-derived
+program satisfies this contract and must not be used to merge one. The Effect
+milestone is gated on extending the actual certificate types and end-to-end
+theorem so that provider-origin removal and a terminal-vacuous infinite loop are
+negative elaboration fixtures. This document defines that required destination;
+the implementation plan must land the connections before claiming completion.
+
 ## 1. Conceptual interface
 
 ```lean
@@ -219,8 +230,8 @@ the applicable `ProviderRealizesEffectPlan.requirementConnections` (or its
 equivalence-strength extension). It discharges provider-owned members and feeds
 the exact forwarded family into the later staged obligation families; a memory,
 resource, obligation, ABI, platform, or ISA origin cannot disappear at Act 3.
-A direct operation contributes no member only when its registered origin demands
-nothing. Sequential, explicit, and blended sources all derive the union;
+A direct operation contributes no member only when its exact registered origin
+subfamily is empty. Sequential, explicit, and blended sources all derive the union;
 changing or repackaging a correctness proof cannot erase it. Thus the effect
 plan, rooted histories, adapter proof, and provider dictionary remain adjacent in the final certificate without making
 the provider proof's theorem type depend on continuations or making

@@ -12,6 +12,18 @@ allocation operations independently. A first-class assembly author may bypass
 this syntax and refine the same requirements directly. No verified program is
 required to possess a decorative monadic source.
 
+**Implementation status.** This is the normative target for the Effect
+milestone, not a claim about the current Lean skeleton. At the reviewed baseline
+there is no `Grass/Effect/**`; the landed `DriverBoundary`, sequential adapter,
+`SpecProcess`, and `VerifiedProgram` do not yet carry the authority-indexed
+provider origins, general progress junction, certified direct-program wrapper,
+or final closure displayed here. Consequently the current emitter cannot accept
+an Effect-derived program as satisfying this design. Before the first Effect
+implementation may merge, those exact connections must reach the actual
+`VerifiedProgram.endToEnd` theorem and removing one provider origin or progress
+premise must make a negative fixture fail to elaborate. A green build of the
+pre-Effect skeleton is not evidence for that gate.
+
 ## 1. Dependency and authority boundary
 
 `Grass.Effect` imports only `Core`, `Std.Logical`, and neutral
@@ -567,8 +579,9 @@ forwarded to a named target key with a semantic implication proof, or discharged
 by a handler proof carrying authority to discharge that exact requirement; every
 new target key cites its source or reviewed introduction authority. Only an
 Effect-owned abstract-operation requirement has an Effect-level discharge
-constructor, and that constructor requires the entry's authority index to be
-`.builtin .effect`. There is no generic
+constructor, and that constructor requires the demand itself and its opaque
+origin scope to be indexed by `.builtin .effect`; it does not inspect a
+caller-filled authority tag. There is no generic
 `discharge : Prop -> ...` constructor. Memory,
 resource, platform/provider, ABI, and obligation keys must be forwarded until
 their owner-specific later bridge supplies its distinct typed constructor.
@@ -647,6 +660,10 @@ Effect lowering selects one local disposition for every source family. It does
 not select physical API providers:
 
 ```lean
+def EffectRequirementOriginScope
+    (key : ScopeId) (target : EffectRow) :
+    RequirementOriginScope (.builtin .effect)
+
 structure EffectLoweringPlan
     (source : EffectRow) (sourceModel : EffectRowModel source) where
   key : ScopeId
@@ -813,22 +830,39 @@ result.
 Both normal and exceptional connections use `PrefixObservations`; neither may
 drop the waiting history's partial segment.
 
-The adapter constructs a `Process.DirectProgramDerivation` whose dependent
-payload retains the exact effect program,
+This requires a real pending-progress path. The adapter-owned waiting state
+contains the exact rooted operation history, and a `pendingProgress` transition
+extends that same history without consuming the occurrence, emitting precisely
+the newly exposed `PrefixObservations`. Completion alone consumes the occurrence
+and resumes the continuation. The Effect adapter generates this relation from
+`EffectTheory.Extends`. For a plain `SequentialMachine`, the library accepts a
+`SequentialPendingSemantics`: its automatic `atomic` instance proves there is no
+proper pending extension or pending observation and matches the currently landed
+adapter; a streaming/custom instance supplies the history extension relation.
+This optional certificate adds no field to a simple machine. A custom raw
+`DirectRelationalProgram` may instead express pending progress as an internal
+transition which preserves its exact held-occurrence bag. The general Effect
+adapter may not be implemented by the atomic route, and the two routes share a
+theorem only after preserving and reflecting `EffectPrefixExtends`.
+
+The adapter constructs a `Process.CertifiedDirectProgram` whose dependent
+`DirectProgramDerivation` payload retains the exact effect program,
 `EffectProgramAdequate`, selected `EffectProgramMeetsProgress`, and adapter
 certificate. Separately, the generated `DriverBoundary.providerDemands` is the
 stable `plan.providerDemands`, whose statements are indexed only by the source
 and target row models, lowering plan, and handoff—not by the caller's program
-body. Every generated operation site's registered origin points to the exact
-member it uses. `DirectRelationalProgram.originDemands` is definitionally that
-boundary envelope, so a continuation-only edit rebuilds local adapter provenance
+body. Every generated operation occurrence points to the exact finite subfamily
+it uses, which may contain zero, one, or several independent origins. The
+certified wrapper's `originDemands` is extensionally fixed
+to that boundary envelope, so a continuation-only edit rebuilds local adapter provenance
 without changing an otherwise identical provider certificate.
 
 The envelope is conservative: even `.pure` over a deliberately broad nonempty
 row retains the plan's requirements. Unused broad rows remain a proof-economy
 smell, but requirements are never dropped by runtime reachability inference.
 Direct operations pay no Effect ceremony; their selected boundary still states
-their actual lower requirements and each site points to a registered origin.
+their actual lower requirements and each occurrence points to its exact
+registered subfamily.
 Decision 120 remains authoritative:
 
 ```lean
@@ -1005,7 +1039,11 @@ The first implementation is incomplete until checked fixtures demonstrate:
    fields; behavioral preservation requires and consumes a row-model embedding.
 9. A handler discharges and introduces exactly its declared requirement delta;
    omission of one lower requirement fails, and an Effect handler cannot claim
-   to discharge an obligation-, memory-, ABI-, or provider-owned key.
+   to discharge an obligation-, memory-, ABI-, or provider-owned key. The
+   negative fixture starts from the exact owner-indexed origin and attempts to
+   relabel it as `.builtin .effect`; changing only a descriptor or capability
+   name cannot typecheck. An operation with two independent origins retains and
+   disposes both, while an operation with an empty subfamily adds none.
 10. Handler identity and two-stage composition agree with direct handling in
     both complete and pending-prefix behavior directions.
 11. Graphics-only lowering leaves storage abstract, followed by storage-only
@@ -1019,7 +1057,9 @@ The first implementation is incomplete until checked fixtures demonstrate:
 14. Expected failure flows through the dependent result continuation, while an
     interruption does not silently invoke it. A completed interaction followed
     by a partially emitting wait/cut retains both segments in
-    `PrefixObservations`.
+    `PrefixObservations`. A streaming pending history exposes at least one
+    observation before completion through `pendingProgress`; the atomic adapter
+    is rejected for that theory.
 15. A blocking handler exposes a process frontier and cannot claim finite silent
     execution.
 16. `SequentialAdapter` generates distinct occurrence identities for two equal
