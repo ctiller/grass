@@ -16,7 +16,8 @@ Every identity here is nominal and every one of them is subject to
 > replacements are fresh over a monotone execution history; stale completions
 > never regain authority after numeric reuse.
 
-`Grass/Process/Nominal.lean` proves what a monotone history guarantees. This
+`Grass/Process/Nominal.lean` proves what a monotone history guarantees, of
+which `never_fresh_again` is the one this module leans on. This
 module is where the four kinds of identity law 22 names are actually built, and
 each carries its `NominalKind` so that a recycled carrier value in a different
 role is a different identity by construction rather than by convention.
@@ -75,7 +76,7 @@ realization plan when each field consumes only a facet". A channel contract
 consumes the endpoints and the spawn law; it does not consume the restart
 intensity window. Putting all three in one record would make every channel proof
 depend on the supervision policy, and adding a cancellation point would rebuild
-proofs that cannot mention one.
+proofs that have no way to mention one.
 
 Cancellation and supervision are therefore separate certificates over a
 topology, landing with the rest of M3. `docs/PROCESS_IMPLEMENTATION_PLAN.md`
@@ -172,10 +173,10 @@ structure ChannelId (edge : topology.ChannelKind) where
 One message on one session.
 
 `channel` and `message` are phantom indices: they appear in the type and in no
-field. That is what they are for. An occurrence of a `Settings` frame on
-connection 3's writer session has a *different type* from one on connection 5's,
-so a routing proof cannot mix them up and a resolution cannot be applied to the
-wrong channel. What makes two sends of an *equal* payload on the *same* session
+field. That is what they are for. An occurrence of a Settings frame on
+connection 3's writer session has a *different type* from one on connection 5's
+— that is what `MessageOccurrence`'s phantom indices buy — so a routing proof
+cannot mix them up and a resolution cannot be applied to the wrong channel. What makes two sends of an *equal* payload on the *same* session
 two occurrences is the `id` field, not the indices.
 
 The affine resolve token that makes an occurrence consumable exactly once is
@@ -217,10 +218,10 @@ variable {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoundary.{u}}
 Two references to the same role are the same incarnation when their generations
 agree.
 
-The check a driver performs on every delivery. It is stated for the *same* role
-because references to different roles have different types, which is itself part
-of the discipline: a completion for a worker cannot be delivered to a connection
-even if the numbers coincide.
+The check a driver performs on every delivery. `SameIncarnation` is stated for
+the *same* role because references to different roles have different types,
+which is itself part of the discipline: a completion for a worker cannot be
+delivered to a connection even if the numbers coincide.
 -/
 def SameIncarnation (left right : topology.ProcessRef kind) : Prop :=
   left.generation = right.generation
@@ -261,7 +262,7 @@ def Allocated (reference : topology.ProcessRef kind)
   reference.generation ∈ history.used
 
 /--
-A reference cannot be both allocated and fresh.
+A reference cannot be both allocated and fresh — `not_fresh_of_allocated`.
 
 The disjointness that makes the two halves of the dispatch check independent: an
 allocated reference is by definition not one a spawn transition could be handing

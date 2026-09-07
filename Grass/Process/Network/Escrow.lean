@@ -39,7 +39,8 @@ Three further claims that revision made and this one does not:
   record the same ending here, consistently. That half needs the transition
   family; this module delivers the recording half only.
 * **"Coalescing consumes every source token" is not stated here.** A ledger has
-  no notion of a transition, so it cannot say "every source of *this* coalesce".
+  no notion of a transition, so it has no way to say "every source of *this*
+  coalesce".
   What it does say is that a coalesced occurrence names a real, strictly later
   carrier, which is what stops the constructor being a disguised drop.
 * **`accounting` is a counting identity, not §3's prefix conservation.** It says
@@ -72,7 +73,7 @@ this ledger. So `rerouted` records only the destination, and the obligation that
 the payload reappears there is `ReroutedElsewhere` — stated here, dischargeable
 only by `Plan.lean`, which holds every channel's ledger at once. That is a real
 cross-ledger obligation, recorded rather than hidden inside a law this module
-cannot check.
+has no way to check.
 
 ## Prefix laws, not step laws
 
@@ -284,7 +285,7 @@ theorem outstanding_xor_settled (occurrence : Occurrence)
 
 end EscrowLedger
 
-/-! ## Coalescing cannot go in circles -/
+/-! ## Coalescing cannot go in circles, which is `CoalescesTo.no_cycle` -/
 
 /-- One occurrence's payload reaches another by one or more coalesces. -/
 inductive CoalescesTo {Occurrence : Type u} {Session : Type s}
@@ -404,8 +405,8 @@ theorem cancel_request_leaves_escrow (occurrence : Occurrence)
 /--
 The cross-ledger obligation a reroute creates.
 
-`rerouted destination` says the payload left this channel; it does not and
-cannot say it arrived. This predicate names what a plan holding every channel's
+`rerouted destination` says the payload left this channel; it does not and has
+no way to say it arrived. This predicate names what a plan holding every channel's
 ledger must prove: for each rerouted occurrence, the destination session escrows
 something carrying it.
 
@@ -635,7 +636,7 @@ theorem resolvedStaysResolved (extension : LedgerExtends earlier later)
 
 An occurrence in flight at any point of an execution is, at every later point,
 either still in flight or ended by one of the named resolutions. It cannot
-simply be absent.
+simply be absent, which is what `noLoss` says.
 -/
 theorem noLoss (extension : LedgerExtends earlier later) {occurrence : Occurrence}
     (inFlight : earlier.Outstanding occurrence) :

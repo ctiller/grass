@@ -40,7 +40,7 @@ earlier design that made it a mandatory spec field.
 `TraceAccepts` ranges over the history of a finite execution prefix, not over
 the limit trace of a maximal run. That is deliberate and it is a restriction on
 what this field can express: it can carry a safety property ("no byte is written
-before the header"), and it cannot by itself carry a liveness property ("the
+before the header"), and it does not by itself carry a liveness property ("the
 response is eventually written"). Liveness for this layer is
 `Grass/Process/Progress.lean` plus, at the network level, the adequacy theorem.
 `docs/PROCESS.md` §7 draws the same line: "Universal prefix safety quantifies
@@ -100,9 +100,9 @@ structure ProcessAcceptance (p : ProcessSpec.{u, w}) where
   This is the third disjunct of `docs/PROCESS.md` §7 progress: a cycle is
   progressing if it produces "an independently specified observation". That
   phrase is specification-relative — an observation the specification did not
-  ask for cannot discharge a progress obligation, or every process could satisfy
-  progress by logging — so the predicate has to come from here and not from the
-  process.
+  ask for is not intended to discharge a progress obligation, or every process
+  could satisfy progress by logging — so the predicate has to come from here and
+  not from the process.
   -/
   Demanded : p.Observation → Prop
   /--

@@ -168,7 +168,8 @@ inductive NetworkFragment {registry : ProtocolRegistry.{u, w, v}}
   commit is still enabled at every network whose `pending` is non-empty. A second
   reviewer proved both. What would close it is an invariant that
   `observations ++ pending` is what a run's steps emitted, which is a statement
-  about executions and cannot be a field here;
+  about executions and is owed elsewhere rather than statable as a field
+  here;
   `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.66.
   -/
   | pending

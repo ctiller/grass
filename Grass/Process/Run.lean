@@ -6,12 +6,13 @@ import Grass.Process.Spec
 `docs/PROCESS.md` §2. `ProcessSpec.Step` says nothing about how many copies of a
 demand are outstanding; the run relation is where multiplicity becomes linear:
 
-> Equal demand values remain indistinguishable at the precious level, but their
-> bag multiplicity cannot be fabricated, replayed, jointly consumed by one
-> result, or silently lost. A result/interruption requires and consumes exactly
-> one live matching item; termination explicitly resolves, transfers, or permits
-> pending for every remainder according to the specification's
-> progress/lifecycle law.
+`docs/PROCESS.md` §2 says that "equal demand values remain indistinguishable at
+the precious level, but their bag multiplicity cannot be fabricated, replayed,
+jointly consumed by one result, or silently lost", and then
+
+> A result/interruption requires and consumes exactly one live matching item;
+> termination explicitly resolves, transfers, or permits pending for every
+> remainder according to the specification's progress/lifecycle law.
 
 Each clause of that paragraph is a structural feature of the definitions below
 rather than a side condition:
@@ -33,7 +34,7 @@ just consumed, so a `.result` step can leave the run state bit-for-bit
 identical. `Grass/Process/Progress.lean` is what stops such a step counting as
 progress, not this table — its measure ranks the state *and the outstanding bag*
 together, and a well-founded order is irreflexive, so a step that moves neither
-cannot descend it.
+cannot descend it — `not_decreases_both_ways` is the sharper form.
 
 The mechanism named here has been wrong twice, in the same sentence, and both
 times a reviewer caught it by building the step rather than by reading. First it
@@ -58,8 +59,8 @@ five cases is `cases` on the transition followed by `cases` on the event, whose
 
 This is not a shortcut. It is what makes the frame reasoning of
 `Grass/Process/Weave/Mixin.lean` tractable later: a mixin that does not touch
-the outstanding bag discharges one case, not three, and cannot accidentally omit
-the fourth.
+the outstanding bag discharges one case, not three, and has no way to
+accidentally omit the fourth.
 
 ## The history is flat, and the segmentation is an index
 
@@ -426,8 +427,8 @@ theorem card_drops_by_at_most_one
 Every transition extends the observation history; nothing is retracted.
 
 `docs/PROCESS.md` §2: "revisiting or rendering a state cannot duplicate an
-observation". The dual fact — that a transition cannot *un*-emit — is what makes
-the history a prefix order, and it is what an acceptance relation stated over
+observation". The dual fact — that a transition cannot *un*-emit, which is
+`history_extends` — is what makes the history a prefix order, and it is what an acceptance relation stated over
 prefixes relies on.
 -/
 theorem history_extends {before after : ProcessRunState p request}
@@ -446,8 +447,8 @@ segmentation that produced their trace.
 
 The `Segmented` index is what keeps `docs/PROCESS.md` §4's observation causality
 available. It is an index rather than a field of the run state so that an
-acceptance relation, which sees only `runState.history`, cannot branch on it —
-see the module note.
+acceptance relation, which sees only `ProcessRunState.history`, cannot branch on
+it — see the module note.
 
 Finite by construction: this is the prefix relation, and every statement about
 maximal or infinite executions belongs to `Grass.Semantics`.

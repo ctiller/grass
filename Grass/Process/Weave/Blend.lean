@@ -117,8 +117,8 @@ structure VocabularyEmbedding (part whole : ProcessVocabulary.{u}) : Type u wher
   An answer to the embedded demand is an answer to the original.
 
   Backwards, and dependently: the woven result type is indexed by the *embedded*
-  demand, so this cannot be a renaming in the other direction without producing
-  a result for a demand it was not handed.
+  demand, so there is no way to write this as a renaming in the other direction
+  without producing a result for a demand it was not handed.
   -/
   result : ∀ own, whole.Result (demand own) → part.Result own
   /-- And no two of its entropies land on one either. -/

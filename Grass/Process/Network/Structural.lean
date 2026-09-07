@@ -26,7 +26,7 @@ second — both spikes and `docs/REFINEMENT.md` — while `REFINEMENT.md` also r
 
 No `denotation`, no `traceDenotation`, no `exact`. This structure says which
 roles exist, how many instances each has, and which protocol each speaks. It
-says nothing about what the network *means*, and it cannot: a `BehaviorContract`
+says nothing about what the network *means*, and it has no way to: a `BehaviorContract`
 is `docs/SEMANTICS.md`'s, and a network that carried one would put Process above
 Semantics and re-create the cycle `coord1:5` just cut.
 

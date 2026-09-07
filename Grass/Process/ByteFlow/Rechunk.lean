@@ -33,7 +33,7 @@ class of parsers.
 are the ones a credit-limited channel needs:
 
 * **it refines the source** — the concatenation is unchanged, so no byte is
-  invented or lost (`splitForCapacity_concat`);
+  invented or lost (`splitForCapacity_stream`);
 * **every chunk fits** — `EveryChunkFitsCredits` (`splitForCapacity_fits`);
 * **no chunk is empty** — §3's `NonemptyByteChunk` is a structure with a
   `nonempty` field, so a splitter that emitted `[]` would produce chunks that
@@ -186,7 +186,8 @@ theorem splitForCapacity_fits (capacity : Nat) (positive : 0 < capacity)
 **And no chunk is empty.**
 
 `docs/PROCESS.md` §3's chunks are `NonemptyByteChunk`s, so a splitter that
-emitted `[]` would produce something the channel cannot send. The case that
+emitted `[]` would produce something the channel cannot send, and
+`splitForCapacity_nonempty` is what rules that out. The case that
 tempts a naive implementation is a stream whose length is an exact multiple of
 the capacity, where a trailing empty chunk is easy to append; the recursion here
 stops on the empty list instead.

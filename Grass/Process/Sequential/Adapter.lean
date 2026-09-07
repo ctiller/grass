@@ -98,8 +98,8 @@ consequences follow and both are real limits rather than conveniences:
   (`terminal_holds_nothing`), so its terminal disposition is the empty partition
   and §2's "resolves, transfers, or permits pending" has no work to do here;
 * every step consumes the whole pending bag before refilling it
-  (`elaborate_consumes_everything_outstanding`), which is why the pending
-  equation has `remainder = 0` in both cases.
+  (`pending_equation_of_result` and `pending_equation_of_internal`), which is why
+  the pending equation has `remainder = 0` in both cases.
 
 A third consequence is worth stating because §4 names a fixture that runs into
 it. "Duplicate equal-valued effects with distinct occurrences", read as *two
@@ -203,9 +203,9 @@ def Consumes (event : DirectEvent boundary Occurrence demandOf)
 /--
 Consumption determines the remainder.
 
-The property that makes the pending equation an equation rather than a
-constraint: given the step and the bag before it, there is at most one bag
-after, so a proof cannot pick a convenient remainder.
+`Consumes.remainder_unique` is what makes the pending equation an equation
+rather than a constraint: given the step and the bag before it, there is at most
+one bag after, so a proof cannot pick a convenient remainder.
 -/
 theorem Consumes.remainder_unique {event : DirectEvent boundary Occurrence demandOf}
     {outstanding left right : Bag Occurrence}
@@ -383,8 +383,8 @@ variable {boundary : DriverBoundary.{u}} (program : DirectRelationalProgram boun
 /--
 §4's `Pending`, derived rather than supplied.
 
-A program cannot present a demand bag that disagrees with its occurrences,
-because it never presents one.
+A program has no way to present a demand bag that disagrees with its
+occurrences, because it never presents one.
 -/
 def Pending (state : program.State) : Bag (EffectDemand boundary) :=
   (program.held state).map program.demandOf
@@ -755,7 +755,8 @@ theorem pending_of_effect {point : machine.Point} {demand : EffectDemand boundar
   rfl
 
 /--
-**A sequential machine cannot finish holding anything.**
+**A sequential machine cannot finish holding anything** —
+`terminal_holds_nothing`.
 
 Stated as a limit rather than presented as a convenience. `docs/PROCESS.md` §2
 requires termination to "explicitly resolves, transfers, or permits pending", and

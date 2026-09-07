@@ -89,16 +89,16 @@ theorem self_independent_iff_scopeless {step : plan.NetworkTransition a b} :
 
 end NetworkTransition
 
-/-! ## What an independent step cannot disturb -/
+/-! ## What an independent step cannot disturb: `unaffected_by_an_independent_step` -/
 
 /--
 **An assertion inside one step's scope is untouched by any step independent of
-it.**
+it** — `unaffected_by_an_independent_step`.
 
 The usable content of independence, and what `docs/FOUNDATION.md` law 18 needs:
 a fact scoped to one process is the same whichever way the scheduler
 interleaved an independent one, so a specification stated over such facts cannot
-observe the interleaving.
+observe the interleaving — `unaffected_by_an_independent_step`.
 
 No diamond is needed for this, which is the point — the schedule-independence
 that matters is about what can be *seen*, not about reaching an identical state.

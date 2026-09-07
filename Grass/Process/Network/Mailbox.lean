@@ -5,12 +5,14 @@ import Grass.Process.Network.Topology
 
 `docs/PROCESS.md` §3, on the Erlang-derived patterns Grass adopts:
 
-> A channel profile states its ordering guarantee explicitly. The Erlang-shaped
-> profile preserves send order only from one sender incarnation to one receiver
-> incarnation; it invents no global order between senders. Every signal has a
-> fresh occurrence even when payloads are equal. Selective receive consumes the
-> oldest matching occurrence while every skipped occurrence retains order,
-> escrow, obligations, and resource charge.
+> A channel profile states its ordering guarantee explicitly.
+
+`docs/PROCESS.md` §3 then says that "the Erlang-shaped profile preserves send
+order only from one sender incarnation to one receiver incarnation; it invents
+no global order between senders", that "every signal has a fresh occurrence even
+when payloads are equal", and that "selective receive consumes the oldest
+matching occurrence while every skipped occurrence retains order, escrow,
+obligations, and resource charge".
 
 Two things in that paragraph are easy to implement wrongly in the same direction
 — by accidentally promising more order than the profile does — and this module

@@ -9,13 +9,14 @@ import Grass.Process.Protocol.Registry
 than an atomic function with an oversized result sum, and puts the whole weight
 of that choice on one field:
 
-> The binding—not a child key alone—authorizes spawn. It proves the exact
-> request is initially valid and realizes the parent demand, exhaustively
-> classifies every child terminal result, failure, interruption, cancellation
-> acknowledgement/race, fault, violation, and death as the precise parent
-> result/event or a named non-returning disposition, preserves and reflects
-> result choices, and carries the matching resource/obligation/cancellation
-> equation.
+> The binding—not a child key alone—authorizes spawn.
+
+and of that binding `docs/PROCESS.md` §3 asks that "it proves the exact request
+is initially valid and realizes the parent demand, exhaustively classifies every
+child terminal result, failure, interruption, cancellation acknowledgement/race,
+fault, violation, and death as the precise parent result/event or a named
+non-returning disposition, preserves and reflects result choices, and carries
+the matching resource/obligation/cancellation equation".
 
 `Grass/Process/Network/Delivery.lean` did this for the three fault classes,
 which are free functions because they carry no dependent result. This module

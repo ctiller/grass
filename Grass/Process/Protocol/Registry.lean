@@ -12,8 +12,11 @@ keys rather than embed a `ProcessSpec`:
 
 `docs/PROCESS_SHARDING.md` §2 says what the registry must *not* be:
 
-> A large program does not declare `inductive WholeProgramProcessKind`. Registry
-> merge preserves the nominal identity of every unaffected entry.
+> A large program does not declare `inductive WholeProgramProcessKind`.
+
+and asks, of the operation this module supplies, that "registry merge preserves
+the nominal identity of every unaffected entry" — which is what
+`RegistryEmbedding` witnesses.
 
 and lists "a closed whole-program `ProcessKind`, `ProtocolKey`, or role sum" and
 "one registry value imported by every process module" among its foundational
@@ -186,7 +189,8 @@ theorem ScopesDisjoint.scopes_ne {left right : ProtocolRegistry.{u, w, v}}
   exact (disjoint leftKey rightKey).1 (same ▸ ScopeId.contains_self _)
 
 /--
-**A fragment scoped at an ancestor of another's cannot merge with it.**
+**A fragment scoped at an ancestor of another's cannot merge with it** —
+`ScopesDisjoint.not_nested`.
 
 The defect stated as the property the fix buys. `g-foundation:44` found it: with
 inequality alone, a fragment owning `["Grass"]` and one owning

@@ -12,11 +12,12 @@ def processRealization : ProcessRealization spec :=
   ProcessRealization.standard (Grass.Std.Realizers.lookupExact spec)
 ```
 
-That is only worth anything if the lookup is *forced*. If two lookups of one
-specification could select different realizers, the one expression would be
-choosing a program rather than naming one, and §4's "the final certificate
-cannot silently use a different graph" would be false at the selection rather
-than at the elaboration.
+That is only worth anything if the lookup is *forced*, which is
+`selection_is_determined`. If two lookups of one specification could select
+different realizers, the one expression would be choosing a program rather than
+naming one, and `docs/PROCESS.md` §4's "the final certificate cannot silently
+use a different graph" would be false at the selection rather than at the
+elaboration.
 
 `selection_is_determined` is that theorem.
 
@@ -205,11 +206,11 @@ theorem selection_is_determined (left right : ExactStandardRealizerLookup regist
   exact registry.keysDistinct left.entry left.member right.entry right.member sameKey
 
 /--
-**So the realization is determined too.**
+**So the realization is determined too** — `realization_is_determined`.
 
-§4's "the final certificate cannot silently use a different graph", at the
-selection rather than at the elaboration: two applications naming the same
-specification get the same program, not merely the same key.
+`docs/PROCESS.md` §4's "the final certificate cannot silently use a different
+graph", at the selection rather than at the elaboration: two applications naming
+the same specification get the same program, not merely the same key.
 -/
 theorem realization_is_determined (left right : ExactStandardRealizerLookup registry spec) :
     left.entry.realization = right.entry.realization :=

@@ -157,12 +157,14 @@ structure SequentialMachine (boundary : DriverBoundary.{u}) : Type (u + 1) where
   internalPreserves : ∀ state next observations,
     decide state = .internal next observations → invariant state → invariant next
   /--
-  Every permitted result of an issued effect preserves it.
+  Every permitted result of an issued effect preserves it, which is what
+  `effectResumes` demands.
 
   Quantified over *every* result of the exact demand, which is
   `docs/FOUNDATION.md` law 5: an author cannot handle the success case and leave
   the failure case to a later proof, because the continuation is total on the
-  demand's dependent result type.
+  demand's dependent result type — the resumption `resume` is a function on it,
+  so a partial handling is not writable.
   -/
   effectResumes : ∀ state demand resume,
     decide state = .effect demand resume → invariant state →

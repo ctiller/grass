@@ -78,7 +78,7 @@ and that is the *cooperative cancellation liveness theorem*, which
 cancellation a liveness theorem plus an exact custody theorem rather than one of
 them.
 
-It is not stated here because it cannot be stated honestly yet. `Eventually`
+It is not stated here because it cannot be stated honestly yet, and is owed. `Eventually`
 over a run quantifies over fair continuations, and this layer has `Reachable`
 but no fairness model and no `TerminationPremiseFamily`; a predicate written as
 "some reachable state satisfies it" would be *possibly*, not *eventually*, and
@@ -245,12 +245,13 @@ theorem cooperative_termination_is_safe {cause : contract.Cause} {state : p.Stat
   · exact absurd faulted (by decide)
 
 /--
-**A process cannot be stopped away from a safe point except by failing.**
+**A process cannot be stopped away from a safe point except by failing** —
+`only_a_fault_happens_off_a_safe_point`.
 
 The contrapositive, and the form a caller wants: at a state that is not a safe
 point, the only permitted mode is `faulted`. This is what stops a supervisor
-manufacturing a forced stop wherever it likes — §3 says a supervisor "cannot
-manufacture a safe forced stop", and this is that.
+manufacturing a forced stop wherever it likes — `docs/PROCESS.md` §3 says a
+supervisor "cannot manufacture a safe forced stop", and this is that.
 -/
 theorem only_a_fault_happens_off_a_safe_point {mode : TerminationMode}
     {cause : contract.Cause} {state : p.State} {outstanding : Bag p.Demand}

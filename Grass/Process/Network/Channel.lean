@@ -49,10 +49,11 @@ conditional, and from those:
   the separating conjunction §3 writes rather than a plain one.
 
 The other **four** are not fields here at all, and are deferred to owners this
-note names rather than dropped. `prefixConservation` and `atMostOneResolution`
-are `Grass/Process/Network/Escrow.lean`'s, proved there over the ledger, and a
-contract cannot restate them because it cannot see a ledger through an abstract
-agreement. `resolutions` and `transferExact` quantify over the transition
+note names rather than dropped. §3's `prefixConservation` and
+`atMostOneResolution` are `Grass/Process/Network/Escrow.lean`'s `accounting`
+with `created_monotone`, and `atMostOneRecordedEnding`, proved there over the
+ledger, and a contract cannot restate them because it cannot see a ledger
+through an abstract agreement. `resolutions` and `transferExact` quantify over the transition
 family, which is `Transition.lean`'s. `ChannelSteps` below is the seam that lets
 the contract be written first: it takes its send and receive relations as
 parameters, and the family instantiates them.
@@ -252,7 +253,7 @@ structure ChannelContract {registry : ProtocolRegistry.{u, w, v}}
   sender's postcondition conjoined with the escrow the channel now owns.
 
   §3's triple, with the session law folded into the precondition because this
-  layer cannot project a session status from an abstract world.
+  layer has no way to project a session status from an abstract world.
   -/
   send : ∀ message occurrence before after,
     steps.Send message occurrence before after →

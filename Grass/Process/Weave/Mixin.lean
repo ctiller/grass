@@ -112,7 +112,8 @@ structure WeaveInvariantMixin where
   -/
   withinScope : ∀ fragment, assertion.footprint fragment → Scope fragment
   /--
-  A step that touches the scope preserves the invariant.
+  A step that touches the scope preserves the invariant, which is what
+  `preserved_by_every_step` spends.
 
   The author's real obligation, and the one nothing else can discharge: it is
   the content of the invariant rather than a fact about where it lives.
@@ -240,7 +241,7 @@ structure WeaveInvariantFamily where
   Which regions this family claims to cover.
 
   Supplied rather than derived: what counts as a cross-process dependency is a
-  fact about the application, and `Grass.Process` cannot enumerate them.
+  fact about the application, and this layer has no way to enumerate them.
   -/
   Covers : plan.NetworkScope → Prop
   /--

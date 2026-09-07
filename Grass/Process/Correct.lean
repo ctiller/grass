@@ -89,7 +89,7 @@ structure ProcessCorrect (p : ProcessSpec.{u, w}) (accept : ProcessAcceptance p)
   initialDemands : ∀ (request : p.Request) (state : p.State)
       (issued : Bag p.Demand) (emitted : p.Segment),
     p.Initial request state issued emitted → accept.DemandsWellFormed issued
-  /-- Every step preserves it. -/
+  /-- Every step preserves it, which is what `invariant_of_reachable` spends. -/
   preserved : ∀ (state after : p.State) (event : p.Event)
       (issued : Bag p.Demand) (emitted : p.Segment),
     Invariant state → p.Step state event after issued emitted → Invariant after
@@ -119,7 +119,8 @@ structure ProcessCorrect (p : ProcessSpec.{u, w}) (accept : ProcessAcceptance p)
   module's own `countdown` fixture for the other half of the same field.
 
   The hypothesis is now "terminal for *every* request", which is exactly what a
-  relation that cannot see the request can be asked about. That is a genuine
+  request-blind relation can be asked about, and `no_step_at_terminal` is the
+  reading a driver gets. That is a genuine
   weakening, and the reason for it — `ProcessSpec.Step` is request-blind where
   `Initial` and `Terminal` are not — is
   `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.45.
@@ -202,11 +203,11 @@ theorem terminalAccepts_of_reachable (correct : ProcessCorrect p accept)
 
 /--
 A state the specification calls finished, whatever it was started with, cannot
-step.
+step — `no_step_at_terminal`.
 
 The fact a driver needs when it decides whether a dispatch loop may exit. The
 hypothesis is terminality for *every* request rather than for the one in hand,
-because `p.Step` cannot see the request — see the field's own note and
+because `ProcessSpec.Step` cannot see the request — see the field's own note and
 `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.45.
 
 A driver holding a specific request and a state terminal only for it gets

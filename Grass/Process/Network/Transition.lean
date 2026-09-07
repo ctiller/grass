@@ -494,7 +494,8 @@ theorem resolution_is_exact {before after edge session occurrence resolution}
     resolution = other :=
   (after.inFlight edge session).atMostOneRecordedEnding resolved.nowResolved alsoResolved
 
-/-- An occurrence that was already ended cannot be ended again. -/
+/-- An occurrence that was already ended cannot be ended again, which is
+`cannot_resolve_twice`. -/
 theorem cannot_resolve_twice {before after edge session occurrence resolution}
     (resolved : plan.ResolvesEscrow before after edge session occurrence resolution)
     {earlier} (alreadyEnded :
@@ -2149,7 +2150,8 @@ theorem touchesOnly (step : plan.NetworkStep before after) :
 **An identity allocated by this step was never allocated before it.**
 
 Law 22 at the step: freshness is absence from the history, so an identity this
-step introduces cannot be one a resolved or tombstoned occurrence already used.
+step introduces cannot be one a resolved or tombstoned occurrence already used —
+`allocations_were_fresh`.
 -/
 theorem allocations_were_fresh (step : plan.NetworkStep before after)
     {nominal} (allocated : nominal ∈ step.transition.allocatedNominals.entries) :

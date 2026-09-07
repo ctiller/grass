@@ -4475,6 +4475,60 @@ gate is met — it may not claim to discharge cancellation or supervision
 requirements, and it may not be consumed as a complete `ProcessPlan` by
 `VerifiedProgram`.
 
+### 10.122 A hundred and four docstring claims that named nothing
+
+`e-reviewer:45`, finding `tools-audit-coverage-gaps`, and the second-largest
+claims defect this milestone has recorded after §10.105's twenty.
+
+Main's `c-x86:4` added a coverage guard to `Tools/AxiomAudit.lean` and
+`Tools/DeclNames.lean`: both walk `Grass/` on disk and fail if a module exists
+that they do not import. This branch introduces fifty modules under
+`Grass/Process/` and `Grass/Specification/`, none of them imported by either
+tool, so after the merge both audits failed on coverage rather than on content.
+Adding the fifty imports is mechanical.
+
+**What the coverage gap was hiding is the entry.** With the fifty modules
+finally in scope, `Tools/DocstringAudit.py` reported **104 unbacked claims**,
+every one of them in a module this milestone wrote. The rule is
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §3.10: a comment using "ensures",
+"prevents", "cannot", "only", or "preserves" must name the enforcing type or
+theorem, or be rewritten as an intended invariant or an open obligation. The
+tool checks names against the build, so a fabricated theorem name fails.
+
+They fall into four kinds, and only the first is drift in the sense the rule
+targets:
+
+* **Nine named declarations that do not exist.** `interrupt_source_empty_of_target_empty`
+  — which §10.120 deleted three commits ago and no reader would have caught;
+  `splitForCapacity_concat`, whose real name is `splitForCapacity_stream`;
+  `elaborate_consumes_everything_outstanding`, which was never written and whose
+  content is `pending_equation_of_result` and `pending_equation_of_internal`;
+  and six §3 names the corpus declares nowhere, cited as though they were code.
+  `Grass/Process/Network/Channel.lean`'s was the sharpest: a paragraph whose
+  *subject* is that §3's seven law names are undeclared, itself citing two of
+  them as if they resolved.
+* **Block quotations from `docs/PROCESS.md`.** The tool exempts a sentence that
+  cites `docs/…` and quotes it, because a normative claim is the document's. A
+  `>` block carries neither marker into the sentence, so twenty-odd quoted
+  requirements read as this layer's assertions. They are now inline citations,
+  which is a better attribution than the block was.
+* **Theorem docstrings that state the theorem and do not name it.** The tool
+  deliberately does not exempt these — its own header says a theorem's docstring
+  "routinely claims more than its statement proves". About forty. Naming the
+  theorem in its own docstring costs nothing and makes the claim chaseable.
+* **Genuine limitations phrased as mechanisms.** "This layer cannot project a
+  session status from an abstract world" is a statement about what is *not*
+  built, which the rule asks to be phrased as such. Reworded.
+
+**The lesson is the one §10.105 already recorded, at a different seam.** A claim
+in prose is a claim, and this branch has spent eight review rounds finding
+docstrings that assert what their types do not carry. What is new is that a
+*checker* for exactly that existed on main the whole time and this branch was
+outside its coverage — so the branch's own quality bar was enforced everywhere
+except on the branch. That is worth more than the 104 fixes: a gate that a new
+subtree silently escapes is a gate that reports success about work it never saw,
+which is §10.71's shape at the tooling layer rather than the proof layer.
+
 ## 11. The authoring facade
 
 `docs/DECISIONS.md` decision 134, ruling `c-spike:4`'s third question and the

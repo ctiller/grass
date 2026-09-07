@@ -16,12 +16,11 @@ than a field, for the reason `Grass/Process/ByteFlow/Ingress.lean` gives and
 
 ## The suffix is the whole difficulty
 
-A write completes with a *prefix* of what was requested. §3:
-
-> Each carries the exact completed prefix plus residual loan/credit/suffix
-> disposition; a provider which guarantees zero transfer on one outcome supplies
-> that stronger `providerLaw`. No model invents a prior success to account for a
-> partial effect.
+A write completes with a *prefix* of what was requested. `docs/PROCESS.md` §3
+asks that each outcome "carries the exact completed prefix plus residual
+loan/credit/suffix disposition; a provider which guarantees zero transfer on one
+outcome supplies that stronger `providerLaw`", and that "no model invents a prior
+success to account for a partial effect".
 
 So a resolution splits the in-flight bytes into a transferred prefix and an
 untransferred suffix, and the suffix has to go somewhere. `resolveActive`
@@ -201,7 +200,8 @@ inductive ByteEgressTransition {Byte Occurrence : Type u} {Loan : Occurrence →
           queued := suffix ++ before.queued }) :
       ByteEgressTransition before after
   /--
-  The stream closes, and only when everything offered has been committed.
+  The stream closes, and the fields below require everything offered to have
+  been committed first.
 
   `docs/PROCESS.md` §3's `finish` requires `queued = #[]` and
   `offered = committed`. Both, because either alone would let a flow close while

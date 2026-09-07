@@ -13,8 +13,8 @@ for, not a second semantics.
 
 ## What is deliberately absent
 
-`docs/FOUNDATION.md` law 18 is enforced here by omission. `Step` receives a
-state and an event and relates them to a new state, a demand *bag*, and an
+`docs/FOUNDATION.md` law 18 is met here by omission rather than by a field.
+`Step` receives a state and an event and relates them to a new state, a demand *bag*, and an
 observation segment. There is no occurrence identity, no ordering among issued
 demands, no dependency edge, no routing target, no worker, and no pending
 handle. A specification that wants a later demand to depend on an earlier
@@ -209,8 +209,8 @@ outcomes the sentence names.
 
 ## Why it takes bags and not a demand
 
-Because the obligation is a *bound*, and a bound cannot be stated against a
-predicate on values. A law indexed by a single demand says which outcomes are
+Because the obligation is a *bound*, and there is no way to state a bound
+against a predicate on values. A law indexed by a single demand says which outcomes are
 legitimate for a `CommitBytes`; one such permission then licenses any number of
 outstanding `CommitBytes` occurrences at once, which is exactly the accounting
 `docs/FOUNDATION.md` law 7 and law 20 forbid.
