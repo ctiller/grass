@@ -213,6 +213,36 @@ def mapPrefix (refinement : BehaviorRefinement concrete abstract)
   events := execution.events
   runs := refinement.mapRuns execution.runs
 
+/-- Reflexive refinement leaves every packaged execution prefix unchanged. -/
+@[simp]
+theorem mapPrefix_refl (behavior : ProgramBehavior spec)
+    (execution : behavior.system.ExecutionPrefix) :
+    (refl behavior).mapPrefix execution = execution := by
+  apply RelationalSystem.ExecutionPrefix.ext <;> rfl
+
+/-- Mapping a prefix through a composite refinement agrees with mapping it
+through the two adjacent refinements in order. -/
+@[simp]
+theorem mapPrefix_trans (lowerMiddle : BehaviorRefinement lower middle)
+    (middleUpper : BehaviorRefinement middle upper)
+    (execution : lower.system.ExecutionPrefix) :
+    (lowerMiddle.trans middleUpper).mapPrefix execution =
+      middleUpper.mapPrefix (lowerMiddle.mapPrefix execution) := by
+  apply RelationalSystem.ExecutionPrefix.ext <;> rfl
+
+/-- `BehaviorRefinement.mapPrefix_append` states that refinement mapping
+preserves suffix append and its complete event order. -/
+@[simp]
+theorem mapPrefix_append (refinement : BehaviorRefinement concrete abstract)
+    (execution : concrete.system.ExecutionPrefix)
+    {events : List spec.AuditEvent}
+    {finalState : concrete.system.State} {finalGraph : concrete.system.Graph}
+    (suffix : concrete.system.Steps execution.state execution.graph events
+      finalState finalGraph) :
+    refinement.mapPrefix (execution.append suffix) =
+      (refinement.mapPrefix execution).append (refinement.mapSteps suffix) := by
+  apply RelationalSystem.ExecutionPrefix.ext <;> rfl
+
 /-- Transport the concrete side of a refinement along exact behavior equality. -/
 def castConcrete {replacement : ProgramBehavior spec}
     (exact : concrete = replacement)
