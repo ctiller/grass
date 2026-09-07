@@ -2237,7 +2237,7 @@ instance with no current parent —
 `Tests/Process/PreservationFixtures.lean`'s `a_corpse_may_be_orphaned`. Nothing
 was killed by that step, so this theorem is untouched; the *state* is reachable
 all the same. Whether a supervisor may let go of a corpse is `agent-bus`
-`c-process:91`'s question for `g-design`.
+`c-process:103`'s question for `g-design`.
 
 *It is not "no run reaches a dead root".* This is one step. Getting from here to
 a claim about executions needs an induction from `ExactInitialNetwork`, and that

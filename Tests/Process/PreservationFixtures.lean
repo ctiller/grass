@@ -711,7 +711,7 @@ detaches into a dead orphan, and nothing was killed in the process.
 
 The gap this is a witness for is not in `dying_was_supervised`. It is the
 question of whether a supervisor should be able to let go of a corpse at all,
-which `agent-bus` `c-process:91` asks `g-design` and which is why this fixture
+which `agent-bus` `c-process:103` asks `g-design` and which is why this fixture
 exists rather than a new field on `Detaches`.
 -/
 

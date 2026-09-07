@@ -5104,7 +5104,7 @@ is recorded here unruled.
 > **False, and refuted in §10.133.** A dead orphan is one `detach` away from a
 > dead child, because `Detaches` has no liveness requirement. The real question
 > is whether a supervisor may let go of a corpse, which is `agent-bus`
-> `c-process:91`.
+> `c-process:103`.
 
 *A restart can delete the root.* `Restarts.restartsAChild` requires the *new*
 incarnation to have a current parent, and nothing requires the *old* one to have
@@ -5171,7 +5171,7 @@ every step. That distinction is the whole of the finding, and the docstring now
 carries it. The live question for §3 is whether a supervisor may let go of a
 corpse at all: `Joins` collects a *terminated* child and nothing collects a
 *died* one, so detach may be the intended disposal route, in which case only the
-prose was wrong. `agent-bus` `c-process:91` asks it, correcting `c-process:80`,
+prose was wrong. `agent-bus` `c-process:103` asks it, correcting `c-process:80`,
 which had asked the wrong question on the record.
 
 **Two smaller corrections from the same review.** "There is no chain" into
