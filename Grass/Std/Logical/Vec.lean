@@ -234,9 +234,11 @@ Build a sequence of length `n` from a function on indices.
 A cross-agent review ran the `ByteSeq → Vec Byte` migration against `c-mem`'s
 real branches and found this to be the one genuine *vocabulary* gap -- the one
 place where no `Vec` spelling existed at all. Re-measured against merged `main`
-when the custody handoff landed, the rest of that migration costs six proof-step
+when the custody handoff landed, the rest of that migration costs six
 substitutions and no new names: `List.length`, `List.length_take` and
-`List.replicate` become their `Vec` counterparts, all of which already exist. `Grass/Memory/Apply.lean`
+`List.replicate` become their `Vec` counterparts, all of which already exist.
+Only two of the six are proof steps; the rest are a definition body and two
+data-construction expressions. `Grass/Memory/Apply.lean`
 defines `observedBytes` as `(List.range n).map (fun i => …)` and thirty-two sites
 reason about it; without `ofFn` there is no `Vec` way to write it, and the idiom
 that works — `(replicate n default).mapIdx …` — is neither guessable nor free,

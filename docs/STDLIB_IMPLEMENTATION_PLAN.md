@@ -730,8 +730,10 @@ settled at `g-design:49`: the name stays.
 
 **The "one line" half of that is now known to be incomplete, and §3.13 supersedes
 it.** No field changes, which is what this paragraph claims and what remains true.
-Six *proof steps* do change, because they apply `List` operations to what has
-become a `Vec`. The two counts in this document measure different trees and are
+Six *sites* do change, because they apply `List` operations to what has become a
+`Vec`. Only two of those six are proof steps; §3.13 tabulates which, and this
+sentence said "proof steps" until `g-reviewer:47` found it contradicting that
+table. The two counts in this document measure different trees and are
 both right: the ~22 edits below were measured against `agent/c-mem/memory-*`, and
 §3.13's six were measured against merged `main`, where much of that branch work
 has not landed. The trees also differ in *scope*, which is the half of the reason
