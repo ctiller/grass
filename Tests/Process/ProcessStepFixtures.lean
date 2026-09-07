@@ -121,6 +121,9 @@ theorem the_listener_ticks (remaining : Nat) (running : remaining ≠ 0)
   writesPermitted := by
     intro region moved
     exact absurd rfl moved
+  sharedWritesAdmitted := by
+    intro region moved
+    exact absurd rfl moved
   scope := by
     intro fragment outside
     cases fragment with
@@ -249,5 +252,106 @@ theorem the_tick_preserves_the_incarnation (remaining : Nat) (running : remainin
   obtain ⟨fromInstance, toInstance, fromKind, toKind, _, _, _, _, sameRef, sameParent,
     sameRequest⟩ := (the_listener_ticks remaining running answer).protocolStep
   exact ⟨fromInstance, toInstance, fromKind, toKind, sameRef, sameParent, sameRequest⟩
+
+/-! ## A step that writes a shared region
+
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.128 and `agent-bus` ruling
+`g-design:84`. Until this section `ProcessPlan.sharedUpdate` was declared and
+exercised nowhere: every `StepsLocally` in the corpus discharged
+`writesPermitted` and `sharedWritesAdmitted` by `absurd rfl moved`, because no
+fixture step moved a region at all. A bound nothing is held to is the shape this
+ledger refuses, so here is a step held to it, and one refused by it.
+
+`serverPlan.sharedUpdate` says the accept counter goes up by exactly one. The
+listener may write it — `sharedAccess .listener .acceptCount` is `.readWrite` —
+so the capability is not what decides these two cases; the *value* is.
+-/
+
+/-- The counter after one accept. -/
+def busyCounted (remaining : Nat) : ServerWorld :=
+  { busyAfter remaining with
+      shared := fun
+        | .routeTable => ⟨[]⟩
+        | .acceptCount => ⟨1⟩ }
+
+/-- And after a write that skips a number. -/
+def busyMiscounted (remaining : Nat) : ServerWorld :=
+  { busyAfter remaining with
+      shared := fun
+        | .routeTable => ⟨[]⟩
+        | .acceptCount => ⟨7⟩ }
+
+theorem the_counter_moved (remaining : Nat) :
+    (busyAfter remaining).shared .acceptCount ≠ (busyCounted remaining).shared .acceptCount := by
+  intro same
+  have counts : (0 : Nat) = 1 := congrArg (fun held => held.down) same
+  exact absurd counts (by decide)
+
+/--
+**A tick that also counts the accept is a step**, and `sharedWritesAdmitted` is
+where it pays for the write.
+
+Every other field is `the_listener_ticks`'s. What is new is the last two: the
+counter moved, so `writesPermitted` needs the listener to have write access and
+`sharedWritesAdmitted` needs the new value to be one the plan admits.
+-/
+theorem the_listener_counts (remaining : Nat) (running : remaining ≠ 0)
+    (answer : countdownVocabulary.Result .tick) :
+    serverPlan.StepsLocally (busy remaining) (busyCounted remaining) .listener ()
+      (.result .tick answer) [Observation.beep] 0 [Observation.beep] where
+  from' := ⟨awaiting remaining, rfl, trivial, rfl⟩
+  stillLive := ⟨settled remaining, rfl, trivial⟩
+  protocolStep :=
+    ⟨awaiting remaining, settled remaining, rfl, rfl, rfl, rfl,
+      ⟨running, rfl, rfl, rfl⟩, ⟨0, rfl, rfl⟩, rfl, rfl, rfl⟩
+  emittedIsProjected := rfl
+  producesPending := rfl
+  writesPermitted := by
+    intro region moved
+    cases region with
+    | routeTable => exact absurd rfl moved
+    | acceptCount => rfl
+  sharedWritesAdmitted := by
+    intro region moved _ _ _ _ _ _
+    cases region with
+    | routeTable => exact absurd rfl moved
+    | acceptCount => rfl
+  scope := by
+    intro fragment outside
+    cases fragment with
+    | instanceState kind slot =>
+      cases kind with
+      | listener => exact absurd (Or.inl rfl) outside
+      | connection => rfl
+    | region region =>
+      cases region with
+      | routeTable => rfl
+      | acceptCount =>
+        exact absurd (Or.inr (Or.inr ⟨.acceptCount, the_counter_moved remaining, rfl⟩)) outside
+    | pending => exact absurd (Or.inr (Or.inl ⟨by simp, rfl⟩)) outside
+    | _ => rfl
+
+/--
+**And the same step writing a value the plan does not admit is refused.**
+
+The counter jumps from nothing to seven. `writesPermitted` is satisfied — the
+listener may write this region — so the capability is not what refuses it;
+`ProcessPlan.sharedUpdate` is, which is exactly the gap §10.103 recorded and
+`g-design:84` ruled on. Before the field, this step was constructible and the
+after-world passed every `WellFormed` clause.
+-/
+theorem the_listener_may_not_miscount (remaining : Nat)
+    (answer : countdownVocabulary.Result .tick)
+    (step : serverPlan.StepsLocally (busy remaining) (busyMiscounted remaining) .listener ()
+      (.result .tick answer) [Observation.beep] 0 [Observation.beep]) : False := by
+  have moved : (busy remaining).shared .acceptCount
+      ≠ (busyMiscounted remaining).shared .acceptCount := by
+    intro same
+    have counts := congrArg (fun held => held.down) same
+    simp [busy, busyMiscounted, Grass.Process.Tests.World.quiet] at counts
+  have admitted := step.sharedWritesAdmitted .acceptCount moved
+    (awaiting remaining) (settled remaining) rfl rfl rfl rfl
+  have counts : (7 : Nat) = 0 + 1 := admitted
+  exact absurd counts (by decide)
 
 end Grass.Process.Tests.ProcessStep
