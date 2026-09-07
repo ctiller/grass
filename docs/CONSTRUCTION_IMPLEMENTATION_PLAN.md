@@ -318,6 +318,12 @@ before the final authored macro can rely on the selection.
 request's live set at every state admitted by the body contract. The resulting
 `withLiveScratch` binder retains the fixed contract and exact body source; it
 still delegates instruction correctness to the supplied `VerifiedFragment`.
+`Grass.Construct.Source.Containment` supplies the proof-only containment metadata
+surface from `INSTRUCTIONS.md` section 5. Each annotation carries an exact
+violation class and finite affine return envelope and must attach to one literal
+CFG edge or the exact final instruction origin of its block. Duplicate and
+unattached sites are rejected, while erasure theorems prove the projected CFG,
+located instruction expansion, and instruction count unchanged.
 
 The Spike 1 call/partial-write loop is the first acceptance fixture. Spike 2's
 named layouts and reusable short fragments are the next one.
