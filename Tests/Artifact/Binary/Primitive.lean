@@ -33,4 +33,9 @@ example (value : Byte) (suffix : Std.Logical.ByteArray) :
     Derives anyByteFormat (writeByte value ++ suffix) value suffix :=
   writeByte_realizes.derivesWithSuffix value suffix
 
+example (input : Std.Logical.ByteArray) (short : input.length < 8) :
+    takeExact 8 input = .needMore (some (8 - input.length)) :=
+  (takeExact_realizes 8).needMoreExact input (some (8 - input.length)) |>.2
+    ⟨short, rfl⟩
+
 end Grass.Tests.Artifact.Binary

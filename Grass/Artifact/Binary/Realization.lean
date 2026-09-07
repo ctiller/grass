@@ -1,5 +1,5 @@
 import Grass.Artifact.Binary.Primitive
-import Grass.Grammar.Realization
+import Grass.Grammar.Binary
 
 /-! # Proofs that primitive binary implementations realize Grammar formats -/
 
@@ -44,5 +44,33 @@ round-trip rather than relying on reduction of the implementation. -/
 theorem takeByte_writeByte_via_realization (value : Byte) :
     takeByte (writeByte value) = .done value Vec.empty :=
   parse_write takeByte_realizes writeByte_realizes value
+
+/-- The exact-length consumer realizes the derived fixed-byte format: success,
+completeness, and exact short-buffer classification agree with its semantics. -/
+theorem takeExact_realizes (count : Nat) :
+    ParserRealizes (fixedBytesSemantics count) (takeExact count) := by
+  constructor
+  · intro input value rest success
+    obtain ⟨lengthEq, recomposes⟩ := takeExact_done success
+    exact (fixedBytesSemantics count).selectedSound ⟨recomposes.symm, lengthEq⟩
+  · intro input value rest selected
+    exact takeExact_append selected.2 rest ▸ congrArg (takeExact count) selected.1
+  · intro input hint
+    simp only [takeExact]
+    split
+    next enough =>
+      constructor
+      · intro impossible
+        cases impossible
+      · intro repairable
+        exact (Nat.not_lt_of_ge enough repairable.1).elim
+    next short =>
+      simp [fixedBytesSemantics, Nat.lt_of_not_ge short, eq_comm]
+  · intro input error
+    simp only [takeExact]
+    split <;> simp [fixedBytesSemantics]
+  · intro input value rest success
+    obtain ⟨lengthEq, recomposes⟩ := takeExact_done success
+    exact ⟨recomposes.symm, lengthEq⟩
 
 end Grass.Artifact.Binary
