@@ -495,4 +495,51 @@ theorem the_unoffset_relation_is_unchanged :
     mapped.SharesBytes placed viewAt2048 ∧
     mapped.SharesBytes placed viewAt256More := by decide
 
+/-! ### One offset, or a refusal
+
+`SharesBytesAt` holds at every shift some declared path witnesses, and deliberately
+does not choose between them. `aliasShift?` is where a caller that needs *one* offset
+gets an answer or is refused, which is [FOUNDATION.md](../../docs/FOUNDATION.md) law
+8's direction: picking the first path, the shortest, or zero would each be a
+permissive fallback.
+-/
+
+/-- On a consistent graph the offset is the one declared, and a chain's is the sum. -/
+theorem the_shift_is_recovered :
+    mapped.aliasShift? placed viewAt2048 = some 2048 ∧
+    mapped.aliasShift? placed viewAt256More = some 2304 := by decide
+
+/-- Reflexive at zero when nothing contradicts it. -/
+theorem an_allocation_is_at_zero_from_itself :
+    mapped.aliasShift? placed placed = some 0 := by decide
+
+/-- Unrelated allocations get `none`, which is the *other* thing `none` means. -/
+theorem an_unaliased_allocation_has_no_shift :
+    mapped.aliasShift? placed unplaced = Option.none := by decide
+
+/-- The same pair declared aliased twice, at offsets that disagree. A profile can
+write this and the model must not pretend otherwise. -/
+def contradictory : MemoryState :=
+  (((MemoryState.empty.allocateAll?
+      [(placed, placedRecord), (viewAt2048, placedRecord)]).getD .empty).alias
+    placed viewAt2048 0).alias placed viewAt2048 8
+
+/-- **The predicate stays permissive and the decision refuses**, which is the pairing
+worth stating together. `SharesBytesAt` holds at *both* declared offsets, because
+both are witnessed and it is not `SharesBytesAt`'s job to adjudicate them. -/
+theorem the_predicate_admits_both_offsets :
+    contradictory.SharesBytesAt placed viewAt2048 0 ∧
+    contradictory.SharesBytesAt placed viewAt2048 8 := by decide
+
+/-- And `aliasShift?` refuses rather than picking one. Law 8: no permissive
+fallback. Zero is not the answer, and neither is the first edge declared. -/
+theorem contradictory_offsets_are_refused :
+    contradictory.aliasShift? placed viewAt2048 = Option.none := by decide
+
+/-- The unoffset question is still answerable on the same state, and still says yes:
+whatever else is true, those two allocations do share storage. A caller asking about
+conflicts is not blocked by a disagreement about offsets. -/
+theorem sharing_is_still_decided :
+    contradictory.SharesBytes placed viewAt2048 := by decide
+
 end Tests.Memory.Placement

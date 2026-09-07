@@ -446,6 +446,53 @@ instance (state : MemoryState) (a b : AllocId) (shift : Int) :
     Decidable (state.SharesBytesAt a b shift) :=
   inferInstanceAs (Decidable (state.SharesAfterAt _ a b shift))
 
+/-- Everything reachable from `a` in at most `n` hops, each with the offset the path
+to it shifts by.
+
+The frontier `SharesAfterAt` decides by recursion, computed instead, because
+`aliasShift?` below has to ask *how many distinct* shifts reach a target and a
+predicate cannot be asked that. Paths are not deduplicated: two paths reaching the
+same allocation at the same shift appear twice, which costs nothing because the only
+consumer compares shifts for agreement. -/
+def aliasFrontier (state : MemoryState) : Nat → AllocId → List (AllocId × Int)
+  | 0, a => [(a, 0)]
+  | n + 1, a =>
+      let prev := state.aliasFrontier n a
+      prev ++ prev.flatMap fun step =>
+        (state.aliasNeighbours step.1).map fun hop => (hop.1, step.2 + hop.2)
+
+/-- Every offset at which some declared path relates `a` to `b`. -/
+def aliasShiftsTo (state : MemoryState) (a b : AllocId) : List Int :=
+  ((state.aliasFrontier state.aliases.length a).filter fun step => step.1 = b).map
+    Prod.snd
+
+/--
+The offset relating `a` to `b`, when the declared aliases agree on one, and `none`
+when they do not.
+
+**This is where an inconsistent alias graph is refused rather than resolved.** A
+profile may declare a cycle that does not close at zero, or two independent mappings
+relating the same pair at different offsets; `SharesBytesAt` holds at every shift
+some path witnesses and deliberately does not choose between them.
+[FOUNDATION.md](../../docs/FOUNDATION.md) law 8 forbids the permissive fallback, and
+picking the first path, the shortest path, or zero would each be one. `none` is the
+answer, and a caller that needs an offset to decide authority must refuse the access.
+
+`none` therefore means two different things — no path at all, and more than one
+disagreeing path — and that is deliberate. Both are cases where this layer cannot
+supply an offset, and a caller that must refuse in one must refuse in the other.
+A reader wanting to tell them apart has `SharesBytes` for the first.
+
+Reflexive at zero only when nothing contradicts it: if a cycle relates `a` to itself
+at a non-zero shift, `aliasShift? a a` is `none`, which is the refusal doing its job
+on the state that most obviously deserves it.
+-/
+def aliasShift? (state : MemoryState) (a b : AllocId) : Option Int :=
+  match state.aliasShiftsTo a b with
+  | [] => Option.none
+  | first :: rest => if rest.all (· = first) then some first else Option.none
+
+
 theorem sharesAfter_zero_of_eq {state : MemoryState} {n : Nat} {a b : AllocId}
     (h : a = b) : state.SharesAfter n a b := by
   cases n with
