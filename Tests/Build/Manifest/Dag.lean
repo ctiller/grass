@@ -26,6 +26,9 @@ def fixtureDag : ManifestDag 2 where
 
 example : fixtureDag.WellFormed := by decide
 
+example : NodesOrdered [] fixtureDag.nodes.toList :=
+  fixtureDag.wellFormed_iff_nodesOrdered.mp (by decide)
+
 example : (checkManifestDag fixtureDag).isSome = true := by decide
 
 def onlyAChanged (scope : ScopeId) : Bool := scope == leafA
@@ -48,6 +51,13 @@ def nothingChanged (_ : ScopeId) : Bool := false
 
 example : rebuildCone fixtureDag nothingChanged = Vec.empty := by
   decide
+
+example : nodeAffected onlyAChanged Vec.empty (node leafA Vec.empty) = true :=
+  (nodeAffected_eq_true_iff ..).2 (Or.inl (by decide))
+
+example : nodeAffected nothingChanged (Vec.singleton leafA)
+    (node component (Vec.singleton leafA)) = true :=
+  by decide
 
 /-- The fanout index prevents constructing a two-dependency node at fanout one. -/
 example : ¬∃ candidate : DependencyNode 1,
