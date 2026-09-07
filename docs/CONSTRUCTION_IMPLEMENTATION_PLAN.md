@@ -444,6 +444,11 @@ consecutive byte offset, including zero-byte encodings; exact projection and
 concatenation theorems tie the result to the original source while a mandatory
 ordered taint ledger makes the absence of semantic and artifact certification
 review-visible.
+`Grass.Unsafe.EmitProgram` performs the corresponding operation on
+`LoweredProgram`, retaining each containing block alongside `SourceOrigin` and
+offset. Its verified-construction bridge proves the raw stream projects to the
+original pre-alpha instructions and normalized CFG while keeping the byte
+encoder explicitly tainted.
 
 Exit criteria include round trips for supported raw instructions, structured
 errors for unknown/ambiguous bytes and targets, exact stepping agreement with
