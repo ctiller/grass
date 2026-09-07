@@ -231,6 +231,35 @@ theorem instructionsExact
   exact (emitRawProgram.instructionsExact checked.lower encoder primaryTaint
     additionalTaints).trans checked.lower_instructions_exact
 
+/-- Verified raw bytes are the original pre-alpha instructions encoded in
+authored order by the explicitly supplied raw encoder. -/
+theorem bytesExact
+    {State : Type u} {Terminal : Type v} {Instruction : Type w}
+    {Annotation : Type x} {Effect : Type y}
+    {semantics : Semantics Instruction State}
+    {effectModel : EffectModel Instruction Effect}
+    [DecidableEq Terminal]
+    {source : PreAlphaConstructionSource State Terminal Instruction Annotation
+      Effect semantics effectModel}
+    {model : LabelAlphaModel}
+    (checked : VerifiedConstructionElaborated source model)
+    (encoder : RawEncoder Instruction) (primaryTaint : Taint)
+    (additionalTaints : List Taint := []) :
+    (emitVerifiedConstructionRaw checked encoder primaryTaint
+      additionalTaints).bytes =
+      source.authored.instructions.flatMap encoder.encode := by
+  change (emitRawProgram checked.lower encoder primaryTaint
+    additionalTaints).bytes =
+      source.authored.instructions.flatMap encoder.encode
+  calc
+    _ = checked.lower.items.flatMap
+        (fun item => encoder.encode item.instruction) :=
+      emitRawProgram.bytesExact checked.lower encoder primaryTaint
+        additionalTaints
+    _ = (checked.lower.items.map LoweredInstruction.instruction).flatMap
+        encoder.encode := by simp [List.flatMap_map]
+    _ = _ := by rw [checked.lower_instructions_exact]
+
 end emitVerifiedConstructionRaw
 
 end Grass.Unsafe

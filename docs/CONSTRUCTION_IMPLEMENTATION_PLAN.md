@@ -462,6 +462,10 @@ Its `RelocatableEmissionPlan` overlay accepts those four symbolic metadata
 tables independently, retains the exact checked bytes and source map, and
 delegates their section bounds, symbol closure, and entry closure to
 `checkRelocatableFragment`; it still performs no relocation or serialization.
+`emitVerifiedConstructionRaw.bytesExact` and
+`verifiedConstructionSectionBytesExact` close the source-to-writer-input
+equation: initialized logical section bytes are the original pre-alpha authored
+instructions encoded in order and converted through canonical `Byte.ofUInt8`.
 
 Exit criteria include round trips for supported raw instructions, structured
 errors for unknown/ambiguous bytes and targets, exact stepping agreement with

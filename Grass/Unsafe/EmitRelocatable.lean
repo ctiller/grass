@@ -15,7 +15,7 @@ namespace Grass.Unsafe
 
 open Grass.Construct.Link Grass.Std.Logical
 
-universe u v w x y
+universe u v w x y z q
 
 variable {State : Type u} {Terminal : Type v} {Instruction : Type w}
   {RelocKind : Type x} {ImportIdentity : Type y}
@@ -91,6 +91,31 @@ def fragment
     (checked : CheckedRelocatableEmission emission config) :
     checked.contribution.content.initialized.toList =
       emission.bytes.map Byte.ofUInt8 := rfl
+
+/-- `verifiedConstructionSectionBytesExact` relates the initialized logical
+section directly to the original pre-alpha authored instruction list. -/
+theorem verifiedConstructionSectionBytesExact
+    {Annotation : Type z} {Effect : Type q}
+    {semantics : Grass.Construct.Fragment.Semantics Instruction State}
+    {effectModel : Grass.Construct.Fragment.EffectModel Instruction Effect}
+    [DecidableEq Terminal]
+    {source : Grass.Construct.Source.PreAlphaConstructionSource State Terminal
+      Instruction Annotation Effect semantics effectModel}
+    {model : Grass.Construct.Source.LabelAlphaModel}
+    (construction : Grass.Construct.Source.VerifiedConstructionElaborated
+      source model)
+    (encoder : RawEncoder Instruction) (primaryTaint : Taint)
+    (additionalTaints : List Taint := [])
+    {config : RelocatableEmissionConfig}
+    (checked : CheckedRelocatableEmission
+      (emitVerifiedConstructionRaw construction encoder primaryTaint
+        additionalTaints) config) :
+    checked.contribution.content.initialized.toList =
+      (source.authored.instructions.flatMap encoder.encode).map
+        Byte.ofUInt8 := by
+  rw [checked.sectionBytesExact,
+    emitVerifiedConstructionRaw.bytesExact construction encoder primaryTaint
+      additionalTaints]
 
 /-- `CheckedRelocatableEmission.fragmentWellFormed` discharges the generic link
 schema from positive alignment and the checked source-map range laws. -/
