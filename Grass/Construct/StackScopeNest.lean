@@ -25,6 +25,8 @@ structure StackScopeNest {State : Type u} {profile : LayoutProfile}
   outer : StackScopeSession before outerChecked outerContract OuterResource
   inner : StackScopeSession outer.after innerChecked innerContract
     (InnerResource outer.token.id)
+  innerParentExact : inner.token.scopeRef.scope.parent =
+    some outer.token.scopeRef.scope.id
 
 namespace StackScopeNest
 
@@ -78,6 +80,7 @@ end StackScopeNest
 inductive StackScopeNestError where
   | outer (error : StackScopeError)
   | inner (error : StackScopeError)
+  | parentMismatch (actual : Option ScopeId) (expected : ScopeId)
 deriving Repr, DecidableEq
 
 /--
@@ -109,6 +112,12 @@ def checkStackScopeNest {State : Type u} {profile : LayoutProfile}
       match checkStackScopeSession outer.after innerChecked innerScopeRef innerContract
           (InnerResource outer.token.id) (innerLedgerFor outer.token.id) with
       | .error error => .error (.inner error)
-      | .ok inner => .ok ⟨outer, inner⟩
+      | .ok inner =>
+          if nested : inner.token.scopeRef.scope.parent =
+              some outer.token.scopeRef.scope.id then
+            .ok ⟨outer, inner, nested⟩
+          else
+            .error (.parentMismatch inner.token.scopeRef.scope.parent
+              outer.token.scopeRef.scope.id)
 
 end Grass.Construct

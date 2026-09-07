@@ -48,7 +48,7 @@ private def inner : StackScopeSession outer.after checked contract
   ⟨outer.after.mint checked innerRef,
     ⟨innerLedger outer.token.id outer.after.fresh.1, by rfl⟩⟩
 private def nest : StackScopeNest supply checked checked contract contract String InnerPayload :=
-  ⟨outer, inner⟩
+  ⟨outer, inner, rfl⟩
 
 example : FreshSupply.Reachable supply nest.outer.after := nest.beforeToOuter
 example : FreshSupply.Reachable nest.outer.after nest.inner.after := nest.outerToInner
@@ -70,5 +70,9 @@ private def openInnerLedger (outerId innerId : StackScopeId) :
 example : (checkStackScopeNest supply checked checked outerRef innerRef contract contract
     String InnerPayload outerLedger openInnerLedger).map (fun _ => ()) =
     .error (.inner (.openExit fault)) := by rfl
+
+example : (checkStackScopeNest supply checked checked outerRef outerRef contract contract
+    String InnerPayload outerLedger innerLedger).map (fun _ => ()) =
+    .error (.parentMismatch none outerScope) := by rfl
 
 end Grass.Tests.Construct.StackScopeNest
