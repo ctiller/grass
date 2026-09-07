@@ -91,11 +91,11 @@ Build/Cache              canonical semantic-environment Merkle keys
 Build/Manifest           leaf/aggregate manifests and certificate DAG folds
 ```
 
-The first implementation slice puts the semantic result vocabulary and small,
-total byte consumers together in `Grammar/Core`. Later optimization can replace
-the executable consumer while retaining `ParserRealizes`. Host `_root_.ByteArray`
-is used only at an explicit adapter; format semantics use
-`Grass.Std.Logical.ByteArray`.
+The semantic result vocabulary lives in `Grammar/Core`; small total byte
+consumers live in `Artifact/Binary/Primitive`, and their realization proofs in
+`Artifact/Binary/Realization`. Later optimization can replace an executable
+consumer while retaining `ParserRealizes`. Host `_root_.ByteArray` is used only
+at an explicit adapter; format semantics use `Grass.Std.Logical.ByteArray`.
 
 ## 3. Milestones and exit gates
 

@@ -6,10 +6,6 @@ namespace Grass.Tests.Grammar
 
 open Grass.Std.Logical Grass.Grammar
 
-example (value : Byte) :
-    takeByte (writeByte value) = .done value Vec.empty :=
-  parse_write takeByte_realizes writeByte_realizes value
-
 example (value : Byte) (rest : Std.Logical.ByteArray) :
     anyByteSemantics.selectedDerivation
       (Vec.singleton value ++ rest) value rest := rfl
