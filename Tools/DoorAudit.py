@@ -136,7 +136,7 @@ DOORS = {
     # name produced twenty-six reports, none of them a call to the mutator. Guarding
     # it needs elaboration, not a regex. Its two `Grass/` callers today are
     # `MemoryState.commit` and `Shape.lean`'s `writeField`, and
-    # `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records that the second is unbounded
+    # `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records that the second is unbounded
     # by the allocation and safe only for want of callers.
     "allocate?": {"Grass/Memory/State.lean"},
     "allocateAll?": {"Grass/Memory/State.lean"},

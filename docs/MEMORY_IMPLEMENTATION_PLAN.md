@@ -639,6 +639,29 @@ changes what a program sees and never what it leaves behind.
 
 ### 4.2 What M2 still owes
 
+- **The `ByteSeq` → `ByteArray := Vec Byte` migration is now due, and it is not one
+  edit.** §3.6 lists `ByteSeq` as provisional "until `Std.Logical` lands `Vec`", and the
+  merge of main at `b3f5470` landed it, so the condition is met.
+  `Grass/Std/Logical/Byte.lean` says the migration is "one edit in one place rather than
+  a change to every field that holds bytes"; that sentence was written when there was no
+  `Vec` to import and it is false in two ways review measured rather than estimated.
+
+  The abbrev cannot stay where it is: `Vec.lean` imports `Byte.lean`, so `Byte.lean`
+  cannot name `Vec`. It moves, and every consumer gains an import. And the fields are
+  the easy half — `Vec` supplies `length`, `take`, `GetElem?`, `Append`, `DecidableEq`
+  and `Repr`, so the declarations survive. What does not survive is the proof layer,
+  which discharges goals with `List.getElem?_eq_none`, `List.getElem?_eq_some_iff`,
+  `List.getElem?_eq_getElem` and `List.length_take` directly rather than through any
+  interface: twenty-five errors, in `ByteStore.lean` and `Event.lean`, with the build
+  never reaching `Apply.lean`, `State.lean`, `Grass/Op/Step.lean` or any test. One is a
+  *statement* rather than a proof — `observedBytes` builds its result as
+  `(List.range n).map`, a `List` constructor whose counterpart is `Vec.ofFn`.
+
+  The naming convention held: no module under this layer writes `List Byte`. It was
+  necessary and not sufficient, because the proofs depend on `ByteSeq`'s identity rather
+  than on a sequence interface. Reported to the owner as `c-mem:51`, correcting an
+  estimate `c-mem:50` gave them before it was measured.
+
 Recorded rather than implied, and expanded twice after adversarial review. The
 first round found three of these stated as done; the second found three more, and
 one outright defect that had already merged — see §3.11's denial row.
@@ -1710,8 +1733,24 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   registry's answer rather than a mismatch against a defaulted one; that ordering has
   its own fixture.
 - **`EventCause.origin` is an open nominal with no registry**, and it reaches every
-  minted event as one of §7.1's required fields. It is now the only one: every other
-  open name in this layer that reaches an operation has a registry. It has an allowlist
+  minted event as one of §7.1's required fields. ~~It is now the only one.~~ It is one of
+  five, and the claim that it was the only one is what stopped the next reviewer
+  attacking the list — which is precisely what §4.4.1a asks a reviewer to do, so an
+  exhaustiveness claim there is worse than a gap.
+
+  The others: `ObservationLabel` on `AccessDescriptor.observations`, which §4.2 already
+  records as having no reader *at all*, so the missing registry understates it;
+  `Restartability.profileSpecific`, which reaches an operation through
+  `OperationFacets.restartability` and is the only one of this layer's four
+  `profileSpecific` nominals that did not get a registry when `MemoryOrder`,
+  `MemoryScope` and `FaultVisibility` all did; and `Coherence.profileSpecific` and
+  `MemoryTypeId` on the address-space side. `Tools/ReachabilityAudit.py` is silent on
+  two of them through its own documented same-name blindness — its comment names
+  "two `profileSpecific` by the third".
+
+  `Restartability` is the one to close on `ContextKind`'s terms: a closed-enough list a
+  profile can write down, reaching an operation, with three siblings already registered.
+  The others need their own decision and §4.2 holds them. It has an allowlist
   entry in `Tools/ConsultedAudit.py` instead, and nothing relates it to the
   `SomeOperation` being stepped.
 
@@ -2221,6 +2260,22 @@ the field belongs beside it as something that can only add.
   `AuthorityGrant` does not. Adding fields nothing consults is the shape this layer
   has been bitten by three times, so they wait for M4's frames, where a bounded
   lifetime has something to mean.
+
+  **What the absence costs is larger than the missing fields**, and this bullet did
+  not say so. A sublet outlives the loan it was carved from: review had an owner lend
+  a range read-only, the borrower sublet the same range on, and the owner then return
+  its own identity as lender — which succeeds and erases it, leaving the sublet
+  outstanding, the owner at `sharedImmutable` with no write authority, no identity left
+  to return, and `tearDown?` refusing while a grant is out. The owner has consumed
+  every identity it lent and has no action that restores what it had.
+
+  That defeats the §6 sentence `returnGrant?` names as its own reason for existing:
+  "consumes the same loan identities to reconstruct local authority on a conforming
+  return". No rule anywhere relates a sublet's life to its source's, and each of the
+  three deltas is reachable as a declared `authorityEffect`. The mechanism is M4's — a
+  `derivedFrom : Option GrantId`, and a `returnGrant?` that refuses or cascades while a
+  derived grant is outstanding — and should not land here. Recorded so that the missing
+  field is not mistaken for the whole of the missing guarantee.
 - ~~**Atomic shared authority, and §3's rule that atomics do not grant ordinary
   non-atomic access.**~~ Closed, after two wrong turns worth recording.
 

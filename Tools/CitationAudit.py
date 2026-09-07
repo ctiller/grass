@@ -49,6 +49,12 @@ advertised a stronger reading and review corrected it:
 
 - It matches short names, so `Foo.bar` and `Baz.bar` are indistinguishable. A
   citation naming the right leaf in the wrong namespace passes.
+- `Tools/*.py` is scanned for *section* citations only, not declaration ones. A Python
+  file naming `applyAuthorityDelta?` is naming a door rather than citing a theorem, and
+  a declaration set built from Lean sources cannot adjudicate it. Nothing scanned this
+  directory at all until review found a debt pointed at the wrong section here — the
+  fourth finding to live in `Tools/`, which §4.4.1 had already recorded as "where no
+  gate looks".
 - A citation that is *stale but still resolves* — the name exists, but the theorem
   no longer says what the prose claims — is invisible here. It is invisible to
   `DocstringAudit.py` too, which only asks whether a claim-shaped sentence contains
@@ -78,6 +84,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LEAN_FILES = sorted((ROOT / "Grass").rglob("*.lean")) + sorted((ROOT / "Tests").rglob("*.lean"))
 DOC_FILES = sorted((ROOT / "docs").glob("*.md"))
+# The audits themselves, scanned for section citations only. `Tools/` is where four
+# findings have now lived -- a dead pattern whose comment described it as in force, a
+# hedge list justified as covering the opposite of what it covered, an allowed caller
+# for a caller that does not exist, and a debt pointed at the wrong section -- and it
+# was scanned by nothing while §4.4.1 recorded it as "where no gate looks". Section
+# citations are the half a `#`-commented file can be checked for without a Lean
+# declaration set; the declaration half stays out, because a Python file naming
+# `applyAuthorityDelta?` is naming a door rather than citing a theorem.
+TOOL_FILES = sorted((ROOT / "Tools").glob("*.py"))
 
 # Documents that argue from Lean declaration names, and are scanned for them. See the
 # module docstring: the plan cites theorems as evidence for closed claims, and eight
@@ -535,6 +550,11 @@ def main() -> int:
             out[first] = " ".join(
                 line.strip() for line in match.group(0).splitlines())
         joined[path.relative_to(ROOT).as_posix()] = chr(10).join(out)
+    # Section citations in the audits themselves. A `#` comment already keeps the
+    # line structure, so no joining and no blanking is needed: the file is its own
+    # comment text for this purpose.
+    tools = {path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
+             for path in TOOL_FILES}
     documents: dict[str, str] = {}
     for path in DOC_FILES:
         documents[path.relative_to(ROOT).as_posix()] = path.read_text(encoding="utf-8")
@@ -552,6 +572,7 @@ def main() -> int:
                 # the same sentence; review put a wrong section in a line comment and
                 # the audit passed.
                 + check_sections(prose, sections)
+                + check_sections(tools, sections)
                 + check_sections(documents, sections)
                 + check_links(prose))
     if problems:

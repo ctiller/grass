@@ -57,9 +57,10 @@ and this paragraph is where it was claimed.
 
 Authority beyond what an allocation record means. `denialOf` checks liveness,
 epoch, address space, bounds, permission, and initialization, because those are
-what an `AllocationRecord` *is*. Loans, frames, pins, and lock tokens are
-`Grass/Op/Step.lean`'s `AuthorityProvider`, and they need a policy. A caller that
-uses `applyAccess` alone gets memory's own rules and not a profile's.
+what an `AllocationRecord` *is*. Loans are `Grass/Op/Step.lean`'s `refusalOf`, in
+clauses of its own that need no policy; frames, pins and lock tokens are an
+`AuthorityProvider`, which does. A caller that uses `applyAccess` alone gets memory's
+own rules and neither.
 
 ## Two parameters rather than two defaults
 
@@ -96,19 +97,40 @@ anything but the value that arithmetic happens to give was reported as a placeme
 disagreement — the audit naming a class downstream of the actual defect. Review found
 it by reading this sentence against the code below it.
 
-Alignment is deliberately absent. `AccessDescriptor.WellFormedIn.aligned` already
-checks it and `step` requires well-formedness before any access is attempted, so a
-misaligned access is *rejected at the declaration*, never denied at the state. An
-alignment branch here would be unreachable, and an unreachable branch that looks
-like a check is worse than no branch: it suggests the transition tests something
+Alignment is deliberately absent, and the reason is narrower than it was written.
+`AccessDescriptor.WellFormedIn.aligned` checks it and `step` requires well-formedness
+before any access is attempted, so a misaligned access is *rejected at the
+declaration*, never denied at the state.
+
+**On the transition path.** The claim was unqualified -- "an alignment branch here
+would be unreachable" -- and review falsified it the way this file falsified the same
+shape for the bounds clause forty lines below: `applyAccess` asks `denialOf` with no
+well-formedness hypothesis at all, so on the block path there is nothing between a
+misaligned descriptor and a committed write. Review stepped a four-byte store at offset
+one declaring 4096-byte alignment and watched it commit; the placement clause passes
+because the declared address really is the allocation's base plus the offset, so
+nothing else catches it. `Tests/Memory/Placement.lean`'s
+`a_misaligned_block_access_commits` is that case, kept as a demonstration rather than a
+guard, so that closing it breaks a theorem rather than passing unnoticed.
+
+An alignment branch on the transition path would be unreachable, and an unreachable
+branch that looks like a check is worse than no branch: it suggests the transition
+tests something
 it does not. `AuditViolationClass.misaligned` remains for a profile whose own
 alignment rule is stricter than the declared demand -- reached through that profile's
 `AuthorityProvider`, not through this function, which is why review removed it from
 `AuditViolationClass.emittedByTransition` and why deleting it there changed nothing.
 
-Authority beyond what an allocation record means is not here: loans, frames,
-pins, and lock tokens are `Grass/Op/Step.lean`'s `AuthorityProvider` and need a
-policy. This is memory's own rules, which is why it lives in the memory layer.
+Authority beyond what an allocation record means is not here. Loans are
+`Grass/Op/Step.lean`'s `refusalOf`, in two clauses of its own that need no policy at
+all; frames, pins and lock tokens are an `AuthorityProvider`, which does. This is
+memory's own rules, which is why it lives in the memory layer.
+
+That sentence read "loans, frames, pins, and lock tokens are … `AuthorityProvider`"
+until review found it, one milestone after `AuthorityProvider.loan` was deleted and
+nineteen citations were repointed at `refusalOf`. Two were not, and both were this one
+-- the sentence a reader chasing "who checks §3's loan rule" would follow. Forty lines
+above, the same file already says the true thing.
 -/
 def denialOf (state : MemoryState) (d : AccessDescriptor) : Option AuditViolationClass :=
   match state.allocations.lookup d.provenance.root with

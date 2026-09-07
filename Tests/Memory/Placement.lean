@@ -345,4 +345,52 @@ theorem a_provenance_in_another_space_is_refused :
         { fittingStore.provenance with space := .deviceHostVisible } } =
       some AuditViolationClass.wrongAddressSpace := by decide
 
+/-! ## The block evaluator commits a misaligned store
+
+`denialOf` has no alignment branch, and `Grass/Memory/Apply.lean` gives the reason:
+`AccessDescriptor.WellFormedIn.aligned` checks it and `step` requires well-formedness
+before any access is attempted, so a branch here would be unreachable. That was written
+unqualified and it is true only of the transition path. `applyAccess` asks `denialOf`
+with no well-formedness hypothesis at all -- the same fact that makes the bounds clause
+live, recorded forty lines below the alignment paragraph in the same file -- so on the
+block path nothing stands between a misaligned descriptor and a committed write.
+
+Kept as a demonstration rather than a guard, on the model of
+`a_join_of_two_duties_halves_the_ledger`: closing this breaks a theorem rather than
+passing unnoticed. Closing it means either an alignment clause in `denialOf`, which
+would be unreachable through `step` and would put a fifteenth class into
+`emittedByTransition`, or a well-formedness hypothesis on `applyAccess`, which changes
+the block evaluator's signature. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records
+the choice as open. -/
+
+/-- A four-byte store at offset 201 of the `fitting` allocation, demanding page
+alignment at an address that is not page-aligned. Every clause of `denialOf` passes:
+the address really is the allocation's base plus the offset, which is what the
+placement clause checks. -/
+def misalignedStore : AccessDescriptor :=
+  { overrunningStore with
+    range := ⟨201, 4⟩, address := .numeric (0x2000 + 201), alignment := 4096 }
+
+/-- **It is misaligned and it is not denied.** -/
+theorem a_misaligned_block_access_is_not_denied :
+    ¬ misalignedStore.AlignmentSatisfied ∧
+    ¬ misalignedStore.WellFormedIn AddressSpace.cpuVirtual64 ∧
+    denialOf fitting misalignedStore = Option.none := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **And the block evaluator commits it**, which is the consequence. The second
+conjunct is the byte: offset 201 held nothing and holds `0xAB` afterwards. -/
+theorem a_misaligned_block_access_commits :
+    (applyAccess fitting misalignedStore (List.replicate 4 0xAB) (fun _ => 0)).1.Committed ∧
+    (applyAccess fitting misalignedStore (List.replicate 4 0xAB)
+      (fun _ => 0)).2.byteAt? offsetAlloc 201 = some 0xAB ∧
+    fitting.byteAt? offsetAlloc 201 = Option.none := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- The same store at a page-aligned address is well formed, so the fixture is about
+the alignment and not about the descriptor. -/
+theorem the_aligned_store_is_well_formed :
+    ({ misalignedStore with alignment := 1 } :
+      AccessDescriptor).WellFormedIn AddressSpace.cpuVirtual64 := by decide
+
 end Tests.Memory.Placement
