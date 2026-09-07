@@ -48,7 +48,7 @@ structure ProcessShardCertificate (sig : ProcessSignature) where
   private localProof : LocalProcessCorrect realization
   public boundary : RealizesProcessSignature realization sig
   public providerOriginsExact :
-    sig.providers.family.ExtEq realization.providerDemands
+    sig.providers.family.ExtEq realization.providers.providerDemands
 ```
 
 The public theorem type contains `sig`, including its semantic `behavior`, but

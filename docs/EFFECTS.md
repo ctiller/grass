@@ -835,10 +835,12 @@ contains the exact rooted operation history, and a `pendingProgress` transition
 extends that same history without consuming the occurrence, emitting precisely
 the newly exposed `PrefixObservations`. Completion alone consumes the occurrence
 and resumes the continuation. The Effect adapter generates this relation from
-`EffectTheory.Extends`. For a plain `SequentialMachine`, the library accepts a
-`SequentialPendingSemantics`: its automatic `atomic` instance proves there is no
-proper pending extension or pending observation and matches the currently landed
-adapter; a streaming/custom instance supplies the history extension relation.
+`EffectTheory.Extends` and proves an exact projection to the selected
+`PendingInteractionModel`. For a plain `SequentialMachine`, the library accepts
+a `SequentialPendingSemantics` indexed by that exact model: its automatic
+`atomic` instance requires a proof that the model has no proper pending extension
+or pending observation and matches the currently landed adapter; a
+streaming/custom instance supplies the history extension relation.
 This optional certificate adds no field to a simple machine. A custom raw
 `DirectRelationalProgram` may instead express pending progress as an internal
 transition which preserves its exact held-occurrence bag. The general Effect
@@ -848,8 +850,9 @@ theorem only after preserving and reflecting `EffectPrefixExtends`.
 The adapter constructs a `Process.CertifiedDirectProgram` whose dependent
 `DirectProgramDerivation` payload retains the exact effect program,
 `EffectProgramAdequate`, selected `EffectProgramMeetsProgress`, and adapter
-certificate. Separately, the generated `DriverBoundary.providerDemands` is the
-stable `plan.providerDemands`, whose statements are indexed only by the source
+certificate. Separately, the generated `CertifiedDriverBoundary` sidecar carries
+the stable `plan.providerDemands`; the underlying five-field `DriverBoundary`
+does not change. Its statements are indexed only by the source
 and target row models, lowering plan, and handoff—not by the caller's program
 body. Every generated operation occurrence points to the exact finite subfamily
 it uses, which may contain zero, one, or several independent origins. The
