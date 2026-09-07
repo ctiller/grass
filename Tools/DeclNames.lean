@@ -9,6 +9,7 @@ import Grass.Core.Demand
 import Grass.Core.Generational
 import Grass.Core.Identifiers
 import Grass.Core.Name
+import Grass.Core.Scope
 import Grass.Core.Uid
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes

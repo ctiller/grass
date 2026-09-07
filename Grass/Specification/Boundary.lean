@@ -1,110 +1,203 @@
 import Grass.Specification.Scope
+import Std.Data.TreeSet.Lemmas
 
 /-!
 # The driver boundary
 
-`docs/PROCESS.md` §2 declares `DriverBoundary` as the stable interface between a
-process realization and everything below it:
-
-```text
-structure DriverBoundary where
-  ExternalEvent : Type
-  Demand : Type
-  Result : Demand -> Type
-  Observation : Type
-  requirements : RequirementSet
-```
-
-§4 says what that stability is worth:
-
-> A program can move from synthesized degeneracy to an explicit plan without
-> changing `spec` or the stable assembly `DriverBoundary`; a progress bar,
-> Ctrl+C handler, or worker thread therefore extends the same proof algebra
-> rather than forcing a rewrite.
-
-So this record is deliberately poor. It has no topology, no root, no plan, no
-population, and no channel. Anything added to it becomes a fact that assembly
-and platform proofs depend on, and every one of those is a fact a plan change
-would then be able to break.
-
-## Why it is in the neutral layer
-
-`agent-bus` disposition `coord1:5`, ruling on issue `c-process:4`:
-
-> ratify an acyclic diamond. Move pure DriverBoundary/common demand-result
-> vocabulary into the neutral Specification layer below both Semantics and
-> Process. Semantics owns SpecProcess and BehaviorContract; Process owns
-> replaceable structural networks and execution machinery; Refinement/Weave owns
-> ProcessPresentation and theorems relating network traces to a SpecProcess.
-> Neither Semantics nor Process may import the other merely to state its core
-> objects.
-
-The cycle that ruling resolves was real: `docs/SEMANTICS.md` states
-`SpecProcess.driverBoundary` in terms of this record, while
-`docs/PROCESS.md`'s abstract network carried a `BehaviorContract`, which
-`Grass.Semantics` owns. `docs/MODULES.md` declares a strict chain, so neither
-layer could be written first.
-
-An earlier version of this module lived at `Grass/Process/Network/Boundary.lean`
-and imported `Grass.Process.Spec` in order to offer a `toVocabulary` view. That
-edge is what made the placement wrong rather than merely unconventional: a
-neutral record must not depend on the layer that consumes it. The view moved to
-`Grass/Process/Network/Exposure.lean`, which is Process-side and is allowed to
-know both.
-
-This module therefore imports exactly one thing: the scope identity its
-requirement keys are named in.
+`DriverBoundary` is deliberately limited to the stable vocabulary shared by a
+process realization and lower implementation layers. Its requirements use an
+extensional finite-set identity: insertion order and duplicate insertion are
+not observable, while `toCanonicalList` supplies the unique ordered form used
+by storage and serialization.
 -/
 
 namespace Grass.Specification
 
 universe u
 
-/--
-A nominal requirement key: what a realization demands of its platform.
-
-`docs/FOUNDATION.md` law 6 forbids ambient provider choice, and law 14 requires
-that changing one requirement invalidate only what depends on it. Both need
-requirements to be *named*, scoped, and comparable, which is why this is a scope
-plus a name and not a proposition.
--/
+/-- A nominal requirement key: what a realization demands of its platform. -/
 structure RequirementKey where
-  /-- The scope that owns this requirement. -/
+  /-- The Core-owned scope responsible for the requirement. -/
   scope : ScopeId
-  /-- The requirement's name within that scope. -/
+  /-- The requirement name within that scope. -/
   name : String
   deriving DecidableEq, Repr
 
-/--
-The requirements a boundary carries.
+namespace RequirementKey
 
-Duplicate-free: a requirement demanded twice is demanded once, and a set that
-recorded it twice would make the coverage fold at closure count wrong.
--/
-structure RequirementSet where
-  /-- The demanded keys. -/
-  keys : List RequirementKey
-  /-- Each key appears once. -/
-  distinct : keys.Nodup
+private abbrev Rep := List String × String
+
+private def toRep (key : RequirementKey) : Rep :=
+  (key.scope.path, key.name)
+
+private def ofRep (rep : Rep) : RequirementKey :=
+  ⟨⟨rep.1⟩, rep.2⟩
+
+private theorem toRep_injective : Function.Injective toRep := by
+  intro left right equal
+  have pathEqual : left.scope.path = right.scope.path := congrArg Prod.fst equal
+  have nameEqual : left.name = right.name := congrArg Prod.snd equal
+  cases left with
+  | mk leftScope leftName =>
+      cases right with
+      | mk rightScope rightName =>
+          cases leftScope
+          cases rightScope
+          cases pathEqual
+          cases nameEqual
+          rfl
+
+@[simp] private theorem ofRep_toRep (key : RequirementKey) :
+    ofRep (toRep key) = key := by
+  cases key
+  rfl
+
+@[simp] private theorem toRep_ofRep (rep : Rep) :
+    toRep (ofRep rep) = rep := by
+  cases rep
+  rfl
+
+local instance : Ord (List String × String) := lexOrd
+
+/-- The stable lexicographic order used by requirement serialization: scope
+path first, then the name within that scope. -/
+def CanonicalBefore (left right : RequirementKey) : Prop :=
+  compare (toRep left) (toRep right) = Ordering.lt
+
+end RequirementKey
+
+local instance : Ord (List String × String) := lexOrd
+
+private abbrev RequirementTree := Std.TreeSet RequirementKey.Rep
+
+private def requirementTreeSetoid : Setoid RequirementTree where
+  r := Std.TreeSet.Equiv
+  iseqv := {
+    refl := fun _ => Std.TreeSet.Equiv.rfl
+    symm := fun relation => relation.symm
+    trans := fun left right => left.trans right
+  }
+
+/-- A finite, membership-extensional family of platform requirements. -/
+def RequirementSet : Type := Quotient requirementTreeSetoid
 
 namespace RequirementSet
 
+/-- Construct a requirement set from arbitrary keys, discarding duplicates and
+normalizing insertion order. -/
+def ofList (keys : List RequirementKey) : RequirementSet :=
+  Quotient.mk requirementTreeSetoid
+    (Std.TreeSet.ofList (keys.map RequirementKey.toRep))
+
 /-- The empty requirement set. -/
-def empty : RequirementSet where
-  keys := []
-  distinct := List.nodup_nil
+def empty : RequirementSet := ofList []
+
+/-- The unique ordered representation used for storage and serialization. -/
+def toCanonicalList (requirements : RequirementSet) : List RequirementKey :=
+  Quotient.lift
+    (fun tree => tree.toList.map RequirementKey.ofRep)
+    (fun _ _ equivalent => congrArg (List.map RequirementKey.ofRep)
+      (Std.TreeSet.equiv_iff_toList_eq.mp equivalent))
+    requirements
+
+/-- Canonical serialization is strictly ordered by scope path and name. -/
+theorem toCanonicalList_ordered (requirements : RequirementSet) :
+    requirements.toCanonicalList.Pairwise RequirementKey.CanonicalBefore := by
+  induction requirements using Quotient.inductionOn with
+  | _ tree =>
+      change (tree.toList.map RequirementKey.ofRep).Pairwise
+        RequirementKey.CanonicalBefore
+      rw [List.pairwise_map]
+      simpa [RequirementKey.CanonicalBefore] using
+        (Std.TreeSet.ordered_toList (t := tree))
 
 /-- `key` is demanded by this set. -/
 def Demands (requirements : RequirementSet) (key : RequirementKey) : Prop :=
-  key ∈ requirements.keys
+  Quotient.lift
+    (fun tree => RequirementKey.toRep key ∈ tree)
+    (fun _ _ equivalent => propext
+      ((Std.TreeSet.equiv_iff_forall_mem_iff.mp equivalent)
+        (RequirementKey.toRep key)))
+    requirements
 
-/--
-One set demands everything another does.
+@[simp] theorem demands_ofList (keys : List RequirementKey)
+    (key : RequirementKey) :
+    (ofList keys).Demands key ↔ key ∈ keys := by
+  change RequirementKey.toRep key ∈
+      Std.TreeSet.ofList (keys.map RequirementKey.toRep) ↔ key ∈ keys
+  rw [Std.TreeSet.mem_ofList, List.contains_iff_mem, List.mem_map]
+  constructor
+  · intro found
+    obtain ⟨candidate, member, equal⟩ := found
+    have keyEqual := RequirementKey.toRep_injective equal
+    simpa [keyEqual] using member
+  · intro member
+    exact ⟨key, member, rfl⟩
 
-This is the direction a refinement delta accumulates: `docs/PROCESS.md` §8 says
-"Requirement deltas accumulate in the explicit `ProviderEnv`", and a lowering
-step may add requirements but may not silently drop one.
--/
+/-- The canonical serialization contains exactly the demanded keys. -/
+theorem mem_toCanonicalList (requirements : RequirementSet)
+    (key : RequirementKey) :
+    key ∈ requirements.toCanonicalList ↔ requirements.Demands key := by
+  induction requirements using Quotient.inductionOn with
+  | _ tree =>
+      change key ∈ tree.toList.map RequirementKey.ofRep ↔
+        RequirementKey.toRep key ∈ tree
+      rw [List.mem_map]
+      constructor
+      · intro found
+        obtain ⟨rep, member, equal⟩ := found
+        cases equal
+        simpa using member
+      · intro member
+        exact ⟨RequirementKey.toRep key,
+          (Std.TreeSet.mem_toList).2 member, by simp⟩
+
+/-- Insert a requirement. Quotient equality makes repeated insertion
+unobservable. -/
+def insert (requirements : RequirementSet) (key : RequirementKey) :
+    RequirementSet :=
+  Quotient.lift
+    (fun tree => Quotient.mk requirementTreeSetoid
+      (tree.insert (RequirementKey.toRep key)))
+    (fun _ _ equivalent => Quotient.sound
+      (Std.TreeSet.Equiv.insert equivalent (RequirementKey.toRep key)))
+    requirements
+
+/-- Membership determines public requirement-set identity. -/
+@[ext]
+theorem ext {left right : RequirementSet}
+    (equal : ∀ key, left.Demands key ↔ right.Demands key) : left = right := by
+  induction left using Quotient.inductionOn with
+  | _ leftTree =>
+      induction right using Quotient.inductionOn with
+      | _ rightTree =>
+          apply Quotient.sound
+          apply Std.TreeSet.Equiv.of_forall_mem_iff
+          intro rep
+          have memberEqual := equal (RequirementKey.ofRep rep)
+          change (rep ∈ leftTree ↔ rep ∈ rightTree) at memberEqual
+          exact memberEqual
+
+/-- Canonical serialization is injective and therefore a complete public
+representation of requirement-set identity. -/
+theorem eq_iff_toCanonicalList_eq {left right : RequirementSet} :
+    left = right ↔ left.toCanonicalList = right.toCanonicalList := by
+  constructor
+  · intro equal
+    cases equal
+    rfl
+  · intro listsEqual
+    apply ext
+    intro key
+    rw [← mem_toCanonicalList, ← mem_toCanonicalList, listsEqual]
+
+instance : DecidableEq RequirementSet := fun left right =>
+  if equal : left.toCanonicalList = right.toCanonicalList then
+    isTrue (eq_iff_toCanonicalList_eq.mpr equal)
+  else
+    isFalse (fun setsEqual => equal (eq_iff_toCanonicalList_eq.mp setsEqual))
+
+/-- One set demands everything another does. -/
 def Covers (larger smaller : RequirementSet) : Prop :=
   ∀ key, smaller.Demands key → larger.Demands key
 
@@ -116,37 +209,97 @@ theorem Covers.trans {a b c : RequirementSet}
   fun key demanded => outer key (inner key demanded)
 
 @[simp] theorem not_empty_demands (key : RequirementKey) :
-    ¬ empty.Demands key := List.not_mem_nil
+    ¬ empty.Demands key := by
+  change ¬ RequirementKey.toRep key ∈ (Std.TreeSet.empty : RequirementTree)
+  simp
+
+@[simp] theorem demands_insert (requirements : RequirementSet)
+    (inserted candidate : RequirementKey) :
+    (requirements.insert inserted).Demands candidate ↔
+      candidate = inserted ∨ requirements.Demands candidate := by
+  induction requirements using Quotient.inductionOn with
+  | _ tree =>
+      change RequirementKey.toRep candidate ∈
+          tree.insert (RequirementKey.toRep inserted) ↔
+        candidate = inserted ∨ RequirementKey.toRep candidate ∈ tree
+      rw [Std.TreeSet.mem_insert]
+      rw [Std.LawfulEqCmp.compare_eq_iff_eq]
+      constructor
+      · intro found
+        cases found with
+        | inl equal =>
+            exact .inl (RequirementKey.toRep_injective equal).symm
+        | inr prior => exact .inr prior
+      · intro demanded
+        cases demanded with
+        | inl equal =>
+            subst candidate
+            exact .inl rfl
+        | inr prior => exact .inr prior
+
+/-- `RequirementSet.insert_covers` states that insertion preserves every prior
+demand. -/
+theorem insert_covers (requirements : RequirementSet) (key : RequirementKey) :
+    (requirements.insert key).Covers requirements := by
+  intro candidate demanded
+  exact demands_insert requirements key candidate |>.2 (.inr demanded)
+
+/-- Inserting an already demanded key is unobservable. -/
+@[simp] theorem insert_idempotent (requirements : RequirementSet)
+    (key : RequirementKey) :
+    (requirements.insert key).insert key = requirements.insert key := by
+  apply ext
+  intro candidate
+  simp only [demands_insert]
+  constructor
+  · intro demanded
+    cases demanded with
+    | inl equal => exact .inl equal
+    | inr demanded =>
+        cases demanded with
+        | inl equal => exact .inl equal
+        | inr prior => exact .inr prior
+  · intro demanded
+    cases demanded with
+    | inl equal => exact .inl equal
+    | inr prior => exact .inr (.inr prior)
+
+/-- Insertion order is unobservable. -/
+theorem insert_comm (requirements : RequirementSet) (left right : RequirementKey) :
+    (requirements.insert left).insert right =
+      (requirements.insert right).insert left := by
+  apply ext
+  intro candidate
+  simp only [demands_insert]
+  constructor
+  · intro demanded
+    cases demanded with
+    | inl rightEqual => exact .inr (.inl rightEqual)
+    | inr demanded =>
+        cases demanded with
+        | inl leftEqual => exact .inl leftEqual
+        | inr prior => exact .inr (.inr prior)
+  · intro demanded
+    cases demanded with
+    | inl leftEqual => exact .inr (.inl leftEqual)
+    | inr demanded =>
+        cases demanded with
+        | inl rightEqual => exact .inl rightEqual
+        | inr prior => exact .inr (.inr prior)
 
 end RequirementSet
 
-/--
-The interface a driver realizes: what enters, what is asked for, what answers
-are permitted, what is observed, and what the platform must supply.
-
-Deliberately poor; see the module note.
--/
+/-- The stable interface a driver realizes. -/
 structure DriverBoundary : Type (u + 1) where
-  /-- Entropy the driver delivers into the process network. -/
   ExternalEvent : Type u
-  /-- The interactions the network exports to the driver. -/
   Demand : Type u
-  /-- The permitted answers to each exported demand. -/
   Result : Demand → Type u
-  /-- What a commit may append to the observed trace. -/
   Observation : Type u
-  /-- What the platform must supply for this boundary to be realizable. -/
   requirements : RequirementSet
 
 namespace DriverBoundary
 
-/--
-Replace a boundary's requirement set, leaving its interface alone.
-
-Replacement, not strengthening: an earlier docstring claimed the result
-"provably covers the original", which is false — passing `RequirementSet.empty`
-drops everything. Use `demandAlso` for the monotone operation.
--/
+/-- Replace a boundary's requirement set, leaving its interface alone. -/
 def withRequirements (boundary : DriverBoundary.{u})
     (requirements : RequirementSet) : DriverBoundary.{u} :=
   { boundary with requirements := requirements }
@@ -155,37 +308,39 @@ def withRequirements (boundary : DriverBoundary.{u})
     (requirements : RequirementSet) :
     (boundary.withRequirements requirements).requirements = requirements := rfl
 
-/--
-Demand one more thing of the platform.
-
-`docs/PROCESS.md` §8: a local refinement "introduces a finite requirement
-delta", and deltas accumulate rather than replace — a lowering step may add
-requirements but may not silently drop one. `demandAlso_covers` is that
-guarantee, so a proof stated against the weaker boundary still applies.
--/
+/-- Demand one additional platform capability without exposing insertion order
+or duplicate insertion. -/
 def demandAlso (boundary : DriverBoundary.{u}) (key : RequirementKey) :
     DriverBoundary.{u} :=
-  if present : key ∈ boundary.requirements.keys then
-    boundary
-  else
-    boundary.withRequirements
-      ⟨key :: boundary.requirements.keys,
-        List.nodup_cons.mpr ⟨present, boundary.requirements.distinct⟩⟩
+  boundary.withRequirements (boundary.requirements.insert key)
 
 theorem demandAlso_covers (boundary : DriverBoundary.{u}) (key : RequirementKey) :
-    (boundary.demandAlso key).requirements.Covers boundary.requirements := by
-  intro demanded member
-  unfold demandAlso
-  split
-  · exact member
-  · exact List.mem_cons_of_mem key member
+    (boundary.demandAlso key).requirements.Covers boundary.requirements :=
+  RequirementSet.insert_covers boundary.requirements key
 
 theorem demandAlso_demands (boundary : DriverBoundary.{u}) (key : RequirementKey) :
     (boundary.demandAlso key).requirements.Demands key := by
-  unfold demandAlso
-  split
-  · assumption
-  · exact List.mem_cons_self
+  simp [demandAlso]
+
+/-- Demanding the same key twice is exactly the same boundary. -/
+@[simp] theorem demandAlso_idempotent (boundary : DriverBoundary.{u})
+    (key : RequirementKey) :
+    (boundary.demandAlso key).demandAlso key = boundary.demandAlso key := by
+  change {boundary with requirements :=
+      (boundary.requirements.insert key).insert key} =
+    {boundary with requirements := boundary.requirements.insert key}
+  rw [RequirementSet.insert_idempotent]
+
+/-- The order in which independent keys are demanded is unobservable. -/
+theorem demandAlso_comm (boundary : DriverBoundary.{u})
+    (left right : RequirementKey) :
+    (boundary.demandAlso left).demandAlso right =
+      (boundary.demandAlso right).demandAlso left := by
+  change {boundary with requirements :=
+      (boundary.requirements.insert left).insert right} =
+    {boundary with requirements :=
+      (boundary.requirements.insert right).insert left}
+  rw [RequirementSet.insert_comm]
 
 end DriverBoundary
 
