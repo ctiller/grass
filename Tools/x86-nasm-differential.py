@@ -61,14 +61,21 @@ def corpus_digest(text: str) -> str:
     nothing to, and its own remedy was to silence it. That is the shape of the
     row-count weakness described below, one column over.
 
+    Sorted, because coverage is a set and not a sequence. Reordering the
+    generator's own enumeration -- swapping two entries in `Gpr.all`, say --
+    leaves exactly the same cases exercised, and a digest that fired on it
+    would route a real model change to the "update the constant" path instead
+    of to the oracle. A reviewer raised that as the residue of the previous
+    fix.
+
     Hashing coverage keeps what the guard is for. A corpus that drops rows,
     duplicates them, or swaps hard cases for easy ones still changes this
     digest; a corpus whose byte column changed because the encoder changed does
     not, and goes straight to the oracle that can judge it.
     """
     normalised = COVERAGE_LINE.join(
-        coverage_of(line.rstrip("\r"))
-        for line in text.splitlines() if line.strip())
+        sorted(coverage_of(line.rstrip("\r"))
+               for line in text.splitlines() if line.strip()))
     return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 
@@ -95,7 +102,7 @@ LISTING = re.compile(r"^\s*(\d+)\s+[0-9A-F]{8}\s+([0-9A-F]+-?)\s*(.*)$")
 PROLOGUE = ["BITS 64", "DEFAULT ABS"]
 
 # The corpus this tool was last reviewed against. See corpus_digest.
-EXPECTED_DIGEST = "6cb8fbdf038d027991aff78e4c61ddf1a1e8bf067edfd00d505a45cb5e28a660"
+EXPECTED_DIGEST = "47919056adb843cb4dd86074b31d6598352afccc8508a0a979fda0c711afeb34"
 # The coverage this tool was reviewed at. Shrinking the corpus must be a
 # deliberate, reviewed edit rather than a side effect of regenerating it.
 #
@@ -105,7 +112,67 @@ EXPECTED_DIGEST = "6cb8fbdf038d027991aff78e4c61ddf1a1e8bf067edfd00d505a45cb5e28a
 # demonstrated it -- one `.take 1` plus a digest update turned 1085 encodings
 # into 1 and still reported no disagreement. `docs/VALIDATION.md` section 7's
 # ratchet is meant to prevent exactly that, and this is it applied to corpora.
-EXPECTED_ROWS = 1117
+# The coverage this tool was reviewed at, as structural buckets rather than a
+# row count.
+#
+# The row count was a proxy the author controls. A reviewer replaced the corpus
+# with N copies of one row, updated the digest exactly as the error message
+# instructs, and this tool reported full agreement over a corpus that exercised
+# one case -- a result that read *better* than baseline. Counting distinct
+# inputs instead means duplicating a row moves nothing, so the substitution is
+# caught whether or not the digest is refreshed.
+#
+# Every bucket is a minimum. Raising coverage is free; lowering it is a reviewed
+# edit, which is what `docs/VALIDATION.md` section 7's ratchet asks for.
+EXPECTED_COVERAGE = {
+    "distinct sources": 1116,
+    "mnemonics": 3,
+    "registers named": 32,
+    "addressing forms": 4,
+}
+
+
+def coverage_buckets(rows):
+    """What the corpus exercises, from the NASM source column only.
+
+    The byte column is under test and cannot vote on its own coverage.
+    """
+    sources = {source for _, source in rows}
+    mnemonics = {s.split()[0] for s in sources if s.split()}
+    registers = set()
+    forms = set()
+    for s in sources:
+        registers.update(re.findall(
+            r"\b(?:r[0-9]+[dwb]?|[re]?[abcd]x|[re]?[sd]i|[re]?[sb]p|"
+            r"[abcd][lh]|sil|dil|spl|bpl)\b", s))
+        bracket = re.search(r"\[([^\]]*)\]", s)
+        inner = bracket.group(1) if bracket else ""
+        if "rel" in inner or "rip" in inner:
+            forms.add("rip")
+        elif "*" in inner and "+" in inner:
+            forms.add("base+index")
+        elif "*" in inner:
+            forms.add("index-only")
+        elif "+" in inner:
+            forms.add("base+disp")
+        elif inner:
+            forms.add("absolute")
+        else:
+            forms.add("no-memory")
+    return {
+        "distinct sources": len(sources),
+        "mnemonics": len(mnemonics),
+        "registers named": len(registers),
+        "addressing forms": len(forms),
+    }
+
+
+def coverage_shortfall(rows):
+    """Buckets that fall below their reviewed minimum, as (name, have, want)."""
+    have = coverage_buckets(rows)
+    return [(name, have.get(name, 0), want)
+            for name, want in sorted(EXPECTED_COVERAGE.items())
+            if have.get(name, 0) < want]
 
 
 # Disagreements that were investigated and found to be NASM canonicalising an
@@ -179,12 +246,16 @@ def main() -> int:
 
     if not rows:
         sys.exit("corpus is empty; did the Lean generator run?")
-    if len(rows) < EXPECTED_ROWS:
+    shortfall = coverage_shortfall(rows)
+    if shortfall:
+        detail = "; ".join(
+            f"{name}: {have}, expected at least {want}"
+            for name, have, want in shortfall)
         sys.exit(
-            f"corpus has {len(rows)} rows, fewer than the {EXPECTED_ROWS} this "
-            "tool was reviewed against. Coverage may only grow; if the "
-            "reduction is deliberate, lower EXPECTED_ROWS in the same reviewed "
-            "edit that shrinks the corpus.")
+            "corpus coverage fell below the reviewed minimums -- " + detail
+            + ". Coverage may only grow, and duplicating rows does not raise "
+            "it; if a reduction is deliberate, lower EXPECTED_COVERAGE in the "
+            "same reviewed edit that shrinks the corpus.")
 
     actual_digest = corpus_digest(
         Path(sys.argv[1]).read_text(encoding="utf-8"))

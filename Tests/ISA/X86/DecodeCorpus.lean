@@ -79,6 +79,17 @@ def rexLabel : Option Byte → String
   | none => "norex"
   | some b => "rex" ++ hexByte b
 
+/--
+The opcode a row is for, as a label component.
+
+Included because the mnemonic does not identify the row. `plusRegRows` gives all
+eight of its opcodes one mnemonic, so `0x50`-`0x57` and `0xB8`-`0xBF` collapsed
+to two labels between them and 56 windows shared a label with another window.
+The coverage ratchet in `Tools/x86-decode-differential.py` counts distinct
+labels, so that redundancy was invisible until it started counting. -/
+def opcodeTag (s : OpcodeSpec) : String :=
+  (if s.escape then "0f" else "") ++ hexByte s.opcode
+
 /-- Pad a byte list out to `windowBytes` with `NOP`. -/
 def window (core : ByteSeq) : ByteSeq :=
   core ++ List.replicate (windowBytes - core.length) 0x90
@@ -123,15 +134,16 @@ def modrmRows (s : OpcodeSpec) (rex : Option Byte) : List Row :=
   (List.range 256).map fun i =>
     let b : Byte := BitVec.ofNat 8 i
     let core := coreOf s rex ++ [b] ++ (if modrmNeedsSib b then [0x24] else [])
-    rowOf (s.mnemonic ++ "/" ++ rexLabel rex ++ "/modrm" ++ hexByte b) core
+    rowOf (opcodeTag s ++ "|" ++ rexLabel rex ++ "|modrm" ++ hexByte b ++
+      "|" ++ s.mnemonic) core
 
 /-- The 256 SIB sweeps for one ModR/M byte. -/
 def sibRows (s : OpcodeSpec) (rex : Option Byte) (modrm : Byte) : List Row :=
   (List.range 256).map fun i =>
     let sib : Byte := BitVec.ofNat 8 i
     let core := coreOf s rex ++ [modrm, sib]
-    rowOf (s.mnemonic ++ "/" ++ rexLabel rex ++ "/modrm" ++ hexByte modrm ++
-      "/sib" ++ hexByte sib) core
+    rowOf (opcodeTag s ++ "|" ++ rexLabel rex ++ "|modrm" ++ hexByte modrm ++
+      "|sib" ++ hexByte sib ++ "|" ++ s.mnemonic) core
 
 /-- The representative ModR/M bytes whose SIB field is swept: `rm=100` with
 `reg=000`, in each of the three memory `mod` values. -/
@@ -142,7 +154,8 @@ def rowsFor (s : OpcodeSpec) (rex : Option Byte) : List Row :=
   if s.hasModrm then
     modrmRows s rex ++ (sibSweepModrms.flatMap fun m => sibRows s rex m)
   else
-    [rowOf (s.mnemonic ++ "/" ++ rexLabel rex) (coreOf s rex)]
+    [rowOf (opcodeTag s ++ "|" ++ rexLabel rex ++ "|" ++ s.mnemonic)
+      (coreOf s rex)]
 
 /-- The whole corpus. -/
 def corpus : List Row :=

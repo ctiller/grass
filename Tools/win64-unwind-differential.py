@@ -53,7 +53,7 @@ from pathlib import Path
 # means substituting a same-length corpus fails. Changing the corpus requires
 # updating this constant, which is the reviewed edit `docs/VALIDATION.md`
 # section 7 asks for rather than a silent change to what is being checked.
-EXPECTED_DIGEST = "a9009d55a935a81f1ca90da712f308d2a5d34722dfa0bbe8fb7f331858755447"
+EXPECTED_DIGEST = "8838a95126235350e0ed84e31c9f52c2b7fd82c0c2d73fc7486ff5c6d83daa40"
 # The coverage this tool was reviewed at. Shrinking the corpus must be a
 # deliberate, reviewed edit rather than a side effect of regenerating it.
 #
@@ -63,7 +63,52 @@ EXPECTED_DIGEST = "a9009d55a935a81f1ca90da712f308d2a5d34722dfa0bbe8fb7f331858755
 # demonstrated it -- one `.take 1` plus a digest update turned 1085 encodings
 # into 1 and still reported no disagreement. `docs/VALIDATION.md` section 7's
 # ratchet is meant to prevent exactly that, and this is it applied to corpora.
-EXPECTED_ROWS = 52
+# The coverage this tool was reviewed at, as structural buckets rather than a
+# row count.
+#
+# The row count was a proxy the author controls. A reviewer replaced the corpus
+# with N copies of one row, updated the digest exactly as the error message
+# instructs, and this tool reported full agreement over a corpus that exercised
+# one case -- a result that read *better* than baseline. Counting distinct
+# inputs instead means duplicating a row moves nothing, so the substitution is
+# caught whether or not the digest is refreshed.
+#
+# Every bucket is a minimum. Raising coverage is free; lowering it is a reviewed
+# edit, which is what `docs/VALIDATION.md` section 7's ratchet asks for.
+EXPECTED_COVERAGE = {
+    "distinct prologues": 52,
+    "directives": 3,
+    "registers pushed": 8,
+    "allocation sizes": 24,
+}
+
+
+def coverage_buckets(rows):
+    """What the corpus exercises, from each row's name and MASM text."""
+    prologues = {masm for _, _, masm in rows}
+    directives, pushed, allocs = set(), set(), set()
+    for masm in prologues:
+        for part in (p.strip() for p in masm.split("|")):
+            if part.startswith("."):
+                directives.add(part.split()[0])
+            if part.startswith("push "):
+                pushed.add(part.split()[1])
+            if part.startswith("sub rsp, "):
+                allocs.add(part.split(", ")[1])
+    return {
+        "distinct prologues": len(prologues),
+        "directives": len(directives),
+        "registers pushed": len(pushed),
+        "allocation sizes": len(allocs),
+    }
+
+
+def coverage_shortfall(rows):
+    """Buckets that fall below their reviewed minimum, as (name, have, want)."""
+    have = coverage_buckets(rows)
+    return [(name, have.get(name, 0), want)
+            for name, want in sorted(EXPECTED_COVERAGE.items())
+            if have.get(name, 0) < want]
 
 
 TEMPLATE = """\
@@ -100,14 +145,21 @@ def corpus_digest(text: str) -> str:
     nothing to, and its own remedy was to silence it. That is the shape of the
     row-count weakness described below, one column over.
 
+    Sorted, because coverage is a set and not a sequence. Reordering the
+    generator's own enumeration -- swapping two entries in `Gpr.all`, say --
+    leaves exactly the same cases exercised, and a digest that fired on it
+    would route a real model change to the "update the constant" path instead
+    of to the oracle. A reviewer raised that as the residue of the previous
+    fix.
+
     Hashing coverage keeps what the guard is for. A corpus that drops rows,
     duplicates them, or swaps hard cases for easy ones still changes this
     digest; a corpus whose byte column changed because the encoder changed does
     not, and goes straight to the oracle that can judge it.
     """
     normalised = COVERAGE_LINE.join(
-        coverage_of(line.rstrip("\r"))
-        for line in text.splitlines() if line.strip())
+        sorted(coverage_of(line.rstrip("\r"))
+               for line in text.splitlines() if line.strip()))
     return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 
@@ -223,13 +275,17 @@ def main() -> int:
     if not rows:
         print("corpus is empty", file=sys.stderr)
         return 1
-    if len(rows) < EXPECTED_ROWS:
+    shortfall = coverage_shortfall(rows)
+    if shortfall:
+        print("corpus coverage fell below the reviewed minimums:",
+              file=sys.stderr)
+        for name, have, want in shortfall:
+            print(f"    {name}: {have}, expected at least {want}",
+                  file=sys.stderr)
         print(
-            f"corpus has {len(rows)} rows, fewer than the {EXPECTED_ROWS} this "
-            "tool was reviewed against. Coverage may only grow; if the "
-            "reduction is deliberate, lower EXPECTED_ROWS in the same reviewed "
-            "edit that shrinks the corpus.",
-            file=sys.stderr)
+            "Coverage may only grow, and duplicating rows does not raise it; "
+            "if a reduction is deliberate, lower EXPECTED_COVERAGE in the same "
+            "reviewed edit that shrinks the corpus.", file=sys.stderr)
         return 1
 
     ml64 = find_tool("ml64.exe")

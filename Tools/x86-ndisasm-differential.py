@@ -79,14 +79,21 @@ def corpus_digest(text: str) -> str:
     nothing to, and its own remedy was to silence it. That is the shape of the
     row-count weakness described below, one column over.
 
+    Sorted, because coverage is a set and not a sequence. Reordering the
+    generator's own enumeration -- swapping two entries in `Gpr.all`, say --
+    leaves exactly the same cases exercised, and a digest that fired on it
+    would route a real model change to the "update the constant" path instead
+    of to the oracle. A reviewer raised that as the residue of the previous
+    fix.
+
     Hashing coverage keeps what the guard is for. A corpus that drops rows,
     duplicates them, or swaps hard cases for easy ones still changes this
     digest; a corpus whose byte column changed because the encoder changed does
     not, and goes straight to the oracle that can judge it.
     """
     normalised = COVERAGE_LINE.join(
-        coverage_of(line.rstrip("\r"))
-        for line in text.splitlines() if line.strip())
+        sorted(coverage_of(line.rstrip("\r"))
+               for line in text.splitlines() if line.strip()))
     return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 
@@ -115,7 +122,7 @@ def normalise(text: str) -> str:
 INSTRUCTION_LINE = re.compile(r"^[0-9A-F]{8}\s")
 
 # The corpus this tool was last reviewed against. See corpus_digest.
-EXPECTED_DIGEST = "bdda43a6e9d2850aafcccadda4c6f4b756af6f9972f326623dbebc37ecdf09ee"
+EXPECTED_DIGEST = "2263804bc49f77256a1bde564aa97f13217aa22f20180d9e2770c1e55d0f32af"
 # The coverage this tool was reviewed at. Shrinking the corpus must be a
 # deliberate, reviewed edit rather than a side effect of regenerating it.
 #
