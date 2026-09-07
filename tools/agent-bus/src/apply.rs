@@ -233,6 +233,7 @@ fn apply_event(state: &mut BusState, env: &Envelope) -> AbResult<()> {
     }
 
     match &data {
+        EventData::AuditReported(d) => apply_audit_reported(state, env, d)?,
         EventData::AgentRegistered(d) => apply_registered(state, env, d)?,
         EventData::AgentStatus(d) => apply_status(state, env, d)?,
         EventData::AgentResumed(d) => apply_resumed(state, env, d)?,
@@ -663,6 +664,42 @@ fn apply_progress(state: &mut BusState, env: &Envelope, d: &ProgressReported) ->
 }
 
 // ------------------------------------------------------------------ issues
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 2.2, gates 20 and 22.
+///
+/// Two rules, and the second is the one worth being careful about.
+///
+/// Gate 20: only an auditor publishes this. The role is what the design
+/// gives fleet-wide audit authority to; an implementor or reviewer with an
+/// opinion about the fleet raises issues, which they already may.
+///
+/// Gate 22: "an audit report cannot resolve its referenced issues or satisfy
+/// any merge finding disposition merely by describing them as closed". That
+/// is enforced by this function doing *nothing* to the issues it names --
+/// deliberately, and the emptiness is the enforcement. It validates that
+/// each referenced issue exists, so a report cannot cite a fiction, and then
+/// touches no issue status, no assignment, no finding disposition. If a
+/// future change makes this function mutate an issue, gate 22 is broken and
+/// `an_audit_report_leaves_every_issue_it_names_untouched` will say so.
+fn apply_audit_reported(
+    state: &mut BusState,
+    env: &Envelope,
+    d: &crate::events::AuditReported,
+) -> AbResult<()> {
+    require_active_role(state, &env.agent, Role::Auditor)?;
+    for issue in d.issues.iter() {
+        if !state.issues.contains_key(issue) {
+            return Err(invalid(format!(
+                "{}: audit report references unknown issue {issue}",
+                env.id
+            )));
+        }
+    }
+    // Recorded verbatim as durable evidence, exactly like `friction.reported`
+    // -- readable, referenceable, and carrying no obligation of its own.
+    state.audits.insert(env.id.clone(), d.clone());
+    Ok(())
+}
 
 fn apply_issue_opened(state: &mut BusState, env: &Envelope, d: &IssueOpened) -> AbResult<()> {
     require_agent(state, &env.agent)?;
@@ -2314,6 +2351,305 @@ mod tests {
         if let Some(ag) = state.agents.get_mut(&env.agent) {
             ag.next_seq = ag.next_seq.max(env.seq + 1);
         }
+    }
+
+    // ------------------------------------------------ auditor role (2.2)
+    //
+    // AGENT_COORDINATION_EVOLUTION.md section 2.2 and its activation gates
+    // 20-23. The role's whole point is that it has *less* authority than the
+    // roles around it, so most of what follows asserts refusals.
+
+    fn audit(auditor: &Agent, seq: u64, issues: &[&EventId]) -> Envelope {
+        let data = EventData::AuditReported(crate::events::AuditReported {
+            inspected_commits: StringSet::from_iter([hash(7)]),
+            areas: vec![text("coordination history")],
+            methods: vec![text("replayed every stream against the registry")],
+            limitations: vec![text("did not examine the proof surface")],
+            issues: StringSet::from_iter(issues.iter().map(|i| (*i).clone())),
+            summary: text("one drift found, filed as an issue"),
+        });
+        Envelope::new(
+            auditor,
+            seq,
+            no_frontier(),
+            &data,
+            issues.iter().map(|i| (*i).clone()),
+        )
+    }
+
+    fn open_issue(opener: &Agent, seq: u64, target: &Agent) -> Envelope {
+        let data = EventData::IssueOpened(IssueOpened {
+            target: target.clone(),
+            issue_kind: IssueKind::Bug,
+            severity: Priority::Normal,
+            summary: text("cross-cutting drift no workstream-local review would see"),
+            code_commit: None,
+            locations: vec![],
+            expected: None,
+            observed_behavior: None,
+            reproduction: vec![],
+            blocks: StringSet::default(),
+            evidence: StringSet::default(),
+        });
+        Envelope::new(opener, seq, no_frontier(), &data, [])
+    }
+
+    /// Gate 21: "an auditor is rejected when it attempts to claim product
+    /// scope, nominate or accept a candidate review, authorize or perform a
+    /// merge, or attach product commit state to its identity."
+    ///
+    /// Each refusal already followed from an existing role check, but nothing
+    /// demonstrated it, and the design states the gate as an acceptance
+    /// condition rather than an implementation detail. Driven as one table so
+    /// a future role change that quietly widens auditor authority fails here
+    /// rather than in whichever single case someone happened to cover.
+    #[test]
+    fn an_auditor_is_refused_every_authority_the_design_denies_it() {
+        let aud = a("aud");
+        let alice = a("alice");
+        let bob = a("bob");
+
+        let fresh = || {
+            let mut state = empty_state(&[
+                ("aud", Role::Auditor),
+                ("alice", Role::Implementor),
+                ("bob", Role::Reviewer),
+            ]);
+            apply_ok(&mut state, &register(&aud, Role::Auditor));
+            apply_ok(&mut state, &register(&alice, Role::Implementor));
+            apply_ok(&mut state, &register(&bob, Role::Reviewer));
+            state
+        };
+
+        // Claiming product scope.
+        let scope = Envelope::new(
+            &aud,
+            1,
+            no_frontier(),
+            &EventData::ScopeSet(ScopeSet {
+                base_code_commit: hash(1),
+                exclusive: StringSet::from_iter([crate::scalars::PathClaim::parse(
+                    "src/**".into(),
+                )
+                .unwrap()]),
+                shared: StringSet::default(),
+                exports: StringSet::default(),
+                depends_on: vec![],
+                note: text("auditors do not own paths"),
+            }),
+            [],
+        );
+        let err = apply_event(&mut fresh(), &scope).unwrap_err();
+        assert!(
+            err.to_string().contains("does not have role implementor"),
+            "an auditor must not claim product scope, got: {err}"
+        );
+
+        // Attaching product commit state to its own identity.
+        let product_state = Envelope::new(
+            &aud,
+            1,
+            no_frontier(),
+            &EventData::AgentStatus(AgentStatusEvent {
+                status: LifecycleStatus::Active,
+                note: text("hi"),
+                product_branch: None,
+                product_commit: Some(hash(2)),
+            }),
+            [],
+        );
+        let err = apply_event(&mut fresh(), &product_state).unwrap_err();
+        assert!(
+            err.to_string().contains("implementor"),
+            "an auditor must not carry product commit state, got: {err}"
+        );
+
+        // Nominating a candidate for review.
+        let nominate = Envelope::new(
+            &aud,
+            1,
+            no_frontier(),
+            &EventData::ReviewNominated(ReviewNominated {
+                authors: StringSet::from_iter([aud.clone()]),
+                product_branch: Branch::parse("refs/heads/agent/aud/x".into()).unwrap(),
+                reviewer: bob.clone(),
+                required_checks: vec![],
+                review_scope: StringSet::from_iter([crate::scalars::PathClaim::parse(
+                    "src/**".into(),
+                )
+                .unwrap()]),
+                summary: text("s"),
+                target_branch: Branch::parse("refs/heads/main".into()).unwrap(),
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        let err = apply_event(&mut fresh(), &nominate).unwrap_err();
+        assert!(
+            err.to_string().contains("does not have role implementor"),
+            "an auditor must not nominate, got: {err}"
+        );
+
+        // Being named as the reviewer of one.
+        let named_as_reviewer = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::ReviewNominated(ReviewNominated {
+                authors: StringSet::from_iter([alice.clone()]),
+                product_branch: Branch::parse("refs/heads/agent/alice/x".into()).unwrap(),
+                reviewer: aud.clone(),
+                required_checks: vec![],
+                review_scope: StringSet::from_iter([crate::scalars::PathClaim::parse(
+                    "src/**".into(),
+                )
+                .unwrap()]),
+                summary: text("s"),
+                target_branch: Branch::parse("refs/heads/main".into()).unwrap(),
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        let err = apply_event(&mut fresh(), &named_as_reviewer).unwrap_err();
+        assert!(
+            err.to_string().contains("does not have role reviewer"),
+            "an auditor must not be nominated as a reviewer, got: {err}"
+        );
+    }
+
+    /// Gate 20: "an auditor can publish `audit.reported` and open issues
+    /// without product scope, product authorship, nomination acceptance, or
+    /// merge authority."
+    #[test]
+    fn an_auditor_may_open_issues_and_publish_an_audit_report() {
+        let mut state = empty_state(&[("alice", Role::Implementor), ("aud", Role::Auditor)]);
+        let (alice, aud) = (a("alice"), a("aud"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&aud, Role::Auditor));
+
+        let issue = open_issue(&aud, 1, &alice);
+        let issue_id = issue.id.clone();
+        apply_ok(&mut state, &issue);
+
+        let report = audit(&aud, 2, &[&issue_id]);
+        let report_id = report.id.clone();
+        apply_ok(&mut state, &report);
+        assert!(
+            state.audits.contains_key(&report_id),
+            "the report must be recorded as durable evidence"
+        );
+    }
+
+    /// The same event from any other role is refused: the design gives
+    /// fleet-wide audit authority to this role specifically. An implementor
+    /// or reviewer with a fleet-wide concern raises an issue, which both
+    /// already may.
+    #[test]
+    fn only_an_auditor_may_publish_an_audit_report() {
+        for role in [Role::Implementor, Role::Reviewer, Role::Coordinator] {
+            let mut state = empty_state(&[("someone", role)]);
+            let someone = a("someone");
+            apply_ok(&mut state, &register(&someone, role));
+            let err = apply_event(&mut state, &audit(&someone, 1, &[])).unwrap_err();
+            assert!(
+                err.to_string().contains("does not have role auditor"),
+                "{role} must not publish an audit report, got: {err}"
+            );
+        }
+    }
+
+    /// A report may not cite a finding that does not exist -- otherwise an
+    /// audit could manufacture the appearance of filed work.
+    #[test]
+    fn an_audit_report_may_not_reference_an_issue_that_does_not_exist() {
+        let mut state = empty_state(&[("aud", Role::Auditor)]);
+        let aud = a("aud");
+        apply_ok(&mut state, &register(&aud, Role::Auditor));
+        let err = apply_event(
+            &mut state,
+            &audit(&aud, 1, &[&EventId::new(&a("alice"), 9)]),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown issue"),
+            "expected an unknown-issue refusal, got: {err}"
+        );
+    }
+
+    /// AGENT_BUS_SCHEMA.md section 2: "`refs` equals exactly the unique event
+    /// IDs contained in `data`."
+    ///
+    /// A report's issue references are event ids, so they must appear in
+    /// `refs`; its inspected commits are *object* ids and must not. Pinned
+    /// through `dry_run`, which is the check a self-inconsistent envelope
+    /// would otherwise sail past before being committed, pushed, and then
+    /// failing to reduce on every host that fetches it -- and asserted on
+    /// `referenced_ids` directly as well, because the apply-level tests above
+    /// never reach `dry_run` and so could not see this.
+    #[test]
+    fn an_audit_report_references_exactly_the_issues_it_names() {
+        let mut state = empty_state(&[("alice", Role::Implementor), ("aud", Role::Auditor)]);
+        let (alice, aud) = (a("alice"), a("aud"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&aud, Role::Auditor));
+        let issue = open_issue(&aud, 1, &alice);
+        let issue_id = issue.id.clone();
+        apply_ok(&mut state, &issue);
+
+        let report = audit(&aud, 2, &[&issue_id]);
+        assert_eq!(
+            report.typed_data().unwrap().referenced_ids(),
+            [issue_id.clone()]
+                .into_iter()
+                .collect::<BTreeSet<EventId>>(),
+            "the named issues, and nothing else -- inspected commits are object ids"
+        );
+        dry_run(&state, &report).expect("a well-formed report must pass dry-run");
+
+        // And a report naming nothing references nothing. Same sequence as
+        // above: neither report is applied here, only dry-run, so the
+        // auditor's next expected sequence has not moved.
+        let clean = audit(&aud, 2, &[]);
+        assert!(
+            clean.typed_data().unwrap().referenced_ids().is_empty(),
+            "a clean report references no events"
+        );
+        dry_run(&state, &clean).expect("a clean report is still well-formed");
+    }
+
+    /// Gate 22: "an audit report cannot resolve its referenced issues or
+    /// satisfy any merge finding disposition merely by describing them as
+    /// closed." Asserted as a *before and after* comparison of the issue's
+    /// entire lifecycle state, so any future change that makes the report
+    /// touch an issue fails here rather than silently granting the auditor
+    /// disposal authority the design denies it.
+    #[test]
+    fn an_audit_report_leaves_every_issue_it_names_untouched() {
+        let mut state = empty_state(&[("alice", Role::Implementor), ("aud", Role::Auditor)]);
+        let (alice, aud) = (a("alice"), a("aud"));
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&aud, Role::Auditor));
+        let issue = open_issue(&aud, 1, &alice);
+        let issue_id = issue.id.clone();
+        apply_ok(&mut state, &issue);
+
+        let before = state.issues.get(&issue_id).cloned().expect("issue exists");
+        apply_ok(&mut state, &audit(&aud, 2, &[&issue_id]));
+        let after = state.issues.get(&issue_id).expect("issue still exists");
+
+        assert_eq!(before.status, after.status, "status must not move");
+        assert_eq!(
+            before.current_assignment, after.current_assignment,
+            "assignment must not move"
+        );
+        assert_eq!(
+            before.acknowledged_assignments, after.acknowledged_assignments,
+            "acknowledgement must not move"
+        );
+        assert_eq!(
+            before.resolution_summary, after.resolution_summary,
+            "the report must not resolve what it reports"
+        );
     }
 
     #[test]

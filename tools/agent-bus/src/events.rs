@@ -17,7 +17,13 @@ pub enum Role {
     Implementor,
     Reviewer,
     Coordinator,
-    Observer,
+    /// The fleet-wide assurance role (AGENT_COORDINATION_EVOLUTION.md
+    /// section 2.2). Version one spelled this least-authority identity
+    /// `observer`; version two renames the wire role rather than carrying
+    /// two overlapping ones. Nothing is lost in the rename: no `observer`
+    /// was ever registered on this bus, which the design records as the
+    /// reason it was safe to rename rather than deprecate.
+    Auditor,
 }
 
 impl fmt::Display for Role {
@@ -26,7 +32,7 @@ impl fmt::Display for Role {
             Role::Implementor => "implementor",
             Role::Reviewer => "reviewer",
             Role::Coordinator => "coordinator",
-            Role::Observer => "observer",
+            Role::Auditor => "auditor",
         };
         write!(f, "{s}")
     }
@@ -152,6 +158,46 @@ pub struct ProgressReported {
     pub next: Vec<Text>,
     pub blockers: Vec<Text>,
     pub verification: Vec<Text>,
+}
+
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 2.2: the auditor's summary,
+/// deliberately **non-authoritative**.
+///
+/// "The report itself creates no work obligation and cannot carry an
+/// acceptance or merge verdict; issue lifecycle owns acknowledgement,
+/// reassignment, and disposition." That separation is why this type has no
+/// disposition, status or verdict field of any kind, and why actionable
+/// findings are carried by reference to separate `issue.opened` events
+/// rather than inline: a report that could resolve what it references would
+/// let an auditor clear its own findings, which section 2.2 forbids
+/// explicitly (gate 22).
+///
+/// The observed event frontier the design asks the report to pin is the
+/// envelope's own `observed` field, not a field here -- every event already
+/// carries it, and duplicating it would create two answers that could
+/// disagree.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuditReported {
+    /// The product revisions actually inspected. Empty is legitimate: an
+    /// audit of coordination history alone inspects no product commit, and
+    /// section 2.2 wants a clean or partially-examined surface reportable
+    /// "without manufacturing empty issues".
+    pub inspected_commits: StringSet<ObjectId>,
+    /// What was examined -- architecture, proof surface, implementation,
+    /// validation evidence, coordination history.
+    pub areas: Vec<Text>,
+    /// How, so a reader can judge what the absence of a finding is worth.
+    pub methods: Vec<Text>,
+    /// Blind spots. Section 2.2: an auditor "cannot convert absence of a
+    /// finding into assurance that unexamined behavior is correct", and this
+    /// is where that is said out loud rather than left to inference.
+    pub limitations: Vec<Text>,
+    /// The `issue.opened` events carrying the actionable findings. Every id
+    /// must name a real issue; a report referencing nothing is a clean
+    /// report, not an error.
+    pub issues: StringSet<EventId>,
+    pub summary: Text,
 }
 
 // --------------------------------------------------------------- issues
@@ -645,6 +691,7 @@ event_data! {
     BroadcastPublished(BroadcastPublished) = "broadcast.published",
     BroadcastAcknowledged(BroadcastAcknowledged) = "broadcast.acknowledged",
     BroadcastSeen(BroadcastSeen) = "broadcast.seen",
+    AuditReported(AuditReported) = "audit.reported",
 }
 
 impl EventData {
@@ -653,6 +700,11 @@ impl EventData {
     /// `refs` equals exactly the unique event IDs contained in `data`.").
     pub fn referenced_ids(&self) -> BTreeSet<EventId> {
         match self {
+            // Every referenced issue, so `refs` equals exactly the ids in
+            // `data` (AGENT_BUS_SCHEMA.md section 2). The report's inspected
+            // commits are object ids, not event ids, so they do not belong
+            // here.
+            EventData::AuditReported(d) => d.issues.iter().cloned().collect(),
             EventData::AgentRegistered(_) => BTreeSet::new(),
             EventData::AgentStatus(_) => BTreeSet::new(),
             EventData::AgentResumed(d) => [d.previous_lifecycle.clone()].into(),
@@ -769,7 +821,7 @@ mod tests {
         assert_eq!(Role::Implementor.to_string(), "implementor");
         assert_eq!(Role::Reviewer.to_string(), "reviewer");
         assert_eq!(Role::Coordinator.to_string(), "coordinator");
-        assert_eq!(Role::Observer.to_string(), "observer");
+        assert_eq!(Role::Auditor.to_string(), "auditor");
     }
 
     #[test]
@@ -1030,6 +1082,16 @@ mod tests {
                 selected: previous.clone(),
                 reason: text("r"),
                 user_authority: text("u"),
+            }),
+            EventData::AuditReported(AuditReported {
+                inspected_commits: StringSet::from_iter([ObjectId::parse("a".repeat(40)).unwrap()]),
+                areas: vec![text("coordination history")],
+                methods: vec![text(
+                    "replayed every stream and diffed against the registry",
+                )],
+                limitations: vec![text("did not examine the proof surface")],
+                issues: StringSet::from_iter([previous.clone()]),
+                summary: text("s"),
             }),
             EventData::FrictionReported(FrictionReported {
                 area: CoordinationTopic::parse("proof.rebuild".into()).unwrap(),

@@ -120,7 +120,7 @@ result. Failed runs are recorded in `progress.reported` and normally produce
 ```text
 data = {
   display_name : Short,
-  primary_role : implementor|reviewer|coordinator|observer,
+  primary_role : implementor|reviewer|coordinator|auditor,
   purpose : Text,
   product_base? : ObjectId,
   product_branch? : Branch,
@@ -133,6 +133,17 @@ refs = []
 This is sequence zero. A coordinator registration is valid only if its agent
 name appears in immutable `_bus/BUS.json`. Product fields are permitted only for
 an `implementor`.
+
+**Deviation actually taken (2026-09), documented for the historical record.**
+The least-authority role was spelled `observer` in version one and is spelled
+`auditor` here. AGENT_COORDINATION_EVOLUTION.md section 2.2 renames the wire
+role rather than carrying two overlapping ones, and nothing was migrated
+because no `observer` was ever registered on this bus -- which is the reason
+that section gives for the rename being safe rather than breaking. An audit
+identity that must register before activation uses V1 `observer` with
+`purpose: auditor:<emphasis>`; it holds only observer authority until it
+migrates, and that spelling is a transition device, not a second long-term
+role.
 
 ### `agent.status`
 
@@ -624,6 +635,40 @@ values is a valid redundant receipt, not a lifecycle conflict. Any disagreement
 with the authorization or product history is invalid.
 
 ## 9. Lifecycle conflict resolution
+
+### `audit.reported`
+
+```text
+data = {
+  inspected_commits : StringSet<ObjectId>,
+  areas : List<Text>,
+  methods : List<Text>,
+  limitations : List<Text>,
+  issues : StringSet<EventId>,
+  summary : Text
+}
+refs = issues
+```
+
+The auditor's fleet-wide summary (AGENT_COORDINATION_EVOLUTION.md section 2.2).
+Valid only from an active agent whose immutable primary role is `auditor`.
+
+Deliberately **non-authoritative**, and the type carries no status,
+disposition or verdict field of any kind so that it cannot become otherwise.
+Actionable findings live in separate `issue.opened` events referenced by
+`issues`; every id there must name an issue that exists, so a report cannot
+cite a fiction. Reducing this event touches nothing else -- no issue status,
+no assignment, no finding disposition -- because an auditor that could close
+what it reports would be clearing its own findings, which section 2.2 forbids
+(gate 22). A nominated reviewer may cite an audit as evidence but must still
+publish its own dispositions and authorization judgment (gate 23).
+
+`inspected_commits` and `issues` may both be empty: an audit of coordination
+history alone inspects no product commit, and a clean surface is reportable
+"without manufacturing empty issues". `limitations` is where blind spots are
+stated, because absence of a finding is not assurance that unexamined
+behavior is correct. The observed event frontier the report pins is the
+envelope's own `observed` field, not a field here.
 
 ### `lifecycle.conflict_resolved`
 
