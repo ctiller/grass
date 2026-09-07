@@ -41,10 +41,38 @@ def nodesWellFormed {fanout : Nat} :
       node.dependencies.all (fun dependency => decide (dependency ∈ seen)) &&
       nodesWellFormed (seen ++ [node.scope]) rest
 
+/-- Propositional meaning of the executable graph check: scopes are introduced
+once, every dependency is already available, and the same property holds after
+the current scope is added to the traversal prefix. -/
+def NodesOrdered {fanout : Nat} :
+    List ScopeId → List (DependencyNode fanout) → Prop
+  | _, [] => True
+  | seen, node :: rest =>
+      node.scope ∉ seen ∧
+      (∀ dependency ∈ node.dependencies, dependency ∈ seen) ∧
+      NodesOrdered (seen ++ [node.scope]) rest
+
+/-- `nodesWellFormed_eq_true_iff` proves that executable graph admission checks
+exactly the stated uniqueness and child-before-parent conditions. -/
+theorem nodesWellFormed_eq_true_iff {fanout : Nat}
+    (seen : List ScopeId) (nodes : List (DependencyNode fanout)) :
+    nodesWellFormed seen nodes = true ↔ NodesOrdered seen nodes := by
+  induction nodes generalizing seen with
+  | nil => simp [nodesWellFormed, NodesOrdered]
+  | cons node rest inductionHypothesis =>
+      simp [nodesWellFormed, NodesOrdered, Vec.all_eq_true_iff,
+        inductionHypothesis, and_assoc]
+
 /-- The graph has unique scopes and all dependency edges point to earlier
 nodes. This is the executable-order formulation of finite acyclicity. -/
 def ManifestDag.WellFormed {fanout : Nat} (dag : ManifestDag fanout) : Prop :=
   nodesWellFormed [] dag.nodes.toList = true
+
+/-- Logical characterization of admitted manifest DAGs. -/
+theorem ManifestDag.wellFormed_iff_nodesOrdered {fanout : Nat}
+    (dag : ManifestDag fanout) :
+    dag.WellFormed ↔ NodesOrdered [] dag.nodes.toList :=
+  nodesWellFormed_eq_true_iff [] dag.nodes.toList
 
 instance ManifestDag.instDecidableWellFormed {fanout : Nat}
     (dag : ManifestDag fanout) : Decidable dag.WellFormed := by
@@ -81,6 +109,15 @@ def nodeAffected (changed : ScopeId → Bool) (affected : Vec ScopeId)
   changed node.scope ||
     node.dependencies.any fun dependency => affected.contains dependency
 
+/-- A node is selected exactly for a local change or an already-selected direct
+dependency; no digest match or transitive flattened input participates. -/
+theorem nodeAffected_eq_true_iff (changed : ScopeId → Bool)
+    (affected : Vec ScopeId) {fanout : Nat} (node : DependencyNode fanout) :
+    nodeAffected changed affected node = true ↔
+      changed node.scope = true ∨
+        ∃ dependency ∈ node.dependencies, dependency ∈ affected := by
+  simp [nodeAffected, Vec.any_eq_true_iff, Vec.contains_iff_mem]
+
 /-- Extend a streamed rebuild cone by one topologically ready node. -/
 def extendRebuildCone (changed : ScopeId → Bool) (affected : Vec ScopeId)
     {fanout : Nat} (node : DependencyNode fanout) : Vec ScopeId :=
@@ -114,6 +151,19 @@ theorem mem_extendRebuildCone_iff (changed : ScopeId → Bool)
       · rfl
       · exact absurd value isAffected
     simp [extendRebuildCone, isFalse]
+
+/-- Fully expanded semantic form of `mem_extendRebuildCone_iff`: one streamed
+step retains its input and adds no scope except the visited node, which is added
+exactly for a local change or an affected direct dependency. -/
+theorem mem_extendRebuildCone_semantics_iff (changed : ScopeId → Bool)
+    (affected : Vec ScopeId) {fanout : Nat} (node : DependencyNode fanout)
+    (scope : ScopeId) :
+    scope ∈ extendRebuildCone changed affected node ↔
+      scope ∈ affected ∨
+        (scope = node.scope ∧
+          (changed node.scope = true ∨
+            ∃ dependency ∈ node.dependencies, dependency ∈ affected)) := by
+  rw [mem_extendRebuildCone_iff, nodeAffected_eq_true_iff]
 
 /-- Extending the cone never loses a previously affected scope. -/
 theorem mem_extendRebuildCone_of_mem (changed : ScopeId → Bool)
