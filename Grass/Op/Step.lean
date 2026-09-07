@@ -1130,18 +1130,20 @@ theorem refusalOf_class_declared {policy : StepPolicy} {state : MachineState}
 **The classes `performAccess` records outside `refusalOf` are declared too.**
 
 `refusalOf_class_declared` covers the class `refusalOf` returns. `performAccess`
-appends violations at three further points — an undeclared address space, the
-outcome's own violation, and the branch where the declared authority effect does not
-apply — and review pointed out that the last of those is outside that theorem's
-reach, which matters because that branch is the one actually doing the refusing: with
-`refusalOf`'s authority clause deleted the whole build stays green, because the
-fallback still records and still commits nothing.
+appends violations at **four** further points — an undeclared address space, the
+outcome's own violation, the unreachable ledger branch on the committing path, and the
+branch where the declared authority effect does not apply — and review pointed out that
+the last of those is outside that theorem's reach, which matters because that branch is
+the one actually doing the refusing: with `refusalOf`'s authority clause deleted the
+whole build stays green, because the fallback still records and still commits nothing.
 
-Two of the three are settled here. The address-space and authority classes are the
-transition's own, so `StepPolicy.violationClassesDeclared` covers them by the same
-route `refusalOf_class_declared` takes.
+Three of the four are settled here. The address-space, ledger and authority classes are
+the transition's own, so `StepPolicy.violationClassesDeclared` covers them by the same
+route `refusalOf_class_declared` takes. This paragraph said three points and settled two
+of them; the ledger branch arrived with this branch's ledger unification, §4.4.1 records
+it, and the enumeration of append sites was not extended when it did.
 
-The third is neither covered nor reachable, and the second half of that is a
+The fourth is neither covered nor reachable, and the second half of that is a
 correction. This docstring used to say `AccessOutcome.violation?` "is supplied by the
 profile's machine oracle, so nothing in this layer bounds its class". The oracle
 cannot supply it: `Oracle.answer` returns a `CompleteCommitted`, never an
@@ -1155,8 +1157,12 @@ theorem transition_own_classes_declared (policy : StepPolicy) :
     policy.profile.vocabulary.auditViolationClasses.Recognizes
       AuditViolationClass.wrongAddressSpace ∧
     policy.profile.vocabulary.auditViolationClasses.Recognizes
+      AuditViolationClass.obligationNotAuthorized ∧
+    policy.profile.vocabulary.auditViolationClasses.Recognizes
       AuditViolationClass.authorityEffectRefused :=
   ⟨policy.violationClassesDeclared _
+    (AuthorityProvider.mem_emittedClasses_of_transition (by decide)),
+   policy.violationClassesDeclared _
     (AuthorityProvider.mem_emittedClasses_of_transition (by decide)),
    policy.violationClassesDeclared _
     (AuthorityProvider.mem_emittedClasses_of_transition (by decide))⟩

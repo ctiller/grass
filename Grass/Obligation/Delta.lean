@@ -108,6 +108,13 @@ def claimedProtocol : LedgerDelta → ObligationProtocolId
   | .create claimed _ _ | .discharge claimed _ _ | .split claimed _ _ _
   | .join claimed _ _ _ | .transfer claimed _ _ _ => claimed
 
+/-- The obligation kinds this delta creates, including through split and join. -/
+def createdKinds : LedgerDelta → List ObligationKindId
+  | .create _ _ obligation => [obligation.kind]
+  | .split _ _ _ into => into.map Obligation.kind
+  | .join _ _ _ into => [into.kind]
+  | .discharge _ _ _ | .transfer _ _ _ _ => []
+
 /-- The identities this delta adds to the ledger. -/
 def produces : LedgerDelta → List ObligationId
   | .create _ _ obligation => [obligation.id]
@@ -569,12 +576,7 @@ def produces (effect : LedgerEffect) : List ObligationId :=
 A profile checks these, so a protocol cannot introduce a duty of a kind the
 target never declared. -/
 def createdKinds (effect : LedgerEffect) : List ObligationKindId :=
-  effect.flatMap fun delta =>
-    match delta with
-    | .create _ _ o => [o.kind]
-    | .split _ _ _ into => into.map Obligation.kind
-    | .join _ _ _ into => [into.kind]
-    | .discharge _ _ _ | .transfer _ _ _ _ => []
+  effect.flatMap LedgerDelta.createdKinds
 
 /--
 The protocols this effect claims authority under.
@@ -587,13 +589,21 @@ under its own protocol: no violation, duty gone. The type index restricts nothin
 about where the value came from.
 
 **Through `LedgerDelta.claimedProtocol`, which it used to re-encode.** This wrote the
-same five-case match out again while its three siblings -- `consumes`, `produces` and
-`reowns` -- all delegate. The projection had no caller anywhere in the tree, which is
-the shape `Tools/FixtureAudit.py` and `Tools/ReachabilityAudit.py` between them cannot
-see: one scans `Tests/` and the other looks at constructors, so a `def` under `Grass/`
-that nothing calls falls between them. §4.4.1 records that gap and this was an
+same five-case match out again. The projection had no caller anywhere in the tree, which
+is the shape `Tools/FixtureAudit.py` and `Tools/ReachabilityAudit.py` between them
+cannot see: one scans `Tests/` and the other looks at constructors, so a `def` under
+`Grass/` that nothing calls falls between them. §4.4.1 records that gap and this was an
 instance of it, with the added cost that a second encoding of one match is a second
 place to keep in step.
+
+The sentence here said "its three siblings -- `consumes`, `produces` and `reowns` -- all
+delegate", and there are **four**: `createdKinds` was the fourth and was the only
+remaining inline per-delta match at the effect level, with no `LedgerDelta.createdKinds`
+for it to delegate to. Both halves of the paragraph applied to it verbatim, in the
+paragraph written to record fixing exactly that. It has a projection now and delegates
+to it. **A repair that names its own class and then enumerates the instances is a repair
+that can miss one**, and the miss is invisible because the enumeration reads as a
+survey.
 
 A profile checks these, exactly as it checks `createdKinds`, so an operation cannot
 act under a protocol the target never declared. That is not a capability either —

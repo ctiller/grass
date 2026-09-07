@@ -423,10 +423,18 @@ keeps finding — `AllocationRecord.initialized` and `AccessIntent.isDevice` wer
 that, and a first attempt at this was too. Here the list is the definition and
 `Admits` is its emptiness, so a clause can only be added in one place.
 
-This is applicability, in the sense of `docs/MEMORY_MODEL.md` §9. An access naming
-an address space, allocation source, provenance step kind, fault class, obligation
-kind, ordering mode, scope or initialization rule that was never declared fails
-here, before any question of whether it would succeed.
+This is applicability, in the sense of `docs/MEMORY_MODEL.md` §9. An access naming an
+open nominal name that was never declared fails here, before any question of whether it
+would succeed — one clause per registry `AdmittedVocabulary` carries, which today is
+address space, allocation source, provenance step kind, fault class, obligation kind,
+obligation protocol, grant kind, ordering mode, scope and initialization rule.
+
+This sentence listed eight of the ten. `grantKindNotRecognized` and
+`protocolNotRecognized` are the two most recently added registries and nobody
+re-counted, while the two fixtures pinning them each say "which is where every other
+undeclared open name is caught" — pointing a reader at a list that omitted them. It is
+phrased over `AdmittedVocabulary`'s registries rather than spelled out now, which is
+the shape that does not go stale when the next registry lands.
 -/
 def admissibilityFailures (vocabulary : AdmittedVocabulary) (d : AccessDescriptor) :
     List AdmissibilityFailure :=

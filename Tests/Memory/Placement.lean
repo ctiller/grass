@@ -319,7 +319,7 @@ theorem the_fitting_store_is_admitted :
 theorem an_absent_allocation_is_refused :
     denialOf withFreed
       { fittingStore with provenance := { fittingStore.provenance with root := absentAlloc } } =
-      some AuditViolationClass.deadProvenance := by decide
+      some AuditViolationClass.provenanceNotAllocated := by decide
 
 /-- **A torn-down allocation is refused**, which is §5's teardown read at the access. -/
 theorem a_dead_allocation_is_refused :
@@ -328,11 +328,26 @@ theorem a_dead_allocation_is_refused :
       some AuditViolationClass.deadProvenance := by decide
 
 /-- **A stale-epoch provenance is refused**, which is §2's "address reuse never revives
-old pointers" at the access. -/
+old pointers" at the access.
+
+The record is *live* here, which `the_freed_allocation_is_the_one_that_is_dead` below
+pins: these three theorems had three docstrings naming three conditions and all three
+asserted `deadProvenance`, so the class threw away the distinction the file had already
+made. Each names its own class now. -/
 theorem a_stale_epoch_is_refused :
     denialOf withFreed
       { fittingStore with provenance := { fittingStore.provenance with epoch := laterEpoch } } =
-      some AuditViolationClass.deadProvenance := by decide
+      some AuditViolationClass.staleEpoch := by decide
+
+/-- The three refusals above are three conditions and not one: the identity the first
+names is absent from the table, the second's record is torn down, and the third's is
+**live** and merely at another epoch. Without this the three classes would be three
+names for whatever `withFreed` happens to contain. -/
+theorem the_freed_allocation_is_the_one_that_is_dead :
+    withFreed.allocations.lookup absentAlloc = Option.none ∧
+    (withFreed.allocations.lookup freedAlloc).any (fun r => !r.live) = true ∧
+    (withFreed.allocations.lookup offsetAlloc).any (fun r => r.live) = true := by
+  exact ⟨by decide, by decide, by decide⟩
 
 /-- **And a provenance naming a different address space is refused.** §7.5 makes
 spaces non-interchangeable, and this clause is the only comparison of the *record's*

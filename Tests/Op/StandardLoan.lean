@@ -434,13 +434,25 @@ theorem the_owner_may_read_what_it_lent_read_only :
   exact ⟨by decide, by decide⟩
 
 /-- **But a write against it is still refused**, so the change above is about reads
-and not about the state having become permissive. -/
+and not about the state having become permissive.
+
+**And by the authority-state clause**, which is the fourth way `PermitsIntent` can be
+false and the one `authorityUnavailable`'s docstring omitted for as long as the class
+existed: `sharedImmutable` against a write. The other three ways — `frozen` and
+`unavailable` at any intent, `atomicShared` against a non-atomic one — each had a
+class-naming fixture and this path had only a count, which any of the clauses ahead of
+it would have satisfied equally. -/
 theorem a_write_against_shared_immutable_access_is_refused :
+    readLentToEngine.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ =
+      AuthorityState.sharedImmutable ∧
+    ¬ (AuthorityState.sharedImmutable.PermitsIntent AccessIntent.write) ∧
     ∀ s, (step readLentToEngine .store).state? = some s →
-      s.events = [] ∧ s.violations.recordCount = 1 := by
+      s.events = [] ∧ s.violations.recordCount = 1 ∧
+      s.violations.records?.any (fun r => r.class_ = .authorityUnavailable) := by
+  refine ⟨by decide, by decide, ?_⟩
   intro s hs
   cases hs
-  exact ⟨by decide, by decide⟩
+  exact ⟨by decide, by decide, by decide⟩
 
 /-- The thread holds a *read-only* loan over the head — this layer's own "declare a
 loan to yourself" idiom for "the owner may still read". -/

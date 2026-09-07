@@ -2752,6 +2752,64 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   argued it out at length and this said nothing, so review had to reconstruct the argument
   from the sibling to decide the conjunct was deliberate.
 
+- ~~**Three rules under `deadProvenance`, whose docstring named one.**~~ `denialOf`
+  returned that class for three independent conditions: the allocation table never held
+  the identity, the record is torn down, and the record is **live** and the access
+  presents an epoch it has moved past. The docstring said "provenance that is no longer
+  live", which is false of the first and false twice over of the third.
+
+  `provenanceNotAllocated` and `staleEpoch` are the split, and it is the third on this
+  branch after `conflictingAccess` and `authorityNotHeld`. §2's "address reuse never
+  revives old pointers" is the sentence that most needed its own class: reuse is legal
+  and is the entire reason epochs exist, so an epoch mismatch is the expected diagnosis
+  on a correct path and a teardown violation is not, and §8's ledger could not tell them
+  apart.
+
+  `Tests/Memory/Placement.lean` already had all three as separate fixtures with separate
+  docstrings, each asserting the same class — **the discriminating evidence was written
+  down and the class name was throwing it away**, which is the same shape as round
+  twenty-two's two `authorityNotHeld` fixtures. `the_freed_allocation_is_the_one_that_is_dead`
+  pins that the three states really are three conditions.
+- ~~**Four enumerations short by one and two counts nobody re-counted**, all in code the
+  previous commit touched.~~ Listed because the pattern is now the branch's most common
+  finding and the instances are individually small:
+
+  `authorityUnavailable`'s new docstring said `PermitsIntent` is false three ways and it
+  is four — the omitted one, `sharedImmutable` against a write, was live and fixtured,
+  and the fixture asserted only a *count*, which any earlier clause would have satisfied.
+  Its framing sentence, "a question about the storage rather than about the accessor",
+  was false and is what produced the short list: `authorityOf` takes the accessing
+  context precisely so that it is not, and the same bytes at the same range are
+  `exclusive` to the lender and `sharedImmutable` to everyone else.
+
+  `emittedByTransition`'s prose said `refusalOf` returns "four fixed ones" and the tail
+  "four more"; it is five and one, and was five and one before either split. `performAccess`
+  appends at four points, not three, and `transition_own_classes_declared` settled two —
+  the ledger branch arrived with this branch's ledger unification and the enumeration of
+  append sites was not extended; it is a third conjunct now.
+  `admissibilityFailures` listed eight of ten registries, missing the two most recently
+  added, while both fixtures pinning those two say "which is where every other undeclared
+  open name is caught". It is phrased over `AdmittedVocabulary`'s registries now rather
+  than spelled out. And the count of where the anti-collapse rule is stated said three
+  when it is five, four lines above the paragraph that says to re-read such counts.
+
+  **The instances are cheap and the class is not.** A count in prose is a claim with no
+  gate, no type and no fixture behind it, and this branch adds mechanisms faster than it
+  re-reads the sentences that count them. Where a list can be phrased over the structure
+  that generates it — "one clause per registry" rather than ten names — it should be.
+- ~~**`LedgerEffect.createdKinds` was the fourth sibling, and the repair that named the
+  class listed three.**~~ The previous commit made `claimedProtocols` delegate to
+  `LedgerDelta.claimedProtocol` and wrote "its three siblings — `consumes`, `produces`
+  and `reowns` — all delegate". There are four. `createdKinds` was the only remaining
+  inline per-delta match at the effect level, with no `LedgerDelta.createdKinds` to
+  delegate to, so both halves of that paragraph's argument applied to it verbatim: a
+  second encoding of one match to keep in step, and invisible to `FixtureAudit` and
+  `ReachabilityAudit` for the same reason. It has a projection now.
+
+  **A repair that names its own class and then enumerates the instances is a repair that
+  can miss one**, and the miss is invisible because the enumeration reads as a survey. Of
+  the five findings this round, four are a previous round's repair being one short.
+
 ### 4.4.1a Which profile inputs can weaken a rule
 
 Four review rounds found the same shape and it is worth naming as a shape rather than

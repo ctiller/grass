@@ -85,13 +85,14 @@ open Grass.Std.Logical
 Why the state refuses one access, or `none` if it authorizes it.
 
 Checked before anything commits, so a denial leaves the state exactly as it was
-(`docs/MEMORY_MODEL.md` §1). The order is deliberate: liveness, then space, then the provenance's declared
-allocation source, then its declared extent, then bounds, then placement, then
-permission, then initialization — so the recorded class names the first thing that was
-wrong rather than an incidental consequence. Eight groups, and this list named seven
-until review counted them against the body: `provenanceSourceMismatch` has its own
-violation class in `emittedByTransition` and was missing from the one enumeration a
-reader checks the code against.
+(`docs/MEMORY_MODEL.md` §1). The order is deliberate: allocation, then liveness, then epoch, then space, then the
+provenance's declared allocation source, then its declared extent, then bounds, then
+placement, then permission, then initialization — so the recorded class names the first
+thing that was wrong rather than an incidental consequence. Ten groups, and this list
+named seven until review counted them against the body twice: `provenanceSourceMismatch`
+had its own violation class and was missing from the one enumeration a reader checks the
+code against, and the first three were written as one word, "liveness", while returning
+one class for three independent conditions — which is how they stayed collapsed.
 
 The placement clauses sit *after* bounds, and were inserted before it when they
 landed. `addressOf base d.range.start` is only meaningful once the range is known to
@@ -137,10 +138,10 @@ above, the same file already says the true thing.
 -/
 def denialOf (state : MemoryState) (d : AccessDescriptor) : Option AuditViolationClass :=
   match state.allocations.lookup d.provenance.root with
-  | Option.none => some .deadProvenance
+  | Option.none => some .provenanceNotAllocated
   | some record =>
       if record.live ≠ true then some .deadProvenance
-      else if record.epoch ≠ d.provenance.epoch then some .deadProvenance
+      else if record.epoch ≠ d.provenance.epoch then some .staleEpoch
       else if record.space ≠ d.provenance.space then some .wrongAddressSpace
       else if record.source ≠ d.provenance.source then some .provenanceSourceMismatch
       else if record.extent ≠ d.provenance.rootExtent then some .provenanceExtentMismatch

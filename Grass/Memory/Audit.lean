@@ -65,8 +65,33 @@ namespace AuditViolationClass
 /-- An access was attempted outside the bounds its provenance authorizes. -/
 def outOfBounds : AuditViolationClass := ⟨⟨"outOfBounds"⟩⟩
 
-/-- An access was attempted through provenance that is no longer live. -/
+/-- The allocation table does not hold the identity the provenance names.
+
+Not "no longer live": never live here, as far as this state can tell. A profile
+diagnosing a fabricated or mis-copied provenance wants this and not the two below. -/
+def provenanceNotAllocated : AuditViolationClass := ⟨⟨"provenanceNotAllocated"⟩⟩
+
+/-- The allocation is in the table and its record is torn down, which is §5's teardown
+read at the access. -/
 def deadProvenance : AuditViolationClass := ⟨⟨"deadProvenance"⟩⟩
+
+/-- The record is **live** and the access presents an epoch the record has moved past,
+which is §2's "address reuse never revives old pointers" read at the access.
+
+Split from `deadProvenance`, with `provenanceNotAllocated`, for the reason
+`conflictingAccess` and `authorityNotHeld` were split from `authorityUnavailable`. One
+class covered three independent conditions and its docstring described one of them --
+"no longer live", which is false of this one twice over, since the record is live and
+nothing about it changed. A profile reading §8's ledger could not tell a fabricated
+identity from a freed one from a stale pointer into reused storage, and §2's sentence is
+the one it most needs to state separately: reuse is legal and is the whole reason epochs
+exist, so an epoch mismatch is the expected diagnosis in correct code paths and a
+teardown violation is not.
+
+`Tests/Memory/Placement.lean` had all three cases as separate fixtures with separate
+docstrings, each asserting the same class -- the discriminating evidence was already
+written down and the class name was throwing it away. -/
+def staleEpoch : AuditViolationClass := ⟨⟨"staleEpoch"⟩⟩
 
 /-- An access was attempted without the permission it requires. -/
 def permissionDenied : AuditViolationClass := ⟨⟨"permissionDenied"⟩⟩
@@ -80,10 +105,19 @@ def misaligned : AuditViolationClass := ⟨⟨"misaligned"⟩⟩
 /-- The bytes' **authority state** refuses the access: `authorityOf` reports a state
 whose `PermitsIntent` is false for what the access intends.
 
-That is a question about the storage rather than about the accessor -- `frozen` because
-another context may write, `unavailable` because the storage is dead or in another
-epoch, `atomicShared` against an ordinary write. The accessor may hold a grant and still
-land here. -/
+`PermitsIntent` is false four ways, not three: `frozen` at any intent, `unavailable` at
+any intent, `atomicShared` against a non-atomic intent, and **`sharedImmutable` against a
+write**. The fourth is live and fixtured — `a_write_against_shared_immutable_access_is_refused`
+drives exactly it — and was missing from this list the day the class was written.
+
+The question is *what other contexts hold makes your intent impossible*, against the
+holder clause's *something is held here and none of it is yours*. It is not "a question
+about the storage rather than about the accessor", which is what the first version of
+this paragraph said and is what produced the short enumeration:
+`MemoryState.authorityOf` takes the accessing context precisely so that it is not, which
+its own docstring argues at length, and `sharedImmutable` is the most accessor-relative
+state there is — the same bytes are `exclusive` to the context that lent them and
+`sharedImmutable` to everyone else, in one state, at one range. -/
 def authorityUnavailable : AuditViolationClass := ⟨⟨"authorityUnavailable"⟩⟩
 
 /-- The accessor **holds nothing** over bytes somebody holds: authority is outstanding,
@@ -118,9 +152,11 @@ Distinct from `authorityUnavailable`, and this class exists because it was not.
 clause, §3's holder clause, and this. Review demonstrated a race recorded as
 `authorityUnavailable` from a state where *nothing was held* — the ledger entry
 byte-identical in class to a genuine loan violation. The rule against collapsing
-distinguishable failures is stated three times in this layer (here for
-`wrongAddressSpace`, again for `authorityEffectRefused`, and again for
-`faultWithUndeclaredAuthorityEffect`), and §7.3's second paragraph — race-freedom as a
+distinguishable failures is stated five times in this layer — here for
+`wrongAddressSpace`, again for `authorityEffectRefused`, again for
+`faultWithUndeclaredAuthorityEffect`, again for `provenanceExtentMismatch`, and again
+for `authorityNotHeld`, which is the second split it produced — and §7.3's second
+paragraph — race-freedom as a
 claim separate from an authority claim — could not be stated by a profile while it was
 broken.
 
@@ -231,8 +267,14 @@ field nothing reads. `StepPolicy` carries the proof.
 deliberately has no alignment branch -- `AccessDescriptor.WellFormedIn.aligned` rejects
 a misaligned access at the declaration, and `Grass/Memory/Apply.lean` argues that an
 unreachable branch looking like a check is worse than no branch. `refusalOf` returns
-`denialOf`'s classes, four fixed ones and the providers'; `performAccess` and `runStep`
-emit four more. None is this one. Review deleted the entry and the whole tree stayed
+`denialOf`'s eleven classes, five fixed ones of its own, and the providers';
+`runAccesses` and `runStep` add `machineAnswerIncomplete`. Seventeen, which is this
+list. None is this one.
+
+That sentence read "four fixed ones ... and four more" and was wrong in both halves
+before the last two splits and after them: `refusalOf` has always returned five classes
+of its own, and the tail is one. The paragraph four lines below says to re-read a count
+when the thing it counts changes, which is the instruction this sentence needed. Review deleted the entry and the whole tree stayed
 green, which is what a mandatory declaration of an unemittable class is worth: under
 `docs/MEMORY_MODEL.md` §8 an empty ledger is supposed to mean something, and it said
 nothing about alignment either way.
@@ -243,7 +285,8 @@ declared demand. Such a profile supplies an `AuthorityProvider`, and
 this list.
 -/
 def emittedByTransition : List AuditViolationClass :=
-  [outOfBounds, deadProvenance, permissionDenied, uninitializedRead,
+  [outOfBounds, provenanceNotAllocated, deadProvenance, staleEpoch,
+   permissionDenied, uninitializedRead,
    authorityUnavailable, authorityNotHeld, obligationNotAuthorized, wrongAddressSpace,
    machineAnswerIncomplete, provenanceExtentMismatch, provenanceSourceMismatch,
    addressDisagreesWithPlacement, placementWraps, authorityEffectRefused,
