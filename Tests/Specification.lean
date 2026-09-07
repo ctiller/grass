@@ -1,3 +1,4 @@
+import Grass.Core.Identifiers
 import Grass.Specification.Boundary
 
 /-!
@@ -14,10 +15,16 @@ open Grass.Specification
 def scopeA : ScopeId := ⟨["A"]⟩
 def scopeB : ScopeId := ⟨["B"]⟩
 
-def keyA : RequirementKey := ⟨scopeA, "z"⟩
-def keyB : RequirementKey := ⟨scopeB, "a"⟩
+def keyA : PlatformRequirementKey := ⟨scopeA, "z"⟩
+def keyB : PlatformRequirementKey := ⟨scopeB, "a"⟩
 
 example : (scopeA : Grass.ScopeId) = ⟨["A"]⟩ := rfl
+
+example : Grass.Specification.ScopeId.mk ["A"] = scopeA := rfl
+
+example : Grass.Specification.ScopeId.path scopeA = ["A"] := rfl
+
+example (key : Grass.RequirementKey) : key.id = key.id := rfl
 
 example :
     RequirementSet.ofList [keyB, keyA, keyB] =
