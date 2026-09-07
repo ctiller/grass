@@ -111,24 +111,50 @@ with total origin maps. Target-specific facts are never inserted into the
 precious `SpecProcess.requirements`:
 
 ```lean
-structure StagedObligationFamily
-    (spec : SpecProcess resources)
+structure StagedObligationFamily {R : Type u} [ResourceModel R]
+    {resources : R} (spec : SpecProcess resources)
+    {profile : PlatformProfile}
     (projection : TargetProjection spec profile)
-    (plan : PlatformPlan spec.driverBoundary.requirements)
+    {requirements : RequirementSet}
+    (plan : PlatformPlan projection requirements)
     (forwarded : ProviderDemandFamily)
     (source : MachineSource plan)
     (artifact : Artifact plan) where
   portable : DemandFamily := spec.requirements
-  projected : DerivedDemandFamily portable
+  projected : DerivedDemandFamily portable.identities
   providerInput : DemandFamily
   forwardedIncorporation : ExactOriginPreservingUnionOfProjectedAndForwarded
     projected forwarded providerInput
   provider : DerivedDemandFamily providerInput.identities
-  machine : DerivedDemandFamily provider
-  artifact : DerivedDemandFamily machine
+  machine : DerivedDemandFamily provider.allKeys
+  artifact : DerivedDemandFamily machine.allKeys
   origins : EveryDerivedDemandHasOnePriorStageOrForwardedOrigin
   disjoint : PairwiseDisjointStagedAndForwardedOrigins
     portable projected forwarded provider machine artifact
+
+structure OriginDispositionFeedsStagedFamilyExactly
+    {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {projection : TargetProjection spec profile}
+    {requirements : RequirementSet}
+    {plan : PlatformPlan projection requirements}
+    {originDemands : ProviderDemandFamily}
+    {bindingView : ProviderBindingView}
+    {forwarded : ProviderDemandFamily}
+    {source : MachineSource plan}
+    {artifact : Artifact plan}
+    (connections : ExactAuthorityRespectingRequirementDisposition
+      originDemands bindingView)
+    (forwardedExact : connections.exactForwardedFamily.AuthorityEquiv forwarded)
+    (staged : StagedObligationFamily
+      spec projection plan forwarded source artifact) where
+  dispositionForwardedExact :
+    connections.exactForwardedFamily.AuthorityEquiv forwarded
+  agreesWithDriverBridge : dispositionForwardedExact = forwardedExact
+  lookupExact : forall origin,
+    connections.exactForwardedFamily.lookupView origin =
+      forwarded.lookupView origin
 
 structure ImplementationConstraintIndex
     (staged : StagedObligationFamily spec projection plan forwarded source artifact) where
@@ -227,6 +253,9 @@ structure MachineCertificate {R : Type u} [ResourceModel R]
   forwardedIncorporated : OriginPreservingDemandIncorporation
     driver.driverSummary.forwardedRequirements summary.requirements
   implementationModels : ImplementationBundle source portable.model
+  operationCorrespondence :
+    EveryMachineAndProviderCallCorrespondsExactlyToRegisteredPortableOperation
+      source portable.model implementationModels
   localCertificates : MachineDemandCertificateFamily source summary
   closedBlendCoverage : SourceCoversExactlyEveryClosedBlendScope
     source driver.processOrigin blend
@@ -281,6 +310,12 @@ plan, rooted histories, adapter proof, and provider dictionary remain adjacent i
 the provider proof's theorem type depend on continuations or making
 `VerifiedProgram` itself Effect-specific. A program-body edit rebuilds extraction
 and adapter proofs; an unchanged handoff summary reuses its provider certificate.
+`MachineCertificate.operationCorrespondence` is bidirectional: every authored
+machine instruction or API call is attributed to the exact registered portable
+operation it realizes, and every selected portable operation is covered by its
+source region. Since provider footprints are owned by the independent operation
+registry, neither a custom assembly author nor a direct-program binder can hide
+a provider-using call behind a provider-free surrogate.
 
 Each tier is compiled/exported through its small summary. Private process state
 changes reopen the portable proof but not a consumer whose boundary is
