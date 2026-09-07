@@ -75,12 +75,28 @@ def initialExecution (input : Bool) : system.ExecutionPrefix :=
   @RelationalSystem.ExecutionPrefix.initial spec.AuditEvent system input (0 : Nat)
     rfl
 
+example {initialState state : system.State} {initialGraph graph : system.Graph}
+    {events : List spec.AuditEvent}
+    (execution : system.Runs initialState initialGraph state graph events) : True := by
+  induction execution with
+  | initial _ => trivial
+  | step _ _ _ => trivial
+
 theorem behaviorAdequate : behavior.Adequate where
   execution input _ := ⟨initialExecution input, rfl⟩
   completion _ := ⟨.finite .refl trivial⟩
 
 def behaviorRefinesItself : BehaviorRefinement behavior behavior :=
   .refl behavior
+
+example (refinement : BehaviorRefinement behavior behavior) :
+    (BehaviorRefinement.refl behavior).trans refinement = refinement := by simp
+
+example (refinement : BehaviorRefinement behavior behavior) :
+    refinement.trans (BehaviorRefinement.refl behavior) = refinement := by simp
+
+example (first second third : BehaviorRefinement behavior behavior) :
+    (first.trans second).trans third = first.trans (second.trans third) := by simp
 
 def portable : PortableProgramCertificate spec where
   behavior := behavior
@@ -177,6 +193,20 @@ def samplePrefix : system.ExecutionPrefix :=
     (RelationalSystem.ExecutionPrefix.initial (system := system)
       (state := ()) (graph := ()) trivial)
     (choice := ()) (event := true) (nextState := ()) (nextGraph := ()) trivial
+
+theorem falseSuffix : system.Steps samplePrefix.state samplePrefix.graph [false] () () :=
+  .step (choice := ()) .refl trivial
+
+theorem trueSuffix : system.Steps () () [true] () () :=
+  .step (choice := ()) .refl trivial
+
+example : (samplePrefix.append falseSuffix).events = [true, false] := rfl
+
+example : (samplePrefix.append falseSuffix).append trueSuffix =
+    samplePrefix.append (falseSuffix.trans trueSuffix) :=
+  RelationalSystem.ExecutionPrefix.append_assoc samplePrefix falseSuffix trueSuffix
+
+example : samplePrefix.append (.refl) = samplePrefix := by simp
 
 def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.graph
     samplePrefix.events where

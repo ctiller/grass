@@ -23,6 +23,24 @@ expression: "&shapes"
     "note": "",
     "status": "active"
   },
+  "audit.reported": {
+    "areas": [
+      "coordination history"
+    ],
+    "inspected_commits": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "issues": [
+      "alice:0"
+    ],
+    "limitations": [
+      "did not examine the proof surface"
+    ],
+    "methods": [
+      "replayed every stream and diffed against the registry"
+    ],
+    "summary": "s"
+  },
   "broadcast.acknowledged": {
     "broadcasts": [
       "alice:0"
