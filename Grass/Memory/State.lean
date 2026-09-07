@@ -1,7 +1,8 @@
+import Grass.Memory.Addressing
+import Grass.Memory.ByteStore
 import Grass.Memory.Audit
 import Grass.Memory.Authority
 import Grass.Memory.Event
-import Grass.Memory.Profile
 import Grass.Std.Logical.FiniteMap
 
 /-!
@@ -43,16 +44,111 @@ structure AllocationRecord where
   epoch : EpochId
   /-- The address space it lives in. -/
   space : AddressSpaceId
+  /-- Which allocator or mapping produced it.
+
+  The counterpart to `Provenance.source`, and it exists because there was none.
+  `docs/MEMORY_MODEL.md` §2 asks a profile to distinguish `VirtualAlloc`, process
+  heap, `malloc`, page-table mapping, kernel heap, bump allocator, stack, mapped
+  file and device memory; a descriptor recorded which of those it claimed and
+  nothing could compare the claim to the storage, so two provenances differing only
+  in `source` were the same storage to every rule in the layer. `denialOf` compares
+  them now, as `provenanceSourceMismatch`.
+
+  No default, for the same reason `base` has none: a profile says where an
+  allocation came from. -/
+  source : AllocationSourceId
+  /-- The contexts that hold the allocation's own authority.
+
+  `docs/MEMORY_MODEL.md` §3 lists "exclusive read/write ownership" among the
+  canonical authority states, and until this field existed the layer could not say
+  whose. `MayLend`'s lender disjunct -- the one a first loan needs -- was therefore
+  the same rule a stranger's first loan needed, so a context could lend out bytes it
+  had no relation to; `MayLend`'s own docstring named that as what it could not stop.
+  Ownership is the missing half.
+
+  A list, not a single context: §3's shared states and §7.4's synchronization both
+  need storage several contexts own outright, and a profile that means one owner
+  writes one. Empty is legal and means *no* context owns it -- storage reachable only
+  through grants issued when it was made.
+
+  Not a right and not a loan. Owning storage does not say what the permission
+  allows, and `Permission.Grants` is still the question `denialOf` asks. -/
+  owners : List ContextId
   /-- The permission its storage carries. -/
   permission : Permission
   /-- Whether it is live. A dead allocation authorizes nothing, whatever
   provenance is presented. -/
   live : Bool
-  /-- The offsets currently initialized. A list rather than a byte store, because
-  the vertical needs to decide initialization, not to model byte values; M2 owns
-  the store. -/
-  initialized : List Nat
+  /-- The allocation's bytes.
+
+  Initialization is read off this rather than tracked beside it: a separate list
+  of initialized offsets was a second source of truth that could disagree with
+  the values, and `RangeInitialized` now cannot drift from what was written. -/
+  bytes : ByteStore
+  /-- Where the allocation sits in its address space, if it sits anywhere.
+
+  `Option`, and not because placement is optional bookkeeping. `docs/MEMORY_MODEL.md`
+  §7.5 makes address spaces non-interchangeable and a logical space — a SPIR-V
+  `Private` storage class, say — has allocations with no machine address at all, so
+  a mandatory base would force every profile to invent one. Placement is also not
+  authority in §2's sense: provenance decides what an access may touch, and two
+  allocations at one base are distinct storage unless `aliases` says otherwise. It is
+  *not* invisible to `denialOf`, which reads this field in `placementWraps` and
+  `addressDisagreesWithPlacement`; this docstring said "nothing in `denialOf` reads
+  this" for two milestones after those clauses landed, thirty-two lines above its own
+  retraction below, and review found it with three copies elsewhere. It is here so `Grass/Memory/Addressing.lean`'s bridge can
+  be instantiated, which §4.2 recorded as owed for as long as no allocation carried
+  an address.
+
+  No default. A profile placing an allocation says where; a profile that does not
+  place it says `none` deliberately. -/
+  base : Option MachineAddress
 deriving DecidableEq, Repr
+
+/--
+The fields a denial decision depends on.
+
+Not "everything except the bytes", which is what this said before `owners` existed:
+`denialOf` does not read `owners` and must not, because ownership is an authority
+question and `Grass/Memory/Loan.lean` is where it is asked. Leaving it out is the
+claim that adding an owner cannot change whether an access is *denied* -- only
+whether it is *authorized* -- and `denialOf_congr_of_agrees` is that claim proved.
+
+`denialOf` reads exactly these seven fields plus initialization, so this is the
+view a decision depends on. Naming it lets a framing argument say "the metadata
+did not move" without asserting the bytes did not, which is the whole point of a
+write.
+-/
+structure AllocationRecord.Metadata where
+  /-- The allocation's extent. -/
+  extent : ByteRange
+  /-- Its reuse generation. -/
+  epoch : EpochId
+  /-- Its address space. -/
+  space : AddressSpaceId
+  /-- Which allocator or mapping produced it. Here because `denialOf` reads it; a
+  metadata view missing a decision input would make `denialOf_congr_of_agrees`
+  false. -/
+  source : AllocationSourceId
+  /-- The permission its storage carries. -/
+  permission : Permission
+  /-- Whether it is live. -/
+  live : Bool
+  /-- Where it sits, if it sits anywhere.
+
+  Added when `denialOf` began checking the access's declared address against the
+  allocation's placement. `AllocationRecord.base`'s docstring said "nothing in
+  `denialOf` reads this", and that was true and was the problem: the address field
+  on a descriptor could say anything. The moment it became a decision input it had
+  to be in this view, or `denialOf_congr_of_agrees` would be false — two states
+  agreeing on metadata and on every byte could refuse differently. -/
+  base : Option MachineAddress
+deriving DecidableEq, Repr
+
+/-- The metadata view of a record. -/
+def AllocationRecord.metadata (record : AllocationRecord) : AllocationRecord.Metadata :=
+  ⟨record.extent, record.epoch, record.space, record.source, record.permission,
+   record.live, record.base⟩
 
 /--
 The memory state.
@@ -61,11 +157,13 @@ The memory state.
 declares each aliased pair once.
 -/
 structure MemoryState where
+  private mk ::
   /-- The live and dead allocations. -/
   allocations : FiniteMap AllocId AllocationRecord
   /-- Pairs of allocations whose bytes are the same storage. -/
   aliases : List (AllocId × AllocId)
-  /-- The authority grants currently live.
+  /-- The authority grants currently live. **Private**: see below.
+
 
   `docs/MEMORY_MODEL.md` §3 makes this map the authoritative borrowing state.
   What is here is the map and nothing else: the split, join, freeze, and
@@ -73,16 +171,1993 @@ structure MemoryState where
   M4's. It exists a milestone early so that `Grass/Op/Step.lean`'s
   `AuthorityProvider` has a real table to check against, which is what shows a
   new authority kind needs no change to operation packaging. -/
-  grants : FiniteMap GrantId AuthorityGrant
+  private grants : FiniteMap GrantId AuthorityGrant
 
 namespace MemoryState
 
 /-- The state with nothing allocated. -/
 def empty : MemoryState := { allocations := .empty, aliases := [], grants := .empty }
 
-/-- Record a grant of authority. -/
-def grant (state : MemoryState) (id : GrantId) (record : AuthorityGrant) : MemoryState :=
-  { state with grants := state.grants.insert id record }
+/-! ## The grant map is sealed
+
+`grants` is `private`, and the mutators live in this module, because deleting the
+unchecked door was not enough twice running.
+
+First there was `MemoryState.grant` — `grants.insert`, no checks — described as the
+door providers of kinds other than `loan` use, with a theorem arguing it was safe
+because the access-time rule reads whatever map it finds. `FiniteMap.insert`
+*erases* any existing binding, so installing a grant under an identity another
+context already holds deletes that context's grant, and the map the access-time rule
+then finds no longer contains the victim. Review wrote that attack and the write
+committed with no violation.
+
+Deleting `grant` and adding `issue?` did not close it: `grants` was a public field,
+so `{ state with grants := state.grants.insert id g }` *is* the deleted function,
+available to every caller — and two of this project's own fixtures used it. Review
+wrote the same attack again through the field. A comment saying "there is no second
+door" was in the file at the time.
+
+So the field is private and the five operations that change it are here: `issue?`,
+`returnGrant?`, `splitGrant?`, `joinGrants?` and `transferGrant?` — which is the door
+set `Tools/DoorAudit.py` guards, and this sentence said two for as long as there have
+been five. `Grass/Memory/Loan.lean` states §3's laws over
+them and adds the loan-specific refusals; `grantEntries` and `grantAt?` are the
+read-only views everything else uses.
+
+**And `mk` is private too**, which is the third time this hole was closed — and the
+checks live here rather than a module up, which is the fourth. Marking the *field*
+private privatised the projection and left the constructor alone, so
+`MemoryState.mk allocations aliases ⟨…⟩` still built any map at all; review rebuilt
+`Tests/Op/StandardLoan.lean`'s own lent state with the loan filtered out of
+`grantEntries`, and the thread's store committed. Sealing `mk` closed that, and left
+a low-level `issueGrant?` public in this module that ran the identity check and none
+of the others, so review installed a four-kilobyte grant over a sixty-four-byte
+allocation through it and froze an honest store. There is one door now and it is the
+checked one.
+Marking the *field* private privatises the projection and leaves the constructor
+alone, so `MemoryState.mk allocations aliases ⟨…⟩` still built any map at all —
+review rebuilt `Tests/Op/StandardLoan.lean`'s own lent state with the loan filtered
+out of `grantEntries`, and the thread's store committed. That is the same failure
+`Grass/Memory/ByteStore.lean`'s comment records for `ByteStore.rec`, and this module
+had it while claiming there was no second door. `MemoryState.rec` cannot construct,
+so with `mk` private the map is reachable only through the five mutators above.
+-/
+
+/--
+`state.RootExtentAgrees provenance` holds when the provenance's recorded root extent
+is the extent of the allocation it names.
+
+`Provenance.rootExtent` is what `AccessDescriptor.WellFormedIn.rangeInProvenance`
+bounds an access against and what `Provenance.extent` computes a grant's bound from,
+and nothing compared it to the allocation table -- so both were self-certifying, and
+review issued a grant over four kilobytes of a sixteen-byte allocation and watched it
+authorize and freeze. `denialOf` records `provenanceExtentMismatch` for an access;
+`MemoryState.issue?` refuses the grant.
+-/
+def RootExtentAgrees (state : MemoryState) (provenance : Provenance) : Prop :=
+  (state.allocations.lookup provenance.root).any
+    (fun record => decide (record.extent = provenance.rootExtent)) = true
+
+instance (state : MemoryState) (provenance : Provenance) :
+    Decidable (state.RootExtentAgrees provenance) :=
+  inferInstanceAs (Decidable (_ = _))
+
+/--
+`state.RootIdentityAgrees provenance` holds when the allocation the provenance names
+is in the address space and from the allocator the provenance claims.
+
+The other two comparisons `denialOf` makes for an *access* -- `wrongAddressSpace` and
+`provenanceSourceMismatch` -- asked at the authority layer, where `issue?` asks
+`RootExtentAgrees` and asked nothing else about the root. A grant is a claim about
+storage in the same way a descriptor is, and it reached the map without either
+question: review issued a grant whose provenance put `bufferAlloc` in
+`device.hostVisible`, and the map held it and froze the thread's own bytes with it.
+
+Deliberately *not* about the grant versus the access. `MemoryState.AuthorizedAt` drops
+its space conjunct on purpose, because a device engine's grant over a host-visible
+buffer is the case §7.5 exists to describe; this compares the grant's provenance with
+the allocation that provenance names, which in that case agree.
+-/
+def RootIdentityAgrees (state : MemoryState) (provenance : Provenance) : Prop :=
+  (state.allocations.lookup provenance.root).any
+    (fun record => decide (record.space = provenance.space) &&
+      decide (record.source = provenance.source)) = true
+
+instance (state : MemoryState) (provenance : Provenance) :
+    Decidable (state.RootIdentityAgrees provenance) :=
+  inferInstanceAs (Decidable (_ = _))
+
+/-- The grants outstanding, as a read-only view. -/
+def grantEntries (state : MemoryState) : List (GrantId × AuthorityGrant) :=
+  state.grants.entries
+
+/-- The grant an identity names, if it names one. -/
+def grantAt? (state : MemoryState) (id : GrantId) : Option AuthorityGrant :=
+  state.grants.lookup id
+
+/-- One declared aliasing hop, in either direction. Aliasing is symmetric by
+convention and this is where the convention is discharged. -/
+def AliasHop (state : MemoryState) (a b : AllocId) : Prop :=
+  (a, b) ∈ state.aliases ∨ (b, a) ∈ state.aliases
+
+instance (state : MemoryState) (a b : AllocId) : Decidable (state.AliasHop a b) :=
+  inferInstanceAs (Decidable (_ ∨ _))
+
+/-- Every identity the alias list mentions, in either position.
+
+The vertices of the alias graph. `SharesAfter` quantifies its intermediate over this
+rather than over the allocation table, which is what makes the closure symmetric:
+review was asked for a symmetry theorem and found the definition did not admit one.
+
+`SharesAfter` used `state.allocations.domain`, so a one-hop path `a → b` required
+`b` to be *allocated* while the reversed path required `a` to be. Alias `(a, b)` with
+`a` allocated and `b` not, and `SharesBytes b a` held while `SharesBytes a b` did
+not — for a relation whose whole meaning is "these two name the same bytes".
+Unreachable through `step`, because `denialOf` refuses an unallocated root and
+`issue?` requires a live provenance, so both ends are allocated on every path an
+operation can take; but a relation that is asymmetric anywhere cannot have a symmetry
+theorem, and `conflicts_symm` wanted one.
+
+Quantifying over the graph's own vertices keeps the closure decidable — it is still a
+list — and makes it conservative in the safe direction: an alias naming an
+unallocated identity now propagates sharing rather than silently stopping, and more
+sharing means more freezing. -/
+def aliasIdentities (state : MemoryState) : List AllocId :=
+  state.aliases.flatMap (fun pair => [pair.1, pair.2])
+
+/-- `state.SharesAfter n a b` holds when `b` is reachable from `a` in at most `n`
+declared hops. The bounded form, so the closure below is decidable. -/
+def SharesAfter (state : MemoryState) : Nat → AllocId → AllocId → Prop
+  | 0, a, b => a = b
+  | n + 1, a, b =>
+      a = b ∨ ∃ mid ∈ state.aliasIdentities, state.AliasHop a mid ∧
+        state.SharesAfter n mid b
+
+instance decSharesAfter (state : MemoryState) : (n : Nat) → (a b : AllocId) →
+    Decidable (state.SharesAfter n a b)
+  | 0, _, _ => inferInstanceAs (Decidable (_ = _))
+  | n + 1, _, b =>
+      have : ∀ mid, Decidable (state.SharesAfter n mid b) := fun mid =>
+        decSharesAfter state n mid b
+      inferInstanceAs (Decidable (_ ∨ ∃ _ ∈ _, _))
+
+/--
+`state.SharesBytes a b` holds when two allocations name the same storage.
+
+**Transitively.** `docs/MEMORY_MODEL.md` §7.5 makes mapping, pinning and sharing
+typed transitions, and those compose: a profile that declares a file aliased to a
+view, and that view aliased to a second view, has said all three name the same
+bytes. This was a single hop, so the two ends of such a chain were declared
+non-conflicting and a cross-context write to the far end committed with no
+violation — the same defect `SharesBytes` was introduced to fix, one hop further
+out. Local adversarial review built the chain.
+
+The bound is the number of declared aliases, which is the longest simple path any
+chain can have, so `SharesAfter` at that bound is the full closure and stays
+decidable.
+-/
+def SharesBytes (state : MemoryState) (a b : AllocId) : Prop :=
+  state.SharesAfter state.aliases.length a b
+
+instance (state : MemoryState) (a b : AllocId) : Decidable (state.SharesBytes a b) :=
+  inferInstanceAs (Decidable (state.SharesAfter _ a b))
+
+theorem sharesAfter_zero_of_eq {state : MemoryState} {n : Nat} {a b : AllocId}
+    (h : a = b) : state.SharesAfter n a b := by
+  cases n with
+  | zero => exact h
+  | succ m => exact .inl h
+
+theorem sharesBytes_refl (state : MemoryState) (a : AllocId) : state.SharesBytes a a :=
+  sharesAfter_zero_of_eq rfl
+
+/-- Aliasing is symmetric, which `AliasHop` gets by construction. -/
+theorem aliasHop_symm {state : MemoryState} {a b : AllocId} (h : state.AliasHop a b) :
+    state.AliasHop b a := h.symm
+
+/-- A declared hop's far end is one of the alias graph's own vertices. -/
+theorem mem_aliasIdentities_of_hop {state : MemoryState} {a b : AllocId}
+    (h : state.AliasHop a b) : b ∈ state.aliasIdentities := by
+  unfold aliasIdentities
+  rcases h with h | h
+  · exact List.mem_flatMap.mpr ⟨(a, b), h, by simp⟩
+  · exact List.mem_flatMap.mpr ⟨(b, a), h, by simp⟩
+
+/-- A hop may be appended to a path, which is the step the recursion does not give:
+`SharesAfter` peels from the front and a reversal needs to add at the back. -/
+theorem sharesAfter_snoc {state : MemoryState} : ∀ {n : Nat} {a b c : AllocId},
+    state.SharesAfter n a b → state.AliasHop b c → state.SharesAfter (n + 1) a c := by
+  intro n
+  induction n with
+  | zero =>
+    intro a b c hpath hhop
+    have hab : a = b := hpath
+    subst hab
+    exact .inr ⟨c, mem_aliasIdentities_of_hop hhop, hhop, sharesAfter_zero_of_eq rfl⟩
+  | succ m ih =>
+    intro a b c hpath hhop
+    rcases hpath with hab | ⟨mid, hmid, hop, hrest⟩
+    · subst hab
+      exact .inr ⟨c, mem_aliasIdentities_of_hop hhop, hhop, sharesAfter_zero_of_eq rfl⟩
+    · exact .inr ⟨mid, hmid, hop, ih hrest hhop⟩
+
+/--
+**Sharing bytes is symmetric.**
+
+The theorem `Grass/Op/Step.lean`'s `conflicts_symm` takes as a hypothesis, and the
+reason the definition above quantifies over the alias graph's vertices rather than the
+allocation table: with the old quantifier this was false, and review found it when
+asked for the proof.
+
+Reversing a path keeps its length, so the same bound works and no strengthening of
+`aliases.length` is needed — which is why the statement is over `SharesAfter n` for
+every `n` rather than only over the closure.
+-/
+theorem sharesAfter_symm {state : MemoryState} : ∀ {n : Nat} {a b : AllocId},
+    state.SharesAfter n a b → state.SharesAfter n b a := by
+  intro n
+  induction n with
+  | zero => intro a b h; exact (h : a = b).symm
+  | succ m ih =>
+    intro a b h
+    rcases h with hab | ⟨mid, _, hop, hrest⟩
+    · exact .inl hab.symm
+    · exact sharesAfter_snoc (ih hrest) (aliasHop_symm hop)
+
+/-- The closure form. -/
+theorem sharesBytes_symm {state : MemoryState} {a b : AllocId}
+    (h : state.SharesBytes a b) : state.SharesBytes b a :=
+  sharesAfter_symm h
+
+/-- One declared hop shares bytes.
+
+The allocation-table hypothesis is gone with the change above: a hop's far end is a
+vertex of the alias graph by construction, so `mem_aliasIdentities_of_hop` supplies
+what the existential needs and a caller no longer has to prove the far end is
+allocated. -/
+theorem sharesBytes_of_hop {state : MemoryState} {a b : AllocId}
+    (hhop : state.AliasHop a b)
+    (hpos : 0 < state.aliases.length) : state.SharesBytes a b := by
+  unfold SharesBytes
+  cases hn : state.aliases.length with
+  | zero => omega
+  | succ m =>
+    exact .inr ⟨b, mem_aliasIdentities_of_hop hhop, hhop, sharesAfter_zero_of_eq rfl⟩
+
+
+/--
+`state.CurrentEpoch provenance` holds when the root allocation exists and is in the
+epoch this provenance names.
+
+`docs/MEMORY_MODEL.md` §2: address reuse never revives old pointers, and §5:
+same-address objects in a new epoch have new provenance. `AllocationRecord` carried
+the epoch and nothing compared it, so a provenance minted before a
+free-and-reallocate was treated as naming the storage that replaced it.
+-/
+def CurrentEpoch (state : MemoryState) (provenance : Provenance) : Prop :=
+  (state.allocations.lookup provenance.root).any
+    (fun record => decide (record.epoch = provenance.epoch)) = true
+
+instance (state : MemoryState) (provenance : Provenance) :
+    Decidable (state.CurrentEpoch provenance) :=
+  inferInstanceAs (Decidable (_ = _))
+
+/--
+`state.Live provenance` holds when the root allocation exists, is live, and is in
+the epoch this provenance names.
+
+Authority over storage that is gone is not weak authority, it is none — which is
+`AllocationRecord.live`'s own rule ("a dead allocation authorizes nothing, whatever
+provenance is presented") read at this layer.
+-/
+def Live (state : MemoryState) (provenance : Provenance) : Prop :=
+  (state.allocations.lookup provenance.root).any
+    (fun record => record.live && decide (record.epoch = provenance.epoch)) = true
+
+instance (state : MemoryState) (provenance : Provenance) : Decidable (state.Live provenance) :=
+  inferInstanceAs (Decidable (_ = _))
+
+/-- Live storage is current-epoch storage. -/
+theorem currentEpoch_of_live {state : MemoryState} {provenance : Provenance}
+    (h : state.Live provenance) : state.CurrentEpoch provenance := by
+  unfold Live at h
+  unfold CurrentEpoch
+  cases hm : state.allocations.lookup provenance.root with
+  | none => rw [hm] at h; simp at h
+  | some record =>
+      rw [hm] at h
+      simp only [Option.any_some] at *
+      exact ((Bool.and_eq_true _ _).mp h).2
+
+/--
+The grants outstanding over the same *bytes* as `provenance`, meeting `range`.
+
+**No epoch filter**, which this sentence claimed for as long as there has not been one —
+the fourth departure below is the argument for deleting it, twenty lines under a summary
+asserting it. A reader skimming this line and concluding "a stale grant is not in this
+list" reasons from the premise the deletion was made against.
+
+Four departures from the obvious filter, each of which review demonstrated:
+
+**`MemoryState.SharesBytes`, not `Provenance.SameStorage`.** `Grass/Memory/State.lean`
+records that `Conflicts` used to require `SameStorage` and "declared every aliased
+pair non-conflicting: a write through a mapped view and a write through the file it
+maps would not conflict", which is why `SharesBytes` exists at all — and this
+function was written with `SameStorage` anyway. Review drove a thread's store to
+lent bytes through an aliasing view and it committed with no violation.
+
+**`ByteRange.Meets`, not `¬ Disjoint`.** An empty range covers no offset, so every
+range is `Disjoint` from a position, and asking what was outstanding over offset 4
+while `[0, 8)` was lent returned nothing.
+
+**Every kind of grant, not only loans.** `docs/MEMORY_MODEL.md` §7.3's conflict is
+about authority, not about one kind of it. Filtering to `GrantKind.loan` meant a
+`.frame` grant — or one of a kind a profile invented, which `GrantKind` is open
+nominal to allow — carried write authority that froze nobody and conflicted with
+nothing. `loansOver` below is this list narrowed to loans, for §3's laws, which
+really are about loans.
+
+**And no epoch clause.** There was one, on the grant's own provenance, and it was
+wrong in the unsafe direction: review re-epoched one member of an alias set and the
+grant over it vanished from this list while the other member stayed live, so the
+freeze lifted and an unauthorized store committed. A grant that names a defunct
+epoch is also unable to *authorize* anything — `MemoryState.AuthorizedAt` checks
+both provenances — so dropping it here means a stale grant freezes without
+authorizing, which is the refuse-both-ways answer `docs/FOUNDATION.md` law 8 asks
+for. §5.1 requires live use loans to be returned before reallocation, so a stale
+grant that still freezes is a profile that skipped a step, not a case to be
+accommodated.
+
+It also restores agreement with `LoanConflicts`, which has no epoch clause either.
+The epoch filter had made the two disagree about which grants exist, and review used
+exactly that gap: a context could not *obtain* a loan (the conflict test saw the
+stale grant) and did not need one (this list did not), so the write proceeded
+unauthorized.
+-/
+def grantsOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
+    List (GrantId × AuthorityGrant) :=
+  state.grantEntries.filter fun entry =>
+    decide (state.SharesBytes entry.2.provenance.root provenance.root) &&
+      decide (entry.2.range.Meets range)
+
+/-- The loans among them. §3's laws — exclusivity, counts, return by identity — are
+about loans, so they are stated over this; the access-time conflict rule is about
+authority, so it is stated over `grantsOver`. -/
+def loansOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
+    List (GrantId × AuthorityGrant) :=
+  (state.grantsOver provenance range).filter (fun entry => entry.2.kind = GrantKind.loan)
+
+/-- `state.AnyGrantOver provenance range` holds when *some* context holds authority
+over those bytes, of any kind.
+
+The question the transition's holder test should be asking, and it took three tries
+to arrive at.
+
+It was `Exclusive` — the *loan* map empty of everyone's loans — which is §3's
+sentence about exclusive authority and not a question about this access. A lender
+that had lent read-only could not read its own bytes, and a context following this
+layer's own "declare a loan to yourself" idiom with a read-only self-loan could not
+write those bytes even after every other loan was returned.
+
+Then it was `LoanHeldBySelf`, which fixed the self-loan case and opened a worse one:
+a context holding *nothing* was asked nothing, so when others held atomic-only
+grants and `authorityOf` reported `atomicShared`, any context at all could join the
+protocol atomically. Review demonstrated two contexts atomically writing the same
+live bytes with one of them holding no grant. It also keyed on `GrantKind.loan`
+while the state half did not, so two grants identical but for `kind` gave opposite
+answers about whether their holder may write.
+
+So: if anything is held over these bytes, an accessor needs authority of its own.
+
+That over-refused, and the cost was stated here for two milestones: the lender's read
+of its own shared-immutably-lent bytes was refused along with a stranger's, because
+nothing recorded who owned an allocation and the two were indistinguishable to the
+rule. `AllocationRecord.owners` distinguishes them, and `Grass/Op/Step.lean`'s clause
+exempts an owner that holds no grant of its own -- `HeldBySelf` being the second half,
+since an owner that took a narrower grant over its own bytes is bound by it. The
+predicate here is unchanged and still asks only what is outstanding; the exemption is
+where the refusal is narrowed, which is the layer that knows who is accessing. -/
+def AnyGrantOver (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
+    Prop := state.grantsOver provenance range ≠ []
+
+instance (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
+    Decidable (state.AnyGrantOver provenance range) :=
+  inferInstanceAs (Decidable (_ ≠ _))
+
+/--
+Two grants issue conflicting authority.
+
+`docs/MEMORY_MODEL.md` §7.3 defines a conflict as overlapping live bytes with at
+least one writer *from distinct concurrent contexts*, and says "unique loans
+prevent ordinary conflicting authority from being issued". This is that test
+applied at issue time.
+
+**Distinct holders.** §7.3's rule is about distinct contexts, and without the
+clause a context could not hold two grants over its own bytes — which is the
+idiom the access-time rule endorses for "the owner may still read", and
+which was therefore mutually exclusive with any other grant on those bytes.
+
+**`Meets` in both directions**, because `Meets` is asymmetric and neither grant is
+the query here. `loansOver` moved off `Disjoint` and this did not, which left one
+module with two answers to what "overlapping" means.
+
+That sentence says why the directions differ and not what the second one adds, and
+review found nothing discriminating it. `ByteRange.meets_comm_of_nonempty` is the
+boundary stated: on two non-empty ranges the directions agree, so the reverse one is
+reached only where the *installed* grant covers no bytes and the new grant covers
+where it sits. `issue?_eq_none_of_empty` refuses an empty grant at the door, so no
+state reached through `issue?` has one installed — which is the shape of `MayLend`'s
+epoch conjunct, and it is kept for the same reason: this is a safety rule, refusing is
+the narrowing direction, and §7.3 is not a place to widen on a reachability argument.
+Unlike that conjunct it is not unreachable at this layer, because `LoanConflicts` takes
+both grants as arguments rather than reading them out of the map, and
+`an_empty_installed_grant_still_conflicts` decides the case the reverse direction
+exists for.
+
+That fixture is what the two docstrings were standing in for. This paragraph cited the
+asymmetry, `issue?_eq_none_of_empty` cited this paragraph, and neither named a state
+either direction catches.
+
+Two read-only grants over one range do not conflict, which is `sharedImmutable`
+being a real state rather than a name. Nor do two **atomic-only** grants, which is
+`atomicShared` being one: §7.3's issuance sentence is "unique loans prevent
+*ordinary* conflicting authority from being issued", and this had no
+ordinary/atomic distinction, so `issue?` prevented all conflicting authority and two
+contexts could not share a word atomically at all.
+
+The write probe is `rights.write`, the capability, not `rights.Permits .write`.
+An atomic-only grant may modify the bytes and does not permit an ordinary write, and
+§7.3's "at least one writer" is the first question.
+
+**Refusing at issue is not the whole rule, and an earlier version of this comment
+said it was.** "The point of uniqueness is that the conflicting pair never exists" is
+false, and it was false for two reasons. One is closed: there was a second, unchecked
+door, and review used it twice — once through a `grant` function and once through the
+public field that function was deleted in favour of. `issue?` is the only way in now
+and `MemoryState.mk` is private.
+
+The other is not closable at issue time, and `Grass/Op/Step.lean`'s `refusalOf`
+access-time rule is what covers it. Declaring an alias *after* two
+non-conflicting grants are issued makes them conflict, with nothing re-examined, and
+§7.5 makes declaring one a real transition. The pair that must never *act* is stopped
+at access time by `Grass/Op/Step.lean`'s `refusalOf`, which is where the guarantee lives;
+this is the cheaper check that stops the honest caller earlier.
+-/
+def LoanConflicts (state : MemoryState) (a b : AuthorityGrant) : Prop :=
+  a.holder ≠ b.holder ∧
+    state.SharesBytes a.provenance.root b.provenance.root ∧
+    (a.range.Meets b.range ∨ b.range.Meets a.range) ∧
+    (a.rights.write ∨ b.rights.write) ∧
+    ¬ (a.rights.atomicOnly ∧ b.rights.atomicOnly)
+
+instance (state : MemoryState) (a b : AuthorityGrant) :
+    Decidable (state.LoanConflicts a b) :=
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
+
+/--
+`state.OwnedBy context provenance` holds when the context is one of the contexts the
+provenance's root allocation was declared to belong to.
+
+Reads the allocation table and not the grant map, which is the point: ownership is
+not a grant, so it leaves no entry, and a rule that asked only the map could not
+distinguish an owner with nothing lent from a stranger. Absent storage is owned by
+nobody -- `List.any` on a missing lookup is `false` -- so this is not a door onto the
+empty state.
+
+Says nothing about liveness or epoch on purpose. `Live` is a separate question that
+`authorityOf` asks first, and folding it in here would hide which of the two refused.
+-/
+def OwnedBy (state : MemoryState) (context : ContextId) (provenance : Provenance) : Prop :=
+  (state.allocations.lookup provenance.root).any
+    (fun record => record.owners.contains context) = true
+
+instance (state : MemoryState) (context : ContextId) (provenance : Provenance) :
+    Decidable (state.OwnedBy context provenance) :=
+  inferInstanceAs (Decidable (_ = _))
+
+/--
+`state.MayLend grant` holds when the grant's lender has the authority it is lending.
+
+**You cannot lend what you do not have**, which `issue?_eq_none_of_nothing_to_lend`
+now says and nothing said before. `issue?` checked
+reissue, emptiness, liveness, nestedness, extent agreement, containment and conflict,
+and never related the lender to the storage — while `LoanConflicts` requires distinct
+holders, so the *first* grant over any bytes conflicts with nothing. Review had one
+context issue itself a whole-buffer write loan over an allocation another context
+exclusively owned: the owner became `frozen`, its counter-grant was refused as
+conflicting, it could not return a grant it neither held nor lent, and it could not
+free or re-epoch the allocation because a grant was outstanding. Permanent seizure, in
+one accepted call. `AuthorityGrant.kind`'s own docstring calls a loan "a borrow of
+authority over bytes the lender retains".
+
+Two ways to have it, and the second is the one that took thinking about.
+
+**The sublet disjunct keeps an epoch filter that `grantsOver` deliberately dropped**,
+and the two are not in conflict. `grantsOver` answers "which grants freeze these
+bytes", and there a stale grant must still count, because dropping it lifted a freeze
+and let an unauthorized store commit — the argument is written out above that
+function. This disjunct answers a different question: "may this lender pass on what it
+holds". A grant naming a defunct epoch authorizes nothing, by `AuthorizedAt`, so
+sublending from it would hand on authority that does not exist. Refusing here is the
+narrowing direction and refusing there was the widening one, which is why the same
+filter is right in one place and wrong in the other.
+
+Review found that conjunct discriminated by nothing and asked which way it should go;
+this paragraph is the answer, and the honest limit is that no reachable state exercises
+it. `allocate?` refuses a record change while authority is outstanding over the bytes,
+alias-aware in both directions, and `tearDown?` goes through `allocate?`, so an
+outstanding grant's provenance cannot go stale through any door —
+`allocate?_eq_none_of_outstanding` is that refusal, so the conjunct is kept for a state
+the doors cannot currently build. That is the conservative direction, and
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it rather than leaving it to be
+rediscovered.
+
+The sublet disjunct bounds what is passed on by `entry.2.rights.GrantsAsGrant
+grant.rights`: a lender hands on no more than it holds. `Permission.Grants` is the same
+relation `denialOf` uses for a descriptor's declared permission, asked here at the
+authority layer, and `GrantsAsGrant` adds the `atomicOnly` comparison, because both
+sides are grants here and an atomic-only holder must not sublet an ordinary write.
+
+**The lender disjunct is the owner's, and the unlent case is its empty instance.** Every
+grant outstanding over the bytes was lent *by this lender* — whoever put them out may
+put more out — *if* the lender owns the storage and the storage carries the rights being
+lent. With nothing outstanding the `List.all` is vacuous, and that is exactly how a
+first grant is ever issued: "nothing is held over these bytes" is "everything held over
+these bytes is mine" with an empty list. `mayLend_of_unheld_of_owned` states that
+instance and proves it through this disjunct.
+
+Without it an owner who lends once could never lend again, because it holds nothing
+itself: ownership is recorded on the allocation, not as a grant, so a lender's claim on
+unlent bytes leaves no trace in the map. Two read loans from one owner is
+`sharedImmutable`'s whole point, and the sublet disjunct alone refuses the second of
+them.
+
+The rights bound is the *storage's* and not the outstanding grants', deliberately. An
+owner that lent read still holds write and may lend it; bounding by what is already out
+would refuse that, and §3 says an owner retains what it did not lend.
+
+**The rights conjunct is what made `issue?_eq_none_of_nothing_to_lend`'s sentence true
+of this disjunct.** Ownership is not itself the authority: review had an owner lend
+`readWrite` over a read-only page, `issue?` accepted it, and `authorityOf` then reported
+the owner `frozen` over its own data and refused it even a read, from a write authority
+the model had just certified nobody has.
+
+**The ownership conjunct is what this could not say before `AllocationRecord.owners`
+existed.** Seizing bytes nothing is held over satisfied this disjunct exactly as a
+legitimate owner's first loan did, so the model could not tell the two apart, and this
+docstring said so for two milestones. It can now: a stranger's first loan fails the
+conjunct, an owner's passes it, and `Grass/Op/Step.lean`'s `refusalOf` no longer
+carries the residue alone. The disjunct was also written for an owner that has lent a
+fragment out and holds no grant of its own, and never said so, so it admitted two things
+review stepped. An owner of a *read-only* page lent it read-only and then, because every
+grant outstanding was its own, lent itself `readWrite` — which the allocation-permission
+conjunct refuses. And a read-only *borrower* sublet to itself, returned the original as
+holder, and lent itself write authority, all three deltas in one access's declared
+effect: having become the only lender of record it satisfied this disjunct outright,
+which the ownership conjunct refuses.
+
+**There were two further terms here, and deleting the second of them repaired the wrong
+one.** A fourth conjunct required that something *be* outstanding, because `List.all` on
+the empty list is `true` and without it this disjunct readmitted every stranger the
+ownership conjunct had not yet arrived to refuse. Once that conjunct did arrive the
+non-emptiness one was inert, and it went — on the argument that "the first disjunct
+subsumes the third, so the two disjunctions are pointwise equal". The equality holds;
+the subsumption runs the other way. `¬ AnyGrantOver` unfolds to `grantsOver = []`, which
+makes this disjunct's `.all` vacuous, so it was the *first* disjunct that implied this
+one, and the first disjunct that was dead. Review proved that the following round, on a
+branch that requires a redundancy claim to be proved rather than observed — and the
+proof offered was of the converse of what the deletion needed.
+
+The first disjunct was `¬ AnyGrantOver ∧ OwnedBy ∧ storage-rights`, and all three of its
+terms survive in this one. **A redundancy between two clauses says one of them may go
+and never which one**; choosing wrong leaves the definition the same size, still
+carrying something nothing can reach, under a docstring now arguing it is load-bearing.
+That is the shape of the very conjunct the deletion was meant to remove, one level up.
+
+Stealing from a lender was closed earlier and separately: once a context has lent
+bytes out, no other context can issue a grant over them, which is what ended review's
+permanent-seizure state.
+-/
+def MayLend (state : MemoryState) (grant : AuthorityGrant) : Prop :=
+  state.grantEntries.any (fun entry =>
+      entry.2.holder = grant.lender &&
+        decide (state.SharesBytes entry.2.provenance.root grant.provenance.root) &&
+        decide (state.CurrentEpoch entry.2.provenance) &&
+        decide (entry.2.range.Contains grant.range) &&
+        decide (entry.2.rights.GrantsAsGrant grant.rights)) = true ∨
+    (state.OwnedBy grant.lender grant.provenance ∧
+      (state.allocations.lookup grant.provenance.root).any
+        (fun record => decide (record.permission.GrantsAsGrant grant.rights)) = true ∧
+      (state.grantsOver grant.provenance grant.range).all
+        (fun entry => entry.2.lender = grant.lender) = true)
+
+instance (state : MemoryState) (grant : AuthorityGrant) : Decidable (state.MayLend grant) :=
+  inferInstanceAs (Decidable (_ = _ ∨ (_ ∧ _ = _ ∧ _ = _)))
+
+/--
+Issue a grant, or refuse.
+
+`Option`, because every way of getting this wrong is silent otherwise, and review
+found four of them.
+
+**Reissue.** An earlier version was `grants.insert`, and `FiniteMap.insert` erases
+any existing binding — so issuing twice under one identity returned the first grant
+with no return, and exclusivity came back for bytes still borrowed. §3 says a return
+consumes that exact identity; a reissue is a return nobody asked for. Worse, there
+was a second, wholly unchecked door (`MemoryState.grant`) with the same erasing
+behaviour, so one context could delete another's grant and write the bytes. That
+door is gone: this is the only way a grant enters the map.
+
+**Conflict.** §7.3 says unique loans prevent conflicting authority from being
+issued. Nothing prevented issuing two overlapping write grants to different holders,
+and each satisfied the access rule, so both could write the same bytes. The scan
+covers **every kind of grant**: a `.frame` or profile-invented write grant is
+conflicting authority on §7.3's terms, and scanning only loans applied
+`LoanConflicts` — which has no kind clause of its own — to a strict subset of the
+pairs it describes.
+
+**A grant over nothing.** A grant whose range is empty conflicts at issue (both
+`Meets` directions are tried there) and freezes nobody once installed, because an
+empty extent meets no position. It is decoration with a refusal attached, so it is
+refused instead — the same rule `AccessDescriptor.WellFormedIn.rangeNonEmpty`
+applies to accesses.
+
+**A grant over storage that is not there.** Review lent a write loan over a
+provenance whose root the allocation table does not hold, aliased to a live one:
+`issue?` accepted it, `grantsOver` did not see it, and the store committed. A grant
+must be over live current-epoch storage, and its range must lie within the extent
+its own provenance claims.
+
+What this is **not** is the guarantee that no conflicting pair can act. Declaring an
+alias after two non-conflicting grants are issued makes them conflict with nothing
+re-examined, and §7.5 makes that a real transition. `Grass/Op/Step.lean`'s `refusalOf`
+reads the map it finds; this is the cheaper check that stops the honest caller
+earlier.
+
+Refusing rather than overwriting or ignoring is `docs/FOUNDATION.md` law 8's
+direction. Eight of the nine refusals are stated — `issue?_eq_none_of_reissued`,
+`issue?_eq_none_of_empty`, `issue?_eq_none_of_not_live`,
+`issue?_eq_none_of_not_nested`, `issue?_eq_none_of_wrong_extent`,
+`issue?_eq_none_of_wrong_identity`, `issue?_eq_none_of_nothing_to_lend` and
+`issue?_eq_none_of_conflict` — so a caller that cannot issue finds out which rule
+stopped it. **The containment clause is the one with no theorem of its own**; it is
+checked and not stated.
+
+This sentence named the *extent* clause, which is the one gate here that does have a
+theorem, and it went on naming it after the count beside it was repaired from "four of
+the five" to "eight of the nine". A reviewer following it checked a clause that was
+already covered and did not check the one that is not — which is why the enumeration
+is now complete rather than partial: a list of four under a claim about eight leaves
+the reader to guess which four are missing, and guessing wrong is the whole defect.
+-/
+def issue? (state : MemoryState) (id : GrantId) (grant : AuthorityGrant) :
+    Option MemoryState :=
+  if (state.grants.lookup id).isSome then Option.none
+  else if grant.range.IsEmpty then Option.none
+  else if ¬ state.Live grant.provenance then Option.none
+  else if ¬ grant.provenance.Nested then Option.none
+  else if ¬ state.RootExtentAgrees grant.provenance then Option.none
+  else if ¬ state.RootIdentityAgrees grant.provenance then Option.none
+  else if ¬ grant.provenance.extent.Contains grant.range then Option.none
+  else if ¬ state.MayLend grant then Option.none
+  else if state.grantEntries.any
+      (fun entry => decide (state.LoanConflicts entry.2 grant))
+    then Option.none
+  else some { state with grants := state.grants.insert id grant }
+
+/-- **A grant whose provenance misdescribes its storage is refused.** The two
+comparisons `denialOf` makes for an access, at the door a grant comes through. -/
+theorem issue?_eq_none_of_wrong_identity (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant) (h : ¬ state.RootIdentityAgrees grant.provenance) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  by_cases hfresh : (state.grants.lookup id).isSome = true
+  · rw [if_pos hfresh]
+  · rw [if_neg hfresh]
+    by_cases hempty : grant.range.IsEmpty
+    · rw [if_pos hempty]
+    · rw [if_neg hempty]
+      by_cases hlive : state.Live grant.provenance
+      · rw [if_neg (by simpa using hlive)]
+        by_cases hnest : grant.provenance.Nested
+        · rw [if_neg (by simpa using hnest)]
+          by_cases hext : state.RootExtentAgrees grant.provenance
+          · rw [if_neg (by simpa using hext), if_pos (by simpa using h)]
+          · rw [if_pos (by simpa using hext)]
+        · rw [if_pos (by simpa using hnest)]
+      · rw [if_pos (by simpa using hlive)]
+
+/-- **A lender with nothing may not lend over held bytes.** -/
+theorem issue?_eq_none_of_nothing_to_lend (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant) (h : ¬ state.MayLend grant) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  by_cases hfresh : (state.grants.lookup id).isSome = true
+  · rw [if_pos hfresh]
+  · rw [if_neg hfresh]
+    by_cases hempty : grant.range.IsEmpty
+    · rw [if_pos hempty]
+    · rw [if_neg hempty]
+      by_cases hlive : state.Live grant.provenance
+      · rw [if_neg (by simpa using hlive)]
+        by_cases hnest : grant.provenance.Nested
+        · rw [if_neg (by simpa using hnest)]
+          by_cases hext : state.RootExtentAgrees grant.provenance
+          · rw [if_neg (by simpa using hext)]
+            by_cases hid : state.RootIdentityAgrees grant.provenance
+            · rw [if_neg (by simpa using hid)]
+              by_cases hin : grant.provenance.extent.Contains grant.range
+              · rw [if_neg (by simpa using hin), if_pos (by simpa using h)]
+              · rw [if_pos (by simpa using hin)]
+            · rw [if_pos (by simpa using hid)]
+          · rw [if_pos (by simpa using hext)]
+        · rw [if_pos (by simpa using hnest)]
+      · rw [if_pos (by simpa using hlive)]
+
+/-- **An owner may lend bytes nothing is held on.** That is how a first grant is ever
+issued. The ownership hypothesis is the half this theorem did not have: it used to
+read "over bytes nothing is held on, *anyone* may lend", which was true of the code
+and was the gap. -/
+theorem mayLend_of_unheld_of_owned {state : MemoryState} {grant : AuthorityGrant}
+    (h : ¬ state.AnyGrantOver grant.provenance grant.range)
+    (howns : state.OwnedBy grant.lender grant.provenance)
+    (hrights : (state.allocations.lookup grant.provenance.root).any
+      (fun record => decide (record.permission.GrantsAsGrant grant.rights)) = true) :
+    state.MayLend grant := by
+  refine Or.inr ⟨howns, hrights, ?_⟩
+  cases hl : state.grantsOver grant.provenance grant.range with
+  | nil => rfl
+  | cons x xs =>
+    exact absurd
+      (show state.grantsOver grant.provenance grant.range ≠ [] by
+        rw [hl]; exact List.cons_ne_nil x xs) h
+
+/-- **A stranger may not lend bytes nothing is held on.** The falsifying half of the
+theorem above, and the one that would have failed before `AllocationRecord.owners`
+existed. Stated over an arbitrary state: a fixture could not distinguish this from a
+state where the refusal came from somewhere else. -/
+theorem not_mayLend_of_unheld_of_unowned {state : MemoryState} {grant : AuthorityGrant}
+    (h : ¬ state.AnyGrantOver grant.provenance grant.range)
+    (howns : ¬ state.OwnedBy grant.lender grant.provenance)
+    (hne : ¬ grant.range.IsEmpty) : ¬ state.MayLend grant := by
+  rintro (hheld | ⟨howned, _, _⟩)
+  · -- The lender holding a covering grant *is* a grant over the bytes, so the
+    -- sublet disjunct contradicts the hypothesis directly. `Contains` needs the
+    -- range to be non-empty before it implies `Meets`; `issue?` refuses empty
+    -- ranges anyway.
+    refine h ?_
+    obtain ⟨entry, hmem, hcond⟩ := List.any_eq_true.1 hheld
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at hcond
+    obtain ⟨⟨⟨⟨_, hshare⟩, _⟩, hcontains⟩, _⟩ := hcond
+    refine List.ne_nil_of_mem (a := entry) ?_
+    refine List.mem_filter.2 ⟨hmem, ?_⟩
+    simpa using ⟨hshare, ByteRange.meets_of_contains hcontains hne⟩
+  · exact howns howned
+
+/-- **A grant over no bytes is refused.** It would conflict at issue with a live one
+— `LoanConflicts`'s *forward* direction asks whether an installed grant covers the new
+grant's start, which an empty range inside a live one satisfies — and freeze nobody
+once installed, because an empty extent meets no position. Decoration with a refusal
+attached.
+
+This named "both directions", which is the wrong half of the rule: the reverse
+direction is about an *installed* grant of no bytes, and this theorem is what makes
+that state unreachable through the door. The two docstrings cited each other for why
+the reverse direction exists, and `ByteRange.meets_comm_of_nonempty` is the fact
+neither of them stated. -/
+theorem issue?_eq_none_of_empty (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant) (h : grant.range.IsEmpty) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  by_cases hfresh : (state.grants.lookup id).isSome = true
+  · rw [if_pos hfresh]
+  · rw [if_neg hfresh, if_pos h]
+
+/-- **A grant over dead, absent or stale-epoch storage is refused.** -/
+theorem issue?_eq_none_of_not_live (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant) (h : ¬ state.Live grant.provenance) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  by_cases hfresh : (state.grants.lookup id).isSome = true
+  · rw [if_pos hfresh]
+  · rw [if_neg hfresh]
+    by_cases hempty : grant.range.IsEmpty
+    · rw [if_pos hempty]
+    · rw [if_neg hempty, if_pos (by simpa using h)]
+
+/-- **A grant whose provenance path is not nested is refused**, which every access
+already had to satisfy through `AccessDescriptor.WellFormedIn.provenanceNested` and
+no grant did — a single unnested step was a second way to claim any extent at all. -/
+theorem issue?_eq_none_of_not_nested (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant) (h : ¬ grant.provenance.Nested) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  by_cases hfresh : (state.grants.lookup id).isSome = true
+  · rw [if_pos hfresh]
+  · rw [if_neg hfresh]
+    by_cases hempty : grant.range.IsEmpty
+    · rw [if_pos hempty]
+    · rw [if_neg hempty]
+      by_cases hlive : state.Live grant.provenance
+      · rw [if_neg (by simpa using hlive), if_pos (by simpa using h)]
+      · rw [if_pos (by simpa using hlive)]
+
+/--
+**A grant whose provenance misdescribes its allocation is refused.**
+
+The clause that was self-certifying: `issue?` bounds a grant by
+`grant.provenance.extent`, which the provenance itself supplies, and nothing compared
+that to the allocation table. Review issued a write grant over four kilobytes of a
+sixty-four-byte allocation, and it both authorized accesses and froze a context that
+legitimately owned the larger storage it was aliased to.
+-/
+theorem issue?_eq_none_of_wrong_extent (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant) (h : ¬ state.RootExtentAgrees grant.provenance) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  by_cases hfresh : (state.grants.lookup id).isSome = true
+  · rw [if_pos hfresh]
+  · rw [if_neg hfresh]
+    by_cases hempty : grant.range.IsEmpty
+    · rw [if_pos hempty]
+    · rw [if_neg hempty]
+      by_cases hlive : state.Live grant.provenance
+      · rw [if_neg (by simpa using hlive)]
+        by_cases hnest : grant.provenance.Nested
+        · rw [if_neg (by simpa using hnest), if_pos (by simpa using h)]
+        · rw [if_pos (by simpa using hnest)]
+      · rw [if_pos (by simpa using hlive)]
+
+/-- **Conflicting authority is refused at issue.** -/
+theorem issue?_eq_none_of_conflict (state : MemoryState) (id : GrantId)
+    (grant : AuthorityGrant)
+    (h : state.grantEntries.any
+      (fun entry => decide (state.LoanConflicts entry.2 grant)) = true) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  by_cases hfresh : (state.grants.lookup id).isSome = true
+  · rw [if_pos hfresh]
+  · rw [if_neg hfresh]
+    by_cases hempty : grant.range.IsEmpty
+    · rw [if_pos hempty]
+    · rw [if_neg hempty]
+      by_cases hlive : state.Live grant.provenance
+      · rw [if_neg (by simpa using hlive)]
+        by_cases hnest : grant.provenance.Nested
+        · rw [if_neg (by simpa using hnest)]
+          by_cases hext : state.RootExtentAgrees grant.provenance
+          · rw [if_neg (by simpa using hext)]
+            by_cases hid : state.RootIdentityAgrees grant.provenance
+            · rw [if_neg (by simpa using hid)]
+              by_cases hin : grant.provenance.extent.Contains grant.range
+              · rw [if_neg (by simpa using hin)]
+                by_cases hlend : state.MayLend grant
+                · rw [if_neg (by simpa using hlend), if_pos h]
+                · rw [if_pos (by simpa using hlend)]
+              · rw [if_pos (by simpa using hin)]
+            · rw [if_pos (by simpa using hid)]
+          · rw [if_pos (by simpa using hext)]
+        · rw [if_pos (by simpa using hnest)]
+      · rw [if_pos (by simpa using hlive)]
+
+/-- Remove the grant an identity names, if this context may.
+
+The holder or the lender, and nobody else. `docs/MEMORY_MODEL.md` §6's ABI call
+profile "consumes the same loan identities to reconstruct local authority on a
+conforming return", and the party consuming is the caller — so a holder-only check
+left §6's return to a party that is not §6's, and for a loan to an external API agent,
+which never executes a Grass step, made the return impossible for anyone. -/
+def returnGrant? (state : MemoryState) (context : ContextId) (id : GrantId) :
+    Option MemoryState :=
+  match state.grants.lookup id with
+  | some grant =>
+      if grant.holder = context ∨ grant.lender = context then
+        some { state with grants := state.grants.erase id }
+      else Option.none
+  | Option.none => Option.none
+
+/-!
+## Splitting and joining a grant
+
+`docs/MEMORY_MODEL.md` §3 lists `split` and `join` as operations on the authority
+map, and `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 has carried them as owed since
+M3 opened. They are here now, in the module that owns the map, for the reason every
+other mutator is: a caller that could build the parts itself would be a second door.
+
+**Binary, at an offset, with the parts derived.** A list-of-parts door would have to
+check that the parts cover the source's range and lie inside it, and a coverage
+predicate over a list is a satisfaction condition with room to be empty — the class
+of defect this branch found in §10's proof package. Two parts either side of an
+offset need no coverage check, because coverage is arithmetic: the low part runs to
+the boundary and the high part runs from it. An *n*-way split is *n* − 1 of these.
+
+**Neither door re-runs `issue?`.** A split is not a new claim of authority, it is a
+re-description of one the map already accepted, and re-running the door would refuse
+correct splits: `MayLend`'s lender disjunct requires the lender to own the storage
+and every grant outstanding to be its own, and a split's source is outstanding and
+often lent by a context that owns nothing; its sublet disjunct bounds a holder, and a
+split's lender need not hold anything. What justifies skipping the door is a theorem
+rather than an argument — `splitGrant?_creates_no_authority` says the result
+authorizes nothing the source did not, and `splitGrant?_preserves_authority` says it
+authorizes everything the source did.
+
+**What is not stated is an `↔` over the whole map**, because `Granted` ranges over
+the raw entry list and a map carrying a shadowed duplicate under the source's
+identity would lose that duplicate's authority to the `erase`. No such map can be
+built — `mk` and the field are private and every mutator here goes through `insert`
+and `erase` — but that is an invariant with no theorem, which
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 already records for `Exclusive`. The two
+directions above hold of every map, shadowed or not.
+-/
+
+end MemoryState
+
+namespace AuthorityGrant
+
+/-- The part of `grant` below `boundary`. -/
+def lowPart (grant : AuthorityGrant) (boundary : Nat) : AuthorityGrant :=
+  { grant with range := ⟨grant.range.start, boundary - grant.range.start⟩ }
+
+/-- The part of `grant` from `boundary` up. -/
+def highPart (grant : AuthorityGrant) (boundary : Nat) : AuthorityGrant :=
+  { grant with range := ⟨boundary, grant.range.stop - boundary⟩ }
+
+/-- The parts carry everything except the range, which is the whole of what a split
+changes: a split may not relabel, re-holder or re-rights a grant.
+`Grass/Obligation/Delta.lean` learned that from the other side, where an unpinned
+`kind` let a split relabel a live duty. Here the fields are not parameters at all,
+so there is nothing to pin. -/
+theorem parts_differ_only_in_range (grant : AuthorityGrant) (boundary : Nat) :
+    (grant.lowPart boundary).kind = grant.kind ∧
+    (grant.lowPart boundary).holder = grant.holder ∧
+    (grant.lowPart boundary).lender = grant.lender ∧
+    (grant.lowPart boundary).provenance = grant.provenance ∧
+    (grant.lowPart boundary).rights = grant.rights ∧
+    (grant.highPart boundary).kind = grant.kind ∧
+    (grant.highPart boundary).holder = grant.holder ∧
+    (grant.highPart boundary).lender = grant.lender ∧
+    (grant.highPart boundary).provenance = grant.provenance ∧
+    (grant.highPart boundary).rights = grant.rights :=
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+
+/-- Each part lies within the source. This is what makes a split not a claim. -/
+theorem lowPart_contained {grant : AuthorityGrant} {boundary : Nat}
+    (h : boundary ≤ grant.range.stop) :
+    grant.range.Contains (grant.lowPart boundary).range := by
+  have h' : boundary ≤ grant.range.start + grant.range.size := h
+  refine ⟨Nat.le_refl _, ?_⟩
+  simp only [lowPart, ByteRange.stop]
+  omega
+
+theorem highPart_contained {grant : AuthorityGrant} {boundary : Nat}
+    (hlow : grant.range.start ≤ boundary) (hhigh : boundary ≤ grant.range.stop) :
+    grant.range.Contains (grant.highPart boundary).range := by
+  have h' : boundary ≤ grant.range.start + grant.range.size := hhigh
+  refine ⟨hlow, ?_⟩
+  simp only [highPart, ByteRange.stop]
+  omega
+
+/-- The grant a join produces: the low one, stretched over both. -/
+def joined (low high : AuthorityGrant) : AuthorityGrant :=
+  { low with range := ⟨low.range.start, low.range.size + high.range.size⟩ }
+
+/-- And together they cover it: every offset the source covers is covered by one of
+them. No predicate checks this; it is arithmetic. -/
+theorem covered_by_part {grant : AuthorityGrant} {boundary offset : Nat}
+    (h : grant.range.Covers offset) :
+    (grant.lowPart boundary).range.Covers offset ∨
+      (grant.highPart boundary).range.Covers offset := by
+  have h' : grant.range.start ≤ offset ∧ offset < grant.range.start + grant.range.size := h
+  rcases Nat.lt_or_ge offset boundary with hcase | hcase
+  · refine Or.inl ⟨h'.1, ?_⟩
+    simp only [lowPart, ByteRange.stop]
+    omega
+  · refine Or.inr ⟨hcase, ?_⟩
+    simp only [highPart, ByteRange.stop]
+    omega
+
+end AuthorityGrant
+
+namespace MemoryState
+
+/-- The map a successful split leaves. Private: it names the private field, and the
+public theorems below speak of `splitGrant?`'s result rather than of this. -/
+private def splitMap (state : MemoryState) (id low high : GrantId) (boundary : Nat)
+    (grant : AuthorityGrant) : FiniteMap GrantId AuthorityGrant :=
+  ((state.grants.erase id).insert low (grant.lowPart boundary)).insert
+    high (grant.highPart boundary)
+
+/-!
+### What a grants-only update leaves alone
+
+`SharesBytes`, `CurrentEpoch` and `Live` read the allocation table and the alias
+list, so a state that differs only in `grants` agrees with the original on all
+three. For the last two that is definitional — they are non-recursive definitions
+over a projection — but `SharesAfter` recurses on the alias-chain length, so its
+state argument does not reduce and the agreement needs an induction. Without it
+every theorem below would have to carry a hypothesis about the state
+`MemoryState.splitMap` produces, which none of them is in a position to discharge.
+-/
+
+private theorem sharesAfter_grants (state : MemoryState)
+    (g : FiniteMap GrantId AuthorityGrant) (n : Nat) (a b : AllocId) :
+    SharesAfter { state with grants := g } n a b ↔ state.SharesAfter n a b := by
+  induction n generalizing a b with
+  | zero => exact Iff.rfl
+  | succ n ih =>
+    constructor
+    · rintro (rfl | ⟨mid, hmem, hhop, hrest⟩)
+      · exact Or.inl rfl
+      · exact Or.inr ⟨mid, hmem, hhop, (ih mid b).mp hrest⟩
+    · rintro (rfl | ⟨mid, hmem, hhop, hrest⟩)
+      · exact Or.inl rfl
+      · exact Or.inr ⟨mid, hmem, hhop, (ih mid b).mpr hrest⟩
+
+private theorem sharesBytes_grants (state : MemoryState)
+    (g : FiniteMap GrantId AuthorityGrant) (a b : AllocId) :
+    SharesBytes { state with grants := g } a b ↔ state.SharesBytes a b :=
+  sharesAfter_grants state g _ a b
+
+private theorem currentEpoch_grants (state : MemoryState)
+    (g : FiniteMap GrantId AuthorityGrant) (provenance : Provenance) :
+    CurrentEpoch { state with grants := g } provenance ↔ state.CurrentEpoch provenance :=
+  Iff.rfl
+
+/--
+Split one outstanding grant into two, at `boundary`.
+
+The source identity is consumed and the two parts are recorded under fresh
+identities, which is §3's return-consumes-that-exact-identity discipline applied to a
+split: a part reusing the source's identity would make "the source is gone" and "the
+part is here" the same fact, and `Grass/Obligation/Delta.lean` shows what that costs
+when the two are conflated.
+
+Refused when the source is unknown, when either part identity is taken (which
+includes the source's own, since it is taken), when the two part identities are the
+same, and when `boundary` is not strictly inside the source's range — an `⟨start, 0⟩`
+part would be a grant `issue?` refuses to issue, so a split may not manufacture one.
+-/
+def splitGrant? (state : MemoryState) (id low high : GrantId) (boundary : Nat) :
+    Option MemoryState :=
+  (state.grants.lookup id).bind fun grant =>
+    if low = high then Option.none
+    else if (state.grants.lookup low).isSome then Option.none
+    else if (state.grants.lookup high).isSome then Option.none
+    else if ¬ grant.range.start < boundary then Option.none
+    else if ¬ boundary < grant.range.stop then Option.none
+    else some { state with grants := state.splitMap id low high boundary grant }
+
+/-- **An unknown identity cannot be split**, which `splitGrant?` refuses before it
+looks at anything else. -/
+theorem splitGrant?_eq_none_of_unknown {state : MemoryState} {id low high : GrantId}
+    {boundary : Nat} (h : state.grantAt? id = Option.none) :
+    state.splitGrant? id low high boundary = Option.none := by
+  unfold splitGrant?
+  rw [show state.grants.lookup id = Option.none from h, Option.bind_none]
+
+/-- **A part may not land on a taken identity**, the source's own included. -/
+theorem splitGrant?_eq_none_of_taken {state : MemoryState} {id low high : GrantId}
+    {boundary : Nat} (hne : low ≠ high) (h : (state.grantAt? low).isSome) :
+    state.splitGrant? id low high boundary = Option.none := by
+  unfold splitGrant?
+  cases hlook : state.grants.lookup id with
+  | none => rfl
+  | some grant =>
+    rw [Option.bind_some, if_neg hne,
+      if_pos (show (state.grants.lookup low).isSome = true from h)]
+
+/-- **The two parts may not share an identity**, which would record one part and
+lose the other. -/
+theorem splitGrant?_eq_none_of_same_identity {state : MemoryState} {id low : GrantId}
+    {boundary : Nat} : state.splitGrant? id low low boundary = Option.none := by
+  unfold splitGrant?
+  cases hlook : state.grants.lookup id with
+  | none => rfl
+  | some grant => rw [Option.bind_some, if_pos rfl]
+
+/-- **A boundary outside the source is refused**, in either direction, because a part
+of size zero is a grant `issue?` would not issue. -/
+theorem splitGrant?_eq_none_of_boundary_low {state : MemoryState} {id low high : GrantId}
+    {boundary : Nat} {grant : AuthorityGrant} (hat : state.grantAt? id = some grant)
+    (hne : low ≠ high) (hlow : (state.grantAt? low).isSome = false)
+    (hhigh : (state.grantAt? high).isSome = false)
+    (h : ¬ grant.range.start < boundary) :
+    state.splitGrant? id low high boundary = Option.none := by
+  have hlow' : (state.grants.lookup low).isSome = false := hlow
+  have hhigh' : (state.grants.lookup high).isSome = false := hhigh
+  unfold splitGrant?
+  rw [show state.grants.lookup id = some grant from hat, Option.bind_some, if_neg hne,
+    if_neg (by simpa using hlow'), if_neg (by simpa using hhigh'),
+    if_pos (by simpa using h)]
+
+theorem splitGrant?_eq_none_of_boundary_high {state : MemoryState} {id low high : GrantId}
+    {boundary : Nat} {grant : AuthorityGrant} (hat : state.grantAt? id = some grant)
+    (hne : low ≠ high) (hlow : (state.grantAt? low).isSome = false)
+    (hhigh : (state.grantAt? high).isSome = false)
+    (h : ¬ boundary < grant.range.stop) :
+    state.splitGrant? id low high boundary = Option.none := by
+  have hlow' : (state.grants.lookup low).isSome = false := hlow
+  have hhigh' : (state.grants.lookup high).isSome = false := hhigh
+  unfold splitGrant?
+  rw [show state.grants.lookup id = some grant from hat, Option.bind_some, if_neg hne,
+    if_neg (by simpa using hlow'), if_neg (by simpa using hhigh')]
+  by_cases hstart : grant.range.start < boundary
+  · rw [if_neg (by simpa using hstart), if_pos (by simpa using h)]
+  · rw [if_pos (by simpa using hstart)]
+
+/-- What a successful split produced, and the five facts its guards established. -/
+private theorem splitGrant?_eq {state next : MemoryState} {id low high : GrantId}
+    {boundary : Nat} {grant : AuthorityGrant}
+    (h : state.splitGrant? id low high boundary = some next)
+    (hat : state.grantAt? id = some grant) :
+    next = { state with grants := state.splitMap id low high boundary grant } ∧
+      low ≠ high ∧ (state.grants.lookup low).isSome = false ∧
+      (state.grants.lookup high).isSome = false ∧
+      grant.range.start < boundary ∧ boundary < grant.range.stop := by
+  unfold splitGrant? at h
+  rw [show state.grants.lookup id = some grant from hat, Option.bind_some] at h
+  split at h
+  · exact absurd h (by simp)
+  · next hne =>
+    split at h
+    · exact absurd h (by simp)
+    · next hlow =>
+      split at h
+      · exact absurd h (by simp)
+      · next hhigh =>
+        split at h
+        · exact absurd h (by simp)
+        · next hstart =>
+          split at h
+          · exact absurd h (by simp)
+          · next hstop =>
+            injection h with h
+            exact ⟨h.symm, hne, by simpa using hlow, by simpa using hhigh,
+              by simpa using hstart, by simpa using hstop⟩
+
+/-- **A split consumes the source and records both parts.** -/
+theorem splitGrant?_yields_the_parts {state next : MemoryState} {id low high : GrantId}
+    {boundary : Nat} {grant : AuthorityGrant}
+    (h : state.splitGrant? id low high boundary = some next)
+    (hat : state.grantAt? id = some grant) :
+    next.grantAt? low = some (grant.lowPart boundary) ∧
+    next.grantAt? high = some (grant.highPart boundary) ∧
+    next.grantAt? id = Option.none := by
+  obtain ⟨hnext, hne, hlow, hhigh, _, _⟩ := splitGrant?_eq h hat
+  have hatl : state.grants.lookup id = some grant := hat
+  have hidlow : id ≠ low := by
+    intro hid
+    subst hid
+    rw [hatl] at hlow
+    simp at hlow
+  have hidhigh : id ≠ high := by
+    intro hid
+    subst hid
+    rw [hatl] at hhigh
+    simp at hhigh
+  subst hnext
+  refine ⟨?_, ?_, ?_⟩
+  · show (state.splitMap id low high boundary grant).lookup low = _
+    unfold splitMap
+    rw [FiniteMap.lookup_insert_ne _ hne, FiniteMap.lookup_insert_self]
+  · show (state.splitMap id low high boundary grant).lookup high = _
+    unfold splitMap
+    rw [FiniteMap.lookup_insert_self]
+  · show (state.splitMap id low high boundary grant).lookup id = _
+    unfold splitMap
+    rw [FiniteMap.lookup_insert_ne _ hidhigh, FiniteMap.lookup_insert_ne _ hidlow,
+      FiniteMap.lookup_erase_self]
+
+/-- A split leaves every other identity alone. -/
+theorem splitGrant?_other {state next : MemoryState} {id low high other : GrantId}
+    {boundary : Nat} {grant : AuthorityGrant}
+    (h : state.splitGrant? id low high boundary = some next)
+    (hat : state.grantAt? id = some grant) (hid : other ≠ id) (hlow : other ≠ low)
+    (hhigh : other ≠ high) : next.grantAt? other = state.grantAt? other := by
+  obtain ⟨hnext, _, _, _, _, _⟩ := splitGrant?_eq h hat
+  subst hnext
+  show (state.splitMap id low high boundary grant).lookup other = _
+  unfold splitMap
+  rw [FiniteMap.lookup_insert_ne _ hhigh, FiniteMap.lookup_insert_ne _ hlow,
+    FiniteMap.lookup_erase_ne _ hid]
+  rfl
+
+/-- The map a successful join leaves. Private, for the reason `splitMap` is. -/
+private def joinMap (state : MemoryState) (low high into : GrantId)
+    (grant : AuthorityGrant) : FiniteMap GrantId AuthorityGrant :=
+  ((state.grants.erase low).erase high).insert into grant
+
+/--
+Join two adjacent grants into one.
+
+The inverse of `splitGrant?`, and the checks are the ones that make it an inverse
+rather than an accumulation. Both sources must be outstanding, the target identity
+must be free, the two sources must be distinct identities, and — the clause that
+carries the weight — the two grants must be *equal except for their ranges*, with
+the low one's range ending exactly where the high one's begins.
+
+**Equality of everything but the range is `decide`d, not spot-checked.**
+`AuthorityGrant` derives `DecidableEq`, so `low.grant = { high.grant with range := … }`
+compares every field there is, and a field added later is compared without this door
+being edited. A door listing the fields it cares about is the shape that let
+`Grass/Obligation/Delta.lean` relabel a duty: it pinned protocol and owner because
+those were the fields someone thought of.
+
+**Adjacency, not overlap or a gap.** A gap would join authority over bytes neither
+source covered, which is the creation `joinGrants?_creates_no_authority` forbids. An
+overlap cannot happen between two grants this map holds for the same holder over the
+same storage — `LoanConflicts` does not forbid it, since conflict needs distinct
+holders — so it is refused here rather than assumed away.
+-/
+def joinGrants? (state : MemoryState) (low high into : GrantId) :
+    Option MemoryState :=
+  (state.grants.lookup low).bind fun lowGrant =>
+    (state.grants.lookup high).bind fun highGrant =>
+      if low = high then Option.none
+      else if (state.grants.lookup into).isSome then Option.none
+      else if lowGrant ≠ { highGrant with range := lowGrant.range } then Option.none
+      else if lowGrant.range.stop ≠ highGrant.range.start then Option.none
+      else
+        some { state with grants := state.joinMap low high into (lowGrant.joined highGrant) }
+
+/-- **An unknown source cannot be joined**, from either side, which `joinGrants?`
+refuses in the `bind` before any check runs. -/
+theorem joinGrants?_eq_none_of_unknown_low {state : MemoryState} {low high into : GrantId}
+    (h : state.grantAt? low = Option.none) :
+    state.joinGrants? low high into = Option.none := by
+  unfold joinGrants?
+  rw [show state.grants.lookup low = Option.none from h, Option.bind_none]
+
+theorem joinGrants?_eq_none_of_unknown_high {state : MemoryState} {low high into : GrantId}
+    (h : state.grantAt? high = Option.none) :
+    state.joinGrants? low high into = Option.none := by
+  have h' : state.grants.lookup high = Option.none := h
+  unfold joinGrants?
+  cases hlook : state.grants.lookup low with
+  | none => rfl
+  | some lowGrant => rw [Option.bind_some, h', Option.bind_none]
+
+/-- **A join may not land on a taken identity.** -/
+theorem joinGrants?_eq_none_of_taken {state : MemoryState} {low high into : GrantId}
+    {lowGrant highGrant : AuthorityGrant} (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant) (hne : low ≠ high)
+    (h : (state.grantAt? into).isSome) :
+    state.joinGrants? low high into = Option.none := by
+  have hlow' : state.grants.lookup low = some lowGrant := hlow
+  have hhigh' : state.grants.lookup high = some highGrant := hhigh
+  have h' : (state.grants.lookup into).isSome = true := h
+  unfold joinGrants?
+  rw [hlow', Option.bind_some, hhigh', Option.bind_some, if_neg hne, if_pos h']
+
+/-- **Two grants differing in anything but their range may not be joined**, which is
+the whole of the equality this door checks. -/
+theorem joinGrants?_eq_none_of_mismatch {state : MemoryState} {low high into : GrantId}
+    {lowGrant highGrant : AuthorityGrant} (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant) (hne : low ≠ high)
+    (hinto : (state.grantAt? into).isSome = false)
+    (h : lowGrant ≠ { highGrant with range := lowGrant.range }) :
+    state.joinGrants? low high into = Option.none := by
+  have hlow' : state.grants.lookup low = some lowGrant := hlow
+  have hhigh' : state.grants.lookup high = some highGrant := hhigh
+  have hinto' : (state.grants.lookup into).isSome = false := hinto
+  unfold joinGrants?
+  rw [hlow', Option.bind_some, hhigh', Option.bind_some, if_neg hne,
+    if_neg (by simpa using hinto'), if_pos h]
+
+/-- **And two grants that do not meet may not be joined**, whether they gap or
+overlap. -/
+theorem joinGrants?_eq_none_of_not_adjacent {state : MemoryState} {low high into : GrantId}
+    {lowGrant highGrant : AuthorityGrant} (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant) (hne : low ≠ high)
+    (hinto : (state.grantAt? into).isSome = false)
+    (hmatch : lowGrant = { highGrant with range := lowGrant.range })
+    (h : lowGrant.range.stop ≠ highGrant.range.start) :
+    state.joinGrants? low high into = Option.none := by
+  have hlow' : state.grants.lookup low = some lowGrant := hlow
+  have hhigh' : state.grants.lookup high = some highGrant := hhigh
+  have hinto' : (state.grants.lookup into).isSome = false := hinto
+  unfold joinGrants?
+  rw [hlow', Option.bind_some, hhigh', Option.bind_some, if_neg hne,
+    if_neg (by simpa using hinto'), if_neg (by simpa using hmatch), if_pos h]
+
+/-- What a successful join produced, and the four facts its guards established. -/
+private theorem joinGrants?_eq {state next : MemoryState} {low high into : GrantId}
+    {lowGrant highGrant : AuthorityGrant}
+    (h : state.joinGrants? low high into = some next)
+    (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant) :
+    next = { state with grants := state.joinMap low high into (lowGrant.joined highGrant) } ∧
+      low ≠ high ∧ (state.grants.lookup into).isSome = false ∧
+      lowGrant = { highGrant with range := lowGrant.range } ∧
+      lowGrant.range.stop = highGrant.range.start := by
+  have hlow' : state.grants.lookup low = some lowGrant := hlow
+  have hhigh' : state.grants.lookup high = some highGrant := hhigh
+  unfold joinGrants? at h
+  rw [hlow', Option.bind_some, hhigh', Option.bind_some] at h
+  split at h
+  · exact absurd h (by simp)
+  · next hne =>
+    split at h
+    · exact absurd h (by simp)
+    · next hinto =>
+      split at h
+      · exact absurd h (by simp)
+      · next hmatch =>
+        split at h
+        · exact absurd h (by simp)
+        · next hadjacent =>
+          injection h with h
+          exact ⟨h.symm, hne, by simpa using hinto, by simpa using hmatch,
+            by simpa using hadjacent⟩
+
+/-- **A join consumes both sources and records the joined grant.** -/
+theorem joinGrants?_yields_the_join {state next : MemoryState} {low high into : GrantId}
+    {lowGrant highGrant : AuthorityGrant}
+    (h : state.joinGrants? low high into = some next)
+    (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant) :
+    next.grantAt? into = some (lowGrant.joined highGrant) ∧
+    next.grantAt? low = Option.none ∧ next.grantAt? high = Option.none := by
+  obtain ⟨hnext, hne, hinto, _, _⟩ := joinGrants?_eq h hlow hhigh
+  have hlow' : state.grants.lookup low = some lowGrant := hlow
+  have hhigh' : state.grants.lookup high = some highGrant := hhigh
+  have hintolow : into ≠ low := by
+    intro hid
+    subst hid
+    rw [hlow'] at hinto
+    simp at hinto
+  have hintohigh : into ≠ high := by
+    intro hid
+    subst hid
+    rw [hhigh'] at hinto
+    simp at hinto
+  subst hnext
+  refine ⟨?_, ?_, ?_⟩
+  · show (state.joinMap low high into (lowGrant.joined highGrant)).lookup into
+      = _
+    unfold joinMap
+    rw [FiniteMap.lookup_insert_self]
+  · show (state.joinMap low high into (lowGrant.joined highGrant)).lookup low
+      = _
+    unfold joinMap
+    rw [FiniteMap.lookup_insert_ne _ (Ne.symm hintolow), FiniteMap.lookup_erase_ne _ hne,
+      FiniteMap.lookup_erase_self]
+  · show (state.joinMap low high into (lowGrant.joined highGrant)).lookup high
+      = _
+    unfold joinMap
+    rw [FiniteMap.lookup_insert_ne _ (Ne.symm hintohigh), FiniteMap.lookup_erase_self]
+
+/--
+Hand a grant on to another context.
+
+`docs/MEMORY_MODEL.md` §3's fifth authority state is "transferred or unavailable", and
+§7.4 makes transfer real: "acquire operations may transfer protected memory
+authority". Until now `unavailable` derived from liveness and epoch and *nothing*
+represented a transfer, which `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 recorded as
+owed.
+
+**The identity is kept, unlike a split's.** §6 has the lender "consume the same loan
+identities to reconstruct local authority on a conforming return", so the identity a
+lender lent must still be the identity it returns; a transfer that reissued under a
+fresh identity would strand the lender's return. A split consumes its source
+precisely because it is *not* the same authority afterwards.
+
+**Only the holder may transfer**, which is what `actor` is for. The lender's power
+over an outstanding grant is `returnGrant?`, and nothing in §3 or §6 gives a lender
+the power to redirect a loan to a third party while it is out.
+
+**Conflict is re-checked, and this is the check with teeth.** `LoanConflicts` needs
+*distinct* holders, so one context may hold two write grants over the same bytes —
+`issue?` accepts the second, correctly, because a context does not conflict with
+itself. Transfer one of them to a third context and that pair becomes a conflicting
+pair, which is the §7.3 violation a door that only checked authorization would
+create. `Tests/Memory/Loans.lean`'s `transferring_into_a_conflict_is_refused` is that
+state.
+
+**A self-transfer is refused** rather than treated as a no-op: it changes nothing, so
+a caller asking for one has made a mistake, and [FOUNDATION.md](../../docs/FOUNDATION.md)
+law 8 says reject rather than approximate.
+
+**The recipient is not checked against any context set, and the obligation ledger's
+transfer clause does check its own.** `LedgerDelta.Applicable` requires
+`newOwner ∈ contexts`; this door requires nothing of the recipient. The asymmetry is
+deliberate and was undocumented, which review noted rather than reported. A duty is
+discharged by running, so a duty handed to a context that never runs is a duty nobody
+can discharge — unrecoverable, and `LedgerDelta.Applicable` is what refuses it. A grant is
+not: `returnGrant?` lets the *lender* clear it, so a grant handed to a context that
+never steps can still be taken back, and `returnGrant?`'s own docstring makes a
+non-stepping holder deliberate ("an external API agent, which never executes a Grass
+step"). Requiring a context set here would refuse exactly the case that door exists for.
+-/
+def transferGrant? (state : MemoryState) (actor : ContextId) (id : GrantId)
+    (recipient : ContextId) : Option MemoryState :=
+  (state.grants.lookup id).bind fun grant =>
+    if grant.holder ≠ actor then Option.none
+    else if recipient = actor then Option.none
+    else if state.grantEntries.any (fun entry =>
+        entry.1 ≠ id && decide (state.LoanConflicts entry.2 { grant with holder := recipient }))
+      then Option.none
+    else some { state with grants := state.grants.insert id { grant with holder := recipient } }
+
+/-- **A context that does not hold it may not transfer it**, and that includes the
+lender, whose power over an outstanding grant is `returnGrant?`. -/
+theorem transferGrant?_eq_none_of_not_holder {state : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    (hat : state.grantAt? id = some grant) (h : grant.holder ≠ actor) :
+    state.transferGrant? actor id recipient = Option.none := by
+  have hat' : state.grants.lookup id = some grant := hat
+  unfold transferGrant?
+  rw [hat', Option.bind_some, if_pos h]
+
+/-- **An unknown identity cannot be transferred**, which `transferGrant?` refuses in
+the `bind` before any check runs. -/
+theorem transferGrant?_eq_none_of_unknown {state : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} (h : state.grantAt? id = Option.none) :
+    state.transferGrant? actor id recipient = Option.none := by
+  have h' : state.grants.lookup id = Option.none := h
+  unfold transferGrant?
+  rw [h', Option.bind_none]
+
+/-- **A self-transfer is refused**, because it changes nothing. -/
+theorem transferGrant?_eq_none_of_self {state : MemoryState} {actor : ContextId}
+    {id : GrantId} {grant : AuthorityGrant} (hat : state.grantAt? id = some grant)
+    (hholder : grant.holder = actor) :
+    state.transferGrant? actor id actor = Option.none := by
+  have hat' : state.grants.lookup id = some grant := hat
+  unfold transferGrant?
+  rw [hat', Option.bind_some, if_neg (by simpa using hholder), if_pos rfl]
+
+/-- What a successful transfer produced, and the three facts its guards
+established. -/
+private theorem transferGrant?_eq {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant) :
+    next = { state with grants := state.grants.insert id { grant with holder := recipient } } ∧
+      grant.holder = actor ∧ recipient ≠ actor ∧
+      state.grantEntries.any (fun entry =>
+        entry.1 ≠ id && decide (state.LoanConflicts entry.2
+          { grant with holder := recipient })) = false := by
+  have hat' : state.grants.lookup id = some grant := hat
+  unfold transferGrant? at h
+  rw [hat', Option.bind_some] at h
+  split at h
+  · exact absurd h (by simp)
+  · next hholder =>
+    split at h
+    · exact absurd h (by simp)
+    · next hself =>
+      split at h
+      · exact absurd h (by simp)
+      · next hconflict =>
+        injection h with h
+        exact ⟨h.symm, by simpa using hholder, by simpa using hself,
+          by simpa using hconflict⟩
+
+/-- **A transfer moves the grant to the recipient, under the identity it had.** -/
+theorem transferGrant?_yields_the_transfer {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant) :
+    next.grantAt? id = some { grant with holder := recipient } := by
+  obtain ⟨hnext, _, _, _⟩ := transferGrant?_eq h hat
+  subst hnext
+  show (state.grants.insert id { grant with holder := recipient }).lookup id = _
+  rw [FiniteMap.lookup_insert_self]
+
+/--
+**A transfer that happened was the holder's own, and went somewhere else.**
+
+The guards read back out. Review found `transferGrant?_eq` extracting these two facts
+with every one of its five callers discarding them as `_` — a carried fact with no
+reader, in a private lemma, which is the same class this layer's `ConsultedAudit.py`
+exists for and which no audit can see inside a proof.
+-/
+theorem transferGrant?_was_by_the_holder {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant) :
+    grant.holder = actor ∧ recipient ≠ actor := by
+  obtain ⟨_, hholder, hself, _⟩ := transferGrant?_eq h hat
+  exact ⟨hholder, hself⟩
+
+/--
+**A transfer leaves no conflicting pair.**
+
+§7.3's issuance rule holding across a transfer as well as an issue, and the reason
+the guard is more than a formality: `LoanConflicts` needs distinct holders, so a
+context may hold two write grants over one range and `issue?` is right to accept the
+second. Moving either to a third context turns that pair into the conflict this
+refuses.
+-/
+theorem transferGrant?_leaves_no_conflict {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    {entry : GrantId × AuthorityGrant}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant) (hmem : entry ∈ state.grantEntries)
+    (hid : entry.1 ≠ id) :
+    ¬ state.LoanConflicts entry.2 { grant with holder := recipient } := by
+  obtain ⟨_, _, _, hconflict⟩ := transferGrant?_eq h hat
+  have := List.any_eq_false.mp hconflict entry hmem
+  simpa [hid] using this
+
+/-- A transfer leaves every other identity alone. -/
+theorem transferGrant?_other {state next : MemoryState} {actor : ContextId}
+    {id other : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant) (hne : other ≠ id) :
+    next.grantAt? other = state.grantAt? other := by
+  obtain ⟨hnext, _, _, _⟩ := transferGrant?_eq h hat
+  subst hnext
+  show (state.grants.insert id { grant with holder := recipient }).lookup other = _
+  rw [FiniteMap.lookup_insert_ne _ hne]
+  rfl
+
+/-!
+## The authority changes an operation declares
+
+`AuthorityDelta` is the operation-level vocabulary; this is where a declared change
+meets the doors above. `Grass/Op/Step.lean` consults it in `refusalOf` and applies it
+on the committing branch, which is what gives the five doors a caller that is not a
+fixture.
+
+**One function, not a predicate and an applier.** `Grass/Obligation/Delta.lean` and
+`Grass/Op/Step.lean` do the obligation ledger the other way: `LedgerDelta.Applicable`
+is a `Prop` saying a delta may be applied and `applyDelta` is a separate function
+that applies it — two sources of truth, and a clause added to one and forgotten in the
+other is a silent divergence. An `Option`-returning applier cannot diverge from
+itself. The ledger cannot be brought all the way to this shape without rewriting every
+fixture that states `LedgerEffectApplicable`, so it is tied by one theorem and one
+construction instead: `Grass/Op/Step.lean`'s `ledgerEffectApplicable_iff_isSome` says
+the predicate is exactly the applier succeeding, and the transition installs that
+applier's own result rather than recomputing the fold, so the two cannot disagree on
+the path the transition takes.
+
+This named a second theorem for the construction half, and no such theorem exists --
+one of three dead citations `Tools/CitationAudit.py` could not see because its
+citation pattern omitted `?` while its declaration pattern accepted it, so every
+citation of an `Option`-returning door was unadjudicated. A construction argument is
+worth stating as one; naming it as a theorem is worth less than silence.
+-/
+
+/--
+Apply one declared authority change, or refuse.
+
+**The actor is the access's context**, and this is where a delta is *authorized* as
+opposed to merely accepted by the map. Three of the five doors take no actor —
+`issue?` reads the lender from the grant it is given, and `splitGrant?` and
+`joinGrants?` are re-descriptions the map alone can check — so their actor rules are
+here:
+
+- an `issue` must name the acting context as its **lender**. Without this a context
+  could lend bytes another context holds. `MayLend` bounds what the *named* lender
+  can lend, so the forgery conjures no authority out of nothing; what it does is let
+  one context strip another's exclusivity by lending that other's bytes to itself,
+  which is the seizure `MayLend` closed reached by a different route.
+- a `split` or a `join` must be performed by the **holder**, because it is that
+  context's authority being re-described and a stranger re-describing it changes
+  which identities the holder must return. An unknown identity falls through to the
+  door, which refuses it and says so.
+- `returnGrant?` and `transferGrant?` already take a context and check it, so they
+  are passed the actor and nothing is added here.
+
+Splitting the actor rules from the invariant checks has a cost and it is recorded
+rather than hidden: a caller reaching `issue?` directly can still name any lender.
+Closing it means an `actor` parameter on `issue?` and ninety-odd call sites, worth
+doing deliberately rather than as a side effect of this commit;
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 has it.
+-/
+def applyAuthorityDelta? (state : MemoryState) (actor : ContextId) :
+    AuthorityDelta → Option MemoryState
+  | .issue id grant =>
+      if grant.lender ≠ actor then Option.none else state.issue? id grant
+  | .returnGrant id => state.returnGrant? actor id
+  | .split id low high boundary =>
+      if (state.grantAt? id).all (fun grant => decide (grant.holder = actor)) then
+        state.splitGrant? id low high boundary
+      else Option.none
+  | .join low high into =>
+      if (state.grantAt? low).all (fun grant => decide (grant.holder = actor)) then
+        state.joinGrants? low high into
+      else Option.none
+  | .transfer id recipient => state.transferGrant? actor id recipient
+
+/-- Apply every declared change, in order, refusing if any is refused. -/
+def applyAuthorityEffect? (state : MemoryState) (actor : ContextId) :
+    AuthorityEffect → Option MemoryState
+  | [] => some state
+  | delta :: rest =>
+      (state.applyAuthorityDelta? actor delta).bind fun next =>
+        next.applyAuthorityEffect? actor rest
+
+/-- Declaring nothing changes nothing, which is why the field can default to `[]`
+without every access having to think about it. -/
+@[simp] theorem applyAuthorityEffect?_nil (state : MemoryState) (actor : ContextId) :
+    state.applyAuthorityEffect? actor [] = some state := rfl
+
+/-- An accepted effect is the doors' work and nothing else: this is the equation a
+caller reasons with, and it is the reason `refusalOf` can decide applicability by
+running the same function the commit branch runs. -/
+theorem applyAuthorityEffect?_cons (state : MemoryState) (actor : ContextId)
+    (delta : AuthorityDelta) (rest : AuthorityEffect) :
+    state.applyAuthorityEffect? actor (delta :: rest) =
+      (state.applyAuthorityDelta? actor delta).bind fun next =>
+        next.applyAuthorityEffect? actor rest := rfl
+
+/-- **A forged lender is refused.** A context may declare a loan of what it holds or
+lent; it may not declare a loan on another context's behalf. -/
+theorem applyAuthorityDelta?_eq_none_of_forged_lender {state : MemoryState}
+    {actor : ContextId} {id : GrantId} {grant : AuthorityGrant}
+    (h : grant.lender ≠ actor) :
+    state.applyAuthorityDelta? actor (.issue id grant) = Option.none := by
+  show (if grant.lender ≠ actor then Option.none else state.issue? id grant) = Option.none
+  rw [if_pos h]
+
+/-- **A stranger may not split another context's grant.** -/
+theorem applyAuthorityDelta?_eq_none_of_stranger_split {state : MemoryState}
+    {actor : ContextId} {id low high : GrantId} {boundary : Nat} {grant : AuthorityGrant}
+    (hat : state.grantAt? id = some grant) (h : grant.holder ≠ actor) :
+    state.applyAuthorityDelta? actor (.split id low high boundary) = Option.none := by
+  show (if (state.grantAt? id).all (fun grant => decide (grant.holder = actor)) then
+      state.splitGrant? id low high boundary else Option.none) = Option.none
+  rw [if_neg (by simp [hat, h])]
+
+/-- **Nor join it.** -/
+theorem applyAuthorityDelta?_eq_none_of_stranger_join {state : MemoryState}
+    {actor : ContextId} {low high into : GrantId} {grant : AuthorityGrant}
+    (hat : state.grantAt? low = some grant) (h : grant.holder ≠ actor) :
+    state.applyAuthorityDelta? actor (.join low high into) = Option.none := by
+  show (if (state.grantAt? low).all (fun grant => decide (grant.holder = actor)) then
+      state.joinGrants? low high into else Option.none) = Option.none
+  rw [if_neg (by simp [hat, h])]
+
+/-!
+### Authority is not data
+
+Every door above changes the `grants` field and nothing else, so a declared
+authority change moves no bytes. `Grass/Op/Step.lean` needs that: the transition
+applies the effect and then writes the access's bytes on top, and its framing law
+— every cell the access did not declare is unchanged — would be false if a lend
+could touch a cell.
+
+Stated through `allocations`, because that is the field `cellAt?` and `byteAt?` read
+and it is public, so the fact is available to a caller who cannot see `grants`.
+-/
+
+/-- An issue changes the grant map only. -/
+theorem allocations_issue? {state issued : MemoryState} {id : GrantId}
+    {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
+    issued.allocations = state.allocations := by
+  unfold issue? at h
+  repeat' split at h
+  all_goals
+    first
+      | (injection h with h; subst h; rfl)
+      | exact absurd h (by simp)
+
+/-- A return changes the grant map only. -/
+theorem allocations_returnGrant? {state returned : MemoryState} {context : ContextId}
+    {id : GrantId} (h : state.returnGrant? context id = some returned) :
+    returned.allocations = state.allocations := by
+  unfold returnGrant? at h
+  repeat' split at h
+  all_goals
+    first
+      | (injection h with h; subst h; rfl)
+      | exact absurd h (by simp)
+
+/-- A split changes the grant map only. -/
+theorem allocations_splitGrant? {state next : MemoryState} {id low high : GrantId}
+    {boundary : Nat} (h : state.splitGrant? id low high boundary = some next) :
+    next.allocations = state.allocations := by
+  unfold splitGrant? at h
+  cases hlook : state.grants.lookup id with
+  | none => rw [hlook, Option.bind_none] at h; exact absurd h (by simp)
+  | some grant =>
+    rw [hlook, Option.bind_some] at h
+    repeat' split at h
+    all_goals
+      first
+        | (injection h with h; subst h; rfl)
+        | exact absurd h (by simp)
+
+/-- A join changes the grant map only. -/
+theorem allocations_joinGrants? {state next : MemoryState} {low high into : GrantId}
+    (h : state.joinGrants? low high into = some next) :
+    next.allocations = state.allocations := by
+  unfold joinGrants? at h
+  cases hlow : state.grants.lookup low with
+  | none => rw [hlow, Option.bind_none] at h; exact absurd h (by simp)
+  | some lowGrant =>
+    rw [hlow, Option.bind_some] at h
+    cases hhigh : state.grants.lookup high with
+    | none => rw [hhigh, Option.bind_none] at h; exact absurd h (by simp)
+    | some highGrant =>
+      rw [hhigh, Option.bind_some] at h
+      repeat' split at h
+      all_goals
+        first
+          | (injection h with h; subst h; rfl)
+          | exact absurd h (by simp)
+
+/-- A transfer changes the grant map only. -/
+theorem allocations_transferGrant? {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId}
+    (h : state.transferGrant? actor id recipient = some next) :
+    next.allocations = state.allocations := by
+  unfold transferGrant? at h
+  cases hlook : state.grants.lookup id with
+  | none => rw [hlook, Option.bind_none] at h; exact absurd h (by simp)
+  | some grant =>
+    rw [hlook, Option.bind_some] at h
+    repeat' split at h
+    all_goals
+      first
+        | (injection h with h; subst h; rfl)
+        | exact absurd h (by simp)
+
+/-- **A declared authority change moves no bytes**, one delta at a time. -/
+theorem allocations_applyAuthorityDelta? {state next : MemoryState} {actor : ContextId}
+    {delta : AuthorityDelta} (h : state.applyAuthorityDelta? actor delta = some next) :
+    next.allocations = state.allocations := by
+  cases delta with
+  | issue id grant =>
+    have h' : (if grant.lender ≠ actor then Option.none else state.issue? id grant)
+        = some next := h
+    split at h'
+    · exact absurd h' (by simp)
+    · exact allocations_issue? h'
+  | returnGrant id =>
+    have h' : state.returnGrant? actor id = some next := h
+    exact allocations_returnGrant? h'
+  | split id low high boundary =>
+    have h' : (if (state.grantAt? id).all (fun grant => decide (grant.holder = actor)) then
+        state.splitGrant? id low high boundary else Option.none) = some next := h
+    split at h'
+    · exact allocations_splitGrant? h'
+    · exact absurd h' (by simp)
+  | join low high into =>
+    have h' : (if (state.grantAt? low).all (fun grant => decide (grant.holder = actor)) then
+        state.joinGrants? low high into else Option.none) = some next := h
+    split at h'
+    · exact allocations_joinGrants? h'
+    · exact absurd h' (by simp)
+  | transfer id recipient =>
+    have h' : state.transferGrant? actor id recipient = some next := h
+    exact allocations_transferGrant? h'
+
+/-- **And a whole declared effect moves no bytes.** -/
+theorem allocations_applyAuthorityEffect? {state next : MemoryState} {actor : ContextId} :
+    ∀ {effect : AuthorityEffect}, state.applyAuthorityEffect? actor effect = some next →
+      next.allocations = state.allocations := by
+  intro effect
+  induction effect generalizing state with
+  | nil =>
+    intro h
+    injection h with h
+    subst h
+    rfl
+  | cons delta rest ih =>
+    intro h
+    rw [applyAuthorityEffect?_cons] at h
+    cases hd : state.applyAuthorityDelta? actor delta with
+    | none => rw [hd] at h; exact absurd h (by simp)
+    | some mid =>
+      rw [hd, Option.bind_some] at h
+      exact (ih h).trans (allocations_applyAuthorityDelta? hd)
+
+@[simp] theorem grantAt?_eq_lookup (state : MemoryState) (id : GrantId) :
+    state.grantAt? id = state.grants.lookup id := rfl
+
+@[simp] theorem grantEntries_eq (state : MemoryState) :
+    state.grantEntries = state.grants.entries := rfl
+
+/-- A successful issue records the grant under the identity it names. -/
+theorem grantAt?_issue?_self {state issued : MemoryState} {id : GrantId}
+    {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
+    issued.grantAt? id = some grant := by
+  unfold issue? at h
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  injection h with h
+  subst h
+  exact FiniteMap.lookup_insert_self _ _ _
+
+/-- **A reissued identity is refused**, which is §3's "a return consumes that exact
+identity" read from the other side: an identity is consumed by a return and by
+nothing else. -/
+theorem issue?_eq_none_of_reissued (state : MemoryState) {id : GrantId}
+    (grant : AuthorityGrant) (h : (state.grantAt? id).isSome) :
+    state.issue? id grant = Option.none := by
+  unfold issue?
+  rw [if_pos (show (state.grants.lookup id).isSome from h)]
+
+/-- An issue happens only into a free identity. -/
+theorem grantAt?_eq_none_of_issue? {state issued : MemoryState} {id : GrantId}
+    {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
+    state.grantAt? id = Option.none := by
+  unfold issue? at h
+  split at h
+  · exact absurd h (by simp)
+  · next hfresh => simpa using hfresh
+
+/-- **A return consumes the identity it names.** -/
+theorem grantAt?_returnGrant?_self {state returned : MemoryState} {context : ContextId}
+    {id : GrantId} (h : state.returnGrant? context id = some returned) :
+    returned.grantAt? id = Option.none := by
+  unfold returnGrant? at h
+  split at h
+  · split at h
+    · injection h with h
+      subst h
+      exact FiniteMap.lookup_erase_self _ _
+    · exact absurd h (by simp)
+  · exact absurd h (by simp)
+
+/-- Returning one grant leaves every other identity alone. -/
+theorem grantAt?_returnGrant?_ne {state returned : MemoryState} {context : ContextId}
+    {id other : GrantId} (h : state.returnGrant? context id = some returned)
+    (hne : other ≠ id) : returned.grantAt? other = state.grantAt? other := by
+  unfold returnGrant? at h
+  split at h
+  · split at h
+    · injection h with h
+      subst h
+      exact FiniteMap.lookup_erase_ne _ hne
+    · exact absurd h (by simp)
+  · exact absurd h (by simp)
+
+/-- **A context that neither holds nor lent it may not return it.** -/
+theorem returnGrant?_eq_none_of_stranger {state : MemoryState} {context : ContextId}
+    {id : GrantId} {grant : AuthorityGrant} (hlook : state.grantAt? id = some grant)
+    (hholder : grant.holder ≠ context) (hlender : grant.lender ≠ context) :
+    state.returnGrant? context id = Option.none := by
+  unfold returnGrant?
+  rw [show state.grants.lookup id = some grant from hlook]
+  exact if_neg (fun h => h.elim hholder hlender)
+
+/-- **And the lender may return what it lent.** -/
+theorem returnGrant?_isSome_of_lender {state : MemoryState} {context : ContextId}
+    {id : GrantId} {grant : AuthorityGrant} (hlook : state.grantAt? id = some grant)
+    (h : grant.lender = context) : (state.returnGrant? context id).isSome := by
+  unfold returnGrant?
+  rw [show state.grants.lookup id = some grant from hlook]
+  simp only []
+  rw [if_pos (Or.inr h)]
+  rfl
+
+/-- And a return naming no live grant is refused rather than treated as a no-op. -/
+theorem returnGrant?_eq_none_of_absent {state : MemoryState} {context : ContextId}
+    {id : GrantId} (h : state.grantAt? id = Option.none) :
+    state.returnGrant? context id = Option.none := by
+  unfold returnGrant?
+  rw [show state.grants.lookup id = Option.none from h]
+
+/--
+`state.AuthorizedAt grant context provenance offset intent` holds when this grant
+lets `context` touch that byte, in this state.
+
+Six clauses: the holder is the context performing the access, the grant is over the
+same *bytes*, both provenances are current, the grant's range covers the byte, and
+the rights permit the intent.
+
+**On the state, and using `SharesBytes`.** This was a pure function on provenances in
+`Grass/Memory/Authority.lean`, using `Provenance.SameStorage` — equal `space`, `root`
+and `epoch`. That is the relation this layer has now moved off twice for being wrong
+in the unsafe direction, and leaving it there made it wrong in the *other* direction:
+`MemoryState.grantsOver` sees aliases and it did not, so a holder reaching its own
+lent bytes through a declared alias was frozen by its own loan and authorized by
+nothing. §7.5's mapped file and host-visible device buffer are exactly that shape.
+Whether two allocations name the same bytes is a fact about the state, so this takes
+the state.
+
+The `space` conjunct is gone with `SameStorage` and is not replaced. An access is
+checked against its own allocation's space by `AccessDescriptor.WellFormedIn` and by
+`denialOf`; requiring the *grant* to name the same space as well would refuse a
+device engine's grant over a host-visible buffer, which is the case §7.5 exists to
+describe.
+
+**At one byte, not over a range**, and that is deliberate. A range-shaped version
+existed beside this one, `Granted` moved off it, and it kept its four safety theorems
+— so the theorems a reader cites to believe the gate is safe stopped bearing on the
+gate. Review found it. There is one predicate now and the negatives below are stated
+over it.
+
+`Contains` compares offsets relative to a root, and aliased allocations are assumed
+to agree offset for offset — `MemoryState.aliases` records no offset mapping.
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records that.
+
+**Two epoch conjuncts, and only one is reachable.** `CurrentEpoch provenance` is the
+*access's* epoch and `not_authorizedAt_of_stale_epoch` states it. `CurrentEpoch
+grant.provenance` is the *grant's*, and no state the doors can build has a grant whose
+own epoch is stale: `issue?` requires the provenance live, and
+`allocate?_eq_none_of_outstanding` refuses a record change while any grant is
+outstanding over the bytes, so the epoch cannot move under one. `MemoryState.mk` is
+private, so no fixture can construct the state either.
+
+Kept for the same reason and in the same direction as `MayLend`'s identical conjunct,
+whose docstring argues it out at length: refusing is the narrowing direction, and a
+grant naming a defunct epoch should authorize nothing whether or not a door can build
+one. The difference from that case is that `MayLend` said so and this said nothing --
+review found the conjunct discriminated by nothing here and had to reconstruct the
+argument from the sibling.
+-/
+def AuthorizedAt (state : MemoryState) (grant : AuthorityGrant) (context : ContextId)
+    (provenance : Provenance) (offset : Nat) (intent : AccessIntent) : Prop :=
+  grant.holder = context ∧
+  state.SharesBytes grant.provenance.root provenance.root ∧
+  state.CurrentEpoch grant.provenance ∧
+  state.CurrentEpoch provenance ∧
+  grant.range.Covers offset ∧
+  grant.rights.Permits intent
+
+instance (state : MemoryState) (grant : AuthorityGrant) (context : ContextId)
+    (provenance : Provenance) (offset : Nat) (intent : AccessIntent) :
+    Decidable (state.AuthorizedAt grant context provenance offset intent) :=
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+
+/-- A grant held by one context authorizes nothing for another. Authority is not
+ambient: `docs/FOUNDATION.md` law 6 forbids ambient provider choice, and the same
+reading applies to authority a context did not receive. -/
+theorem not_authorizedAt_of_other_holder {state : MemoryState} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {offset : Nat}
+    {intent : AccessIntent} (h : grant.holder ≠ context) :
+    ¬ state.AuthorizedAt grant context provenance offset intent := fun ha => h ha.1
+
+/-- A grant over storage that does not share bytes with the access authorizes
+nothing, however their offsets compare (`docs/MEMORY_MODEL.md` §7.5). -/
+theorem not_authorizedAt_of_other_storage {state : MemoryState} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {offset : Nat}
+    {intent : AccessIntent}
+    (h : ¬ state.SharesBytes grant.provenance.root provenance.root) :
+    ¬ state.AuthorizedAt grant context provenance offset intent := fun ha => h ha.2.1
+
+/-- A read-only grant does not authorize a write. -/
+theorem not_authorizedAt_of_insufficient_rights {state : MemoryState}
+    {grant : AuthorityGrant} {context : ContextId} {provenance : Provenance}
+    {offset : Nat} {intent : AccessIntent} (h : ¬ grant.rights.Permits intent) :
+    ¬ state.AuthorizedAt grant context provenance offset intent :=
+  fun ha => h ha.2.2.2.2.2
+
+/-- A grant over a defunct epoch authorizes nothing, and neither does any grant to a
+stale pointer. §2's reuse rule, at the authority gate. -/
+theorem not_authorizedAt_of_stale_epoch {state : MemoryState} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {offset : Nat}
+    {intent : AccessIntent} (h : ¬ state.CurrentEpoch provenance) :
+    ¬ state.AuthorizedAt grant context provenance offset intent := fun ha => h ha.2.2.2.1
+
+/-- A grant whose range covers a whole access covers each of its bytes. The bridge a
+caller with one covering grant uses to reach `Granted`. -/
+theorem authorizedAt_of_covering {state : MemoryState} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+    {intent : AccessIntent} {i : Nat} (hi : i < range.size)
+    (hcover : grant.range.Contains range)
+    (hholder : grant.holder = context)
+    (hshares : state.SharesBytes grant.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch grant.provenance)
+    (haccess : state.CurrentEpoch provenance)
+    (hrights : grant.rights.Permits intent) :
+    state.AuthorizedAt grant context provenance (range.start + i) intent := by
+  refine ⟨hholder, hshares, hgrant, haccess, ?_, hrights⟩
+  rw [ByteRange.contains_def] at hcover
+  rw [ByteRange.covers_def]
+  omega
 
 /--
 `state.Granted context provenance range intent` holds when some live grant
@@ -94,85 +2169,1525 @@ is finite.
 -/
 def Granted (state : MemoryState) (context : ContextId) (provenance : Provenance)
     (range : ByteRange) (intent : AccessIntent) : Prop :=
-  ∃ entry ∈ state.grants.entries,
-    entry.2.Authorizes context provenance range intent
+  ∀ i, i < range.size →
+    ∃ entry ∈ state.grantEntries,
+      state.AuthorizedAt entry.2 context provenance (range.start + i) intent
 
 instance (state : MemoryState) (context : ContextId) (provenance : Provenance)
     (range : ByteRange) (intent : AccessIntent) :
     Decidable (state.Granted context provenance range intent) :=
-  inferInstanceAs (Decidable (∃ _ ∈ _, _))
+  inferInstanceAs (Decidable (∀ _, _ → ∃ _ ∈ _, _))
+
+/-- One grant covering the whole range is enough, which is the ordinary case. -/
+theorem granted_of_covering {state : MemoryState} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    {entry : GrantId × AuthorityGrant} (hmem : entry ∈ state.grantEntries)
+    (hcover : entry.2.range.Contains range)
+    (hholder : entry.2.holder = context)
+    (hshares : state.SharesBytes entry.2.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch entry.2.provenance)
+    (haccess : state.CurrentEpoch provenance)
+    (hrights : entry.2.rights.Permits intent) :
+    state.Granted context provenance range intent :=
+  fun _ hi => ⟨entry, hmem,
+    authorizedAt_of_covering hi hcover hholder hshares hgrant haccess hrights⟩
+
+/--
+The same bridge from an identity rather than from a membership.
+
+`granted_of_covering`'s `entry ∈ grantEntries` hypothesis is what a concrete fixture
+has and a symbolic caller does not — review found that every fixture in `Tests/`
+discharges it by `decide`, so the bridge had never been used the way a general
+theorem would use it. `Grass/Std/Logical/FiniteMap.lean`'s `mem_entries_of_lookup`
+supplies the step, and this is the form to reach for: it takes the `grantAt?` a caller
+holding a grant identity actually has.
+-/
+theorem granted_of_grantAt {state : MemoryState} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    {id : GrantId} {grant : AuthorityGrant} (hat : state.grantAt? id = some grant)
+    (hcover : grant.range.Contains range)
+    (hholder : grant.holder = context)
+    (hshares : state.SharesBytes grant.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch grant.provenance)
+    (haccess : state.CurrentEpoch provenance)
+    (hrights : grant.rights.Permits intent) :
+    state.Granted context provenance range intent :=
+  granted_of_covering (entry := (id, grant))
+    (Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hat)
+    hcover hholder hshares hgrant haccess hrights
+
+/--
+`Granted` refuted, from a refutation of every outstanding grant.
+
+The `not_authorizedAt_of_*` family says a *particular* grant does not authorize a
+particular byte, and `Granted` is existential over `grantEntries`, so those negatives
+composed into nothing: review pointed out that no theorem in the tree turns them into
+a `¬ Granted`. This is the composition. The `¬ range.IsEmpty` hypothesis is not
+incidental — `Granted` is vacuously true on an empty range, in every state, which is
+why `AccessDescriptor.WellFormedIn.rangeNonEmpty` exists two layers up.
+-/
+theorem not_granted_of_no_authorizing_entry {state : MemoryState} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (hne : ¬ range.IsEmpty)
+    (h : ∀ entry ∈ state.grantEntries, ∀ offset,
+      ¬ state.AuthorizedAt entry.2 context provenance offset intent) :
+    ¬ state.Granted context provenance range intent := by
+  intro hgranted
+  have hsize : 0 < range.size := by
+    rcases Nat.eq_zero_or_pos range.size with hzero | hpos
+    · exact absurd (by simpa [ByteRange.IsEmpty] using hzero) hne
+    · exact hpos
+  obtain ⟨entry, hmem, hauth⟩ := hgranted 0 hsize
+  exact h entry hmem (range.start + 0) hauth
+
+/--
+**A split preserves the source's authority.**
+
+The hypotheses are `granted_of_grantAt`'s, so this reads: whatever the source
+authorized, the parts still authorize. Per byte, because that is how `Granted`
+composes — an offset below the boundary is the low part's and one at or above it is
+the high part's, and `AuthorityGrant.covered_by_part` is that arithmetic.
+-/
+theorem splitGrant?_preserves_authority {state next : MemoryState} {id low high : GrantId}
+    {boundary : Nat} {grant : AuthorityGrant} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (h : state.splitGrant? id low high boundary = some next)
+    (hat : state.grantAt? id = some grant)
+    (hcover : grant.range.Contains range)
+    (hholder : grant.holder = context)
+    (hshares : state.SharesBytes grant.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch grant.provenance)
+    (haccess : state.CurrentEpoch provenance) (hrights : grant.rights.Permits intent) :
+    next.Granted context provenance range intent := by
+  obtain ⟨hlowat, hhighat, _⟩ := splitGrant?_yields_the_parts h hat
+  obtain ⟨hnext, _, _, _, _, _⟩ := splitGrant?_eq h hat
+  intro i hi
+  have hcontains : grant.range.start ≤ range.start ∧
+      range.start + range.size ≤ grant.range.start + grant.range.size := hcover
+  have hcovers : grant.range.Covers (range.start + i) := by
+    refine ⟨by omega, ?_⟩
+    show range.start + i < grant.range.start + grant.range.size
+    omega
+  have hshares' : next.SharesBytes grant.provenance.root provenance.root := by
+    subst hnext
+    exact (sharesBytes_grants state _ _ _).mpr hshares
+  have hgrant' : next.CurrentEpoch grant.provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr hgrant
+  have haccess' : next.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr haccess
+  rcases AuthorityGrant.covered_by_part (boundary := boundary) hcovers with hpart | hpart
+  · exact ⟨(low, grant.lowPart boundary),
+      Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hlowat,
+      hholder, hshares', hgrant', haccess', hpart, hrights⟩
+  · exact ⟨(high, grant.highPart boundary),
+      Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hhighat,
+      hholder, hshares', hgrant', haccess', hpart, hrights⟩
+
+/--
+**A split creates no authority.**
+
+The other direction, and the one that justifies not re-running `issue?`: every entry
+of the split state is one of the two parts or an entry the state already had, and
+each part's range lies inside the source's, so an offset a part authorizes is one the
+source authorized. `Grass/Std/Logical/FiniteMap.lean`'s `mem_entries_insert` and
+`mem_entries_erase` are what bound the new entry list from above; without them a
+theorem about a modified map has to unfold the association list here.
+-/
+theorem splitGrant?_creates_no_authority {state next : MemoryState}
+    {id low high : GrantId} {boundary : Nat} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+    {intent : AccessIntent}
+    (h : state.splitGrant? id low high boundary = some next)
+    (hat : state.grantAt? id = some grant)
+    (hgranted : next.Granted context provenance range intent) :
+    state.Granted context provenance range intent := by
+  obtain ⟨hnext, _, _, _, hstart, hstop⟩ := splitGrant?_eq h hat
+  intro i hi
+  obtain ⟨entry, hmem, hauth⟩ := hgranted i hi
+  have hsource : (id, grant) ∈ state.grantEntries :=
+    Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hat
+  have hmem' : entry = (high, grant.highPart boundary) ∨
+      entry = (low, grant.lowPart boundary) ∨ entry ∈ state.grantEntries := by
+    have hlist : entry ∈ (state.splitMap id low high boundary grant).entries := by
+      subst hnext; exact hmem
+    unfold splitMap at hlist
+    rcases Grass.Std.Logical.FiniteMap.mem_entries_insert hlist with hcase | hcase
+    · exact Or.inl hcase
+    · rcases Grass.Std.Logical.FiniteMap.mem_entries_insert hcase with hcase | hcase
+      · exact Or.inr (Or.inl hcase)
+      · exact Or.inr (Or.inr (Grass.Std.Logical.FiniteMap.mem_entries_erase hcase))
+  obtain ⟨hholder, hshares, hgrantepoch, haccess, hcovers, hrights⟩ := hauth
+  have hshares' : state.SharesBytes entry.2.provenance.root provenance.root := by
+    subst hnext
+    exact (sharesBytes_grants state _ _ _).mp hshares
+  have hgrantepoch' : state.CurrentEpoch entry.2.provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mp hgrantepoch
+  have haccess' : state.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mp haccess
+  have hstop' : boundary < grant.range.start + grant.range.size := hstop
+  rcases hmem' with hcase | hcase | hcase
+  · subst hcase
+    obtain ⟨hc1, hc2⟩ : boundary ≤ range.start + i ∧
+        range.start + i < boundary + (grant.range.start + grant.range.size - boundary) :=
+      hcovers
+    refine ⟨(id, grant), hsource, hholder, hshares', hgrantepoch', haccess', ?_, hrights⟩
+    refine ⟨Nat.le_trans (Nat.le_of_lt hstart) hc1, ?_⟩
+    show range.start + i < grant.range.start + grant.range.size
+    omega
+  · subst hcase
+    obtain ⟨hc1, hc2⟩ : grant.range.start ≤ range.start + i ∧
+        range.start + i < grant.range.start + (boundary - grant.range.start) := hcovers
+    refine ⟨(id, grant), hsource, hholder, hshares', hgrantepoch', haccess', ?_, hrights⟩
+    refine ⟨hc1, ?_⟩
+    show range.start + i < grant.range.start + grant.range.size
+    omega
+  · exact ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', hcovers, hrights⟩
+
+/--
+**A join preserves each source's authority.**
+
+Stated for the low source; `joinGrants?_preserves_high_authority` is the other. The
+joined range starts where the low one does and runs the sum of the two sizes, so
+every offset a source covered the join covers, and the adjacency check is what makes
+that true of the high source too.
+-/
+theorem joinGrants?_preserves_low_authority {state next : MemoryState}
+    {low high into : GrantId} {lowGrant highGrant : AuthorityGrant} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (h : state.joinGrants? low high into = some next)
+    (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant)
+    (hcover : lowGrant.range.Contains range)
+    (hholder : lowGrant.holder = context)
+    (hshares : state.SharesBytes lowGrant.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch lowGrant.provenance)
+    (haccess : state.CurrentEpoch provenance) (hrights : lowGrant.rights.Permits intent) :
+    next.Granted context provenance range intent := by
+  obtain ⟨hintoat, _, _⟩ := joinGrants?_yields_the_join h hlow hhigh
+  obtain ⟨hnext, _, _, _, _⟩ := joinGrants?_eq h hlow hhigh
+  intro i hi
+  obtain ⟨hc1, hc2⟩ : lowGrant.range.start ≤ range.start ∧
+      range.start + range.size ≤ lowGrant.range.start + lowGrant.range.size := hcover
+  have hshares' : next.SharesBytes lowGrant.provenance.root provenance.root := by
+    subst hnext
+    exact (sharesBytes_grants state _ _ _).mpr hshares
+  have hgrant' : next.CurrentEpoch lowGrant.provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr hgrant
+  have haccess' : next.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr haccess
+  refine ⟨(into, lowGrant.joined highGrant),
+    Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hintoat,
+    hholder, hshares', hgrant', haccess', ⟨?_, ?_⟩, hrights⟩
+  · show lowGrant.range.start ≤ range.start + i
+    omega
+  · show range.start + i <
+      lowGrant.range.start + (lowGrant.range.size + highGrant.range.size)
+    omega
+
+/-- The high source's authority survives too, which is where adjacency is used. -/
+theorem joinGrants?_preserves_high_authority {state next : MemoryState}
+    {low high into : GrantId} {lowGrant highGrant : AuthorityGrant} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (h : state.joinGrants? low high into = some next)
+    (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant)
+    (hcover : highGrant.range.Contains range)
+    (hholder : highGrant.holder = context)
+    (hshares : state.SharesBytes highGrant.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch highGrant.provenance)
+    (haccess : state.CurrentEpoch provenance) (hrights : highGrant.rights.Permits intent) :
+    next.Granted context provenance range intent := by
+  obtain ⟨hintoat, _, _⟩ := joinGrants?_yields_the_join h hlow hhigh
+  obtain ⟨hnext, _, _, hmatch, hadjacent⟩ := joinGrants?_eq h hlow hhigh
+  intro i hi
+  obtain ⟨hc1, hc2⟩ : highGrant.range.start ≤ range.start ∧
+      range.start + range.size ≤ highGrant.range.start + highGrant.range.size := hcover
+  have hstop : lowGrant.range.start + lowGrant.range.size = highGrant.range.start :=
+    hadjacent
+  have hholder' : (lowGrant.joined highGrant).holder = context := by
+    show lowGrant.holder = context
+    rw [hmatch]
+    exact hholder
+  have hprov : lowGrant.provenance = highGrant.provenance := by rw [hmatch]
+  have hrights' : (lowGrant.joined highGrant).rights.Permits intent := by
+    show lowGrant.rights.Permits intent
+    rw [hmatch]
+    exact hrights
+  have hshares' : next.SharesBytes (lowGrant.joined highGrant).provenance.root
+      provenance.root := by
+    subst hnext
+    refine (sharesBytes_grants state _ _ _).mpr ?_
+    show state.SharesBytes lowGrant.provenance.root provenance.root
+    rw [hprov]
+    exact hshares
+  have hgrant' : next.CurrentEpoch (lowGrant.joined highGrant).provenance := by
+    subst hnext
+    refine (currentEpoch_grants state _ _).mpr ?_
+    show state.CurrentEpoch lowGrant.provenance
+    rw [hprov]
+    exact hgrant
+  have haccess' : next.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr haccess
+  refine ⟨(into, lowGrant.joined highGrant),
+    Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hintoat,
+    hholder', hshares', hgrant', haccess', ⟨?_, ?_⟩, hrights'⟩
+  · show lowGrant.range.start ≤ range.start + i
+    omega
+  · show range.start + i < lowGrant.range.start + (lowGrant.range.size + highGrant.range.size)
+    omega
+
+/--
+**A join creates no authority.**
+
+The direction that justifies not re-running `issue?`, and the one adjacency is for: a
+gap between the sources would put bytes inside the joined range that neither source
+covered, and this theorem would be false. Every entry of the joined state is the
+joined grant or an entry the state already had, and the joined grant's every offset
+is one source's or the other's.
+-/
+theorem joinGrants?_creates_no_authority {state next : MemoryState}
+    {low high into : GrantId} {lowGrant highGrant : AuthorityGrant} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (h : state.joinGrants? low high into = some next)
+    (hlow : state.grantAt? low = some lowGrant)
+    (hhigh : state.grantAt? high = some highGrant)
+    (hgranted : next.Granted context provenance range intent) :
+    state.Granted context provenance range intent := by
+  obtain ⟨hnext, _, _, hmatch, hadjacent⟩ := joinGrants?_eq h hlow hhigh
+  intro i hi
+  obtain ⟨entry, hmem, hauth⟩ := hgranted i hi
+  have hmem' : entry = (into, lowGrant.joined highGrant) ∨
+      entry ∈ state.grantEntries := by
+    have hlist : entry ∈ (state.joinMap low high into
+        (lowGrant.joined highGrant)).entries := by
+      subst hnext; exact hmem
+    unfold joinMap at hlist
+    rcases Grass.Std.Logical.FiniteMap.mem_entries_insert hlist with hcase | hcase
+    · exact Or.inl hcase
+    · exact Or.inr (Grass.Std.Logical.FiniteMap.mem_entries_erase
+        (Grass.Std.Logical.FiniteMap.mem_entries_erase hcase))
+  obtain ⟨hholder, hshares, hgrantepoch, haccess, hcovers, hrights⟩ := hauth
+  have hshares' : state.SharesBytes entry.2.provenance.root provenance.root := by
+    subst hnext
+    exact (sharesBytes_grants state _ _ _).mp hshares
+  have hgrantepoch' : state.CurrentEpoch entry.2.provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mp hgrantepoch
+  have haccess' : state.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mp haccess
+  have hstop : lowGrant.range.start + lowGrant.range.size = highGrant.range.start :=
+    hadjacent
+  rcases hmem' with hcase | hcase
+  · subst hcase
+    obtain ⟨hc1, hc2⟩ : lowGrant.range.start ≤ range.start + i ∧
+        range.start + i <
+          lowGrant.range.start + (lowGrant.range.size + highGrant.range.size) := hcovers
+    rcases Nat.lt_or_ge (range.start + i) (lowGrant.range.start + lowGrant.range.size) with
+      hlt | hge
+    · refine ⟨(low, lowGrant), Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hlow,
+        ?_, ?_, ?_, haccess', ⟨hc1, ?_⟩, ?_⟩
+      · show lowGrant.holder = context
+        exact hholder
+      · show state.SharesBytes lowGrant.provenance.root provenance.root
+        exact hshares'
+      · show state.CurrentEpoch lowGrant.provenance
+        exact hgrantepoch'
+      · show range.start + i < lowGrant.range.start + lowGrant.range.size
+        omega
+      · show lowGrant.rights.Permits intent
+        exact hrights
+    · refine ⟨(high, highGrant), Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hhigh,
+        ?_, ?_, ?_, haccess', ⟨?_, ?_⟩, ?_⟩
+      · show highGrant.holder = context
+        rw [← show lowGrant.holder = highGrant.holder from by rw [hmatch]]
+        exact hholder
+      · show state.SharesBytes highGrant.provenance.root provenance.root
+        rw [← show lowGrant.provenance = highGrant.provenance from by rw [hmatch]]
+        exact hshares'
+      · show state.CurrentEpoch highGrant.provenance
+        rw [← show lowGrant.provenance = highGrant.provenance from by rw [hmatch]]
+        exact hgrantepoch'
+      · show highGrant.range.start ≤ range.start + i
+        omega
+      · show range.start + i < highGrant.range.start + highGrant.range.size
+        omega
+      · show highGrant.rights.Permits intent
+        rw [← show lowGrant.rights = highGrant.rights from by rw [hmatch]]
+        exact hrights
+  · exact ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', hcovers, hrights⟩
+
+/--
+**A transfer gives the recipient exactly what the holder had.**
+
+The hypotheses are `granted_of_grantAt`'s over the *transferred* grant, which differs
+from the source only in its holder, so this is the source's authority now standing in
+the recipient's name.
+-/
+theorem transferGrant?_grants_the_recipient {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant)
+    (hcover : grant.range.Contains range)
+    (hshares : state.SharesBytes grant.provenance.root provenance.root)
+    (hgrant : state.CurrentEpoch grant.provenance)
+    (haccess : state.CurrentEpoch provenance) (hrights : grant.rights.Permits intent) :
+    next.Granted recipient provenance range intent := by
+  have hmoved := transferGrant?_yields_the_transfer h hat
+  obtain ⟨hnext, _, _, _⟩ := transferGrant?_eq h hat
+  have hshares' : next.SharesBytes grant.provenance.root provenance.root := by
+    subst hnext
+    exact (sharesBytes_grants state _ _ _).mpr hshares
+  have hgrant' : next.CurrentEpoch grant.provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr hgrant
+  have haccess' : next.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mpr haccess
+  exact granted_of_grantAt hmoved hcover rfl hshares' hgrant' haccess' hrights
+
+/--
+**A transfer creates no authority for anyone but the recipient.**
+
+The safety half. Every entry of the transferred state is the moved grant or an entry
+the state already had, and the moved grant is held by the recipient, so a context
+that is not the recipient is authorized by exactly what authorized it before. What
+this deliberately does *not* say is that the old holder lost the bytes: it may hold
+other grants over them, and `Tests/Memory/Loans.lean` shows the concrete case where
+it holds none and the authority really is gone.
+-/
+theorem transferGrant?_creates_no_authority {state next : MemoryState} {actor : ContextId}
+    {id : GrantId} {recipient : ContextId} {grant : AuthorityGrant} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (h : state.transferGrant? actor id recipient = some next)
+    (hat : state.grantAt? id = some grant) (hne : context ≠ recipient)
+    (hgranted : next.Granted context provenance range intent) :
+    state.Granted context provenance range intent := by
+  obtain ⟨hnext, _, _, _⟩ := transferGrant?_eq h hat
+  intro i hi
+  obtain ⟨entry, hmem, hauth⟩ := hgranted i hi
+  have hmem' : entry = (id, { grant with holder := recipient }) ∨
+      entry ∈ state.grantEntries := by
+    have hlist : entry ∈ (state.grants.insert id { grant with holder := recipient }).entries := by
+      subst hnext; exact hmem
+    exact Grass.Std.Logical.FiniteMap.mem_entries_insert hlist
+  obtain ⟨hholder, hshares, hgrantepoch, haccess, hcovers, hrights⟩ := hauth
+  have hshares' : state.SharesBytes entry.2.provenance.root provenance.root := by
+    subst hnext
+    exact (sharesBytes_grants state _ _ _).mp hshares
+  have hgrantepoch' : state.CurrentEpoch entry.2.provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mp hgrantepoch
+  have haccess' : state.CurrentEpoch provenance := by
+    subst hnext
+    exact (currentEpoch_grants state _ _).mp haccess
+  rcases hmem' with hcase | hcase
+  · subst hcase
+    exact absurd (show recipient = context from hholder) (Ne.symm hne)
+  · exact ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', hcovers, hrights⟩
 
 /-- `state.GrantedOfKind` additionally requires the authorizing grant to be of a
 particular kind, which is how one provider distinguishes itself from another over
 the same table. -/
 def GrantedOfKind (state : MemoryState) (kind : GrantKind) (context : ContextId)
     (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) : Prop :=
-  ∃ entry ∈ state.grants.entries,
-    entry.2.kind = kind ∧ entry.2.Authorizes context provenance range intent
+  ∀ i, i < range.size →
+    ∃ entry ∈ state.grantEntries,
+      entry.2.kind = kind ∧
+        state.AuthorizedAt entry.2 context provenance (range.start + i) intent
 
 instance (state : MemoryState) (kind : GrantKind) (context : ContextId)
     (provenance : Provenance) (range : ByteRange) (intent : AccessIntent) :
     Decidable (state.GrantedOfKind kind context provenance range intent) :=
-  inferInstanceAs (Decidable (∃ _ ∈ _, _))
+  inferInstanceAs (Decidable (∀ _, _ → ∃ _ ∈ _, _))
 
 /-- A state with no grants authorizes nothing. Authority is held, not assumed. -/
 theorem not_granted_empty (context : ContextId) (provenance : Provenance)
-    (range : ByteRange) (intent : AccessIntent) :
+    {range : ByteRange} (hne : ¬ range.IsEmpty) (intent : AccessIntent) :
     ¬ empty.Granted context provenance range intent := by
-  rintro ⟨entry, hmem, -⟩
-  simp [empty, FiniteMap.empty] at hmem
+  intro h
+  have hpos : 0 < range.size := by
+    rw [ByteRange.isEmpty_def] at hne
+    omega
+  obtain ⟨entry, hmem, -⟩ := h 0 hpos
+  simp [empty, grantEntries, FiniteMap.empty] at hmem
 
-/-- `state.SharesBytes a b` holds when two allocations name the same storage,
-either because they are the same allocation or because the profile declared them
-aliased. -/
-def SharesBytes (state : MemoryState) (a b : AllocId) : Prop :=
-  a = b ∨ (a, b) ∈ state.aliases ∨ (b, a) ∈ state.aliases
+/--
+Record an allocation, or refuse.
 
-instance (state : MemoryState) (a b : AllocId) : Decidable (state.SharesBytes a b) :=
-  inferInstanceAs (Decidable (_ ∨ _ ∨ _))
+`Option`, and for the same reason `issue?` is. `FiniteMap.insert` replaces, so this
+is also the *re*-allocation operation, and `docs/MEMORY_MODEL.md` §5.1 makes
+reallocation conditional: "reallocation requires the return of all live use loans".
+Nothing checked that. A profile could bump an allocation's epoch under an outstanding
+grant, and the result is a grant that freezes the new storage — `grantsOver` has no
+epoch clause, deliberately — while authorizing nothing, since
+`MemoryState.AuthorizedAt` requires both provenances current. Review reached that
+state and found only the stale grant's holder or lender could clear it.
 
-theorem sharesBytes_refl (state : MemoryState) (a : AllocId) : state.SharesBytes a a :=
-  .inl rfl
+Refused rather than reconciled: which of the two the profile meant is not this
+module's to guess (`docs/FOUNDATION.md` law 8), and §5.1 already says which comes
+first.
 
-theorem SharesBytes.symm {state : MemoryState} {a b : AllocId}
-    (h : state.SharesBytes a b) : state.SharesBytes b a := by
-  rcases h with rfl | h | h
-  · exact .inl rfl
-  · exact .inr (.inr h)
-  · exact .inr (.inl h)
+**Teardown counts as well as reuse**, and an earlier version accepted it: it refused
+only an epoch change, and its own docstring listed "a liveness change" among the
+things always allowed. So `live := true → false` under an outstanding grant was
+admitted, and the consequence was silent rather than loud — `authorityOf` reports
+`unavailable` for a dead allocation, so every outstanding loan over it evaporated
+with no return and no violation, and a later record with the same epoch and
+`live := true` resurrected them. §5 requires arena teardown to take "the return of all
+live use loans" in the same breath as §5.1 requires it of reallocation.
 
-/-- Record a new allocation. -/
-def allocate (state : MemoryState) (id : AllocId) (record : AllocationRecord) :
-    MemoryState :=
-  { state with allocations := state.allocations.insert id record }
+**And the scan is alias-aware.** It matched `entry.2.provenance.root = id`, so a
+grant held over a mapped view did not block a reallocation of the file it maps, even
+though `SharesBytes` says they are the same bytes — the asymmetry this layer has now
+fixed three times in three places.
 
-/-- Declare that two allocations name the same storage. -/
+**And the guard was on the metadata, which is not the whole record.**
+`AllocationRecord.Metadata` deliberately omits `owners` and `bytes` -- `denialOf` reads
+neither, and leaving them out is what makes `denialOf_congr_of_agrees` the stronger
+statement -- so under an outstanding grant this refused a change to extent, epoch,
+space, source, permission, liveness and placement, and *accepted* a change to who owns
+the allocation or to what its bytes say.
+
+Both are authority. `owners` is the field `MayLend`'s lender disjunct and
+`Grass/Op/Step.lean`'s owner exemption read, so a context that wrote itself into it
+bought §3's authority over storage another context had lent out: review did exactly
+that and watched `a_stranger_may_not_join_the_atomic_protocol` and
+`the_stranger_may_not_seize_unheld_bytes` both flip, through one accepted call that
+changed no metadata. And `bytes` is raw memory, which §1's chokepoint sentence names
+before permissions or provenance -- review rewrote the first byte of a range frozen
+under a write loan.
+
+So the guard is the whole record now: while authority is outstanding over an
+identity's bytes, `allocate?` may not change that identity's record at all. That is
+narrower than "a reallocation is refused" and it is the right width, because the
+question §5.1 asks is not whether the caller called this a reallocation.
+
+A *fresh* identity is always accepted. An identity with nothing outstanding over it
+may be replaced freely, which is how a fixture builds a state and how a profile
+records a permission change or a placement.
+-/
+def allocate? (state : MemoryState) (id : AllocId) (record : AllocationRecord) :
+    Option MemoryState :=
+  match state.allocations.lookup id with
+  | some existing =>
+      if existing ≠ record ∧
+          state.grantEntries.any
+            (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) then
+        Option.none
+      else some { state with allocations := state.allocations.insert id record }
+  | Option.none => some { state with allocations := state.allocations.insert id record }
+
+/-- Allocate several records in order, refusing if any is refused.
+
+A fixture building a machine state allocates half a dozen things, and threading
+`Option` through that by hand buries the state it is trying to show. One
+`isSome` theorem beside the definition is the whole obligation. -/
+def allocateAll? (state : MemoryState) :
+    List (AllocId × AllocationRecord) → Option MemoryState
+  | [] => some state
+  | (id, record) :: rest => (state.allocate? id record).bind (·.allocateAll? rest)
+
+/-- What an allocation ends up as: `allocate?` writes the record it was given. -/
+theorem allocate?_lookup_self {state next : MemoryState} {id : AllocId}
+    {record : AllocationRecord} (h : state.allocate? id record = some next) :
+    next.allocations.lookup id = some record := by
+  unfold allocate? at h
+  split at h
+  · split at h
+    · exact absurd h (by simp)
+    · injection h with h
+      subst h
+      exact FiniteMap.lookup_insert_self _ _ _
+  · injection h with h
+    subst h
+    exact FiniteMap.lookup_insert_self _ _ _
+
+/-- And it leaves every other allocation alone. -/
+theorem allocate?_lookup_ne {state next : MemoryState} {id other : AllocId}
+    {record : AllocationRecord} (h : state.allocate? id record = some next)
+    (hne : other ≠ id) : next.allocations.lookup other = state.allocations.lookup other := by
+  unfold allocate? at h
+  split at h
+  · split at h
+    · exact absurd h (by simp)
+    · injection h with h
+      subst h
+      exact FiniteMap.lookup_insert_ne _ hne _
+  · injection h with h
+    subst h
+    exact FiniteMap.lookup_insert_ne _ hne _
+
+/-- **A fresh identity is always allocatable.** -/
+theorem allocate?_isSome_of_fresh (state : MemoryState) (id : AllocId)
+    (record : AllocationRecord) (h : state.allocations.lookup id = Option.none) :
+    (state.allocate? id record).isSome := by
+  unfold allocate?
+  rw [h]
+  rfl
+
+/-- **Reallocating under an outstanding grant is refused.** §5.1's precondition, as a
+refusal rather than as a sentence. -/
+theorem allocate?_eq_none_of_outstanding {state : MemoryState} {id : AllocId}
+    {record existing : AllocationRecord}
+    (hlook : state.allocations.lookup id = some existing)
+    (hchange : existing ≠ record)
+    (hgrants : state.grantEntries.any
+      (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) = true) :
+    state.allocate? id record = Option.none := by
+  unfold allocate?
+  rw [hlook]
+  simp only []
+  rw [if_pos (show existing ≠ record ∧ _ from ⟨hchange, hgrants⟩)]
+
+/-- **A record replaced by an equal one is accepted, grants or not**, which is all the
+identity case says.
+
+This theorem took `existing.metadata = record.metadata` and its docstring said "a
+permission, liveness or placement change is not a reallocation" -- which was false in
+both directions. Permission, liveness and placement are *in* the metadata, so those
+changes were refused under an outstanding grant, not accepted; and what the metadata
+left out was `owners` and `bytes`, so those changes were accepted, which is the hole
+`allocate?`'s guard now closes. Review found the sentence and the hole together. -/
+theorem allocate?_isSome_of_same_record {state : MemoryState} {id : AllocId}
+    {record existing : AllocationRecord}
+    (hlook : state.allocations.lookup id = some existing)
+    (hsame : existing = record) :
+    (state.allocate? id record).isSome := by
+  unfold allocate?
+  rw [hlook]
+  simp only []
+  rw [if_neg (fun h => h.1 hsame)]
+  rfl
+
+/-- **And a record replaced under nothing outstanding is accepted however it
+changes.** The other half of the guard, and the half that keeps `allocate?` usable:
+a profile that has lent nothing out may re-record whatever it likes. -/
+theorem allocate?_isSome_of_nothing_outstanding {state : MemoryState} {id : AllocId}
+    {record : AllocationRecord}
+    (hgrants : state.grantEntries.any
+      (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) = false) :
+    (state.allocate? id record).isSome := by
+  unfold allocate?
+  cases hlook : state.allocations.lookup id with
+  | none => rfl
+  | some existing =>
+    simp only []
+    rw [if_neg (fun h => by rw [hgrants] at h; exact absurd h.2 (by simp))]
+    rfl
+
+/--
+Tear down several allocations at once, or refuse.
+
+§5's arena reset "requires returning all live use loans", and `allocate?` refuses one
+reallocation at a time, so a profile resetting an arena walked its allocations itself
+and nothing made the walk all-or-nothing: a walk that stopped halfway left some
+storage dead and some live, with no record that it had stopped. This is the bulk
+operation. Every named allocation ends dead, or `Option.none` and the state is
+untouched.
+
+**An identity the table does not hold is refused** rather than treated as already
+gone. A caller naming an allocation that was never allocated has lost track of its
+arena, and [FOUNDATION.md](../../docs/FOUNDATION.md) law 8 says say so rather than
+carry on.
+
+**The grant check is `allocate?`'s**, which is the point of routing through it: a
+teardown is a metadata change, so every outstanding grant over the storage refuses
+it, alias-aware, and §5's precondition is the refusal it already was for one
+allocation.
+
+**What is still owed is the arena itself.** The list comes from the caller, so
+nothing here knows it names *every* allocation of the arena being reset — a caller
+that forgets one tears down the rest and leaves it live, and this operation cannot
+tell. Closing that needs an arena identity on `AllocationRecord`, which §5's model
+owes; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it.
+-/
+def tearDown? (state : MemoryState) : List AllocId → Option MemoryState
+  | [] => some state
+  | id :: rest =>
+      (state.allocations.lookup id).bind fun record =>
+        (state.allocate? id { record with live := false }).bind (·.tearDown? rest)
+
+/-- Tearing down nothing changes nothing. -/
+@[simp] theorem tearDown?_nil (state : MemoryState) : state.tearDown? [] = some state := rfl
+
+/-- **An identity the table does not hold refuses the whole teardown.** -/
+theorem tearDown?_eq_none_of_absent {state : MemoryState} {id : AllocId}
+    {rest : List AllocId} (h : state.allocations.lookup id = Option.none) :
+    state.tearDown? (id :: rest) = Option.none := by
+  unfold tearDown?
+  rw [h, Option.bind_none]
+
+/-- **An outstanding grant refuses it**, through `allocate?`. -/
+theorem tearDown?_eq_none_of_outstanding {state : MemoryState} {id : AllocId}
+    {record : AllocationRecord} {rest : List AllocId}
+    (hlook : state.allocations.lookup id = some record) (hlive : record.live = true)
+    (hgrants : state.grantEntries.any
+      (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) = true) :
+    state.tearDown? (id :: rest) = Option.none := by
+  unfold tearDown?
+  rw [hlook, Option.bind_some]
+  have hmeta : record ≠ ({ record with live := false } : AllocationRecord) := by
+    intro hcontra
+    have : record.live = false := congrArg AllocationRecord.live hcontra
+    rw [hlive] at this
+    exact absurd this (by simp)
+  rw [allocate?_eq_none_of_outstanding hlook hmeta hgrants, Option.bind_none]
+
+/-- A teardown leaves every identity it does not name alone, which is what makes the
+law below about the names rather than about the whole table. -/
+theorem tearDown?_lookup_of_not_mem {state : MemoryState} :
+    ∀ {ids : List AllocId} {next : MemoryState}, state.tearDown? ids = some next →
+      ∀ {id : AllocId}, id ∉ ids →
+        next.allocations.lookup id = state.allocations.lookup id := by
+  intro ids
+  induction ids generalizing state with
+  | nil =>
+    intro next h id _
+    injection h with h
+    subst h
+    rfl
+  | cons head rest ih =>
+    intro next h id hmem
+    unfold tearDown? at h
+    cases hlook : state.allocations.lookup head with
+    | none => rw [hlook, Option.bind_none] at h; exact absurd h (by simp)
+    | some record =>
+      rw [hlook, Option.bind_some] at h
+      cases hstep : state.allocate? head { record with live := false } with
+      | none => rw [hstep, Option.bind_none] at h; exact absurd h (by simp)
+      | some stepped =>
+        rw [hstep, Option.bind_some] at h
+        have hne : id ≠ head := fun hid => hmem (hid ▸ List.mem_cons_self)
+        have hrest : id ∉ rest := fun hin => hmem (List.mem_cons_of_mem _ hin)
+        rw [ih h hrest, allocate?_lookup_ne hstep hne]
+
+/--
+**Everything named is dead afterwards.**
+
+The law the bulk operation exists for, and the one a hand-written walk could not
+state: not "each call succeeded" but "every allocation in the list is dead in the
+state that came out". Duplicates in the list are harmless — the second teardown of an
+identity finds it already dead and `allocate?` accepts a record it already holds.
+-/
+theorem tearDown?_kills_every_name {state : MemoryState} :
+    ∀ {ids : List AllocId} {next : MemoryState}, state.tearDown? ids = some next →
+      ∀ id ∈ ids, (next.allocations.lookup id).any (fun record => !record.live) = true := by
+  intro ids
+  induction ids generalizing state with
+  | nil => intro next _ id hmem; exact absurd hmem (by simp)
+  | cons head rest ih =>
+    intro next h id hmem
+    unfold tearDown? at h
+    cases hlook : state.allocations.lookup head with
+    | none => rw [hlook, Option.bind_none] at h; exact absurd h (by simp)
+    | some record =>
+      rw [hlook, Option.bind_some] at h
+      cases hstep : state.allocate? head { record with live := false } with
+      | none => rw [hstep, Option.bind_none] at h; exact absurd h (by simp)
+      | some stepped =>
+        rw [hstep, Option.bind_some] at h
+        rcases List.mem_cons.mp hmem with hcase | hcase
+        · subst hcase
+          by_cases hlater : id ∈ rest
+          · exact ih h id hlater
+          · have hkept : next.allocations.lookup id = stepped.allocations.lookup id :=
+              tearDown?_lookup_of_not_mem h hlater
+            rw [hkept, allocate?_lookup_self hstep]
+            rfl
+        · exact ih h id hcase
+
+/--
+Declare that two allocations name the same storage.
+
+**Deliberately not an `Option`-returning door**, unlike every other mutator here, and
+the reason is worth stating because review asked. Declaring an alias can put two
+grants into conflict that did not conflict when they were issued: nothing
+re-examines them, and `docs/MEMORY_MODEL.md` §7.5 makes the mapping a real
+transition. The tempting fix is to refuse such an alias. That would be a lie in the
+other direction — if the platform mapped two views of one file, the alias *exists*,
+and a `MemoryState` with no way to record it does not describe the machine.
+
+What makes the unchecked form safe is that the question is asked at access time
+instead. `Grass/Op/Step.lean`'s `refusalOf` carries both halves of §3's rule, so in
+the conflicting state each holder is frozen by the other and neither may write:
+`Tests/Op/StandardLoan.lean`'s
+`an_alias_declared_after_issue_is_refused_without_a_provider` is that state, stepped
+with no providers listed. The state is stuck rather than unsound, which is the
+conservative answer §7.5's own wording asks for.
+
+`Tools/DoorAudit.py` still guards it, because a `Grass/` caller changing the alias
+set is changing authority whether or not the function refuses anything.
+
+**Unmapping has no representation at all.** §7.5's unmapping would remove a pair,
+and nothing here can; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it.
+-/
 def alias (state : MemoryState) (a b : AllocId) : MemoryState :=
   { state with aliases := (a, b) :: state.aliases }
 
-/-- Mark a range initialized. -/
-def setInitialized (state : MemoryState) (id : AllocId) (range : ByteRange) : MemoryState :=
+/--
+Write `bytes` at `start` in allocation `id`.
+
+`initializes` is `AccessDescriptor.producesInitialized`: a completed write does
+not always credit initialization, and `ByteStore` carries that per run so the two
+facts cannot disagree. A write to an allocation that is not there changes
+nothing; `performAccess` reaches this only after `denialOf` has found the record,
+so the missing case is unreachable there rather than silently permissive.
+-/
+def write (state : MemoryState) (id : AllocId) (start : Nat) (bytes : ByteSeq)
+    (initializes : Bool) : MemoryState :=
   match state.allocations.lookup id with
   | Option.none => state
   | some record =>
       { state with
         allocations := state.allocations.insert id
-          { record with
-            initialized := record.initialized ++
-              (List.range range.size).map (range.start + ·) } }
+          { record with bytes := record.bytes.write start bytes initializes } }
+
+/-- **Writing bytes changes no authority.** Half of "authority is not data", from
+the other side: `cellAt?_applyAuthorityEffect?` says a declared authority change
+moves no bytes, and this says a write grants nothing. Both are needed by
+`Grass/Op/Step.lean`, which does one and then the other in a single transition. -/
+@[simp] theorem grantEntries_write (state : MemoryState) (id : AllocId) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) :
+    (state.write id start bytes initializes).grantEntries = state.grantEntries := by
+  unfold write
+  split <;> rfl
+
+/-- The byte allocation `id` holds at `offset`, if it holds one. -/
+def byteAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option Byte :=
+  (state.allocations.lookup id).bind (·.bytes.byteAt? offset)
+
+/-- What allocation `id` holds at `offset`: the byte and whether it counts as
+initialized. Both from one lookup, for the reason `ByteStore.cellAt?` gives. -/
+def cellAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option (Byte × Bool) :=
+  (state.allocations.lookup id).bind (·.bytes.cellAt? offset)
+
+/-- A cell is a function of the allocation table alone. -/
+theorem cellAt?_of_allocations_eq {a b : MemoryState} (h : a.allocations = b.allocations)
+    (id : AllocId) (offset : Nat) : a.cellAt? id offset = b.cellAt? id offset := by
+  unfold cellAt?
+  rw [h]
+
+/-- The framing form `Grass/Op/Step.lean` uses. -/
+theorem cellAt?_applyAuthorityEffect? {state next : MemoryState} {actor : ContextId}
+    {effect : AuthorityEffect} (h : state.applyAuthorityEffect? actor effect = some next)
+    (id : AllocId) (offset : Nat) : next.cellAt? id offset = state.cellAt? id offset :=
+  cellAt?_of_allocations_eq (allocations_applyAuthorityEffect? h) id offset
+
+/-- The byte is the cell's first component. Both go through one lookup, so a
+framing fact proved for cells is immediately a framing fact for bytes. -/
+@[simp] theorem byteAt?_eq_map_cellAt? (state : MemoryState) (id : AllocId) (offset : Nat) :
+    state.byteAt? id offset = (state.cellAt? id offset).map Prod.fst := by
+  unfold byteAt? cellAt? ByteStore.byteAt?
+  cases state.allocations.lookup id <;> simp
+
+/-- `state.InitializedAt id offset` holds when that byte is initialized. The
+pointwise form of `RangeInitialized`, which a padding argument needs because
+padding is a set of offsets rather than a range. -/
+def InitializedAt (state : MemoryState) (id : AllocId) (offset : Nat) : Prop :=
+  (state.cellAt? id offset).map Prod.snd = some true
+
+instance (state : MemoryState) (id : AllocId) (offset : Nat) :
+    Decidable (state.InitializedAt id offset) :=
+  inferInstanceAs (Decidable (_ = _))
 
 /-- `state.RangeInitialized id range` holds when every offset of `range` is
-initialized in `id`. -/
+initialized in `id`. Read off the byte store, so it says what the writes said. -/
 def RangeInitialized (state : MemoryState) (id : AllocId) (range : ByteRange) : Prop :=
   match state.allocations.lookup id with
   | Option.none => False
-  | some record =>
-      ∀ offset ∈ (List.range range.size).map (range.start + ·),
-        offset ∈ record.initialized
+  | some record => record.bytes.Initialized range
 
 instance (state : MemoryState) (id : AllocId) (range : ByteRange) :
     Decidable (state.RangeInitialized id range) := by
   unfold RangeInitialized; split <;> infer_instance
+
+/-! ### Framing
+
+What a write does *not* change. `applyAccess` reasons by disjointness, and
+disjointness is only useful with lemmas saying that everything outside the
+written range survives. `docs/MEMORY_MODEL.md` §2 makes provenance the authority,
+so the two axes are "a different allocation" and "a disjoint range within the
+same one"; both are below. -/
+
+/-- A write changes no allocation's metadata: extent, epoch, space, permission,
+and liveness come back unchanged.
+
+`denialOf` reads **seven** record fields plus initialization, not five: `source` and
+`base` are the two this theorem does not mention, and `AllocationRecord.Metadata`
+carries all seven. So "a write cannot quietly widen what a later access may reach" does
+not follow from the five equalities below — it follows from `write`'s type, which
+returns a record differing in `bytes` alone. This theorem is the readable half of that
+and the sentence claiming otherwise overstated it; the paragraph above
+`AllocationRecord.Metadata` is where the seven are counted. -/
+theorem write_preserves_metadata (state : MemoryState) (id : AllocId) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) (other : AllocId) (record : AllocationRecord)
+    (h : (state.write id start bytes initializes).allocations.lookup other = some record) :
+    ∃ before, state.allocations.lookup other = some before ∧
+      before.extent = record.extent ∧ before.epoch = record.epoch ∧
+      before.space = record.space ∧ before.permission = record.permission ∧
+      before.live = record.live := by
+  unfold write at h
+  split at h
+  · exact ⟨record, h, rfl, rfl, rfl, rfl, rfl⟩
+  · rename_i found hfound
+    by_cases hid : other = id
+    · subst hid
+      rw [FiniteMap.lookup_insert_self] at h
+      cases h
+      exact ⟨found, hfound, rfl, rfl, rfl, rfl, rfl⟩
+    · rw [FiniteMap.lookup_insert_ne _ hid _] at h
+      exact ⟨record, h, rfl, rfl, rfl, rfl, rfl⟩
+
+/-- **A write to one allocation leaves every other allocation alone.**
+
+Distinct `AllocId`s are distinct storage by construction, which is what
+`docs/MEMORY_MODEL.md` §2 means by making provenance rather than address the
+authority. -/
+theorem write_preserves_other_allocation (state : MemoryState) {id other : AllocId}
+    (hne : other ≠ id) (start : Nat) (bytes : ByteSeq) (initializes : Bool) :
+    (state.write id start bytes initializes).allocations.lookup other =
+      state.allocations.lookup other := by
+  unfold write
+  split
+  · rfl
+  · exact FiniteMap.lookup_insert_ne _ hne _
+
+/-- Initialization of another allocation survives a write. -/
+theorem rangeInitialized_write_of_other_allocation (state : MemoryState)
+    {id other : AllocId} (hne : other ≠ id) (start : Nat) (bytes : ByteSeq)
+    (initializes : Bool) {range : ByteRange} (h : state.RangeInitialized other range) :
+    (state.write id start bytes initializes).RangeInitialized other range := by
+  unfold RangeInitialized at h ⊢
+  rw [write_preserves_other_allocation state hne start bytes initializes]
+  exact h
+
+/-- **Initialization of a disjoint range in the same allocation survives a
+write.** The state-level form of `ByteStore.initialized_write_of_disjoint`, and
+the one a framing argument about two fields of one object needs. -/
+theorem rangeInitialized_write_of_disjoint (state : MemoryState) (id : AllocId)
+    {start : Nat} {bytes : ByteSeq} {initializes : Bool} {range : ByteRange}
+    (hd : (ByteRange.mk start bytes.length).Disjoint range)
+    (h : state.RangeInitialized id range) :
+    (state.write id start bytes initializes).RangeInitialized id range := by
+  unfold RangeInitialized at h ⊢
+  unfold write
+  cases hfound : state.allocations.lookup id with
+  | none => rw [hfound] at h; exact absurd h (by simp)
+  | some record =>
+    rw [hfound] at h
+    rw [FiniteMap.lookup_insert_self]
+    exact ByteStore.initialized_write_of_disjoint record.bytes hd h
+
+/--
+Two memory states agree when every allocation holds the same *cell* — byte and
+initialization — at every offset. This, and not structural equality, is what a
+framing law can say about a journal-backed store.
+
+Over `cellAt?` rather than `byteAt?`, and that is the whole point. An earlier
+version compared bytes only, which made the commutation laws unable to carry the
+refusal decision across: `denialOf` reads `RangeInitialized`, so two states
+agreeing on every byte can still disagree about whether a later access is refused.
+Review built exactly that pair. It is the same mistake `ByteStore`'s module
+comment warns about, made one layer up.
+-/
+def AgreesOn (a b : MemoryState) : Prop :=
+  ∀ id offset, a.cellAt? id offset = b.cellAt? id offset
+
+/-- Agreeing states hold the same bytes. The `byteAt?` consequence, for callers
+that only need values. -/
+theorem AgreesOn.byteAt? {a b : MemoryState} (h : a.AgreesOn b) (id : AllocId)
+    (offset : Nat) : a.byteAt? id offset = b.byteAt? id offset := by
+  rw [byteAt?_eq_map_cellAt?, byteAt?_eq_map_cellAt?, h id offset]
+
+/-- Agreeing states agree on what is initialized, which is what lets a
+commutation argument carry the refusal decision. -/
+theorem AgreesOn.initializedAt {a b : MemoryState} (h : a.AgreesOn b) (id : AllocId)
+    (offset : Nat) : a.InitializedAt id offset ↔ b.InitializedAt id offset := by
+  unfold InitializedAt
+  rw [h id offset]
+
+theorem AgreesOn.refl (state : MemoryState) : state.AgreesOn state := fun _ _ => rfl
+
+theorem AgreesOn.symm {a b : MemoryState} (h : a.AgreesOn b) : b.AgreesOn a :=
+  fun id offset => (h id offset).symm
+
+theorem AgreesOn.trans {a b c : MemoryState} (hab : a.AgreesOn b) (hbc : b.AgreesOn c) :
+    a.AgreesOn c := fun id offset => (hab id offset).trans (hbc id offset)
+
+/-- A write to a missing allocation changes nothing. `performAccess` reaches
+`write` only after `denialOf` has found the record, so this case does not arise
+there; it is stated because `write` is total and a caller may not have checked. -/
+theorem write_of_missing (state : MemoryState) {id : AllocId} (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool)
+    (h : state.allocations.lookup id = Option.none) :
+    state.write id start bytes initializes = state := by
+  unfold write; rw [h]
+
+/-- A write leaves its own allocation present, with the written store. -/
+theorem lookup_write_self (state : MemoryState) {id : AllocId} (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
+    (h : state.allocations.lookup id = some record) :
+    (state.write id start bytes initializes).allocations.lookup id =
+      some { record with bytes := record.bytes.write start bytes initializes } := by
+  unfold write
+  rw [h]
+  exact FiniteMap.lookup_insert_self _ _ _
+
+/-- The cell a write leaves at an offset, in terms of the store's own law. -/
+theorem cellAt?_write_self (state : MemoryState) {id : AllocId} (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
+    (h : state.allocations.lookup id = some record) (offset : Nat) :
+    (state.write id start bytes initializes).cellAt? id offset =
+      (record.bytes.write start bytes initializes).cellAt? offset := by
+  unfold cellAt?
+  rw [lookup_write_self state start bytes initializes h]
+  rfl
+
+/-- The byte a write leaves at an offset, in terms of the store's own law. -/
+theorem byteAt?_write_self (state : MemoryState) {id : AllocId} (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
+    (h : state.allocations.lookup id = some record) (offset : Nat) :
+    (state.write id start bytes initializes).byteAt? id offset =
+      (record.bytes.write start bytes initializes).byteAt? offset := by
+  unfold byteAt?
+  rw [lookup_write_self state start bytes initializes h]
+  rfl
+
+/-- Two states whose allocation records agree at `id` agree on what is
+initialized there. -/
+theorem rangeInitialized_congr_of_lookup {a b : MemoryState} {id : AllocId}
+    {range : ByteRange} (h : a.allocations.lookup id = b.allocations.lookup id) :
+    a.RangeInitialized id range ↔ b.RangeInitialized id range := by
+  unfold RangeInitialized
+  rw [h]
+
+/-- **A write neither creates nor destroys initialization outside its own range.**
+The `iff` rather than the forward direction alone: framing has to carry a *lack*
+of initialization across a write too, or an `uninitializedRead` could be laundered
+by writing somewhere else. -/
+theorem rangeInitialized_write_iff_of_disjoint (state : MemoryState) {id : AllocId}
+    {start : Nat} {bytes : ByteSeq} {initializes : Bool} {range : ByteRange}
+    (hd : (ByteRange.mk start bytes.length).Disjoint range) :
+    (state.write id start bytes initializes).RangeInitialized id range ↔
+      state.RangeInitialized id range := by
+  unfold RangeInitialized
+  cases hfound : state.allocations.lookup id with
+  | none => rw [write_of_missing state _ _ _ hfound, hfound]
+  | some record =>
+    rw [lookup_write_self state start bytes initializes hfound]
+    exact ByteStore.initialized_write_iff_of_disjoint record.bytes hd
+
+/-- Inside the range it wrote, a write determines the cell: byte and
+initialization both come from the run just prepended. -/
+theorem cellAt?_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}
+    {bytes : ByteSeq} {initializes : Bool} {record : AllocationRecord}
+    (hfound : state.allocations.lookup id = some record) {offset : Nat}
+    (h : (ByteRange.mk start bytes.length).Covers offset) :
+    (state.write id start bytes initializes).cellAt? id offset =
+      (bytes[offset - start]?).map (·, initializes) := by
+  unfold cellAt?
+  rw [lookup_write_self state start bytes initializes hfound]
+  simp only [Option.bind_some]
+  exact ByteStore.cellAt?_write_of_covers record.bytes h
+
+/-- The byte a write leaves inside its own range. -/
+theorem byteAt?_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}
+    {bytes : ByteSeq} {initializes : Bool} {record : AllocationRecord}
+    (hfound : state.allocations.lookup id = some record) {offset : Nat}
+    (h : (ByteRange.mk start bytes.length).Covers offset) :
+    (state.write id start bytes initializes).byteAt? id offset = bytes[offset - start]? := by
+  unfold byteAt?
+  rw [lookup_write_self state start bytes initializes hfound]
+  simp only [Option.bind_some]
+  unfold ByteStore.byteAt?
+  rw [ByteStore.cellAt?_write_of_covers record.bytes h]
+  cases bytes[offset - start]? <;> simp
+
+/-- An initializing write initializes each byte it covered. -/
+theorem initializedAt_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}
+    {bytes : ByteSeq} {record : AllocationRecord}
+    (hfound : state.allocations.lookup id = some record) {offset : Nat}
+    (h : (ByteRange.mk start bytes.length).Covers offset) :
+    (state.write id start bytes true).InitializedAt id offset := by
+  unfold InitializedAt
+  rw [cellAt?_write_of_covers state hfound h]
+  cases hb : bytes[offset - start]? with
+  | none =>
+    rw [ByteRange.covers_def] at h
+    exact absurd (List.getElem?_eq_none_iff.mp hb) (by simp at h ⊢; omega)
+  | some b => simp
+
+/-- **A write frames every cell it did not write**, in the same allocation or in
+another: byte and initialization together, so a framing argument can carry a lack
+of initialization across a write as well as its presence. -/
+theorem cellAt?_write_of_not_covers (state : MemoryState) (id : AllocId) {start : Nat}
+    {bytes : ByteSeq} {initializes : Bool} {other : AllocId} {offset : Nat}
+    (h : other ≠ id ∨ ¬ (ByteRange.mk start bytes.length).Covers offset) :
+    (state.write id start bytes initializes).cellAt? other offset =
+      state.cellAt? other offset := by
+  unfold cellAt?
+  cases h with
+  | inl hne => rw [write_preserves_other_allocation state hne]
+  | inr hout =>
+    by_cases hid : other = id
+    · subst hid
+      cases hfound : state.allocations.lookup other with
+      | none =>
+        rw [write_of_missing state start bytes initializes hfound, hfound]
+      | some record =>
+        rw [lookup_write_self state start bytes initializes hfound]
+        simp only [Option.bind_some]
+        exact ByteStore.cellAt?_write_of_not_covers record.bytes hout
+    · rw [write_preserves_other_allocation state hid]
+
+/-- The initialization half of `cellAt?_write_of_not_covers`, in the shape a
+padding argument uses. -/
+theorem initializedAt_write_iff_of_not_covers (state : MemoryState) (id : AllocId)
+    {start : Nat} {bytes : ByteSeq} {initializes : Bool} {other : AllocId} {offset : Nat}
+    (h : other ≠ id ∨ ¬ (ByteRange.mk start bytes.length).Covers offset) :
+    (state.write id start bytes initializes).InitializedAt other offset ↔
+      state.InitializedAt other offset := by
+  unfold InitializedAt
+  rw [cellAt?_write_of_not_covers state id h]
+
+/-- `state.MetadataAt id` is what a decision about `id` reads besides its bytes. -/
+def MetadataAt (state : MemoryState) (id : AllocId) : Option AllocationRecord.Metadata :=
+  (state.allocations.lookup id).map AllocationRecord.metadata
+
+/-- A write moves no metadata, which is the half of a framing argument that says a
+later access is decided the same way. The bytes are exactly what it does move. -/
+@[simp] theorem metadataAt_write (state : MemoryState) (id : AllocId) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) (other : AllocId) :
+    (state.write id start bytes initializes).MetadataAt other = state.MetadataAt other := by
+  unfold MetadataAt write
+  cases hfound : state.allocations.lookup id with
+  | none => rfl
+  | some record =>
+    by_cases hid : other = id
+    · subst hid
+      rw [FiniteMap.lookup_insert_self, hfound]
+      rfl
+    · rw [FiniteMap.lookup_insert_ne _ hid]
+
+/-- An allocation is present exactly when its metadata is. -/
+theorem isSome_metadataAt (state : MemoryState) (id : AllocId) :
+    (state.MetadataAt id).isSome = (state.allocations.lookup id).isSome := by
+  unfold MetadataAt
+  cases state.allocations.lookup id <;> rfl
+
+/--
+Cell agreement plus metadata agreement gives initialization agreement.
+
+`AgreesOn` alone does not: `RangeInitialized` is `False` for a missing allocation,
+so a state where `id` is absent and one where it is present with an empty store
+agree at every cell and disagree here. That was the gap
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 recorded, and the presence half is what
+closes it.
+-/
+theorem rangeInitialized_congr_of_agrees {a b : MemoryState} {id : AllocId}
+    {range : ByteRange} (hpresent : a.MetadataAt id = b.MetadataAt id)
+    (hcells : a.AgreesOn b) : a.RangeInitialized id range ↔ b.RangeInitialized id range := by
+  have hsome : (a.allocations.lookup id).isSome = (b.allocations.lookup id).isSome := by
+    rw [← isSome_metadataAt, ← isSome_metadataAt, hpresent]
+  unfold RangeInitialized
+  cases ha : a.allocations.lookup id with
+  | none =>
+    have : (b.allocations.lookup id).isSome = false := by rw [← hsome, ha]; rfl
+    cases hb : b.allocations.lookup id with
+    | none => exact Iff.rfl
+    | some _ => rw [hb] at this; simp at this
+  | some ra =>
+    cases hb : b.allocations.lookup id with
+    | none =>
+      have : (a.allocations.lookup id).isSome = false := by rw [hsome, hb]; rfl
+      rw [ha] at this; simp at this
+    | some rb =>
+      constructor <;> intro h offset hcov
+      · have := h offset hcov
+        have hc := hcells id offset
+        unfold cellAt? at hc
+        rw [ha, hb] at hc
+        simp only [Option.bind_some] at hc
+        unfold ByteStore.InitializedAt at this ⊢
+        rw [← hc]; exact this
+      · have := h offset hcov
+        have hc := hcells id offset
+        unfold cellAt? at hc
+        rw [ha, hb] at hc
+        simp only [Option.bind_some] at hc
+        unfold ByteStore.InitializedAt at this ⊢
+        rw [hc]; exact this
+
+/-- A write depends on its allocation and nothing else, so two states agreeing
+about that allocation write it identically. -/
+theorem cellAt?_write_congr {a b : MemoryState} {id : AllocId}
+    (h : a.allocations.lookup id = b.allocations.lookup id) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) (offset : Nat) :
+    (a.write id start bytes initializes).cellAt? id offset =
+      (b.write id start bytes initializes).cellAt? id offset := by
+  unfold write cellAt?
+  cases hl : b.allocations.lookup id with
+  | none =>
+    have ha : a.allocations.lookup id = Option.none := by rw [h, hl]
+    simp only [ha, hl]
+  | some r =>
+    have ha : a.allocations.lookup id = some r := by rw [h, hl]
+    simp only [ha, FiniteMap.lookup_insert_self]
+
+/--
+**Writes to different allocations commute**, whatever ranges they name.
+
+The companion to `write_comm`, which needs disjoint ranges because it is about one
+allocation. Here disjointness is free: `docs/MEMORY_MODEL.md` §2 makes distinct
+`AllocId`s distinct storage by construction, so two writes to different
+allocations cannot interfere however their offsets compare.
+-/
+theorem write_comm_of_ne (state : MemoryState) {a b : AllocId} (hne : a ≠ b)
+    (sa : Nat) (ba : ByteSeq) (ia : Bool) (sb : Nat) (bb : ByteSeq) (ib : Bool) :
+    ((state.write a sa ba ia).write b sb bb ib).AgreesOn
+      ((state.write b sb bb ib).write a sa ba ia) := by
+  intro other offset
+  by_cases hoa : other = a
+  · subst hoa
+    rw [cellAt?_write_of_not_covers _ b (Or.inl hne),
+      cellAt?_write_congr (write_preserves_other_allocation state hne sb bb ib) sa ba ia]
+  · by_cases hob : other = b
+    · subst hob
+      rw [cellAt?_write_of_not_covers _ a (Or.inl (Ne.symm hne)),
+        cellAt?_write_congr (write_preserves_other_allocation state (Ne.symm hne) sa ba ia)
+          sb bb ib]
+    · rw [cellAt?_write_of_not_covers _ b (Or.inl hob),
+        cellAt?_write_of_not_covers _ a (Or.inl hoa),
+        cellAt?_write_of_not_covers _ a (Or.inl hoa),
+        cellAt?_write_of_not_covers _ b (Or.inl hob)]
+
+/-! ### Placement
+
+`Grass/Memory/Addressing.lean` proves that inside a non-wrapping allocation
+distinct offsets have distinct machine addresses. Until an allocation carried a
+base there was nothing to instantiate it with, and
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 recorded the offset-to-address debt as
+undischarged for exactly that reason. These connect the two.
+
+Placement is not authority in `docs/MEMORY_MODEL.md` §2's sense: provenance decides
+what an access may touch, and two allocations at one base are still distinct storage
+unless `aliases` says otherwise. It is not *unread* by `denialOf`, which is a
+different claim and was made here — `placementWraps` and
+`addressDisagreesWithPlacement` both read the base. What placement answers is the
+further question of whether two offsets name the same machine byte. -/
+
+/-- The machine address of an offset in `id`, if `id` is placed at all. -/
+def addressAt? (state : MemoryState) (id : AllocId) (offset : Nat) :
+    Option MachineAddress :=
+  (state.allocations.lookup id).bind (fun record => record.base.map (addressOf · offset))
+
+/--
+`state.AddressAgrees d` holds when the access's declared address is the one its
+allocation's placement gives the offset it names.
+
+`docs/MEMORY_MODEL.md` §2 makes provenance and not address the authority, which is
+why `denialOf` decides on provenance — but an access still *declares* an address,
+`MemoryEvent` carries it, and a declaration nothing checks is a declaration that can
+say anything. It said anything: every Spike 1 fixture's address contradicted the
+placement the same fixture built.
+
+Vacuous where there is nothing to compare — an unplaced allocation, or one that does
+not exist. A logical address space has allocations with no machine address at all,
+which is why `AllocationRecord.base` is an `Option`, and demanding agreement with an
+address that does not exist would force every such profile to invent one.
+-/
+def AddressAgrees (state : MemoryState) (d : AccessDescriptor) : Prop :=
+  match state.addressAt? d.provenance.root d.range.start with
+  | some addr => d.address = .numeric addr
+  | Option.none => True
+
+instance (state : MemoryState) (d : AccessDescriptor) : Decidable (state.AddressAgrees d) := by
+  unfold AddressAgrees
+  split <;> infer_instance
+
+/-- `state.PlacedWithoutWrap id` holds when `id`'s bytes do not wrap the address
+space **if it is placed at all**.
+
+Both binders are `Option` membership, so this is vacuously true of an unplaced
+allocation and of one that does not exist. That is the right shape for a
+hypothesis — `addressAt?_ne_of_disjoint` takes `record.base = some base` separately
+and only then uses this — but an earlier docstring read it as asserting placement,
+which it does not, and `Tests/Memory/Placement.lean`'s deliberately unplaced
+allocation satisfies it. -/
+def PlacedWithoutWrap (state : MemoryState) (id : AllocId) : Prop :=
+  ∀ record ∈ state.allocations.lookup id, ∀ base ∈ record.base,
+    FitsAllocation base record.extent.stop
+
+instance (state : MemoryState) (id : AllocId) : Decidable (state.PlacedWithoutWrap id) :=
+  inferInstanceAs (Decidable (∀ _ ∈ _, ∀ _ ∈ _, _))
+
+/--
+**Disjoint ranges in one placed allocation do not alias.**
+
+The bridge `Grass/Memory/Range.lean` records as owed, instantiated at last. Offsets
+are `Nat` and disjointness is `Nat` arithmetic; this is what connects that to
+machine addresses, for an allocation a profile actually placed.
+-/
+theorem addressAt?_ne_of_disjoint {state : MemoryState} {id : AllocId}
+    (hplaced : state.PlacedWithoutWrap id) {record : AllocationRecord}
+    (hfound : state.allocations.lookup id = some record) {r t : ByteRange}
+    (hr : r.WithinBound record.extent.stop) (ht : t.WithinBound record.extent.stop)
+    (hd : r.Disjoint t) {i j : Nat} (hi : r.Covers i) (hj : t.Covers j)
+    {base : MachineAddress} (hbase : record.base = some base) :
+    state.addressAt? id i ≠ state.addressAt? id j := by
+  have hfits : FitsAllocation base record.extent.stop :=
+    hplaced record (by rw [hfound]; simp) base (by rw [hbase]; simp)
+  have hne := disjoint_ranges_do_not_alias hfits hr ht hd hi hj
+  unfold addressAt?
+  rw [hfound]
+  simp only [Option.bind_some]
+  rw [hbase]
+  simp only [Option.map_some, ne_eq, Option.some.injEq]
+  exact hne
+
+/--
+**Writes to disjoint ranges commute.**
+
+Stated as `AgreesOn` rather than as state equality: the byte store is a journal,
+so the two orders leave different write histories, and no proof will make those
+equal. `AgreesOn` compares cells, so a caller can conclude both `AgreesOn.byteAt?`
+and `AgreesOn.initializedAt`. `ByteStore.cellAt?_write_comm` is where the content
+is. It does not carry the refusal decision, which needs allocation metadata as
+well; see `AgreesOn`.
+-/
+theorem write_comm (state : MemoryState) (id : AllocId) {a b : Nat}
+    {bytesA bytesB : ByteSeq} {initA initB : Bool}
+    (hd : (ByteRange.mk a bytesA.length).Disjoint (ByteRange.mk b bytesB.length)) :
+    ((state.write id a bytesA initA).write id b bytesB initB).AgreesOn
+      ((state.write id b bytesB initB).write id a bytesA initA) := by
+  intro other offset
+  by_cases hid : other = id
+  · subst hid
+    cases hfound : state.allocations.lookup other with
+    | none =>
+      rw [write_of_missing state a bytesA initA hfound,
+        write_of_missing state b bytesB initB hfound,
+        write_of_missing state a bytesA initA hfound]
+    | some record =>
+      rw [cellAt?_write_self _ b bytesB initB
+            (lookup_write_self state a bytesA initA hfound),
+        cellAt?_write_self _ a bytesA initA
+            (lookup_write_self state b bytesB initB hfound)]
+      exact ByteStore.cellAt?_write_comm record.bytes hd offset
+  · unfold cellAt?
+    rw [write_preserves_other_allocation _ hid, write_preserves_other_allocation _ hid,
+      write_preserves_other_allocation _ hid, write_preserves_other_allocation _ hid]
+
+/-- An initializing write initializes what it wrote, provided the allocation is
+there. The state-level form of `ByteStore.initialized_write`. -/
+theorem rangeInitialized_write (state : MemoryState) {id : AllocId} {start : Nat}
+    {bytes : ByteSeq} {record : AllocationRecord}
+    (hfound : state.allocations.lookup id = some record) :
+    (state.write id start bytes true).RangeInitialized id ⟨start, bytes.length⟩ := by
+  unfold RangeInitialized write
+  simp only [hfound, FiniteMap.lookup_insert_self]
+  exact ByteStore.initialized_write record.bytes start bytes
+
+
+/-- **A provenance in a superseded epoch is not live.** `docs/MEMORY_MODEL.md` §2:
+address reuse never revives old pointers, and §5 makes an arena advance the epoch
+before reusing storage. This is that sentence read as a refusal. -/
+theorem not_live_of_stale_epoch {state : MemoryState} {provenance : Provenance}
+    {record : AllocationRecord}
+    (hlook : state.allocations.lookup provenance.root = some record)
+    (hepoch : record.epoch ≠ provenance.epoch) : ¬ state.Live provenance := by
+  unfold Live
+  rw [hlook]
+  simp [hepoch]
+
+/-- **A torn-down allocation is not live**, whatever provenance is presented. -/
+theorem not_live_of_dead {state : MemoryState} {provenance : Provenance}
+    {record : AllocationRecord}
+    (hlook : state.allocations.lookup provenance.root = some record)
+    (hdead : record.live = false) : ¬ state.Live provenance := by
+  unfold Live
+  rw [hlook]
+  simp [hdead]
+
+/--
+**§10's allocator item, as a proposition this layer states rather than one a profile
+names.**
+
+`docs/MEMORY_MODEL.md` §10 asks for "allocator/arena freshness, teardown, and epoch
+invalidation". The second of `RequiredProofPackage`'s eleven fields to stop being a
+bare `Prop`; see `LoanMapLaws` for why that matters and
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 for which milestone owes each of the nine
+that remain.
+
+Freshness is two conjuncts rather than one, and the pair is the point: an unused
+identity can always be allocated, and `MemoryState.allocate?` refuses an identity
+whose *record would change at all* while authority is outstanding over its bytes --
+§5.1's precondition.
+
+The second conjunct read "whose metadata would change" and that was the width of the
+guard, which review found too narrow: `AllocationRecord.Metadata` omits `owners` and
+`bytes`, so a stranger could write itself into an allocation's owner list under
+somebody else's outstanding loan and buy §3's authority with it. Teardown says
+every name given is dead afterwards and no other name moved. Epoch invalidation is
+the two liveness refusals above, which is what makes a stale pointer unusable rather
+than merely stale.
+
+What this does not say: that a profile's own allocator is faithful to any of it. It
+says the state's allocation table obeys these laws for every profile, so no profile
+can close §10's allocator item by naming a weaker sentence.
+-/
+def AllocatorLaws : Prop :=
+  (∀ (state : MemoryState) (id : AllocId) (record : AllocationRecord),
+      state.allocations.lookup id = Option.none → (state.allocate? id record).isSome) ∧
+  (∀ (state : MemoryState) (id : AllocId) (record existing : AllocationRecord),
+      state.allocations.lookup id = some existing →
+      existing ≠ record →
+      state.grantEntries.any
+        (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) = true →
+      state.allocate? id record = Option.none) ∧
+  (∀ (state next : MemoryState) (id : AllocId) (record : AllocationRecord),
+      state.allocate? id record = some next →
+      next.allocations.lookup id = some record) ∧
+  (∀ (state next : MemoryState) (id other : AllocId) (record : AllocationRecord),
+      state.allocate? id record = some next → other ≠ id →
+      next.allocations.lookup other = state.allocations.lookup other) ∧
+  (∀ (state next : MemoryState) (ids : List AllocId),
+      state.tearDown? ids = some next →
+      ∀ id ∈ ids, (next.allocations.lookup id).any (fun record => !record.live) = true) ∧
+  (∀ (state next : MemoryState) (ids : List AllocId),
+      state.tearDown? ids = some next →
+      ∀ (id : AllocId), id ∉ ids →
+        next.allocations.lookup id = state.allocations.lookup id) ∧
+  (∀ (state : MemoryState) (provenance : Provenance) (record : AllocationRecord),
+      state.allocations.lookup provenance.root = some record →
+      record.epoch ≠ provenance.epoch → ¬ state.Live provenance) ∧
+  (∀ (state : MemoryState) (provenance : Provenance) (record : AllocationRecord),
+      state.allocations.lookup provenance.root = some record →
+      record.live = false → ¬ state.Live provenance)
+
+/-- **The allocator laws hold**, which is the proof every `MemoryProfile` supplies for
+§10's allocator item. Its conjuncts are, in order, `allocate?_isSome_of_fresh`,
+`allocate?_eq_none_of_outstanding`, `allocate?_lookup_self`, `allocate?_lookup_ne`,
+`tearDown?_kills_every_name`, `tearDown?_lookup_of_not_mem`, `not_live_of_stale_epoch`
+and `not_live_of_dead`. -/
+theorem allocatorLaws : AllocatorLaws :=
+  ⟨fun state id record h => allocate?_isSome_of_fresh state id record h,
+   fun _ _ _ _ hl hc hg => allocate?_eq_none_of_outstanding hl hc hg,
+   fun _ _ _ _ h => allocate?_lookup_self h,
+   fun _ _ _ _ _ h hne => allocate?_lookup_ne h hne,
+   fun _ _ _ h => tearDown?_kills_every_name h,
+   fun _ _ _ h _ hmem => tearDown?_lookup_of_not_mem h hmem,
+   fun _ _ _ hl he => not_live_of_stale_epoch hl he,
+   fun _ _ _ hl hd => not_live_of_dead hl hd⟩
+
+/--
+**§10's loan-map item, as a proposition this layer states rather than one a profile
+names.**
+
+`docs/MEMORY_MODEL.md` §10 asks for "loan map laws: unique loan identity; split, join,
+transfer, reclamation". `RequiredProofPackage` carried that as a bare `Prop` field, so
+a profile chose the sentence as well as the proof and `True` closed it. The field's
+type is this now, and `MemoryState.loanMapLaws` below is the proof every profile
+supplies, so the item is closed by construction and cannot be weakened by the profile
+that closes it.
+
+Each conjunct is the statement of a theorem already proved here, in order:
+`issue?_eq_none_of_reissued`, `splitGrant?_creates_no_authority`,
+`splitGrant?_yields_the_parts`, `joinGrants?_creates_no_authority`,
+`joinGrants?_yields_the_join`, `transferGrant?_creates_no_authority`,
+`transferGrant?_grants_the_recipient`, `grantAt?_returnGrant?_self` and
+`grantAt?_returnGrant?_ne`.
+
+**What this is not.** It is not a claim that the profile proved anything specific to
+its target -- the proof is generic and identical for every profile, which is the
+correct answer for laws about a map this layer owns. It is a claim that §10's
+loan-map sentence now has one meaning across all profiles. The other ten fields of
+`RequiredProofPackage` are still `Prop`s a profile names, and
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records which milestone owes each of
+them the same treatment.
+-/
+def LoanMapLaws : Prop :=
+  (∀ (state : MemoryState) (id : GrantId) (grant : AuthorityGrant),
+      (state.grantAt? id).isSome → state.issue? id grant = Option.none) ∧
+  (∀ (state next : MemoryState) (id low high : GrantId) (boundary : Nat)
+      (grant : AuthorityGrant) (context : ContextId) (provenance : Provenance)
+      (range : ByteRange) (intent : AccessIntent),
+      state.splitGrant? id low high boundary = some next →
+      state.grantAt? id = some grant →
+      next.Granted context provenance range intent →
+      state.Granted context provenance range intent) ∧
+  (∀ (state next : MemoryState) (id low high : GrantId) (boundary : Nat)
+      (grant : AuthorityGrant),
+      state.splitGrant? id low high boundary = some next →
+      state.grantAt? id = some grant →
+      next.grantAt? low = some (grant.lowPart boundary) ∧
+      next.grantAt? high = some (grant.highPart boundary) ∧
+      next.grantAt? id = Option.none) ∧
+  (∀ (state next : MemoryState) (low high into : GrantId)
+      (lowGrant highGrant : AuthorityGrant) (context : ContextId)
+      (provenance : Provenance) (range : ByteRange) (intent : AccessIntent),
+      state.joinGrants? low high into = some next →
+      state.grantAt? low = some lowGrant →
+      state.grantAt? high = some highGrant →
+      next.Granted context provenance range intent →
+      state.Granted context provenance range intent) ∧
+  (∀ (state next : MemoryState) (low high into : GrantId)
+      (lowGrant highGrant : AuthorityGrant),
+      state.joinGrants? low high into = some next →
+      state.grantAt? low = some lowGrant →
+      state.grantAt? high = some highGrant →
+      next.grantAt? into = some (lowGrant.joined highGrant) ∧
+      next.grantAt? low = Option.none ∧ next.grantAt? high = Option.none) ∧
+  (∀ (state next : MemoryState) (actor : ContextId) (id : GrantId)
+      (recipient : ContextId) (grant : AuthorityGrant) (context : ContextId)
+      (provenance : Provenance) (range : ByteRange) (intent : AccessIntent),
+      state.transferGrant? actor id recipient = some next →
+      state.grantAt? id = some grant → context ≠ recipient →
+      next.Granted context provenance range intent →
+      state.Granted context provenance range intent) ∧
+  (∀ (state next : MemoryState) (actor : ContextId) (id : GrantId)
+      (recipient : ContextId) (grant : AuthorityGrant) (provenance : Provenance)
+      (range : ByteRange) (intent : AccessIntent),
+      state.transferGrant? actor id recipient = some next →
+      state.grantAt? id = some grant →
+      grant.range.Contains range →
+      state.SharesBytes grant.provenance.root provenance.root →
+      state.CurrentEpoch grant.provenance →
+      state.CurrentEpoch provenance →
+      grant.rights.Permits intent →
+      next.Granted recipient provenance range intent) ∧
+  (∀ (state returned : MemoryState) (context : ContextId) (id : GrantId),
+      state.returnGrant? context id = some returned →
+      returned.grantAt? id = Option.none) ∧
+  (∀ (state returned : MemoryState) (context : ContextId) (id other : GrantId),
+      state.returnGrant? context id = some returned → other ≠ id →
+      returned.grantAt? other = state.grantAt? other)
+
+/-- **The loan-map laws hold**, which is the proof every `MemoryProfile` supplies for
+§10's loan-map item. Nothing about it is profile-specific, and that is the point: the
+item is discharged by this layer for every target, so no profile can close §10 by
+naming a weaker sentence. -/
+theorem loanMapLaws : LoanMapLaws :=
+  ⟨fun state _ grant h => issue?_eq_none_of_reissued state grant h,
+   fun _ _ _ _ _ _ _ _ _ _ _ h hat hg => splitGrant?_creates_no_authority h hat hg,
+   fun _ _ _ _ _ _ _ h hat => splitGrant?_yields_the_parts h hat,
+   fun _ _ _ _ _ _ _ _ _ _ _ h hl hh hg => joinGrants?_creates_no_authority h hl hh hg,
+   fun _ _ _ _ _ _ _ h hl hh => joinGrants?_yields_the_join h hl hh,
+   fun _ _ _ _ _ _ _ _ _ _ h hat hne hg =>
+     transferGrant?_creates_no_authority h hat hne hg,
+   fun _ _ _ _ _ _ _ _ _ h hat hc hs hg ha hr =>
+     transferGrant?_grants_the_recipient h hat hc hs hg ha hr,
+   fun _ _ _ _ h => grantAt?_returnGrant?_self h,
+   fun _ _ _ _ _ h hne => grantAt?_returnGrant?_ne h hne⟩
 
 end MemoryState
 
@@ -217,11 +3732,19 @@ structure MachineState where
   violations : AuditViolationLedger
   /-- The memory events performed so far, most recent last.
 
-  `ValidMemoryEvent`, not `MemoryEvent`: the trace cannot contain a malformed
-  event, so "every event in the trace is well formed" holds by construction rather
-  than by a check something could forget. An earlier trace held bare events beside
-  a predicate nothing consulted, and every event the transition minted violated
-  it. -/
+  `ValidMemoryEvent`, not `MemoryEvent`: every event in the trace carries its own
+  well-formedness proof, so the property holds by construction rather than by a
+  check something could forget. An earlier trace held bare events beside a
+  predicate nothing consulted, and every event the transition minted violated it.
+
+  A malformed trace is unrepresentable outside the event module:
+  `ValidMemoryEvent.mk` is private and `MemoryEvent.ofOutcome` is the only
+  producer. That claim was withdrawn when the constructor was public and review
+  assembled a contradictory event; sealing is what makes it true rather than
+  aspirational.
+
+  It is still only as strong as the fields. Two of them went uncompared until that
+  review, so sealing stops a bypass and does not stop a weak clause. -/
   events : List ValidMemoryEvent
   /-- The supply that mints event identities. -/
   eventSupply : FreshSupply EventTag
@@ -233,13 +3756,114 @@ structure MachineState where
   behaviour a specification may permit, a violation is behaviour
   `VerifiedProgram` proves never happens. -/
   faults : List RaisedFault
+  /-- What kind of execution context each identity is.
+
+  `docs/MEMORY_MODEL.md` §7.1 requires an event to carry execution context
+  identity *and* kind. The identity came from the access descriptor and the kind
+  from an argument to `step`, with nothing relating them, so the same
+  `ContextId` could be stepped as a thread once and a device engine the next time
+  and each event carried whatever pair the caller supplied. Two sources of truth
+  for one fact, which is the defect this layer keeps finding; review found this
+  instance after the identity half was closed and the kind half was not.
+
+  A context's kind is a fact about the machine, so it lives in the state. `step`
+  refuses an identity whose kind disagrees with what is recorded here, and records
+  the pairing the first time it sees one. -/
+  contexts : FiniteMap ContextId ContextKind
 
 namespace MachineState
 
 /-- The state a program starts in. -/
 def initial (memory : MemoryState) : MachineState :=
   { memory := memory, obligations := .empty, violations := .empty
-    events := [], eventSupply := .initial, faults := [] }
+    events := [], eventSupply := .initial, faults := [], contexts := .empty }
+
+/--
+`state.FaultsRecognized recognized` holds when every fault the state has recorded is
+of a class the list names.
+
+`docs/MEMORY_MODEL.md` §8: "`VerifiedProgram` proves the ledger remains empty **and
+that only spec-allowed fault outcomes occur**." The first conjunct has
+`AuditViolationLedger.IsEmpty`, `Extends`, and `Grass.Op.step_extends_violations`. The
+second had nothing: `faults` was appended to by `runStep` and read by no predicate
+anywhere under `Grass/`, only by fixture assertions, so there was no analogue of
+`IsEmpty` for a `VerifiedProgram` to prove. Review found it, and found that no
+milestone owned it either.
+
+This is the half of §8's second conjunct this layer can state. "Spec-allowed" is a
+profile's word, and a profile's fault vocabulary is the list it declares — so a fault
+outside it is a fault the profile never modelled, which
+`Grass/Op/Step.lean` refuses at declaration time through `faultClassNotDeclared` and
+`operationFaultNotRecognized`. What this adds is the *state-level* statement those
+refusals make true, so a consumer has something to carry rather than an argument about
+which gates ran.
+
+What it is **not** is the whole conjunct. §8's "spec-allowed" is a claim about which
+outcomes a specification permits at a given point, and that needs the specification —
+`docs/SEMANTICS.md`'s, not this layer's. Recorded in
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2.
+-/
+def FaultsRecognized (state : MachineState) (recognized : List FaultClassId) : Prop :=
+  ∀ raised ∈ state.faults, raised.fault ∈ recognized
+
+instance (state : MachineState) (recognized : List FaultClassId) :
+    Decidable (state.FaultsRecognized recognized) :=
+  inferInstanceAs (Decidable (∀ _ ∈ _, _))
+
+/-- The initial state has recorded no fault, so every list recognises them. -/
+@[simp] theorem faultsRecognized_initial (memory : MemoryState)
+    (recognized : List FaultClassId) :
+    (MachineState.initial memory).FaultsRecognized recognized := by
+  intro raised hmem
+  simp [MachineState.initial] at hmem
+
+/-- Recognition is monotone in the list, so a profile that declares more still
+recognises what a narrower one did. -/
+theorem FaultsRecognized.mono {state : MachineState} {a b : List FaultClassId}
+    (h : state.FaultsRecognized a) (hsub : ∀ f ∈ a, f ∈ b) :
+    state.FaultsRecognized b := fun raised hmem => hsub _ (h raised hmem)
+
+/-- **A state that has recorded a fault outside the list does not satisfy it.** The
+discriminating direction: without it the predicate would hold of every state whose
+`faults` list the checker happened not to look at. -/
+theorem not_faultsRecognized_of_mem {state : MachineState} {recognized : List FaultClassId}
+    {raised : RaisedFault} (hmem : raised ∈ state.faults)
+    (h : raised.fault ∉ recognized) : ¬ state.FaultsRecognized recognized :=
+  fun hr => h (hr raised hmem)
+
+/-- `state.KindAgrees context kind` holds when the state has not already recorded
+a different kind for that identity. A context the state has never seen agrees with
+any kind, and is recorded by `noteContext`. -/
+def KindAgrees (state : MachineState) (context : ContextId) (kind : ContextKind) : Prop :=
+  state.contexts.lookup context = Option.none ∨
+    state.contexts.lookup context = some kind
+
+instance (state : MachineState) (context : ContextId) (kind : ContextKind) :
+    Decidable (state.KindAgrees context kind) :=
+  inferInstanceAs (Decidable (_ ∨ _))
+
+/-- Record the pairing, so a later step with a different kind disagrees. -/
+def noteContext (state : MachineState) (context : ContextId) (kind : ContextKind) :
+    MachineState :=
+  { state with contexts := state.contexts.insert context kind }
+
+/-- Recording a context's kind touches nothing else, so a framing argument passes
+straight through it. -/
+@[simp] theorem noteContext_memory (state : MachineState) (context : ContextId)
+    (kind : ContextKind) : (state.noteContext context kind).memory = state.memory := rfl
+
+/-- Recording a pairing makes it agree, and makes every other kind disagree. -/
+@[simp] theorem kindAgrees_noteContext (state : MachineState) (context : ContextId)
+    (kind : ContextKind) : (state.noteContext context kind).KindAgrees context kind :=
+  .inr (by simp [noteContext])
+
+theorem not_kindAgrees_noteContext_of_ne (state : MachineState) (context : ContextId)
+    {kind other : ContextKind} (h : other ≠ kind) :
+    ¬ (state.noteContext context kind).KindAgrees context other := by
+  rintro (hn | hs)
+  · simp [noteContext] at hn
+  · simp [noteContext] at hs
+    exact h hs.symm
 
 /-- `state.OutstandingObligations` are the identities still owed. -/
 def outstanding (state : MachineState) : List ObligationId := state.obligations.domain

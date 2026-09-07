@@ -171,12 +171,116 @@ structure WellFormed (e : MemoryEvent) : Prop where
   /-- Observed bytes number exactly what the event says it read. -/
   readLength :
     ∀ bytes, e.valueRead = some bytes → bytes.length = e.committedReadRange.size
-  /-- Neither count exceeds the range. -/
-  readWithinRange : e.readCommitted ≤ e.range.size
-  /-- Neither count exceeds the range. -/
-  writeWithinRange : e.writeCommitted ≤ e.range.size
-  /-- The status does not claim more bytes than the range covers. -/
+  /-- The status does not claim more bytes than the range covers.
+
+  **This is also what bounds the event's own counts**, and there were two more clauses
+  saying so directly -- `readCommitted ≤ range.size` and its write twin. They are
+  implied: `statusAgreesWithReads` below ties `status.committedReads` to
+  `readCommitted`, and this clause bounds the status, so the count is bounded by
+  transitivity and nothing about an event is needed to see it. `readCommitted_le_size`
+  and `writeCommitted_le_size` state the implication, which is what this branch asks of
+  a redundancy claim rather than an observation.
+
+  Review found them the way it found `PreservationLaws`' sixth conjunct: by trying to
+  build a neighbour that fails one and not the others, and finding that no such event
+  exists. A clause that cannot be isolated is a clause the seal already had, and
+`Tests/Memory/EventClauses.lean`'s `each_neighbour_fails_exactly_one_clause` is what
+decides isolation for the eleven that remain. -/
   statusWellFormed : e.status.WellFormed e.range.size
+  /-- **The status and the counts are the same two facts.**
+
+  An event records how much it read and wrote twice, once in `status` and once in
+  its own fields, and nothing compared them: review built an event whose status
+  said it observed nothing while `readCommitted` said eight, discharged every
+  other clause by `decide`, and wrapped it in a `ValidMemoryEvent`. Two records of
+  one fact with no clause tying them is the defect this layer keeps finding
+  elsewhere, inside the structure that exists to prevent it. -/
+  statusAgreesWithReads : e.status.committedReads = e.readCommitted
+  /-- The write half of `statusAgreesWithReads`. -/
+  statusAgreesWithWrites : e.status.committedWrites = e.writeCommitted
+  /-- The event's address space is the one its provenance names.
+
+  Two records of one fact, and nothing tied them. `space` is what the event reports
+  while `provenance.space` is what the descriptor declared; the two agreed only because
+  `Grass/Op/Step.lean`'s `performAccess` resolves the space through the profile's
+  table before calling `ofOutcome`. `Conflicts` keyed on `provenance.space` when this
+  clause was written and no longer does, which removes a consumer but not the
+  objection: a structure carrying one fact twice with no clause tying them is the
+  defect this layer keeps finding. That is the argument this structure exists to
+  make unnecessary — it was rejected for the context identity in
+  `StepRejection.contextMismatch` and for the status and count pair in the clause
+  above — and review found it standing here, in a file no round had read. -/
+  spaceAgreesWithProvenance : e.space.id = e.provenance.space
+
+/--
+`MemoryEvent.WellFormed` decided.
+
+**The seal had no instance, so nothing could name one of its clauses**, and review
+found what that cost: eleven of the thirteen field names were projected nowhere, and
+replacing each clause's proposition with `True` -- co-editing `ofOutcome`'s discharge,
+so that the producer's proof is not what is being tested -- gave thirteen green builds.
+The structure exists to stop an event carrying two records of one fact, and nothing
+depended on any of it.
+
+`Tools/ConsultedAudit.py` could not report it either: its proof-bundle exemption
+skipped any structure whose name ends `WellFormed`, on the argument that a proof
+obligation's purpose is that a constructor had to discharge it. That argument is
+disproved in this module -- `touchesMemory_ofOutcome` proves no event `ofOutcome` can
+mint fails `noLocationWhenUntouched`, so discharging that clause proves nothing about
+it -- and `AccessDescriptor.WellFormedIn` was only ever swept because its name does not
+end that way.
+
+This instance is the mechanism that makes the clauses nameable, and
+`Tests/Memory/EventClauses.lean` is the sweep it enables. Every conjunct below is a
+field of the structure, in declaration order, so a clause added later is a type error
+here rather than a silently unchecked seal.
+-/
+instance (e : MemoryEvent) : Decidable e.WellFormed :=
+  if h : (e.kind.reads = true → e.valueRead.isSome) ∧
+      (e.kind.reads = false → e.valueRead = Option.none) ∧
+      (e.kind.writes = true → e.valueWritten.isSome) ∧
+      (e.kind.writes = false → e.valueWritten = Option.none) ∧
+      (e.kind.touchesMemory = false → e.range.IsEmpty) ∧
+      (∀ bytes ∈ e.valueWritten, bytes.length = e.committedWriteRange.size) ∧
+      (∀ bytes ∈ e.valueRead, bytes.length = e.committedReadRange.size) ∧
+      e.status.WellFormed e.range.size ∧
+      e.status.committedReads = e.readCommitted ∧
+      e.status.committedWrites = e.writeCommitted ∧
+      e.space.id = e.provenance.space then
+    .isTrue
+      { readValuePresent := h.1, readValueAbsent := h.2.1
+        writeValuePresent := h.2.2.1, writeValueAbsent := h.2.2.2.1
+        noLocationWhenUntouched := h.2.2.2.2.1
+        writtenLength := fun bytes hb => h.2.2.2.2.2.1 bytes hb
+        readLength := fun bytes hb => h.2.2.2.2.2.2.1 bytes hb
+        statusWellFormed := h.2.2.2.2.2.2.2.1
+        statusAgreesWithReads := h.2.2.2.2.2.2.2.2.1
+        statusAgreesWithWrites := h.2.2.2.2.2.2.2.2.2.1
+        spaceAgreesWithProvenance := h.2.2.2.2.2.2.2.2.2.2 }
+  else
+    .isFalse fun w =>
+      h ⟨w.readValuePresent, w.readValueAbsent, w.writeValuePresent,
+        w.writeValueAbsent, w.noLocationWhenUntouched,
+        fun bytes hb => w.writtenLength bytes hb,
+        fun bytes hb => w.readLength bytes hb,
+        w.statusWellFormed,
+        w.statusAgreesWithReads, w.statusAgreesWithWrites,
+        w.spaceAgreesWithProvenance⟩
+
+/-- **A well-formed event's read count is bounded by its range**, which is what the
+deleted `readWithinRange` clause said. The status is bounded and the count equals it. -/
+theorem readCommitted_le_size {e : MemoryEvent} (w : e.WellFormed) :
+    e.readCommitted ≤ e.range.size := by
+  have := w.statusWellFormed.1
+  rw [w.statusAgreesWithReads] at this
+  exact this
+
+/-- The write half. -/
+theorem writeCommitted_le_size {e : MemoryEvent} (w : e.WellFormed) :
+    e.writeCommitted ≤ e.range.size := by
+  have := w.statusWellFormed.2
+  rw [w.statusAgreesWithWrites] at this
+  exact this
 
 /--
 `Conflicts a b` holds when two events contend for the same bytes.
@@ -216,7 +320,6 @@ are bytes it did not touch.
 def Conflicts (sharesBytes : AllocId → AllocId → Prop)
     (compatible : MemoryEvent → MemoryEvent → Prop) (a b : MemoryEvent) : Prop :=
   a.kind.touchesMemory = true ∧ b.kind.touchesMemory = true ∧
-  a.provenance.space = b.provenance.space ∧
   sharesBytes a.provenance.root b.provenance.root ∧
   a.committedRange.Overlaps b.committedRange ∧
   (a.kind.writes = true ∨ b.kind.writes = true) ∧
@@ -239,7 +342,7 @@ instance {sharesBytes : AllocId → AllocId → Prop}
     {compatible : MemoryEvent → MemoryEvent → Prop}
     [∀ x y, Decidable (compatible x y)] (a b : MemoryEvent) :
     Decidable (Conflicts sharesBytes compatible a b) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 theorem Conflicts.symm {sharesBytes : AllocId → AllocId → Prop}
     {compatible : MemoryEvent → MemoryEvent → Prop}
@@ -247,8 +350,8 @@ theorem Conflicts.symm {sharesBytes : AllocId → AllocId → Prop}
     (symmetric : ∀ x y, compatible x y → compatible y x) {a b : MemoryEvent}
     (h : Conflicts sharesBytes compatible a b) :
     Conflicts sharesBytes compatible b a := by
-  obtain ⟨ha, hb, hspace, hshare, ho, hw, hat⟩ := h
-  refine ⟨hb, ha, hspace.symm, shareSymm _ _ hshare, ?_, hw.symm,
+  obtain ⟨ha, hb, hshare, ho, hw, hat⟩ := h
+  refine ⟨hb, ha, shareSymm _ _ hshare, ?_, hw.symm,
     fun hc => hat (symmetric b a hc)⟩
   obtain ⟨offset, h₁, h₂⟩ := ho
   exact ⟨offset, h₂, h₁⟩
@@ -258,9 +361,39 @@ theorem not_conflicts_of_both_read {sharesBytes : AllocId → AllocId → Prop}
     {compatible : MemoryEvent → MemoryEvent → Prop}
     {a b : MemoryEvent} (ha : a.kind = .read) (hb : b.kind = .read) :
     ¬ Conflicts sharesBytes compatible a b := by
-  rintro ⟨_, _, _, _, _, hw, _⟩
+  rintro ⟨_, _, _, _, hw, _⟩
   rw [ha, hb] at hw
   simp [EventKind.writes] at hw
+
+/-- **Events whose committed ranges do not overlap never conflict.** §7.3's first
+condition, as a refusal.
+
+`Conflicts` has six conjuncts and four had a negative theorem; this and
+`not_conflicts_of_compatible` below are the two §7.3 is actually *about*, and review
+found both replaceable by `True` with the tree green. Without this one every pair of
+accesses to shared storage with a writer is a race, however far apart they are --
+which is the over-refusing direction, and therefore silent.
+
+Stated over the *committed* ranges, because bytes an event did not commit are bytes it
+did not touch. -/
+theorem not_conflicts_of_disjoint {sharesBytes : AllocId → AllocId → Prop}
+    {compatible : MemoryEvent → MemoryEvent → Prop} {a b : MemoryEvent}
+    (h : ¬ a.committedRange.Overlaps b.committedRange) :
+    ¬ Conflicts sharesBytes compatible a b :=
+  fun hc => h hc.2.2.2.1
+
+/-- **And a compatible pair never conflicts**, which is §7.3's own exemption: "not both
+compatible atomic accesses under one profile". Without it `atomicShared` stops meaning
+anything at the event layer.
+
+The adjective is load-bearing and is enforced one layer up:
+`Grass/Op/Step.lean`'s `StepPolicy.compatibleIsAtomic` is a proof field, so a policy
+that cannot show both accesses atomic cannot be constructed at all. This theorem is
+about the clause; that field is about what a profile may put in it. -/
+theorem not_conflicts_of_compatible {sharesBytes : AllocId → AllocId → Prop}
+    {compatible : MemoryEvent → MemoryEvent → Prop} {a b : MemoryEvent}
+    (h : compatible a b) : ¬ Conflicts sharesBytes compatible a b :=
+  fun hc => hc.2.2.2.2.2 h
 
 /-- Events in different storage never conflict, however their offsets compare.
 This is `docs/MEMORY_MODEL.md` §7.5 at the event layer. -/
@@ -268,25 +401,56 @@ theorem not_conflicts_of_unshared {sharesBytes : AllocId → AllocId → Prop}
     {compatible : MemoryEvent → MemoryEvent → Prop} {a b : MemoryEvent}
     (h : ¬ sharesBytes a.provenance.root b.provenance.root) :
     ¬ Conflicts sharesBytes compatible a b :=
-  fun hc => h hc.2.2.2.1
-
-/-- Events in different address spaces never conflict, however their offsets
-compare. This is `docs/MEMORY_MODEL.md` §7.5 at the event layer, and unlike the
-allocation test it really is a provenance fact. -/
-theorem not_conflicts_of_different_space {sharesBytes : AllocId → AllocId → Prop}
-    {compatible : MemoryEvent → MemoryEvent → Prop} {a b : MemoryEvent}
-    (h : a.provenance.space ≠ b.provenance.space) :
-    ¬ Conflicts sharesBytes compatible a b :=
   fun hc => h hc.2.2.1
 
-/-- A fence conflicts with nothing, because it touches no bytes. -/
-theorem not_conflicts_fence_left {sharesBytes : AllocId → AllocId → Prop}
+/-!
+**There is no theorem here saying different spaces never conflict, and there was.**
+
+`Conflicts` carried `a.provenance.space = b.provenance.space` and that theorem
+asserted the narrowing as a law of §7.5. §7.3's sentence has no address-space clause,
+and §7.5's is about offset coincidence -- "not interchangeable *merely because their
+offsets match*" -- which `sharesBytes` already implements: unrelated allocations do
+not share bytes whatever their spaces, and related ones share them only where the
+state says so.
+
+The conjunct did not narrow the rule to offset coincidence. It cancelled a
+*declared* sharing whenever the two provenances named different spaces, which is
+exactly the configuration the `SameStorage` repair above was made for: two of the
+three pairs that repair names -- a host-visible device buffer and the device
+allocation behind it, a physical/virtual pair -- live in different spaces. Review
+stepped it: with the buffer aliased to a host-visible device view, the program thread
+wrote the buffer and the device engine then wrote the same declared storage through
+the view, and the step committed with an empty violation ledger. The same store
+through a *cpu*-space view of the same storage was refused as `conflictingAccess`.
+
+`MemoryState.AuthorizedAt` had dropped its own space conjunct for the same reason and
+said so, so the authority rule and the race rule were answering differently about one
+pair of allocations.
+-/
+
+/-- **An event that touches no bytes conflicts with nothing.**
+
+Stated over `touchesMemory` and not over `EventKind.fence`. It was
+`(h : a.kind = .fence)`, and nothing in the model can mint an event of that kind, so
+the theorem held of a term no state could reach.
+
+**The correction moved the vacuity; it did not remove it, and an earlier version of
+this docstring claimed otherwise** ("a real statement about a real hypothesis").
+Review checked: `kindOf` yields only `read`, `write` and `readModifyWrite`, all three
+of which `touchesMemory_kindOf` sends to `true`; `ofOutcome` is the only producer of a
+`ValidMemoryEvent`; and `MachineState.events` holds `ValidMemoryEvent`. So no event in
+any trace satisfies this hypothesis either — `touchesMemory_ofOutcome` below is that
+fact, stated rather than left implicit.
+
+The theorem is kept, because it is a true statement about `Conflicts` over arbitrary
+`MemoryEvent`s and `Conflicts` is where a fence *would* enter if §7.1's fence kind
+became constructible. What it is not is coverage of anything the transition can
+produce, and this docstring says so now. The same applies to
+`WellFormed.noLocationWhenUntouched`. -/
+theorem not_conflicts_of_untouched {sharesBytes : AllocId → AllocId → Prop}
     {compatible : MemoryEvent → MemoryEvent → Prop}
-    {a b : MemoryEvent} (h : a.kind = .fence) :
-    ¬ Conflicts sharesBytes compatible a b := by
-  rintro ⟨ht, _⟩
-  rw [h] at ht
-  simp [EventKind.touchesMemory] at ht
+    {a b : MemoryEvent} (h : a.kind.touchesMemory ≠ true) :
+    ¬ Conflicts sharesBytes compatible a b := fun hc => h hc.1
 
 end MemoryEvent
 
@@ -375,10 +539,22 @@ def inert (hr : d.intent.reads = false) (hw : d.intent.writes = false) :
     observedFits := fun _ h => absurd h (by simp)
     writtenFits := fun _ h => absurd h (by simp) }
 
-/-- Truncate a committed outcome to a prefix, for a faulting access. -/
-def truncate {d : AccessDescriptor} (c : Committed d) (count : Nat) : Committed d :=
-  { observed := c.observed.map (·.take count)
-    written := c.written.map (·.take count)
+/--
+Truncate a committed outcome to a prefix, for a faulting access.
+
+**Reads and writes truncate separately**, which is the whole reason `Committed`
+counts them separately. This module's own docstrings motivate the two-count design
+with an `xadd` that observed eight bytes and then faulted before storing any — and
+until review checked, the transition truncated both lists by one shared count, so
+that outcome was the one thing the fault path could not express. A faulting
+read-modify-write always reported `readCommitted = writeCommitted`, and the
+fixture asserting the read survived never checked the write, so it passed while
+demonstrating the opposite of the property its section claimed.
+-/
+def truncate {d : AccessDescriptor} (c : Committed d) (reads writes : Nat) :
+    Committed d :=
+  { observed := c.observed.map (·.take reads)
+    written := c.written.map (·.take writes)
     observedPresent := fun h => by simpa using c.observedPresent h
     observedAbsent := fun h => by simp [c.observedAbsent h]
     writtenPresent := fun h => by simpa using c.writtenPresent h
@@ -399,6 +575,31 @@ def truncate {d : AccessDescriptor} (c : Committed d) (count : Nat) : Committed 
 end Committed
 
 /--
+A `Committed` that filled the access it answers.
+
+`Committed`'s length obligations are upper bounds — `observedFits` and
+`writtenFits` say a committed list is *no longer* than the range, never that it
+fills it. That is right for a faulting access, whose whole point is a prefix. It
+is wrong for a completed one, and nothing said so: an oracle returning an empty
+write for a nonempty store produced a `completed` outcome, `AccessOutcome.status`
+quietly relabelled it `partialCommit 0 0`, and the operation continued to its
+later substeps with nothing committed and no fault or denial. A malformed machine
+answer became successful execution, which is the shape `docs/FOUNDATION.md` law 8
+names. Review type-checked that counterexample against the seam fixture.
+
+The counts are **intent-relative**: an access that does not read owes no read
+bytes. Carrying the evidence here rather than checking it later makes a short
+completion unrepresentable instead of detectable.
+-/
+structure CompleteCommitted (d : AccessDescriptor) where
+  /-- What the machine committed. -/
+  committed : Committed d
+  /-- A reading access observed its whole range. -/
+  readsFull : d.intent.reads = true → committed.readCount = d.range.size
+  /-- A writing access wrote its whole range. -/
+  writesFull : d.intent.writes = true → committed.writeCount = d.range.size
+
+/--
 What happened when an access was attempted.
 
 `denied` carries no `Committed`, which is the type-level form of
@@ -406,8 +607,10 @@ What happened when an access was attempted.
 denied substep": a denial that reported committed bytes is not expressible.
 -/
 inductive AccessOutcome (d : AccessDescriptor) where
-  /-- The access ran to completion. -/
-  | completed (committed : Committed d)
+  /-- The access ran to completion, filling every count its intent implies.
+  `CompleteCommitted` carries that evidence, so a short answer cannot be dressed
+  as a completion. -/
+  | completed (complete : CompleteCommitted d)
   /-- The access faulted, having committed what `committed` records. -/
   | faulted (fault : FaultClassId) (committed : Committed d)
   /-- The access was refused before committing anything. -/
@@ -417,13 +620,23 @@ namespace AccessOutcome
 
 variable {d : AccessDescriptor}
 
-/-- The architectural status this outcome reports. -/
+/--
+The architectural status this outcome reports.
+
+The completeness test is **intent-relative**, and has to be. It once demanded
+`readCount = size ∧ writeCount = size` unconditionally, so a write-only access —
+whose `readCount` is `0` because `Committed.observedAbsent` requires it — could
+never report `.completed`. Every ordinary load and store recorded
+`.partialCommit`, whose own docstring says "stopped early without faulting", and
+`AccessStatus.IsComplete` was false for every access this model can perform except
+a full-width read-modify-write. Review found it by asking what a completed load
+reports. `Tests/Op/FakeIsa.lean`'s `a_completed_load_reports_completed` is the
+regression.
+-/
 def status : AccessOutcome d → AccessStatus
-  | .completed c => if c.readCount = d.range.size ∧ c.writeCount = d.range.size then
-      .completed
-    else .partialCommit (max c.readCount c.writeCount)
-  | .faulted fault c => .faulted fault (max c.readCount c.writeCount)
-  | .denied _ => .partialCommit 0
+  | .completed c => .completed c.committed.readCount c.committed.writeCount
+  | .faulted fault c => .faulted fault c.readCount c.writeCount
+  | .denied _ => .partialCommit 0 0
 
 /-- The violation this outcome records, if it was refused. -/
 def violation? : AccessOutcome d → Option AuditViolation
@@ -432,7 +645,8 @@ def violation? : AccessOutcome d → Option AuditViolation
 
 /-- What this outcome committed, if it committed anything. -/
 def committed? : AccessOutcome d → Option (Committed d)
-  | .completed c | .faulted _ c => some c
+  | .completed c => some c.committed
+  | .faulted _ c => some c
   | .denied _ => Option.none
 
 /-- A denial commits nothing, by construction rather than by convention. -/
@@ -445,22 +659,11 @@ theorem status_wellFormed (outcome : AccessOutcome d) :
     outcome.status.WellFormed d.range.size := by
   cases outcome with
   | completed c =>
-    have hr := c.readCount_le
-    have hw := c.writeCount_le
-    simp only [status]
-    split
-    · exact Nat.le_refl _
-    · show max c.readCount c.writeCount ≤ d.range.size
-      omega
+    exact ⟨c.committed.readCount_le, c.committed.writeCount_le⟩
   | faulted fault c =>
-    have hr := c.readCount_le
-    have hw := c.writeCount_le
-    simp only [status]
-    show max c.readCount c.writeCount ≤ d.range.size
-    omega
+    exact ⟨c.readCount_le, c.writeCount_le⟩
   | denied _ =>
-    simp only [status]
-    exact Nat.zero_le _
+    exact ⟨Nat.zero_le _, Nat.zero_le _⟩
 
 end AccessOutcome
 
@@ -474,6 +677,7 @@ construction rather than by a check something might forget to run — and M8's
 consistency model consumes a type that cannot contain a malformed event.
 -/
 structure ValidMemoryEvent where
+  private mk ::
   /-- The event. -/
   event : MemoryEvent
   /-- Its well-formedness. -/
@@ -497,17 +701,17 @@ def kindOf (intent : AccessIntent) : Option EventKind :=
 
 theorem reads_kindOf {intent : AccessIntent} {kind : EventKind}
     (h : kindOf intent = some kind) : kind.reads = intent.reads := by
-  obtain ⟨reads, writes, _, _, _⟩ := intent
+  obtain ⟨reads, writes, _, _⟩ := intent
   cases reads <;> cases writes <;> simp [kindOf] at h <;> subst h <;> rfl
 
 theorem writes_kindOf {intent : AccessIntent} {kind : EventKind}
     (h : kindOf intent = some kind) : kind.writes = intent.writes := by
-  obtain ⟨reads, writes, _, _, _⟩ := intent
+  obtain ⟨reads, writes, _, _⟩ := intent
   cases reads <;> cases writes <;> simp [kindOf] at h <;> subst h <;> rfl
 
 theorem touchesMemory_kindOf {intent : AccessIntent} {kind : EventKind}
     (h : kindOf intent = some kind) : kind.touchesMemory = true := by
-  obtain ⟨reads, writes, _, _, _⟩ := intent
+  obtain ⟨reads, writes, _, _⟩ := intent
   cases reads <;> cases writes <;> simp [kindOf] at h <;> subst h <;> rfl
 
 /--
@@ -518,11 +722,29 @@ the descriptor's own well-formedness already forbids. A denial emits a violation
 not an event: nothing happened to any byte.
 
 The well-formedness proof is discharged here, from the `Committed` fields, so a
-caller never assembles one and never has an opportunity to skip it.
+caller going through this function never assembles one and never has an
+opportunity to skip it.
+
+**The only producer, now by construction.** `ValidMemoryEvent.mk` is private, so
+no caller outside `Grass/Memory/Event.lean` can assemble one, and this is the only
+declaration inside it that returns one. A probe confirms the direct assembly is a
+compile error rather than a discouraged habit.
+
+That claim was withdrawn once and is restored deliberately. The constructor was
+public, review assembled an event whose status disagreed with its own counts, and
+the honest response at the time was to weaken the claim rather than defend it.
+Sealing is the fix that makes the strong version true.
+
+Sealing is not sufficient on its own and should not be read as if it were. It
+stops an event bypassing the fields; it says nothing about whether the fields are
+strong enough. Two of them were not being compared at all until that same review,
+which is what `statusAgreesWithReads` and `statusAgreesWithWrites` fixed. The
+fields remain the thing to keep honest.
 -/
 def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
     (space : AddressSpace) (d : AccessDescriptor) (outcome : AccessOutcome d) :
     Option ValidMemoryEvent :=
+  if hspace : space.id ≠ d.provenance.space then Option.none else
   match houtcome : outcome.committed? with
   | Option.none => Option.none
   | some c =>
@@ -545,7 +767,8 @@ def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
                   readCommitted := c.readCount
                   writeCommitted := c.writeCount }
               wellFormed :=
-                { readValuePresent := fun h =>
+                { spaceAgreesWithProvenance := by simpa using hspace
+                  readValuePresent := fun h =>
                     c.observedPresent (by rw [← reads_kindOf hkind]; exact h)
                   readValueAbsent := fun h =>
                     c.observedAbsent (by rw [← reads_kindOf hkind]; exact h)
@@ -571,9 +794,67 @@ def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
                     show bytes.length = (d.range.take c.readCount).size
                     rw [ByteRange.take_size, hcount]
                     omega
-                  readWithinRange := c.readCount_le
-                  writeWithinRange := c.writeCount_le
-                  statusWellFormed := outcome.status_wellFormed } }
+                  statusWellFormed := outcome.status_wellFormed
+                  statusAgreesWithReads := by
+                    cases houtcome' : outcome with
+                    | completed c' =>
+                      subst houtcome'
+                      simp only [AccessOutcome.committed?] at houtcome
+                      cases Option.some.inj houtcome
+                      rfl
+                    | faulted f c' =>
+                      subst houtcome'
+                      simp only [AccessOutcome.committed?] at houtcome
+                      cases Option.some.inj houtcome
+                      rfl
+                    | denied v =>
+                      subst houtcome'
+                      simp [AccessOutcome.committed?] at houtcome
+                  statusAgreesWithWrites := by
+                    cases houtcome' : outcome with
+                    | completed c' =>
+                      subst houtcome'
+                      simp only [AccessOutcome.committed?] at houtcome
+                      cases Option.some.inj houtcome
+                      rfl
+                    | faulted f c' =>
+                      subst houtcome'
+                      simp only [AccessOutcome.committed?] at houtcome
+                      cases Option.some.inj houtcome
+                      rfl
+                    | denied v =>
+                      subst houtcome'
+                      simp [AccessOutcome.committed?] at houtcome } }
+
+/--
+**Every event this module can mint touches memory.**
+
+The fact that makes `not_conflicts_of_untouched` and
+`WellFormed.noLocationWhenUntouched` vacuous over any trace, stated so that the
+vacuity is a theorem rather than something a reader has to reconstruct. It follows
+from `kindOf`'s three cases and is what `ofOutcome` itself relies on to discharge
+`kindTouchesMemory`.
+
+If §7.1's `fence` kind ever becomes constructible, this theorem is what breaks, which
+is the right place for the breakage to appear.
+-/
+theorem touchesMemory_ofOutcome {id : EventId} {contextKind : ContextKind}
+    {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
+    {outcome : AccessOutcome d} {valid : ValidMemoryEvent}
+    (h : ofOutcome id contextKind cause space d outcome = some valid) :
+    valid.event.kind.touchesMemory = true := by
+  unfold ofOutcome at h
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  next c _ =>
+    split at h
+    · exact absurd h (by simp)
+    · next kind hkind =>
+      injection h with h
+      subst h
+      exact touchesMemory_kindOf hkind
 
 /-- The event an access produces records exactly the access's own range. -/
 @[simp] theorem range_of_ofOutcome {id : EventId} {contextKind : ContextKind}
@@ -584,9 +865,12 @@ def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
   unfold ofOutcome at h
   split at h
   · exact absurd h (by simp)
-  · split at h
-    · exact absurd h (by simp)
-    · cases h; rfl
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  cases h
+  rfl
 
 /-- A denied outcome produces no event. Nothing was touched, so nothing is
 recorded in the trace; the violation ledger is where a denial appears. -/

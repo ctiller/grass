@@ -9,9 +9,11 @@ That law has two halves and they need different mechanisms.
 
 **Grass's own identities are never reused within one supply.** A `Uid` can only be
 produced by `FreshSupply.fresh`. The constructor and the index field are
-`private`, so outside this module there is no `Uid.mk` and no way to read an
-index back out. `never_reissued` is therefore a mechanism rather than a
-convention for a given supply.
+`private`, so outside this module there is no `Uid.mk` and no way to read an index
+back out *through a projection*. The generated recursor is another matter — see the
+`FreshSupply` note below, which review corrected. `never_reissued` is a mechanism
+rather than a convention for a given supply, and the strength it has comes from its
+`Reachable` hypothesis rather than from the privacy.
 
 What this module does not deliver: uniqueness of the supply itself. `initial` is public, and it must be — something has to start. So a second
 `FreshSupply.initial` for the same tag reissues every identity from zero, and
@@ -85,9 +87,19 @@ end Uid
 /--
 The mint state of one identity domain.
 
-`nextIndex` is the least index never yet issued. Both the constructor and the
-field are private, so no consumer can fabricate a supply, rewind one, or observe
-how many identities have been issued.
+`nextIndex` is the least index never yet issued. Both the constructor and the field
+are private, so no consumer can fabricate a supply through `mk`, rewind one through a
+named function, or observe the count through a projection.
+
+**All three are reachable through the recursor**, which Lean generates with the
+type's own visibility. Review compiled, from outside this module and with no `sorry`,
+an `issuedCount` reading the index back out, a `supplyAt` fabricating a supply at any
+index, and a `rewind` composed from the two — and then re-minted an identity the
+rewound supply had already issued. So the protection is not the private constructor:
+it is the `Reachable` hypothesis on `never_reissued`, and nothing type-enforces that
+a caller mints from a forward-reachable supply rather than a rewound one.
+`Grass/Memory/ByteStore.lean` records the same limit for its own recursor; this
+module claimed more than that one does.
 -/
 structure FreshSupply (Tag : Type u) where
   private mk ::
@@ -114,9 +126,15 @@ def fresh (s : FreshSupply Tag) : Uid Tag × FreshSupply Tag :=
 `Reachable s t` holds when `t` is a supply some sequence of mints reaches from
 `s`.
 
-This is the relation an execution establishes, and it is the one the freshness
-laws are stated over. A bare numeric comparison between two supplies would be
-satisfiable by supplies no execution connects.
+This is the relation an execution establishes, and it is the one the freshness laws
+are stated over.
+
+It is **equivalent** to `s.nextIndex ≤ t.nextIndex`, which the module comment above
+says plainly and an earlier version of this paragraph denied — it claimed a bare
+numeric comparison would be satisfiable by supplies no execution connects. It would
+not; it is the same relation. What the named inductive buys is that a reader sees
+what the comparison is *for*, and that a proof carries the reason rather than the
+arithmetic. That is worth having and it is not extra strength.
 -/
 inductive Reachable : FreshSupply Tag → FreshSupply Tag → Prop where
   /-- A supply reaches itself. -/

@@ -1,6 +1,7 @@
 import Grass.Core.Context
 import Grass.Memory.AddressSpace
 import Grass.Memory.Audit
+import Grass.Memory.Authority
 import Grass.Memory.Fault
 import Grass.Memory.Ordering
 import Grass.Memory.Provenance
@@ -90,6 +91,30 @@ inductive InitializationDemand where
   | readsNothing
 deriving DecidableEq, Repr
 
+namespace InitializationDemand
+
+/-- The rule this demand cites, when it cites one.
+
+`Option`, so "cites a rule" and "does not" are one match rather than two
+predicates that could disagree — the same shape as `MemoryOrder.profileName?`.
+`AdmittedVocabulary.Admits` requires the cited rule to be one the profile
+registered; before that registry existed, an access read uninitialized bytes by
+declaring a string. -/
+def justification? : InitializationDemand → Option Name
+  | .permitsUninitialized justification => some justification
+  | _ => Option.none
+
+@[simp] theorem justification?_allBytesInitialized :
+    allBytesInitialized.justification? = Option.none := rfl
+
+@[simp] theorem justification?_readsNothing :
+    readsNothing.justification? = Option.none := rfl
+
+@[simp] theorem justification?_permitsUninitialized (justification : Name) :
+    (permitsUninitialized justification).justification? = some justification := rfl
+
+end InitializationDemand
+
 /--
 One declared memory access.
 
@@ -137,6 +162,9 @@ structure AccessDescriptor where
   observations : List ObservationLabel := []
   /-- How this access changes the obligation ledger. -/
   ledgerEffect : LedgerEffect := []
+  /-- How this access changes the authority map. Defaulted to nothing, because
+  almost no access lends or returns anything, and an access that does says so. -/
+  authorityEffect : AuthorityEffect := []
 deriving DecidableEq, Repr
 
 namespace AccessDescriptor
@@ -189,6 +217,15 @@ transition never applies it to a hand-made space: `Substep.WellFormedIn` resolve
 through the profile's table, and `StepPolicy.vocabularyWellFormed` rules out a
 table that answers ambiguously.
 
+**And that was not enough, for a milestone.** Resolution and the ambiguity check close
+the hand-made space and the duplicate; neither closes a table that declares the
+pairing this paragraph names *once*, which is well formed on its own. Review built
+such a table, discharged `vocabularyWellFormed` against it, and stepped a store of
+more than `2^64` bytes at a symbolic address with a 4096-byte alignment demand. The
+fixture that was supposed to be about this wrote the value down and refused it as a
+`Nodup` duplicate. `AddressSpace.RepresentationMatchesIdentity` is the missing half:
+`cpu.virtual` is numerically addressed by its identity, not by a profile's choice.
+
 The remaining conditions are checkable from the descriptor alone. Whether the
 provenance is live, whether the named bytes are actually initialized, and whether
 the address really is the allocation base plus `range.start` are facts about a
@@ -211,6 +248,19 @@ structure WellFormedIn (d : AccessDescriptor) (space : AddressSpace) : Prop wher
   /-- An access that reads, writes, and executes nothing is not an access.
   `docs/FOUNDATION.md` law 8 forbids treating it as a harmless no-op. -/
   notInert : ¬ d.intent.IsInert
+  /-- An access that names no bytes is not an access either.
+
+  `notInert` above is about *intent* and this is about *extent*, and only the first
+  existed. A read of zero bytes at the offset one past an allocation's end was
+  therefore well formed and admitted: `denialOf` bounds-checks with
+  `ByteRange.Contains`, which places an empty range at `stop` inside the extent,
+  while `ByteRange.Meets` — what the loan map asks — places it outside every range.
+  So the access was undenied, unrefused by the loan rule even over bytes lent for
+  writing, and minted an event. It committed nothing, but law 8's answer to an
+  operation the model has no account of is to reject it, and the two range
+  predicates disagreeing about a position it is the only way to reach is exactly
+  such a case. -/
+  rangeNonEmpty : ¬ d.range.IsEmpty
   /-- The declared space is realizable by this vocabulary version. -/
   spaceWellFormed : space.WellFormed
   /-- The address has the form the space's representation requires. A numeric
@@ -257,7 +307,7 @@ structure WellFormedIn (d : AccessDescriptor) (space : AddressSpace) : Prop wher
 
 instance (d : AccessDescriptor) (space : AddressSpace) :
     Decidable (d.WellFormedIn space) :=
-  if h : space.id = d.space ∧ ¬ d.intent.IsInert ∧ space.WellFormed ∧
+  if h : space.id = d.space ∧ ¬ d.intent.IsInert ∧ ¬ d.range.IsEmpty ∧ space.WellFormed ∧
       space.Representable d.address ∧ d.provenance.space = d.space ∧
       d.provenance.Nested ∧ d.provenance.extent.Contains d.range ∧
       d.AlignmentSatisfied ∧ d.RangeFitsSpace space ∧
@@ -266,17 +316,19 @@ instance (d : AccessDescriptor) (space : AddressSpace) :
       ((d.intent.reads = true) ↔ (d.initialization ≠ .readsNothing)) ∧
       (d.producesInitialized = true → d.intent.writes = true) then
     .isTrue
-      { spaceResolved := h.1, notInert := h.2.1, spaceWellFormed := h.2.2.1
-        addressRepresentable := h.2.2.2.1, spaceAgrees := h.2.2.2.2.1
-        provenanceNested := h.2.2.2.2.2.1, rangeInProvenance := h.2.2.2.2.2.2.1
-        aligned := h.2.2.2.2.2.2.2.1, rangeFitsSpace := h.2.2.2.2.2.2.2.2.1
-        atomicityAgrees := h.2.2.2.2.2.2.2.2.2.1
-        permissionSufficient := h.2.2.2.2.2.2.2.2.2.2.1
-        initializationMatchesIntent := h.2.2.2.2.2.2.2.2.2.2.2.1
-        producesInitializedOnlyIfWrites := h.2.2.2.2.2.2.2.2.2.2.2.2 }
+      { spaceResolved := h.1, notInert := h.2.1, rangeNonEmpty := h.2.2.1
+        spaceWellFormed := h.2.2.2.1
+        addressRepresentable := h.2.2.2.2.1, spaceAgrees := h.2.2.2.2.2.1
+        provenanceNested := h.2.2.2.2.2.2.1, rangeInProvenance := h.2.2.2.2.2.2.2.1
+        aligned := h.2.2.2.2.2.2.2.2.1, rangeFitsSpace := h.2.2.2.2.2.2.2.2.2.1
+        atomicityAgrees := h.2.2.2.2.2.2.2.2.2.2.1
+        permissionSufficient := h.2.2.2.2.2.2.2.2.2.2.2.1
+        initializationMatchesIntent := h.2.2.2.2.2.2.2.2.2.2.2.2.1
+        producesInitializedOnlyIfWrites := h.2.2.2.2.2.2.2.2.2.2.2.2.2 }
   else
     .isFalse fun w =>
-      h ⟨w.spaceResolved, w.notInert, w.spaceWellFormed, w.addressRepresentable,
+      h ⟨w.spaceResolved, w.notInert, w.rangeNonEmpty, w.spaceWellFormed,
+        w.addressRepresentable,
         w.spaceAgrees, w.provenanceNested, w.rangeInProvenance, w.aligned,
         w.rangeFitsSpace, w.atomicityAgrees, w.permissionSufficient,
         w.initializationMatchesIntent, w.producesInitializedOnlyIfWrites⟩
@@ -290,44 +342,89 @@ def IsPlainWrite (d : AccessDescriptor) : Prop :=
   d.intent = .write ∧ d.ordering.IsPlain
 
 /--
-The bytes a given outcome commits, as a range.
+The bytes a given outcome **writes**, as a range.
 
 `docs/MEMORY_MODEL.md` §4: "A write initializes only the bytes it actually
-completes." The committed range is therefore a prefix of the named range, and
-this is the function every initialization and framing argument goes through.
--/
-def committedRange (d : AccessDescriptor) (status : AccessStatus) : ByteRange :=
-  d.range.take (status.committedBytes d.range.size)
+completes." The committed write range is therefore a prefix of the named range.
 
-@[simp] theorem committedRange_completed (d : AccessDescriptor) :
-    d.committedRange .completed = d.range := by
-  simp [committedRange]
+Writes, not "commits". It used to read the status's single conflated count, so a
+read-modify-write that observed eight bytes and wrote none mapped to the *whole*
+eight-byte range — the opposite of what §4 says, in the function whose docstring
+claimed to be what every initialization argument goes through. It was not: the
+initialization path is `MemoryState.commit`'s byte list, which is why the error
+never reached memory. Review found both the defect and the false claim.
+
+**And it has no consumer.** `MemoryEvent.committedWriteRange` is the one the tree
+uses — same definition over an event's own range and count, consumed by
+`MemoryEvent.Conflicts` through `committedRange`. This one is applied nowhere; its
+only mention outside its own six theorems was a sentence in
+`Tests/Memory/Spike1Reference.lean` saying "`AccessDescriptor.committedWriteRange` is
+what a later proof reads", which was not so and which that file has since corrected —
+this paragraph went on quoting the repaired-away text in the present tense and calling
+it false. Two Lean encodings of one sentence in one
+layer is the [FOUNDATION.md](../../docs/FOUNDATION.md) law 11 objection this document
+raises against `LoanConflicts`, and here the duplicate is the dead one.
+
+Kept rather than deleted for one reason: the *event* version is derived from a
+descriptor's range and an outcome's count, so a proof relating an event's committed
+range to the descriptor that produced it will want this side of the equation, and
+`Grass/Op/Step.lean` has no such theorem yet. If M8's graph does not want it, it
+should go. Recorded in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1.
+-/
+def committedWriteRange (d : AccessDescriptor) (status : AccessStatus) : ByteRange :=
+  d.range.take status.committedWrites
+
+@[simp] theorem committedWriteRange_completed (d : AccessDescriptor) (reads : Nat) :
+    d.committedWriteRange (.completed reads d.range.size) = d.range := by
+  simp [committedWriteRange]
+
+/--
+**A completed load writes nothing.**
+
+The case the previous shape got wrong: `completed` answered "the whole range" for
+both counts, so a load — and every ordinary load lands on `completed` — mapped to
+its whole range under a function named for what an access *writes*.
+-/
+@[simp] theorem committedWriteRange_completed_read (d : AccessDescriptor) (reads : Nat) :
+    d.committedWriteRange (.completed reads 0) = ByteRange.empty d.range.start := by
+  simp [committedWriteRange, ByteRange.take, ByteRange.empty]
 
 /--
 The committed range never escapes the named range.
 
-Unconditional, because `committedRange` saturates through `ByteRange.take`. A
+Unconditional, because `committedWriteRange` saturates through `ByteRange.take`. A
 status claiming more committed bytes than the access covered therefore describes
-no effect outside the access's own range.
+no effect outside the access's own range — though `Grass/Op/Step.lean` rejects such
+a claim rather than relying on the saturation.
 -/
-theorem committedRange_contained (d : AccessDescriptor) (status : AccessStatus) :
-    d.range.Contains (d.committedRange status) :=
+theorem committedWriteRange_contained (d : AccessDescriptor) (status : AccessStatus) :
+    d.range.Contains (d.committedWriteRange status) :=
   d.range.contains_take _
 
 /-- For a well-formed status the committed range is exactly the claimed prefix,
 with no saturation. -/
-theorem committedRange_size (d : AccessDescriptor) {status : AccessStatus}
+theorem committedWriteRange_size (d : AccessDescriptor) {status : AccessStatus}
     (h : status.WellFormed d.range.size) :
-    (d.committedRange status).size = status.committedBytes d.range.size := by
+    (d.committedWriteRange status).size = status.committedWrites := by
   rw [AccessStatus.WellFormed] at h
-  simp [committedRange, Nat.min_eq_left h]
+  simp [committedWriteRange, Nat.min_eq_left h.2]
 
-/-- A faulting access commits its declared prefix, which may be nonempty. Nothing
-here permits a proof to assume a fault committed no bytes. -/
-theorem committedRange_faulted (d : AccessDescriptor) (fault : FaultClassId)
-    {committed : Nat} (h : committed ≤ d.range.size) :
-    d.committedRange (.faulted fault committed) = ⟨d.range.start, committed⟩ := by
-  simp [committedRange, AccessStatus.committedBytes, ByteRange.take, Nat.min_eq_left h]
+/-- A faulting access writes its declared prefix, which may be nonempty. Nothing
+here permits a proof to assume a fault wrote no bytes. -/
+theorem committedWriteRange_faulted (d : AccessDescriptor) (fault : FaultClassId)
+    {reads writes : Nat} (h : writes ≤ d.range.size) :
+    d.committedWriteRange (.faulted fault reads writes) =
+      ⟨d.range.start, writes⟩ := by
+  simp [committedWriteRange, AccessStatus.committedWrites, ByteRange.take,
+    Nat.min_eq_left h]
+
+/-- **A faulted read-modify-write writes only what it wrote.** The read count does
+not widen the write range, which is what the conflated count did. -/
+theorem committedWriteRange_faulted_read_only (d : AccessDescriptor)
+    (fault : FaultClassId) (reads : Nat) :
+    d.committedWriteRange (.faulted fault reads 0) = ByteRange.empty d.range.start := by
+  simp [committedWriteRange, AccessStatus.committedWrites, ByteRange.take,
+    ByteRange.empty]
 
 end AccessDescriptor
 

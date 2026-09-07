@@ -23,15 +23,19 @@ import Grass.ISA.X86.Register
 import Grass.ISA.X86.Sources
 import Grass.Memory.Access
 import Grass.Memory.AddressSpace
+import Grass.Memory.Addressing
+import Grass.Memory.Apply
 import Grass.Memory.Audit
 import Grass.Memory.Authority
 import Grass.Memory.Event
+import Grass.Memory.Loan
 import Grass.Memory.Fault
 import Grass.Memory.Ordering
 import Grass.Memory.Profile
 import Grass.Memory.Provenance
 import Grass.Memory.Range
 import Grass.Memory.Rights
+import Grass.Memory.Shape
 import Grass.Memory.State
 import Grass.Memory.Substep
 import Grass.Obligation.Core
@@ -170,7 +174,14 @@ first is what puts them back inside the audit.
 -/
 def userFacing (name : Name) : Name := (privateToUserName? name).getD name
 
-/-- Whether a declaration belongs to the audited namespace. -/
+/-- Whether a declaration belongs to the audited namespace.
+
+**Namespace, not module**, and that is a gap rather than a design. A declaration
+written in a `Grass/` module but outside the `Grass` namespace is scanned by nothing:
+review appended a root-namespace `axiom` to `Grass/Core/Name.lean` and a theorem using
+it, and `lake build` and this audit both passed. `moduleNamespacesAgree` below closes
+it by refusing the module rather than by widening this predicate, because widening it
+would pull in every core declaration the environment carries. -/
 def isAudited (name : Name) : Bool :=
   let n := userFacing name
   (`Grass).isPrefixOf n
@@ -238,6 +249,60 @@ run_cmd do
   unless missing.isEmpty do
     throwError m!"axiom audit coverage gap: these modules exist under Grass/ but are not imported by Tools/AxiomAudit.lean, so their declarations were never scanned:
 {MessageData.joinSep (missing.toList.map (m!"  {·}")) "
+"}"
+  -- Every declaration a `Grass/` module introduces must be in the `Grass`
+  -- namespace, or `isAudited` skips it and the axiom audit is silent about it.
+  -- Review appended a root-namespace axiom to `Grass/Core/Name.lean` and both gates
+  -- passed. Checked by module rather than by widening `isAudited`, which would pull
+  -- in every core declaration the environment carries.
+  --
+  -- Equation lemmas Lean generates for a *core* function are attributed to whichever
+  -- module first needed them, so `Grass/Std/Logical/Text.lean` mentioning
+  -- `String.toUTF8` puts `String.toUTF8.eq_1` in a `Grass/` module under the `String`
+  -- namespace. Nobody wrote it and its axioms are the core function's, so the gap
+  -- this check is about -- an *authored* declaration escaping `isAudited` -- does not
+  -- arise.
+  --
+  -- There was a second exemption here, a ten-name list matched against the last
+  -- component -- `eq_def`, `induct`, `brecOn` and so on -- carrying the paragraph
+  -- above as its reason. It silenced nothing: the two entries that paragraph names are
+  -- silenced by the numbered rule below, and the ten names match nothing in the
+  -- environment at all, while widening the check to any authored declaration ending in
+  -- one of them. That is the shape of the `eq_` prefix hole this file closed a round
+  -- earlier, minus the exploit, and review checked the limit: an axiom named
+  -- `ProbeStray.ind` does escape the namespace-gap check, but the axiom scan catches
+  -- any `Grass` declaration that uses it, so it was defence in depth and not a hole.
+  -- Deleted rather than kept with a reason that describes a different rule.
+  --
+  -- Generated *numbered* suffixes are exempt by shape, not by prefix. The prefix
+  -- form was a hole and the reason attached to it was false: it said "an authored
+  -- declaration cannot have one, because the elaborator reserves them", and Lean
+  -- reserves `f.eq_1` and `f.eq_def`, not the string `eq_`. `theorem eq_of_mem` is
+  -- ordinary Lean. Review appended `axiom List.eq_probeFalse` and a theorem using
+  -- it: `lake build` passed and this audit printed its clean line unchanged, while
+  -- the same axiom named `probeFalseControl` was caught. The two entries the
+  -- exemption silences in the real tree -- `String.fromUTF8.eq_1` and
+  -- `String.toUTF8.eq_1` -- match the numbered shape and still pass.
+  let generatedNumbered : String -> Bool := fun component =>
+    ["eq_", "match_", "proof_", "fun_"].any (fun marker =>
+      marker.isPrefixOf component &&
+        let rest := component.drop marker.length
+        !rest.isEmpty && rest.all Char.isDigit)
+  let mut strays : Array Name := #[]
+  for (name, _) in env.constants.toList do
+    if name.isInternal then continue
+    if (`Grass).isPrefixOf name then continue
+    let component := name.getString!
+    if generatedNumbered component then continue
+    match env.getModuleIdxFor? name with
+    | some idx =>
+        match env.header.moduleNames[idx.toNat]? with
+        | some m => if (`Grass).isPrefixOf m then strays := strays.push name
+        | none => pure ()
+    | none => pure ()
+  unless strays.isEmpty do
+    throwError m!"axiom audit namespace gap: these declarations live in a Grass/ module but outside the Grass namespace, so isAudited skips them:
+{MessageData.joinSep (strays.toList.map (m!"  {·}")) "
 "}"
   let mut audited : Nat := 0
   let mut unsafeFindings : Array Name := #[]

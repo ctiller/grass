@@ -11,8 +11,11 @@ makes the loan map the authoritative representation of borrowing, and
 almost every proof in the memory layer reduces to "this update did not touch the
 key I am reading".
 
-Equality is extensional, per `docs/STDLIB.md` §1: two maps are `Equiv` when they
-agree at every key. Representations are deliberately not normalized, so
+Equality is extensional here by this module's choice: two maps are `Equiv` when they
+agree at every key. `docs/STDLIB.md` §1 is about `Vec`, and §6's `Map` carries
+"separate equality, ordering/hash, allocator, and complexity profiles" — it
+parameterises equality rather than fixing it. An earlier version of this line cited §1
+as the authority for the choice. Representations are deliberately not normalized, so
 propositional equality of the underlying entry list is finer than `Equiv` and is
 never the right relation to use.
 
@@ -58,6 +61,30 @@ def eraseKey [DecidableEq K] (entries : List (K × V)) (key : K) : List (K × V)
 theorem findValue_cons_ne [DecidableEq K] {k key : K} (h : k ≠ key) (value : V)
     (rest : List (K × V)) : findValue ((k, value) :: rest) key = findValue rest key := by
   simp [findValue, h]
+
+/--
+A found value is one of the entries.
+
+The bundled form, `FiniteMap.mem_entries_of_lookup`, is the missing half of a bridge
+review found broken: `MemoryState.granted_of_covering` takes an
+`entry ∈ state.grantEntries` hypothesis, which `decide` discharges for a concrete map
+and which nothing discharged for an abstract one, so no general theorem about
+authority could be stated from a `lookup`. Proved by induction on the entry list,
+which is why `findValue` operates on the raw list.
+-/
+theorem mem_of_findValue [DecidableEq K] {entries : List (K × V)} {key : K} {value : V}
+    (h : findValue entries key = some value) : (key, value) ∈ entries := by
+  induction entries with
+  | nil => simp [findValue] at h
+  | cons entry rest ih =>
+    obtain ⟨k, v⟩ := entry
+    by_cases hk : k = key
+    · subst hk
+      rw [findValue_cons_self] at h
+      cases h
+      exact List.mem_cons_self
+    · rw [findValue, if_neg hk] at h
+      exact List.mem_cons_of_mem _ (ih h)
 
 @[simp] theorem eraseKey_nil [DecidableEq K] (key : K) :
     eraseKey ([] : List (K × V)) key = [] := rfl
@@ -131,8 +158,49 @@ such a map. Use `Binds`, or `domain` only up to membership, until the
 -/
 def domain (m : FiniteMap K V) : List K := m.entries.map Prod.fst
 
+/-- Erasing removes entries and adds none. -/
+theorem mem_of_mem_eraseKey {entries : List (K × V)} {key : K}
+    {entry : K × V} (h : entry ∈ eraseKey entries key) : entry ∈ entries := by
+  induction entries with
+  | nil => simp [eraseKey] at h
+  | cons e rest ih =>
+    obtain ⟨k, v⟩ := e
+    by_cases hk : k = key
+    · rw [eraseKey, if_pos hk] at h
+      exact List.mem_cons_of_mem _ (ih h)
+    · rw [eraseKey, if_neg hk] at h
+      rcases List.mem_cons.mp h with h | h
+      · exact h ▸ List.mem_cons_self
+      · exact List.mem_cons_of_mem _ (ih h)
+
+/-- A binding is one of the entries. The converse fails on a map with shadowed
+duplicates, which is why this direction only. -/
+theorem mem_entries_of_lookup {m : FiniteMap K V} {key : K} {value : V}
+    (h : m.lookup key = some value) : (key, value) ∈ m.entries :=
+  mem_of_findValue h
+
 /-- `m.Binds key` holds when `m` has a binding for `key`. -/
 def Binds (m : FiniteMap K V) (key : K) : Prop := (m.lookup key).isSome
+
+/--
+The entries of a map after an insert or an erase, bounded from above.
+
+`mem_entries_of_lookup` says what a map holds; these two say what it does *not*
+hold, which is what a no-new-authority theorem needs: every entry of the new map
+is either the one just inserted or an entry of the old map. Without them a
+theorem about a modified map has to unfold the association list at the call site.
+-/
+theorem mem_entries_insert {m : FiniteMap K V} {key : K} {value : V} {entry : K × V}
+    (h : entry ∈ (m.insert key value).entries) :
+    entry = (key, value) ∨ entry ∈ m.entries := by
+  rcases List.mem_cons.mp (show entry ∈ (key, value) :: eraseKey m.entries key from h) with
+    h | h
+  · exact Or.inl h
+  · exact Or.inr (mem_of_mem_eraseKey h)
+
+theorem mem_entries_erase {m : FiniteMap K V} {key : K} {entry : K × V}
+    (h : entry ∈ (m.erase key).entries) : entry ∈ m.entries :=
+  mem_of_mem_eraseKey h
 
 /-- `m.IsEmpty` holds when `m` binds nothing. -/
 def IsEmpty (m : FiniteMap K V) : Prop := ∀ key, m.lookup key = none
@@ -236,10 +304,16 @@ theorem Equiv.mem_domain {m n : FiniteMap K V} (h : m.Equiv n) {key : K}
     (hd : key ∈ m.domain) : key ∈ n.domain :=
   (mem_domain_iff_binds n key).mpr (h.binds ((mem_domain_iff_binds m key).mp hd))
 
-/-- A map with no entries binds nothing. The converse needs `K` to be searchable
-and is not available at this generality. -/
+/-- A map with no entries binds nothing. -/
 theorem isEmpty_of_entries_eq_nil {m : FiniteMap K V} (h : m.entries = []) : m.IsEmpty :=
   fun _ => by simp [lookup, h]
+
+/-- And the converse, which an earlier docstring said needed `K` to be searchable and
+was "not available at this generality". It is available, from
+`domain_eq_nil_of_isEmpty` above, at this generality. -/
+theorem entries_eq_nil_of_isEmpty {m : FiniteMap K V} (h : m.IsEmpty) : m.entries = [] := by
+  have hd := domain_eq_nil_of_isEmpty h
+  simpa [domain] using hd
 
 end FiniteMap
 

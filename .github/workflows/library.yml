@@ -12,10 +12,62 @@ name: Library build
 #
 # A third check is about prose. Four adversarial review rounds each found a
 # docstring asserting a property the code did not have, including one naming a
-# theorem that did not exist. Tools/DocstringAudit.py requires a strong claim in
+# theorem that did not exist. Tools/ConsultedAudit.py is a cheap net over a
+# different recurring failure: a fact the model carries that nothing consults. It
+# checks a lexical property -- that a declared field name is projected somewhere --
+# which is weaker than "every field is read" and is not evidence that the class is
+# closed; its own docstring lists what it cannot see. Run it with --self-test after
+# changing the scanner. Tools/DocstringAudit.py requires a strong claim in
 # a definition or module comment to name the type or theorem enforcing it.
+# Tools/CitationAudit.py closes the gap those two leave: a docstring may name an
+# enforcing theorem that no longer exists, and a debt may be "recorded in section
+# 4.2" of a document whose section 4.2 is about something else. Three review rounds
+# found both. It is lexical too -- it matches short names and cannot tell a
+# still-resolving citation from an accurate one -- and its own docstring lists what
+# it does not see.
 #
-# A fourth check is about laws. docs/STDLIB_IMPLEMENTATION_PLAN.md decision 6
+# All four now self-test, and `DocstringAudit.py` was the last to. It was also the
+# only one whose roots were relative to the working directory, so it printed its
+# success line and exited 0 from anywhere but the repo root, having read nothing —
+# the pure "check that cannot fail", in the tool that exists to catch that class.
+# Review found it. Every audit here anchors on `__file__` and fails when it finds no
+# sources.
+#
+# Tools/ReachabilityAudit.py is the fifth, over a class the others cannot see:
+# `ConsultedAudit.py` scans structure fields, and this is about sum constructors. A
+# constructor nothing builds makes every theorem about it hold of a term no state can
+# reach — `AuthorityState` carried three such, and section 4.4.1 of the plan asked
+# for this check in its own words. It is lexical too and reports ten deliberate
+# entries into an allowlist rather than none.
+#
+# Tools/DoorAudit.py is the seventh, and it guards a rule that cannot be enforced
+# inside the thing it protects. `MemoryState`'s grant map has five checked doors and
+# four separate second ways in were found on this branch. `issue?` takes no acting
+# context -- it reads the lender from the grant -- so "the acting context must be the
+# lender it names" cannot live in the door: a caller holding the grant would satisfy
+# an `actor` parameter by passing `grant.lender`, a gate closed with the thing being
+# gated. The check has content only where the actor comes from somewhere the caller
+# does not choose, which is the access descriptor's context, so it lives in
+# `applyAuthorityDelta?` -- and this audit is what keeps every `Grass/` path going
+# through there. `Tests/` is deliberately not scanned.
+#
+# Tools/FixtureAudit.py is the eighth, over the one place the field and constructor
+# audits do not look: a `def` under Tests/ that nothing uses. `Tests/Memory/Loans.lean`
+# carried a state built by reallocating under an outstanding loan from before that
+# reallocation was refused -- after the refusal landed the definition still
+# elaborated, its `.getD` silently returned the unreallocated state, and nothing used
+# it, so nothing failed.
+#
+# Tools/SourceLocationAudit.py is the sixth, and it exists because of an accident
+# rather than a class: two scratch probe files were swept into commits by a
+# `git add -A`, one of them containing a `sorry`, and a repo-root `.lean` file is
+# outside every gate there is — `lake build` globs `Grass.+` and `Tests.+`, and every
+# audit above scans those two trees. Neither file ever failed anything.
+#
+# Tools/CoverageAudit.lean is the ninth, and it arrived from the standard library's
+# side of the tree rather than this one -- renumbered here because a merge put both
+# enumerations in one comment, and it was written as "a fourth check".
+# docs/STDLIB_IMPLEMENTATION_PLAN.md decision 6
 # requires every Vec-returning operation to carry a law computing its length and
 # a law computing its get?. That rule was stated in prose three times and
 # violated in the same commit that stated it each time - most recently by
@@ -86,12 +138,50 @@ jobs:
         shell: pwsh
         run: ./audit-trust.ps1
 
+      - name: Self-test the docstring audit
+        run: python3 Tools/DocstringAudit.py --self-test
+
       - name: Audit docstring claims
         run: python3 Tools/DocstringAudit.py
 
+      - name: Self-test the consulted audit
+        run: python3 Tools/ConsultedAudit.py --self-test
+
+      - name: Audit declared field names never projected
+        run: python3 Tools/ConsultedAudit.py
+
+      - name: Self-test the source location audit
+        run: python3 Tools/SourceLocationAudit.py --self-test
+
+      - name: Audit Lean sources outside every gate
+        run: python3 Tools/SourceLocationAudit.py
+
+      - name: Self-test the reachability audit
+        run: python3 Tools/ReachabilityAudit.py --self-test
+
+      - name: Audit constructors nothing builds
+        run: python3 Tools/ReachabilityAudit.py
+
+      - name: Self-test the fixture audit
+        run: python3 Tools/FixtureAudit.py --self-test
+
+      - name: Audit fixtures nothing uses
+        run: python3 Tools/FixtureAudit.py
+
+      - name: Self-test the door audit
+        run: python3 Tools/DoorAudit.py --self-test
+
+      - name: Audit authority-map changes outside the map's own modules
+        run: python3 Tools/DoorAudit.py
+
+      - name: Self-test the citation audit
+        run: python3 Tools/CitationAudit.py --self-test
+
+      - name: Audit citations of declarations and document sections
+        run: python3 Tools/CitationAudit.py
+
       - name: Report ledger coverage
         run: lake env lean Tests/ISA/X86/LedgerAudit.lean
-
       - name: Audit observation coverage
         run: lake env lean Tools/CoverageAudit.lean
 
