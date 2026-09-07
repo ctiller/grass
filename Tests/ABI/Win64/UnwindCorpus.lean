@@ -79,6 +79,10 @@ inductive Step where
   | saveReg (r : Gpr) (off : Nat)
   /-- `movaps [rsp+off], xmm`, with `.savexmm128 xmm, off`. -/
   | saveXmm (r : Xmm) (off : Nat)
+  /-- `.pushframe`, with no instruction at all: the processor pushed the trap
+  frame before the function's first instruction ran. The only step here that
+  contributes nothing to `SizeOfProlog`. -/
+  | pushFrame (withErrorCode : Bool)
 deriving Repr
 
 namespace Step
@@ -93,6 +97,10 @@ def instr : Step → String
       "mov QWORD PTR [rsp+" ++ toString off ++ "], " ++ nasmName r
   | .saveXmm r off =>
       "movaps XMMWORD PTR [rsp+" ++ toString off ++ "], " ++ xmmName r
+  -- No instruction. The row builder drops the empty string rather than
+  -- emitting a blank line, because the differential counts non-directive
+  -- parts to decide what epilogue the test function needs.
+  | .pushFrame _ => ""
 
 /-- The unwind directive that must follow it. -/
 def directive : Step → String
@@ -101,6 +109,8 @@ def directive : Step → String
   | .setFrame r off => ".setframe " ++ nasmName r ++ ", " ++ toString off
   | .saveReg r off => ".savereg " ++ nasmName r ++ ", " ++ toString off
   | .saveXmm r off => ".savexmm128 " ++ xmmName r ++ ", " ++ toString off
+  | .pushFrame true => ".pushframe code"
+  | .pushFrame false => ".pushframe"
 
 /--
 The instruction's length in bytes.
@@ -136,6 +146,9 @@ def length : Step → Nat
   | .saveXmm r off =>
       (if 8 ≤ r.index.val then 5 else 4)
         + (if off = 0 then 0 else if off ≤ 127 then 1 else 4)
+  -- Zero: there is no instruction to measure, which is what makes the
+  -- machine frame's code offset zero however many operations follow it.
+  | .pushFrame _ => 0
 
 /-- The largest save offset for which `ml64` writes the near form.
 
@@ -167,6 +180,7 @@ def op : Step → UnwindOp
   | .saveXmm r off =>
       if off ≤ ml64LastNearSave then .saveXmm128 r off
       else .saveXmm128Far r off
+  | .pushFrame withErrorCode => .pushMachineFrame withErrorCode
 
 /-- The header nibbles this step establishes, if any. `FrameOffset` is scaled by
 sixteen. -/
@@ -213,7 +227,12 @@ def rowOf (name : String) (steps : List Step) : Option Row :=
   let layout : Layout := ⟨placed.1, BitVec.ofNat 8 placed.2.1⟩
   (UnwindInfo.mk? layout placed.2.2 .noHandler).map fun u =>
     { name := name
-      masm := String.intercalate " | " (steps.flatMap fun st => [st.instr, st.directive])
+      -- An empty instruction is dropped rather than joined: `.pushframe`
+      -- describes what the processor did, so there is nothing to assemble,
+      -- and the differential decides the test function's epilogue by counting
+      -- the parts that are not directives.
+      masm := String.intercalate " | " (steps.flatMap fun st =>
+        (if st.instr = "" then [] else [st.instr]) ++ [st.directive])
       xdata := hexBytes u.toBytes }
 
 /-- The registers a prologue may push: nonvolatile and not `rsp`. -/
@@ -334,6 +353,22 @@ def farSaveRows : List Row :=
      , rowOf "savereg-near-rbx-boundary"
          [.alloc 64504, .saveReg .rbx 64496] ].reduceOption
 
+/-- `UWOP_PUSH_MACHFRAME`, the trap frame an interrupt or exception pushed
+before the function began.
+
+Both shapes: `OpInfo = 0` without an error code and `1` with one. `ml64` writes
+`0A` and `1A` for them, and the operation's code offset is zero because no
+instruction precedes it -- which the rows with operations after the frame check,
+since those operations' offsets have to start from zero rather than from a
+prologue that had already begun. -/
+def machineFrameRows : List Row :=
+  [ rowOf "machframe" [.pushFrame false]
+  , rowOf "machframe-code" [.pushFrame true]
+  , rowOf "machframe-push-rbp" [.pushFrame false, .push .rbp]
+  , rowOf "machframe-code-alloc" [.pushFrame true, .alloc 32]
+  , rowOf "machframe-push-alloc-save"
+      [.pushFrame false, .push .rbx, .alloc 64, .saveReg .rsi 8] ].reduceOption
+
 /-- Saves mixed with the forms that already had coverage, so that a two-slot
 save has to agree on offsets with a push and an allocation on either side. -/
 def mixedSaveRows : List Row :=
@@ -355,7 +390,29 @@ def spike1Rows : List Row :=
 def corpus : List Row :=
   singlePushRows ++ pairPushRows ++ smallAllocRows ++ largeAllocRows ++
     pushAllocRows ++ frameRows ++ hugeAllocRows ++ saveRegRows ++
-    saveXmmRows ++ farSaveRows ++ mixedSaveRows ++ spike1Rows
+    saveXmmRows ++ farSaveRows ++ machineFrameRows ++ mixedSaveRows ++
+    spike1Rows
+
+-- Evaluating a hundred rows to a length outruns the default depth.
+set_option maxRecDepth 8000
+
+/-- Every family contributes the rows it was written to contribute.
+
+`rowOf` returns an `Option`: a prologue `UnwindInfo.mk?` refuses produces no row
+at all, and `filterMap` drops it without a word. That is the right behaviour --
+a corpus must not contain a prologue the model calls unencodable -- but it means
+a family can silently contribute nothing.
+
+It already did. All five `machineFrameRows` vanished on their first run, because
+`Layout.WellFormed` required every code offset to be positive and a machine
+frame's is zero. The differential then reported "95 prologues, byte-identical",
+which was true and told me nothing about the operation I had just added. The
+count is pinned here so that the next silent drop is a failed build rather than
+a satisfying green line.
+
+Raising this number is the ordinary way to add rows; lowering it means
+something stopped building and should be explained rather than accommodated. -/
+theorem corpus_length : corpus.length = 100 := by rfl
 
 /-- The Spike 1 row agrees with the theorem in `UnwindBytes.lean`, so the
 differential and the proof are checking the same bytes rather than two

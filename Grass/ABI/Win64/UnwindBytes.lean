@@ -176,6 +176,33 @@ unwinder would read whatever follows `.xdata` as unwind codes.
   | ⟨.saveNonvolatileFar _ _, _⟩ =>
       simp [toBytes, UnwindOp.slots, le32]
   | ⟨.saveXmm128Far _ _, _⟩ => simp [toBytes, UnwindOp.slots, le32]
+  | ⟨.pushMachineFrame _, _⟩ => simp [toBytes, UnwindOp.slots]
+
+/-- The code offset is placed where the unwinder can act on it.
+
+Every operation but one describes an instruction, and its unwind code takes
+effect at the address *after* that instruction; an offset of zero would make the
+code apply before the instruction had run, which is
+`zero_codeOffset_not_wellFormed`.
+
+`pushMachineFrame` is the exception and its offset must be zero. It describes
+what the processor pushed before the function's first instruction, so there is
+no preceding instruction for it to sit after -- `ml64` writes `00 0A`, and a
+positive offset would claim the trap frame appeared partway through a prologue
+that had already started running.
+
+Stated per operation rather than as a blanket rule on offsets, because the two
+cases are opposite and a single bound cannot express both. This cost five
+corpus rows that vanished silently before it was noticed: `rowOf` returns an
+`Option`, and a machine-frame row simply failed to build. -/
+def OffsetPlaced (p : PlacedOp) : Prop :=
+  match p.op with
+  | .pushMachineFrame _ => p.codeOffset.toNat = 0
+  | _ => 0 < p.codeOffset.toNat
+
+instance (p : PlacedOp) : Decidable p.OffsetPlaced := by
+  unfold OffsetPlaced
+  split <;> infer_instance
 
 /-- The first byte written is the code offset. -/
 theorem toBytes_head (p : PlacedOp) : p.toBytes.head? = some p.codeOffset := by
@@ -190,6 +217,7 @@ theorem toBytes_head (p : PlacedOp) : p.toBytes.head? = some p.codeOffset := by
   | ⟨.saveXmm128 _ _, _⟩ => rfl
   | ⟨.saveNonvolatileFar _ _, _⟩ => rfl
   | ⟨.saveXmm128Far _ _, _⟩ => rfl
+  | ⟨.pushMachineFrame _, _⟩ => rfl
 
 end PlacedOp
 
@@ -254,20 +282,32 @@ and is owed rather than done.
 -/
 def WellFormed (l : Layout) : Prop :=
   l.prologue.Encodable ∧ Ascends l.offsets ∧
-    (∀ o ∈ l.offsets, o ≤ l.sizeOfProlog) ∧ ∀ o ∈ l.offsets, 0 < o.toNat
+    (∀ o ∈ l.offsets, o ≤ l.sizeOfProlog) ∧
+    ∀ p ∈ l.placed, PlacedOp.OffsetPlaced p
 
 instance (l : Layout) : Decidable l.WellFormed :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
 
 /--
-A code offset of zero is refused.
+A code offset of zero is refused for an operation describing an instruction.
 
 The reviewer's case, kept as a theorem. The layout is internally consistent --
 the offsets ascend and stay inside the prologue -- and it describes a `push`
 whose unwind code applies before the `push` has run.
+
+`UWOP_PUSH_MACHFRAME` is the exception, and `PlacedOp.OffsetPlaced` is where
+that lives. See its docstring: the rule is about instructions, and a machine
+frame is not one.
 -/
 theorem zero_codeOffset_not_wellFormed :
     ¬ (Layout.mk [⟨.pushNonvolatile .rbx, 0⟩, ⟨.allocSmall 32, 4⟩] 4).WellFormed := by
+  decide
+
+/-- A machine frame at a nonzero offset is refused, the mirror of
+`zero_codeOffset_not_wellFormed`. The two together are why the rule is stated
+per operation: neither bound alone admits both. -/
+theorem machineFrame_nonzero_not_wellFormed :
+    ¬ (Layout.mk [⟨.pushMachineFrame false, 4⟩] 4).WellFormed := by
   decide
 
 /--

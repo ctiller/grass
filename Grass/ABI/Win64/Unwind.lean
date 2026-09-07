@@ -166,6 +166,16 @@ inductive UnwindOp where
   | saveNonvolatileFar (r : Gpr) (offset : Nat)
   /-- `UWOP_SAVE_XMM128_FAR` (9): the XMM save with an unscaled offset. -/
   | saveXmm128Far (r : Xmm) (offset : Nat)
+  /-- `UWOP_PUSH_MACHFRAME` (10): the trap frame the processor pushed before
+  the first instruction of the function ran.
+
+  Unlike every other operation here, this one describes something the prologue
+  did not do. On an interrupt or exception the processor pushes `SS`, `RSP`,
+  `RFLAGS`, `CS` and `RIP`, and an error code first for those vectors that have
+  one; the operation records that it happened so the unwinder can step over it.
+  Its code offset is zero and it contributes nothing to `SizeOfProlog`, because
+  there is no instruction to measure. -/
+  | pushMachineFrame (withErrorCode : Bool)
 deriving DecidableEq, Repr, Inhabited
 
 namespace UnwindOp
@@ -180,6 +190,7 @@ def opcode : UnwindOp → BitVec 4
   | .saveXmm128 _ _ => 8
   | .saveNonvolatileFar _ _ => 5
   | .saveXmm128Far _ _ => 9
+  | .pushMachineFrame _ => 10
 
 /-- The largest allocation the scaled `UWOP_ALLOC_LARGE` form encodes:
 `65535 * 8`, the ceiling of its 16-bit field. Above this the operation takes a
@@ -212,6 +223,7 @@ def slots : UnwindOp → Nat
   | .saveXmm128 _ _ => 2
   | .saveNonvolatileFar _ _ => 3
   | .saveXmm128Far _ _ => 3
+  | .pushMachineFrame _ => 1
 
 /-- Every operation occupies at least one slot. -/
 theorem slots_pos (op : UnwindOp) : 0 < op.slots := by
@@ -229,6 +241,20 @@ def stackDelta : UnwindOp → Nat
   | .saveXmm128 _ _ => 0
   | .saveNonvolatileFar _ _ => 0
   | .saveXmm128Far _ _ => 0
+  -- Zero, and the zero is a statement rather than an omission. `stackDelta`
+  -- is what the *prologue* subtracts from `RSP`, which is what
+  -- `Grass.ABI.Win64.rspAfterPrologue` reasons about; the processor pushed the
+  -- machine frame before the first instruction ran, so no instruction in the
+  -- prologue accounts for it.
+  --
+  -- The consequence is an open obligation rather than a hidden approximation:
+  -- a function entered through an interrupt gate does not arrive with the
+  -- eight-byte misalignment a `call` leaves, so `entryMisalignment` does not
+  -- describe its entry at all. This module models the unwind *encoding* of a
+  -- machine frame and not the alignment of the frame it sits in, and a
+  -- prologue mixing `pushMachineFrame` with an alignment argument would be
+  -- reasoning from a premise nothing here establishes.
+  | .pushMachineFrame _ => 0
 
 /-- The `OpInfo` nibble.
 
@@ -269,6 +295,10 @@ def opInfo : UnwindOp → BitVec 4
   | .saveXmm128 r _ => BitVec.ofNat 4 r.index.val
   | .saveNonvolatileFar r _ => regNibble r
   | .saveXmm128Far r _ => BitVec.ofNat 4 r.index.val
+  -- `OpInfo` distinguishes the two trap-frame shapes: 1 when the processor
+  -- also pushed an error code, 0 when it did not. Confirmed against `ml64`,
+  -- which writes 0x0A for `.pushframe` and 0x1A for `.pushframe code`.
+  | .pushMachineFrame withErrorCode => if withErrorCode then 1 else 0
 
 /--
 The allocation sizes `allocSmall` can encode: multiples of 8 from 8 to 128.
@@ -337,6 +367,10 @@ def Encodable : UnwindOp → Prop
         off ≤ largeAllocRawMax
   | .saveXmm128Far r off =>
       6 ≤ r.index.val ∧ off % 16 = 0 ∧ off ≤ largeAllocRawMax
+  -- Nothing to constrain: both trap-frame shapes are encodable, and which one
+  -- occurred is a fact about the vector rather than a choice the prologue
+  -- makes.
+  | .pushMachineFrame _ => True
 
 instance (op : UnwindOp) : Decidable op.Encodable := by
   cases op <;> unfold Encodable <;> infer_instance
@@ -578,6 +612,7 @@ theorem frameSpecIs_iff (p : Prologue) (reg offset : BitVec 4) :
     | .saveXmm128 _ _ => rfl
     | .saveNonvolatileFar _ _ => rfl
     | .saveXmm128Far _ _ => rfl
+    | .pushMachineFrame _ => rfl
 
 /-- A register other than `RAX` has a nonzero four-bit number. `RAX` is 0, and 0
 is how `UNWIND_INFO.FrameRegister` spells "no frame pointer". -/

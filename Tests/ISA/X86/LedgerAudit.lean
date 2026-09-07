@@ -104,7 +104,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 104
+def owedBaseline : Nat := 105
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -367,6 +367,11 @@ def owed : List Name :=
     -- ml64 confirms by refusing 2^32 with A2156.
     `Grass.ABI.Win64.UnwindOp.largeAllocScaledMax,
     `Grass.ABI.Win64.UnwindOp.largeAllocRawMax,
+    -- Where an unwind code may sit relative to the instruction it describes.
+    -- An external rule about how the unwinder reads the array -- a code takes
+    -- effect after its instruction, except a machine frame, which precedes
+    -- every instruction -- rather than a construction of Grass's own.
+    `Grass.ABI.Win64.PlacedOp.OffsetPlaced,
     -- The Win32 handle and pointer widths. A reviewer of the platform profile
     -- pointed out that these are external ABI facts wearing the clothes of a
     -- project selection: `docs/DECISIONS.md` 16 fixes x64, but it says nothing

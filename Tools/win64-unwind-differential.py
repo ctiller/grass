@@ -53,7 +53,7 @@ from pathlib import Path
 # means substituting a same-length corpus fails. Changing the corpus requires
 # updating this constant, which is the reviewed edit `docs/VALIDATION.md`
 # section 7 asks for rather than a silent change to what is being checked.
-EXPECTED_DIGEST = "daae6c7fb5bb9a4bc600d380b86618708e61804b7c46ade83debcbdabe00f509"
+EXPECTED_DIGEST = "4e3af0e5cd25ad941e1078640583b741d4dabad46aa3b2ecc8f62bfd75458594"
 # The coverage this tool was reviewed at. Shrinking the corpus must be a
 # deliberate, reviewed edit rather than a side effect of regenerating it.
 #
@@ -76,8 +76,8 @@ EXPECTED_DIGEST = "daae6c7fb5bb9a4bc600d380b86618708e61804b7c46ade83debcbdabe00f
 # Every bucket is a minimum. Raising coverage is free; lowering it is a reviewed
 # edit, which is what `docs/VALIDATION.md` section 7's ratchet asks for.
 EXPECTED_COVERAGE = {
-    "distinct prologues": 95,
-    "directives": 5,
+    "distinct prologues": 100,
+    "directives": 6,
     "registers pushed": 8,
     "allocation sizes": 40,
 }
