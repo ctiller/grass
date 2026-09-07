@@ -11,6 +11,7 @@ use crate::bootstrap::BusConfig;
 use crate::envelope::Envelope;
 use crate::error::{invalid, AbResult};
 use crate::events::*;
+use crate::exclusive::Disposition;
 use crate::scalars::{Agent, EventId, ObjectId};
 use crate::state::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -592,25 +593,30 @@ fn apply_merge_engine_activated(
         )));
     }
     let key = format!("engine_epoch:{}", d.previous_epoch);
-    state.exclusive.record(&key, &env.id, |other| {
-        env.observed.validate_reference(other).is_ok()
-    })?;
+    state.exclusive.record(&key, &env.id)?;
     state.merge_engine_info.insert(
         env.id.clone(),
         (d.merge_engine.clone(), d.merge_engine_version.clone()),
     );
-    if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
-        state.current_merge_engine_epoch = Some(env.id.clone());
-    } else {
-        // A second, genuinely concurrent candidate turned this group
-        // contested -- unwind `current_merge_engine_epoch` back to the
-        // shared pre-race baseline every candidate in this group agrees on
-        // (`d.previous_epoch`), the same "provisional apply, then reset on
-        // conflict" pattern `reset_issue_to_conflict`/`reset_dependency_to_
-        // conflict` use. Idempotent: a third+ candidate in an already-
-        // contested group finds this already at baseline and just resets
-        // it to the same value again.
-        state.current_merge_engine_epoch = Some(d.previous_epoch.clone());
+    match state.exclusive.disposition(&key, &env.id) {
+        Disposition::Applies => {
+            state.current_merge_engine_epoch = Some(env.id.clone());
+        }
+        Disposition::Contested => {
+            // A second, genuinely concurrent candidate turned this group
+            // contested -- unwind `current_merge_engine_epoch` back to the
+            // shared pre-race baseline every candidate in this group agrees on
+            // (`d.previous_epoch`), the same "provisional apply, then reset on
+            // conflict" pattern `reset_issue_to_conflict`/`reset_dependency_to_
+            // conflict` use. Idempotent: a third+ candidate in an already-
+            // contested group finds this already at baseline and just resets
+            // it to the same value again.
+            state.current_merge_engine_epoch = Some(d.previous_epoch.clone());
+        }
+        // A coordinator already picked someone else. The effect must
+        // not apply, and resetting to contested here would undo the
+        // resolution this candidate simply arrived too late for.
+        Disposition::Superseded => {}
     }
     Ok(())
 }
@@ -895,14 +901,19 @@ fn apply_issue_terminal(
         )));
     }
     let key = issue_key(assignment);
-    state.exclusive.record(&key, &env.id, |other| {
-        env.observed.validate_reference(other).is_ok() || other.agent() == env.agent
-    })?;
+    state.exclusive.record(&key, &env.id)?;
     let expected_target = expected_target.clone();
-    if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
-        apply_issue_terminal_effect(state, data, label);
-    } else {
-        reset_issue_to_conflict(state, issue_id, assignment, &expected_target);
+    match state.exclusive.disposition(&key, &env.id) {
+        Disposition::Applies => {
+            apply_issue_terminal_effect(state, data, label);
+        }
+        Disposition::Contested => {
+            reset_issue_to_conflict(state, issue_id, assignment, &expected_target);
+        }
+        // A coordinator already picked someone else. The effect must
+        // not apply, and resetting to contested here would undo the
+        // resolution this candidate simply arrived too late for.
+        Disposition::Superseded => {}
     }
     Ok(())
 }
@@ -1004,13 +1015,18 @@ fn apply_issue_reassigned(
         )));
     }
     let key = issue_key(&d.previous_assignment);
-    state.exclusive.record(&key, &env.id, |other| {
-        env.observed.validate_reference(other).is_ok() || other.agent() == env.agent
-    })?;
-    if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
-        issue_reassign_effect(state, &env.id, d);
-    } else {
-        reset_issue_to_conflict(state, &d.issue, &d.previous_assignment, &d.previous_target);
+    state.exclusive.record(&key, &env.id)?;
+    match state.exclusive.disposition(&key, &env.id) {
+        Disposition::Applies => {
+            issue_reassign_effect(state, &env.id, d);
+        }
+        Disposition::Contested => {
+            reset_issue_to_conflict(state, &d.issue, &d.previous_assignment, &d.previous_target);
+        }
+        // A coordinator already picked someone else. The effect must
+        // not apply, and resetting to contested here would undo the
+        // resolution this candidate simply arrived too late for.
+        Disposition::Superseded => {}
     }
     Ok(())
 }
@@ -1125,13 +1141,18 @@ fn apply_dependency_terminal(
     }
     let expected_target = expected_target.clone();
     let key = dependency_key(assignment);
-    state.exclusive.record(&key, &env.id, |other| {
-        env.observed.validate_reference(other).is_ok() || other.agent() == env.agent
-    })?;
-    if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
-        dependency_terminal_effect(state, data, dependency_id, label);
-    } else {
-        reset_dependency_to_conflict(state, dependency_id, assignment, &expected_target);
+    state.exclusive.record(&key, &env.id)?;
+    match state.exclusive.disposition(&key, &env.id) {
+        Disposition::Applies => {
+            dependency_terminal_effect(state, data, dependency_id, label);
+        }
+        Disposition::Contested => {
+            reset_dependency_to_conflict(state, dependency_id, assignment, &expected_target);
+        }
+        // A coordinator already picked someone else. The effect must
+        // not apply, and resetting to contested here would undo the
+        // resolution this candidate simply arrived too late for.
+        Disposition::Superseded => {}
     }
     Ok(())
 }
@@ -1209,18 +1230,23 @@ fn apply_dependency_reassigned(
         )));
     }
     let key = dependency_key(&d.previous_assignment);
-    state.exclusive.record(&key, &env.id, |other| {
-        env.observed.validate_reference(other).is_ok() || other.agent() == env.agent
-    })?;
-    if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
-        dependency_reassign_effect(state, &env.id, d);
-    } else {
-        reset_dependency_to_conflict(
-            state,
-            &d.dependency,
-            &d.previous_assignment,
-            &d.previous_target,
-        );
+    state.exclusive.record(&key, &env.id)?;
+    match state.exclusive.disposition(&key, &env.id) {
+        Disposition::Applies => {
+            dependency_reassign_effect(state, &env.id, d);
+        }
+        Disposition::Contested => {
+            reset_dependency_to_conflict(
+                state,
+                &d.dependency,
+                &d.previous_assignment,
+                &d.previous_target,
+            );
+        }
+        // A coordinator already picked someone else. The effect must
+        // not apply, and resetting to contested here would undo the
+        // resolution this candidate simply arrived too late for.
+        Disposition::Superseded => {}
     }
     Ok(())
 }
@@ -1291,13 +1317,18 @@ fn apply_handoff_terminal(
         )));
     }
     let key = handoff_key(handoff_id);
-    state.exclusive.record(&key, &env.id, |other| {
-        env.observed.validate_reference(other).is_ok() || other.agent() == env.agent
-    })?;
-    if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
-        handoff_terminal_effect(state, handoff_id, label);
-    } else {
-        reset_handoff_to_conflict(state, handoff_id);
+    state.exclusive.record(&key, &env.id)?;
+    match state.exclusive.disposition(&key, &env.id) {
+        Disposition::Applies => {
+            handoff_terminal_effect(state, handoff_id, label);
+        }
+        Disposition::Contested => {
+            reset_handoff_to_conflict(state, handoff_id);
+        }
+        // A coordinator already picked someone else. The effect must
+        // not apply, and resetting to contested here would undo the
+        // resolution this candidate simply arrived too late for.
+        Disposition::Superseded => {}
     }
     Ok(())
 }
@@ -1468,13 +1499,18 @@ fn apply_review_closing(
         _ => unreachable!(),
     }
     let key = review_key(nomination);
-    state.exclusive.record(&key, &env.id, |other| {
-        env.observed.validate_reference(other).is_ok() || other.agent() == env.agent
-    })?;
-    if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
-        confirm_review_closing(state, nomination, label);
-    } else {
-        reset_review_to_conflict(state, nomination);
+    state.exclusive.record(&key, &env.id)?;
+    match state.exclusive.disposition(&key, &env.id) {
+        Disposition::Applies => {
+            confirm_review_closing(state, nomination, label);
+        }
+        Disposition::Contested => {
+            reset_review_to_conflict(state, nomination);
+        }
+        // A coordinator already picked someone else. The effect must
+        // not apply, and resetting to contested here would undo the
+        // resolution this candidate simply arrived too late for.
+        Disposition::Superseded => {}
     }
     Ok(())
 }
@@ -1724,13 +1760,18 @@ fn apply_review_reassigned(
 
     let root = chain.root.clone();
     let key = review_key(&d.replaces);
-    state.exclusive.record(&key, &env.id, |other| {
-        env.observed.validate_reference(other).is_ok() || other.agent() == env.agent
-    })?;
-    if state.exclusive.winner(&key).as_ref() == Some(&env.id) {
-        confirm_review_reassigned(state, &env.id, &root, d);
-    } else {
-        reset_review_to_conflict(state, &d.replaces);
+    state.exclusive.record(&key, &env.id)?;
+    match state.exclusive.disposition(&key, &env.id) {
+        Disposition::Applies => {
+            confirm_review_reassigned(state, &env.id, &root, d);
+        }
+        Disposition::Contested => {
+            reset_review_to_conflict(state, &d.replaces);
+        }
+        // A coordinator already picked someone else. The effect must
+        // not apply, and resetting to contested here would undo the
+        // resolution this candidate simply arrived too late for.
+        Disposition::Superseded => {}
     }
     Ok(())
 }
@@ -2049,13 +2090,17 @@ fn apply_conflict_resolved(
             env.id
         )));
     }
-    // Find the exclusive-tracker key whose group exactly matches `competing`.
+    // Find the exclusive-tracker key whose group contains `competing`.
+    // Containment rather than equality: a further candidate may be published
+    // concurrently with this very resolution, and requiring an exact match
+    // made the resolution unfindable on any host that had already reduced
+    // the newcomer -- see `ExclusiveTracker::key_for_competing`.
     let key = state
         .exclusive
-        .key_with_exact_group(&d.competing.iter().cloned().collect())
+        .key_for_competing(&d.competing.iter().cloned().collect())
         .ok_or_else(|| {
             invalid(format!(
-                "{}: no unresolved conflict has exactly this competing set",
+                "{}: no unresolved conflict covers this competing set",
                 env.id
             ))
         })?;
@@ -4073,6 +4118,151 @@ mod tests {
         );
     }
 
+    /// A third claim published concurrently with a `lifecycle.conflict_
+    /// resolved` must not wedge the bus -- in either order.
+    ///
+    /// This pair was the worst of the reduction-DoS class because it was
+    /// fatal *both* ways round, not merely order-dependent:
+    ///
+    ///   resolution first -> `ExclusiveTracker::record` refused the newcomer,
+    ///                       because the key already had a resolved
+    ///                       disposition it had not observed;
+    ///   newcomer first   -> `key_with_exact_group` required the tracker's
+    ///                       group to equal the coordinator's `competing` set
+    ///                       exactly, and the newcomer had grown it, so the
+    ///                       resolution could not find its own key.
+    ///
+    /// So whichever order a host replayed, some host somewhere returned
+    /// `Err` from `reduce` and could not read the bus at all. The coordinator
+    /// naming only the racers it could see is not a defect on its part --
+    /// the newcomer is concurrent with the resolution itself, and no amount
+    /// of care lets the coordinator name an event that does not exist yet.
+    #[test]
+    fn a_third_claim_racing_a_conflict_resolution_reduces_in_either_order() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        let dave = a("dave");
+        let coord1 = a("coord1");
+        let coord2 = a("coord2");
+
+        let issue_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::IssueOpened(IssueOpened {
+                target: bob.clone(),
+                issue_kind: IssueKind::Bug,
+                severity: Priority::Normal,
+                summary: text("s"),
+                code_commit: None,
+                locations: vec![],
+                expected: None,
+                observed_behavior: None,
+                reproduction: vec![],
+                blocks: StringSet::default(),
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+
+        let reassign = |who: &Agent, seq: u64, to: &Agent, why: &str| {
+            Envelope::new(
+                who,
+                seq,
+                no_frontier(),
+                &EventData::IssueReassigned(IssueReassigned {
+                    issue: issue_env.id.clone(),
+                    previous_assignment: issue_env.id.clone(),
+                    previous_target: bob.clone(),
+                    new_target: to.clone(),
+                    reason: text(why),
+                }),
+                [issue_env.id.clone()],
+            )
+        };
+        // Three agents entitled to reassign this issue: its opener and two
+        // coordinators. None has observed the others.
+        let by_alice = reassign(&alice, 2, &carol, "r1");
+        let by_coord1 = reassign(&coord1, 1, &dave, "r2");
+        let by_coord2 = reassign(&coord2, 1, &bob, "r3");
+
+        // coord1 resolves, naming only the two racers it could see. `by_coord2`
+        // is concurrent with this event.
+        let resolve_env = Envelope::new(
+            &coord1,
+            2,
+            frontier_seeing(&[&by_alice.id]),
+            &EventData::LifecycleConflictResolved(LifecycleConflictResolved {
+                root: by_alice.id.clone(),
+                competing: StringSet::from_iter([by_alice.id.clone(), by_coord1.id.clone()]),
+                selected: by_alice.id.clone(),
+                reason: text("alice opened it and picked first"),
+                user_authority: text("operator"),
+            }),
+            [by_alice.id.clone(), by_coord1.id.clone()],
+        );
+
+        let run = |newcomer_first: bool| {
+            let mut state = empty_state(&[
+                ("alice", Role::Implementor),
+                ("bob", Role::Implementor),
+                ("carol", Role::Implementor),
+                ("coord1", Role::Coordinator),
+                ("coord2", Role::Coordinator),
+                ("dave", Role::Implementor),
+            ]);
+            for (name, role) in [
+                ("alice", Role::Implementor),
+                ("bob", Role::Implementor),
+                ("carol", Role::Implementor),
+                ("dave", Role::Implementor),
+                ("coord1", Role::Coordinator),
+                ("coord2", Role::Coordinator),
+            ] {
+                apply_ok(&mut state, &register(&a(name), role));
+            }
+            apply_ok(&mut state, &issue_env);
+            apply_ok(&mut state, &by_alice);
+            apply_ok(&mut state, &by_coord1);
+
+            let tail: Vec<Envelope> = if newcomer_first {
+                vec![by_coord2.clone(), resolve_env.clone()]
+            } else {
+                vec![resolve_env.clone(), by_coord2.clone()]
+            };
+            reduce_onto(state, &tail).unwrap_or_else(|e| {
+                panic!("newcomer_first={newcomer_first} must still reduce: {e}")
+            })
+        };
+
+        let resolution_first = run(false);
+        let newcomer_first = run(true);
+
+        // The resolution stands in both, and the late claim did not drag the
+        // issue back into conflict.
+        for (label, state) in [
+            ("resolution first", &resolution_first),
+            ("newcomer first", &newcomer_first),
+        ] {
+            let issue = &state.issues[&issue_env.id];
+            assert_eq!(
+                issue.current_target, carol,
+                "{label}: the coordinator's selected winner must hold"
+            );
+            assert_ne!(
+                issue.status,
+                ItemStatus::LifecycleConflict,
+                "{label}: a claim that arrived after the resolution must not reopen the conflict"
+            );
+        }
+        assert_eq!(
+            format!("{resolution_first:#?}"),
+            format!("{newcomer_first:#?}"),
+            "GATE 15/16: both valid orders must reduce to identical state"
+        );
+    }
+
     /// Adversarial-review regression: two racing `IssueReassigned` events
     /// (not `IssueResolved` vs `IssueReassigned` -- the only combination
     /// `issue_race_converges_to_the_same_state_regardless_of_reduction_order`
@@ -4557,9 +4747,12 @@ mod tests {
     fn conflict_resolved_rejects_a_competing_set_that_matches_no_unresolved_conflict() {
         let (mut state, resolve_id, _reassign_id, coord1) = contested_issue_race();
         // A syntactically valid two-member competing set (satisfies the
-        // first two guards) that simply isn't any real conflict's exact
-        // group -- `resolve_id` paired with an unrelated, never-contested
-        // event id.
+        // first two guards) that no real conflict's group covers --
+        // `resolve_id` paired with an unrelated, never-contested event id.
+        // Containment is what the lookup asks now, and an id that was never
+        // a candidate at all is not contained in any group, so naming one
+        // still fails. Only a *concurrent* candidate widening a group is
+        // tolerated, and that one is a genuine member of it.
         let unrelated = EventId::new(&a("nobody"), 0);
         let resolved_data = EventData::LifecycleConflictResolved(LifecycleConflictResolved {
             root: resolve_id.clone(),
@@ -4578,7 +4771,7 @@ mod tests {
         let err = apply_event(&mut state, &env).unwrap_err();
         assert!(
             err.to_string()
-                .contains("no unresolved conflict has exactly this competing set"),
+                .contains("no unresolved conflict covers this competing set"),
             "{err}"
         );
     }
@@ -5882,13 +6075,20 @@ mod tests {
     }
 
     /// Pins down the actual (non-`LifecycleConflict`) behavior for a second
-    /// disposal attempt that causally observed the first: `apply_handoff_
+    /// disposal attempt by the agent that already made one: `apply_handoff_
     /// terminal` routes every disposal through the same `ExclusiveTracker`
-    /// used for issue/dependency/review terminal transitions, and a
-    /// candidate that observed an existing group member is hard-rejected
-    /// outright by `ExclusiveTracker::record` -- it never gets the chance to
-    /// become a second, genuinely concurrent candidate the way an
+    /// used for issue/dependency/review terminal transitions, and a second
+    /// claim from the same agent is hard-rejected outright by
+    /// `ExclusiveTracker::record` -- it never gets the chance to become a
+    /// second, genuinely concurrent candidate the way an
     /// unaware-of-each-other race would.
+    ///
+    /// Only the receiver may accept or decline, so both disposals here are
+    /// necessarily bob's. That is what keeps this rejection sound: a stream
+    /// is single-writer, so bob's two events are ordered against each other
+    /// on every host. The tracker no longer refuses a *cross-agent* claim on
+    /// the frontier, because reduction cannot ask that question -- see
+    /// `ExclusiveTracker::record`.
     #[test]
     fn rejects_disposing_of_an_already_terminal_handoff() {
         let mut state = empty_state(&[]);
@@ -5929,7 +6129,8 @@ mod tests {
         );
         let err = apply_event(&mut state, &decline_env).unwrap_err();
         assert!(
-            err.to_string().contains("already causally observed"),
+            err.to_string()
+                .contains("already claimed the same predecessor"),
             "{err}"
         );
         assert_eq!(

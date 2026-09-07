@@ -32,6 +32,22 @@ use crate::error::{invalid, AbResult};
 use crate::scalars::EventId;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// What should happen to a candidate's effect, per
+/// `ExclusiveTracker::disposition`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Disposition {
+    /// This candidate holds the key uncontested, or a coordinator named it
+    /// the winner: apply its effect.
+    Applies,
+    /// Two or more mutually-concurrent candidates and no resolution yet, so
+    /// the predecessor goes back to a conflict state pending one.
+    Contested,
+    /// A coordinator already resolved this key to someone else. The effect
+    /// must not apply, and the predecessor must *not* be reset to contested
+    /// -- that would undo the resolution.
+    Superseded,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ExclusiveTracker {
     groups: BTreeMap<String, BTreeSet<EventId>>,
@@ -39,39 +55,70 @@ pub struct ExclusiveTracker {
 }
 
 impl ExclusiveTracker {
-    /// Records `candidate` as one more claim on `key`, rejecting it outright
-    /// if it causally observed (per `observes`) an existing member of the
-    /// group or the key's explicit resolution, if any. `observes(other)`
-    /// must answer "did `candidate`'s declared frontier see `other`,"
-    /// independent of processing order -- typically `ObservedFrontier::
-    /// validate_reference` succeeding.
-    pub fn record(
-        &mut self,
-        key: &str,
-        candidate: &EventId,
-        observes: impl Fn(&EventId) -> bool,
-    ) -> AbResult<()> {
+    /// Records `candidate` as one more claim on `key`.
+    ///
+    /// Refuses only a second claim from the same agent. It is tempting to
+    /// also refuse a candidate that causally observed an existing member --
+    /// that was this tracker's original rule, and it reads as the right one
+    /// -- but reduction cannot ask that question. `apply::topological_order`
+    /// builds its edges from `refs` and each stream's own predecessor, never
+    /// from `observed`, so a candidate is routinely applied before the very
+    /// event its frontier saw. Refusing on the frontier therefore makes the
+    /// answer depend on which of two unordered events a host replayed first,
+    /// and with no per-event isolation in `reduce` that is every host unable
+    /// to reduce the bus at all.
+    ///
+    /// What survives is the half that is sound: a stream is single-writer
+    /// and gets a predecessor edge, so an agent's own events are ordered
+    /// against each other in every extension. An agent publishing a second
+    /// exclusive claim on the same predecessor is not a race anybody lost,
+    /// and refusing it gives the same answer on every host.
+    ///
+    /// Everything else is recorded, including a claim that arrives after a
+    /// coordinator has resolved the key. The winner stays a pure function of
+    /// the final membership (`winner`), so hosts that assembled the same set
+    /// in different orders still agree.
+    pub fn record(&mut self, key: &str, candidate: &EventId) -> AbResult<()> {
         if let Some(winner) = self.resolved.get(key) {
-            if !observes(winner) {
+            if winner.agent() == candidate.agent() {
                 return Err(invalid(format!(
-                    "{candidate}: predecessor already has a coordinator-resolved disposition ({winner})"
+                    "{candidate}: this agent's own {winner} already has a coordinator-resolved disposition, so a further claim on the same predecessor is forward progress rather than a new exclusive claim"
                 )));
             }
-            return Err(invalid(format!(
-                "{candidate}: predecessor was already resolved ({winner}); this is forward progress, \
-                 not a new exclusive claim, and does not belong in this tracker"
-            )));
+            self.groups
+                .entry(key.to_string())
+                .or_default()
+                .insert(candidate.clone());
+            return Ok(());
         }
         let group = self.groups.entry(key.to_string()).or_default();
-        for existing in group.iter() {
-            if observes(existing) {
-                return Err(invalid(format!(
-                    "{candidate}: predecessor already causally observed a disposition ({existing})"
-                )));
-            }
+        if let Some(existing) = group.iter().find(|e| e.agent() == candidate.agent()) {
+            return Err(invalid(format!(
+                "{candidate}: this agent already claimed the same predecessor ({existing})"
+            )));
         }
         group.insert(candidate.clone());
         Ok(())
+    }
+
+    /// What a caller should do with `candidate`'s effect.
+    ///
+    /// `winner` alone cannot answer this. Once a coordinator has resolved a
+    /// key, a late concurrent candidate is neither the winner nor grounds
+    /// for treating the predecessor as contested again -- resetting there
+    /// would undo the resolution. That third case is `Superseded`.
+    pub fn disposition(&self, key: &str, candidate: &EventId) -> Disposition {
+        if let Some(w) = self.resolved.get(key) {
+            return if w == candidate {
+                Disposition::Applies
+            } else {
+                Disposition::Superseded
+            };
+        }
+        match self.groups.get(key) {
+            Some(g) if g.len() == 1 && g.contains(candidate) => Disposition::Applies,
+            _ => Disposition::Contested,
+        }
     }
 
     /// Explicitly resolves `key` to `winner` (a `lifecycle.conflict_resolved`
@@ -123,14 +170,26 @@ impl ExclusiveTracker {
         })
     }
 
-    /// Finds the still-unresolved group whose membership equals exactly
-    /// `competing` -- how `lifecycle.conflict_resolved` locates the
-    /// predecessor key it names by its complete competing set rather than by
-    /// an internal key string the event format never exposes.
-    pub fn key_with_exact_group(&self, competing: &BTreeSet<EventId>) -> Option<String> {
+    /// Finds the still-unresolved group that *contains* `competing` -- how
+    /// `lifecycle.conflict_resolved` locates the predecessor key it names by
+    /// its competing set rather than by an internal key string the event
+    /// format never exposes.
+    ///
+    /// Containment, not equality. A coordinator names the racers it could
+    /// see, and a further candidate may be published concurrently with the
+    /// resolution itself. Requiring an exact match meant such a candidate
+    /// made the resolution unfindable, so `lifecycle.conflict_resolved`
+    /// returned `Err` on any host that had reduced the newcomer first, while
+    /// `record` returned `Err` on any host that reduced it second. That pair
+    /// was fatal in *both* orders, not merely order-dependent.
+    ///
+    /// `groups` is a `BTreeMap`, so where more than one group could match,
+    /// the choice is deterministic rather than whichever a hash order
+    /// happened to yield.
+    pub fn key_for_competing(&self, competing: &BTreeSet<EventId>) -> Option<String> {
         self.groups
             .iter()
-            .find(|(key, group)| !self.resolved.contains_key(*key) && *group == competing)
+            .find(|(key, group)| !self.resolved.contains_key(*key) && competing.is_subset(group))
             .map(|(key, _)| key.clone())
     }
 }
@@ -147,15 +206,10 @@ mod tests {
         EventId::new(&a(agent), seq)
     }
 
-    fn none_observed(_: &EventId) -> bool {
-        false
-    }
-
     #[test]
     fn a_lone_candidate_wins() {
         let mut t = ExclusiveTracker::default();
-        t.record("issue:1", &eid("alice", 0), none_observed)
-            .unwrap();
+        t.record("issue:1", &eid("alice", 0)).unwrap();
         assert_eq!(t.winner("issue:1"), Some(eid("alice", 0)));
     }
 
@@ -165,9 +219,8 @@ mod tests {
     #[test]
     fn two_mutually_concurrent_candidates_are_contested() {
         let mut t = ExclusiveTracker::default();
-        t.record("issue:1", &eid("alice", 0), none_observed)
-            .unwrap();
-        t.record("issue:1", &eid("bob", 0), none_observed).unwrap();
+        t.record("issue:1", &eid("alice", 0)).unwrap();
+        t.record("issue:1", &eid("bob", 0)).unwrap();
         assert_eq!(t.winner("issue:1"), None);
     }
 
@@ -179,11 +232,11 @@ mod tests {
         let candidates = [eid("carol", 0), eid("alice", 0), eid("bob", 0)];
         let mut forward = ExclusiveTracker::default();
         for c in &candidates {
-            forward.record("issue:1", c, none_observed).unwrap();
+            forward.record("issue:1", c).unwrap();
         }
         let mut reverse = ExclusiveTracker::default();
         for c in candidates.iter().rev() {
-            reverse.record("issue:1", c, none_observed).unwrap();
+            reverse.record("issue:1", c).unwrap();
         }
         assert_eq!(forward.winner("issue:1"), reverse.winner("issue:1"));
         // Three mutually-concurrent candidates: still contested (>1
@@ -191,21 +244,38 @@ mod tests {
         assert_eq!(forward.winner("issue:1"), None);
     }
 
-    /// A candidate that causally observed an existing group member must be
-    /// rejected outright, not merely lose -- it should have built forward
-    /// progress on the observed disposition, not raced it.
+    /// The sound remnant of the old "observed an existing member" rule: an
+    /// agent's own second claim on the same predecessor.
+    ///
+    /// Streams are single-writer and `apply::topological_order` gives each
+    /// one a predecessor edge, so an agent's events are ordered against each
+    /// other in every linear extension. Refusing this therefore gives the
+    /// same answer on every host. The general frontier-based form did not,
+    /// which is why it is gone.
     #[test]
-    fn a_candidate_observing_an_existing_member_is_rejected() {
+    fn a_second_claim_by_the_same_agent_is_rejected() {
         let mut t = ExclusiveTracker::default();
-        let first = eid("alice", 0);
-        t.record("issue:1", &first, none_observed).unwrap();
-        let err = t
-            .record("issue:1", &eid("bob", 0), |other| *other == first)
-            .unwrap_err();
+        t.record("issue:1", &eid("alice", 0)).unwrap();
+        let err = t.record("issue:1", &eid("alice", 1)).unwrap_err();
         assert!(
-            err.to_string().contains("already causally observed"),
+            err.to_string()
+                .contains("already claimed the same predecessor"),
             "{err}"
         );
+    }
+
+    /// A cross-agent claim is recorded, never refused, however late it is.
+    ///
+    /// This is the totality property the whole reduction-DoS class turns on:
+    /// two agents who never observed each other publish competing claims,
+    /// and no ordering of them may make a host fail to reduce.
+    #[test]
+    fn a_cross_agent_claim_is_always_recorded() {
+        let mut t = ExclusiveTracker::default();
+        t.record("issue:1", &eid("alice", 0)).unwrap();
+        t.record("issue:1", &eid("bob", 0)).unwrap();
+        t.record("issue:1", &eid("carol", 0)).unwrap();
+        assert_eq!(t.winner("issue:1"), None, "three-way race is contested");
     }
 
     #[test]
@@ -213,8 +283,8 @@ mod tests {
         let mut t = ExclusiveTracker::default();
         let alice = eid("alice", 0);
         let bob = eid("bob", 0);
-        t.record("issue:1", &alice, none_observed).unwrap();
-        t.record("issue:1", &bob, none_observed).unwrap();
+        t.record("issue:1", &alice).unwrap();
+        t.record("issue:1", &bob).unwrap();
         assert_eq!(t.winner("issue:1"), None);
         t.resolve("issue:1", bob.clone()).unwrap();
         assert_eq!(t.winner("issue:1"), Some(bob));
@@ -223,8 +293,7 @@ mod tests {
     #[test]
     fn resolve_rejects_a_winner_never_recorded_as_a_candidate() {
         let mut t = ExclusiveTracker::default();
-        t.record("issue:1", &eid("alice", 0), none_observed)
-            .unwrap();
+        t.record("issue:1", &eid("alice", 0)).unwrap();
         let err = t.resolve("issue:1", eid("mallory", 0)).unwrap_err();
         assert!(err.to_string().contains("never recorded"), "{err}");
     }
@@ -233,7 +302,7 @@ mod tests {
     fn resolve_rejects_a_second_resolution_of_the_same_key() {
         let mut t = ExclusiveTracker::default();
         let alice = eid("alice", 0);
-        t.record("issue:1", &alice, none_observed).unwrap();
+        t.record("issue:1", &alice).unwrap();
         t.resolve("issue:1", alice.clone()).unwrap();
         let err = t.resolve("issue:1", alice).unwrap_err();
         assert!(
@@ -243,22 +312,70 @@ mod tests {
         );
     }
 
-    /// Once a key is resolved, any further `record` attempt is rejected --
-    /// whether or not it observed the winner -- since ordinary forward
-    /// progress on a resolved predecessor is a different code path
-    /// entirely, not another exclusive claim.
+    /// A candidate published concurrently with a resolution is recorded,
+    /// and the resolution still decides.
+    ///
+    /// Refusing it was one half of a pair that was fatal in *both* orders:
+    /// a third candidate racing a `lifecycle.conflict_resolved` made this
+    /// return `Err` on hosts that reduced the resolution first, while
+    /// `key_for_competing`'s exact-match requirement made the resolution
+    /// itself unfindable on hosts that reduced the candidate first. Neither
+    /// host could reduce the bus at all.
+    ///
+    /// The candidate's own effect must not apply, but nor may the
+    /// predecessor be reset to contested -- that would undo the resolution
+    /// -- which is what `Disposition::Superseded` exists to say.
     #[test]
-    fn record_after_resolution_is_always_rejected() {
+    fn a_candidate_racing_a_resolution_is_recorded_and_superseded() {
         let mut t = ExclusiveTracker::default();
         let alice = eid("alice", 0);
-        t.record("issue:1", &alice, none_observed).unwrap();
+        let bob = eid("bob", 0);
+        t.record("issue:1", &alice).unwrap();
+        t.record("issue:1", &bob).unwrap();
         t.resolve("issue:1", alice.clone()).unwrap();
 
-        let observing_the_winner = t.record("issue:1", &eid("bob", 0), |o| *o == alice);
-        assert!(observing_the_winner.is_err());
+        let carol = eid("carol", 0);
+        t.record("issue:1", &carol)
+            .expect("a concurrent third claim must never be fatal");
+        assert_eq!(t.winner("issue:1"), Some(alice.clone()));
+        assert_eq!(t.disposition("issue:1", &alice), Disposition::Applies);
+        assert_eq!(t.disposition("issue:1", &carol), Disposition::Superseded);
+        assert_eq!(t.disposition("issue:1", &bob), Disposition::Superseded);
+    }
 
-        let not_observing_it = t.record("issue:1", &eid("carol", 0), none_observed);
-        assert!(not_observing_it.is_err());
+    /// The same agent doing it, though, is still a caller error -- and
+    /// soundly so, for the single-writer reason above.
+    #[test]
+    fn the_resolved_winners_own_agent_may_not_claim_again() {
+        let mut t = ExclusiveTracker::default();
+        let alice = eid("alice", 0);
+        t.record("issue:1", &alice).unwrap();
+        t.resolve("issue:1", alice.clone()).unwrap();
+        let err = t.record("issue:1", &eid("alice", 1)).unwrap_err();
+        assert!(
+            err.to_string().contains("coordinator-resolved disposition"),
+            "{err}"
+        );
+    }
+
+    /// `key_for_competing` finds the group by containment, so a coordinator
+    /// that named only the racers it could see still resolves the key when a
+    /// further candidate has joined concurrently.
+    #[test]
+    fn a_resolution_still_finds_its_group_after_a_late_candidate_joins() {
+        let mut t = ExclusiveTracker::default();
+        let alice = eid("alice", 0);
+        let bob = eid("bob", 0);
+        t.record("issue:1", &alice).unwrap();
+        t.record("issue:1", &bob).unwrap();
+        t.record("issue:1", &eid("carol", 0)).unwrap();
+
+        let named: BTreeSet<EventId> = [alice.clone(), bob].into_iter().collect();
+        assert_eq!(
+            t.key_for_competing(&named).as_deref(),
+            Some("issue:1"),
+            "the coordinator named what it saw; a concurrent newcomer must not hide the group"
+        );
     }
 
     #[test]
@@ -266,14 +383,14 @@ mod tests {
         let mut t = ExclusiveTracker::default();
         let alice = eid("alice", 0);
         let bob = eid("bob", 0);
-        t.record("solo:1", &alice, none_observed).unwrap();
+        t.record("solo:1", &alice).unwrap();
         assert!(
             !t.is_contested(&alice),
             "a lone candidate is never contested"
         );
 
-        t.record("race:1", &alice, none_observed).unwrap();
-        t.record("race:1", &bob, none_observed).unwrap();
+        t.record("race:1", &alice).unwrap();
+        t.record("race:1", &bob).unwrap();
         assert!(t.is_contested(&alice));
         assert!(t.is_contested(&bob));
 
