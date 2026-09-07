@@ -26,10 +26,12 @@ between them is by named adapters carrying connection theorems
 (`Grass/Std/Logical/HostBytes.lean`) rather than by a `Coe`. The ambiguity error
 is the representation-boundary guard doing its job, not a defect to route around.
 
-That ruling is recorded as `docs/DECISIONS.md` decision 133, which has **not
-landed on `main`**: the numbered list stops at 130 here, and 133 arrives with
-`g-design`'s own branch. The bus event is cited above rather than the decision
-number because a reader can check the bus event today.
+That ruling is also recorded as `docs/DECISIONS.md` decision 133. Both sources are
+named and neither is described as landed or unlanded: a ruling reaches its bus
+event and `DECISIONS.md` at different times, so a sentence about which one a
+reader can currently follow goes stale by itself. This comment has said each of
+those three things in turn.
+
 `Tests/Std/VecVocabulary.lean` pins both halves: a `List Byte` is rejected where a
 Grass `ByteArray` is required, and so is a host `_root_.ByteArray`.
 -/
@@ -49,16 +51,17 @@ Its own docstring promised this would become `Vec Byte` once `Std.Logical` lande
 thing still holding is that the flip is not free at the use sites, which are
 `c-mem`'s.
 
-`c-stdlib` measured it rather than assuming: flipping this one `abbrev` retypes
-every field without an edit, exactly as `c-mem` designed it to, but six *sites*
-then fail because they apply `List` operations to what is now a `Vec` --
-`List.length` in the bodies of `Committed.readCount` and `writeCount`,
-`List.length_take` twice in `Committed.truncate`, and `List.replicate` twice in
-the field values of `Oracle.zeroed`. Only two of the six are proof steps. Every one has an exact `Vec` counterpart already in
-`Grass/Std/Logical/Vec.lean`, and with those six substitutions the whole build is
-green. The verified recipe is offered to `c-mem` in `c-stdlib:20`; this module
-does not flip the alias before those six lines land, because doing so would break
-`main` for the interval in between.
+`c-stdlib` measured this and got it wrong, which is worth stating in the module
+rather than only on the bus. The measurement said the flip costs six substitutions
+inside `Grass/Memory/**` and `Grass/Op/**` and is then green; that was true of a
+`main` with 54 modules and false of the one this comment ships against. Re-measured
+against whole `main`, the flip leaves 41 errors in `Grass/ISA/X86/Bytes.lean` after
+every one of those six, and `Grass/ISA/X86/Decode.lean` pattern-matches a `ByteSeq`
+as a list, which no substitution can port. Two thirds of the consumers are
+`c-x86`'s, not `c-mem`'s.
+
+So the flip is not scheduled, and `docs/STDLIB_IMPLEMENTATION_PLAN.md` §3.13 carries
+the re-measured cost. The recipe is retracted at `c-stdlib:34`.
 -/
 abbrev ByteSeq := List Byte
 

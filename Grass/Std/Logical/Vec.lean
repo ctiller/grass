@@ -238,7 +238,7 @@ when the custody handoff landed, the rest of that migration costs six
 substitutions and no new names: `List.length`, `List.length_take` and
 `List.replicate` become their `Vec` counterparts, all of which already exist.
 Only two of the six are proof steps; the rest are a definition body and two
-data-construction expressions. `Grass/Memory/Apply.lean`
+data-construction expressions. The memory layer's apply pass
 defines `observedBytes` as `(List.range n).map (fun i => …)` and thirty-two sites
 reason about it; without `ofFn` there is no `Vec` way to write it, and the idiom
 that works — `(replicate n default).mapIdx …` — is neither guessable nor free,
@@ -287,7 +287,7 @@ theorem ext_of_get {v w : Vec α} (hlen : v.length = w.length)
   toList_injective (List.ext_getElem hlen (fun i hv hw => h i hv hw))
 
 /-- Two index functions agreeing below `n` build the same sequence. This is what
-`Grass/Memory/Apply.lean`'s indeterminacy-irrelevance proof needs in place of
+the memory layer's indeterminacy-irrelevance proof needs in place of
 `List.map_congr_left`. -/
 theorem ofFn_congr {n : Nat} {f g : Nat → α} (h : ∀ i, i < n → f i = g i) :
     ofFn n f = ofFn n g := by

@@ -616,9 +616,11 @@ S1 is complete when all of the following hold. The first four hold today.
    `sorry`.
 2. `lake env lean Tools/AxiomAudit.lean` reports no axiom outside the
    [FOUNDATION.md](FOUNDATION.md) §3 allowlist, with **every** module this plan
-   owns in its coverage set — `Vec`, `HostBytes`, `Text`, and `Order`. The
-   criterion previously named only `Vec` and stopped tracking the library as it
-   grew. It is also not evidence about the `@[extern]` boundary of §3.9, because
+   owns in its coverage set — `Vec`, `HostBytes`, `Text`, `Order`, and, since the
+   §2 transfers landed, `Byte`, `FiniteMap`, and `Bag`. The criterion previously
+   named only `Vec`, then only the four this plan wrote, and each time stopped
+   tracking the library as it grew; `Tools/AxiomAudit.lean` already imports all
+   seven, so it was the criterion that lagged rather than the tool. It is also not evidence about the `@[extern]` boundary of §3.9, because
    an `@[extern]` is not an axiom.
 3. `python Tools/DocstringAudit.py` reports no unbacked claim.
 4. **Every** fixture under `Tests/Std/` elaborates, including all `#guard_msgs`
@@ -645,10 +647,15 @@ implemented §1 as written and put the question to the owner of
 [STDLIB.md](STDLIB.md) rather than choosing a different name unilaterally, as
 `c-stdlib:7`.
 
-**Ruled** at `g-design:49`: keep `Grass.Std.Logical.ByteArray := Vec Byte`. The
-event records it as [DECISIONS.md](DECISIONS.md) decision 133, which is **not yet
-on `main`** -- that list stops at 130 here and 133 lands with `g-design`'s branch,
-so the bus event is what a reader can check today. Modules that also see the packed
+**Ruled** at `g-design:49`, and recorded as [DECISIONS.md](DECISIONS.md) decision
+133: keep `Grass.Std.Logical.ByteArray := Vec Byte`. Both are named and neither is
+described as landed. A ruling reaches its bus event and `DECISIONS.md` at
+different times, so for a window the decision number points at nothing; this plan
+asserted 133 while the list stopped at 130, then corrected itself to say 133 had
+not landed, and that correction was false within a day when the branch merged.
+Naming both and claiming nothing about merge status is the form that stays true.
+
+Modules that also see the packed
 host type qualify the Grass one or take a narrow local alias, and the crossing
 between them is by explicitly named adapters carrying connection theorems rather
 than by any coercion. The ambiguity is an intentional representation-boundary
@@ -690,22 +697,75 @@ are definition bodies and two are ordinary data-construction expressions -- so
 `writtenFits`, because those two names occur in four declarations across the two
 files and would send a reader to the wrong one.
 
-Expect **thirteen diagnostics at nine locations**, not six. The other seven are
-downstream and need no edit of their own: five `declaration uses 'sorry'`
+Expect **thirteen diagnostics at nine locations**, not six, and all of them in
+`Event.lean`: `Op/Step.lean` imports it, so its two errors cannot appear in the
+same build. The other nine are downstream and need no edit of their own — two
+`unsolved goals` at `Event.lean:560` and `:568`, five `declaration uses 'sorry'`
 cascades, and two `This simp argument is unused` linter messages that
-`warningAsError` promotes to errors. All clear when the six land.
+`warningAsError` promotes to errors. Four named sites plus those nine is the
+thirteen. An earlier version of this paragraph said "the other seven" and listed
+only the `sorry` cascades and the linter messages, which does not add up; the two
+`unsolved goals` were the ones it dropped.
 
-Every counterpart already exists and no new name is needed. With those six
-substitutions the build completes with zero errors, zero warnings and no `sorry`,
-and the other CI gates pass. That was measured by making the change, not
-predicted. Job count is *not* evidence: the build is 54 jobs before and after,
-because the module list does not change.
+Every counterpart already exists and no new name is needed, and the six do clear
+the two files they are about: after them, `Grass/Memory/Event.lean` and
+`Grass/Op/Step.lean` report zero errors.
 
-All six sites are in `Grass/Memory/**` and `Grass/Op/**`, both `c-mem`'s exclusive
-scope, and the change has to be atomic: flipping the `abbrev` without them breaks
-`main`, and making them without the flip is a no-op. So the flip is not this
-branch's to land. The verified recipe is offered to `c-mem` at `c-stdlib:20`, and
-`ByteSeq` stays `List Byte` here until those six lines land.
+**They do not make the build green, and this section said they did.** Re-measured
+against whole `main` — this branch merged onto it, with the one-line
+`Grass/Build/Cache/Key.lean` import change of §3.14 applied so the tree compiles
+at all — the flip produces **54 errors in two files**: 13 in `Grass/Memory/Event.lean`
+and **41 in `Grass/ISA/X86/Bytes.lean`**, which this section never mentioned.
+Applying all six substitutions clears the 13 and leaves the 41 exactly as they
+were. `Grass/ISA/X86/Decode.lean`, `Grass/ABI/Win64/UnwindBytes.lean` and the
+three `Tests/ISA/X86` fixtures are never reached by that build, so **their cost is
+unmeasured and is not in the 41.**
+
+**And the ISA half is not substitution at all.** `Grass/ISA/X86/Decode.lean`'s
+`takeByte` is `ByteSeq → Except DecodeError (Byte × ByteSeq)` with arms for `[]`
+and `b :: rest`. `Vec` is a structure wrapping a list, not an inductive with those
+constructors, so no lemma rename ports it; the decoder needs `Vec`'s recursors or
+an explicit uncons. There are 46 `++` uses across the ISA and ABI byte modules
+besides.
+
+**The scope attribution was wrong too.** Of the `ByteSeq` mentions on `main`,
+`Grass/Memory/Event.lean` holds 4 and the rest are `c-x86`'s: `Decode.lean` 20,
+`Bytes.lean` 10, `UnwindBytes.lean` 8, and 6 across three `Tests/ISA/X86`
+fixtures. So the change spans `c-mem`, `c-x86`, and — for `ByteArray` rather than
+`ByteSeq` — `g-build`, and it was never `c-mem`'s to land atomically.
+
+**How this plan got it wrong, since the error is the one it lectures others
+about.** The six-site figure was measured when `main` carried 54 modules and was
+published as a durable recipe at `c-stdlib:20`; `main` is now 181 build jobs and
+the ISA, ABI and Build layers arrived afterwards. The measurement was true of its
+tree and was never re-taken. §4.0 above says in terms that neither count should be
+quoted without its tree, and this section then quoted one without its date. The
+recipe is retracted to `c-mem` at `c-stdlib:34`, `c-x86` is told at `c-stdlib:35`,
+and `g-build` at `c-stdlib:36`.
+
+**Status.** The flip is not scheduled and is not this branch's to land. `ByteSeq`
+stays `List Byte`, everything builds, and the `Grass/Memory` half is costed while
+the ISA and ABI half is large and unmeasured until `c-x86` costs it.
+
+### 3.14 Moving `ByteArray` costs one import line in `Grass/Build/**`
+
+`Grass/Build/Cache/Key.lean` imports `Grass.Std.Logical.Vec` and declares
+`Digest.bytes : Std.Logical.ByteArray`. That works only while `ByteArray` is
+declared in `Vec.lean`, so §3.12's merge of the two declarations into `Byte.lean`
+breaks it: merged onto `main`, `lake build` reports `Unknown identifier
+Std.Logical.ByteArray` at `Key.lean:19` plus three `sorry` cascades. Changing that
+one import to `Grass.Std.Logical.Byte` — which re-exports `Vec` transitively, so
+nothing else in the file moves — makes the merged tree green with every audit
+passing.
+
+`Grass/Build/Cache/**` is `g-build`'s exclusive scope, so this plan asks rather
+than edits: `c-stdlib:36` offers them the line, or offers to hold the move.
+
+Worth recording how this was found, because the branch's own check missed it.
+`c-stdlib` had merged this branch onto `main` and rebuilt, and it passed — against
+a `main` that predated `Key.lean`. A cold reviewer repeated the merge later and it
+failed. A merge-and-build check is evidence about the `main` it ran against and
+decays exactly as fast as `main` moves, which on this repository is hours.
 
 ## 4. S2 — Custody consolidation
 
@@ -720,9 +780,12 @@ agent to add a fourth piece.
 A cross-agent review ran this migration against `c-mem`'s real branches rather
 than reasoning about it, and its headline finding inverts what §4.1 assumed.
 
-**Do not retype the use sites to `ByteArray`.** Every `Grass/Memory/*.lean` opens
-`Grass.Std.Logical`, and `ByteArray` is ambiguous there against the prelude's, so
-retyping ~83 fields produces ~83 elaboration errors. The migration `Byte.lean`'s
+**Do not retype the use sites to `ByteArray`.** A `Grass/Memory/*.lean` that opens
+`Grass.Std.Logical` finds `ByteArray` ambiguous against the prelude's, so retyping
+~83 fields produces ~83 elaboration errors. (This paragraph said "every"; on
+`main` two of the thirteen do — `Event.lean` and `State.lean` — which is what
+`c-stdlib:7` itself reported. The conclusion is unchanged, since it only needs the
+files that hold byte fields, but "every" was not measured.) The migration `Byte.lean`'s
 docstring actually promised is **one line** — `abbrev ByteSeq := Vec Byte` — after
 which no field or parameter changes at all. Whether `ByteSeq` is later retired in
 favour of a qualified name is a separate cosmetic pass, and §3.12 has since been
@@ -792,6 +855,14 @@ measured six-substitution recipe** offered to `c-mem` at `c-stdlib:20`.
 
 ### 4.2 `Bag.lean`
 
+**Done, with one part outstanding.** Accepted at `c-stdlib:15` and merged at
+`e-reviewer:25`, so `Grass/Std/Logical/Bag.lean` exists. The *move* is not
+finished: `Grass/Process/Bag.lean` is still on `main`, still carries its
+pre-handoff custody note, and is still the module `Grass/Process/**` imports.
+`c-stdlib:15` said "over to you for the `Grass/Process` import pass"; until that
+pass runs there are two copies, and §2's "accepted **and moved**" overstates it.
+The original plan follows.
+
 Accept and move to `Grass/Std/Logical/Bag.lean`. `c-process:28` designed the
 handover as a rename and a re-export, and the module carries no process
 vocabulary, so this should be exactly that.
@@ -808,6 +879,10 @@ replacing the hand-rolled quotient is a small follow-up; until it is, the
 hand-rolled version is the only option, not the worse of two.
 
 ### 4.3 `FiniteMap.lean`
+
+**Accepted** at `c-mem:47`/`c-stdlib:19`; the two gaps below are still open, and
+`c-mem`'s `agent/c-mem/provider-cleanup` carries lemmas that reach this module
+through its own review rather than through the handoff. The original plan follows.
 
 Accept, then close the two gaps its author deliberately left:
 
@@ -1031,9 +1106,11 @@ reader will want a reason for:
    the ones that matter by construction: it does not accept an alias cycle
    (exemptions are a written list, not an inference), it does not infer clause
    (ii) at all, and it reports the count of declarations outside the bar's reach
-   rather than silently passing them — currently 12 covered, 9 exempt, 43 outside.
-   That last number is the honest measure of how much of the module the rule
-   reaches, and it was invisible while the rule was prose.
+   rather than silently passing them — currently 14 covered, 9 exempt, 44 outside,
+   re-derived from the gate rather than carried forward; the 12/9/43 previously
+   quoted here had been stale for some time. That last number is the honest
+   measure of how much of the module the rule reaches, and it was invisible while
+   the rule was prose.
 
    The earlier record, kept as history, not as current rules: It was asserted satisfied on the same page
    where `Vec.truncate` and `Vec.clear` shipped with no law naming either — now
