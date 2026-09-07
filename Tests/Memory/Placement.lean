@@ -435,4 +435,64 @@ theorem the_aligned_store_is_well_formed :
     ({ misalignedStore with alignment := 1 } :
       AccessDescriptor).WellFormedIn AddressSpace.cpuVirtual64 := by decide
 
+/-! ## A view mapped at a non-zero offset
+
+`MemoryState.aliases` carried no offset until now, so aliased allocations were
+assumed to agree byte for byte from zero. The ordinary `MapViewOfFile` case -- a view
+mapped part-way into a file -- was not expressible, and
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` section 4.4.1 recorded that as this layer's
+largest open gap.
+
+These are the states that gap made unrepresentable. They are here rather than in
+`Tests/Memory/Loans.lean` because the question is about placement and offsets rather
+than about authority: nothing below issues a grant.
+-/
+
+/-- A view of `placed`, mapped 2048 bytes in. -/
+def viewAt2048 : AllocId := allocs.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- A view of *that* view, a further 256 bytes in. -/
+def viewAt256More : AllocId := allocs.fresh.2.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- `placed`, and two views into it at non-zero offsets, chained. -/
+def mapped : MemoryState :=
+  (((MemoryState.empty.allocateAll?
+      [(placed, placedRecord), (viewAt2048, placedRecord),
+       (viewAt256More, placedRecord)]).getD .empty).alias placed viewAt2048 2048).alias
+    viewAt2048 viewAt256More 256
+
+/-- The offset is recorded, and it is the offset that was declared. -/
+theorem the_view_is_mapped_at_its_offset :
+    mapped.SharesBytesAt placed viewAt2048 2048 := by decide
+
+/-- **And not at zero**, which is the whole content of the change: the unoffset
+model could only say the two share bytes, and could only mean "at the same offsets".
+A model that cannot distinguish these two states cannot describe a mapped view. -/
+theorem the_view_is_not_mapped_at_zero :
+    ¬ mapped.SharesBytesAt placed viewAt2048 0 := by decide
+
+/-- Backwards, the shift negates. `AliasEdge.delta` is an `Int` for exactly this: a
+`Nat` would have made the reverse direction inexpressible and the relation
+asymmetric. -/
+theorem the_reverse_hop_negates_the_offset :
+    mapped.SharesBytesAt viewAt2048 placed (-2048) := by decide
+
+/-- **Offsets compose along a path.** Two hops at 2048 and 256 put `viewAt256More`
+2304 bytes into `placed`, and no single declared edge says so. This is the
+transitivity `SharesBytes` already had, now carrying an offset with it. -/
+theorem offsets_compose_along_a_chain :
+    mapped.SharesBytesAt placed viewAt256More 2304 := by decide
+
+/-- The sum, and not either summand: a chain is not two independent facts. -/
+theorem the_chain_is_not_its_first_hop :
+    ¬ mapped.SharesBytesAt placed viewAt256More 2048 ∧
+    ¬ mapped.SharesBytesAt placed viewAt256More 256 := by decide
+
+/-- The unoffset question is unchanged, which is what makes this migration safe.
+`SharesBytes` still answers "the same storage at all", conflict detection still
+consults it, and every theorem stated over it is still true of these states. -/
+theorem the_unoffset_relation_is_unchanged :
+    mapped.SharesBytes placed viewAt2048 ∧
+    mapped.SharesBytes placed viewAt256More := by decide
+
 end Tests.Memory.Placement
