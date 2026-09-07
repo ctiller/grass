@@ -8,6 +8,9 @@ open Grass.Std.Logical Grass.Grammar Grass.Artifact.Binary
 
 def sample : Std.Logical.ByteArray := Vec.fromList [0x10, 0x20, 0x30]
 
+def samplePair : SizedByteArray 2 :=
+  ⟨Vec.fromList [0x10, 0x20], by decide⟩
+
 example : takeByte Vec.empty = .needMore (some 1) := rfl
 
 example : takeByte sample = .done 0x10 (Vec.fromList [0x20, 0x30]) := rfl
@@ -34,8 +37,21 @@ example (value : Byte) (suffix : Std.Logical.ByteArray) :
   writeByte_realizes.derivesWithSuffix value suffix
 
 example (input : Std.Logical.ByteArray) (short : input.length < 8) :
-    takeExact 8 input = .needMore (some (8 - input.length)) :=
-  (takeExact_realizes 8).needMoreExact input (some (8 - input.length)) |>.2
+    takeExactSized 8 input = .needMore (some (8 - input.length)) :=
+  (takeExactSized_realizes 8).needMoreExact input (some (8 - input.length)) |>.2
     ⟨short, rfl⟩
+
+example : takeExactSized 2 sample =
+    .done samplePair (Vec.fromList [0x30]) := by rfl
+
+example : DecidableEq (SizedByteArray 2) := inferInstance
+
+example (suffix : Std.Logical.ByteArray) :
+    takeExactSized 2 (writeExact samplePair ++ suffix) =
+      .done samplePair suffix := by simp
+
+example : takeExactSized 2 (writeExact samplePair) =
+    .done samplePair Vec.empty :=
+  parse_write (takeExactSized_realizes 2) (writeExact_realizes 2) samplePair
 
 end Grass.Tests.Artifact.Binary

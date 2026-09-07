@@ -65,6 +65,7 @@ inductive Format : Type → Type 1 where
   | choice {α : Type} (left right : Format α) : Format α
   | repeat {α : Type} (count : Nat) (item : Format α) : Format (Vec α)
   | refine {α : Type} (inner : Format α) (accepts : α → Prop) : Format α
+  | lift {α β : Type} (inner : Format α) (forget : β → α) : Format β
   | iso {α β : Type} (inner : Format α)
       (isomorphism : Isomorphism α β) : Format β
 
@@ -98,6 +99,10 @@ inductive Derives : {α : Type} → Format α → Std.Logical.ByteArray → α �
       {input rest : Std.Logical.ByteArray} {value : α}
       (derivation : Derives inner input value rest) (accepted : predicate value) :
       Derives (.refine inner predicate) input value rest
+  | lift {α β : Type} {inner : Format α} {forget : β → α}
+      {input rest : Std.Logical.ByteArray} {value : β}
+      (derivation : Derives inner input (forget value) rest) :
+      Derives (.lift inner forget) input value rest
   | iso {α β : Type} {inner : Format α} {isomorphism : Isomorphism α β}
       {input rest : Std.Logical.ByteArray} {value : α}
       (derivation : Derives inner input value rest) :
@@ -131,6 +136,8 @@ theorem appendSuffix {α : Type} {format : Format α}
       exact Derives.repeatSucc headSuffix tailSuffix
   | refine derivation accepted derivationSuffix =>
       exact Derives.refine derivationSuffix accepted
+  | lift derivation derivationSuffix =>
+      exact Derives.lift derivationSuffix
   | iso derivation derivationSuffix =>
       exact Derives.iso derivationSuffix
 
@@ -148,5 +155,32 @@ theorem seqAppend {α β : Type} {first : Format α} {next : α → Format β}
   exact Derives.seq (by simpa using left.appendSuffix rightInput) right
 
 end Derives
+
+/-- Eliminate one value-lifting derivation back to the underlying format. -/
+theorem Derives.lift_inner {α β : Type} {inner : Format α}
+    {forget : β → α} {input rest : Std.Logical.ByteArray} {value : β}
+    (derivation : Derives (.lift inner forget) input value rest) :
+    Derives inner input (forget value) rest := by
+  cases derivation with
+  | lift innerDerivation => exact innerDerivation
+
+/-- Promote a value invariant into the public result type of a format. This is
+distinct from `Format.refine`, which filters while retaining the same value
+type. -/
+def Format.refineValue {α : Type} (inner : Format α) (accepts : α → Prop) :
+    Format {value // accepts value} :=
+  .lift inner Subtype.val
+
+/-- Denotational equation for invariant-promoting refinement. -/
+theorem derives_refineValue_iff {α : Type} {inner : Format α}
+    {accepts : α → Prop} {input rest : Std.Logical.ByteArray}
+    {value : α} (accepted : accepts value) :
+    Derives (inner.refineValue accepts) input ⟨value, accepted⟩ rest ↔
+      Derives inner input value rest := by
+  constructor
+  · intro derivation
+    exact derivation.lift_inner
+  · intro innerDerivation
+    exact Derives.lift innerDerivation
 
 end Grass.Grammar

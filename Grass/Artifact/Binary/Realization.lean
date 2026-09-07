@@ -43,32 +43,70 @@ theorem takeByte_writeByte_via_realization (value : Byte) :
     takeByte (writeByte value) = .done value Vec.empty :=
   parse_write takeByte_realizes writeByte_realizes value
 
-/-- The exact-length consumer realizes the derived fixed-byte format: success,
+/-- Exact-length parsing into a value whose type retains the checked length. -/
+def takeExactSized (count : Nat) (input : Std.Logical.ByteArray) :
+    ParseResult (SizedByteArray count) :=
+  if enough : count ≤ input.length then
+    .done ⟨input.take count, by simp [enough]⟩ (input.drop count)
+  else
+    .needMore (some (count - input.length))
+
+/-- Writing a sized byte value forgets only its proof, never any byte. -/
+def writeExact {count : Nat} (value : SizedByteArray count) :
+    Std.Logical.ByteArray :=
+  value.1
+
+/-- A sized byte value written in front of any suffix is consumed exactly. -/
+@[simp] theorem takeExactSized_writeExact_append {count : Nat}
+    (value : SizedByteArray count) (rest : Std.Logical.ByteArray) :
+    takeExactSized count (writeExact value ++ rest) = .done value rest := by
+  simp [takeExactSized, writeExact, Vec.length_append, value.2,
+    Vec.take_append_of_length_eq, Vec.drop_append_of_length_eq]
+
+/-- A short input retains the exact deficit through the sized wrapper. -/
+theorem takeExactSized_short {count : Nat} {input : Std.Logical.ByteArray}
+    (short : input.length < count) :
+    takeExactSized count input = .needMore (some (count - input.length)) := by
+  simp [takeExactSized, Nat.not_le.mpr short]
+
+/-- The exact-length consumer realizes the sized fixed-byte format: success,
 completeness, and exact short-buffer classification agree with its semantics. -/
-theorem takeExact_realizes (count : Nat) :
-    ParserRealizes (fixedBytesSemantics count) (takeExact count) := by
+theorem takeExactSized_realizes (count : Nat) :
+    ParserRealizes (fixedBytesSemantics count) (takeExactSized count) := by
   constructor
-  · intro input value rest success
-    obtain ⟨lengthEq, recomposes⟩ := takeExact_done success
-    exact (fixedBytesSemantics count).selectedSound ⟨recomposes.symm, lengthEq⟩
   · intro input value rest selected
-    exact takeExact_append selected.2 rest ▸ congrArg (takeExact count) selected.1
+    subst input
+    exact takeExactSized_writeExact_append value rest
   · intro input hint
-    simp only [takeExact]
-    split
-    next enough =>
-      constructor
-      · intro impossible
-        cases impossible
-      · intro repairable
-        exact (Nat.not_lt_of_ge enough repairable.1).elim
-    next short =>
-      simp [fixedBytesSemantics, Nat.lt_of_not_ge short, eq_comm]
+    by_cases short : input.length < count
+    · rw [takeExactSized_short short]
+      simp [fixedBytesSemantics, short, eq_comm]
+    · have enough : count ≤ input.length := Nat.le_of_not_gt short
+      simp [takeExactSized, enough, fixedBytesSemantics, short]
   · intro input error
-    simp only [takeExact]
-    split <;> simp [fixedBytesSemantics]
+    by_cases short : input.length < count
+    · rw [takeExactSized_short short]
+      simp [fixedBytesSemantics]
+    · have enough : count ≤ input.length := Nat.le_of_not_gt short
+      simp [takeExactSized, enough, fixedBytesSemantics]
   · intro input value rest success
-    obtain ⟨lengthEq, recomposes⟩ := takeExact_done success
-    exact ⟨recomposes.symm, lengthEq⟩
+    by_cases short : input.length < count
+    · rw [takeExactSized_short short] at success
+      contradiction
+    · have enough : count ≤ input.length := Nat.le_of_not_gt short
+      simp only [takeExactSized, enough, ↓reduceDIte] at success
+      injection success with valueEq restEq
+      rw [← valueEq, ← restEq]
+      exact (Vec.append_splitAt input count).symm
+
+/-- The sized writer realizes the same fixed-byte semantics. -/
+theorem writeExact_realizes (count : Nat) :
+    WriterRealizes (fixedBytesSemantics count) (@writeExact count) := by
+  constructor
+  · intro value
+    exact Derives.lift (by
+      simpa [writeExact, value.2] using anyBytes_derives value.1 Vec.empty)
+  · intro value
+    simp [fixedBytesSemantics, writeExact]
 
 end Grass.Artifact.Binary
