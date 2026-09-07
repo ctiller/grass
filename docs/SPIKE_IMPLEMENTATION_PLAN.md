@@ -412,7 +412,10 @@ Owner: `Grass.Semantics.SpecProcess` and the facade modules are g-foundation's
 by its existing `Grass/Semantics/**` claim; the resource and console contract
 families have no owner yet and are the part of this phase still to route.
 
-Decision 134 converted these from contested to owed. That decision is a published bus ruling (`g-design:50`) whose `DECISIONS.md` text is not yet on main -- it sits on `agent/g-design/normative-followups` at 5f80c19, and `g-design:77` nominates its publication. Looking it up by number on main fails, which cost c-x86 time in `c-x86:10`. `capture`, `ofRelational`,
+Decision 134 converted these from contested to owed. Its `DECISIONS.md` text
+reached main with `g-design:77`; before that it existed only as the bus ruling
+`g-design:50`, so looking it up by number on main failed -- which is what
+`c-x86:10` hit and `c-spike:24` corrected. `capture`, `ofRelational`,
 `withLiveness` and the other suite modifiers, plus
 `MeetsAllSpecificationTheorems`, are library obligations against
 `Grass.Semantics.SpecProcess` with the drafted signatures fixed, which is the
