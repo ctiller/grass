@@ -104,7 +104,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 102
+def owedBaseline : Nat := 104
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -361,6 +361,12 @@ def owed : List Name :=
     -- declaration to carry it -- so the fact was real, load-bearing and
     -- absent from this ledger entirely. Naming it is what put it here.
     `Grass.ABI.Win64.xmmVolatility,
+    -- The two ceilings of UWOP_ALLOC_LARGE. Both are external facts about the
+    -- unwind encoding rather than choices: 524280 is what the 16-bit scaled
+    -- field reaches, and 4294967288 is what the unscaled form reaches, which
+    -- ml64 confirms by refusing 2^32 with A2156.
+    `Grass.ABI.Win64.UnwindOp.largeAllocScaledMax,
+    `Grass.ABI.Win64.UnwindOp.largeAllocRawMax,
     -- The Win32 handle and pointer widths. A reviewer of the platform profile
     -- pointed out that these are external ABI facts wearing the clothes of a
     -- project selection: `docs/DECISIONS.md` 16 fixes x64, but it says nothing

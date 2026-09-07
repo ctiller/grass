@@ -137,7 +137,10 @@ displacement.
 def toBytes : PlacedOp → ByteSeq
   | ⟨.allocLarge n, off⟩ =>
       [off, (UnwindOp.allocLarge n).opInfo ++ (UnwindOp.allocLarge n).opcode] ++
-        le16 (BitVec.ofNat 16 (n / 8))
+        (if n ≤ UnwindOp.largeAllocScaledMax then
+          le16 (BitVec.ofNat 16 (n / 8))
+        else
+          le32 (BitVec.ofNat 32 n))
   | ⟨.saveNonvolatile r n, off⟩ =>
       [off, (UnwindOp.saveNonvolatile r n).opInfo ++
         (UnwindOp.saveNonvolatile r n).opcode] ++ le16 (BitVec.ofNat 16 (n / 8))
@@ -156,7 +159,9 @@ unwinder would read whatever follows `.xdata` as unwind codes.
 -/
 @[simp] theorem length_toBytes (p : PlacedOp) : p.toBytes.length = 2 * p.op.slots := by
   match p with
-  | ⟨.allocLarge _, _⟩ => simp [toBytes, UnwindOp.slots, le16]
+  | ⟨.allocLarge n, _⟩ =>
+      by_cases h : n ≤ UnwindOp.largeAllocScaledMax <;>
+        simp [toBytes, UnwindOp.slots, le16, le32, h]
   | ⟨.pushNonvolatile _, _⟩ => simp [toBytes, UnwindOp.slots]
   | ⟨.allocSmall _, _⟩ => simp [toBytes, UnwindOp.slots]
   | ⟨.setFramePointer _ _, _⟩ => simp [toBytes, UnwindOp.slots]
@@ -166,7 +171,9 @@ unwinder would read whatever follows `.xdata` as unwind codes.
 /-- The first byte written is the code offset. -/
 theorem toBytes_head (p : PlacedOp) : p.toBytes.head? = some p.codeOffset := by
   match p with
-  | ⟨.allocLarge _, _⟩ => rfl
+  | ⟨.allocLarge n, _⟩ =>
+      by_cases h : n ≤ UnwindOp.largeAllocScaledMax <;>
+        simp [toBytes, le16, le32, h]
   | ⟨.pushNonvolatile _, _⟩ => rfl
   | ⟨.allocSmall _, _⟩ => rfl
   | ⟨.setFramePointer _ _, _⟩ => rfl

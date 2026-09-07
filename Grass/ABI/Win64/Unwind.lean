@@ -52,11 +52,13 @@ models general-purpose registers only.
 
 ## What is still outside the model
 
-`UWOP_ALLOC_LARGE` with `OpInfo = 1`, the three-slot form carrying an unscaled
-32-bit size. `char buf[600000]` produces it at both optimisation levels, and
-`UnwindOp.LargeAllocEncodable` caps at 524280, so this profile refuses it.
-
 The `_FAR` save forms and `UWOP_PUSH_MACHFRAME`, which have no constructors.
+
+`UWOP_ALLOC_LARGE` with `OpInfo = 1` -- the three-slot form carrying an unscaled
+32-bit size, which `char buf[600000]` produces at both optimisation levels -- is
+modelled now. Which of the two forms an `allocLarge` takes is derived from its
+size rather than chosen, so no operation can declare a slot count its own bytes
+contradict.
 
 None of that is unsoundness — every one is a refusal, and refusing is what this
 module is for. It is a statement about *reach*.
@@ -159,6 +161,15 @@ def opcode : UnwindOp → BitVec 4
   | .saveNonvolatile _ _ => 4
   | .saveXmm128 _ _ => 8
 
+/-- The largest allocation the scaled `UWOP_ALLOC_LARGE` form encodes:
+`65535 * 8`, the ceiling of its 16-bit field. Above this the operation takes a
+third slot and stores the size unscaled. -/
+def largeAllocScaledMax : Nat := 524280
+
+/-- The largest allocation the unscaled form encodes. `ml64` accepts `2^32 - 8`
+and refuses `2^32` outright with `A2156: constant value out of range`. -/
+def largeAllocRawMax : Nat := 4294967288
+
 /--
 How many two-byte slots this operation occupies in the `UNWIND_CODE` array.
 
@@ -170,14 +181,19 @@ array, which the unwinder reads as whatever follows.
 def slots : UnwindOp → Nat
   | .pushNonvolatile _ => 1
   | .allocSmall _ => 1
-  | .allocLarge _ => 2
+  -- Two slots for the scaled form, three for the unscaled one, derived from
+  -- the size rather than chosen. `UWOP_ALLOC_LARGE` carries its size in the
+  -- slots that follow it, so a constructor letting the caller pick the form
+  -- could claim a slot count the bytes do not match, and the unwinder reads
+  -- `CountOfCodes` slots whatever was actually written.
+  | .allocLarge n => if n ≤ largeAllocScaledMax then 2 else 3
   | .setFramePointer _ _ => 1
   | .saveNonvolatile _ _ => 2
   | .saveXmm128 _ _ => 2
 
 /-- Every operation occupies at least one slot. -/
 theorem slots_pos (op : UnwindOp) : 0 < op.slots := by
-  cases op <;> simp [slots]
+  cases op <;> simp [slots] <;> split <;> simp
 
 /-- How many bytes this operation moves `RSP` down by in the prologue. -/
 def stackDelta : UnwindOp → Nat
@@ -223,7 +239,7 @@ being wrong. -/
 def opInfo : UnwindOp → BitVec 4
   | .pushNonvolatile r => regNibble r
   | .allocSmall n => BitVec.ofNat 4 (n / 8 - 1)
-  | .allocLarge _ => 0
+  | .allocLarge n => if n ≤ largeAllocScaledMax then 0 else 1
   | .setFramePointer r _ => regNibble r
   | .saveNonvolatile r _ => regNibble r
   | .saveXmm128 r _ => BitVec.ofNat 4 r.index.val
@@ -240,9 +256,17 @@ def SmallAllocEncodable (n : Nat) : Prop := 8 ≤ n ∧ n ≤ 128 ∧ n % 8 = 0
 instance (n : Nat) : Decidable (SmallAllocEncodable n) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 
-/-- `allocLarge` with `OpInfo = 0` stores `n/8` in one 16-bit slot, so it
-reaches 8 to 512K-8, and still only multiples of 8. -/
-def LargeAllocEncodable (n : Nat) : Prop := 8 ≤ n ∧ n < 524288 ∧ n % 8 = 0
+/-- `allocLarge` covers both of its forms.
+
+With `OpInfo = 0` the size is stored as `n/8` in one 16-bit slot, reaching
+`largeAllocScaledMax`. Above that `OpInfo = 1` stores it unscaled in two slots,
+reaching `largeAllocRawMax`. Both are multiples of eight.
+
+Which form is used is not a choice: `slots` and `opInfo` derive it from `n`, so
+there is no way to build an operation whose declared slot count disagrees with
+the bytes it writes. -/
+def LargeAllocEncodable (n : Nat) : Prop :=
+  8 ≤ n ∧ n ≤ largeAllocRawMax ∧ n % 8 = 0
 
 instance (n : Nat) : Decidable (LargeAllocEncodable n) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))

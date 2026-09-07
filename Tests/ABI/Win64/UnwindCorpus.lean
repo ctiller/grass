@@ -222,6 +222,23 @@ def largeAllocRows : List Row :=
   [136, 256, 1024, 4096, 65536, 262144, 524280].filterMap fun n =>
     rowOf ("alloc-large-" ++ toString n) [.alloc n]
 
+/-- Allocations needing `UWOP_ALLOC_LARGE` with `OpInfo = 1`: three slots, and
+the size stored unscaled in the two that follow. `524288` is the first size the
+scaled field cannot reach, and `char buf[600000]` is what MSVC emits it for at
+both optimisation levels, which is why this form is worth covering rather than
+merely permitting.
+
+Well below `UnwindOp.largeAllocRawMax`. At the very top of that range `ml64`
+assembles `sub rsp, 4294967288` as a four-byte `sub rsp, -8`, because the
+constant is its own two's complement, while still recording an unwind code
+claiming the full allocation. `Step.length` says seven for every allocation
+above 127, so a row up there would fail the differential on the instruction
+length rather than on the unwind bytes -- a real disagreement about a
+pathological input, and not the one this family is for. -/
+def hugeAllocRows : List Row :=
+  [524288, 600000, 1048576, 16777216].filterMap fun n =>
+    rowOf ("alloc-huge-" ++ toString n) [.alloc n]
+
 /-- A push and an allocation together, over the alloc forms, so that a
 `REX`-prefixed push and a seven-byte `sub` have to agree on offsets. -/
 def pushAllocRows : List Row :=
@@ -294,8 +311,8 @@ def spike1Rows : List Row :=
 /-- The whole corpus. -/
 def corpus : List Row :=
   singlePushRows ++ pairPushRows ++ smallAllocRows ++ largeAllocRows ++
-    pushAllocRows ++ frameRows ++ saveRegRows ++ saveXmmRows ++
-    mixedSaveRows ++ spike1Rows
+    pushAllocRows ++ frameRows ++ hugeAllocRows ++ saveRegRows ++
+    saveXmmRows ++ mixedSaveRows ++ spike1Rows
 
 /-- The Spike 1 row agrees with the theorem in `UnwindBytes.lean`, so the
 differential and the proof are checking the same bytes rather than two
