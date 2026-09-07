@@ -51,6 +51,21 @@ theorem padding_is_where_expected :
     layout.IsPadding 1 ∧ layout.IsPadding 2 ∧ layout.IsPadding 3 ∧
     ¬ layout.IsPadding 0 ∧ ¬ layout.IsPadding 4 := by decide
 
+/-- Padding is *inside* the aggregate, and this is what says so.
+
+`Footprint.IsPadding` is `extent.Covers offset` **and** no field covering it.
+Review deleted the `extent` conjunct, co-edited the `Decidable` instance and the
+one projection of it, and the whole tree still built -- 193 jobs green. Nothing
+distinguished padding from any offset in the universe that no field covers.
+`padding_uninitialized_after_writing_fields` survives the widening because
+`writeFields` writes only field ranges, so it stays true of everything else too,
+which is exactly why no existing case noticed.
+
+`layout` is eight bytes, so offset 100 is outside it and covered by no field: the
+two readings disagree there and nowhere a field lives. -/
+theorem an_offset_outside_the_aggregate_is_not_padding :
+    ¬ layout.IsPadding 100 := by decide
+
 /-- The allocation the fixture works in, and its epoch. Minted from the
 supplies rather than written as literals, because `Uid.mk` is private. -/
 def alloc : AllocId := (FreshSupply.initial (Tag := AllocTag)).fresh.1

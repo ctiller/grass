@@ -157,7 +157,20 @@ def scope_is_covered(paths, trees=("Grass", "Tests")) -> list[str]:
 DECLARED_IN = [p for p in sorted((ROOT / "Grass").rglob("*.lean")) if in_scope(p)]
 # Readers are looked for in the fixtures too: a field a fixture projects is read,
 # and excluding them made AuditViolation.class_ look inert when Tests/ reads it.
-READERS_IN = DECLARED_IN + sorted((ROOT / "Tests").rglob("*.lean"))
+#
+# **Unscoped, both trees.** This was `DECLARED_IN + Tests/`, which scopes the
+# `Grass/` half to `SCOPE` and leaves the `Tests/` half whole -- so a field read
+# only from `Grass/ISA` was reported unread while one read only from `Tests/ISA`
+# was not. Same owner, same out-of-scope status, opposite verdict; review built
+# one probe and moved its single consumer between three files to isolate it.
+#
+# A declaration is *used* wherever it is used. Only the set this gate
+# **adjudicates** belongs in `SCOPE`, which is the distinction `CitationAudit`
+# was given a round earlier and `FixtureAudit` already had. Applying it to one
+# gate of three was the repair landing on the instance instead of the class.
+# It also silently corrupted `--inert`, which reads the same narrowed window.
+READERS_IN = (sorted((ROOT / "Grass").rglob("*.lean"))
+              + sorted((ROOT / "Tests").rglob("*.lean")))
 
 # Only `structure` declarations are scanned. `class` fields and inductive
 # constructor parameters are not, so an allowlist entry naming one of those records
@@ -528,6 +541,11 @@ def blank(match: "re.Match[str]") -> str:
 # `QUOTE` and `BACKSLASH` are spelled with `chr` so that this file's own source
 # carries neither where a reader might take it for the thing being matched.
 QUOTE = chr(34)
+APOSTROPHE = chr(39)
+# Characters an apostrophe may follow as a *prime* on a name rather than opening a
+# char literal. Lean allows `h'`, `foo''` and `x?'`.
+PRIMEABLE = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_!?" + chr(39))
 BACKSLASH = chr(92)
 
 
@@ -548,9 +566,10 @@ def scannable(text: str) -> str:
         if char == chr(10):
             out.append(chr(10))
             in_line_comment = False
-            # A string literal does not span lines in Lean, so one left open at a
-            # newline is a lexical error in the source rather than licence to
-            # blank the rest of the file.
+            # A string left open at a newline is a lexical error in the source
+            # rather than licence to blank the rest of the file. Reached only when
+            # the newline is *not* part of a string gap; a gap is consumed by the
+            # escape branch below, which keeps `in_string` set.
             in_string = False
             index += 1
             continue
@@ -560,6 +579,38 @@ def scannable(text: str) -> str:
             continue
         if in_string:
             if char == BACKSLASH and index + 1 < size:
+                # A **string gap**: a backslash immediately before a newline
+                # continues the literal onto the next line. Lean 4 has these, and
+                # the comment above this branch used to say it did not. Emitting
+                # two spaces here consumed the newline: total length was preserved,
+                # so the advertised invariant appeared to hold, while the line count
+                # dropped and every finding after the gap was reported one line
+                # early. Review measured it -- a door call on line 195 reported as
+                # 194, with a gap-free control on 191 reported correctly.
+                #
+                # The newline is emitted and `in_string` stays set, because the
+                # literal really does continue.
+                # CRLF first, and it is the half that is unsafe rather than
+                # merely wrong. On a CRLF checkout the escape ate the
+                # backslash and the CR, the LF then hit the top-of-loop reset,
+                # and `in_string` cleared **mid-string** -- so the
+                # continuation line was scanned as source while the string's
+                # own tail was not, which is the hiding direction. What holds
+                # it off today is `.gitattributes` (`* text=auto eol=lf`),
+                # which no gate consults, against a repo-local
+                # `core.autocrlf=true`.
+                if (index + 2 < size and text[index + 1] == chr(13)
+                        and text[index + 2] == chr(10)):
+                    out.append(chr(32))
+                    out.append(chr(13))
+                    out.append(chr(10))
+                    index += 3
+                    continue
+                if text[index + 1] == chr(10):
+                    out.append(chr(32))
+                    out.append(chr(10))
+                    index += 2
+                    continue
                 out.append(chr(32) * 2)
                 index += 2
                 continue
@@ -592,6 +643,21 @@ def scannable(text: str) -> str:
             out.append(chr(32) * 2)
             index += 2
             continue
+        # A char literal, before the quote branch, because `'"'` holds a bare
+        # quote and opened a string that blanked the rest of the line -- review put
+        # two door calls on one line either side of one and watched the second
+        # disappear. Only when the apostrophe cannot be a prime on an identifier:
+        # `h'` and `foo'` are ordinary Lean names and must not start a literal.
+        if char == APOSTROPHE and not (out and out[-1][-1:] in PRIMEABLE):
+            if (index + 3 < size and text[index + 1] == BACKSLASH
+                    and text[index + 3] == APOSTROPHE):
+                out.append(chr(32) * 4)
+                index += 4
+                continue
+            if index + 2 < size and text[index + 2] == APOSTROPHE:
+                out.append(chr(32) * 3)
+                index += 3
+                continue
         if char == QUOTE:
             in_string = True
             out.append(chr(32))
@@ -801,8 +867,49 @@ def self_test() -> int:
     # memory layer while still printing its success line. No self-test reached the
     # path filter, because every case here writes probes into a temporary directory
     # and calls the scanner directly.
+    # **One case per `SCOPE` token.** This was `Memory` alone, and review measured
+    # what that pinned: a leave-one-out over every token found 36 of 44 (gate,
+    # token) pairs silent across the four scoped gates -- token deleted, self-test
+    # green, gate green, success line printed. Seven were silent in all four,
+    # `Obligation` among them, so dropping it took every `Grass/Obligation` file
+    # out of every gate invisibly. That is the defect the plan records as closed,
+    # reproduced against the subtree carrying `LedgerDelta.Applicable`.
+    #
+    # The floor cannot cover this and the docstring is right that it cannot: a
+    # check derived from `SCOPE` is deleted along with the token. Only a
+    # hard-coded name survives its removal, so there has to be one per token.
+    if not in_scope(ROOT / "Grass" / "Certificate.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Certificate")
+        failures_qualified += 1
+    if not in_scope(ROOT / "Grass" / "Core" / "Context.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Core")
+        failures_qualified += 1
     if not in_scope(ROOT / "Grass" / "Memory" / "State.lean"):
-        print("  SELF-TEST FAILED: Grass/Memory is out of scope")
+        print("  SELF-TEST FAILED: SCOPE lost Memory")
+        failures_qualified += 1
+    if not in_scope(ROOT / "Grass" / "Obligation" / "Core.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Obligation")
+        failures_qualified += 1
+    if not in_scope(ROOT / "Grass" / "Op" / "Facets.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Op")
+        failures_qualified += 1
+    if not in_scope(ROOT / "Grass" / "Resource" / "Algebra.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Resource")
+        failures_qualified += 1
+    if not in_scope(ROOT / "Grass" / "Semantics" / "Execution.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Semantics")
+        failures_qualified += 1
+    if not in_scope(ROOT / "Grass" / "Std" / "Logical" / "Bag.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Std")
+        failures_qualified += 1
+    if not in_scope(ROOT / "Grass" / "Trust" / "Audit.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Trust")
+        failures_qualified += 1
+    if not in_scope(ROOT / "Grass" / "Verify" / "VerifiedProgram.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Verify")
+        failures_qualified += 1
+    if not in_scope(ROOT / "Tests" / "Foundation.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Foundation")
         failures_qualified += 1
     if not in_scope(ROOT / "Tests" / "Memory" / "Loans.lean"):
         print("  SELF-TEST FAILED: Tests/Memory is out of scope")
@@ -842,6 +949,57 @@ def self_test() -> int:
     if not missed:
         print("  SELF-TEST FAILED [same-named field]: blind spot has changed; "
               "update the module docstring, which documents it as unhandled")
+        failures += 1
+
+    # The shared scanner, both shapes review defeated it with. Neither had a
+    # case here: `BACKSLASH` appeared only in this file's own comment, constant
+    # and single use, and no seed contained an apostrophe -- so both defects were
+    # invisible to CI while the gate printed its success line.
+    #
+    # A **string gap** -- a backslash immediately before a newline -- continues a
+    # Lean literal. The escape branch used to consume the newline, preserving
+    # total length while dropping a line, so every finding below a gap was
+    # reported one line early. Length is the invariant the docstring advertises
+    # and it is the weaker one; the line count is what a report cites.
+    gapped = ("def s : String :=" + chr(10) + "  " + chr(34) + "a" + chr(92) + chr(10)
+               + "  b" + chr(34) + chr(10) + "def afterGap := 1" + chr(10))
+    if scannable(gapped).count(chr(10)) != gapped.count(chr(10)):
+        print("  SELF-TEST FAILED: a string gap loses a line, shifting every "
+              "reported line number after it")
+        failures += 1
+
+    # The same gap with **CRLF** endings, which is the half that hides source
+    # rather than merely shifting a number. The escape ate the backslash and the
+    # CR; the LF then hit the top-of-loop reset and cleared `in_string`
+    # mid-literal, so the string's own tail was scanned as source. Held off only
+    # by `.gitattributes`, which no gate consults.
+    crlf = ("def s : String :=" + chr(13) + chr(10) + "  " + chr(34) + "a" + chr(92) + chr(13) + chr(10)
+            + "  MemoryState.alias" + chr(34) + chr(13) + chr(10))
+    if "MemoryState.alias" in scannable(crlf):
+        print("  SELF-TEST FAILED: a CRLF string gap exposes the string's tail "
+              "as source")
+        failures += 1
+    if scannable(crlf).count(chr(10)) != crlf.count(chr(10)):
+        print("  SELF-TEST FAILED: a CRLF string gap loses a line")
+        failures += 1
+
+    # A **char literal** holding a quote must not open a string and blank the
+    # rest of the line. Review put two door calls either side of one and watched
+    # the second disappear.
+    charlit = "def p := (alpha, " + chr(39) + chr(34) + chr(39) + ", omega)" + chr(10)
+    if "omega" not in scannable(charlit):
+        print("  SELF-TEST FAILED: a char literal holding a quote hides the "
+              "rest of its line")
+        failures += 1
+
+    # Controls, so neither repair is a blanket disabling. A real string literal
+    # is still blanked, and an apostrophe that is a *prime* on a name -- `h'`,
+    # ordinary Lean -- does not start a literal and eat what follows.
+    if "hidden" in scannable("def s := " + chr(34) + "hidden" + chr(34) + chr(10)):
+        print("  SELF-TEST FAILED: a real string literal is no longer blanked")
+        failures += 1
+    if "visible" not in scannable("theorem h" + chr(39) + " : True := visible" + chr(10)):
+        print("  SELF-TEST FAILED: a primed identifier swallows what follows it")
         failures += 1
 
     if failures:

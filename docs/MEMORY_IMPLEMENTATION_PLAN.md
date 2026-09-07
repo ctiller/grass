@@ -3108,7 +3108,7 @@ structure, and the scan still cannot.
 
 Reported to their owners rather than decided here: the five new unread fields in
 `Grass/Semantics` and the twelfth `RequirementKind` constructor (g-foundation, extending
-`c-mem:52` and `c-mem:53`); eighteen hedge entries in main's `DocstringAudit` that silence
+`c-mem:52` and `c-mem:53`); twenty hedge entries in main's `DocstringAudit` that silence
 nothing in the merged tree; and the `Tests/` widening of `DeclNames.lean`.
 
 ### 4.4.1d Round twenty-five: everything the merge commit got wrong
@@ -3211,6 +3211,189 @@ the tooling built to police it did not.
   `FixtureAudit`'s allowlist has three entries, not two; the `Grass/Semantics` fields new
   in the merge are five, not six; "hundreds of findings" is true of one of the four gates
   that say it.
+
+### 4.4.1e Round twenty-six: the Lean does not come back clean
+
+Ten findings, **five of them in the Lean**, which is the round's most important
+result because it falsifies what §4.4.1d said. Round twenty-five returned nothing on
+the Lean side and this section was going to be about whether that replicated. It did
+not. **One clean round is not a fixpoint**, and treating it as one would have been
+the "disclosed gap treated as a closed one" defect applied to the review process
+rather than to the code.
+
+What *has* changed is the character of what survives. All five Lean findings are
+prose: a claim quantified over three fields and proved of one, two adjectives absent
+from their own definitions, a discharged obligation still written as owed, and two
+names that have never existed. None is a hole in a guard. Both mutations the reviewer
+ran either died against a purpose-built fixture or ran out of arity before reaching
+semantics, and every count re-counted — nine, ten, eleven, thirteen, fourteen,
+twenty, six, seven-of-nine — was right, one round after four were wrong. The
+mechanisms have converged; the sentences about them have not.
+
+- ~~**The floor added last round was weaker than its own sentence.**~~
+  `roots_are_covered` promised "a representative subtree from each owner" and
+  hard-coded six of fifteen. Nine could vanish with it green, and review ran it:
+  dropping `Grass/Std/Logical` and `Grass/Resource` took `--hedged` from 35 claim
+  sentences to 30 while the floor printed nothing and the gate printed its success
+  line. Two of the nine were this branch's own areas and one, `Grass/Std`, is a
+  distinct owner with its own normative document — so the list did not satisfy even
+  the sentence above it.
+
+  Derived from disk now, and falsified per subtree: **sixteen of sixteen caught,
+  against six before**. Writing that repair exposed a second defect underneath it —
+  the `is_dir()` guard dropped every top-level module, so `Grass/Certificate.lean`
+  stayed invisible even once `required` named it. **A floor that enumerates correctly
+  and then filters the enumeration is two chances to be wrong**, and the filter
+  silently undid the fix.
+- ~~**The shared scanner was defeated in two more ways, in all five gates.**~~ Lean
+  has **string gaps** — a backslash immediately before a newline continues the
+  literal — and the escape branch consumed the newline. Total length was preserved,
+  so the invariant the docstring advertises appeared to hold, while the line count
+  dropped and every finding below a gap was reported one line early; review measured
+  a door call on 195 reported as 194 against a gap-free control on 191 reported
+  correctly. The comment above that branch asserted Lean strings cannot span lines.
+
+  And a **char literal** `'"'` holds a bare quote, which opened a string and blanked
+  the rest of the line — two door calls either side of one, and the second vanished.
+  Same class as the `--`-in-a-line-comment defeat round twenty-five closed, in the
+  same function, in the hiding direction.
+
+  Neither branch had a self-test case: `BACKSLASH` appeared only in each file's own
+  comment, constant and single use, and no seed contained an apostrophe. Both are
+  seeded now in all five, with controls — a real string is still blanked, and `h'` as
+  a prime does not start a literal. The repairs were checked against the pre-fix code
+  at `f48cb9a`: **ten failures before, zero after**, and one seed was falsified by
+  reverting its branch and watching the self-test fail.
+- ~~**The consumer set was scoped over `Grass/` and not over `Tests/`.**~~
+  `ConsultedAudit` and `ReachabilityAudit` both built it as `DECLARED_IN + Tests/`,
+  so a declaration used only from `Grass/ISA` was reported unused while one used only
+  from `Tests/ISA` was not — same owner, same out-of-scope status, opposite verdict.
+  Review isolated it with one probe and three placements of its single consumer.
+
+  `CitationAudit` was given exactly this repair a round earlier and `FixtureAudit`
+  already had it: **two gates of four, which is the repair landing on the instance
+  instead of the class**, on the branch that names that class. It also silently
+  corrupted `--inert`, which reads the same narrowed window. `SCOPE` governs what a
+  gate *adjudicates*, never where it looks for a use.
+- ~~**A count broken by the commit under review.**~~ `ReachabilityAudit`'s
+  disposition group said "these two are named and unbuilt" over one entry and "the
+  other three" over four — `Disposition.transferred` was deleted by the same commit
+  that left the sentence standing. *A count nobody re-counts*, introduced by the
+  change whose own subject was allowlist accuracy, four bad counts having been round
+  twenty-five's closing item.
+- ~~**`Grass/Memory/Audit.lean:37` said M2 owed a proof it had already supplied.**~~
+  `Grass.Op.step_extends_violations` has existed since M2, and line 434 of the *same
+  file* cites it as done. The file contradicted itself about §8's central guarantee,
+  in the passage that is the authoritative prose for it — the one that correctly
+  concedes append-only is not a property of the type and relocates the guarantee to
+  the transition relation, then tells the reader the relocation is unproved.
+
+  **`DocstringAudit` cannot catch this and never could**: "owes" is in `HEDGES`, so a
+  stale open obligation is exempt by construction. That is a limit of the gate worth
+  recording next to the sentence it missed — a hedge admits a disclosure and cannot
+  tell one from an obligation that has since closed.
+- ~~**`isPortable_of_isPlain` claimed "every part" and proved one part.**~~ `IsPlain`
+  constrains `atomicity` and `order` and says nothing about `scope`, so a demand with
+  `scope := .profileSpecific ⟨"gpuWorkgroup"⟩` is plain, is not portable, and is not
+  expressible against a profile that has not registered the name. Review elaborated
+  the counterexample rather than arguing it. Nothing depends on the wider reading —
+  `Grass/Op/Step.lean` checks `AdmitsOrder` and `AdmitsScope` separately and directly,
+  and `IsPlain` has no caller under `Grass/`.
+
+  The sibling paragraph was worse: "the initial single-threaded profile admits only
+  plain accesses" is a gate nothing applies, and `Grass/Memory/Profile.lean`
+  discloses the opposite. **A disclosed gap written as a closed guarantee in a
+  different module is the hardest kind to find**, because the disclosure and the
+  claim never appear on the same screen.
+- ~~**Two names that have never existed, and one adjective pair that is not in the
+  definition.**~~ `Grass/Memory/Provenance.lean:283` cited `p.Designates root`;
+  nothing declares `Designates` and `descend` takes a step, not a root.
+  `Grass/Memory/ByteStore.lean:107` said `ByteStore.read` is where the
+  newest-wins-for-initialization reading is taken; there is no `ByteStore.read`, and
+  the reading is taken in `cellAt?`. `IsPlainRead`/`IsPlainWrite` were documented as
+  "aligned single-context" when alignment is `WellFormedIn`'s and "single-context"
+  would be the scope `IsPlain` does not constrain.
+
+  **Three citations, three different blind spots, none of them new.** `Designates`
+  exploits two documented limits at once — a space inside the backticks defeats
+  `CITATION`, and a lower-case head makes `worth_checking` read it as an expression
+  fragment. `ByteStore.read` is adjudicated and *passes*, on the disclosed
+  final-component fallback: `read` is declared as `AccessIntent.read`. **A citation
+  whose last component is a common word — `read`, `write`, `owner` — is unadjudicated
+  by construction, and this layer is full of such words.** And two dead `def`s in
+  `Grass/` are invisible to every gate, because `FixtureAudit` covers `Tests/` only.
+
+**The second reviewer, and the answer to the round's question.** 33 mutations, 31
+conclusive, **30 caught, one documented-closed survival, one new finding**. So the
+Lean layer does hold: round twenty-five's clean result was not an artefact of
+reviewers following the diff. Both reviewers agree on the shape — the mechanisms have
+converged and the sentences about them have not — and the disagreement is only about
+whether prose counts as "the Lean coming back clean". It does not, which is why this
+section is titled as it is.
+
+Settled by that round, and worth recording because a previous reviewer got it wrong:
+**`Grass/Obligation/Delta.lean`'s two kind clauses are verified.** They were flagged
+as unproved on the strength of a theorem census, and there is no `not_applicable_*`
+theorem for either — but deleting `.split`'s kind clause is caught at
+`Tests/Op/FakeIsa.lean:1721` and `.join`'s at `:1738`, both beside positive controls.
+**A census of theorem names is not a census of what is checked.** All twelve
+`denialOf` branches, all four `Rights.lean` guards, all four `Loan.lean` guards and
+five `MayLend`/`LoanConflicts` clauses were also deleted one at a time and every one
+was caught, four of them at statement level rather than by a tactic script.
+
+- ~~**The `SCOPE` self-test pinned one token of eleven.**~~ A leave-one-out over every
+  token in each of the four scoped gates found **36 of 44 (gate, token) pairs
+  silent** — token deleted, self-test green, gate green, success line printed. Seven
+  tokens were silent in all four, `Obligation` among them: dropping it took all three
+  `Grass/Obligation` files out of every gate while each printed success, which is
+  **precisely the failure §4.4.1d records as closed**, reproduced against the subtree
+  carrying `LedgerDelta.Applicable`.
+
+  §4.4.1d's own sentence is where the error lives — "the hard-coded self-test cases
+  catch the rest" was written about one case. The floor genuinely cannot cover this,
+  and that half of the sentence is right: a check derived from `SCOPE` is deleted
+  along with the token, so only a hard-coded name survives its removal. There is one
+  per token now, in all four gates.
+- ~~**The string-gap repair was half a repair, and the missing half was the unsafe
+  one.**~~ Fixing `\`+LF while leaving `\`+CRLF meant that on a CRLF checkout the
+  escape ate the backslash and the CR, the LF hit the top-of-loop reset, and the
+  scanner's in-string flag cleared **mid-literal** — so the string's own tail was scanned as source.
+  That is the hiding direction, and it is the same content failure that put `alias` in
+  `DOORS`, reached through a third lexical hole. What holds it off today is
+  `.gitattributes`' `* text=auto eol=lf`, which no gate consults, against a repo-local
+  `core.autocrlf=true`.
+
+  Both halves are now falsified against the pre-fix code: **ten failures before, zero
+  after**, LF and CRLF, with the string's tail asserted hidden and the following real
+  call asserted visible. Thirty-two lost newlines existed in four live files.
+- ~~**`Footprint.IsPadding`'s extent conjunct was checked by nothing.**~~ Deleting
+  `extent.Covers offset` — co-editing only the `Decidable` instance and the one
+  projection — left the whole tree green at 193 jobs. Nothing distinguished padding
+  from *any offset in the universe* no field covers.
+  `padding_uninitialized_after_writing_fields` survives the widening because
+  `writeFields` writes only field ranges, so it stays true of everything else too,
+  which is exactly why no case noticed. `Shape.lean:78` names this clause as the reason
+  `fieldsContained` is carried, so the clause the docstring leans on was the untested
+  one. `an_offset_outside_the_aggregate_is_not_padding` pins it.
+- ~~**The two gates disagree about whether a Lean docstring may cite a tool
+  function.**~~ `Tools/CitationAudit.py` scans `TOOL_FILES` and resolves
+  `worth_checking`; `Tools/DocstringAudit.py` resolves against the **Lean build** and
+  reports it as naming nothing. A paragraph written this round to explain a
+  `CitationAudit` blind spot was itself reported by `DocstringAudit` for naming that
+  gate's internals. Rewritten to describe the limits without naming them, and the
+  disagreement is recorded here rather than resolved: neither gate is obviously right,
+  and picking one is a decision about what a Lean docstring is allowed to point at.
+- ~~**A merge left two copies of one paragraph, and a count went stale.**~~
+  `DocstringAudit`'s hedge-matching note appears twice back to back, main's wording
+  then this branch's — in the file §4.4.1c says was taken "wholesale" from main with
+  four additions re-applied. And §4.4.1c said eighteen inert hedge entries; `--inert`
+  reports **twenty**. Corrected by running it, not by re-reading it.
+
+**Owed to another owner, not acted on.** `Tests/ISA/X86/LedgerAudit.lean:476` prints
+on every build that 9 of 18 anchors are unconfirmed and names
+`[amd64-apm-40332-4.09]` as a release-blocker set under
+[VALIDATION.md](VALIDATION.md) §1. That is c-isa's, and it is a stated release
+blocker riding along in a green build.
 
 ### 4.4.1a Which profile inputs can weaken a rule
 

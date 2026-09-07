@@ -759,8 +759,49 @@ def self_test() -> int:
     # memory layer while still printing its success line. No self-test reached the
     # path filter, because every case here writes probes into a temporary directory
     # and calls the scanner directly.
+    # **One case per `SCOPE` token.** This was `Memory` alone, and review measured
+    # what that pinned: a leave-one-out over every token found 36 of 44 (gate,
+    # token) pairs silent across the four scoped gates -- token deleted, self-test
+    # green, gate green, success line printed. Seven were silent in all four,
+    # `Obligation` among them, so dropping it took every `Grass/Obligation` file
+    # out of every gate invisibly. That is the defect the plan records as closed,
+    # reproduced against the subtree carrying `LedgerDelta.Applicable`.
+    #
+    # The floor cannot cover this and the docstring is right that it cannot: a
+    # check derived from `SCOPE` is deleted along with the token. Only a
+    # hard-coded name survives its removal, so there has to be one per token.
+    if not in_scope(ROOT / "Grass" / "Certificate.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Certificate")
+        failures += 1
+    if not in_scope(ROOT / "Grass" / "Core" / "Context.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Core")
+        failures += 1
     if not in_scope(ROOT / "Grass" / "Memory" / "State.lean"):
-        print("  SELF-TEST FAILED: Grass/Memory is out of scope")
+        print("  SELF-TEST FAILED: SCOPE lost Memory")
+        failures += 1
+    if not in_scope(ROOT / "Grass" / "Obligation" / "Core.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Obligation")
+        failures += 1
+    if not in_scope(ROOT / "Grass" / "Op" / "Facets.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Op")
+        failures += 1
+    if not in_scope(ROOT / "Grass" / "Resource" / "Algebra.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Resource")
+        failures += 1
+    if not in_scope(ROOT / "Grass" / "Semantics" / "Execution.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Semantics")
+        failures += 1
+    if not in_scope(ROOT / "Grass" / "Std" / "Logical" / "Bag.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Std")
+        failures += 1
+    if not in_scope(ROOT / "Grass" / "Trust" / "Audit.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Trust")
+        failures += 1
+    if not in_scope(ROOT / "Grass" / "Verify" / "VerifiedProgram.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Verify")
+        failures += 1
+    if not in_scope(ROOT / "Tests" / "Foundation.lean"):
+        print("  SELF-TEST FAILED: SCOPE lost Foundation")
         failures += 1
     if not in_scope(ROOT / "Tests" / "Memory" / "Loans.lean"):
         print("  SELF-TEST FAILED: Tests/Memory is out of scope")

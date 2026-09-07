@@ -34,8 +34,16 @@ rebuilt.
 So the property `docs/MEMORY_MODEL.md` §8 demands — "they cannot be erased or
 masked" — is not a property of the type. It is a property of the *transition
 relation*: the ledger threaded through an execution must only ever grow.
-`Extends` states that, and M2's step relation owes a proof that every step
-preserves it. What laundering produces is a different value that never enters the
+`Extends` states that, and `Grass.Op.step_extends_violations` proves every step
+preserves it, with `performAccess_extends_violations` and
+`runStep_extends_violations` beneath it. This said M2 "owes a proof" long after M2
+supplied one -- four hundred lines below, `not_isEmpty_append` cites the same
+theorem as done, so the file contradicted itself about its own central guarantee.
+`Tools/DocstringAudit.py` cannot catch that: "owes" is in `HEDGES`, so a stale open
+obligation is exempt by construction and invisible to the gate built to police
+claims -- which is worth knowing about that gate, not only about this sentence.
+
+What laundering produces is a different value that never enters the
 execution; what would be a real violation is a step returning a ledger that does
 not extend its input, and that is what `Extends` is there to forbid.
 

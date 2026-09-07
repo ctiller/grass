@@ -85,11 +85,6 @@ HEDGES = (
     "cannot be erased or masked",
 )
 
-# Hedges match as whole words. As bare substrings they matched inside ordinary
-# x86 vocabulary: "M8" inside `imm8`, "M3" inside `imm32`, "M6" inside `imm64`,
-# and "owed" inside `Allowed`. A reviewer found three real sentences exempted
-# for no reason but the letters in an operand size -- in an x86 tree that was
-# only going to grow.
 # Hedges match as whole words, not as bare substrings.
 #
 # As substrings they matched inside ordinary vocabulary: "owed" inside
@@ -188,9 +183,24 @@ def declaration_names() -> set[str]:
         ["lake", "env", "lean", "Tools/DeclNames.lean"], cwd=ROOT,
         capture_output=True, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0:
-        sys.exit(
-            "could not obtain the declaration list from Tools/DeclNames.lean:\n"
-            + (proc.stdout + proc.stderr).strip()[:2000])
+        detail = (proc.stdout + proc.stderr).strip()
+        if detail:
+            sys.exit("could not obtain the declaration list from "
+                     f"Tools/DeclNames.lean (exit {proc.returncode}):\n"
+                     + detail[:2000])
+        # Non-zero with *nothing* on either stream is not a Lean error, and
+        # printing an empty reason sends a reader looking for one. It is what a
+        # killed subprocess looks like: this gate spawns `lake env lean` over the
+        # whole tree, which peaks near a gigabyte, and three of its modes run in
+        # CI beside two more Lean audits. Observed exactly once, under six
+        # concurrent Lean processes; `DeclNames.lean` run alone immediately
+        # afterwards produced the full list.
+        sys.exit("could not obtain the declaration list from "
+                 f"Tools/DeclNames.lean: `lake env lean` exited {proc.returncode} "
+                 "with no output on stdout or stderr. That is not a Lean error -- "
+                 "it is what the subprocess being killed looks like, usually "
+                 "memory pressure from other Lean processes. Re-run this gate "
+                 "alone before looking for a defect in the tree.")
     known: set[str] = set()
     for line in proc.stdout.splitlines():
         name = line.strip()
@@ -369,11 +379,28 @@ def roots_are_covered(paths) -> list[str]:
     An asymmetry is worth only as much as the thing that holds it in place. That answer
     named floors "asserting what the gate walks"; there were none, in this gate or in
     its self-test, which seeds probes into a temporary directory and calls `check`
-    directly so the walk is never exercised. This is that floor: a representative
-    subtree from each owner must reach the scan, so narrowing the roots fails rather
-    than quietening.
+    directly so the walk is never exercised. This is that floor: every subtree on
+    disk must reach the scan, so narrowing the roots fails rather than quietening.
+
+    `required` was a hand-written six -- Memory, Obligation, Op, ISA, ABI, Process --
+    under a sentence promising "a representative subtree from each owner". Nine of
+    the fifteen subtrees on disk could vanish with this floor green, and review ran
+    it: dropping `Grass/Std/Logical` and `Grass/Resource` took `--hedged` from 35
+    claim sentences to 30 while the floor printed nothing and the gate printed its
+    success line. Two of the nine were this branch's own areas, and `Grass/Std` is a
+    distinct owner with `STDLIB.md` as its normative document -- so the list did not
+    even satisfy the sentence above it.
+
+    Derived from disk now, which is the same repair `scope_is_covered` already got
+    in the sibling gates: a floor written as a literal is a second copy of the thing
+    it is supposed to hold in place, and it rots separately. A new subtree is
+    covered the day it is created rather than the day somebody remembers.
     """
-    required = ("Memory", "Obligation", "Op", "ISA", "ABI", "Process")
+    # A set, because `Grass/Process/` and `Grass/Process.lean` both exist and a
+    # tuple lists that name twice.
+    required = sorted({
+        entry.name.removesuffix(".lean") for entry in (ROOT / "Grass").iterdir()
+        if entry.is_dir() or entry.suffix == ".lean"})
     reached = set()
     for path in paths:
         try:
@@ -382,8 +409,15 @@ def roots_are_covered(paths) -> list[str]:
             continue
         if len(parts) > 1 and parts[0] == "Grass":
             reached.add(parts[1].removesuffix(".lean"))
+    # `is_dir()` alone dropped every top-level module. `Grass/Certificate.lean` is
+    # a file, so this guard excluded it from `missing` and the subtree could still
+    # vanish with the floor green even once `required` named it -- enumerating
+    # correctly and then filtering the enumeration is two chances to be wrong,
+    # and the second one silently undid the first.
     missing = [name for name in required
-               if (ROOT / "Grass" / name).is_dir() and name not in reached]
+               if ((ROOT / "Grass" / name).is_dir()
+                   or (ROOT / "Grass" / (name + ".lean")).is_file())
+               and name not in reached]
     return [f"  Grass/{name}: on disk and no file reached the scan" for name in missing]
 
 

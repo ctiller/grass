@@ -333,11 +333,16 @@ instance (d : AccessDescriptor) (space : AddressSpace) :
         w.rangeFitsSpace, w.atomicityAgrees, w.permissionSufficient,
         w.initializationMatchesIntent, w.producesInitializedOnlyIfWrites⟩
 
-/-- A descriptor for an ordinary aligned single-context load. -/
+/-- A descriptor for a non-atomic relaxed load.
+
+Neither "aligned" nor "single-context", which this said: alignment is
+`AlignmentSatisfied`, checked by `WellFormedIn` and not here, and "single-context"
+would be the ordering *scope*, which `OrderingDemand.IsPlain` does not constrain. -/
 def IsPlainRead (d : AccessDescriptor) : Prop :=
   d.intent = .read ∧ d.ordering.IsPlain
 
-/-- A descriptor for an ordinary aligned single-context store. -/
+/-- A descriptor for a non-atomic relaxed store. See `IsPlainRead` for why the two
+adjectives this used to carry are not in the definition. -/
 def IsPlainWrite (d : AccessDescriptor) : Prop :=
   d.intent = .write ∧ d.ordering.IsPlain
 
