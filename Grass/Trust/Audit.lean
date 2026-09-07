@@ -9,8 +9,8 @@ import Grass.Verify.VerifiedProgram
 # VerifiedProgram trust-root audit
 
 The command inspects elaborated declarations in the Lean environment. It does
-not guess roots from source syntax: it discovers direct `VerifiedProgram`
-producers from their types, follows the transitive dependency closure of all
+not guess roots from source syntax: it discovers closed `VerifiedProgram`
+values from their types, follows the transitive dependency closure of all
 certificate-bearing and emission-consuming declarations across imported
 modules, and audits every declaration originating in a Grass library or test
 module. It also follows downstream runtime dependencies and rejects unverified
@@ -31,12 +31,30 @@ private def isRootCandidate : ConstantInfo -> Bool
   | .opaqueInfo _ => true
   | _ => false
 
+/-- Whether `name` is Lean's generated wrapper for a structure constructor.
+
+These definitions have result type `VerifiedProgram` for the `VerifiedProgram`
+constructor, but they are construction machinery rather than completed
+certificates. Checking the parent declaration distinguishes them from ordinary
+authored declarations whose final component happens to be `_flat_ctor`. -/
+private def isGeneratedFlatConstructor
+    (environment : Environment) (name : Name) : Bool :=
+  match name with
+  | .str parent "_flat_ctor" =>
+      match environment.find? parent with
+      | some (.ctorInfo constructor) =>
+          isStructure environment constructor.induct
+      | _ => false
+  | _ => false
+
 private def allowedAxiom (name : Name) : Bool :=
   name == ``propext || name == ``Classical.choice || name == ``Quot.sound
 
-private def producesVerifiedProgram (type : Expr) : MetaM Bool :=
+private def producesClosedVerifiedProgram (type : Expr) : MetaM Bool :=
   withTransparency .all do
-    forallTelescopeReducing type fun _ result => do
+    forallTelescopeReducing type fun parameters result => do
+      unless parameters.isEmpty do
+        return false
       let reduced ← whnf result
       return reduced.getAppFn.constName? == some ``Grass.VerifiedProgram
 
@@ -45,17 +63,17 @@ private def isProjectModule (moduleName : Name) : Bool :=
 
 /-- A declaration from an imported Grass/Test module, or from the current file
 that invoked the command. The latter case is what makes negative probes and
-top-level declarations outside the conventional namespaces fail closed. -/
+top-level declarations outside the conventional namespaces fail closed.
+
+Module ownership, not `Name.isInternal`, is authoritative: Lean classifies
+ordinary authored names with underscore-prefixed components as internal too. -/
 private def isProjectDeclaration (environment : Environment) (name : Name) : Bool :=
-  if name.isInternal then
-    false
-  else
-    match environment.getModuleIdxFor? name with
-    | none => true
-    | some moduleIndex =>
-        match environment.header.moduleNames[moduleIndex.toNat]? with
-        | none => false
-        | some moduleName => isProjectModule moduleName
+  match environment.getModuleIdxFor? name with
+  | none => true
+  | some moduleIndex =>
+      match environment.header.moduleNames[moduleIndex.toNat]? with
+      | none => true
+      | some moduleName => isProjectModule moduleName
 
 /-- Declarations whose type or implementation depends on certificate authority
 or verified emission, closed transitively over the whole imported environment.
@@ -234,7 +252,7 @@ elab "#audit_runtime_dependencies " declaration:ident : command => do
   logInfo m!"runtime dependency audit passed for '{name}' across \
     {runtimeDependencies.size} declaration(s)"
 
-/-- Audit every project declaration and report direct `VerifiedProgram` roots.
+/-- Audit every project declaration and report closed `VerifiedProgram` roots.
 
 `audit-trust.ps1` invokes `auditVerifiedPrograms` from a nonce-named local
 command declared after importing the modules under inspection, then requires
@@ -245,8 +263,8 @@ def auditVerifiedPrograms : CommandElabM Unit := do
     found.push (name, info)
   let mut roots := #[]
   for (name, info) in declarations do
-    if !name.isInternal && isRootCandidate info &&
-        (← liftTermElabM <| producesVerifiedProgram info.type) then
+    if !isGeneratedFlatConstructor environment name && isRootCandidate info &&
+        (← liftTermElabM <| producesClosedVerifiedProgram info.type) then
       roots := roots.push (name, info)
   if roots.isEmpty then
     throwError "trust audit found no concrete VerifiedProgram declarations"

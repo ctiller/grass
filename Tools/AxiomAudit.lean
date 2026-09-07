@@ -1,14 +1,15 @@
 import Lean
+import Grass.ABI.Win64.Convention
+import Grass.ABI.Win64.Unwind
+import Grass.ABI.Win64.UnwindBytes
+import Grass.Build.Cache.Key
+import Grass.Certificate
 import Grass.Core.Context
 import Grass.Core.Demand
 import Grass.Core.Generational
 import Grass.Core.Identifiers
 import Grass.Core.Name
 import Grass.Core.Uid
-import Grass.ABI.Win64.Convention
-import Grass.ABI.Win64.Unwind
-import Grass.ABI.Win64.UnwindBytes
-import Grass.Certificate
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.Citation
@@ -41,8 +42,8 @@ import Grass.Obligation.Core
 import Grass.Obligation.Delta
 import Grass.Obligation.Disposition
 import Grass.Op.Facets
-import Grass.Platform.Win32.Console
 import Grass.Op.Step
+import Grass.Platform.Win32.Console
 import Grass.Process
 import Grass.Process.Acceptance
 import Grass.Process.Bag
@@ -183,7 +184,11 @@ it by refusing the module rather than by widening this predicate, because wideni
 would pull in every core declaration the environment carries. -/
 def isAudited (name : Name) : Bool :=
   let n := userFacing name
-  (`Grass).isPrefixOf n && !n.isInternal
+  (`Grass).isPrefixOf n
+
+run_cmd do
+  unless isAudited `Grass._authoredUnderscoreProbe do
+    throwError "axiom audit would skip an authored underscore-prefixed Grass declaration"
 
 /--
 Attributes that make a declaration's compiled behaviour differ from its logical

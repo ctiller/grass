@@ -27,6 +27,7 @@ import Lean
 -- or a probe but this layer's M1 freeze evidence, and was in the name set anyway,
 -- transitively, through two modules that import it. Both are gone. An exclusion
 -- list written by grepping for a keyword is a list of what the grep matched.
+import Tests.Build.Cache.Key
 import Tests.Foundation
 import Tests.ISA.X86.CorpusCommon
 import Tests.ISA.X86.LedgerAudit
@@ -51,6 +52,7 @@ import Tests.Process.ChannelFixtures
 import Tests.Process.ChannelStepFixtures
 import Tests.Process.ChatterFixtures
 import Tests.Process.ChildBindingFixtures
+import Tests.Process.ChimeFixtures
 import Tests.Process.CloseFixtures
 import Tests.Process.CommitFixtures
 import Tests.Process.ComposeFixtures
@@ -63,6 +65,7 @@ import Tests.Process.FacadeCancellationFixtures
 import Tests.Process.FacadeFixtures
 import Tests.Process.FacetFixtures
 import Tests.Process.FrontierFixtures
+import Tests.Process.IdentityFixtures
 import Tests.Process.IndependenceFixtures
 import Tests.Process.InstanceFixtures
 import Tests.Process.LayeringFixtures
@@ -110,6 +113,7 @@ import Grass.Core.Uid
 import Grass.ABI.Win64.Convention
 import Grass.ABI.Win64.Unwind
 import Grass.ABI.Win64.UnwindBytes
+import Grass.Build.Cache.Key
 import Grass.Certificate
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes

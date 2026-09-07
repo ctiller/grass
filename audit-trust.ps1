@@ -14,6 +14,9 @@ param(
         "Grass.ObservationProjection.comp_assoc",
         "Grass.RelationalSystem.Steps.trans",
         "Grass.RelationalSystem.Steps.graphExtends",
+        "Grass.RelationalSystem.InfiniteContinuation.ext",
+        "Grass.RelationalSystem.InfiniteContinuation.graphExtendsAt",
+        "Grass.RelationalSystem.InfiniteContinuation.prefixSteps",
         "Grass.RelationalSystem.Runs.initialValid",
         "Grass.RelationalSystem.Runs.steps",
         "Grass.RelationalSystem.Runs.ofInitialSteps",
@@ -29,17 +32,33 @@ param(
         "Grass.BehaviorRefinement.trans_assoc",
         "Grass.BehaviorRefinement.mapSteps",
         "Grass.BehaviorRefinement.mapInfinite",
+        "Grass.BehaviorRefinement.mapInfinite_refl",
+        "Grass.BehaviorRefinement.mapInfinite_trans",
         "Grass.BehaviorRefinement.mapCompletion",
+        "Grass.BehaviorRefinement.mapCompletion_refl",
+        "Grass.BehaviorRefinement.mapCompletion_trans",
         "Grass.BehaviorRefinement.mapRuns",
         "Grass.BehaviorRefinement.mapPrefix_refl",
+        "Grass.BehaviorRefinement.mapPrefix_initial",
         "Grass.BehaviorRefinement.mapPrefix_trans",
+        "Grass.BehaviorRefinement.mapPrefix_step",
         "Grass.BehaviorRefinement.mapPrefix_append",
+        "Grass.BehaviorRefinement.mapPrefix_events",
+        "Grass.BehaviorRefinement.observe_mapPrefix",
+        "Grass.BehaviorRefinement.inputOf_mapPrefix",
+        "Grass.BehaviorRefinement.hasInput_mapPrefix",
+        "Grass.BehaviorRefinement.terminal_mapPrefix",
+        "Grass.BehaviorRefinement.mapCompletionAtPrefix",
+        "Grass.BehaviorRefinement.mapCompletionAtPrefix_refl",
+        "Grass.BehaviorRefinement.mapCompletionAtPrefix_trans",
         "Grass.BehaviorRefinement.preservesAcceptance",
         "Grass.VerifiedProgram.loadedBehavior_exact",
         "Grass.VerifiedProgram.loadedAdequate",
         "Grass.VerifiedProgram.sound",
         "Grass.VerifiedProgram.execution_nonempty",
         "Grass.VerifiedProgram.execution_completes",
+        "Grass.VerifiedProgram.CompletionRefinement",
+        "Grass.VerifiedProgram.completion_refinement_nonempty",
         "Grass.emitProgram_parses"
     ),
     [string[]]$AllowedAxiom = @(
@@ -68,8 +87,37 @@ function Get-PathUnder([string] $Base, [string] $Full) {
     return $normalizedFull.Substring($normalizedBase.Length + 1).Replace('\', '/')
 }
 
+function Get-RejectedAxiom(
+    [string[]] $Used,
+    [string[]] $Allowed
+) {
+    # Lean names require ordinal equality. Even PowerShell's case-sensitive
+    # comparison operators use culture-sensitive string comparison, which can
+    # equate distinct Unicode spellings.
+    $rejected = @()
+    foreach ($usedAxiom in $Used) {
+        $accepted = $false
+        foreach ($allowedAxiom in $Allowed) {
+            if ([String]::Equals($usedAxiom, $allowedAxiom, [StringComparison]::Ordinal)) {
+                $accepted = $true
+                break
+            }
+        }
+        if (-not $accepted) {
+            $rejected += $usedAxiom
+        }
+    }
+    return @($rejected)
+}
+
 if ($Declaration.Count -eq 0) {
     throw "At least one declaration must be audited."
+}
+
+$caseVariantProbe = @(Get-RejectedAxiom -Used @("Propext") -Allowed @("propext"))
+if ($caseVariantProbe.Count -ne 1 -or
+    -not [String]::Equals($caseVariantProbe[0], "Propext", [StringComparison]::Ordinal)) {
+    throw "Axiom allowlist comparison is not ordinal."
 }
 
 $moduleNames = @()
@@ -119,6 +167,9 @@ $temporaryPath = [System.IO.Path]::Combine(
 $externalProbeModule = "AuditExternalProbe$([System.Guid]::NewGuid().ToString('N'))"
 $externalProbePath = Join-Path (Get-Location).Path "$externalProbeModule.lean"
 $externalProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$externalProbeModule.olean"
+$internalRootProbeModule = "AuditInternalRootProbe$([System.Guid]::NewGuid().ToString('N'))"
+$internalRootProbePath = Join-Path (Get-Location).Path "$internalRootProbeModule.lean"
+$internalRootProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$internalRootProbeModule.olean"
 $runtimeProbeModule = "AuditRuntimeProbe$([System.Guid]::NewGuid().ToString('N'))"
 $runtimeProbePath = Join-Path (Get-Location).Path "$runtimeProbeModule.lean"
 $runtimeProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$runtimeProbeModule.olean"
@@ -165,7 +216,7 @@ try {
         if ($line -match "^'[^']+' depends on axioms: \[(.*)\]$") {
             $reported += 1
             $used = @($Matches[1].Split(',') | ForEach-Object { $_.Trim() })
-            $rejected = @($used | Where-Object { $_ -notin $AllowedAxiom })
+            $rejected = @(Get-RejectedAxiom -Used $used -Allowed $AllowedAxiom)
             if ($rejected.Count -ne 0) {
                 throw "Rejected transitive axiom(s): $($rejected -join ', ')"
             }
@@ -197,6 +248,20 @@ try {
         $entrypointOutput | ForEach-Object { Write-Host $_ }
     }
 
+    $rootNonvacuityProbe = @(
+        "import Grass.Trust.Audit",
+        "open Grass",
+        "def passthrough {spec : SpecProcess} (verified : VerifiedProgram spec) : VerifiedProgram spec := verified",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $rootNonvacuityProbe)
+    $rootNonvacuityOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($rootNonvacuityOutput -match "trust audit found no concrete VerifiedProgram declarations")) {
+        $rootNonvacuityOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit accepted generated constructor machinery or a certificate pass-through as a concrete root."
+    }
+
     $irreducibleDiscoveryProbe = @(
         "import Tests.Foundation",
         "open Grass",
@@ -212,6 +277,43 @@ try {
         -not ($irreducibleDiscoveryOutput -match "cleanHiddenVerifiedProgram")) {
         $irreducibleDiscoveryOutput | ForEach-Object { Write-Host $_ }
         throw "Trust audit did not discover a producer behind an irreducible result alias."
+    }
+
+    $internalRootProbe = @(
+        "import Tests.Foundation",
+        "open Grass",
+        "namespace InternalRootAuditProbe",
+        "@[irreducible] def HiddenVerifiedProgram : Type 1 := VerifiedProgram Grass.Tests.Foundation.spec",
+        "def _hiddenVerifiedProgram : HiddenVerifiedProgram := by",
+        "  unfold HiddenVerifiedProgram",
+        "  exact Grass.Tests.Foundation.verified",
+        "def _flat_ctor : HiddenVerifiedProgram := by",
+        "  unfold HiddenVerifiedProgram",
+        "  exact Grass.Tests.Foundation.verified",
+        "inductive AuthoredContainer where | node",
+        "def AuthoredContainer.node._flat_ctor : HiddenVerifiedProgram := by",
+        "  unfold HiddenVerifiedProgram",
+        "  exact Grass.Tests.Foundation.verified",
+        "end InternalRootAuditProbe"
+    )
+    [System.IO.File]::WriteAllLines($internalRootProbePath, $internalRootProbe)
+    $internalRootBuildOutput = @(& lake env lean $internalRootProbePath -o $internalRootProbeOlean 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $internalRootBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the imported underscore-prefixed root probe."
+    }
+    $internalRootConsumerProbe = @(
+        "import $internalRootProbeModule",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $internalRootConsumerProbe)
+    $internalRootConsumerOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -ne 0 -or
+        -not ($internalRootConsumerOutput -match "InternalRootAuditProbe\._hiddenVerifiedProgram") -or
+        -not ($internalRootConsumerOutput -match "InternalRootAuditProbe\._flat_ctor") -or
+        -not ($internalRootConsumerOutput -match "InternalRootAuditProbe\.AuthoredContainer\.node\._flat_ctor")) {
+        $internalRootConsumerOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit did not discover an imported authored underscore-prefixed root."
     }
 
     $wrappedNegativeProbe = @(
@@ -244,6 +346,19 @@ try {
         -not ($flatCtorNegativeOutput -match "AuditProbe.Sink._flat_ctor.*AuditProbe.Source._flat_ctor")) {
         $flatCtorNegativeOutput | ForEach-Object { Write-Host $_ }
         throw "Trust audit ignored a user declaration named _flat_ctor."
+    }
+
+    $underscoreAxiomNegativeProbe = @(
+        "import Tests.Foundation",
+        "axiom Grass._unauditedFalse : False",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $underscoreAxiomNegativeProbe)
+    $underscoreAxiomNegativeOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($underscoreAxiomNegativeOutput -match "Grass\._unauditedFalse.*rejected axioms")) {
+        $underscoreAxiomNegativeOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit ignored an authored underscore-prefixed axiom."
     }
 
     $externalProbe = @(
@@ -407,6 +522,12 @@ finally {
     }
     if ([System.IO.File]::Exists($externalProbeOlean)) {
         [System.IO.File]::Delete($externalProbeOlean)
+    }
+    if ([System.IO.File]::Exists($internalRootProbePath)) {
+        [System.IO.File]::Delete($internalRootProbePath)
+    }
+    if ([System.IO.File]::Exists($internalRootProbeOlean)) {
+        [System.IO.File]::Delete($internalRootProbeOlean)
     }
     if ([System.IO.File]::Exists($runtimeProbePath)) {
         [System.IO.File]::Delete($runtimeProbePath)
