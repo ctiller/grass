@@ -1,116 +1,4 @@
 import Lean
-import Grass.ABI.Win64.Convention
-import Grass.ABI.Win64.Unwind
-import Grass.ABI.Win64.UnwindBytes
-import Grass.Artifact.Binary.Endian
-import Grass.Artifact.Binary.Primitive
-import Grass.Artifact.Binary.Realization
-import Grass.Build.Cache.Key
-import Grass.Certificate
-import Grass.Core.Context
-import Grass.Core.Demand
-import Grass.Core.Generational
-import Grass.Core.Identifiers
-import Grass.Core.Name
-import Grass.Core.Uid
-import Grass.Grammar.Binary
-import Grass.Grammar.Core
-import Grass.Grammar.Endian
-import Grass.Grammar.Realization
-import Grass.ISA.X86.Addressing
-import Grass.ISA.X86.Bytes
-import Grass.ISA.X86.Citation
-import Grass.ISA.X86.Decode
-import Grass.ISA.X86.DualCitation
-import Grass.ISA.X86.Encoding
-import Grass.ISA.X86.Ledger
-import Grass.ISA.X86.Performance
-import Grass.ISA.X86.Profile
-import Grass.ISA.X86.Register
-import Grass.ISA.X86.Sources
-import Grass.Memory.Access
-import Grass.Memory.AddressSpace
-import Grass.Memory.Audit
-import Grass.Memory.Authority
-import Grass.Memory.Event
-import Grass.Memory.Fault
-import Grass.Memory.Ordering
-import Grass.Memory.Profile
-import Grass.Memory.Provenance
-import Grass.Memory.Range
-import Grass.Memory.Rights
-import Grass.Memory.State
-import Grass.Memory.Substep
-import Grass.Obligation.Core
-import Grass.Obligation.Delta
-import Grass.Obligation.Disposition
-import Grass.Op.Facets
-import Grass.Op.Step
-import Grass.Platform.Win32.Console
-import Grass.Process
-import Grass.Process.Acceptance
-import Grass.Process.Bag
-import Grass.Process.ByteFlow.Egress
-import Grass.Process.ByteFlow.Ingress
-import Grass.Process.ByteFlow.Rechunk
-import Grass.Process.Cancellation
-import Grass.Process.Cancellation.Compose
-import Grass.Process.Cancellation.Identity
-import Grass.Process.Cancellation.Policy
-import Grass.Process.Correct
-import Grass.Process.Facet
-import Grass.Process.Function.Serial
-import Grass.Process.Network.Assertion
-import Grass.Process.Network.Channel
-import Grass.Process.Network.Child
-import Grass.Process.Network.Commit
-import Grass.Process.Network.Death
-import Grass.Process.Network.Delivery
-import Grass.Process.Network.Escrow
-import Grass.Process.Network.Exposure
-import Grass.Process.Network.Graph
-import Grass.Process.Network.Initial
-import Grass.Process.Network.Instance
-import Grass.Process.Network.Mailbox
-import Grass.Process.Network.Plan
-import Grass.Process.Network.Progress
-import Grass.Process.Network.Structural
-import Grass.Process.Network.Topology
-import Grass.Process.Network.Transition
-import Grass.Process.Network.WellFormedness
-import Grass.Process.Network.World
-import Grass.Process.Nominal
-import Grass.Process.Observation
-import Grass.Process.Progress
-import Grass.Process.Protocol.Registry
-import Grass.Process.Run
-import Grass.Process.Sequential.Adapter
-import Grass.Process.Sequential.Machine
-import Grass.Process.Sequential.Standard
-import Grass.Process.Spec
-import Grass.Process.Termination
-import Grass.Process.Trace.Independence
-import Grass.Process.Trace.Linearization
-import Grass.Process.Vocabulary
-import Grass.Process.Weave.Blend
-import Grass.Process.Weave.Lens
-import Grass.Process.Weave.Mixin
-import Grass.Resource.Algebra
-import Grass.Resource.Axis
-import Grass.Semantics.Execution
-import Grass.Semantics.Observation
-import Grass.Semantics.SpecProcess
-import Grass.Specification.Boundary
-import Grass.Specification.Scope
-import Grass.Std.Logical.Bag
-import Grass.Std.Logical.Byte
-import Grass.Std.Logical.FiniteMap
-import Grass.Std.Logical.HostBytes
-import Grass.Std.Logical.Order
-import Grass.Std.Logical.Text
-import Grass.Std.Logical.Vec
-import Grass.Trust.Audit
-import Grass.Verify.VerifiedProgram
 
 /-!
 # Axiom audit
@@ -134,12 +22,12 @@ the tree, and a maximally false axiom in an unimported module passed both this
 tool and `lake build` with exit 0. A gate that silently stops covering the newest
 code is worse than no gate, because the green run still reads as assurance.
 
-`checkCoverage` therefore walks `Grass/` on disk and fails if any module found
-there is absent from the imported environment. The import list is still written
-out below — Lean has no dynamic import — but it can no longer be wrong without
-the build saying so.
+The audit therefore walks `Grass/` on disk and passes every discovered module
+directly to `Lean.importModules`. It then checks the resulting environment's
+module header before scanning declarations. There is no hand-maintained module
+registry to drift or acquire merge markers.
 
-The list also means this file imports every leaf, which
+The dynamically assembled import set means this tool loads every leaf, which
 `docs/OLEAN_SHARDING.md` §2 forbids for an aggregate certificate. That rule is
 about proof aggregates whose types grow with their descendants. This is a
 diagnostic that must see everything by construction, produces no theorem, and is
@@ -237,10 +125,12 @@ end Grass.Tools
 
 open Grass.Tools in
 run_cmd do
-  let env ← Elab.Command.liftCoreM getEnv
+  let onDisk ← Grass.Tools.modulesOnDisk (System.FilePath.mk "Grass") `Grass
+  let imports := onDisk.map fun moduleName => ({ module := moduleName } : Import)
+  unsafe Lean.enableInitializersExecution
+  let env ← importModules imports {} 0 #[] false true
   -- Coverage first: an axiom audit over half the tree is not an axiom audit.
   let imported := env.header.moduleNames
-  let onDisk ← Grass.Tools.modulesOnDisk (System.FilePath.mk "Grass") `Grass
   let missing := onDisk.filter fun m => !imported.contains m
   unless missing.isEmpty do
     throwError m!"axiom audit coverage gap: these modules exist under Grass/ but are not imported by Tools/AxiomAudit.lean, so their declarations were never scanned:
@@ -249,10 +139,17 @@ run_cmd do
   let mut audited : Nat := 0
   let mut unsafeFindings : Array Name := #[]
   let mut overrideFindings : Array (Name × String) := #[]
+  let mut directAxiomFindings : Array Name := #[]
   let mut findings : Array (Name × Name) := #[]
   for (name, info) in env.constants.toList do
     unless isAudited name do continue
     audited := audited + 1
+    -- `collectAxioms` reports what a declaration depends on, but an axiom
+    -- declaration is itself a trust root and is not necessarily returned as
+    -- its own dependency. Reject it directly before following dependencies.
+    if info matches .axiomInfo _ then
+      unless allowedAxioms.contains name do
+        directAxiomFindings := directAxiomFindings.push name
     -- §3 also names "unsafe declarations used as proof".
     if info.isUnsafe then
       unsafeFindings := unsafeFindings.push name
@@ -276,9 +173,11 @@ logical one, so this severs the two.
     throwError m!"axiom audit failed; docs/FOUNDATION.md section 3 forbids unsafe declarations used as proof:
 {MessageData.joinSep (unsafeFindings.toList.map (m!"  {·}")) "
 "}"
-  if findings.isEmpty then
+  if directAxiomFindings.isEmpty && findings.isEmpty then
     logInfo m!"axiom audit: {audited} Grass declarations across {onDisk.size} modules, no axiom outside the allowlist, no unsafe declaration, no compiled override"
   else
+    let directLines := directAxiomFindings.map fun name =>
+      m!"  {name} is a directly declared axiom"
     let lines := findings.map fun (name, used) => m!"  {name} depends on {used}"
     throwError m!"axiom audit failed; docs/FOUNDATION.md section 3 permits only \
-{allowedAxioms}\n{MessageData.joinSep lines.toList "\n"}"
+{allowedAxioms}\n{MessageData.joinSep (directLines ++ lines).toList "\n"}"
