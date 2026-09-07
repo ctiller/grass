@@ -12,41 +12,34 @@ fails outright for everyone.
 
 So: any agent adding a module runs this with `--write` in the same commit.
 
-## Why this is written the way it is
+## Only the header is read, and that is the whole design
 
-Two earlier versions corrupted files while `--check` reported success, in six
-distinct file shapes between them. Both were built the same way -- split the
-file into lines, decide which lines are imports, rebuild the file from lines --
-and every defect came from that shape:
+Four versions of this tool corrupted files while `--check` reported success, and
+each fix addressed the shape that had just been demonstrated rather than the
+reason the shapes kept arriving. The reason was scope: the tool read the *whole
+file* looking for lines that looked like imports, so every construct Lean allows
+anywhere -- comments, nested comments, doc comments, line comments mentioning
+`/-`, string literals containing `import`, `Char` literals like `'"'`, raw
+strings ending in a backslash -- was a chance to mistake data for code. The last
+version tracked comments and strings and still lost, because `'"'` desynchronised
+its string state and the block was written inside a string literal.
 
-* a leading-run parser stopped at the first non-import line, so a blank line, a
-  line comment or a module docstring hid imports; and one CRLF line in an
-  otherwise-LF file made the whole remainder of the file parse as a single
-  import, deleting every declaration in `Tools/AxiomAudit.lean`;
-* reading imports from anywhere fixed that and broke something worse. A block
-  comment holding an example `import Grass.X` line -- a shape that was sitting
-  in `Tools/DeclNames.lean` at the time -- was read as real, and when it sat
-  above the real block the imports were rewritten *into the comment*, leaving a
-  registry that imported nothing;
-* tracking block comments fixed those and left line comments and string
-  literals: one `-- ... /-! ...` line opened a block comment that never closed,
-  hiding every import after it, which `--write` then re-added as 56 duplicates;
-* and underneath all of them `str.splitlines()` also splits on \\v, \\f,
-  \\x1c-\\x1e, \\x85, U+2028 and U+2029, so rejoining turned each of those
-  characters into a newline and silently edited string literals.
+Lean requires every `import` to precede every command. So the imports live in a
+*header*: a prefix made only of whitespace, comments, and import lines. A string
+literal cannot appear there, because there is no term there to contain one.
+Restricting the scan to that prefix removes the entire class rather than the
+last instance of it: `parse_header` stops at the first thing that is not one of
+those three, and nothing after that point is examined or touched.
 
-Each fix was asserted with a re-parse "fixpoint" that ran the same reader on
-both sides, so it only ever established that the tool was self-consistent.
+## The invariant is checked without this file's own reader
 
-This version does not rebuild the file. It locates the byte span of each real
-import line and splices, so every other byte survives by construction rather
-than by reassembly. That is a claim about strings, so it is checked as one:
-`strip_imports` of the rewritten text must equal `strip_imports` of the
-original, and a wrong parse cannot satisfy that by being wrong consistently.
-
-One scanner tracks the three ways a line can look like an import without being
-one: Lean's block comments (which nest, and which `/--` opens), line comments,
-and string literals.
+The previous version asserted that "everything which is not an import line
+survives", using its own parser on both sides. That is not an invariant, it is a
+consistency check, and a reviewer satisfied it three times with a wrong parse.
+The check now uses facts that do not depend on the scanner at all: the text
+before the first import must be unchanged, the text from the end of the last
+import onward must be unchanged, and the region between them must consist only
+of import lines and the material that already sat between them.
 
 Run:
     python Tools/shared-imports-sync.py            # check, exits 1 on drift
@@ -60,11 +53,13 @@ from pathlib import Path
 
 TARGETS = ("Tools/DeclNames.lean", "Tools/AxiomAudit.lean")
 LIBRARY_ROOT = "Grass"
+# A trailing line comment on an import is legal Lean and was invisible to an
+# anchored `$`, so the tool duplicated the import beneath itself.
 IMPORT_LINE = re.compile(
-    r"^import[ \t]+(" + LIBRARY_ROOT + r"(?:\.[A-Za-z_][A-Za-z0-9_']*)+)[ \t]*$")
-# A Lean module name is dot-separated identifiers. A file named `A.B.lean`
-# would otherwise render an import of a module that cannot exist.
+    r"^import[ \t]+([A-Za-z_][A-Za-z0-9_']*(?:\.[A-Za-z_][A-Za-z0-9_']*)*)"
+    r"[ \t]*(?:--[^\n]*)?$")
 SEGMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_']*$")
+BOM = "﻿"
 
 
 def modules_on_disk() -> list[str]:
@@ -80,9 +75,8 @@ def modules_on_disk() -> list[str]:
         sys.exit(f"{LIBRARY_ROOT}/ contains no .lean files; refusing to write "
                  "an empty import list")
     # Each *path component* must be a single Lean identifier. Validating the
-    # joined name instead would accept `Grass/A.B.lean`, whose dot survives
-    # `with_suffix` and turns into a module separator, rendering
-    # `import Grass.A.B` -- a name that parses and cannot resolve.
+    # joined name would accept `Grass/A.B.lean`, whose dot survives
+    # `with_suffix` and becomes a module separator.
     bad = [".".join(p) for p in parts
            if not all(SEGMENT.match(segment) for segment in p)]
     if bad:
@@ -93,92 +87,66 @@ def modules_on_disk() -> list[str]:
     return sorted(".".join(p) for p in parts)
 
 
-def code_line_starts(text: str) -> list[int]:
-    """Offsets of line starts that begin outside any comment or string."""
-    starts: list[int] = []
-    depth = 0
-    in_line_comment = False
-    in_string = False
-    at_line_start = True
+def parse_header(text: str) -> tuple[list[tuple[int, int, str]], int]:
+    """Import spans in the header, and where the header ends.
+
+    The header is the prefix of the file made of whitespace, comments and
+    import lines -- everything Lean allows before the first command. Parsing
+    stops at the first byte that is none of those, and an unterminated comment
+    stops it too, so a malformed file is refused rather than guessed at.
+    """
+    spans: list[tuple[int, int, str]] = []
     index = 0
     length = len(text)
     while index < length:
         char = text[index]
-        if at_line_start:
-            if depth == 0 and not in_string and not in_line_comment:
-                starts.append(index)
-            at_line_start = False
-        if char == "\n":
-            in_line_comment = False
-            at_line_start = True
-            index += 1
-            continue
-        if in_line_comment:
-            index += 1
-            continue
-        if in_string:
-            if char == "\\":
-                index += 2
-                continue
-            if char == '"':
-                in_string = False
+        if char in " \t\r\n":
             index += 1
             continue
         pair = text[index:index + 2]
-        if pair == "/-":
-            depth += 1
-            index += 2
-            continue
-        if pair == "-/" and depth > 0:
-            depth -= 1
-            index += 2
-            continue
-        if depth > 0:
-            index += 1
-            continue
         if pair == "--":
-            in_line_comment = True
-            index += 2
+            newline = text.find("\n", index)
+            if newline == -1:
+                return spans, length
+            index = newline + 1
             continue
-        if char == '"':
-            in_string = True
-            index += 1
+        if pair == "/-":
+            depth = 0
+            scan = index
+            while scan < length - 1:
+                window = text[scan:scan + 2]
+                if window == "/-":
+                    depth += 1
+                    scan += 2
+                    continue
+                if window == "-/":
+                    depth -= 1
+                    scan += 2
+                    if depth == 0:
+                        break
+                    continue
+                scan += 1
+            else:
+                # Unterminated: the header cannot be delimited, so stop here
+                # and let the caller refuse rather than write into a comment.
+                return spans, index
+            if depth != 0:
+                return spans, index
+            index = scan
             continue
-        index += 1
-    return starts
-
-
-def import_spans(text: str) -> list[tuple[int, int, str]]:
-    """(start, end, module) for each real library-import line.
-
-    `end` is just past the line terminator, so removing a span leaves no blank
-    line behind. Only lines that *begin in code* are considered.
-    """
-    spans = []
-    for start in code_line_starts(text):
-        newline = text.find("\n", start)
-        end = len(text) if newline == -1 else newline + 1
-        line = text[start:end].rstrip("\n").rstrip("\r")
+        newline = text.find("\n", index)
+        end = length if newline == -1 else newline + 1
+        line = text[index:end].rstrip("\n").rstrip("\r")
         match = IMPORT_LINE.match(line)
-        if match:
-            spans.append((start, end, match.group(1)))
-    return spans
+        if not match:
+            return spans, index
+        if match.group(1).split(".")[0] == LIBRARY_ROOT:
+            spans.append((index, end, match.group(1)))
+        index = end
+    return spans, length
 
 
-def strip_imports(text: str) -> str:
-    """Everything that is not a real import line, in order and byte-exact."""
-    kept = []
-    cursor = 0
-    for start, end, _ in import_spans(text):
-        kept.append(text[cursor:start])
-        cursor = end
-    kept.append(text[cursor:])
-    return "".join(kept)
-
-
-def render(text: str, wanted: list[str]) -> str:
-    """Splice a sorted block in at the first import, preserving every other byte."""
-    spans = import_spans(text)
+def render(text: str, spans, wanted: list[str]) -> str:
     first_start, first_end, _ = spans[0]
     terminator = "\r\n" if text[first_start:first_end].endswith("\r\n") else "\n"
     block = "".join(f"import {name}{terminator}" for name in wanted)
@@ -191,24 +159,48 @@ def render(text: str, wanted: list[str]) -> str:
     return "".join(pieces)
 
 
-BOM = "﻿"
+def verify(before: str, after: str, spans, wanted: list[str]) -> str | None:
+    """Reasons the rewrite is unsafe, computed without this file's parser.
+
+    Nothing here calls `parse_header`. The prefix before the first import and
+    the suffix from the end of the last import are compared as strings, and the
+    middle is required to contain only import lines plus whatever already sat
+    between the originals.
+    """
+    prefix = before[:spans[0][0]]
+    suffix = before[spans[-1][1]:]
+    if not after.startswith(prefix):
+        return "the text before the first import changed"
+    if not after.endswith(suffix):
+        return "the text after the last import changed"
+    middle = after[len(prefix):len(after) - len(suffix)] if suffix else \
+        after[len(prefix):]
+    between = "".join(
+        before[a[1]:b[0]] for a, b in zip(spans, spans[1:]))
+    residue = middle
+    for name in wanted:
+        line = f"import {name}"
+        position = residue.find(line)
+        if position == -1:
+            return f"the rewritten block does not contain {line}"
+        residue = residue[:position] + residue[position + len(line):]
+    if residue.strip("\r\n \t") != between.strip("\r\n \t"):
+        return ("the material between the imports changed: "
+                f"{between!r} became {residue!r}")
+    return None
 
 
 def process(path: str, wanted: list[str], write: bool) -> list[str]:
     whole = io.open(path, encoding="utf-8", newline="").read()
-    # A byte-order mark sits *before* the first character of the first line, so
-    # `^import` does not match it. Left in place, the first import is invisible
-    # and gets re-added below the mark as a duplicate -- which a reviewer found
-    # and `--check` then called clean. Held aside and restored verbatim, so a
-    # file that had one still has one and a file that did not still does not.
     mark, raw = (BOM, whole[len(BOM):]) if whole.startswith(BOM) else ("", whole)
-    found = [name for _, _, name in import_spans(raw)]
+    spans, header_end = parse_header(raw)
+    found = [name for _, _, name in spans]
 
     if not found:
         sys.exit(
-            f"{path} contains no `import {LIBRARY_ROOT}.` line outside a "
-            "comment or string. This tool maintains that block and will not "
-            "guess where to put a new one.")
+            f"{path} has no `import {LIBRARY_ROOT}.` line in its header. This "
+            "tool maintains that block and will not guess where to put a new "
+            "one.")
 
     problems: list[str] = []
     for name in wanted:
@@ -226,19 +218,11 @@ def process(path: str, wanted: list[str], write: bool) -> list[str]:
     if not (write and problems):
         return problems
 
-    updated = render(raw, wanted)
-
-    # Checked against the original text, not against a second run of this
-    # file's own reader on its own output.
-    if strip_imports(updated) != strip_imports(raw):
+    updated = render(raw, spans, wanted)
+    reason = verify(raw, updated, spans, wanted)
+    if reason is not None:
         raise SystemExit(
-            f"{path}: refusing to write. The rewrite would have changed "
-            "something other than the import lines, which means this tool "
-            "mis-read the file. Nothing was changed.")
-    if [n for _, _, n in import_spans(updated)] != wanted:
-        raise SystemExit(
-            f"{path}: refusing to write. The rewritten import block does not "
-            "read back as the intended list. Nothing was changed.")
+            f"{path}: refusing to write -- {reason}. Nothing was changed.")
 
     io.open(path, "w", encoding="utf-8", newline="").write(mark + updated)
     return problems
@@ -270,8 +254,6 @@ def main(argv: list[str]) -> int:
         print("shared import lists are out of step with the tree:\n")
     sys.stdout.flush()
     for problem in problems:
-        # A mis-parsed line can carry anything and a Windows console is cp1252
-        # by default; a diagnosis must not die on its own output.
         sys.stdout.buffer.write(("  " + problem).encode("utf-8", "replace")
                                 + b"\n")
     sys.stdout.buffer.flush()
