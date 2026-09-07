@@ -283,6 +283,26 @@ example : toAbstract.mapPrefix (samplePrefix.append falseSuffix) =
   exact BehaviorRefinement.mapPrefix_append
     toAbstract samplePrefix falseSuffix
 
+example : (toAbstract.mapPrefix samplePrefix).events = samplePrefix.events :=
+  BehaviorRefinement.mapPrefix_events toAbstract samplePrefix
+
+example : abstractBehavior.observe (toAbstract.mapPrefix samplePrefix) =
+    behavior.observe samplePrefix :=
+  BehaviorRefinement.observe_mapPrefix toAbstract samplePrefix
+
+example : abstractBehavior.inputOf (toAbstract.mapPrefix samplePrefix).initialState =
+    behavior.inputOf samplePrefix.initialState :=
+  BehaviorRefinement.inputOf_mapPrefix toAbstract samplePrefix
+
+example : abstractBehavior.HasInput false (toAbstract.mapPrefix samplePrefix) ↔
+    behavior.HasInput false samplePrefix :=
+  BehaviorRefinement.hasInput_mapPrefix toAbstract false samplePrefix
+
+example (terminal : system.Terminal samplePrefix.state samplePrefix.graph) :
+    abstractBehavior.system.Terminal (toAbstract.mapPrefix samplePrefix).state
+      (toAbstract.mapPrefix samplePrefix).graph :=
+  BehaviorRefinement.terminal_mapPrefix toAbstract samplePrefix terminal
+
 def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.graph
     samplePrefix.events where
   stateAt := fun _ => ()
@@ -296,6 +316,12 @@ def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.g
 
 def completion : system.Completion samplePrefix.state samplePrefix.graph samplePrefix.events :=
   .infinite continuation
+
+def mappedCompletion : abstractBehavior.system.Completion
+    (toAbstract.mapPrefix samplePrefix).state
+    (toAbstract.mapPrefix samplePrefix).graph
+    (toAbstract.mapPrefix samplePrefix).events :=
+  toAbstract.mapCompletionAtPrefix samplePrefix completion
 
 example : samplePrefix.events = [true] := rfl
 
