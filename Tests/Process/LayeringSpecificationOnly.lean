@@ -39,16 +39,15 @@ namespace Grass.Process.Tests.LayeringSpecificationOnly
 open Grass.Specification
 
 /-- A platform requirement, named in a scope. -/
-def win32Handle : RequirementKey :=
+def win32Handle : PlatformRequirementKey :=
   ⟨⟨["Grass", "Platform", "Win32"]⟩, "GetStdHandle"⟩
 
 /-- A one-element requirement set. -/
-def oneRequirement : RequirementSet where
-  keys := [win32Handle]
-  distinct := by simp
+def oneRequirement : RequirementSet :=
+  RequirementSet.ofList [win32Handle]
 
 theorem demands_win32Handle : oneRequirement.Demands win32Handle := by
-  simp [RequirementSet.Demands, oneRequirement]
+  simp [oneRequirement]
 
 /-- Scope containment decides without anything Process-side. -/
 theorem platform_scope_nests :
@@ -63,7 +62,7 @@ def trivialBoundary : DriverBoundary.{0} where
   requirements := oneRequirement
 
 /-- And its requirement delta is monotone here, with no consumer in scope. -/
-theorem delta_is_monotone (key : RequirementKey) :
+theorem delta_is_monotone (key : PlatformRequirementKey) :
     (trivialBoundary.demandAlso key).requirements.Covers trivialBoundary.requirements :=
   trivialBoundary.demandAlso_covers key
 

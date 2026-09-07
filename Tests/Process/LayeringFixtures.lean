@@ -46,12 +46,12 @@ open Grass.Specification
 
 /-- A requirement key built here is the one built in the Process-free context. -/
 theorem requirementKey_stable :
-    (⟨⟨["Grass", "Platform", "Win32"]⟩, "GetStdHandle"⟩ : RequirementKey) =
+    (⟨⟨["Grass", "Platform", "Win32"]⟩, "GetStdHandle"⟩ : PlatformRequirementKey) =
       LayeringSpecificationOnly.win32Handle := rfl
 
 /-- And so is a requirement set, including its duplicate-freedom proof. -/
 theorem requirementSet_stable :
-    LayeringSpecificationOnly.oneRequirement.keys =
+    LayeringSpecificationOnly.oneRequirement.toCanonicalList =
       [LayeringSpecificationOnly.win32Handle] := rfl
 
 /-- Requirement coverage is decided identically on both sides. -/
@@ -67,7 +67,8 @@ The monotone delta is the same operation on both sides.
 just shape, so it is the one worth pinning: if it were ever to consult something
 Process-side, this equation would break.
 -/
-theorem demandAlso_stable (boundary : DriverBoundary.{0}) (key : RequirementKey) :
+theorem demandAlso_stable (boundary : DriverBoundary.{0})
+    (key : PlatformRequirementKey) :
     (boundary.demandAlso key).requirements.Demands key :=
   boundary.demandAlso_demands key
 
