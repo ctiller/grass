@@ -12,7 +12,24 @@ access descriptor of `docs/MEMORY_MODEL.md` §1.
 
 The point is not that these are correct x86-64 models — the ISA agent owns that,
 and these deliberately do not claim a citation. The point is that each case is
-**expressible without an escape hatch**. If one of them could not be written, the
+**expressible without an escape hatch**.
+
+**The frame geometry here is not `docs/SPIKE_1.md`'s, and that is a known divergence
+rather than a modelling choice.** That document's frame table puts the Win64 shadow
+space at `+0`–`32`, the fifth argument at `+32`, `bytesWritten` at `+40`, and saved
+`r14`/`r13`/`r12` at `+48`/`+56`/`+64`. This file has the frame at `⟨0, 64⟩`,
+`transferred` at `⟨32, 4⟩`, saved `r12` at `⟨0, 8⟩` and the return address at
+`⟨24, 8⟩` — so `transferred` sits on the `OVERLAPPED*` slot, the saved registers sit
+in the shadow space, and the frame cannot contain the table's saved `r12` at all.
+`arg WriteFile.overlapped, 0`, an eight-byte write the program performs, has no case
+here for the same reason: the fixture's `transferred` write is on its low half.
+
+Review found it. It is recorded rather than repaired because the repair is not an
+edit: the return address is pushed *below* the frame base, so it cannot descend
+through the frame step at all, and re-laying the frame to the table means
+restructuring the provenance paths and every offset and address in this file and its
+two siblings. Choosing that geometry is the ISA question this file disclaims, so it
+wants an owner who has one. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1b carries it. If one of them could not be written, the
 descriptor is not sufficient and the freeze has not earned its name. That is the
 one question §9 risk 1 says must be answered before ISA authoring begins, and it
 is answered by elaboration rather than by assertion.
@@ -49,6 +66,11 @@ def stackAlloc : AllocId := allocSupply₀.fresh.1
 /-- The loaded image mapping holding `.rdata` and the import table. -/
 def imageAlloc : AllocId := allocSupply₁.fresh.1
 
+private def allocSupply₂ : FreshSupply AllocTag := allocSupply₁.fresh.2
+
+/-- A two-page reservation the split-store case straddles. -/
+def pageCrossAlloc : AllocId := allocSupply₂.fresh.1
+
 private def epochSupply₀ : FreshSupply EpochTag := FreshSupply.initial
 
 /-- The first epoch of both allocations; nothing is reused in Spike 1. -/
@@ -56,8 +78,15 @@ def epoch₀ : EpochId := epochSupply₀.fresh.1
 
 private def contextSupply₀ : FreshSupply ContextTag := FreshSupply.initial
 
+private def grantSupply₀ : FreshSupply GrantTag := FreshSupply.initial
+
 /-- The single thread Spike 1 runs on. -/
 def mainThread : ContextId := contextSupply₀.fresh.1
+
+/-- The external API agent `WriteFile` runs as. `docs/MEMORY_MODEL.md` §7.1 lists
+"external API agent" among the execution context kinds, and Spike 1's whole point is
+that one writes a slot the program lent it. -/
+def apiAgent : ContextId := contextSupply₀.fresh.2.fresh.1
 
 /-! ## Provenance
 
@@ -78,17 +107,43 @@ offset 32 of the frame. -/
 def transferredStep : ProvenanceStep :=
   { kind := .slot, label := ⟨"transferred"⟩, extent := ⟨32, 4⟩ }
 
-/-- The eight bytes at the top of the frame that `push` and `call` write. -/
-def savedSlotStep : ProvenanceStep :=
-  { kind := .slot, label := ⟨"savedOrReturn"⟩, extent := ⟨0, 8⟩ }
+/-- The eight bytes `push r12` writes.
+
+**One slot per push, and a separate one for the return address.** These were a
+single `savedOrReturn` slot at `⟨0, 8⟩`, shared by `push r12` and by the `call`'s
+return-address write — which on a real stack would put the return address on top of
+a saved nonvolatile register. `Spikes/1_Hello_World/Program.lean` pushes `r12`,
+`r13` and `r14` and then calls, so the return address is the fourth slot down, and
+a theorem below presented the collision as a property of the model rather than a
+defect in it. Review found it. -/
+def savedR12Step : ProvenanceStep :=
+  { kind := .slot, label := ⟨"savedR12"⟩, extent := ⟨0, 8⟩ }
+
+/-- The return address the `call` writes: below the three saved registers. -/
+def returnSlotStep : ProvenanceStep :=
+  { kind := .slot, label := ⟨"returnAddress"⟩, extent := ⟨24, 8⟩ }
 
 /-- Provenance of the `transferred` slot. -/
 def transferredProvenance : Provenance :=
   { stackProvenance with path := [frameStep, transferredStep] }
 
-/-- Provenance of the eight-byte slot `push` and `call` write. -/
-def savedSlotProvenance : Provenance :=
-  { stackProvenance with path := [frameStep, savedSlotStep] }
+/-- Provenance of the slot `push r12` writes. -/
+def savedR12Provenance : Provenance :=
+  { stackProvenance with path := [frameStep, savedR12Step] }
+
+/-- Provenance of the slot the `call` writes the return address into. -/
+def returnSlotProvenance : Provenance :=
+  { stackProvenance with path := [frameStep, returnSlotStep] }
+
+/-- A two-page reservation, so a store can straddle the boundary between them.
+
+Its own allocation, because the split store is not the saved-register slot and the
+one-page stack reservation cannot contain a store at offset 4095 of length 8 — using
+it made the fixture's declared addresses contradict its own offsets, which review
+found once the two were finally compared. -/
+def pageCrossProvenance : Provenance :=
+  { space := .cpuVirtual, root := pageCrossAlloc, epoch := epoch₀
+    source := .virtualAlloc, rootExtent := ⟨0, 8192⟩, path := [] }
 
 /-- Provenance of the loaded image. -/
 def imageProvenance : Provenance :=
@@ -99,9 +154,14 @@ def imageProvenance : Provenance :=
 def rdataStep : ProvenanceStep :=
   { kind := .imageSection, label := ⟨".rdata"⟩, extent := ⟨0, 4096⟩ }
 
-/-- The `payload` static object the spike emits. -/
+/-- The `payload` static object the spike emits.
+
+Fifteen bytes: `docs/SPIKE_1.md` §1 says "the 15 UTF-8 bytes `Hello, World!
+`",
+which is thirteen characters plus the two-byte line ending. This said fourteen until
+review counted, in the file whose mandate is the exact Spike 1 instruction mix. -/
 def payloadStep : ProvenanceStep :=
-  { kind := .symbol, label := ⟨"payload"⟩, extent := ⟨0, 14⟩ }
+  { kind := .symbol, label := ⟨"payload"⟩, extent := ⟨0, 15⟩ }
 
 /-- The `__imp_WriteFile` import table entry. -/
 def importStep : ProvenanceStep :=
@@ -128,7 +188,8 @@ def spaceTable : AddressSpaceTable := .cpuOnly
 /-- Build a plain single-threaded access in the 64-bit CPU space. -/
 def access (provenance : Provenance) (range : ByteRange) (address : MachineAddress)
     (intent : AccessIntent) (permission : Permission) (alignment : Nat)
-    (requiresInitialized producesInitialized : Bool) : AccessDescriptor :=
+    (requiresInitialized producesInitialized : Bool)
+    (authority : AuthorityEffect := []) : AccessDescriptor :=
   { context := mainThread
     address := .numeric address
     space := .cpuVirtual
@@ -140,7 +201,8 @@ def access (provenance : Provenance) (range : ByteRange) (address : MachineAddre
     initialization :=
       if requiresInitialized then .allBytesInitialized else .readsNothing
     producesInitialized := producesInitialized
-    admittedFaults := [.pageFault, .generalProtection] }
+    admittedFaults := [.pageFault, .generalProtection]
+    authorityEffect := authority }
 
 /-! ## The eight reference cases -/
 
@@ -152,7 +214,7 @@ Nothing about the instruction's operands mentions memory; a descriptor that coul
 only describe named operands could not express this.
 -/
 def pushR12 : SubstepSequence :=
-  .single (access savedSlotProvenance ⟨0, 8⟩ 0x1000 .write .readWrite 8 false true)
+  .single (access savedR12Provenance ⟨0, 8⟩ 0x1000 .write .readWrite 8 false true)
 
 /--
 `mov ecx, STD_OUTPUT_HANDLE` — an operation with no memory effect at all.
@@ -182,7 +244,10 @@ def payloadPointer : PointerValue :=
 `mov transferred, 0` — a typed frame-slot write that produces initialization.
 
 `producesInitialized` is a claim about the bytes this access *commits*, not the
-bytes it names; `AccessDescriptor.committedRange` is what a later proof reads.
+bytes it names. This sentence used to add "`AccessDescriptor.committedWriteRange` is
+what a later proof reads", and no proof reads it — the tree's committed-range consumer
+is `MemoryEvent.committedWriteRange`, through `Conflicts`. What actually carries the
+claim is `MemoryState.commit`'s byte list, bounded by `Committed.writtenFits`.
 -/
 def movTransferredZero : SubstepSequence :=
   .single (access transferredProvenance ⟨32, 4⟩ 0x1020 .write .readWrite 4 false true)
@@ -211,7 +276,37 @@ permissions.
 def callImportWriteFile : SubstepSequence :=
   { substeps :=
       [ .access (access importProvenance ⟨2048, 8⟩ 0x3000 .read .readOnly 8 true false),
-        .access (access savedSlotProvenance ⟨0, 8⟩ 0x0FF8 .write .readWrite 8 false true) ]
+        .access (access returnSlotProvenance ⟨24, 8⟩ 0x1018 .write .readWrite 8 false true) ]
+    onFault := .priorEffectsVisible }
+
+/-- The identity of the loan the call passes. -/
+def slotLoan : GrantId := grantSupply₀.fresh.1
+
+/--
+`call qword ptr [rip + __imp_WriteFile]`, **with the loan §6 requires**.
+
+§3.2's own table says what `lea r9, transferred.addr` is for: "taking the address of
+a frame slot for a callee, *and the loan that authorizes it*". No reference case
+carried one — `Spike1Policy`'s vocabulary declared `grantKinds := ⟨[.loan]⟩` for a
+loan nothing issued, which is the registry-with-no-consumer shape this branch
+condemns elsewhere. Review found it.
+
+Modelling it changes the milestone conclusion, which is why it is here.
+`the_reload_is_refused_by_the_loan_rule` below is the program's *own* reload refused,
+by §3's rule, at a clause `refusalOf` reaches before `ConflictsWithHistory` — so M8's
+happens-before is not the only thing M2's exit criterion waits on. What unblocks it is
+§6's conforming return, which is M4's and which this reference set has no case for,
+because `callImportWriteFile` covers both of the call's accesses in one sequence with
+no return point.
+-/
+def callWithLoan : SubstepSequence :=
+  { substeps :=
+      [ .access (access importProvenance ⟨2048, 8⟩ 0x3000 .read .readOnly 8 true false),
+        .access (access returnSlotProvenance ⟨24, 8⟩ 0x1018 .write .readWrite 8 false true
+          [.issue slotLoan
+            { kind := .loan, holder := apiAgent, lender := mainThread
+              provenance := transferredProvenance, range := ⟨32, 4⟩
+              rights := .readWrite }]) ]
     onFault := .priorEffectsVisible }
 
 /--
@@ -226,6 +321,9 @@ justification.
 def movEaxTransferred : SubstepSequence :=
   .single (access transferredProvenance ⟨32, 4⟩ 0x1020 .read .readWrite 4 true false)
 
+/-- `#UD`, the invalid-opcode fault `ud2` exists to raise. -/
+def invalidOpcode : FaultClassId := ⟨⟨"invalidOpcode"⟩⟩
+
 /--
 `ud2 @containment_tail(.excessWriteCount)` — faults having touched nothing.
 
@@ -236,8 +334,17 @@ contract violation, where `docs/SEMANTICS.md` §2 allows only the maximal safe
 prefix. A declaration that quietly discharged outstanding obligations here would
 be the "silently considering obligations discharged on process failure" shortcut
 `docs/DECISIONS.md` rejects.
+**It is a `compute` substep, not `none_`.** It was `.none_`, whose own docstring is
+"performs no access **and cannot fault**" — and `ud2`'s entire semantics is raising
+`#UD`. `FaultPlan.before` indexes with `Fin substeps.length`, so with an empty
+sequence no fault plan could point at anything and the instruction was
+declared unable to do the one thing it does. A theorem below offered
+`substeps = []` as the evidence that it discharges nothing, which is a fact about
+emptiness standing in for a fault the declaration could not express. Review found
+it.
 -/
-def ud2Containment : SubstepSequence := .none_
+def ud2Containment : SubstepSequence :=
+  { substeps := [.compute [invalidOpcode]], onFault := .priorEffectsVisible }
 
 /-! ## Two cases from outside Spike 1
 
@@ -276,8 +383,8 @@ and this module has no business guessing what the profile says.
 -/
 def splitPageStore : SubstepSequence :=
   { substeps :=
-      [ .access (access savedSlotProvenance ⟨0, 1⟩ 0x1FFF .write .readWrite 1 false true),
-        .access (access savedSlotProvenance ⟨1, 7⟩ 0x2000 .write .readWrite 1 false true) ]
+      [ .access (access pageCrossProvenance ⟨4095, 1⟩ 0x1FFF .write .readWrite 1 false true),
+        .access (access pageCrossProvenance ⟨4096, 7⟩ 0x2000 .write .readWrite 1 false true) ]
     onFault := .profileSpecific ⟨"x86.splitPageStore"⟩ }
 
 /-- The divisor read survives the divide-error fault. -/
@@ -351,7 +458,7 @@ formed again, this file stops building. -/
 
 /-- A store that declares it needs only read-only permission. -/
 def writeThroughReadOnly : AccessDescriptor :=
-  access savedSlotProvenance ⟨0, 8⟩ 0x1000 .write .readOnly 8 false true
+  access savedR12Provenance ⟨0, 8⟩ 0x1000 .write .readOnly 8 false true
 
 /--
 It is not well formed, because `WellFormedIn` now demands
@@ -366,7 +473,7 @@ theorem writeThroughReadOnly_not_wellFormed :
 
 /-- A descriptor naming an address space this profile never declared. -/
 def accessInUndeclaredSpace : AccessDescriptor :=
-  { access savedSlotProvenance ⟨0, 8⟩ 0x1000 .write .readWrite 8 false true with
+  { access savedR12Provenance ⟨0, 8⟩ 0x1000 .write .readWrite 8 false true with
     space := .deviceLocal }
 
 /--
@@ -401,7 +508,7 @@ theorem lea_performs_no_access : leaPayload.substeps = [] := rfl
 /-- The pointer `lea` produces carries `payload`'s provenance, not the image
 root's. Descending is not free: it required the nesting the provenance records. -/
 theorem payloadPointer_provenance :
-    payloadPointer.provenance.extent = ⟨0, 14⟩ := rfl
+    payloadPointer.provenance.extent = ⟨0, 15⟩ := rfl
 
 /-- A `call` through the import table is two accesses, not one. -/
 theorem call_has_two_substeps : callImportWriteFile.substeps.length = 2 := rfl
@@ -413,19 +520,36 @@ theorem call_import_read_survives_stack_fault :
       some [access importProvenance ⟨2048, 8⟩ 0x3000 .read .readOnly 8 true false] := rfl
 
 /-- The `call` claims no atomicity across its two accesses, so its profile owes
-no justification for one. -/
-theorem call_claims_no_atomicity : ¬ callImportWriteFile.ClaimsAtomicity := by
-  rintro ⟨h, _⟩
-  exact h
+no justification for one. It declares `priorEffectsVisible`, which is what makes it
+claimless — not its length, which `ClaimsAtomicity` used to consult and no longer
+does. -/
+theorem call_claims_no_atomicity : ¬ callImportWriteFile.ClaimsAtomicity := fun h => h
 
-/-- Reaching the containment tail discharges nothing. -/
-theorem ud2_discharges_nothing : ud2Containment.substeps = [] := rfl
+/-- **Reaching the containment tail discharges nothing, and it does fault.**
 
-/-- `push` and `call`'s stack write are the same slot in the same storage, so a
-later proof must relate them rather than framing them apart. -/
+The first half was `substeps = []`, which was true of a declaration that could not
+fault at all — an emptiness standing in for the `#UD` `ud2` exists to raise. Now the
+sequence has a compute substep declaring that fault and no descriptor, so it touches
+no memory and carries no ledger effect, and a fault plan can point at it. -/
+theorem ud2_discharges_nothing :
+    ud2Containment.accesses = [] ∧
+    ud2Containment.substeps.length = 1 ∧
+    ud2Containment.substeps.map Substep.faults = [[invalidOpcode]] := by
+  exact ⟨by decide, by decide, rfl⟩
+
+/-- **`push` and `call`'s stack writes are distinct slots in the same storage.**
+
+They were one slot, `savedOrReturn` at `⟨0, 8⟩`, used by both — which puts the
+return address on top of a saved nonvolatile register — and this theorem asserted
+`SameStorage` of a provenance with itself, which is `refl` and says nothing. Review
+found both. What is worth stating is that the two are the same *storage* and
+different *ranges*: a framing argument must separate them by range, and the
+allocation identity will not do it. -/
 theorem push_and_call_share_storage :
-    savedSlotProvenance.SameStorage savedSlotProvenance :=
-  Provenance.SameStorage.refl _
+    savedR12Provenance.SameStorage returnSlotProvenance ∧
+    savedR12Provenance ≠ returnSlotProvenance ∧
+    (ByteRange.mk 0 8).Disjoint ⟨24, 8⟩ := by
+  exact ⟨⟨rfl, rfl, rfl⟩, by decide, by decide⟩
 
 /-- The stack and the image are different allocations, so no offset coincidence
 can make an access to one authorize an access to the other. -/
