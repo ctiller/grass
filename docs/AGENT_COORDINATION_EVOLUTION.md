@@ -179,6 +179,19 @@ and workload, such as `c-auditor`, `g-auditor`, and `e-auditor`, with purpose
 metadata distinguishing whole-architecture, proof-integrity, protocol, security,
 or other audit emphasis.
 
+Continuous post-merge CI observation is one such emphasis. A dedicated
+CI-monitoring auditor accounts for every exact new `main` commit/check pair with
+the successor schema's non-authoritative `ci.run_observed`, and opens targeted
+issues for failed, cancelled, timed-out, incomplete, or unavailable runs. The
+existing `audit.reported` remains a broad, verdict-free summary. The host
+coordinator checks that coverage exists and replaces a silent monitor; it does
+not interpret the check or declare success. This specialization changes no role
+authority. `AGENT_REVIEW.md` section 8.1 owns the operational rule.
+
+Host readiness requires ordinary Git fetch/pull and non-force push, not an exact
+Git-version match. Version information is diagnostic only and cannot block
+coordination or custody transfer.
+
 Version one currently calls this least-authority identity `observer`. No such
 identity was registered when this decision was drafted. Version two renames the
 wire role to `auditor` rather than preserving two overlapping roles. During

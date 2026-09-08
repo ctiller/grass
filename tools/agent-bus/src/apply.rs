@@ -802,18 +802,23 @@ fn apply_merge_engine_activated(
     // joins its own key's group, which is a set, and whether its effect
     // applies is `ExclusiveTracker::disposition`, a pure function of that
     // group's final membership.
-    if d.merge_engine.as_str() != crate::bootstrap::SUPPORTED_MERGE_ENGINE {
-        return Err(invalid(format!(
-            "{}: unsupported merge_engine {}",
-            env.id, d.merge_engine
-        )));
-    }
-    if d.merge_engine_version.as_str() != crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION {
-        return Err(invalid(format!(
-            "{}: unsupported merge_engine_version {}",
-            env.id, d.merge_engine_version
-        )));
-    }
+    // `merge_engine`/`merge_engine_version` are *recorded* here and judged
+    // nowhere. Reduction used to reject any value that did not equal a pair
+    // of compile-time constants in this build, which made the whole bus
+    // unreadable -- not merely
+    // unmergeable: `reduce` propagates with `?` and has no per-event
+    // isolation, and the log is append-only, so a single such event wedged
+    // `status`, `tail`, `coordinate` and sync on every host whose binary
+    // carried a different constant, permanently. A reduction handler must be
+    // total over well-formed events, and "well-formed" cannot mean "agrees
+    // with the reader's build".
+    //
+    // Nothing downstream needs the judgement either. Candidate validation no
+    // longer reconstructs the merge locally (g-design:249; see
+    // `merge_candidate::verify_candidate_object`), so no consumer's answer
+    // depends on which engine or version produced a tree. The pair stays in
+    // the event schema, is recorded in `merge_engine_info` below, and is read
+    // back only as a diagnostic label for the epoch.
     let key = format!("engine_epoch:{}", d.previous_epoch);
     state.exclusive.record(&key, &env.id)?;
     state.merge_engine_info.insert(
@@ -1734,7 +1739,20 @@ fn apply_review_closing(
         .ok_or_else(|| invalid(format!("{}: unknown nomination {nomination}", env.id)))?;
     match label {
         "declined" => {
-            let reviewer = chain.nomination_reviewer.get(nomination).unwrap();
+            // `ok_or_else`, not `unwrap`. The invariant does hold -- every
+            // writer of `review_chain_by_nomination` writes
+            // `nomination_reviewer` for the same key on the same root, and
+            // both maps are append-only -- but a panic on the reduction path
+            // is strictly worse than an `Err` for the same defect: it takes
+            // the whole process down rather than the one command, so a host
+            // cannot even report what it choked on. The message names the
+            // pair whose disagreement would be the bug.
+            let reviewer = chain.nomination_reviewer.get(nomination).ok_or_else(|| {
+                invalid(format!(
+                    "{}: nomination {nomination} is in review_chain_by_nomination but has no nomination_reviewer entry",
+                    env.id
+                ))
+            })?;
             if reviewer != &env.agent {
                 return Err(invalid(format!(
                     "{}: only the named reviewer may decline this nomination",
@@ -1869,20 +1887,38 @@ fn apply_review_changes(
     let chain = state
         .review_chain(&d.nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.nomination)))?;
-    if chain.current_nomination != d.nomination {
-        // See the identical comment in `apply_review_accept`: a no-op, not
-        // an `Err` -- a hard failure here would permanently break reduction
-        // of the entire bus, not just this chain.
-        return Ok(());
-    }
-    let reviewer = chain.nomination_reviewer.get(&d.nomination).unwrap();
+    // Judged against the nomination link this event *names*, exactly as
+    // `apply_review_accept` and `apply_finding_disposition` are.
+    //
+    // This used to return `Ok(())` -- a silent no-op -- whenever
+    // `chain.current_nomination` had moved past `d.nomination`. That is the
+    // halfway state this file has now been rescued from three times, and
+    // here it was worse than a divergence on its own: a finding that was
+    // never filed cannot be disposed of either, so the *next* event to name
+    // it got `apply_finding_disposition`'s "unknown finding" -- a hard `Err`
+    // on a well-formed, honestly-published event, which `reduce` propagates
+    // with no per-event isolation. Whether the whole bus reduced at all
+    // therefore depended on which of two unordered events a host replayed
+    // first: reassignment first and the finding vanished and the disposal
+    // was fatal; changes-requested first and both were fine.
+    //
+    // Both facts read instead cannot move underneath a replay.
+    // `nomination_reviewer` is append-only and keyed by the link
+    // `d.nomination` names, which is in this event's own `refs`; and the
+    // acceptance asked about is this same reviewer's own earlier event,
+    // which `topological_order` orders by the stream's predecessor edge on
+    // every host.
+    let reviewer = chain
+        .nomination_reviewer
+        .get(&d.nomination)
+        .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.nomination)))?;
     if reviewer != &env.agent {
         return Err(invalid(format!(
-            "{}: only the accepting reviewer may request changes",
-            env.id
+            "{}: only the reviewer named by nomination {} may request changes against it",
+            env.id, d.nomination
         )));
     }
-    if !chain.accepted() {
+    if !chain.accepted_nominations.contains(&d.nomination) {
         return Err(invalid(format!(
             "{}: the named reviewer must accept the nomination before requesting changes",
             env.id
@@ -1929,38 +1965,105 @@ fn apply_finding_disposition(
     let chain = state
         .review_chain(nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {nomination}", env.id)))?;
-    // Authority belongs to the reviewer of the chain's *current* nomination
-    // link specifically -- a reviewer who has since been superseded by a
-    // reassignment must not retain disposal authority merely by citing
-    // their own now-stale nomination id, even though that id's own
-    // nomination_reviewer entry never gets removed (it stays as a durable
-    // record of who accepted that particular link). See the identical
-    // comment in `apply_review_accept` for why this is a no-op rather than
-    // an `Err`: a hard failure here would permanently break reduction of
-    // the entire bus, not just this chain.
-    if chain.current_nomination != *nomination {
-        return Ok(());
-    }
+    // Judged against the nomination link this event *names*, never against
+    // whichever link is current at reduction time.
+    //
+    // This used to read `if chain.current_nomination != *nomination { return
+    // Ok(()); }`, which is the halfway state `apply_review_accept` was
+    // rescued from and describes at length: it stopped the outage an `Err`
+    // here would cause and introduced a quieter fault in its place.
+    // `current_nomination` is moved by an author's `review.reassigned`,
+    // which a disposition neither references nor need have observed, so
+    // whether the finding was recorded as disposed at all depended on which
+    // of two unordered events a host replayed first. Reassignment first and
+    // the disposition silently vanished; disposition first and it stuck.
+    // Same events, same bus, two permanently different answers, and nothing
+    // reports anything wrong -- which is strictly worse than a loud failure,
+    // because no error message will ever surface it.
+    //
+    // Found by `multihost_proptest`'s confluence oracle, which re-reduces
+    // the published log under several valid replay orders and requires them
+    // to agree byte for byte; `a_disposal_racing_a_reassignment_is_recorded_
+    // the_same_way_in_both_orders` pins it deterministically.
+    //
+    // Both facts this now reads instead are refs-reachable or same-stream,
+    // so neither can move underneath a replay: `nomination_reviewer` is
+    // append-only and keyed by the link `nomination` names (which is in this
+    // event's own `refs`), and the acceptance it asks about is the same
+    // reviewer's own earlier event, which `topological_order` orders by the
+    // stream's predecessor edge on every host.
+    //
+    // The policy this drops -- "a reviewer superseded by a reassignment must
+    // not retain disposal authority" -- is a currency question, and it is
+    // answered where currency has one answer: `coordinator::drain_outbox`
+    // reduces this host's fully-fetched view before it will publish
+    // anything, and `merge_ready::check_merge_ready` re-reads the still-open
+    // findings live at the pre-merge gate. Reduction's own job is to say
+    // what happened, and the disposal did happen.
     let reviewer = chain.nomination_reviewer.get(nomination).cloned();
     if reviewer.as_ref() != Some(&env.agent) {
         return Err(invalid(format!(
-            "{}: only the accepting reviewer for the current nomination may dispose of findings",
+            "{}: only the reviewer named by nomination {nomination} may dispose of its findings",
             env.id
         )));
     }
-    if !chain.accepted() {
+    if !chain.accepted_nominations.contains(nomination) {
         return Err(invalid(format!(
             "{}: the named reviewer must accept the nomination before disposing of findings",
             env.id
         )));
     }
     let key = (changes_event.clone(), finding_id.as_str().to_string());
+    // "Unknown finding" is a genuine, order-independent refusal now, and
+    // only because `apply_review_changes` no longer no-ops: `chain.findings`
+    // is append-only (nothing, including `reset_review_to_conflict`, ever
+    // removes an entry), and `changes_event` is in this event's own `refs`,
+    // so `topological_order` applies the event that filed the finding first
+    // on every host. An id that does not resolve here does not resolve
+    // anywhere, so `dry_run` refuses it at publication and it never lands.
+    // While `apply_review_changes` could silently drop a finding, this line
+    // was the downstream half of *that* defect rather than a rule of its
+    // own -- see its comment.
     let finding = chain
         .findings
         .get(&key)
         .ok_or_else(|| invalid(format!("{}: unknown finding {}", env.id, finding_id)))?;
-    if finding.disposition != FindingDisposition::Open {
-        return Err(invalid(format!("{}: finding is not open", env.id)));
+    // A second disposal is recorded, never refused, and which one is in
+    // force is a pure function of the recorded set.
+    //
+    // Refusing it was the same fleet-wide wedge as the six before it, and
+    // reachable without anyone erring: after a `review.reassigned` the
+    // outgoing reviewer and the incoming one are each, at the moment they
+    // publish, the legitimate reviewer of a link they name, so each can
+    // honestly dispose of the same finding. Neither references the other, so
+    // `topological_order` gives them no edge and ties break on agent name --
+    // and whichever reduced second answered a well-formed event with `Err`,
+    // which `reduce` propagates with no per-event isolation. That is
+    // `status`, `tail` and `coordinate` down for every host, permanently,
+    // the log being append-only and force-push prohibited.
+    //
+    // Taking the smallest disposing `EventId` is total *and* confluent:
+    // `min` is commutative and associative, so every host reaches the same
+    // answer whatever order it replays in. It is the rule
+    // `exclusive::resolved_winner` already uses for two coordinators
+    // resolving one conflict, and for the same reason -- arbitrary between
+    // two good-faith disposals, but a pure function of the set, which is the
+    // property that actually matters. "Whichever landed first" would not be,
+    // because across independent per-agent streams there is no shared notion
+    // of first.
+    //
+    // The policy this drops -- a finding is disposed once -- is not lost,
+    // only moved to where it can be answered honestly:
+    // `coordinator::verify_finding_is_still_open` refuses to *publish* a
+    // disposal against a finding the publishing host can already see is
+    // disposed, against its own fully-reduced, freshly-fetched view.
+    let superseded_by_an_earlier_disposal = match &finding.disposition {
+        FindingDisposition::Open => false,
+        FindingDisposition::Cleared { by_event }
+        | FindingDisposition::Superseded { by_event, .. } => by_event <= &env.id,
+    };
+    if superseded_by_an_earlier_disposal {
+        return Ok(());
     }
     let chain = state.review_chain_mut(nomination).expect("just checked");
     let finding = chain.findings.get_mut(&key).expect("just checked");
@@ -2213,7 +2316,15 @@ fn apply_review_merge_authorized(
         // not fleet-wide-fatal.
         return Ok(());
     }
-    let reviewer = chain.nomination_reviewer.get(&d.nomination).unwrap();
+    // See the note at the sibling site: `ok_or_else` rather than `unwrap`,
+    // because a panic on the reduction path takes the process rather than
+    // the command.
+    let reviewer = chain.nomination_reviewer.get(&d.nomination).ok_or_else(|| {
+        invalid(format!(
+            "{}: nomination {} is in review_chain_by_nomination but has no nomination_reviewer entry",
+            env.id, d.nomination
+        ))
+    })?;
     if reviewer != &env.agent {
         return Err(invalid(format!(
             "{}: only the accepting reviewer may authorize a merge",
@@ -2941,6 +3052,19 @@ fn dependency_from(data: &EventData) -> EventId {
 mod tests {
     use super::*;
     use crate::common::Priority;
+    /// Every merge-engine fixture in this module records a version string no
+    /// build of this crate has ever pinned, and reduction is expected to
+    /// accept all of them.
+    ///
+    /// That is the point of spelling it here rather than reaching for a
+    /// crate constant. Reduction used to reject any `merge_engine_version`
+    /// that did not equal a compile-time constant, and because the fixtures
+    /// spelled that same constant, the whole suite agreed with the code
+    /// under test by construction -- the gate that made the bus unreadable
+    /// on every host built against a different constant was invisible from
+    /// in here. Using a foreign version everywhere means any reintroduction
+    /// of that gate fails hundreds of tests, not zero.
+    const FOREIGN_ENGINE_VERSION: &str = "1.2.3-no-build-ever-pinned-this";
     use crate::frontier::{FrontierEntry, ObservedFrontier};
     use crate::registry::{MemberBinding, RosterEpoch};
     use crate::scalars::{Branch, ObjectId, Short, StringSet, Text};
@@ -2966,7 +3090,7 @@ mod tests {
             object_format: "sha1".to_string(),
             product_review_from: hash(1),
             merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: FOREIGN_ENGINE_VERSION.to_string(),
         }
     }
 
@@ -3385,7 +3509,7 @@ mod tests {
             (
                 false,
                 "request changes on one",
-                "only the accepting reviewer may request changes",
+                "may request changes against it",
                 EventData::ReviewChangesRequested(ReviewChangesRequested {
                     nomination: nomination.clone(),
                     reviewed_commit: hash(3),
@@ -5515,7 +5639,7 @@ mod tests {
             engine_epoch.clone(),
             (
                 short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                short(FOREIGN_ENGINE_VERSION),
             ),
         );
         state.current_merge_engine_epoch = Some(engine_epoch.clone());
@@ -5614,7 +5738,7 @@ mod tests {
             engine_epoch.clone(),
             (
                 short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                short(FOREIGN_ENGINE_VERSION),
             ),
         );
         state.current_merge_engine_epoch = Some(engine_epoch.clone());
@@ -7231,7 +7355,7 @@ mod tests {
             genesis.clone(),
             (
                 short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                short(FOREIGN_ENGINE_VERSION),
             ),
         );
         genesis
@@ -7241,7 +7365,7 @@ mod tests {
         MergeEngineActivated {
             previous_epoch: previous_epoch.clone(),
             merge_engine: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-            merge_engine_version: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+            merge_engine_version: short(FOREIGN_ENGINE_VERSION),
             design_commit: hash(1),
             helper_commit: hash(2),
         }
@@ -7344,52 +7468,112 @@ mod tests {
         assert!(err.to_string().contains("is not a coordinator"), "{err}");
     }
 
+    /// Reduction records the engine and version, and judges neither.
+    ///
+    /// This replaces two tests that asserted the opposite: reduction used to
+    /// `Err` on any `merge_engine`/`merge_engine_version` that did not equal
+    /// this build's own compile-time constants. That was not a merge
+    /// restriction, it was a bus-wide outage. `reduce` propagates every
+    /// handler error with `?` and has no per-event isolation, and an agent
+    /// stream is append-only -- so one such event permanently stopped
+    /// `status`, `tail`, `coordinate` and sync from working at all on every
+    /// host whose binary carried a different constant. The fleet lost three
+    /// working days to exactly this shape.
+    ///
+    /// The values used here are deliberately absurd. If any equality gate
+    /// against a build constant, or against this host's installed `git`,
+    /// ever returns, one of them will trip it.
     #[test]
-    fn rejects_merge_engine_activated_with_an_unsupported_engine() {
-        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
-        let coord1 = a("coord1");
-        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
-        let epoch = state.roster_epoch.as_ref().unwrap().clone();
-        let genesis = seed_merge_engine_genesis(&mut state);
-        let mut data = merge_engine_activated(&genesis);
-        data.merge_engine = short("some-other-engine");
-        let env = Envelope::new(
-            &coord1,
-            1,
-            complete_frontier(&epoch),
-            &EventData::MergeEngineActivated(data),
-            [],
-        );
-        let err = apply_event(&mut state, &env).unwrap_err();
-        assert!(
-            err.to_string().contains("unsupported merge_engine"),
-            "{err}"
-        );
+    fn merge_engine_activated_records_any_engine_and_version_without_judging_them() {
+        for (engine, version) in [
+            ("some-other-engine", "0.0.1"),
+            ("git-ort", "0.0.1"),
+            ("git-recursive", "99.99.99"),
+            ("an-engine-invented-after-this-build", "not-even-a-version"),
+        ] {
+            let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+            let coord1 = a("coord1");
+            apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+            let epoch = state.roster_epoch.as_ref().unwrap().clone();
+            let genesis = seed_merge_engine_genesis(&mut state);
+            let mut data = merge_engine_activated(&genesis);
+            data.merge_engine = short(engine);
+            data.merge_engine_version = short(version);
+            let env = Envelope::new(
+                &coord1,
+                1,
+                complete_frontier(&epoch),
+                &EventData::MergeEngineActivated(data),
+                [],
+            );
+            apply_event(&mut state, &env).unwrap_or_else(|e| {
+                panic!("reduction must be total over well-formed events; {engine}/{version}: {e}")
+            });
+            // Recorded verbatim, and selected: the event is applied, not
+            // merely tolerated.
+            assert_eq!(
+                state.merge_engine_info.get(&env.id),
+                Some(&(short(engine), short(version))),
+                "the pair must be readable back as the diagnostic it now is"
+            );
+            assert_eq!(state.current_merge_engine_epoch.as_ref(), Some(&env.id));
+        }
     }
 
-    /// The version half of the pinned merge engine, checked independently
-    /// of the engine name (found by a design-fidelity review: only the
-    /// name was validated, never the version).
+    /// The same property one level up, through `reduce` rather than a single
+    /// handler: a whole bus carrying such an event must still reduce.
+    ///
+    /// This is the assertion that actually names the outage. A per-handler
+    /// test can be satisfied by a handler that returns `Ok` while `reduce`
+    /// still fails somewhere else; what a host needs to know is that
+    /// `status`, `tail` and `coordinate` come back.
     #[test]
-    fn rejects_merge_engine_activated_with_an_unsupported_version() {
+    fn a_bus_recording_an_unknown_engine_version_still_reduces_end_to_end() {
         let mut state = empty_state(&[("coord1", Role::Coordinator)]);
         let coord1 = a("coord1");
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
         let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let genesis = seed_merge_engine_genesis(&mut state);
         let mut data = merge_engine_activated(&genesis);
-        data.merge_engine_version = short("0.0.1");
-        let env = Envelope::new(
+        data.merge_engine_version = short("2.99.0-from-a-host-this-build-never-heard-of");
+        let activation = Envelope::new(
             &coord1,
             1,
             complete_frontier(&epoch),
             &EventData::MergeEngineActivated(data),
             [],
         );
-        let err = apply_event(&mut state, &env).unwrap_err();
+        // An ordinary, entirely unrelated event published afterwards: the
+        // outage was that *everything* after such an event became
+        // unreachable, not just merging.
+        let after = Envelope::new(
+            &coord1,
+            2,
+            complete_frontier(&epoch),
+            &EventData::AgentStatus(AgentStatusEvent {
+                status: LifecycleStatus::Active,
+                note: text("still here"),
+                product_branch: None,
+                product_commit: None,
+            }),
+            [],
+        );
+
+        let mut base = empty_state(&[("coord1", Role::Coordinator)]);
+        apply_ok(&mut base, &register(&coord1, Role::Coordinator));
+        seed_merge_engine_genesis(&mut base);
+        let replayed = reduce_onto(base, &[activation.clone(), after.clone()])
+            .expect("a bus is not allowed to become unreadable because of a recorded version");
         assert!(
-            err.to_string().contains("unsupported merge_engine_version"),
-            "{err}"
+            replayed.events.contains_key(&after.id),
+            "the event after the activation must still be reachable"
+        );
+        assert_eq!(
+            replayed.merge_engine_info.get(&activation.id),
+            Some(&(
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                short("2.99.0-from-a-host-this-build-never-heard-of")
+            ))
         );
     }
 
@@ -8061,7 +8245,7 @@ mod tests {
             .or_insert_with(|| {
                 (
                     short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                    short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                    short(FOREIGN_ENGINE_VERSION),
                 )
             });
         state.current_merge_engine_epoch.get_or_insert(engine_epoch);
@@ -9099,10 +9283,128 @@ mod tests {
         );
         let err = apply_event(&mut state, &cleared_env).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("only the accepting reviewer for the current nomination may dispose"),
+            err.to_string().contains("may dispose of its findings"),
             "{err}"
         );
+    }
+
+    /// A disposition racing a reassignment must be recorded the same way
+    /// whichever order a host replays the two in.
+    ///
+    /// `apply_finding_disposition` used to return `Ok(())` -- a silent
+    /// no-op -- whenever the chain's `current_nomination` had moved past the
+    /// link the disposition names. That reads as harmless and is not: a
+    /// reassignment is on an *author's* stream, which a disposition neither
+    /// references nor need have observed, so the two are causally unordered
+    /// and `topological_order` may walk them either way. One order recorded
+    /// the disposal, the other dropped it, and both hosts reported success.
+    ///
+    /// This drives the identical two events in both orders and requires the
+    /// same answer, which is the property the no-op broke and the reason a
+    /// "reduction never errors" oracle alone would have blessed it.
+    #[test]
+    fn a_disposal_racing_a_reassignment_is_recorded_the_same_way_in_both_orders() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+
+        // One chain: alice nominates bob, bob accepts and files a finding.
+        // Then, concurrently, bob clears the finding and alice reassigns the
+        // review away to carol. Neither event references the other.
+        let build = || {
+            let mut state = empty_state(&[]);
+            apply_ok(&mut state, &register(&alice, Role::Implementor));
+            apply_ok(&mut state, &register(&bob, Role::Reviewer));
+            apply_ok(&mut state, &register(&carol, Role::Reviewer));
+            let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+            let changes_env = Envelope::new(
+                &bob,
+                2,
+                frontier_seeing(&[&nominate_env.id]),
+                &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                    nomination: nominate_env.id.clone(),
+                    reviewed_commit: hash(3),
+                    findings: vec![finding("f1")],
+                    evidence: StringSet::default(),
+                }),
+                [],
+            );
+            apply_ok(&mut state, &changes_env);
+            let cleared_env = Envelope::new(
+                &bob,
+                3,
+                frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+                &EventData::ReviewFindingsCleared(ReviewFindingsCleared {
+                    nomination: nominate_env.id.clone(),
+                    changes_event: changes_env.id.clone(),
+                    finding_id: short("f1"),
+                    resolved_commit: hash(4),
+                    summary: text("fixed"),
+                }),
+                [],
+            );
+            let EventData::ReviewNominated(request) =
+                nominate_env.typed_data().expect("well-formed")
+            else {
+                panic!("the nomination is a review.nominated");
+            };
+            let reassign_env = Envelope::new(
+                &alice,
+                2,
+                frontier_seeing(&[&nominate_env.id]),
+                &EventData::ReviewReassigned(ReviewReassigned {
+                    authors: request.authors.clone(),
+                    product_branch: request.product_branch.clone(),
+                    reviewer: carol.clone(),
+                    required_checks: request.required_checks.clone(),
+                    review_scope: request.review_scope.clone(),
+                    summary: request.summary.clone(),
+                    target_branch: request.target_branch.clone(),
+                    evidence: request.evidence.clone(),
+                    replaces: nominate_env.id.clone(),
+                    reason: text("round-robin"),
+                    inherited_findings: vec![],
+                }),
+                [],
+            );
+            (state, changes_env, cleared_env, reassign_env)
+        };
+
+        let disposition_of = |state: &BusState, changes: &EventId| {
+            state
+                .reviews
+                .values()
+                .next()
+                .expect("one chain")
+                .findings
+                .get(&(changes.clone(), "f1".to_string()))
+                .expect("the finding was filed")
+                .disposition
+                .clone()
+        };
+
+        let (mut a_first, changes_env, cleared_env, reassign_env) = build();
+        apply_ok(&mut a_first, &cleared_env);
+        apply_ok(&mut a_first, &reassign_env);
+
+        let (mut b_first, changes_env2, cleared_env2, reassign_env2) = build();
+        apply_ok(&mut b_first, &reassign_env2);
+        apply_ok(&mut b_first, &cleared_env2);
+
+        assert_eq!(
+            disposition_of(&a_first, &changes_env.id),
+            disposition_of(&b_first, &changes_env2.id),
+            "the same two unordered events reduced to different finding dispositions depending \
+             on which one a host replayed first"
+        );
+        assert!(
+            matches!(
+                disposition_of(&a_first, &changes_env.id),
+                FindingDisposition::Cleared { .. }
+            ),
+            "and the answer both orders agree on is that the disposal happened"
+        );
+        let _ = (cleared_env, reassign_env, cleared_env2, reassign_env2);
     }
 
     #[test]
@@ -9144,17 +9446,38 @@ mod tests {
         assert!(err.to_string().contains("unknown finding"), "{err}");
     }
 
-    /// Round-3 adversarial review, Critical finding: a `Err` here would
+    /// Round-3 adversarial review, Critical finding: an `Err` here would
     /// propagate via `reduce()`'s bare `?` with no per-event isolation,
     /// permanently breaking reduction of the *entire* bus for every host
     /// that has fetched both streams -- not merely this one review chain --
     /// the moment a genuinely concurrent disposal and reassignment (two
     /// independently-published, single-writer streams, neither observing
-    /// the other) are reduced together. The fix is a no-op: bob's stale
-    /// disposal simply does not apply, and the finding stays exactly as the
-    /// reassignment (which inherited it) left it.
+    /// the other) are reduced together. That much still holds, and is what
+    /// this test guards.
+    ///
+    /// What it used to *additionally* claim was wrong. It asserted that the
+    /// stale disposal "simply does not apply", leaving the finding `Open` --
+    /// and that was true only because this order happens to reduce the
+    /// reassignment first. The two events are causally unordered (a
+    /// disposition neither references nor need have observed an author's
+    /// reassignment), so `topological_order` may walk them either way, and
+    /// the other order recorded the disposal. Two hosts, same events, two
+    /// permanently different answers, neither reporting anything wrong.
+    /// `multihost_proptest`'s confluence oracle found it;
+    /// `a_disposal_racing_a_reassignment_is_recorded_the_same_way_in_both_orders`
+    /// pins the general property, and this test now asserts the half it can
+    /// see: no `Err`, and the disposal is *recorded*, because that is the
+    /// fact that is true regardless of order.
+    ///
+    /// The policy the old assertion was reaching for -- a superseded
+    /// reviewer must not still dispose of findings -- is a currency question
+    /// and is answered where currency has one answer:
+    /// `coordinator::drain_outbox` validates against this host's
+    /// fully-fetched, fully-reduced view before publishing, and
+    /// `merge_ready::check_merge_ready` re-reads the still-open findings
+    /// live at the pre-merge gate.
     #[test]
-    fn ignores_finding_disposal_against_a_stale_nomination() {
+    fn a_finding_disposal_racing_a_reassignment_is_recorded_rather_than_silently_dropped() {
         let mut state = empty_state(&[]);
         let alice = a("alice");
         let bob = a("bob");
@@ -9222,8 +9545,12 @@ mod tests {
         let key = (changes_env.id.clone(), "f1".to_string());
         assert_eq!(
             state.reviews[&root].findings[&key].disposition,
-            FindingDisposition::Open,
-            "bob's stale disposal must not have taken effect"
+            FindingDisposition::Cleared {
+                by_event: cleared_env.id.clone()
+            },
+            "the disposal is recorded, because that is the fact that is true in both replay \
+             orders; whether bob still *had* authority is a currency question answered at \
+             publication"
         );
     }
 
@@ -9307,14 +9634,29 @@ mod tests {
         assert!(!chain.accepted());
     }
 
-    /// Companion to `ignores_finding_disposal_against_a_stale_nomination`
-    /// for `apply_review_changes`: bob accepts, then loses a genuinely
-    /// concurrent reassignment race he never observed. His changes-request
-    /// against the stale nomination must be a no-op, not a fatal `Err` that
-    /// would (via `reduce()`'s bare `?` propagation) break reduction of the
-    /// entire bus for any host that later fetches both streams.
+    /// bob accepts, then loses a genuinely concurrent reassignment race he
+    /// never observed, and requests changes against the link he still
+    /// believes is his. No `Err`: a hard failure here propagates via
+    /// `reduce()`'s bare `?` and breaks reduction of the entire bus for any
+    /// host that later fetches both streams. That much this test always
+    /// asserted and still does.
+    ///
+    /// What it used to *additionally* claim was wrong. It asserted the
+    /// changes-request "must not have recorded any finding", which was true
+    /// only because this order reduces the reassignment first; the other
+    /// order recorded it, and the two events are causally unordered so
+    /// `topological_order` may walk them either way. Worse than a plain
+    /// divergence: a finding that was never filed cannot be disposed of
+    /// either, so the *next* honest event to name it got
+    /// `apply_finding_disposition`'s hard "unknown finding" -- and whether
+    /// the whole bus reduced at all then depended on replay order.
+    ///
+    /// The finding is now recorded against the link the event names, which
+    /// is the fact that is true in both orders. Whether bob still held
+    /// authority is a currency question, answered at publication by
+    /// `coordinator::drain_outbox` against a fully-reduced view.
     #[test]
-    fn ignores_review_changes_requested_against_a_stale_nomination() {
+    fn review_changes_requested_against_a_superseded_nomination_still_records_its_finding() {
         let alice = a("alice");
         let bob = a("bob");
         let carol = a("carol");
@@ -9364,8 +9706,12 @@ mod tests {
 
         let root = state.review_chain_by_nomination[&nominate_env.id].clone();
         assert!(
-            state.reviews[&root].findings.is_empty(),
-            "bob's stale changes-request must not have recorded any finding"
+            state.reviews[&root]
+                .findings
+                .contains_key(&(changes_env.id.clone(), "f1".to_string())),
+            "the finding is recorded against the link bob's event names, because that is the \
+             fact that is true in both replay orders -- and because a finding that is never \
+             filed makes its own honest disposal fatal later"
         );
     }
 
@@ -9428,7 +9774,7 @@ mod tests {
             engine_epoch.clone(),
             (
                 short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                short(FOREIGN_ENGINE_VERSION),
             ),
         );
         state.current_merge_engine_epoch = Some(engine_epoch);
@@ -9686,21 +10032,36 @@ mod tests {
         );
     }
 
-    /// Design-fidelity note: unlike issue/dependency/handoff/review terminal
-    /// dispositions, `apply_finding_disposition` never touches `state.
-    /// exclusive` at all -- a second disposal attempt of an
-    /// already-dispositioned finding is hard-rejected outright ("finding is
-    /// not open"), never routed through a `LifecycleConflict` the way a
-    /// genuinely concurrent race on any other exclusive-transition set in
-    /// this file would be. (True concurrency isn't even structurally
+    /// A reviewer disposing of the same finding twice: recorded, never
+    /// refused, with the earlier disposal left in force.
+    ///
+    /// This test used to assert the opposite -- a hard "finding is not open"
+    /// -- and said so explicitly as "a baseline for any future fix to diff
+    /// against; it is not a statement that the current behavior is correct."
+    /// This is that fix, and the premise underneath the old behaviour was
+    /// the error: the note claimed "true concurrency isn't even structurally
     /// possible here today, since disposal authority is pinned to a single
-    /// agent -- the current nomination's accepting reviewer -- so this test
-    /// exercises the simpler, always-reachable case: a second, already
-    /// causally-ordered attempt by that same reviewer.) This pins down that
-    /// actual behavior as a baseline for any future fix to diff against; it
-    /// is not a statement that the current behavior is correct.
+    /// agent -- the current nomination's accepting reviewer." It is not
+    /// pinned to one agent. After a `review.reassigned` the outgoing and
+    /// incoming reviewers each hold a link they may name, so two disposals
+    /// of one finding by *different* agents is ordinary, and neither
+    /// references the other. `apply.rs`'s hard `Err` then made whichever
+    /// host walked them in the unlucky order unable to reduce the bus at
+    /// all -- see
+    /// `two_reviewers_disposing_one_finding_reduce_the_same_in_either_order`,
+    /// and `multihost_proptest`'s
+    /// `the_smallest_schedule_that_reaches_the_double_disposal_race`, which
+    /// reaches it through the real publication path.
+    ///
+    /// The same-agent case here is the causally-ordered one and could have
+    /// kept its `Err` soundly, but it takes the same rule for one reason:
+    /// the rule is now a property of the *set* of disposals, not of who
+    /// published them, so there is no second code path to get wrong. The
+    /// redundancy is still refused where refusing is free --
+    /// `coordinator::verify_finding_is_still_open`, at publication, against
+    /// the publishing host's own fully-reduced view.
     #[test]
-    fn a_second_disposal_of_an_already_cleared_finding_is_hard_rejected_not_a_lifecycle_conflict() {
+    fn a_second_disposal_of_one_finding_is_recorded_with_the_earlier_one_left_in_force() {
         let mut state = empty_state(&[]);
         let alice = a("alice");
         let bob = a("bob");
@@ -9746,11 +10107,158 @@ mod tests {
             &cleared_data(),
             [],
         );
-        let err = apply_event(&mut state, &second_env).unwrap_err();
-        assert!(err.to_string().contains("finding is not open"), "{err}");
-        assert!(
-            !state.exclusive.is_contested(&first_env.id),
-            "no exclusive-tracker bookkeeping is created for findings at all"
+        apply_ok(&mut state, &second_env);
+        let root = state.review_chain_by_nomination[&nominate_env.id].clone();
+        let key = (changes_env.id.clone(), "f1".to_string());
+        assert_eq!(
+            state.reviews[&root].findings[&key].disposition,
+            FindingDisposition::Cleared {
+                by_event: first_env.id.clone()
+            },
+            "the smallest disposing event id stays in force, so the answer is a pure function \
+             of the recorded set rather than of which one a host walked first"
+        );
+    }
+
+    /// The race the hard `Err` above could not survive, at the level
+    /// `apply.rs` can state it: two reviewers, each the legitimate reviewer
+    /// of a nomination link they name, each disposing of the same finding,
+    /// neither having observed the other.
+    ///
+    /// Reducing both orders and requiring the same state is the whole point.
+    /// "Neither errors" is not enough on its own -- a handler that stops
+    /// failing while still depending on which disposal arrived first has
+    /// traded a wedged bus for silent, permanent divergence between hosts,
+    /// which nothing surfaces.
+    #[test]
+    fn two_reviewers_disposing_one_finding_reduce_the_same_in_either_order() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+
+        // alice nominates bob, who accepts and files a finding; alice then
+        // reassigns to carol, who accepts the new link. Both reviewers can
+        // now honestly dispose of that one finding.
+        let build = || {
+            let mut state = empty_state(&[]);
+            apply_ok(&mut state, &register(&alice, Role::Implementor));
+            apply_ok(&mut state, &register(&bob, Role::Reviewer));
+            apply_ok(&mut state, &register(&carol, Role::Reviewer));
+            let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+            let changes_env = Envelope::new(
+                &bob,
+                2,
+                frontier_seeing(&[&nominate_env.id]),
+                &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                    nomination: nominate_env.id.clone(),
+                    reviewed_commit: hash(3),
+                    findings: vec![finding("f1")],
+                    evidence: StringSet::default(),
+                }),
+                [],
+            );
+            apply_ok(&mut state, &changes_env);
+
+            let request = review_request(&[&alice], &bob);
+            let reassign_env = Envelope::new(
+                &alice,
+                2,
+                frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+                &EventData::ReviewReassigned(ReviewReassigned {
+                    authors: request.authors.clone(),
+                    product_branch: request.product_branch.clone(),
+                    reviewer: carol.clone(),
+                    required_checks: request.required_checks.clone(),
+                    review_scope: request.review_scope.clone(),
+                    summary: request.summary.clone(),
+                    target_branch: request.target_branch.clone(),
+                    evidence: request.evidence.clone(),
+                    replaces: nominate_env.id.clone(),
+                    reason: text("round-robin"),
+                    inherited_findings: vec![crate::common::FindingRef {
+                        changes_event: changes_env.id.clone(),
+                        finding_id: short("f1"),
+                    }],
+                }),
+                [],
+            );
+            apply_ok(&mut state, &reassign_env);
+            let carol_accepts = Envelope::new(
+                &carol,
+                1,
+                frontier_seeing(&[&reassign_env.id]),
+                &EventData::ReviewNominationAccepted(ReviewNominationAccepted {
+                    nomination: reassign_env.id.clone(),
+                    note: text("taking it"),
+                }),
+                [],
+            );
+            apply_ok(&mut state, &carol_accepts);
+
+            // bob still believes the review is his, and clears the finding
+            // against the link he accepted...
+            let bob_clears = Envelope::new(
+                &bob,
+                3,
+                frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+                &EventData::ReviewFindingsCleared(ReviewFindingsCleared {
+                    nomination: nominate_env.id.clone(),
+                    changes_event: changes_env.id.clone(),
+                    finding_id: short("f1"),
+                    resolved_commit: hash(4),
+                    summary: text("fixed"),
+                }),
+                [],
+            );
+            // ...while carol, who never saw that, supersedes the same
+            // finding against the link she accepted.
+            let carol_supersedes = Envelope::new(
+                &carol,
+                2,
+                frontier_seeing(&[&reassign_env.id, &changes_env.id]),
+                &EventData::ReviewFindingsSuperseded(ReviewFindingsSuperseded {
+                    nomination: reassign_env.id.clone(),
+                    changes_event: changes_env.id.clone(),
+                    finding_id: short("f1"),
+                    rationale: text("no longer relevant"),
+                }),
+                [],
+            );
+            (state, changes_env, bob_clears, carol_supersedes)
+        };
+
+        let (mut bob_first, changes_a, bob_clears_a, carol_supersedes_a) = build();
+        apply_ok(&mut bob_first, &bob_clears_a);
+        apply_ok(&mut bob_first, &carol_supersedes_a);
+
+        let (mut carol_first, changes_b, bob_clears_b, carol_supersedes_b) = build();
+        apply_ok(&mut carol_first, &carol_supersedes_b);
+        apply_ok(&mut carol_first, &bob_clears_b);
+
+        let disposition_of = |state: &BusState, changes: &EventId| {
+            state
+                .reviews
+                .values()
+                .next()
+                .expect("one chain")
+                .findings
+                .get(&(changes.clone(), "f1".to_string()))
+                .expect("the finding was filed")
+                .disposition
+                .clone()
+        };
+        assert_eq!(
+            disposition_of(&bob_first, &changes_a.id),
+            disposition_of(&carol_first, &changes_b.id),
+            "two hosts that fetched the same two disposals in different orders must reduce to \
+             the same finding state"
+        );
+        assert_eq!(
+            disposition_of(&bob_first, &changes_a.id),
+            FindingDisposition::Cleared {
+                by_event: bob_clears_a.id.clone()
+            },
+            "and the answer both orders agree on is the smallest disposing event id"
         );
     }
 
@@ -10215,7 +10723,7 @@ mod tests {
                 engine_epoch.clone(),
                 (
                     short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                    short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                    short(FOREIGN_ENGINE_VERSION),
                 ),
             );
             state.current_merge_engine_epoch = Some(engine_epoch.clone());
@@ -11206,7 +11714,7 @@ mod tests {
                 .or_insert_with(|| {
                     (
                         short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                        short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                        short(FOREIGN_ENGINE_VERSION),
                     )
                 });
             state

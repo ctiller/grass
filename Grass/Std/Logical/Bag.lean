@@ -170,8 +170,8 @@ cover the operation as consumers write it. `protected` is what keeps the second
 spelling out of reach of an `open Bag`, so the observation stays true instead of
 depending on nobody happening to write it.
 
-`Grass/Std/Logical/Vec.lean`'s `append` is the same shape with `++`, and
-`Tools/CoverageAudit.lean` exempts it on exactly this ground.
+`Grass/Std/Logical/Vec.lean`'s `append` is the same shape with `++`, and the
+observation-coverage audit exempts it on exactly this ground.
 -/
 protected def append (left right : Bag α) : Bag α :=
   Quotient.liftOn₂ left right (fun l r => ofList (l ++ r))
