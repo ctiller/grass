@@ -35,6 +35,14 @@ schema version. It exits nonzero if its certificate phase fails or if its output
 cannot be written atomically. JSON is a review projection; the referenced
 kernel-checked declaration and verified object remain proof authority.
 
+These commands are also eventual Grass programs. Their initial host-language
+implementations are bootstrap mechanisms governed by
+[VALIDATION.md](VALIDATION.md), not a permanently trusted layer. Reports retain
+stable schemas across an implementation replacement. During cutover, the host
+and Grass executables run the same positive and rejecting fixtures and compare
+the explicit projections below. The Grass executable becomes the default only
+after its own exact verified artifact and replacement evidence are reviewed.
+
 `mirror` may be implemented first by `check-spike-sources.ps1`, but the eventual
 command must emit the same classified manifest rather than merely print a pass
 line.
@@ -46,6 +54,14 @@ goals, proof-term bytes when available, imports, consumed process facets, and
 rebuild cone. The command fails on any unresolved name. Pre-implementation
 burden classes are replaced by measured evidence; they are never copied into
 the report as if they were measurements.
+
+`AuthorityReportV1.semanticProjection` contains every listed normalized
+declaration identity, classification, owning module, instantiated arguments,
+theorem type, residual-goal key, imports, consumed facets, and rebuild cone.
+Proof-term byte count is a semantic measurement only when both sides inspect
+the same checked environment; otherwise the reports are not comparable. Its
+provenance projection contains discovery order, diagnostic rendering, timings,
+host paths, and the common provenance fields.
 
 For constructor-heavy assembly, `elaborate` emits both the typed constructor
 tree and complete raw instruction hierarchy. Spike 4 additionally compares the
@@ -77,6 +93,24 @@ Timestamps and durations are evidence metadata and never enter theorem types or
 cache applicability. Stable identities are nominal IDs plus exact checked
 content; hashes locate content but do not prove it.
 
+Differential comparison has no implicit “meaningful fields” convention. Two
+reports are comparable only when `schema`, `schemaVersion`, `spike`, `gitTree`,
+`profile`, `semanticEnvironment`, and the semantic portion of `command` are
+equal. The semantic command portion contains the operation and normalized input
+selectors; executable paths, output paths, environment spelling, and diagnostic
+options are provenance. A comparison rejects a context mismatch rather than
+calling it a semantic disagreement.
+
+For comparable reports, each V1 payload below declares one `semanticProjection`
+and one `provenanceProjection`. Differential agreement is equality of the
+canonical serialization of `semanticProjection`; it is never equality of the
+whole JSON report. The envelope's `lean`, `lake`, `grass`, `started`, `finished`,
+raw `command`, and `payloadDigest` fields are provenance. The context fields
+above and every payload field not explicitly listed as semantic are also
+retained by `provenanceProjection`. A schema revision must classify every new
+field before it can be emitted. Thus tool versions remain reviewable without
+making two implementations disagree by construction.
+
 ## 3. Phase reports and acceptance
 
 ### 3.1 Mirror
@@ -84,6 +118,13 @@ content; hashes locate content but do not prove it.
 `MirrorReportV1` contains the authored-file manifest, classified Markdown block
 manifest, normalized content digest for each side, duplicate identities, missing
 files, extra files, and mismatches.
+
+`MirrorReportV1.semanticProjection` is the canonical repository-relative
+authored-file manifest, classified-block manifest, per-side normalized-content
+digests, duplicate/missing/extra/mismatch sets, and recomputed counts. Set-valued
+fields are sorted by their stable identity. Its provenance projection contains
+raw host paths, traversal order, diagnostics, and the common provenance fields;
+none can alter acceptance.
 
 Acceptance:
 
@@ -112,6 +153,15 @@ structure ElaborationReportV1 where
   errors : Array SourceElaborationError
 ```
 
+`ElaborationReportV1.semanticProjection` contains every displayed structure
+field, with errors reduced to stable error key, normalized source identity, and
+source span. Arrays whose order is not part of the declared source semantics are
+canonically ordered by stable identity. Its provenance projection contains free
+diagnostic text, host paths, discovery order, internal timing, and the common
+provenance fields. Raw instruction order, source-map order within a fragment,
+and constructor expansion order are semantic and must not be canonicalized
+away.
+
 Acceptance requires no errors, exact fragment/macro/static/import/reference
 coverage, exact join selection, total source maps, and a bounded-fanout aggregate
 tree. Scope elaboration reports the selected entry/frontier/imported-call values
@@ -125,6 +175,16 @@ machine, and artifact requirement-key families and origin maps; local
 `AssemblyCheckReport`s; model bindings; process/cancellation/resource/obligation
 certificates; composition nodes; residual goals; axiom audit; and the final
 kernel declaration name and normalized type.
+
+`VerificationReportV1.semanticProjection` contains the keyed requirement
+families and origin maps, normalized local-check verdicts and residual keys,
+model bindings, certificate subject and theorem identities, composition edges,
+axiom-audit result, exact retained source-hierarchy identity, and final kernel
+declaration name and normalized type. It does not compare proof-term
+serialization, elaborator allocation identities, progress messages, diagnostic
+wording, or timings; those are provenance. A proof identity in this projection
+is its stable declaration name plus normalized checked type, not a tool-private
+object address.
 
 Acceptance requires:
 
@@ -144,6 +204,15 @@ writer/parser reports, each `.gobj` payload-to-certificate resolution equality,
 loader connection, emitted digest and path, and the executable observation
 connection.
 
+`ArtifactReportV1.semanticProjection` contains all normalized manifests and
+serialized ranges named above, parser/writer classified results and recovered
+values, payload-to-certificate equalities, loader and observation connection
+identities, and the emitted artifact digest. Its provenance projection contains
+output paths, temporary-file names, streaming chunk sizes not fixed by the
+format, diagnostics, timings, and the common provenance fields. This report
+comparison uses the named artifact digest; proof authority remains the exact
+byte sequence connected by the referenced kernel declaration, not the digest.
+
 Acceptance requires the common writer law `parse (write x) = .ok x`, the
 format-specific accepted-input conformance law, exact source-to-object-to-bytes
 adjacency, valid ASLR relocations and standard permissions, and successful
@@ -158,6 +227,15 @@ Each mutation is a semantic edit applied to an isolated temporary worktree. Its
 manifest names the exact source transformation, expected first failing phase,
 expected diagnostic key, allowed rebuild cone, and required reusable modules.
 `MutationReportV1` records actual first failure and build actions.
+
+`MutationReportV1.semanticProjection` contains the normalized source
+transformation, expected and actual first phase/key, pass/fail classification,
+stable identities of declarations rebuilt or reused, observed dependency cone,
+and required-reuse results. Its provenance projection contains temporary
+worktree paths, process command lines, scheduling/order among independent build
+actions, logs, timings, and the common provenance fields. Build-action causal
+order and rebuild/reuse identity are semantic even though incidental scheduler
+order is not.
 
 Acceptance requires the expected phase/key, not merely any failure. A mutation
 which reaches a later phase has crossed an unsound boundary. A mutation expected
@@ -290,6 +368,16 @@ planned actions, actual module/facet actions, re-elaborated modules,
 kernel-checked declarations, imported/reused `.olean` files, `.olean` and proof
 bytes, `.gobj` bytes, source/artifact bytes scanned and written, cache outcomes,
 wall time, and peak memory.
+
+`BuildExecutionReportV1.semanticProjection` contains the normalized dependency
+graph, changed inputs, planned and actual action identities with their causal
+edges, re-elaborated and kernel-checked declaration identities, reused `.olean`
+identities, cache classifications, and exact `.olean`, proof, `.gobj`, source,
+and artifact byte counts. Its provenance projection contains scheduler order
+between independent actions, host paths, wall-clock timestamps, wall time, peak
+memory, implementation diagnostics, and the common provenance fields. Resource
+measurements remain validation evidence and can be compared by a separately
+declared tolerance campaign; they are not semantic equality.
 
 The structural theorem proves that a body edit preserving `Sig` changes only
 the leaf implementation/certificate/object and aggregate ancestor identities.

@@ -159,6 +159,79 @@ Each such tool has a language-independent behavioral contract covering:
 - compatibility and migration across simultaneously deployed versions; and
 - exact observable effects at filesystem, Git, process, and network boundaries.
 
+The contract version also contains a reviewed `ToolTheoremDemand`. It decides
+separately for safety, progress, resource use, and exact artifact/output whether
+the family is `required` or `inapplicable`. A required family names the public
+theorem statement, including its quantified input and environment; an
+inapplicable family gives a behavior-specific reason. The record also names any
+shared library theorem intended to discharge it. “Appropriate to the tool” is
+therefore this reviewed record, not an implementor's or reviewer's unrecorded
+judgement. Changing a family, weakening its statement, or attaching a new
+universal theorem to the public tool boundary is a design change and receives
+the burden review required by [SPIKE_PROOF_BURDEN.md](SPIKE_PROOF_BURDEN.md).
+Passing fixtures cannot substitute for a required theorem.
+
+The authoritative per-tool trust-role register lives in this section. A new
+persistent correctness-critical tool is registered before its output is cited
+as evidence or consumed by a gate. `Role` is a nonempty set drawn from
+`evidence-producer`, `gate`, `merge-publisher`, and `foundation-checker`; the
+strongest role selects the assurance floor above. `Status` describes the
+implementation transition, not proof status.
+
+| Tool | Behavior-contract version | Role | Current implementation | Status | Theorem-demand record |
+|---|---|---|---|---|---|
+| corpus mirror | `mirror-report-v1`, [IMPLEMENTATION_RATCHET.md §3.1](IMPLEMENTATION_RATCHET.md#31-mirror) | evidence-producer, gate | `check-spike-sources.ps1` | bootstrap active; Grass replacement planned | `mirror-v1-demands` below |
+| corpus link lint | `corpus-links-v1`, §7 | gate | `check-doc-links.ps1` | bootstrap active; replacement unscheduled | `pure-finite-lint-v1` |
+| axiom audit | `axiom-audit-v1`, §6 and [FOUNDATION.md](FOUNDATION.md) | evidence-producer, gate | `audit-trust.ps1` | bootstrap active; replacement unscheduled | `checked-declaration-audit-v1` |
+| agent bus | `agent-bus-schema-v2`, [AGENT_BUS_SCHEMA.md](AGENT_BUS_SCHEMA.md) and [AGENT_REVIEW.md](AGENT_REVIEW.md) | evidence-producer, gate, merge-publisher | `tools/agent-bus` | native implementation active; Grass replacement planned | `durable-authority-tool-v1` |
+| spike report commands | `spike-reports-v1`, [IMPLEMENTATION_RATCHET.md](IMPLEMENTATION_RATCHET.md) | evidence-producer, gate | none | planned | one demand record per command before implementation acceptance |
+| Lean elaborator/kernel used by the build | pinned `lean-toolchain`, §6 and [FOUNDATION.md](FOUNDATION.md) | foundation-checker | pinned Lean distribution | declared TCB; replacement not claimed | `external-foundation-v1` |
+
+The shared records in this table are templates whose per-tool instantiation is
+part of the reviewed row; they are not permission to infer omitted demands.
+`pure-finite-lint-v1` requires safety (acceptance implies every declared lint
+condition), progress (every finite readable snapshot returns accept, reject, or
+an explicit input error), a reviewed finite resource bound, and exact output
+(the public verdict and exit status equal the specified scan result; any emitted
+report obeys its canonical writer law). `checked-declaration-audit-v1` requires
+the same four families and strengthens safety and exact output with exact
+correspondence between the audited declaration closure and reported names. The
+`durable-authority-tool-v1` record also requires all four families, including
+exact durable events/effects, and the crash, retry, concurrency, freshness,
+recovery, and migration laws above. `external-foundation-v1` marks all four
+Grass theorem families inapplicable to the external checker itself: proving the
+checker by accepting that checker's result would be circular. Its exact version,
+allowed foundation, validation, and downstream dependence remain explicit trust
+ledger entries until a separately reviewed checker transition replaces that
+boundary.
+
+`mirror-v1-demands` is the small-tool worked example:
+
+- **Safety:** for every finite repository snapshot, an accepted report iff all
+  authored files and classified blocks are in the one-to-one normalized-content
+  relation in [IMPLEMENTATION_RATCHET.md §3.1](IMPLEMENTATION_RATCHET.md#31-mirror);
+  malformed classifications and I/O failures cannot produce acceptance.
+- **Progress:** every finite snapshot whose reads each return data or a named
+  I/O failure terminates with accepted, rejected, or that explicit failure. No
+  fairness or termination claim is made for an operating-system read which
+  never returns.
+- **Resources:** the contract supplies reviewed numeric functions
+  `mirrorResidentBound(totalInputBytes, fileCount)` and
+  `mirrorWorkBound(totalInputBytes, fileCount)`; the theorem bounds peak resident
+  bytes and abstract work by those functions for every finite snapshot. The
+  functions, units, and overflow behavior are contract data, not chosen by the
+  implementation after measurement.
+- **Exact output/artifact:** report serialization obeys
+  `parse (write report) = .ok report`, emitted report bytes are exactly
+  `write (scan snapshot)`, and the promoted Grass executable has the ordinary
+  exact source-to-artifact `VerifiedProgram mirrorSpec` connection.
+
+This example is intentionally stronger than “the tool terminated.” It also
+shows proportionality: it has no concurrency, recovery, or external-effect
+theorem because its contract is a finite pure scan plus one atomic report write;
+those properties are fixtures or effect-wrapper obligations, not invented
+duties of the pure scanner.
+
 The contract is the durable asset. Rust, another native bootstrap language, and
 Grass are replaceable realizations. Implementation-specific structs, exit text,
 Git version strings, and cache layouts enter the contract only when an external
@@ -201,9 +274,12 @@ Tests exercise the same public command boundary operators and agents use; a
 parallel test-only implementation is not evidence for the production path.
 
 A Grass replacement first runs in shadow against retained bootstrap traces.
-Differential campaigns compare classified results, reduced states, intended
-effects, and produced bytes—not timing, incidental diagnostics, or other
-unspecified details. Disagreement is a retained finding. The Grass realization
+Differential campaigns compare the report schema's declared semantic
+projection—not timing, provenance, incidental diagnostics, or other unspecified
+details. The projection and its canonicalization are part of the versioned
+behavior contract; [IMPLEMENTATION_RATCHET.md](IMPLEMENTATION_RATCHET.md)
+defines them for the spike reports. Disagreement is a retained finding. The
+Grass realization
 is promoted only after its refinement theorem, exact emitted artifact
 connection, migration proof, negative fixtures, and measured local cost pass
 review. During an explicit compatibility window both implementations can read
