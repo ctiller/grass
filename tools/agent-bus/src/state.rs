@@ -314,10 +314,22 @@ impl AgentState {
     ///     digits, `"w:12" < "w:4"`.)
     ///  2. What survives is pairwise concurrent by construction, so there is
     ///     no causal order left to exploit and the winner has to be a pure
-    ///     function of the membership: the lowest `(kind rank, agent)`. The
-    ///     lowest-identity half of that is the rule `exclusive.rs` already
-    ///     documents for two coordinators racing over one predecessor, for
-    ///     the same reason.
+    ///     function of the membership: the lowest `(kind rank, agent)`.
+    ///
+    /// The lowest-identity half of step 2 is not invented here. It is the rule
+    /// `ExclusiveTracker::resolved_winner` (`exclusive.rs:173`) already
+    /// applies to the set of winners coordinators have named for one key: a
+    /// duplicate resolution collapses into the set and changes nothing, two
+    /// resolutions naming different winners are both kept, and the minimum is
+    /// taken -- a pure function of the set, so hosts that received them in
+    /// different orders still agree. That is exactly the property this chain
+    /// needs, for exactly the reason given there: "whichever landed first"
+    /// is not a rule, because there is no shared notion of first.
+    ///
+    /// `resolved_winner` is a private `fn` inside `impl ExclusiveTracker`,
+    /// so it does not appear in the crate's public surface and is easy to
+    /// miss when looking for the precedent; it is named here by file and
+    /// line so the next reader does not have to find it again.
     ///
     /// Computed afresh from the whole set every time, so a transition that
     /// arrives late can still take a position an earlier one provisionally
