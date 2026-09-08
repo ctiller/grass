@@ -81,9 +81,12 @@ The reduction every instance-shaped clause of `WellFormed` uses.
 outside its scope, and every constructor's scope names at most one instance
 fragment, so a slot the step did not declare holds exactly what it held.
 
-Stated over an arbitrary `Property` because the five clauses differ only in what
-they ask of the incarnation, and proving the framing five times would be five
-chances to get it wrong in a different way.
+Stated over an arbitrary `Property` because `SlotsAgree`, `LifecyclesWitnessed`,
+`ParentageValid` and `NominalsAllocated` differ only in what they ask of the
+incarnation, and proving the framing once per clause would be that many chances
+to get it wrong in a different way. The note above records why `RootUnique` is
+not among them; an earlier version of *this* docstring said five and was the
+miscount that note describes, left standing when the note was fixed.
 -/
 theorem instanceProperty_preserved
     {Property : ∀ kind : plan.topology.ProcessKind, plan.topology.InstanceId kind →

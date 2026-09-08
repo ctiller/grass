@@ -463,10 +463,10 @@ section after this one. What §10.89's check asks for is still the step, and the
 are it: each transition is one an execution can contain, which is the claim a
 transition alone does not make.
 
-That the before-worlds are unreached is worth saying rather than leaving
-implicit. It is the same distinction §10.88 drew between inhabited and exercised,
-one level down: a step from an unreachable world is a real step, and it is not a
-step of any run.
+That no *run* reaches the before-worlds is worth saying rather than leaving
+implicit — each of them does have a step into it, built below. It is the same
+distinction §10.88 drew between inhabited and exercised, one level down: a step
+from an unreachable world is a real step, and it is not a step of any run.
 
 **§10.132 ran that down and got the answer wrong the first time.** The first
 version of this section gave three of the four a step into their before-world
@@ -478,11 +478,10 @@ What closes it is an invariant over executions rather than steps.
 `ProcessPlan.execution_holds_an_unkilled_root` says every world of every run
 holds, in the root's slot, an instance with no current parent that has not died —
 unless a `restart` at that slot took it away, which
-`no_restart_at_the_root_slot` shows is unconstructible here. So none of the seven
-worlds below is a world of any run. Some are named individually and the
-`holding` ones are covered by a theorem quantified over every such world; each
-refusal has a `no_run_reaches_*` corollary stating the same thing about
-executions. §10.133.
+`no_restart_at_the_root_slot` shows is unconstructible here. So no world in this section is a
+world of any run. Some are named individually and the `holding` ones are covered
+by a theorem quantified over every such world; each refusal has a
+`no_run_reaches_*` corollary stating the same thing about executions. §10.133.
 -/
 
 open Grass.Process.Tests.ChannelStep
@@ -531,12 +530,15 @@ not all `processStep`s: `theReceiverIsKilledStep` is a `childDied` and
 `theJoinIntoTheDeadSender` is a `join`.
 
 **None of that is what §10.129 was asking for**, which is the whole of §10.133: a
-step *into* a world is not a run that *reaches* it. Every world in this file
-fails `ProcessPlan.UnkilledRootAt`, and `every_run_holds_an_unkilled_root` is why
-that settles it. An earlier version of this header said `sentWithDeadSender` had
-no step into it at all — a reviewer refuted that by building the `join` now
-recorded below, in the same breath as the header cited §10.133 for the
-distinction it was failing to draw. §10.142.
+step *into* a world is not a run that *reaches* it. The worlds in *this section*
+each fail `ProcessPlan.UnkilledRootAt`, and `every_run_holds_an_unkilled_root` is
+why that settles them — the file as a whole is not like that, and
+`sent_holds_an_unkilled_root` below is the world a run really does reach.
+
+An earlier version of this header said `sentWithDeadSender` had no step into it
+at all; a reviewer refuted it by building the `join` now recorded below. §10.142,
+and §10.143 for the version of this paragraph that over-reached in the other
+direction.
 -/
 
 /-- The wire's receiver before it died: the same incarnation, running. -/
@@ -634,8 +636,9 @@ def theReceiverIsKilledStep :
 /-! #### And a step into the fourth, which an earlier version said had none
 
 The claim §10.133 calls literally false, restated in a section header above and
-refuted by a reviewer who built the step. It is a fixture now, so restating it
-costs a build. §10.142.
+refuted by a reviewer who built the step. The counterexample is in the tree now
+rather than in a review, which is the most a header can be held to: nothing in
+the build reads one. §10.142.
 -/
 
 /-- `sentWithDeadSender`, with a terminated child still to be collected. -/
@@ -692,6 +695,17 @@ theorem the_corpse_is_collected :
           exact absurd (by rw [isSeven]; rfl) outside
         · rfl
     | _ => rfl
+
+/-- **And the world it starts from is a world of no run either**, for the same
+reason as the world it reaches: the listener slot holds a dead root. Written
+because its four siblings have this pair and it did not, which is the asymmetry
+§10.136 found once already. §10.143. -/
+theorem deadSenderWithACorpseToCollect_is_no_world_of_a_run :
+    ¬ serverPlan.UnkilledRootAt deadSenderWithACorpseToCollect .listener () := by
+  rintro ⟨root, found, _, unkilled⟩
+  injection found with same
+  subst same
+  exact unkilled .supervised rfl
 
 /-- And it is a step. -/
 def theJoinIntoTheDeadSender :
@@ -819,6 +833,13 @@ theorem no_run_reaches_sentWithDeadReceiver
     (isStart : serverPlan.ExactInitialNetwork request start)
     (execution : serverPlan.StepsTo start sentWithDeadReceiver) : False :=
   sentWithDeadReceiver_is_no_world_of_a_run
+    (every_run_holds_an_unkilled_root isStart execution)
+
+theorem no_run_reaches_deadSenderWithACorpseToCollect
+    {request : (serverTopology.protocol serverTopology.root).Request} {start : ServerWorld}
+    (isStart : serverPlan.ExactInitialNetwork request start)
+    (execution : serverPlan.StepsTo start deadSenderWithACorpseToCollect) : False :=
+  deadSenderWithACorpseToCollect_is_no_world_of_a_run
     (every_run_holds_an_unkilled_root isStart execution)
 
 theorem no_run_reaches_a_holding_world (incarnation : ProcessInstance serverTopology)

@@ -27,16 +27,17 @@ program never starts in.
 
 ## The payoff
 
-`initial_is_wellformed` is why the exactness is worth the fields. Six of
-`WellFormed`'s clauses are discharged *because* nothing else exists yet, save
-`sharedInvariantHolds`, which comes from `ExactInitialNetwork`'s own
-`sharedInvariantAtStart`:
-there is no second instance to violate root uniqueness, no recorded parent to
-be invalid, and no escrow to hold a reroute that never lands, an occurrence on
-the wrong session, or two entries sharing a nominal. The remaining two come from
-the root's own record: `nominalsAllocated` from `rootAllocated`, and `slotsAgree`
-from `rootSlotAgrees`, which §10.106 added after a reviewer noticed the theorem
-was taking that clause as a hypothesis instead.
+`initial_is_wellformed` is why the exactness is worth the fields. Most of
+`WellFormed`'s clauses are discharged *because* nothing else exists yet: there is
+no second instance to violate root uniqueness, no recorded parent to be invalid,
+and no escrow to hold a reroute that never lands, an occurrence on the wrong
+session, or two entries sharing a nominal. Two more come from the root's own
+record: `nominalsAllocated` from `rootAllocated`, and `slotsAgree` from
+`rootSlotAgrees`, which §10.106 added after a reviewer noticed the theorem was
+taking that clause as a hypothesis instead. And `sharedInvariantHolds` comes from
+neither, but from `ExactInitialNetwork`'s own `sharedInvariantAtStart`, which is
+a field an author supplies — the theorem's own docstring below sets the three
+groups out in order.
 
 That makes the initial network a place a weave argument can start:
 `WeaveInvariantMixin.preserved_by_every_step` carries an invariant along any

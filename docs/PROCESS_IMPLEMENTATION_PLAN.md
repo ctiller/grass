@@ -5612,8 +5612,10 @@ have doubted from the statements alone.
 
 ### 10.142 The refuted claim came back in a section header, and a step now refuses it
 
-A ninth fresh reviewer, and the first to break something in the source rather
-than only in the prose about it. **No defect in a proof, for the ninth time**,
+A ninth fresh reviewer. Like several before it — §10.134's corpse-of-the-wrong-kind
+world, §10.135's refutation of the transported form, §10.139's stale section
+header — it broke something in the source and not only in the prose about it; an
+earlier version of this sentence called it the first, which §10.143 corrects. **No defect in a proof, for the ninth time**,
 but two findings that matter and one that costs a fixture.
 
 **The claim §10.133 calls literally false was restated in a section header, and
@@ -5622,18 +5624,25 @@ the reviewer built the counterexample.** The header over the step fixtures said
 "'There is no chain' into `sentWithDeadSender` was literally false — a `join` at
 a connection slot reaches it from a world already holding the dead root, since
 its scope never names the listener." The reviewer wrote that `join` and checked
-it. Worse, the header cited §10.133 in the same sentence, for exactly the
-step-versus-run distinction it was failing to draw, and offered
-`dying_was_supervised` as its justification — a theorem about steps that *kill*,
-which a `join` does not.
+it. Worse, the header cited §10.133 in its next sentence, for exactly the
+step-versus-run distinction it was failing to draw, and called the refusal "a
+theorem in the other direction" — which is either
+`sentWithDeadSender_is_no_world_of_a_run`, about *runs*, or
+`dying_was_supervised`, about steps that *kill*. Neither says no step reaches the
+world, and a `join` kills nothing.
 
 `the_corpse_is_collected` and `theJoinIntoTheDeadSender` are now fixtures, so
-restating the claim costs a build rather than a reviewer. That is the pattern
+refuting the claim again costs a build rather than a reviewer — no gate reads a
+section header, and §10.137 already says the prose is checked by nothing, so what
+changed is that the counterexample is now in the tree rather than in a review. That is the pattern
 worth generalising from this whole sequence: a sentence that a reviewer had to
 refute by writing Lean should become the Lean.
 
-**And §10.139's own repair was half done.** It reported that four "eight clauses"
-miscounts were "now phrased without a number". Deleting the word left "Six … The
+**And §10.139's own repair was half done.** Its commit message reported that four
+"eight clauses" miscounts now said it without a number — the phrase is the
+commit's, not §10.139's, which records only the miscount; an earlier version of
+this sentence put it in quotation marks and attributed it to the entry.
+Deleting the word left "Six … The
 remaining two" standing in one passage and six bullets plus "The other two" in
 the other, so the arithmetic still partitioned nine clauses into eight — and the
 ninth, `sharedInvariantHolds`, fits neither of the two categories the prose
@@ -5656,6 +5665,64 @@ token that opens a section comment inside a doc comment does not escape it: Lean
 nests doc comments, so the file stopped parsing. c-x86's stricter gate parses doc
 blocks with nesting for the same reason. The sentence describing the defect could
 not name the syntax it was about.
+
+### 10.143 The rule was ratified and broken in the same commit
+
+A tenth fresh reviewer. **No defect in a proof, for the tenth time.** Six
+findings, and the first is the sharpest thing this sequence has produced about
+itself.
+
+**§10.142 ratified a rule and its own commit broke it.** The header it rewrote
+now said "Every world in this file fails `ProcessPlan.UnkilledRootAt`". The file
+contains `sent_holds_an_unkilled_root`, and a docstring a hundred lines below
+says so in as many words — *"Nor is 'a world of no run' this file's norm —
+`World.withRoot` is a start, `theSendStep` reaches `sent` from it, and
+`sent_holds_an_unkilled_root` is above"*. That docstring exists because §10.136
+caught the identical over-reach ("like every other world in this file") and
+required it to be written. So the correction of an over-general sentence was an
+over-general sentence, twice, about the same file, with the remedy for the first
+sitting in view of the second.
+
+The scope word is what does it. "This section" is true and "this file" is false,
+and nothing about writing the sentence makes the difference salient. That is not
+a rule anyone can follow by resolving to be careful; it is why the fixtures
+matter and the prose does not carry weight on its own.
+
+**And the same commit lit the fuse §10.139 wrote the rule for.** Adding
+`deadSenderWithACorpseToCollect` made "none of the seven worlds below" an
+undercount and made the coverage sentence after it false, since the new world is
+neither named individually nor a `holding` world. It also arrived without the
+`*_is_no_world_of_a_run` and `no_run_reaches_*` pair its five siblings have —
+which is exactly the asymmetry §10.136 found for `sentWithLiveReceiver` and
+§10.137 fixed. Both are now written, and the sentence counts nothing.
+
+**Three claims about earlier rounds that the earlier entries refute.** §10.142
+called the ninth reviewer "the first to break something in the source"; §10.134's
+round built a wrong-kind world that made `UnkilledRootAt` vacuous, §10.135's
+machine-checked a Lean statement false and got a lemma deleted, and §10.139's
+found a stale header in Lean source — §10.139 says so in those words. §10.142
+also quoted §10.139 as reporting the miscounts "now phrased without a number";
+that phrase is a commit message's, and §10.139 reports no repair at all. And it
+said the header cited §10.133 "in the same sentence" and offered
+`dying_was_supervised`; it was the next sentence, and what it offered was "a
+theorem in the other direction", which names neither.
+
+**Two miscounts that predate the branch, in files it edits.**
+`instanceProperty_preserved`'s docstring said "the five clauses" and "five
+times"; there are four, and the module note forty lines above it *records that
+correction being made* — applied to the note and not to the declaration the note
+is about. And §10.142's repair of `Initial.lean` still partitioned nine clauses
+into eight: "Six … save `sharedInvariantHolds` … The remaining two" carves the
+ninth out of the six rather than adding it, and disagrees with the theorem
+docstring two hundred lines below, which gets it right.
+
+**What ten rounds have settled.** No round has found a defect in a proof. Every
+round has found a defect in prose, including every round whose subject was the
+previous round's prose. The three checks that are mechanical — resolve every
+backticked name with its prefix, measure every count, and search the claim's
+wording after a fix — catch most of it and are now run before each commit. What
+they do not catch is the scope word, and nothing except a reader has caught one
+yet.
 
 ## 11. The authoring facade
 
