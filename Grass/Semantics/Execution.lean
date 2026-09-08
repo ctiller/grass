@@ -31,6 +31,9 @@ structure RelationalSystem (Event : Type u) where
   extendsTrans : forall {a b c}, Extends a b -> Extends b c -> Extends a c
   stepExtends : forall {before state choice event next after},
     Step before state choice event next after -> Extends before after
+  /-- A state declared terminal admits no further relational transition. -/
+  terminalNoStep : forall {state graph}, Terminal state graph ->
+    forall {choice event next after}, ¬ Step graph state choice event next after
 
 namespace RelationalSystem
 
