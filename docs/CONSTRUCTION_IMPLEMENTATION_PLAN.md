@@ -265,6 +265,13 @@ missing check and any additional missing obligations. `Raw.map` and
 cannot contain a certificate type, and the unsafe namespace exposes no
 taint-removal or certificate constructor.
 
+`Grass.Unsafe.Import` uses the existing x86 decoder, preserves the exact decode
+result through `importOne_decode`, and rejects empty or duplicate indirect target
+accounts. Target bases distinguish annotations, relocations, and analyses, but
+the imported instruction deliberately retains `MissingCheck.controlTargets`
+until a construction-side proof connects those claimed targets to instruction
+semantics and CFG closure.
+
 Exit criteria include round trips for supported raw instructions, structured
 errors for unknown/ambiguous bytes and targets, exact stepping agreement with
 `Grass.Op.step`, and exact byte/list input passed to the artifact writer.
