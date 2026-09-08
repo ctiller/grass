@@ -66,6 +66,17 @@ example : readGobjSection (Vec.fromList [0, 0, 0, 0, 0, 8]) =
 example : readGobjSection (Vec.fromList [0, 0, 0, 0, 0, 0, 1, 0]) =
     .invalid (.malformed "nonzero .gobj section reserved field") := by rfl
 
+/-- A missing profile tag also accounts for the mandatory contents length. -/
+example : readGobjSection
+    (Vec.fromList [0, 0, 0, 0, 0, 0, 0, 0]) =
+    .needMore (some 5) := by rfl
+
+/-- A partial relocatable profile accounts for its remaining nominal field,
+version, and the section contents length. -/
+example : readGobjSection
+    (Vec.fromList [0, 0, 0, 0, 0, 0, 0, 0, 1, 100, 0, 0, 0]) =
+    .needMore (some 112) := by rfl
+
 theorem singleton_countFits : (Vec.singleton entry).length < 2 ^ 32 := by decide
 
 def table : GobjSectionTable := ⟨Vec.singleton entry, singleton_countFits⟩
@@ -80,6 +91,19 @@ example : readGobjSectionTable (writeGobjSectionTable table ++ suffix) =
 
 example : readGobjSectionTable (Vec.fromList [2, 0, 0, 0]) =
     .needMore (some 26) := by rfl
+
+/-- A malformed first entry is irrecoverable even when later entries are wholly
+absent; the table count must not mask the bad alignment byte. -/
+example : readGobjSectionTable
+    (Vec.fromList [2, 0, 0, 0, 0, 0, 0, 0, 32]) =
+    .invalid (.malformed
+      ".gobj section alignment exponent exceeds 31") := by rfl
+
+/-- The deficit includes the selected name payload and every mandatory field
+that follows it in the smallest section entry. -/
+example : readGobjSectionTable
+    (Vec.fromList [1, 0, 0, 0, 100, 0, 0, 0]) =
+    .needMore (some 109) := by rfl
 
 theorem table_lengthFits : (writeGobjSectionTable table).length < 2 ^ 32 := by
   rw [length_writeGobjSectionTable]

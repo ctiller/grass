@@ -59,7 +59,7 @@ def readGobjNominalId (input : Std.Logical.ByteArray) : ParseResult GobjNominalI
     | .done localName suffix => .done { owner, localName } suffix
     | .needMore hint => .needMore hint
     | .invalid error => .invalid error
-  | .needMore hint => .needMore hint
+  | .needMore hint => requireAfter 4 (.needMore hint)
   | .invalid error => .invalid error
 
 @[simp] theorem readGobjNominalId_write_append (id : GobjNominalId)

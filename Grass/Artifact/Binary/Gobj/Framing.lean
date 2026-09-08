@@ -12,6 +12,19 @@ namespace Grass.Artifact.Binary.Gobj
 
 open Grass.Artifact.Binary Grass.Grammar Grass.Std.Logical
 
+universe u
+
+/-- Add bytes that are unconditionally required after the currently incomplete
+field. Unknown requirements remain unknown, while successful and invalid
+results are unchanged. -/
+def requireAfter {α : Type u} (minimumAfter : Nat) :
+    ParseResult α → ParseResult α
+  | .done value suffix => .done value suffix
+  | .needMore (some minimumAdditional) =>
+      .needMore (some (minimumAdditional + minimumAfter))
+  | .needMore none => .needMore none
+  | .invalid error => .invalid error
+
 /-- Bytes whose length is representable by the `.gobj` 32-bit framing field. -/
 structure U32LengthPrefixedBytes where
   bytes : Std.Logical.ByteArray

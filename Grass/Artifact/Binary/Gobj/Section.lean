@@ -61,9 +61,9 @@ def readGobjSectionProfile (input : Std.Logical.ByteArray) :
             .done (.relocatable { owner, name, version }) suffix
           | .needMore hint => .needMore hint
           | .invalid error => .invalid error
-        | .needMore hint => .needMore hint
+        | .needMore hint => requireAfter 4 (.needMore hint)
         | .invalid error => .invalid error
-      | .needMore hint => .needMore hint
+      | .needMore hint => requireAfter 8 (.needMore hint)
       | .invalid error => .invalid error
     else .invalid (.malformed "unknown .gobj section profile tag")
   | .needMore hint => .needMore hint
@@ -175,20 +175,20 @@ def readGobjSection (input : Std.Logical.ByteArray) : ParseResult GobjSection :=
                     .done { name, alignment, permissions, profile, contents } suffix
                   | .needMore hint => .needMore hint
                   | .invalid error => .invalid error
-                | .needMore hint => .needMore hint
+                | .needMore hint => requireAfter 4 (.needMore hint)
                 | .invalid error => .invalid error
               else
                 .invalid (.malformed
                   "nonzero .gobj section reserved field")
-            | .needMore hint => .needMore hint
+            | .needMore hint => requireAfter 5 (.needMore hint)
             | .invalid error => .invalid error
           | .error error => .invalid error
-        | .needMore hint => .needMore hint
+        | .needMore hint => requireAfter 7 (.needMore hint)
         | .invalid error => .invalid error
       | .error error => .invalid error
-    | .needMore hint => .needMore hint
+    | .needMore hint => requireAfter 8 (.needMore hint)
     | .invalid error => .invalid error
-  | .needMore hint => .needMore hint
+  | .needMore hint => requireAfter 9 (.needMore hint)
   | .invalid error => .invalid error
 
 /-- `length_writeGobjSection` gives the exact section-entry width. -/
@@ -266,7 +266,7 @@ def readGobjSectionList : Nat → Std.Logical.ByteArray →
       | .done entries suffix => .done (entry :: entries) suffix
       | .needMore hint => .needMore hint
       | .invalid error => .invalid error
-    | .needMore hint => .needMore hint
+    | .needMore hint => requireAfter (13 * count) (.needMore hint)
     | .invalid error => .invalid error
 
 /-- `readGobjSectionList_write_append` parses a canonical section list exactly
@@ -296,26 +296,24 @@ def writeGobjSectionTable (table : GobjSectionTable) :
   writeLittleEndian (count := 4) (BitVec.ofNat 32 table.entries.length) ++
     writeGobjSectionList table.entries.toList
 
-/-- Parse a section table after checking its minimum possible byte extent. -/
+/-- Parse a section table entry by entry. Recursion advances only after an entry
+has consumed at least thirteen bytes, so work is bounded by available input. -/
 def readGobjSectionTable (input : Std.Logical.ByteArray) :
     ParseResult GobjSectionTable :=
   match takeLittleEndian 4 input with
   | .done count rest =>
-    if _minimumFits : 13 * count.toNat ≤ rest.length then
-      match readGobjSectionList count.toNat rest with
-      | .done entries suffix =>
-        if countExact : entries.length = count.toNat then
-          .done {
-            entries := Vec.fromList entries
-            countFits := by
-              simp only [Vec.length_fromList, countExact]
-              simpa using BitVec.isLt count } suffix
-        else
-          .invalid (.malformed ".gobj section-count mismatch")
-      | .needMore hint => .needMore hint
-      | .invalid error => .invalid error
-    else
-      .needMore (some (13 * count.toNat - rest.length))
+    match readGobjSectionList count.toNat rest with
+    | .done entries suffix =>
+      if countExact : entries.length = count.toNat then
+        .done {
+          entries := Vec.fromList entries
+          countFits := by
+            simp only [Vec.length_fromList, countExact]
+            simpa using BitVec.isLt count } suffix
+      else
+        .invalid (.malformed ".gobj section-count mismatch")
+    | .needMore hint => .needMore hint
+    | .invalid error => .invalid error
   | .needMore hint => .needMore hint
   | .invalid error => .invalid error
 
@@ -334,14 +332,6 @@ exactly and preserves every following suffix. -/
   have countEq : (BitVec.ofNat 32 table.entries.length).toNat =
       table.entries.length := by
     rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt table.countFits]
-  have minimumFits :
-      13 * (BitVec.ofNat 32 table.entries.length).toNat ≤
-        (writeGobjSectionList table.entries.toList ++ suffix).length := by
-    rw [countEq, Vec.length_append, length_writeGobjSectionList]
-    change 13 * table.entries.toList.length ≤
-      gobjSectionListLength table.entries.toList + suffix.length
-    exact Nat.le_trans (minLength_gobjSectionList table.entries.toList)
-      (Nat.le_add_right _ _)
   have parsedEntries :
       readGobjSectionList (BitVec.ofNat 32 table.entries.length).toNat
           (writeGobjSectionList table.entries.toList ++ suffix) =
@@ -355,7 +345,6 @@ exactly and preserves every following suffix. -/
   unfold readGobjSectionTable writeGobjSectionTable
   rw [Vec.append_assoc, takeLittleEndian_writeLittleEndian_append]
   simp only
-  rw [dif_pos minimumFits]
   rw [parsedEntries]
   simp only
   rw [dif_pos countExact]
