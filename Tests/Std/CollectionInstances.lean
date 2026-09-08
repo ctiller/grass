@@ -111,7 +111,7 @@ gap.
 concatenation laws over `++`. A goal naming the underlying definition instead
 reaches none of them. That is a naming observation rather than a missing law --
 the laws cover each operation as consumers write it, no module in the tree names
-these forms in code, and `Tools/CoverageAudit.lean` exempts `Vec.append` on
+these forms in code, and the observation-coverage audit exempts `Vec.append` on
 exactly this ground. `Bag.append` and `Bag.Mem` are `protected` so the second
 spelling stays out of reach of an `open`.
 
