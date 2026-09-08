@@ -129,7 +129,7 @@ encoders and the four declarations relating unwind code offsets to them. The
 gate's own message prescribes this path, and the alternative was worse --
 `notBehaviour` is a permanent claim and these model the ISA squarely.
 -/
-def owedBaseline : Nat := 151
+def owedBaseline : Nat := 152
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -565,6 +565,12 @@ def owed : List Name :=
     `Grass.ISA.X86.Gpr.index, `Grass.ISA.X86.Gpr.encodingBits,
     `Grass.ISA.X86.Gpr.isExtended, `Grass.ISA.X86.Gpr.rexBit,
     `Grass.ISA.X86.Width.bits, `Grass.ISA.X86.Width.default64BitMode,
+    -- The opcode-indexed refinement of `default64BitMode`, and owed for the
+    -- same reason it is: Intel SDM Vol. 2A section 2.2.1.7 states which
+    -- instructions default to a 64-bit operand size, and no citation is
+    -- attached to either yet. It carries more external behaviour than the
+    -- constant, not less, since it also encodes the far-branch exclusion.
+    `Grass.ISA.X86.operandSizeDefault?,
     `Grass.ISA.X86.ModRm.modRegisterDirect, `Grass.ISA.X86.ModRm.modNoDisplacement,
     `Grass.ISA.X86.ModRm.modDisp8, `Grass.ISA.X86.ModRm.modDisp32,
     `Grass.ISA.X86.ModRm.rmSelectsSib, `Grass.ISA.X86.ModRm.rmSelectsRipRelative,

@@ -235,13 +235,90 @@ and `66` gives them 16 bits rather than 32.
 That is not a detail. `Grass/ISA/X86/Bytes.lean`'s `callMem64` sets `w := false`
 because `FF /2` is a near branch, and `Spikes/1_Hello_World/Program.lean` opens
 with three `push` instructions, which reference RSP implicitly. Both are in the
-second group, and neither fact is derivable from this constant — which is why
-this is a `Width` and not a function of the opcode. Making it opcode-indexed is
-an **open obligation**; the anchor above is confirmed, the model is not yet
-built. -/
+second group, and neither fact is derivable from this constant, which is why
+this is a `Width` and not a function of the opcode.
+
+`operandSizeDefault?` below is the opcode-indexed model this recorded as owed,
+and building it turned up something the obligation did not anticipate: the
+opcode byte is not enough either. `FF` carries a near call, a far call, a near
+jump, a far jump, `push r/m`, `inc` and `dec`, and the manual's sentence puts
+them in three different places, so the model is indexed by opcode *and*
+`/digit`. Both facts named above are now derivable from it, and
+`Tests/ISA/X86/OperandSizeDefault.lean` derives them.
+
+This constant stays, because `operandSizeDefault?` answers `standard` by
+naming it rather than by repeating `.w32`. What remains owed is coverage: the
+model refuses an opcode it does not know rather than guessing, so an
+instruction outside this profile gets `none` and no answer at all. -/
 def default64BitMode : Width := .w32
 
 end Width
+
+/-! ## Default operand size, indexed by the opcode
+
+`Width.default64BitMode` answers for the instructions that follow the rule.
+This answers for the ones that do not, which is the model its docstring records
+as owed.
+-/
+
+/-- What operand size an instruction takes in 64-bit mode with no `REX.W` and
+no `66` prefix.
+
+Two values rather than a `Width`, because the distinction is not "32 or 64" but
+"follows the default or overrides it": an instruction in the second group also
+reads `66` differently, taking 16 bits where a `standard` instruction would take
+32. Naming the rule rather than the resulting width keeps that second fact
+attached to the first. -/
+inductive OperandSizeDefault where
+  /-- 32 bits, unless `REX.W` says otherwise. `Width.default64BitMode`. -/
+  | standard
+  /-- 64 bits with no `REX.W` needed, and `66` selects 16 rather than 32. -/
+  | sixtyFour
+deriving DecidableEq, Repr, Inhabited
+
+/--
+The default operand size of an opcode, or `none` if this profile does not model
+it.
+
+Intel SDM Vol. 2A section 2.2.1.7 names the second group exactly: near branches,
+and "all instructions, except far branches, that implicitly reference the RSP".
+Both halves of that sentence are load-bearing here.
+
+**The `/digit` is not optional for group opcodes, and that is why this takes
+one.** `FF` is the case that defeats an opcode-indexed table: `/2` is a near
+call and `/4` a near jump, both in the first group; `/6` is `push r/m`, in the
+second; `/3` and `/5` are the far forms the manual's parenthetical excludes;
+and `/0` and `/1` are `inc` and `dec`, ordinary instructions. One opcode byte,
+three different answers. Asking about `FF` without a digit returns `none`
+rather than a guess, so the ambiguity cannot be answered by accident.
+
+**`none` also covers every opcode outside this profile.** Returning `standard`
+for an unrecognised byte would be a guess in the direction that silently drops
+a `REX.W` an instruction needed, so the unmodeled case is refused instead. The
+opcodes listed are the ones `Grass.ISA.X86.opcodeTable` decodes, plus the rest
+of the RSP-implicit group, which is where the second group's members live.
+-/
+def operandSizeDefault? (escape : Bool) (opcode : BitVec 8)
+    (digit : Option (BitVec 3)) : Option OperandSizeDefault :=
+  let b := opcode.toNat
+  if escape then
+    if 0x80 ≤ b && b ≤ 0x8F then some .sixtyFour
+    else if b = 0x0B || b = 0xBC then some .standard
+    else Option.none
+  else if 0x50 ≤ b && b ≤ 0x5F then some .sixtyFour
+  else if b = 0xE8 || b = 0xE9 || b = 0xEB then some .sixtyFour
+  else if b = 0xC2 || b = 0xC3 || b = 0xC9 || b = 0x68 || b = 0x6A then
+    some .sixtyFour
+  else if b = 0xFF then
+    match digit with
+    | Option.none => Option.none
+    | some d => if d = 2 || d = 4 || d = 6 then some .sixtyFour
+                else some .standard
+  else if b = 0x8D || b = 0xC7 || b = 0x89 || b = 0x8B || b = 0x85 || b = 0x39 ||
+      b = 0x01 || b = 0x29 || b = 0x31 || b = 0x87 || b = 0x81 || b = 0x83 ||
+      b = 0x90 || b = 0xB0 || b = 0xB4 || (0xB8 ≤ b && b ≤ 0xBF) then
+    some .standard
+  else Option.none
 
 /--
 What a write of `w` bits leaves in the rest of the 64-bit register.
