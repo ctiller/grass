@@ -67,6 +67,26 @@ def selected : LoopSelection Nat Terminal where
 
 example : selected.WellFormed := by decide
 
+example : selected.graph.WellFormed :=
+  selected.graphWellFormed_of_wellFormed (by decide)
+
+example : selected.selectedIds = selected.graph.discoveredLoopIds :=
+  selected.selectedIds_eq_discoveredLoopIds_of_wellFormed (by decide)
+
+example : selected.selectedIds.Nodup :=
+  selected.selectedIdsNodup_of_wellFormed (by decide)
+
+example : selected.findObligation? (blockId "header") = some headerObligation := by
+  rfl
+
+example : ∃ obligation,
+    selected.findObligation? (blockId "done") = some obligation :=
+  selected.obligationForRegion (blockId "done") (by decide)
+
+example : selected.findObligation? (blockId "header") = some headerObligation :=
+  selected.findObligation?_eq_some_of_mem (blockId "header") headerObligation
+    (by decide) (by simp [selected]) rfl
+
 def structurallySelectedOnly : LoopSelection Nat Terminal where
   graph := graph
   selected := [
