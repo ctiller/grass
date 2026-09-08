@@ -6,22 +6,11 @@ other agents; it does not authorize it. Every item here becomes a bus issue or
 dependency against the owning agent, and the owning agent's own implementation
 plan is authoritative for how the item is done.
 
-The drafts in `Spikes/` are the current reviewed authoring baseline, not frozen
-specifications. The precious specification is expected to change when adequacy
-review finds that it accepts the wrong behavior, omits a required case, or
-prescribes an implementation choice. The displayed assembly and proof surface
-may likewise be rebuilt when a real consumer shows that the guessed library
-boundary is uneconomic. What this plan protects is the distinction: a library
-must not make a specification weaker or silently move its work into bespoke
-spike ceremony merely to make the current draft elaborate. Every proposed
-change says whether it repairs product meaning, repairs the reusable authoring
-surface, or changes a replaceable realization, and review follows that change
-through the exact vertical theorem chain.
-
-The question this document answers is therefore "what has to exist underneath
-the current authored baseline, and what evidence tells us to rebuild that
-baseline?" It never turns an early spelling into authority over the behavior
-the program should have.
+The drafts in `Spikes/` are the product of a long design iteration and are
+treated here as fixed. The question this document answers is not "what should
+the author type" -- that is settled, and re-opening it is the failure mode this
+plan exists to prevent. It is "what has to exist underneath so that what the
+author already types is what the author keeps typing".
 
 ## 1. The governing constraint
 
@@ -43,56 +32,6 @@ And `Spikes/` is in no `lakefile.toml` target, so no build gate notices when a
 library change falsifies a drafted import. That is a gap in the build, not a
 missing instrument: the fix is to put the corpus in the build once it can
 compile, which is what section 5 argues and P1 schedules.
-
-### 1.1 The first proof-economy gate is a consumer
-
-Local declarations, green library modules, and plausible automation names do
-not establish proof economy. The first measured implementation is the smallest
-compiling Spike 1 path from its precious specification through its authored
-assembly to the exact emitted artifact theorem. A path containing a temporary
-bridge is explicitly `provisional`: it earns no proof-economy or reuse credit
-until every bridge is discharged, and it cannot satisfy either this gate or the
-final `VerifiedProgram` gate.
-
-The complete initially permitted bridge classes are memory call-frame/loan
-laws, ISA encoder/decoder closure, ABI call-frame/unwind closure, platform-call
-outcome semantics, and artifact writer/linker exactness. Each bridge names one
-direct bus dependency targeted at its owner, the exact substitute contract, every theorem it
-temporarily excludes, and its removal gate in that owner's active roadmap. A
-bridge outside this set, a bridge without a live dependency and scheduled
-removal gate, or a report that counts bridged work as verified is rejected.
-
-That vertical path emits the `VerticalProofEconomyReportV1` owned by
-[`IMPLEMENTATION_RATCHET.md`](IMPLEMENTATION_RATCHET.md), recording separately:
-
-- one-time reusable library work;
-- everything authored specifically for the program, including proofs,
-  annotations, adapters, invariants, layout declarations, and build wiring;
-- residual goals and the declarations that discharge them;
-- the rebuild cone for an ordinary specification edit, assembly edit, and
-  layout-only edit; and
-- declarations or wrappers built in anticipation but not consumed by the path.
-
-The report maps each referenced declaration to the six authority categories in
-[`SPIKE_PROOF_BURDEN.md`](SPIKE_PROOF_BURDEN.md); it does not invent a second
-classification. Reuse earns proof-economy credit only when a second real
-consumer imports the
-same checked boundary without bespoke repair. A public helper with no named
-consumer is not automatically wrong, but it must either be a necessary
-foundation constructor with a stated future gate present as a milestone in an
-active owner roadmap, be kept private to its
-implementation shard, or be deleted when the consumer demonstrates it is the
-wrong abstraction. Similar-looking induction machinery in two layers is
-consolidated only when their semantic carriers and intended invalidation cones
-are genuinely the same; textual resemblance is not sufficient reason to add a
-third generalized framework.
-
-This gate is deliberately qualitative before it is quantitative. It does not
-impose a line-count quota or weaken a theorem demand. It makes the actual
-author burden, diagnostics, and rebuild behavior visible early enough to change
-the library design. In Grass, **rebuild is the verb**: evidence from the first
-consumer is permission to delete a poor replaceable shape and rebuild it around
-the stable specification boundary.
 
 ## 2. What the drafts demand, measured
 
