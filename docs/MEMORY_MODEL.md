@@ -307,6 +307,17 @@ fixtures cover denial before a declared fault, an invalid fault index, and a
 post-denial access that must not run. Positive fixtures cover a fault at the
 exact attempted substep and every declared partial-completion frontier.
 
+Not every declared subeffect may be separated by a frontier. The owning
+protocol identifies coupled commit groups, including an authority acquisition
+or transfer and the obligation delta that installs its matching duty. Every
+visible prefix is closed under that pairing: both members commit at the same
+linearization point or neither does. The same rule couples a release with the
+delta discharging its duty. A profile that places an acquiring write before its
+release obligation is malformed and rejected, even when each member would be
+well formed and applicable in isolation. The mandatory frontier fixtures include
+that rejected schedule and controls for a fault before and after a correctly
+paired group.
+
 An external contract violation terminates modeled assurance at that boundary:
 the prior prefix remains proved, while no post-boundary functional claim is
 made. A real model/hardware discrepancy invalidates the affected profile and
