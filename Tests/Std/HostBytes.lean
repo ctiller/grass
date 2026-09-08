@@ -87,4 +87,37 @@ example :
     (Vec.fromList [0x00, 0x7F, 0x80, 0xFF] : Grass.Std.Logical.ByteArray).toHostBytes.data.toList
       = [0x00, 0x7F, 0x80, 0xFF] := rfl
 
+/-! ## The empty crossing, which `simp` could not reach
+
+`Vec.toHostBytes_append` and `Vec.ofHostBytes_append` are the inductive step of a
+homomorphism in both directions. Its base case was absent until these laws, and
+the absence was invisible: both statements are `rfl`, so nothing failed to
+elaborate and no proof anywhere was wrong — a goal about an empty crossing simply
+stopped, with `simp` reporting no progress on a statement true by definition.
+
+Found by writing the goal a consumer writes rather than by reading the module,
+which is the method `docs/STDLIB_IMPLEMENTATION_PLAN.md` §3.13 argues for and the
+same one that found `Vec.get?_push`.
+-/
+
+example : Vec.toHostBytes (Vec.empty : Vec Byte) = _root_.ByteArray.empty := by simp
+
+example : Vec.ofHostBytes _root_.ByteArray.empty = (Vec.empty : Vec Byte) := by simp
+
+/-! Through the notation, which is how a consumer writes it and how the gap was
+found: the `Vec.emptyCollection_eq_empty` bridge fires and then, before these
+laws, nothing did. -/
+
+example : Vec.toHostBytes (∅ : Vec Byte) = _root_.ByteArray.empty := by simp
+
+example : Vec.ofHostBytes _root_.ByteArray.empty = (∅ : Vec Byte) := by simp
+
+/-! Composing with the step, which is the point of having both: a fold over runs
+that reaches the empty run now closes rather than stranding. -/
+
+example (a : Vec Byte) : Vec.toHostBytes (a ++ Vec.empty) = Vec.toHostBytes a := by simp
+
+example (x : _root_.ByteArray) :
+    Vec.ofHostBytes x ++ Vec.ofHostBytes _root_.ByteArray.empty = Vec.ofHostBytes x := by simp
+
 end Grass.Tests.Std.Host
