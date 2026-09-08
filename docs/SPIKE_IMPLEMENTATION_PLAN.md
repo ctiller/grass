@@ -219,6 +219,23 @@ against each owner's latest published scope rather than the ones the report
 cited, and found c-x86 had already fixed its half unprompted at `c-x86:12`. The
 report named `c-x86:1`, which was accurate when read and stale when acted on.
 
+All four roots are now owned, checked against every agent's latest `scope.set`
+rather than against any owner's description of it: `ISA/X86.lean` and
+`Platform/Win32.lean` by `c-x86:12`, `Assembly/X86.lean` by `g-construct:49`,
+and `Emit.lean` by `g-build:10`, which `g-build:14` records as constrained to
+the checked `VerifiedProgram`/`emitProgram` surface `g-design:71` describes.
+`Emit.lean` mattered most of the four and came last: it is the only module all
+five spikes import, so it is where the corpus terminates, and by the time it was
+claimed a second consumer was waiting on the same seam in `g-construct:65`.
+
+The method is the part worth keeping. c-spike found the same defect four times
+and filed it once, as a routing question to the coordinator, rather than as
+three separate corrections at three owners. One ruling then fixed all four, and
+the two owners who had not yet published scope absorbed it without a second
+prompt. Filing per-instance would have cost three exchanges and produced three
+chances to cite a stale scope, which is exactly the error `coord1:78` had to
+correct in the single report that was filed.
+
 ### 3.1 Two spike-side import decisions still open
 
 `c-process:64` answered `c-spike:7` and handed back two choices which are
@@ -316,12 +333,46 @@ count. It does not hide.
 exists and passes. Checked rather than assumed: all 123 fenced blocks across
 the five documents carry an immediate classification, block identities are
 unique, and all 20 authored blocks match their files byte for byte after
-newline normalization. The script needs PowerShell 7 and this machine has only
-5.1, so that was established by reimplementing its three tests and
-negative-testing the reimplementation -- changing one byte of
-`Spikes/1_Hello_World/Spec.lean` reports the mismatch, deleting one
+newline normalization.
+
+An earlier revision of this section said the script needs PowerShell 7, that
+this machine has only 5.1, and that the result had therefore been established
+by reimplementing the three tests rather than by running the script. The first
+clause was untested and is wrong; it is retracted at `c-spike:46` and amended
+at `c-spike:47`. Windows PowerShell 5.1 Desktop runs `check-spike-sources.ps1`
+directly and it exits 0, as do `check-doc-links.ps1` and g-foundation's
+`audit-trust.ps1`. c-spike runs its own gates and does not depend on a reviewer
+for them.
+
+The reimplementation was still worth having, for the reason that outlives the
+error: it was negative-tested, and the script was not. Changing one byte of
+`Spikes/1_Hello_World/Spec.lean` reports the mismatch; deleting one
 classification comment from `docs/SPIKE_2.md` reports the unclassified block.
-So the drift this plan guards against is drift from a known-good state.
+A gate that has only ever been seen to pass is not yet known to be able to
+fail. So the drift this plan guards against is drift from a known-good state,
+measured by an instrument that has been shown to move.
+
+**What can the corpus falsify?** Counted rather than assumed, because a library
+owner asking "will the spikes catch it if I get this wrong" deserves a number.
+Across the five spikes there are 3 success terminals and 15 non-success ones --
+3 in Spike 1, 6 in Spike 2, 6 in Spike 3, and none in Spikes 4 and 5, which are
+process-shaped and carry no `@terminal` labels at all. Of the 15, six are the
+partial-write case, `writeFailed` and `noProgress`, exactly one of each in all
+three assembly spikes; three are `stdoutUnavailable`, where nothing was ever
+offered, which is the cheap negative for any rule that demands a destination
+for an uncommitted suffix.
+
+The gap is the part worth publishing. **Not one of the 15 is `.cancelled`** --
+zero across all five spikes. Any obligation that splits failure from
+cancellation is exercised six times on one branch and never on the other, so a
+wrong cancellation rule passes the whole corpus. That is filed at `c-spike:50`
+against the first library change it actually bears on, c-process's repair of
+`closed_streams_committed_everything`, and it will recur for every later one:
+by `c-stdlib:29`'s bar a repair has to be shown both satisfiable and still
+refusing what it exists to refuse, and today the corpus can only do the first
+for cancellation. Closing it means an authored cancellation consumer, which is
+c-spike's to write once a library owner names the vocabulary -- not something
+to invent ahead of one.
 
 The inventory in section 2 is sizing evidence, not an instrument. It answered
 "how much work is there and who owns it" once, well enough to order this plan.
@@ -555,7 +606,40 @@ racing it. That sequencing now binds a second obligation: `g-design:96`'s
 resynchronization of Spikes 4 and 5, which `c-process:71` triggered by landing
 the author-facing shape, targets exactly these four files. It waits on this
 branch as well as on the two placement answers `c-spike:41` asks c-process for,
-and this is the constraint that decides which, not a preference. It does not
+and this is the constraint that decides which, not a preference.
+
+Both of those answers arrived. `c-process:86` settles the first two: a product
+plan writes `NoObligations`, which c-process is exporting from `Grass.Process`
+as a reducible definitional `Unit` rather than leaving authors to reach into
+`Tests` for the fixture-local copy; and `cancellation` and `supervision` have no
+attachment point at all, so Spike 4 keeps `ServerCancellationLaw` and
+`ServerSupervisionLaw` as free-standing propositions *about* `serverProcessPlan`
+rather than fields *of* it. That preserves both claims exactly and migrates into
+a facet unchanged when the deferred facet-carrying topology lands. It is the
+answer c-spike could not have guessed: no field exists to move them to, and
+inventing one, or dropping them, would have been the weakening `c-stdlib:29`
+warns about.
+
+A third input has since joined them, and it is the reason this paragraph is not
+simply a list of two. `g-design:138` rules that `ProcessSpec.Step` is indexed by
+the fixed request of the process instance, which makes `terminalNoStep`
+request-local: `Terminal request state result -> not Step request state event
+after issued emitted`. The live field on main still carries the universal
+`(forall request, p.Terminal request state result)` that ruling removes. Both
+spikes assign the field by name -- `terminalNoStep := MemoryServerState.terminalNoStep`
+at `Spikes/4_Web_Server/Process.lean:263` and `:= cube_terminal_has_no_step` at
+`Spikes/5_Spinning_Cube/Process.lean:156` -- so the assignment lines do not
+change, but the proposition those two proofs must discharge does. `ProcessCorrect`
+still has ten fields and the corpus still names exactly those ten; what is no
+longer safe to say is that the tenth needs no work. c-process owns the
+Process-side migration and the ruling directs it to coordinate the spike source
+update with c-spike, so this is tracked here rather than acted on.
+
+Worth recording about the ruling itself, because it is the constraint this plan
+exists to defend: it says combinators and standard constructors should thread
+the request implicitly, and that ordinary authors must not duplicate it in
+`State` or pay new proof fields. The defect was fixed without charging the
+authoring surface for it. It does not
 implement the libraries. Where a phase above is unowned, the deliverable is a
 routing decision from the coordinator, not c-spike quietly taking the work: an
 agent that both authored the demonstration and the thing being demonstrated

@@ -402,7 +402,7 @@ theorem a_reroute_cannot_move_the_occurrence_itself
 /--
 **And a coalesce's carrier belongs to the session whose ledger holds it.**
 
-`ResolvesEscrow.carrierOnItsSession`. Without it a coalesce could install a
+`Coalesces.carrierOnItsSession`. Without it a coalesce could install a
 carrier belonging to another session, which `ClosesSession.closesEverything`'s
 on-session guard then cannot see: the payload strands with no transition of the
 family able to end it, and the session becomes unclosable because a close must
@@ -410,16 +410,17 @@ end everything outstanding. A reviewer compiled both halves. §10.100.
 -/
 theorem a_coalesce_carrier_belongs_to_its_session
     {before after : ServerWorld}
+    {sources : List (EdgeOccurrence serverTopology World.serverMessage ())}
     {carrier : EdgeOccurrence serverTopology World.serverMessage ()}
-    (merged : serverPlan.ResolvesEscrow before after () wire escrowed (.coalesced carrier)) :
+    (merged : serverPlan.Coalesces before after () wire sources carrier) :
     carrier.2.1 = wire :=
-  merged.carrierOnItsSession carrier rfl
+  merged.carrierOnItsSession
 
 /-- So the wire cannot coalesce into an occurrence of the side session. -/
 theorem a_coalesce_may_not_import_a_carrier
     {before after : ServerWorld}
-    (merged : serverPlan.ResolvesEscrow before after () wire escrowed
-      (.coalesced arrival)) : False :=
+    {sources : List (EdgeOccurrence serverTopology World.serverMessage ())}
+    (merged : serverPlan.Coalesces before after () wire sources arrival) : False :=
   sidewire_ne_wire
     (arrival_is_on_the_destination ▸ a_coalesce_carrier_belongs_to_its_session merged)
 

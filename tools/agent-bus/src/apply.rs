@@ -159,7 +159,33 @@ fn topological_order(streams: &BTreeMap<Agent, Vec<Envelope>>) -> AbResult<Vec<&
                 d.push(events[i - 1].id.clone());
             }
             for r in e.refs.iter() {
-                if r.agent() != e.agent {
+                // Only events actually present here become ordering edges.
+                //
+                // A reference this host cannot resolve used to leave its
+                // referrer permanently un-ready, so the sort never completed
+                // and `reduce` returned `Err` -- taking down `status`, `tail`
+                // and `coordinate` for every agent at once. There are two
+                // ordinary ways to reach that:
+                //
+                //  - a partial fetch. Reducing a prefix is normal, and a host
+                //    that has not yet fetched some agent's stream must still
+                //    be able to read the bus.
+                //  - a published event naming an id that does not exist, as
+                //    `e-auditor:10` did (`c-reviewer:100`, one past that
+                //    stream's tip). The log is append-only, so nothing
+                //    published later can withdraw it: an outage of this shape
+                //    is permanent and fleet-wide.
+                //
+                // Dropping the edge is not a weakening. Ordering exists to
+                // make a referrer follow what it references *when both are
+                // present*; whether a referenced event exists at all is a
+                // separate question, and the handlers that genuinely need one
+                // already check for it and fail with a specific, local
+                // message rather than a whole-bus failure. Gate 4 enforces
+                // frontier coverage at submission, which is where a
+                // fabricated reference belongs caught. Cycles among events
+                // that *are* present are still detected below.
+                if r.agent() != e.agent && by_id.contains_key(r) {
                     d.push(r.clone());
                 }
             }
@@ -202,9 +228,7 @@ fn topological_order(streams: &BTreeMap<Agent, Vec<Envelope>>) -> AbResult<Vec<&
         }
     }
     if order.len() != by_id.len() {
-        return Err(invalid(
-            "event dependency graph has a cycle or an unresolvable reference",
-        ));
+        return Err(invalid("event dependency graph has a cycle"));
     }
     Ok(order.into_iter().map(|id| by_id[&id]).collect())
 }
@@ -1944,20 +1968,38 @@ fn apply_review_reassigned(
     if !is_author {
         require_bootstrap_coordinator(state, &env.agent)?;
     }
-    let still_open: std::collections::BTreeSet<(EventId, String)> = chain
-        .findings
-        .iter()
-        .filter(|(_, f)| f.disposition == FindingDisposition::Open)
-        .map(|(k, _)| k.clone())
-        .collect();
+    // Only the half that is a pure function of the payload is checked here:
+    // no finding may be inherited twice. The *equality* against the chain's
+    // still-open set is asked at publication, by
+    // `coordinator::verify_review_reassignment_inherits_open_findings`.
+    //
+    // This took the fleet down. `g-construct:114` reassigned a nomination
+    // carrying `inherited_findings: []`, which was true when it published.
+    // Hours later `c-reviewer` accepted the nomination that had been
+    // reassigned away and filed findings against it, and those findings made
+    // that empty set retroactively false. Reduction then rejected an
+    // immutable, already-published event, and with no per-event isolation in
+    // `reduce` that is `status`, `tail` and `coordinate` down for every
+    // agent -- with no way out, because clearing the findings requires
+    // publishing and publishing was down.
+    //
+    // The still-open set is not something this event can be held to during
+    // replay: `chain.findings` is moved by `review.changes_requested` and
+    // `review.finding_disposed` on other agents' streams, which a
+    // reassignment neither references nor need have observed. An event
+    // validated at publication cannot be re-validated later against state
+    // that has moved underneath it.
+    //
+    // Dropping it costs no reduced state: `confirm_review_reassigned` never
+    // reads `inherited_findings`.
     let inherited: std::collections::BTreeSet<(EventId, String)> = d
         .inherited_findings
         .iter()
         .map(|f| (f.changes_event.clone(), f.finding_id.as_str().to_string()))
         .collect();
-    if inherited != still_open || d.inherited_findings.len() != inherited.len() {
+    if d.inherited_findings.len() != inherited.len() {
         return Err(invalid(format!(
-            "{}: inherited_findings must equal every still-open finding exactly once",
+            "{}: inherited_findings must not name the same finding twice",
             env.id
         )));
     }
@@ -9226,6 +9268,84 @@ mod tests {
     /// exercised the "inherited_findings must equal every still-open
     /// finding exactly once" rejection at all, duplicate or otherwise.
     #[test]
+    fn a_reassignment_whose_inherited_set_a_later_finding_invalidates_still_reduces() {
+        // The live outage, reduced to its bones. `g-construct:114` reassigned
+        // a nomination carrying `inherited_findings: []`, true when it
+        // published. Hours later another reviewer accepted the nomination
+        // that had been reassigned away and filed findings against it, and
+        // those findings made the empty set retroactively false. Reduction
+        // rejected an immutable, already-published event, and with no
+        // per-event isolation that is every agent unable to read the bus --
+        // with no way out, since clearing the findings needs publishing and
+        // publishing was down.
+        //
+        // Nothing orders the later `review.changes_requested` against the
+        // reassignment: it is on a different agent's stream, and the
+        // reassignment neither references nor need have observed it. An event
+        // correct at publication cannot be re-judged against state that moved
+        // afterwards.
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+        let mut state = empty_state(&[]);
+        apply_ok(&mut state, &register(&alice, Role::Implementor));
+        apply_ok(&mut state, &register(&bob, Role::Reviewer));
+        apply_ok(&mut state, &register(&carol, Role::Reviewer));
+        let (nominate_env, _accept) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+
+        // Reassigned while nothing is open, so the empty set is correct.
+        let request = review_request(&[&alice], &bob);
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewReassigned(ReviewReassigned {
+                authors: request.authors.clone(),
+                product_branch: request.product_branch.clone(),
+                reviewer: carol.clone(),
+                required_checks: request.required_checks.clone(),
+                review_scope: request.review_scope.clone(),
+                summary: request.summary.clone(),
+                target_branch: request.target_branch.clone(),
+                evidence: request.evidence.clone(),
+                replaces: nominate_env.id.clone(),
+                reason: text("bob went quiet"),
+                inherited_findings: vec![],
+            }),
+            [],
+        );
+
+        // And afterwards the previous reviewer files a finding against the
+        // link it was moved off, exactly as c-reviewer did.
+        let late_changes = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(3),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+
+        for (label, order) in [
+            (
+                "reassign first",
+                vec![reassign_env.clone(), late_changes.clone()],
+            ),
+            (
+                "finding first",
+                vec![late_changes.clone(), reassign_env.clone()],
+            ),
+        ] {
+            reduce_onto(state.clone(), &order)
+                .unwrap_or_else(|e| panic!("{label} must still reduce: {e}"));
+        }
+    }
+
+    #[test]
     fn rejects_a_reassignment_that_cites_the_same_open_finding_twice() {
         let alice = a("alice");
         let bob = a("bob");
@@ -9274,9 +9394,15 @@ mod tests {
             [],
         );
         let err = apply_event(&mut state, &reassign_env).unwrap_err();
+        // Still refused during replay, because naming the same finding twice
+        // is a property of the payload alone -- nothing another agent
+        // publishes can make a duplicate stop being a duplicate. The
+        // *equality* half of the rule reads the chain's open set, which other
+        // agents' events move, so it now lives at publication; see
+        // `a_reassignment_whose_inherited_set_a_later_finding_invalidates_still_reduces`.
         assert!(
             err.to_string()
-                .contains("inherited_findings must equal every still-open finding exactly once"),
+                .contains("inherited_findings must not name the same finding twice"),
             "{err}"
         );
     }
@@ -10476,5 +10602,105 @@ mod tests {
             format!("{:?}", decline_first.unwrap()),
             "both orders must reduce: the link an acceptance names must stay resolvable"
         );
+    }
+    /// A reference to an event this host does not have must not take the
+    /// whole bus down.
+    ///
+    /// Reproduced from a live outage: `e-auditor:10` was published citing
+    /// `c-reviewer:100` as evidence, one past that stream's actual tip, so
+    /// the id named nothing. `topological_order` left the referrer
+    /// permanently un-ready, the sort never completed, and `reduce` returned
+    /// `Err` -- `status`, `tail` and `coordinate` went down for all
+    /// seventeen agents at once. The log is append-only, so nothing
+    /// published afterwards could withdraw the event: the outage was
+    /// permanent until the reducer changed.
+    ///
+    /// The same shape arises without anyone making a mistake, which is the
+    /// stronger reason for this test: reducing a partial fetch is ordinary,
+    /// and a host that has not yet fetched some agent's stream must still be
+    /// able to read the bus.
+    #[test]
+    fn a_reference_to_an_event_that_is_not_here_does_not_wedge_reduction() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let epoch = epoch_with(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
+        let mut known_epochs = BTreeMap::new();
+        known_epochs.insert(epoch.id.clone(), epoch.clone());
+
+        let alice_reg = register(&alice, Role::Implementor);
+        let bob_reg = register(&bob, Role::Implementor);
+
+        // bob has published exactly one event beyond its root, so `bob:9`
+        // names nothing -- the live case exactly.
+        let dangling = EventId::new(&bob, 9);
+        let mut issue_data = match open_issue(&alice, 1, &bob).typed_data().unwrap() {
+            EventData::IssueOpened(d) => d,
+            _ => unreachable!(),
+        };
+        issue_data.evidence = StringSet::from_iter([dangling.clone()]);
+        let citing = Envelope::new(
+            &alice,
+            1,
+            frontier_seeing(&[&dangling]),
+            &EventData::IssueOpened(issue_data),
+            [dangling.clone()],
+        );
+
+        let streams: BTreeMap<Agent, Vec<Envelope>> = BTreeMap::from([
+            (alice.clone(), vec![alice_reg, citing.clone()]),
+            (bob.clone(), vec![bob_reg]),
+        ]);
+        let state = reduce(config(), Some(epoch), known_epochs, &streams)
+            .expect("an unresolvable reference must not make the bus unreducible");
+
+        // Recorded, not skipped: the issue it opened is real work and must
+        // survive, and dropping it would make the outcome depend on which
+        // host had fetched what.
+        assert!(
+            state.issues.contains_key(&citing.id),
+            "the citing event must still be applied"
+        );
+    }
+
+    /// The tolerance above is narrow: a genuine cycle among events that are
+    /// all present is still a hard failure, because there is no order that
+    /// satisfies it and silently picking one would diverge between hosts.
+    #[test]
+    fn a_real_cycle_between_present_events_is_still_refused() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let epoch = epoch_with(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
+        let mut known_epochs = BTreeMap::new();
+        known_epochs.insert(epoch.id.clone(), epoch.clone());
+
+        // alice:1 references bob:1 and bob:1 references alice:1. Both exist,
+        // so both edges are real and neither can go first.
+        let mk = |who: &Agent, other: &EventId| {
+            Envelope::new(
+                who,
+                1,
+                frontier_seeing(&[other]),
+                &EventData::AgentStatus(AgentStatusEvent {
+                    status: LifecycleStatus::Active,
+                    note: text("n"),
+                    product_branch: None,
+                    product_commit: None,
+                }),
+                [other.clone()],
+            )
+        };
+        let alice_1 = mk(&alice, &EventId::new(&bob, 1));
+        let bob_1 = mk(&bob, &EventId::new(&alice, 1));
+
+        let streams: BTreeMap<Agent, Vec<Envelope>> = BTreeMap::from([
+            (
+                alice.clone(),
+                vec![register(&alice, Role::Implementor), alice_1],
+            ),
+            (bob.clone(), vec![register(&bob, Role::Implementor), bob_1]),
+        ]);
+        let err = reduce(config(), Some(epoch), known_epochs, &streams)
+            .expect_err("a genuine cycle has no valid order and must be refused");
+        assert!(err.to_string().contains("cycle"), "{err}");
     }
 }

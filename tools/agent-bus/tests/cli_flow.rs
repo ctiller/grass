@@ -1058,7 +1058,7 @@ fn outbox_shows_a_rejected_candidates_durable_receipt() {
         repo.path(),
         "coord1",
         "issue.acknowledged",
-        r#"{"issue":"coord1:99","assignment":"coord1:99","note":""}"#,
+        r#"{"issue":"coord1:0","assignment":"coord1:0","note":""}"#,
         "bogus",
     );
     coordinate(repo.path(), "coord1", "host1", 0);
@@ -1095,7 +1095,7 @@ fn coordinate_rejects_an_invalid_candidate_without_blocking_valid_ones() {
         repo.path(),
         "coord1",
         "issue.acknowledged",
-        r#"{"issue":"coord1:99","assignment":"coord1:99","note":""}"#,
+        r#"{"issue":"coord1:0","assignment":"coord1:0","note":""}"#,
         "c2",
     );
     submit(
@@ -1250,11 +1250,21 @@ fn succeed_surfaces_a_rejected_candidate_from_the_resumed_outbox() {
     // A structurally valid but semantically bogus candidate, preserved in
     // alice's local outbox before succession -- the same "unknown issue"
     // recipe `outbox_shows_a_rejected_candidates_durable_receipt` uses.
+    //
+    // It names `coord1:0`, which genuinely exists (it is coord1's own
+    // `agent.registered`) but is not an issue. All three tests using this
+    // recipe used to name `coord1:99`, which exists nowhere; `build_frontier`
+    // now refuses a reference to a nonexistent event at submission, so that
+    // spelling would be rejected at frontier construction and never reach
+    // `apply_issue_ack`. These tests are about the *semantic* rejection
+    // being surfaced, so the reference has to be real for them to still
+    // reach it -- otherwise they would silently be testing the new guard
+    // instead of the one they were written for.
     submit(
         repo.path(),
         "alice",
         "issue.acknowledged",
-        r#"{"issue":"coord1:99","assignment":"coord1:99","note":""}"#,
+        r#"{"issue":"coord1:0","assignment":"coord1:0","note":""}"#,
         "bogus",
     );
 
