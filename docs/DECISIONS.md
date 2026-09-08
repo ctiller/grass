@@ -631,6 +631,17 @@ to imitate compiler-selected storage or CFG structure.
     This records `coord1:5`, originating at `c-process:3`, and names the wrapper
     consumed by the synchronized Spike 4/5 surface under dependency
     `g-design:23`.
+    Presentation-owned shared state is constrained without entering precious
+    `ProcessSpec.Step`. `ProcessGraph.sharedInvariant` states what values of a
+    named logical region are admissible; `ProcessPlan.sharedUpdate` relates an
+    acting process's event, local before/after state, issued demands, and
+    observations to each region value it changes; and the plan proves every
+    admitted update preserves the graph invariant. Access permission says
+    where a process may act, not what value it may install. A process with no
+    writable regions discharges the update premise from the access proof, and
+    an empty shared-region family discharges both declarations by elimination.
+    This also records the shared-state half of ruling `g-design:84` without
+    prescribing a weave in the root specification.
 118. Cancellation coverage is scope-indexed. One core `CancellationPolicy` is
     indexed by a scoped cancellation-point family and consistently names its
     discovered `blockingCalls`; `ScopedCancellationCertificate` ties both
@@ -831,18 +842,7 @@ to imitate compiler-selected storage or CFG structure.
     of every `Grass/Process/**` module. This resolves the three-way
     spike/foundation/module mismatch raised by `c-spike` while retaining the
     process layer's no-import-all invariant.
-135. Presentation-owned shared state is constrained without entering precious
-    `ProcessSpec.Step`. `ProcessGraph.sharedInvariant` states what values of a
-    named logical region are admissible; `ProcessPlan.sharedUpdate` relates an
-    acting process's event, local before/after state, issued demands, and
-    observations to each region value it changes; and the plan proves every
-    admitted update preserves the graph invariant. Access permission says
-    where a process may act, not what value it may install. A process with no
-    writable regions discharges the update premise from the access proof, and
-    an empty shared-region family discharges both declarations by elimination.
-    This records ruling `g-design:84` without prescribing a weave in the root
-    specification.
-136. `ProcessAcceptance` is specification authority, not a fact the process
+    `ProcessAcceptance` is specification authority, not a fact the process
     kernel can discover. Product construction preferentially derives it in
     Refinement from the precious `BehaviorContract` through an exact projection
     bridge. A standalone protocol may supply it directly, in which case it is
