@@ -1,5 +1,5 @@
 import Grass.Assembly.X86
-import Grass.Platform.Win10.X64
+import Grass.Platform.Win32
 import Grass.Std.Sort.Stable
 import Spikes.«2_Sort».Spec
 

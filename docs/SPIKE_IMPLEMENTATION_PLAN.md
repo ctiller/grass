@@ -52,11 +52,17 @@ against every declaration and structure field on `main`,
 | Group | Names | Owner today |
 |---|---|---|
 | Platform constants and API authority facts | 185 | nobody |
-| Assembly and CFG construction vocabulary | 118 | nobody |
-| `Grass.Std` domain packages | 124 | c-stdlib (unaware of the demand) |
+| Assembly and CFG construction vocabulary | 118 | g-construct |
+| `Grass.Std` domain packages | 124 | c-stdlib, sequenced |
 | Platform, ABI, layout and projection | 46 | nobody |
 | Specification front end (`Grass.Spec.*`) | 41 | contested, see section 3 |
 | Application obligations and scraper noise | 318 | c-spike, already priced in `SPIKE_PROOF_BURDEN.md` |
+
+The owner column is as of the merge of this revision and moves; the bus
+registry is authoritative. Two of the four groups changed owner after the
+measurement: `g-construct:1` took construction and lowering and exports
+`BlockContract`, which is itself one of the 118 names, and `c-stdlib:26`
+sequenced the domain packages in response to `c-spike:6`.
 
 Two limits on these figures, stated so they are not over-read. They are lower
 bounds: a dotted name counts as resolvable when its head type exists, so
@@ -104,6 +110,132 @@ schedules. And the facade pattern is the mechanism by which section 4's
 economy is defended, so "which facade does this name enter through" becomes a
 real design question per module rather than a packaging afterthought.
 
+### 3.0 The machine and platform import names, settled
+
+`c-spike:19` asked c-x86 where the drafted machine and platform imports land.
+`c-x86:6` answered by splitting the question, escalated the normative half as
+`c-x86:7`, and `g-design:71` then ruled on it. All four names now have a settled
+spelling and a named owner.
+
+`Grass.Platform.Win10.X64` becomes `Grass.Platform.Win32`, and c-x86 will
+deliver `Grass/Platform/Win32.lean` as a signature-only authoring facade on the
+`c-process:64` pattern, with a fixture guarding against quiet widening. The
+reasoning is one c-spike raised as a secondary point and c-x86 made the deciding
+one: `Win10` names an OS version and `X64` an architecture, while the module is
+about neither -- it is the Win32 API family, and the architecture is already
+named by `ABI/Win64`.
+
+`Grass.Assembly.X86` is *not* that layer. c-x86 read
+`Spikes/1_Hello_World/Program.lean` rather than reasoning from the name:
+`asm_source`, `static_objects`, `MachineSource`, `withStack`, `withCallFrame`
+and the `@placement`/`@invariant`/`@terminal` annotations are construction and
+lowering vocabulary, which `docs/MODULES.md` puts in `Construct/` and `CFG/` --
+coord1:43's second proposed owner. `Grass.Emit` is likewise `Unsafe/`, which
+MODULES.md scopes to raw construction, import, stepping and emission. c-x86 owns
+`ISA/X86`, which MODULES.md scopes to encoding, decoding and validation
+metadata: the tables underneath that vocabulary, not the vocabulary. A single
+`Grass.Assembly.X86` facade over c-x86's leaves would export `InsnEncoding`,
+`MemOperand`, `Gpr` and `UnwindOp`, none of which Spike 1 types, so it would
+have looked like a fix without being one.
+
+The consequence for this plan is sharper than section 6's P2 first recorded.
+Spike 1 needs three of the target-side owners, not one. Two are registered:
+c-x86, whose half is committed and partly built, and `g-construct`, which took
+construction and lowering at `g-construct:1` and is the recipient of the
+`Grass.Assembly.X86` obligation `g-design:71` assigns it. The third, the
+artifact owner that `g-design:71` assigns `Grass.Emit`, is still unregistered.
+
+One risk under this layer is worth recording because it is a release blocker
+rather than a scheduling one, and it is not c-spike's to solve. c-x86's ledger
+audit reports 158 modelled declarations of which 6 carry a citation and 98 are
+owed, and 9 of 18 anchors unconfirmed, with `[amd64-apm-40332-4.09]` named as
+the release-blocker set: `docs/VALIDATION.md` section 1 makes a dead location
+under a `referenceOnly` policy block release. `c-x86:2` states the cause -- the
+AMD half of decision 15's dual-cited Intel/AMD intersection is currently
+unobtainable, so every rule in the common profile rests on one vendor. Spike 1
+emits x86-64 through this layer, so the spike corpus inherits that blocker
+whatever else is ready.
+
+What exists for Spike 1 on c-x86's side today, per `c-x86:6`: the prologue is
+modelled and externally verified -- `spike1Prologue`, `spike1Layout`, and
+`spike1UnwindInfo_toBytes` proving the exact `.xdata` bytes byte-identical to
+Microsoft's assembler for the same prologue; `STD_OUTPUT_HANDLE` and
+`INVALID_HANDLE_VALUE` exist as `StdHandleId.value` and
+`GetStdHandleResult.invalidHandleValue`; the `GetStdHandle` and `WriteFile`
+contracts exist; and the `[rip + symbol]` form Spike 1 needs is
+`MemOperand.ripRelative`, checked against `ndisasm`. Named as missing rather
+than left to be discovered: no encoder yet for `push`, `sub`, `test`, `cmp`,
+`jz`/`je`/`ja`/`jmp`, or call-through-memory-import.
+
+`g-design:71` settled which normative document moves, and it moved MODULES.md
+rather than the author surface. The normative module map now declares
+`Grass.Assembly.X86` as the first-class assembly-author facade over narrow
+`Construct`, `CFG` and `Grass.ISA.X86` signatures, owned by the future
+construction and lowering workstream rather than by the x86 table owner.
+`Grass.ISA.X86` is the machine-authority facade owned by c-x86.
+`Grass.Platform.Win32` replaces the spike spelling `Grass.Platform.Win10.X64`,
+with Windows 10 and x64 remaining explicit profile selections rather than being
+conflated with the Win32 API family in the path. `Grass.Emit` remains the safe
+facade exposing `VerifiedProgram` and a checked `emitProgram`, with raw erasure,
+admission, linking and byte writing staying in `Unsafe` and `Artifact`; the
+facade may not expose unverified source to executable bytes. Every one of these
+is signature-only, and each requires both positive vocabulary and negative
+implementation-leakage fixtures.
+
+So three of the four drafted names stand unchanged and only the platform
+spelling moved. `g-design:71` directed c-spike to update and resynchronize only
+the Platform import, which this branch does: four authored sources and their
+four byte-exact `SPIKE_n.md` mirror blocks, in one pass, verified by
+`check-spike-sources.ps1` and negative-tested by desynchronizing one side alone.
+`Spikes/5_Spinning_Cube/Process.lean` still imports
+`Grass.Platform.Win10.Vulkan13`, deliberately: it raises the same shape of
+question, `g-design:71` did not rule on it, Vulkan is not the Win32 API family,
+and the graphics platform owner is not registered. Renaming it by analogy would
+be inventing a ruling.
+
+### 3.0.1 The facade roots, and who names them
+
+`docs/MODULES.md` now declares all four facades in the tree with their owners:
+`Assembly/X86.lean` as the first-class x86 assembly authoring facade owned by
+the construction and lowering workstream, `ISA/X86.lean` as the lower
+machine-authority facade owned by c-x86 and deliberately outside the
+author-facing set, `Platform/Win32.lean` as the Win32 API family facade, and
+`Emit.lean` as the safe verified-emission facade. All four are signature-only
+with measured dependency cones, and each requires fixtures demonstrating both
+what resolves and what does not.
+
+`c-spike:36` reported that every one of those roots sat outside the directory
+glob of the owner assigned to deliver it, since a glob does not reach a sibling
+file. `coord1:78` ruled explicit listing: an assigned facade root is not
+implicitly in the assignee's scope, and the owner names the root file in its own
+`scope.set` beside the glob. The reasoning is worth keeping because it
+generalizes past this case -- an implicit rule creates ownership no tool can
+see, and scope-conflict detection and every third-party check operate on the
+published globs, so a facade root covered only by convention is a claim
+agent-bus cannot verify or report a collision on.
+
+That ruling also corrected c-spike's evidence. It re-derived the four instances
+against each owner's latest published scope rather than the ones the report
+cited, and found c-x86 had already fixed its half unprompted at `c-x86:12`. The
+report named `c-x86:1`, which was accurate when read and stale when acted on.
+
+All four roots are now owned, checked against every agent's latest `scope.set`
+rather than against any owner's description of it: `ISA/X86.lean` and
+`Platform/Win32.lean` by `c-x86:12`, `Assembly/X86.lean` by `g-construct:49`,
+and `Emit.lean` by `g-build:10`, which `g-build:14` records as constrained to
+the checked `VerifiedProgram`/`emitProgram` surface `g-design:71` describes.
+`Emit.lean` mattered most of the four and came last: it is the only module all
+five spikes import, so it is where the corpus terminates, and by the time it was
+claimed a second consumer was waiting on the same seam in `g-construct:65`.
+
+The method is the part worth keeping. c-spike found the same defect four times
+and filed it once, as a routing question to the coordinator, rather than as
+three separate corrections at three owners. One ruling then fixed all four, and
+the two owners who had not yet published scope absorbed it without a second
+prompt. Filing per-instance would have cost three exchanges and produced three
+chances to cite a stale scope, which is exactly the error `coord1:78` had to
+correct in the single report that was filed.
+
 ### 3.1 Two spike-side import decisions still open
 
 `c-process:64` answered `c-spike:7` and handed back two choices which are
@@ -127,11 +259,20 @@ Neither can be settled by that principle alone yet, because the names the spikes
 actually use are not in the modules the repointing would name.
 `Spikes/5_Spinning_Cube/Process.lean` uses `BlendedProcessGraph`,
 `ClosedBlend` and `ProcessRealization.blend`, and none of the three is in
-`Grass/Process/Weave/Blend.lean` at `agent/c-process/m4-weave-and-composition`,
-which holds `VocabularyEmbedding`, `DisjointWeave` and `routing_is_forced`.
+`Grass/Process/Weave/Blend.lean`, which holds `VocabularyEmbedding`,
+`DisjointWeave` and `routing_is_forced`. That module reached main with
+`c-process:71` at 28a24f6, and each half of this claim was re-checked against
+main rather than carried forward: the three names it holds are there, and the
+three the spike wants are in no file under `Grass/` at all.
 `Spikes/4_Web_Server/Cancellation.lean` uses `CancellationPolicy`, which is in
 `Cancellation/Policy.lean`, but also `CancellationSummary` and
-`CancellationPolicyRealizes`, which are in none of the three leaves. Repointing
+`CancellationPolicyRealizes`, which are in none of the three leaves. Check that
+second pair by declaration and not by `grep -l`: `CancellationSummary` does
+appear in `Cancellation/Compose.lean`, but only at line 37 inside prose
+comparing that module to PROCESS.md §3, and a name found only in a docstring is
+not a declaration. `boundaryProjection` sets the same trap in
+`Grass/Process/Network/Plan.lean`, where the only match is the module note
+quoting the pre-128 shape of a structure that no longer has the field. Repointing
 an import at a module that will not contain the name is not a fix; it moves the
 error rather than removing it. The open question to c-process is therefore
 placement -- where these five names will live -- and the import lines follow
@@ -153,6 +294,18 @@ first proof is attempted. Derivation of block contracts from annotations is
 therefore an acceptance condition on the assembly layer, not a later
 optimization, and it belongs in the first ticket that assigns that layer rather
 than being discovered during Spike 4.
+
+As of `g-construct:12` this is no longer only c-spike's argument. The owner of
+the layer accepted it as a consumer contract: the 95 names remain
+generated-structural, `BlockContract` is an internal checked value rather than
+an authored spike declaration, and source discovery must derive the exit family
+and the effect and clobber facts from annotations and instruction facets. The
+same event accepts the facade split -- g-construct owning the signature-only
+`Grass.Assembly.X86` facade plus raw `Unsafe` emission, admission and stepping,
+with the future artifact owner holding the safe `Grass.Emit` facade -- and names
+Spike 1 as its first end-to-end acceptance target. The risk in this section is
+therefore now a commitment that can be checked against a deliverable rather than
+a concern a consumer is carrying alone.
 
 The same reasoning covers the other generated classes
 `docs/SPIKE_AUTHORING.md` lists as normally omitted: source closures and import
@@ -245,14 +398,42 @@ provide.
 
 ### P2 — The target side (blocking every spike)
 
-Owner: routed by `coord1:43`, not yet registered. The user decided this is split
-by layer rather than given to one owner: machine and platform authority
-(`ISA/X86`, `ABI/Win64`, `Platform/Win32`), the construction and lowering
-language (`CFG`, `Construct`, `Unsafe`) consuming the first, and artifact and
-build (`Grammar`, `Artifact/*`, `Build/*`). Registration is deliberately
-deferred until the agent-bus contention work lands, because a bus already taking
-minutes per publish would not survive fifteen concurrent pushers. Two things
-coord1 flagged rather than decided: `Effect` and `Weave` are not target-side at
+Owner: routed by `coord1:43` into three workstreams, of which two have
+registered. The bus registry is authoritative for who owns what; what follows
+records the split and the obligations, not a running census.
+
+`c-x86` took machine and platform authority -- `Grass/ISA/X86`,
+`Grass/ABI/Win64`, `Grass/Platform/Win32` -- at `c-x86:1`, and already has an
+encoder, a decoder and a byte-level round-trip theorem. `g-construct` took
+construction and lowering at `g-construct:1` -- `Grass/CFG/**`,
+`Grass/Construct/**`, `Grass/Unsafe/**` -- with the explicit purpose of
+implementing the normative authored assembly surface, and is the current
+recipient of the `Grass.Assembly.X86` author-surface obligation. Only the
+artifact and build owner remains unregistered, and `Grass.Emit` is its
+obligation rather than `g-construct`'s: `g-design:71` is explicit that raw
+erasure, admission, linking and byte writing stay in `Unsafe` and `Artifact`
+while the checked `Grass.Emit` facade belongs to the artifact owner.
+
+Assigned delivery and published scope are not the same thing, and one gap
+between them is worth recording because it will block a delivery rather than a
+plan. `g-design:71` assigns `Grass.ISA.X86` and `Grass.Platform.Win32` to c-x86,
+but `c-x86:1`'s globs are `Grass/ISA/X86/**` and `Grass/Platform/Win32/**`,
+which match paths *underneath* those directories and not the root facade files
+`Grass/ISA/X86.lean` and `Grass/Platform/Win32.lean` themselves. Both facade
+roots therefore fall outside c-x86's published exclusive scope. c-x86 needs to
+extend that scope, or receive an explicit handoff, before writing either file.
+This is scope bookkeeping, not an ownership dispute: the assignment is settled
+and only the glob does not reach it. Raised with c-x86 rather than left here.
+
+The split itself, decided by the user and recorded in `coord1:43`, is by layer
+rather than one owner: machine and platform authority (`ISA/X86`, `ABI/Win64`,
+`Platform/Win32`), the construction and lowering language (`CFG`, `Construct`,
+`Unsafe`) consuming the first, and artifact and build (`Grammar`, `Artifact/*`,
+`Build/*`). Registration of these workstreams had been held until the agent-bus
+contention work landed, since a bus then taking minutes per publish would not
+have survived fifteen concurrent pushers. That work has landed and the first two
+registered on the strength of it; the artifact and build owner has not yet.
+Two things coord1 flagged rather than decided: `Effect` and `Weave` are not target-side at
 all and may belong with g-foundation, and `Programs/` is unassigned on purpose,
 since `HelloWin64` and its siblings are the productionized form of exactly the
 end-to-end demonstrations c-spike owns -- whether that makes them c-spike's is a
@@ -262,14 +443,27 @@ This remains the single largest block in the plan and the only reason no spike
 can emit a file.
 
 `Grass.Assembly.X86` -- `asm_source`, `AsmSource`, `MachineOperand`,
-`AddressOperand`, `VerifiedFragment`, `FragmentConstructorClosure`, `BlockContract`,
+`AddressOperand`, `VerifiedFragment`, `FragmentConstructorClosure`,
+`StaticObjectTable` with its `static_objects` macro, `BlockContract`,
 `MacroTable`, and the `@placement`, `@invariant`, `@terminal`, `@audit`,
 `@violation_edge`, `@containment_tail` annotations.
-`Grass.Platform.Win10.X64` -- `PlatformPlan`, the Win64 ABI, `FrameLayout.derive`,
+`Grass.Platform.Win32` -- `PlatformPlan`, the Win64 ABI, `FrameLayout.derive`,
 `StructLayout.derive`, `withStack`, `withCallFrame`, the import table.
-`Grass.Emit` -- `StaticObjectTable`, the `static_objects` macro, the PE writer.
+`Grass.Emit` -- the PE writer, and the checked `emitProgram` over
+`VerifiedProgram`.
 Plus `TargetProjection` / `TargetOutcomeProjection` and the
 `verify_assembly … deriving_standard_process_from … with …` tactic.
+
+`StaticObjectTable` and the `static_objects` macro were listed under
+`Grass.Emit` here and that was wrong. `c-x86:6` grouped `static_objects` with
+the construction and lowering vocabulary when it read
+`Spikes/1_Hello_World/Program.lean`, and `docs/ASSEMBLY_CONSTRUCTION.md` settles
+it: `StaticObjectTable` is a field of `AuthoredSourceInputs`, the dependent
+inputs to `asm_source`, beside `FragmentConstructorClosure` and
+`LayoutSelection`. They are construction vocabulary and belong with
+`Grass.Assembly.X86`. c-spike raised this to g-build in `c-spike:35` as a
+boundary it could not resolve; the evidence was in a normative document it had
+not read, and the answer did not need g-build at all.
 
 Acceptance conditions, not optional extras: block contracts are derived from
 annotations, not authored (section 4); and source closure, cancellation maps and
@@ -283,7 +477,10 @@ Owner: `Grass.Semantics.SpecProcess` and the facade modules are g-foundation's
 by its existing `Grass/Semantics/**` claim; the resource and console contract
 families have no owner yet and are the part of this phase still to route.
 
-Decision 134 converted these from contested to owed. `capture`, `ofRelational`,
+Decision 134 converted these from contested to owed. Its `DECISIONS.md` text
+reached main with `g-design:77`; before that it existed only as the bus ruling
+`g-design:50`, so looking it up by number on main failed -- which is what
+`c-x86:10` hit and `c-spike:24` corrected. `capture`, `ofRelational`,
 `withLiveness` and the other suite modifiers, plus
 `MeetsAllSpecificationTheorems`, are library obligations against
 `Grass.Semantics.SpecProcess` with the drafted signatures fixed, which is the
@@ -316,11 +513,36 @@ These are the `authority-model` and banked-theorem entries in
 that lands here is a theorem the spike author does not write, and the burden
 ledger already names the exact ones each spike expects.
 
+`c-stdlib:26` acted on the advance notice in `c-spike:6` and sequenced all five
+as section 5.1 of `docs/STDLIB_IMPLEMENTATION_PLAN.md`: all five are band 3,
+none is scheduled, and the burden ledger's cost-escalation rule is adopted as
+binding. That last part matters more than the scheduling. Section 7 of the
+burden ledger says that if these obligations expand by orders of magnitude,
+Grass records the cost and changes the reusable interface rather than hiding the
+work in `Grass.Std`; an owner adopting that as binding before starting is the
+difference between a proof-economy claim that can fail loudly and one that
+quietly absorbs whatever it costs.
+
 ### P5 — The spikes, in their drafted order
 
 1 Hello World, then 2 Sort, then 3 Gzip, then 4 Web server, then 5 Spinning
 cube. The order is the drafts' own and is preserved: each spike is the smallest
 program that adds one new class of obligation.
+
+Spikes 4 and 5 additionally carry a named blocking dependency as of
+`g-design:67`, which is worth recording because it is not visible from the spike
+sources. Ruling (3) preserves the facet-carrying `ProcessTopology` of decision
+122 as normative but defers implementing it out of c-process's M4 candidate into
+a later milestone, and states that until it lands the current
+`ProcessPlan`/topology implementation is provisional: it cannot claim to
+discharge cancellation or supervision requirements, and cannot be consumed as a
+complete `ProcessPlan` by `VerifiedProgram`. Both spikes instantiate
+`ProcessPlan` -- `Spikes/4_Web_Server/Process.lean:229` and
+`Spikes/5_Spinning_Cube/Process.lean:200` -- and both close through it, via
+`ProcessPlanRealizes` and, in Spike 4, `using explicit_process`. So neither can
+reach a verified program until that deferred milestone lands, whatever else is
+ready. Nothing in the authored sources changes: the drafted names and shapes
+stand, and this is a scheduling fact rather than a resynchronization.
 
 Two scheduled decision points rather than smooth progress. Spike 2 is the first
 program whose portable model cannot plausibly carry one step per machine
@@ -343,8 +565,47 @@ rulings such as `coord1:4` -- which g-design has been discharging in c-spike's
 absence and which now returns here. One sequencing consequence rather than an
 ownership one: `agent/g-design/normative-design` carries unmerged edits to
 `Spikes/4_Web_Server/Process.lean`, `Spikes/5_Spinning_Cube/Process.lean`,
-`docs/SPIKE_4.md` and `docs/SPIKE_5.md` at 136b20a, so c-spike takes custody of
-those four after that branch lands rather than racing it. It does not
+`docs/SPIKE_4.md` and `docs/SPIKE_5.md` -- at c09c82a as this is written, having
+moved from 136b20a, and still changing all four against its merge-base with
+main. So c-spike takes custody of those four after that branch lands rather than
+racing it. That sequencing now binds a second obligation: `g-design:96`'s
+resynchronization of Spikes 4 and 5, which `c-process:71` triggered by landing
+the author-facing shape, targets exactly these four files. It waits on this
+branch as well as on the two placement answers `c-spike:41` asks c-process for,
+and this is the constraint that decides which, not a preference.
+
+Both of those answers arrived. `c-process:86` settles the first two: a product
+plan writes `NoObligations`, which c-process is exporting from `Grass.Process`
+as a reducible definitional `Unit` rather than leaving authors to reach into
+`Tests` for the fixture-local copy; and `cancellation` and `supervision` have no
+attachment point at all, so Spike 4 keeps `ServerCancellationLaw` and
+`ServerSupervisionLaw` as free-standing propositions *about* `serverProcessPlan`
+rather than fields *of* it. That preserves both claims exactly and migrates into
+a facet unchanged when the deferred facet-carrying topology lands. It is the
+answer c-spike could not have guessed: no field exists to move them to, and
+inventing one, or dropping them, would have been the weakening `c-stdlib:29`
+warns about.
+
+A third input has since joined them, and it is the reason this paragraph is not
+simply a list of two. `g-design:138` rules that `ProcessSpec.Step` is indexed by
+the fixed request of the process instance, which makes `terminalNoStep`
+request-local: `Terminal request state result -> not Step request state event
+after issued emitted`. The live field on main still carries the universal
+`(forall request, p.Terminal request state result)` that ruling removes. Both
+spikes assign the field by name -- `terminalNoStep := MemoryServerState.terminalNoStep`
+at `Spikes/4_Web_Server/Process.lean:263` and `:= cube_terminal_has_no_step` at
+`Spikes/5_Spinning_Cube/Process.lean:156` -- so the assignment lines do not
+change, but the proposition those two proofs must discharge does. `ProcessCorrect`
+still has ten fields and the corpus still names exactly those ten; what is no
+longer safe to say is that the tenth needs no work. c-process owns the
+Process-side migration and the ruling directs it to coordinate the spike source
+update with c-spike, so this is tracked here rather than acted on.
+
+Worth recording about the ruling itself, because it is the constraint this plan
+exists to defend: it says combinators and standard constructors should thread
+the request implicitly, and that ordinary authors must not duplicate it in
+`State` or pay new proof fields. The defect was fixed without charging the
+authoring surface for it. It does not
 implement the libraries. Where a phase above is unowned, the deliverable is a
 routing decision from the coordinator, not c-spike quietly taking the work: an
 agent that both authored the demonstration and the thing being demonstrated

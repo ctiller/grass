@@ -120,7 +120,7 @@ result. Failed runs are recorded in `progress.reported` and normally produce
 ```text
 data = {
   display_name : Short,
-  primary_role : implementor|reviewer|coordinator|observer,
+  primary_role : implementor|reviewer|coordinator|auditor,
   purpose : Text,
   product_base? : ObjectId,
   product_branch? : Branch,
@@ -133,6 +133,33 @@ refs = []
 This is sequence zero. A coordinator registration is valid only if its agent
 name appears in immutable `_bus/BUS.json`. Product fields are permitted only for
 an `implementor`.
+
+**Deviation actually taken (2026-09), documented for the historical record.**
+The least-authority role was spelled `observer` in version one and is spelled
+`auditor` here. AGENT_COORDINATION_EVOLUTION.md section 2.2 renames the wire
+role rather than carrying two overlapping ones, and nothing was migrated
+because no `observer` was ever registered on this bus -- which is the reason
+that section gives for the rename being safe rather than breaking. The design's V1 transition spelling -- registering as `observer` with
+`purpose: auditor:<emphasis>` until migration -- is deliberately **not**
+offered here, because it is already moot and following it would fail. The
+v1-to-v2 cutover has happened (AGENT_COORDINATION_EVOLUTION.md section 2.6),
+v1's `refs/heads/agent-bus` is read-only, so there is no v1 bus on which to
+register the transition spelling; and this helper rejects the string
+`observer` outright, so a reader who tried would get a parse error from
+`register --role`. An audit identity registers as `auditor`.
+
+Gate 24 ("a V1 `observer` registered for audit migrates to exactly one V2
+`auditor` identity without acquiring implementor or reviewer authority") is
+**discharged vacuously and deliberately, not implemented**. No `observer` has
+ever been registered on this bus -- verified against the live roster and
+against every published event on every stream before the rename -- so there is
+nothing to migrate and no fixture that could exercise a migration. Recording
+that here rather than leaving it implied, because the gap is otherwise
+invisible: the helper rejects the string `observer` outright, and reduction
+propagates that failure, so a single V1 `observer` registration appearing in
+migrated history would make the bus unreducible on every host. If such an
+identity is ever created before activation, the migration tool must rewrite
+the wire string, and this note must become a test.
 
 ### `agent.status`
 
@@ -270,6 +297,17 @@ refs = unique (blocks + evidence)
 ```
 
 Every `blocks` member is an opening review nomination or reassignment event.
+
+An auditor-opened `issue.opened` must carry an empty `blocks` set, and the
+helper rejects a nonempty one from an `auditor` identity
+(AGENT_COORDINATION_EVOLUTION.md section 2.2, gate 21). `blocks` makes an
+issue refuse the named reviewer's own `review.merge_authorized`, and only the
+issue's *target* may dispose of it -- so without this rule an auditor could
+halt a candidate at will and could not be made to release it, which is the
+"unilateral or indefinite candidate veto that the named reviewer cannot
+dispose" the design forbids. An auditor with an urgent finding routes the
+evidence to the reviewer and coordinator instead; the reviewer decides whether
+to publish a merge-blocking finding of its own.
 
 ### `issue.acknowledged`
 
@@ -691,3 +729,47 @@ Before bus bootstrap, the helper implementation must generate and check in:
 The generated JSON Schema is validation convenience. This normative document
 and reviewed Rust types define intended semantics; disagreement is an
 implementation defect and blocks bootstrap.
+
+## 12. Fleet-wide assurance
+
+### `audit.reported`
+
+```text
+data = {
+  inspected_commits : StringSet<ObjectId>,
+  areas : List<Text>,
+  methods : List<Text>,
+  limitations : List<Text>,
+  issues : StringSet<EventId>,
+  summary : Text
+}
+refs = issues
+```
+
+The auditor's fleet-wide summary (AGENT_COORDINATION_EVOLUTION.md section 2.2).
+Valid only from an active agent whose immutable primary role is `auditor`.
+
+Deliberately **non-authoritative**, and the type carries no status,
+disposition or verdict field of any kind so that it cannot become otherwise.
+Actionable findings live in separate `issue.opened` events referenced by
+`issues`; every id there must name an issue that exists, so a report cannot
+cite a fiction. Reducing this event touches nothing else -- no issue status,
+no assignment, no finding disposition -- because an auditor that could close
+what it reports would be clearing its own findings, which section 2.2 forbids
+(gate 22). A nominated reviewer may cite an audit as evidence but must still
+publish its own dispositions and authorization judgment (gate 23).
+
+Requires a **complete** frontier, and is therefore currency-sensitive: it may
+not be published from a stale local cut. The frontier is the report's only
+record of what it observed, and a sparse one names just the agents the payload
+happens to reference -- a clean report would otherwise pin nothing at all
+about the streams it claims to have examined, which is exactly the
+assurance-without-evidence `limitations` exists to prevent.
+
+`areas`, `methods` and `summary` must be nonempty. `inspected_commits` and
+`issues` may both be empty: an audit of coordination history alone inspects no
+product commit, and a clean surface is reportable "without manufacturing empty
+issues". `limitations` is where blind spots are
+stated, because absence of a finding is not assurance that unexamined
+behavior is correct. The observed event frontier the report pins is the
+envelope's own `observed` field, not a field here.

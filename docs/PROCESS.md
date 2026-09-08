@@ -100,6 +100,26 @@ structure DeterministicProcess (v : ProcessVocabulary) where
   view : Option (ViewFacet State)
 ```
 
+The interruption, fault, and environment-violation classes are fields of the
+vocabulary, not one global classification. `agent-bus` disposition `g-design:4`
+ratified that, because a single `LogicalFault` covering HTTP/2 error codes,
+Vulkan device loss, zlib corruption, and a Win32 handle violation is the closed
+whole-program sum [PROCESS_SHARDING.md](PROCESS_SHARDING.md) §10 names as a
+foundational failure, and [FOUNDATION.md](FOUNDATION.md) law 8 forbids the
+`other`-constructor escape.
+
+The obligation that creates is discharged rather than assumed. Cross-vocabulary
+delivery owes a *total* classifier from the sending side's classes into the
+receiving side's, so a process whose class is empty is one no such event can
+reach — the empty class is a theorem about what arrives, not a hole in what is
+handled.
+
+`vocabulary` is a field rather than an inherited parent for the other half of
+the same ruling: an ordinary author *selects* a reusable vocabulary in one line
+instead of writing seven interface fields. Simple processes pay no ceremony for
+a classification they do not use, and a process with no faults selects a
+vocabulary whose classes are empty.
+
 Reusable protocol or network constructors select all seven associated families
 once and pass one `ProcessVocabulary` to their process clients. Convenience
 constructors such as `ProcessVocabulary.quiescent` fill the three exceptional
@@ -110,25 +130,32 @@ families and cannot discard an unclassified exceptional event.
 Grass uses explicit terminology:
 
 ```lean
-structure StructuralProcessNetwork (Protocol : Type u) where
-  RoleSchema : Type
-  finiteSchemas : Fintype RoleSchema
-  Instance : RoleSchema -> Type
+structure StructuralProcessNetwork (Protocol : Type v)
+    (InstanceOf : Protocol -> Type r) where
+  RoleSchema : Type r
+  schemas : List RoleSchema
+  schemasComplete : forall schema, schema ∈ schemas
+  schemasDistinct : schemas.Nodup
   protocol : RoleSchema -> Protocol
-  instances : forall schema,
-    Instance schema -> ProtocolInstance (protocol schema)
-  composition : AbstractNetworkCompositionLaw protocol instances
-  abstraction : UsesNoPlatformThreadSchedulerBufferHandleLayoutOrISAIdentity
+  Instance : RoleSchema -> Type r
+  instanceOf : forall schema, Instance schema -> InstanceOf (protocol schema)
 ```
 
-`ProtocolInstance` and `AbstractNetworkCompositionLaw` are neutral typed
-junctions parameterized by the supplied `Protocol`; they do not interpret a
-semantic contract. `StructuralProcessNetwork` consequently contains no
-`SpecProcess`, `BehaviorContract`, selected trace, denotation, transported
-requirements, or exactness proof. `Semantics` instantiates `Protocol` with its
-own semantic process type and selects meaning separately.
+There is exactly one structural process-network abstraction and this is it. It
+is owned by this document's layer and carries **no** `BehaviorContract`,
+`denotation`, `traceDenotation`, or exactness field: it says which roles exist,
+how many instances each has, and which protocol each speaks, and says nothing
+about what the network means. `Protocol` is a parameter so that this layer does
+not import [SEMANTICS.md](SEMANTICS.md)'s; that document instantiates it at
+`SpecProcess resources`.
 
-A `ProcessSpec` selected by a network is a **spec process**. A
+Connecting a chosen network trace to `spec.contract` and its requirements is a
+`ProcessPresentation`, which lives above both layers with
+[REFINEMENT.md](REFINEMENT.md)'s theorems. This structure is a reviewed
+replaceable construction input under [FOUNDATION.md](FOUNDATION.md) law 15, not
+program meaning.
+
+A `ProcessSpec` contained in this network is a **spec process**. A
 `ProcessPlan`, `ProcessRealization`, or driver network is a **process
 realization**. Only the former may be part of precious specification source;
 the latter and its proof are reviewed, bankable, and disposable. Different
@@ -412,27 +439,53 @@ theorem ProcessTopology.allSupervisionContracts
     (topology : ProcessTopology registry boundary) :
     EveryDemandedSupervisionContractHolds topology := ...
 
-structure ProcessRef (topology : ProcessTopology registry boundary)
+structure ProcessRef (topology : ProcessTopologyCore registry boundary)
     (kind : topology.ProcessKind) where
   id : ProcessId kind
   generation : Generation
 
-structure ChannelId (topology : ProcessTopology registry boundary)
+structure ChannelId (topology : ProcessTopologyCore registry boundary)
     (edge : topology.ChannelKind) where
   sender : ProcessRef topology (topology.endpoints edge).1
   receiver : ProcessRef topology (topology.endpoints edge).2
   epoch : SessionEpoch
 
-structure MessageOccurrence (topology : ProcessTopology registry boundary)
+structure MessageOccurrence (topology : ProcessTopologyCore registry boundary)
     (edge : topology.ChannelKind) (channel : ChannelId topology edge)
     (Message : Type) (message : Message) where
   id : OccurrenceId channel message
 
-abbrev ChannelOccurrence (topology : ProcessTopology registry boundary)
+abbrev ChannelOccurrence (topology : ProcessTopologyCore registry boundary)
     (edge : topology.ChannelKind) (Message : Type) (message : Message) :=
   Sigma fun channel : ChannelId topology edge =>
     MessageOccurrence topology edge channel Message message
 ```
+
+The split between `ProcessTopologyCore` and `ProcessTopology` is
+`docs/DECISIONS.md` decision 122, ruling `agent-bus` issue `c-process:10`.
+Cancellation and supervision are *optional imported facets*, not fields every
+topology carries, so a process with no lifecycle promise pays no ceremony for
+one. `ProcessTopologyCore` is the graph, channels, and spawn authority — what a
+`ChannelContract` actually consumes — and `ProcessTopology` aggregates exactly
+the facets `requiredTopologyFacets boundary` derives from the selected
+specification and exports the corresponding aggregate lifecycle theorems.
+
+**Implementation status.** The facet-carrying `ProcessTopology` above is target
+text, not current code. `Grass/`'s `ProcessPlan` carries a
+`topology : ProcessTopologyCore` field and there are no facet fields anywhere in
+the corpus. `agent-bus` ruling `g-design:67` deferred the facet family to an
+explicit later `c-process` milestone rather than expanding the M4 candidate, and
+recorded the consequence: until it lands, the implemented `ProcessPlan` is
+provisional. It may not claim to discharge cancellation or supervision
+requirements, and it may not be consumed as a complete `ProcessPlan` by
+`VerifiedProgram`. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §13 carries the owner
+and the acceptance gate. Decision 122 is unchanged; this is staging.
+
+The weaker object may not carry the unqualified name. A consumer holding a value
+called `ProcessTopology` is entitled to assume the lifecycle authority its type
+names, and the earlier declaration — one structure with `cancellation` and
+`supervision` fields, referenced everywhere below — gave that name to an object
+that had them by construction rather than by demand.
 
 `ProcessGraph` exists separately so topology and channel contracts can quantify over the
 endpoint protocols, spawn/population laws, shared-state interference, and
@@ -455,7 +508,24 @@ processes.” Creation and termination are typed transitions, not changes to an
 uninterpreted global bag.
 
 Local state belongs to one process instance. Shared logical state is named
-separately with read/write/atomic capabilities and interference invariants.
+separately with read/write/atomic capabilities and interference invariants. Both
+belong to the graph: `ProcessGraph.sharedAccess` is the capability and
+`ProcessGraph.sharedInvariant` is the invariant, and network well-formedness
+holds every world to the second.
+
+*How* a region may move is a further thing, and it belongs to the plan rather
+than to the graph or to a process. `ProcessPlan.sharedUpdate` relates a role's
+own transition data — the event, its local state either side, what it issued and
+what it observed — to the before and after value of each region it writes, and
+every local step must show its writes are admitted. `ProcessSpec.Step` does
+**not** mention shared regions and must not: a root specification prescribing a
+state partition is precisely the weave leakage
+[FOUNDATION.md](FOUNDATION.md) law 15 forbids. A root that wants to model
+logically shared behaviour models it in its own `State`, and the presentation
+relates that state to the chosen partition. A role with no writable region owes
+nothing. `agent-bus` ruling `g-design:84` settles this and
+[PROCESS_IMPLEMENTATION_PLAN.md](PROCESS_IMPLEMENTATION_PLAN.md) §10.128 records
+what it closes.
 Nothing is shared merely because two transitions mention the same Lean value.
 The later memory realization maps this logical ownership/access graph to
 provenance, loans, synchronization, allocation identity, and race-freedom
@@ -487,7 +557,7 @@ inductive ProcessLifecycle (p : ProcessSpec)
   | running
   | terminated (result : p.TerminalResult)
   | cancelled (reason : CancelReason)
-  | interrupted (reason : p.InterruptReason)
+  | interrupted (demand : p.Demand) (reason : p.InterruptReason demand)
   | faulted (fault : p.LogicalFault)
   | violated (violation : p.EnvironmentViolation)
   | died (reason : ProcessDeathReason)
@@ -623,6 +693,13 @@ The definitions above make each occurrence nominally indexed by the exact
 channel edge, sender and receiver incarnations, session epoch, message, and
 pre-send world.
 
+An ending records the demand it abandoned as well as the reason, because
+`ProcessVocabulary.InterruptReason` is indexed by that demand. That is not
+bookkeeping: a network well-formedness law can then require the abandoned demand
+to be one the instance was actually holding, which a payload naming no demand
+could not express. `Grass/Process/Network/Transition.lean`'s
+`EndsInstance.endingIsEarned` is that law.
+
 `ProcessLifecycle` is indexed by the instance protocol because an ending must
 remain recoverable from network state without replaying the parent transition.
 The terminal tag stores the exact `TerminalResult`; the other ending tags store
@@ -682,6 +759,22 @@ Requesting cancellation does not reclaim escrow; acknowledged cancellation,
 timeout, endpoint/channel death, drop, reroute, and coalescing are exhaustive
 competing resolution transitions. Coalescing consumes every source token and
 creates one fresh occurrence. Session state evolves on those same transitions.
+
+A send requires the exact incarnation the session names to be live. This is a
+property of the send, not of the session: an endpoint death does **not**
+generically close or kill the session it belongs to, because some channels
+permit buffered drain or half-close and `SessionStatus` has no state that
+distinguishes those from an ordinary close. A channel that wants a death to end
+its session says so in an explicit channel or session policy. What holds of every
+channel is the narrower fact, and it is where the check belongs: a dead sender
+cannot send. `agent-bus` ruling `g-design:83` settles this, and
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.125 records the world it closes — a
+sender present and dead, its death recorded against the session, the session
+still open, and an ordinary second send constructible from it.
+
+The evidence is transition-certificate evidence: a constructor or macro emitting
+a send derives the sender's liveness from the world it is already stepping, and
+an ordinary `ProcessSpec` author writes no new field.
 
 ### Byte-flow protocols and partial I/O
 
@@ -1061,14 +1154,14 @@ structure ChildRequest (registry : ProtocolRegistry) where
 structure LocalDemandOccurrence
     (plan : ProcessPlan registry boundary)
     (parentKind : plan.ProcessKind)
-    (parent : ProcessRef plan.toProcessTopology parentKind)
+    (parent : ProcessRef plan.toProcessTopologyCore parentKind)
     (demand : (registry.protocol (plan.protocolKey parentKind)).Demand) where
   id : ParentLocalDemandId parent demand
 
 structure ChildDemandBinding
     (plan : ProcessPlan registry boundary)
     (parentKind : plan.ProcessKind)
-    (parent : ProcessRef plan.toProcessTopology parentKind)
+    (parent : ProcessRef plan.toProcessTopologyCore parentKind)
     (demand : (registry.protocol (plan.protocolKey parentKind)).Demand)
     (occurrence : LocalDemandOccurrence plan parentKind parent demand)
     (request : ChildRequest registry) where
@@ -1086,13 +1179,13 @@ structure ChildDemandBinding
 structure ChildOccurrence (plan : ProcessPlan registry boundary)
     (request : ChildRequest registry) where
   parentKind : plan.ProcessKind
-  parent : ProcessRef plan.toProcessTopology parentKind
+  parent : ProcessRef plan.toProcessTopologyCore parentKind
   parentDemand : (registry.protocol (plan.protocolKey parentKind)).Demand
   occurrence : LocalDemandOccurrence plan parentKind parent parentDemand
   binding : ChildDemandBinding plan parentKind parent parentDemand occurrence request
   kind : plan.ProcessKind
   protocol : plan.protocolKey kind = request.key
-  ref : ProcessRef plan.toProcessTopology kind
+  ref : ProcessRef plan.toProcessTopologyCore kind
   live : LiveChildAt plan ref parent occurrence
 
 inductive ChildLifecycleEvent (occurrence : ChildOccurrence plan request)
@@ -1101,7 +1194,7 @@ inductive ChildLifecycleEvent (occurrence : ChildOccurrence plan request)
   | succeeded (result : TerminalSuccess request.key request.request)
   | failed (failure : TerminalFailure request.key request.request)
   | cancellationAcknowledged (reason : CancelReason)
-  | interrupted (reason : InterruptReason)
+  | interrupted (demand : Demand) (reason : InterruptReason demand)
   | faulted (fault : ChildFault)
   | environmentViolation (violation : EnvironmentViolation)
   | died (disposition : ChildDeathDisposition occurrence)
@@ -1583,6 +1676,21 @@ donate its provenance. Sequential and explicitly authored plans retain their
 own origins and do not pretend to have blend scopes.
 
 The ordinary authoring interface is a typed sequential effect machine:
+
+`EffectDemand` and `EffectResult` are abbreviations, not a separate layer:
+
+```lean
+abbrev EffectDemand (boundary : DriverBoundary) := boundary.Demand
+
+abbrev EffectResult {boundary : DriverBoundary} (demand : EffectDemand boundary) :=
+  boundary.Result demand
+```
+
+A protocol-specific effect enters through a typed constructor of the open
+boundary demand family, not by wrapping it. Occurrence identity, child binding,
+and pending multiplicity are generated by `SequentialAdapter` from the decision
+structure; they are never added to this authoring type. Adding a new effect
+therefore costs one constructor and no adapter proof.
 
 ```lean
 inductive SequentialDecision
@@ -2078,23 +2186,73 @@ be interrupted.
 
 ### Total cancellation and scoped-realization interfaces
 
-Cancellation policy is indexed by the exact process graph and source occurrence
-map. Names alone are insufficient:
+Cancellation policy is indexed by the exact process plan and source occurrence
+map. Names alone are insufficient.
+
+`ProcessPlan` is applied only at the `registry` and `boundary` parameters §3
+declares it with. Root-oriented notation such as `ProcessPlan root` is permitted
+solely as typed elaborator syntax that constructs or infers those parameters; it
+is never a second type arity, and the spelling `ProcessNetwork` is not a type at
+all. The logical world a plan steps through is `LogicalProcessNetwork plan`,
+which is a different thing and keeps its name.
+
+There is exactly one core `CancellationPolicy`, and it is indexed by a scoped
+cancellation-point family rather than by a plan:
 
 ```lean
-structure CancellationPolicy
-    (network : ProcessNetwork root)
-    (source : MachineSource plan) where
-  points : (id : network.cancellationDemand.Key) -> CancellationPointPolicy id
-  sourceOccurrence : (id : points.Key) -> UniqueSourceOccurrence source id
-  atomicRegions : FiniteMap AtomicRegionId BoundedAtomicRegion
-  blockingCalls : (call : source.discoverPotentiallyBlockingCalls.Key) ->
-    BlockingCallCancellationDisposition call points atomicRegions
-  pointsExact : points.keys = network.cancellationDemand.keys
-  callsExact : blockingCalls.keys = source.discoverPotentiallyBlockingCalls.keys
-  routesTotal : EveryCancelFaultInterruptRouteClassified network source points
+structure ProcessScopeSummary where
+  scope : ScopeId
+  publicCancellationPoints : List CancellationPointId
+  blockingCalls : List BlockingCallId
+  pointsDistinct : publicCancellationPoints.Nodup
+  callsDistinct : blockingCalls.Nodup
+
+structure CancellationPolicy where
+  points : List CancellationPointId
+  pointPolicy : CancellationPointId -> CancellationPointPolicy
+  atomicRegions : List BoundedAtomicRegion
+  blockingCalls : List BlockingCallId
+  callDisposition : BlockingCallId -> BlockingCallDisposition
+
+def CancellationPolicy.Covers (policy : CancellationPolicy)
+    (summary : ProcessScopeSummary) : Prop :=
+  policy.points = summary.publicCancellationPoints ∧
+    policy.blockingCalls = summary.blockingCalls
+
+def CancellationPolicy.RegionsDeclared (policy : CancellationPolicy) : Prop :=
+  forall call, call ∈ policy.blockingCalls ->
+    forall region, policy.callDisposition call = .withinAtomicRegion region ->
+      exists bounded, bounded ∈ policy.atomicRegions ∧ bounded.id = region
+
+def CancellationPolicy.PointsDeclared (policy : CancellationPolicy) : Prop :=
+  forall call, call ∈ policy.blockingCalls ->
+    forall point, policy.callDisposition call = .cancellableAt point ->
+      point ∈ policy.points
+
+structure ScopedCancellationCertificate (summary : ProcessScopeSummary) where
+  policy : CancellationPolicy
+  exact : policy.Covers summary
+  regionsDeclared : policy.RegionsDeclared
+  pointsDeclared : policy.PointsDeclared
+  routesTotal : EveryCancelFaultInterruptRouteClassified summary policy
   progress : EveryRequestedCancellationReachesDispositionUnderDeclaredPremises
 ```
+
+`Covers` is list equality against *that scope's* points and calls, and the field
+is `blockingCalls` on both sides. Equality in both directions and not
+containment: a policy classifying *more* calls than the scope discovered is
+describing code that is not there, and one classifying fewer leaves a blocking
+call unaccounted. `RegionsDeclared` and `PointsDeclared` close the two ways a
+disposition could name something that does not exist — an atomic region with no
+declared bound, or a cancellation point the policy does not govern. This is the whole scalability claim: an added
+`Sleep` changes one scope's discovered-call list and rejects that scope's
+certificate, instead of changing a global key set that every certificate in the
+program compares against.
+
+Whole-plan cancellation is the hierarchical composition of scoped certificates,
+not a separate whole-plan type. Spike syntax may infer the root scope from a
+named process, but that is typed elaborator sugar which constructs a
+`ProcessScopeSummary`; it is not a second Lean arity for this structure.
 
 A call may be uncancellable only inside a named bounded atomic region. A
 finish-current-frame policy states the exact completion premise and its
@@ -2107,7 +2265,8 @@ Staged subsystem refinement receives a canonical scoped projection, not the
 whole plan plus an advisory scope:
 
 ```lean
-structure ScopedProcessPlan (whole : ProcessPlan root) (scope : ScopeId) where
+structure ScopedProcessPlan (whole : ProcessPlan registry boundary)
+    (scope : ScopeId) where
   graph : whole.graph.induced scope
   imports : BoundaryImports whole scope
   exports : BoundaryExports whole scope

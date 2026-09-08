@@ -218,6 +218,12 @@ pub struct BusState {
     pub merge_engine_info: BTreeMap<EventId, (Short, Short)>,
     /// Highest `schema.activated` version seen so far (0 = none yet).
     pub activated_schema_version: u32,
+    /// Every `audit.reported`, verbatim (AGENT_COORDINATION_EVOLUTION.md
+    /// section 2.2). Durable evidence only: like `friction_reports`, and
+    /// unlike `issues`, nothing here ever gains a status, an assignment or a
+    /// disposition, because the design makes the report non-authoritative
+    /// and gives issue lifecycle sole ownership of all three.
+    pub audits: BTreeMap<EventId, crate::events::AuditReported>,
     /// Every `friction.reported` event, verbatim -- durable evidence only;
     /// unlike `issues`, nothing here ever gains a status or an assignment
     /// (gate 11: a friction report creates no target obligation).
@@ -259,6 +265,7 @@ impl BusState {
             current_merge_engine_epoch: None,
             merge_engine_info: BTreeMap::new(),
             activated_schema_version: 0,
+            audits: BTreeMap::new(),
             friction_reports: BTreeMap::new(),
             friction_synthesis: BTreeMap::new(),
             friction_theme_synthesis: BTreeMap::new(),
