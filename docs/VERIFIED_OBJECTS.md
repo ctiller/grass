@@ -53,6 +53,7 @@ structure VerifiedObject (sig : ProgramSignature) where
   payload : GobjPayload
   payloadSourceExact : PayloadEncodesExactSource payload source
   payloadExports : PayloadExportsSignature payload sig
+  payloadImports : PayloadImportsSignature payload sig
   machine : ObjectMachineCodeRefines privateSpec source payload
 ```
 
@@ -101,6 +102,12 @@ structure SerializableImportEntry where
   subject : SerializableImportSubject
   abiContract : StableId
 
+def canonicalImportKey (entry : SerializableImportEntry) : CanonicalBytes :=
+  canonicalEncode (entry.localTarget, entry.subject, entry.abiContract)
+
+theorem canonicalImportKey_injective :
+    Function.Injective canonicalImportKey
+
 structure SerializableImportManifest where
   entries : Vec SerializableImportEntry
   localTargetsUnique : PairwiseDistinct entries.localTarget
@@ -124,18 +131,22 @@ its section-relative extent and local/exported visibility, while an imported
 symbol carries an index into `SerializableImportManifest` and no section or
 extent. Its local symbol name is exactly the referenced import entry's
 `localTarget`. Structural validation checks the correct arm, checks every
-import index, and rejects a defined symbol masquerading as an import (or the
-reverse). This avoids a second relocation target namespace while making an
-external call representable; a table containing only local/exported defined
-symbols cannot implement the import design.
+import index, checks that each imported symbol's local name equals the indexed
+entry's `localTarget`, and rejects a defined symbol masquerading as an import
+(or the reverse). This avoids a second relocation target namespace while
+making an external call representable; a table containing only local/exported
+defined symbols cannot implement the import design.
 
 Manifest semantics are a finite map keyed by `localTarget`, not authored list
-order. The wire writer sorts entries by the injective canonical encoding of the
-structured key. The reader checks that order and uniqueness, so permuting an
-otherwise identical import set is not a second canonical payload. Multiple
-relocations may share one imported symbol, and final linking may intern
-distinct local imports only after proving their subjects and ABI contracts
-identical.
+order. `canonicalImportKey` encodes the complete structured entry: its local
+target, tagged subject and all subject components, and ABI-contract key. The
+`canonicalImportKey_injective` theorem follows from injectivity of those
+component encodings and disjoint subject tags. The wire writer sorts entries by
+that key. The reader checks that order and the separate `localTarget`
+uniqueness condition, so permuting an otherwise identical import set is not a
+second canonical payload. Multiple relocations may share one imported symbol,
+and final linking may intern distinct local imports only after proving their
+subjects and ABI contracts identical.
 
 The manifest deliberately contains neither a final loader spelling nor a slot
 address. A final platform link maps a provider subject to a format-specific

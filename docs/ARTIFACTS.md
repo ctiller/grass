@@ -129,10 +129,26 @@ structure PEImportIdentity where
   logicalImport : SerializableImportEntry
   dll : CanonicalDllName
   symbol : ImportNameOrOrdinal
+
+structure PEImportResolutionCertificate
+    (identity : PEImportIdentity) where
+  callableContract : Win64CallableContract
+  resolvesIdentity : PEIdentityResolvesTo identity callableContract
+  nominalContractKeyExact :
+    callableContract.nominalContractKey = identity.logicalImport.abiContract
+
+structure PEPlatformImportPlan where
+  identity : SerializableImportEntry -> PEImportIdentity
+  logicalImportExact :
+    ∀ logicalImport, (identity logicalImport).logicalImport = logicalImport
+  resolution :
+    ∀ logicalImport, PEImportResolutionCertificate (identity logicalImport)
 ```
 
-The platform plan owns the proved mapping from the target-independent logical
-import to this PE identity. For a provider import it proves that the DLL and
+The selected PE `PlatformPlan` carries a named
+`peImports : PEPlatformImportPlan` field. That field owns the proved mapping
+from the target-independent logical import to this PE identity. For a provider
+import it proves that the DLL and
 name-or-ordinal implement the identical provider profile, nominal operation,
 and ABI contract named by `logicalImport`; for an inter-object callable it
 resolves the named exported signature and callable under the same ABI contract.
@@ -140,9 +156,10 @@ The linker derives descriptors and IAT slots from that mapping. A slot is a
 layout result, not serialized `.gobj` identity. DLL name, symbol/ordinal,
 derived slot identity, and import-environment choice participate in the
 namespaced loaded/raw coupling; matching a function name alone is insufficient.
-The accompanying in-kernel resolution certificate, rather than this
-first-order identity, carries the `Win64CallableContract` and proves that its
-nominal contract key is exactly `logicalImport.abiContract`.
+The accompanying `PEImportResolutionCertificate`, carried by
+`PEPlatformImportPlan.resolution` rather than the first-order identity, carries
+the `Win64CallableContract` and proves that its nominal contract key is exactly
+`logicalImport.abiContract`.
 
 Exports are derived from
 verified callable declarations. Unused imports and unmodeled entry points are
