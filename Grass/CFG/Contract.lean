@@ -59,9 +59,44 @@ variable {State : Type u}
 def exitTags (contract : BlockContract State) : List ExitTag :=
   contract.exits.map ExitContract.tag
 
+/-- Find one exit contract by stable identity. -/
+def findExit? (contract : BlockContract State) (tag : ExitTag) :
+    Option (ExitContract State) :=
+  contract.exits.find? (fun exit => exit.tag == tag)
+
 /-- Whether a contract declares an exit identity. -/
 def declaresExit (contract : BlockContract State) (tag : ExitTag) : Bool :=
   contract.exitTags.contains tag
+
+/-- A successful exit lookup returns a declared member with the requested
+identity. -/
+theorem findExit?_sound
+    (contract : BlockContract State) (tag : ExitTag)
+    (exit : ExitContract State)
+    (hfind : contract.findExit? tag = some exit) :
+    exit ∈ contract.exits ∧ exit.tag = tag := by
+  constructor
+  · exact List.mem_of_find?_eq_some (by
+      simpa [findExit?] using hfind)
+  · have matched : exit.tag == tag := List.find?_some
+      (p := fun candidate : ExitContract State => candidate.tag == tag) (by
+        simpa [findExit?] using hfind)
+    exact LawfulBEq.eq_of_beq matched
+
+/-- Exit lookup succeeds exactly when the contract declares the identity. -/
+theorem findExit?_isSome_iff_declaresExit
+    (contract : BlockContract State) (tag : ExitTag) :
+    (contract.findExit? tag).isSome = true ↔
+      contract.declaresExit tag = true := by
+  simp [findExit?, declaresExit, exitTags]
+
+/-- Every declared exit identity has a concrete exit-contract lookup result. -/
+theorem exitForTag
+    (contract : BlockContract State) (tag : ExitTag)
+    (declared : contract.declaresExit tag = true) :
+    ∃ exit, contract.findExit? tag = some exit := by
+  apply Option.isSome_iff_exists.mp
+  exact (contract.findExit?_isSome_iff_declaresExit tag).2 declared
 
 /-- A contract is structurally well formed exactly when exit identities are
 unique.  An empty family is permitted for a genuinely non-returning block. -/

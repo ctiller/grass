@@ -116,6 +116,11 @@ This prevents the core graph library from becoming x86-specific while allowing
 the first executable instantiation to use `Grass.Memory.MachineState` and
 `Grass.Op.step`.
 
+`BlockContract.findExit?`, `BlockContract.findExit?_sound`, and
+`BlockContract.exitForTag` connect executable exit selection to the exact
+declared `ExitContract`, retaining structural membership and requested-tag
+identity for later edge and call checking.
+
 Exit criteria:
 
 - every edge has one source, target or terminal disposition, and exit tag;
