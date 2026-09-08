@@ -6,6 +6,9 @@ import Grass.Build.Cache.Key
 import Grass.CFG.Contract
 import Grass.CFG.Graph
 import Grass.Certificate
+import Grass.Construct.Fragment.Generator
+import Grass.Construct.Fragment.Source
+import Grass.Construct.Fragment.Verified
 import Grass.Core.Context
 import Grass.Core.Demand
 import Grass.Core.Generational
