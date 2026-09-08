@@ -289,7 +289,7 @@ dropped as an expression fragment rather than adjudicated. A citation exploiting
 both is invisible to that gate, and this one did.
 
 The first version of this paragraph named those two internals directly and
-`Tools/DocstringAudit.py` reported it, because that gate resolves cited names
+the docstring audit reported it, because that gate resolves cited names
 against the **Lean** build while `CitationAudit` also scans the tools. The two
 disagree about whether a Lean docstring may cite a tool function, and nothing says
 which is right; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1e records it.

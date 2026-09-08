@@ -251,6 +251,12 @@ pub struct SucceedArgs {
     target: String,
     /// The host the proposer runs on -- what the target's stream custody
     /// moves to.
+    ///
+    /// This command resumes the target's outbox from *this* checkout under
+    /// exactly this host name, so run it on the host it names. Nothing here
+    /// can verify that (every command in this tool takes the operator's
+    /// word for `--host`), and naming a host you are not on would publish
+    /// for a custody epoch this machine does not hold.
     #[arg(long)]
     host: String,
     #[arg(long, default_value = "origin")]
@@ -583,6 +589,35 @@ fn register(args: RegisterArgs) -> AbResult<()> {
         ),
     ];
     let receipt = crate::publish::publish(&paths.repo, &args.remote, &updates)?;
+
+    // A rejected registry push is a *lost compare-and-swap*, not a warning
+    // to print and exit zero on -- exactly the reasoning `succeed` already
+    // spells out for the same publication, and the same recovery.
+    //
+    // `publish` never returns `Err` for a refused push (rejection is
+    // coordinator policy input, see its own doc), so without this the
+    // command reported success while the local `agent-registry` ref had
+    // advanced to an epoch the remote refused. That local ref is then
+    // diverged from origin, so every later `synced_snapshot` here fails its
+    // deliberately non-force registry fetch -- and the obvious-looking
+    // remedy for a diverged local branch is a force-push, which is
+    // prohibited on this ref. Two hosts adding an agent at once is not
+    // exotic: registering is precisely what an operator does when standing
+    // up a new host, and section 2.1 makes the registry the one ref every
+    // such change serializes on.
+    if !receipt.rejected.is_empty() || !receipt.not_attempted.is_empty() {
+        return Err(invalid(format!(
+            "registering {new_agent} did not reach {}: rejected {:?}, not attempted {:?}. The \
+             registry epoch and this agent's stream root exist only locally; another host almost \
+             certainly won this registry transition. Fetch {} to restore \
+             {}, then re-run `register` against the new epoch -- do not force-push either ref.",
+            args.remote,
+            receipt.rejected,
+            receipt.not_attempted,
+            args.remote,
+            crate::registry::REGISTRY_REF,
+        )));
+    }
 
     // A fresh local reduction of the just-published result -- not an
     // additional remote probe (the publish above already landed everything
@@ -939,11 +974,6 @@ fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
         ));
     }
 
-    // Before anything is constructed: this host's git must be the engine
-    // version the bus pins, or the candidate it builds is unverifiable
-    // everywhere else (AGENT_REVIEW.md section 7).
-    crate::bootstrap::require_pinned_merge_engine(&state)?;
-
     let previous_main = crate::gitrepo::rev_parse(&paths.repo, "refs/heads/main")?;
     let expected_authors: BTreeSet<Agent> = chain.current_request.authors.iter().cloned().collect();
     crate::merge_candidate::verify_authorship(
@@ -953,6 +983,13 @@ fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
         &previous_main,
         reviewed_commit.as_str(),
     )?;
+
+    // Immediately before the one call that runs the merge engine, and no
+    // earlier -- see `require_pinned_merge_engine`'s own doc for why
+    // placement is the whole question here. Everything above is
+    // engine-independent, so checking the pin first told a reviewer whose
+    // *authorship* was wrong that their git was wrong instead.
+    crate::bootstrap::require_pinned_merge_engine(&state)?;
 
     let candidate = crate::merge_candidate::reconstruct_candidate(
         &paths.repo,

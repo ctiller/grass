@@ -188,10 +188,10 @@ structure WellFormed (e : MemoryEvent) : Prop where
   What decides isolation for the eleven that remain is the neighbour set in
   `Tests/Memory/EventClauses.lean` -- one per clause, each failing that clause and no
   other. **The enforcement is a fixture and it is named by its file rather than by
-  its identifier**, because `Tools/DocstringAudit.py` resolves cited names against
+  its identifier**, because the docstring audit resolves cited names against
   the `Grass/` build and does not scan `Tests/`. `c-mem:54` is where that asymmetry
   was raised; the widening that would have let this cite the theorem by name was a
-  `Tools/` edit and is not c-mem's to make. -/
+  tooling edit and is not c-mem's to make. -/
   statusWellFormed : e.status.WellFormed e.range.size
   /-- **The status and the counts are the same two facts.**
 
