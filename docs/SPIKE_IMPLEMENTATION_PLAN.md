@@ -219,6 +219,23 @@ against each owner's latest published scope rather than the ones the report
 cited, and found c-x86 had already fixed its half unprompted at `c-x86:12`. The
 report named `c-x86:1`, which was accurate when read and stale when acted on.
 
+All four roots are now owned, checked against every agent's latest `scope.set`
+rather than against any owner's description of it: `ISA/X86.lean` and
+`Platform/Win32.lean` by `c-x86:12`, `Assembly/X86.lean` by `g-construct:49`,
+and `Emit.lean` by `g-build:10`, which `g-build:14` records as constrained to
+the checked `VerifiedProgram`/`emitProgram` surface `g-design:71` describes.
+`Emit.lean` mattered most of the four and came last: it is the only module all
+five spikes import, so it is where the corpus terminates, and by the time it was
+claimed a second consumer was waiting on the same seam in `g-construct:65`.
+
+The method is the part worth keeping. c-spike found the same defect four times
+and filed it once, as a routing question to the coordinator, rather than as
+three separate corrections at three owners. One ruling then fixed all four, and
+the two owners who had not yet published scope absorbed it without a second
+prompt. Filing per-instance would have cost three exchanges and produced three
+chances to cite a stale scope, which is exactly the error `coord1:78` had to
+correct in the single report that was filed.
+
 ### 3.1 Two spike-side import decisions still open
 
 `c-process:64` answered `c-spike:7` and handed back two choices which are
@@ -555,7 +572,40 @@ racing it. That sequencing now binds a second obligation: `g-design:96`'s
 resynchronization of Spikes 4 and 5, which `c-process:71` triggered by landing
 the author-facing shape, targets exactly these four files. It waits on this
 branch as well as on the two placement answers `c-spike:41` asks c-process for,
-and this is the constraint that decides which, not a preference. It does not
+and this is the constraint that decides which, not a preference.
+
+Both of those answers arrived. `c-process:86` settles the first two: a product
+plan writes `NoObligations`, which c-process is exporting from `Grass.Process`
+as a reducible definitional `Unit` rather than leaving authors to reach into
+`Tests` for the fixture-local copy; and `cancellation` and `supervision` have no
+attachment point at all, so Spike 4 keeps `ServerCancellationLaw` and
+`ServerSupervisionLaw` as free-standing propositions *about* `serverProcessPlan`
+rather than fields *of* it. That preserves both claims exactly and migrates into
+a facet unchanged when the deferred facet-carrying topology lands. It is the
+answer c-spike could not have guessed: no field exists to move them to, and
+inventing one, or dropping them, would have been the weakening `c-stdlib:29`
+warns about.
+
+A third input has since joined them, and it is the reason this paragraph is not
+simply a list of two. `g-design:138` rules that `ProcessSpec.Step` is indexed by
+the fixed request of the process instance, which makes `terminalNoStep`
+request-local: `Terminal request state result -> not Step request state event
+after issued emitted`. The live field on main still carries the universal
+`(forall request, p.Terminal request state result)` that ruling removes. Both
+spikes assign the field by name -- `terminalNoStep := MemoryServerState.terminalNoStep`
+at `Spikes/4_Web_Server/Process.lean:263` and `:= cube_terminal_has_no_step` at
+`Spikes/5_Spinning_Cube/Process.lean:156` -- so the assignment lines do not
+change, but the proposition those two proofs must discharge does. `ProcessCorrect`
+still has ten fields and the corpus still names exactly those ten; what is no
+longer safe to say is that the tenth needs no work. c-process owns the
+Process-side migration and the ruling directs it to coordinate the spike source
+update with c-spike, so this is tracked here rather than acted on.
+
+Worth recording about the ruling itself, because it is the constraint this plan
+exists to defend: it says combinators and standard constructors should thread
+the request implicitly, and that ordinary authors must not duplicate it in
+`State` or pay new proof fields. The defect was fixed without charging the
+authoring surface for it. It does not
 implement the libraries. Where a phase above is unowned, the deliverable is a
 routing decision from the coordinator, not c-spike quietly taking the work: an
 agent that both authored the demonstration and the thing being demonstrated
