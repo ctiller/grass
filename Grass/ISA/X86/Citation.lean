@@ -155,7 +155,25 @@ number under both of its document trees -- 208804 bytes on one, 150594 on the
 other. So a content-length check passes uniformly as well, and even a
 checksum-stability check would report the source healthy indefinitely. Only a
 probe asserting the document's own text separates these cases, which is what
-`livenessProbe` holds and what nothing yet reads. See `amd64Apm409`.
+`livenessProbe` holds. See `amd64Apm409`.
+
+Two corrections, both about currency rather than about the argument above,
+which stands.
+
+This said `livenessProbe` was "what nothing yet reads".
+`Tools/source-liveness.py` reads it; it was written to be exactly that reader.
+What is true is one step further out and is recorded in
+`Grass/ISA/X86/Performance.lean`: nothing runs the tool. No workflow invokes
+it or the `Tests/ISA/X86/SourceCorpus.lean` emitter that feeds it, so the
+status is checkable and unchecked.
+
+And the three failure modes above are dated deliberately, because AMD's
+behaviour has since moved. On 2026-09-08 the pinned URL is a genuine 404
+rather than a 200 with a shell, and a sibling APM volume resolves and serves
+a real PDF. The argument for asserting on content rather than status codes is
+unaffected -- it was never that AMD returns 200 forever, but that a status
+code is the wrong thing to assert on -- and `Grass/ISA/X86/Sources.lean`
+carries the current state.
 -/
 inductive RetrievalStatus where
   /-- Recorded from a secondary source and never fetched by this corpus. Not a
