@@ -3498,6 +3498,25 @@ set is changing authority whether or not the function refuses anything.
 
 **Unmapping has no representation at all.** §7.5's unmapping would remove a pair,
 and nothing here can; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it.
+
+**PROVISIONAL SCAFFOLDING, AND NOT CONSUMABLE.** `g-design:185` rules that this whole
+approach is replaced: one canonical `ByteStore` per backing storage identity, with
+allocation records as typed views naming a backing id, origin and extent, reads and
+writes translating into one checked backing span, and aliasing definitional where two
+views' translated spans overlap. Under that design a declared alias graph is not an
+authority source at all, and the signed shift is derived from view origins rather
+than installed here.
+
+The ruling is right and `Tests/Op/StandardLoan.lean`'s
+`the_alias_is_not_yet_a_byte_level_fact` is c-mem's own proof of why: this door
+declares two allocations to be the same storage while `MemoryState.write` writes only
+the named one, so the claim has no byte-level counterpart. That theorem's docstring
+already named the replacement as the better shape before c-mem built this instead.
+
+Until the replacement lands, **no `MemoryProfile` or `VerifiedProgram`-facing
+transition may depend on this**, and it is unchecked besides: it prepends any source,
+target and delta with no proof that the mapping is real. Treat it as a placeholder
+that records an intent, not as an interface.
 -/
 def alias (state : MemoryState) (a b : AllocId) (delta : Int) : MemoryState :=
   { state with aliases := ⟨a, b, delta⟩ :: state.aliases }
