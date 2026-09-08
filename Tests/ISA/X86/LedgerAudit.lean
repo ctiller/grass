@@ -902,10 +902,17 @@ reviewed edit if a genuinely new declaration belongs here."
   -- everything-minus-the-debt folds the 27 waived declarations into it and
   -- reports several times the real number, which is exactly the flattering
   -- arithmetic this gate exists to replace.
+  -- Reports Gate A's result rather than asserting it. The line used to read
+  -- "all anchoring to real declarations" unconditionally, so a run that had
+  -- just logged a subject naming no declaration still printed the reassuring
+  -- phrase beside the error.
+  let anchorSummary :=
+    if anchorFaults.isEmpty then "all anchoring to real declarations"
+    else s!"{anchorFaults.length} of them anchoring to no declaration"
   let cited := modeled.filter (accountedBy env subjects ·)
   logInfo m!"ledger audit: {modeled.size} modeled declarations -- \
 {cited.size} carry a citation, {owed.length} owed, \
 {notBehaviour.length} reviewed as carrying no external behaviour. \
-{subjects.length} ledger subjects, all anchoring to real declarations. \
+{subjects.length} ledger subjects, {anchorSummary}. \
 {unfounded.length} rules await a confirmed basis. \n{l.unconfirmedAnchors.length} of {l.citations.length} anchors are unconfirmed. \
 {(l.releaseBlockers.map (fun d => d.id.text)).eraseDups} is the release-blocker set (docs/VALIDATION.md section 1: a dead location under a referenceOnly policy blocks release)"

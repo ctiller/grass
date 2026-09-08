@@ -35,11 +35,16 @@ A dual-citation field that is merely a pair of citations closes none of them.
    for one rule cannot be moved to another.
 
    **This third one is not closed, and the check is weaker than it looks.**
-   `Citation.subjects` is a list of names the record's author types in. Nothing
-   relates it to the cited passage, nothing checks the names resolve to
-   declarations, and one anchor may list every subject in the profile — so a
-   preface citing "the whole manual" for all nine rules satisfies every
-   obligation here. Whether an anchor is *about* what it claims is a fact about
+   `Citation.subjects` is a list of names the record's author types in. That
+   those names *resolve* is checked: `Tests/ISA/X86/LedgerAudit.lean`'s Gate A
+   refuses a subject naming no declaration, and refuses one that anchors more
+   than a single segment short of one. This paragraph said nothing checked it,
+   which stopped being true when that gate was written.
+
+   What is unchecked is everything about the passage. Nothing relates a subject
+   to the text the anchor points at, and one anchor may list every subject in
+   the profile — so a preface citing "the whole manual" for all nine rules
+   satisfies every obligation here. Whether an anchor is *about* what it claims is a fact about
    the manual's text, which no type in Lean can decide. It is an **open
    obligation** discharged by a reviewer following `Citation.locator` and
    recording the result in `Citation.confirmed`, and until that field is set the
