@@ -452,7 +452,9 @@ encoder explicitly tainted.
 `Grass.Unsafe.EmitLink` validates consecutive offsets and rejects zero-width
 encodings before projecting emitted items into `Link.SourceMapEntry` values.
 Accepted ranges retain exact block/origin data and carry reusable positive-length
-and emitted-byte-bound theorems; artifact placement remains downstream.
+and emitted-byte-bound theorems. `entriesConsecutive` and
+`entriesOrderedNonoverlap` additionally expose exact section order and
+pairwise non-overlap; artifact placement remains downstream.
 `Grass.Unsafe.EmitRelocatable` packages that checked stream as one initialized
 format-neutral section with exact bytes and source ranges. It proves the generic
 `RelocatableFragment.WellFormed` contract while leaving definitions,

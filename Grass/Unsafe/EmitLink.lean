@@ -28,6 +28,16 @@ def LinkMapReadyFrom :
       item.offset = expected ∧ 0 < item.bytes.length ∧
         LinkMapReadyFrom item.endOffset rest
 
+/-- Consecutive positive source ranges in one exact section. -/
+def SourceMapConsecutiveFrom (sectionId : SectionId) :
+    Nat → List SourceMapEntry → Prop
+  | _, [] => True
+  | expected, entry :: rest =>
+      entry.sectionId = sectionId ∧ entry.offset = expected ∧
+        0 < entry.length ∧
+        SourceMapConsecutiveFrom sectionId
+          (entry.offset + entry.length) rest
+
 /-- `LinkSourceMapError` records the first structural reason raw items cannot
 become positive consecutive link source ranges. -/
 inductive LinkSourceMapError where
@@ -101,6 +111,52 @@ private theorem linkMapReady_bounded
         unfold RawProgramEncodedInstruction.endOffset at bound
         omega
 
+private theorem linkMapReady_sourceMapConsecutive
+    (sectionId : SectionId) (expected : Nat)
+    (items : List (RawProgramEncodedInstruction Instruction))
+    (ready : LinkMapReadyFrom expected items) :
+    SourceMapConsecutiveFrom sectionId expected
+      (items.map fun item =>
+        ⟨sectionId, item.offset, item.bytes.length,
+          item.lowered.block, item.lowered.origin⟩) := by
+  induction items generalizing expected with
+  | nil => trivial
+  | cons head rest ih =>
+      rcases ready with ⟨offsetExact, positive, restReady⟩
+      refine ⟨rfl, offsetExact, positive, ?_⟩
+      simpa [RawProgramEncodedInstruction.endOffset] using
+        ih head.endOffset restReady
+
+private theorem sourceMapConsecutive_offsetsAtLeast
+    (sectionId : SectionId) (expected : Nat) (entries : List SourceMapEntry)
+    (ready : SourceMapConsecutiveFrom sectionId expected entries) :
+    ∀ entry ∈ entries, expected ≤ entry.offset := by
+  induction entries generalizing expected with
+  | nil => simp
+  | cons head rest ih =>
+      rcases ready with ⟨sectionExact, offsetExact, positive, restReady⟩
+      intro entry hentry
+      simp only [List.mem_cons] at hentry
+      rcases hentry with rfl | hentry
+      · omega
+      · have later := ih (head.offset + head.length) restReady entry hentry
+        omega
+
+private theorem sourceMapConsecutive_pairwise
+    (sectionId : SectionId) (expected : Nat) (entries : List SourceMapEntry)
+    (ready : SourceMapConsecutiveFrom sectionId expected entries) :
+    entries.Pairwise
+      (fun left right => left.offset + left.length ≤ right.offset) := by
+  induction entries generalizing expected with
+  | nil => exact List.Pairwise.nil
+  | cons head rest ih =>
+      rcases ready with ⟨sectionExact, offsetExact, positive, restReady⟩
+      exact List.Pairwise.cons
+        (fun right hright =>
+          sourceMapConsecutive_offsetsAtLeast sectionId
+            (head.offset + head.length) rest restReady right hright)
+        (ih (head.offset + head.length) restReady)
+
 namespace RawProgramEmission
 
 /-- Link source-map entries in exact emitted-item order. -/
@@ -138,6 +194,24 @@ theorem entrySectionExact
   simp only [entries, RawProgramEmission.linkSourceMap, List.mem_map] at hentry
   obtain ⟨item, hitem, rfl⟩ := hentry
   rfl
+
+/-- Checked entries form one exact consecutive positive range sequence. -/
+theorem entriesConsecutive
+    {emission : RawProgramEmission State Terminal Instruction}
+    {sectionId : SectionId}
+    (checked : CheckedLinkSourceMap emission sectionId) :
+    SourceMapConsecutiveFrom sectionId 0 checked.entries :=
+  linkMapReady_sourceMapConsecutive sectionId 0 emission.items checked.ready
+
+/-- Earlier checked source ranges end no later than every subsequent range. -/
+theorem entriesOrderedNonoverlap
+    {emission : RawProgramEmission State Terminal Instruction}
+    {sectionId : SectionId}
+    (checked : CheckedLinkSourceMap emission sectionId) :
+    checked.entries.Pairwise
+      (fun left right => left.offset + left.length ≤ right.offset) :=
+  sourceMapConsecutive_pairwise sectionId 0 checked.entries
+    checked.entriesConsecutive
 
 /-- Every checked link source-map entry has positive length. -/
 theorem entryPositive

@@ -52,6 +52,12 @@ example : checked.entries = [
     ⟨sectionId, 0, 2, blockId "entry", ⟨[], [], 0⟩⟩,
     ⟨sectionId, 2, 1, blockId "entry", ⟨[], [], 1⟩⟩] := rfl
 
+example : SourceMapConsecutiveFrom sectionId 0 checked.entries :=
+  checked.entriesConsecutive
+example : checked.entries.Pairwise
+    (fun left right => left.offset + left.length ≤ right.offset) :=
+  checked.entriesOrderedNonoverlap
+
 example (entry : SourceMapEntry) (hentry : entry ∈ checked.entries) :
     0 < entry.length := checked.entryPositive entry hentry
 example (entry : SourceMapEntry) (hentry : entry ∈ checked.entries) :
