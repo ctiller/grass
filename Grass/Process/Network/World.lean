@@ -142,7 +142,10 @@ declare before its contracts.
 
 Every field is a function of the index that its `NetworkFragment` names. That is
 not incidental: it is what lets `logicalWorldAgreement` below discharge
-`agreesGlue`, and a world shaped otherwise could not.
+`agreesGlue` *componentwise*. It is not what the law demands —
+`Tests/Process/AssertionFixtures.lean`'s `blindAgreement` discharges it at any
+world at all — it is what makes the discharge here read off the structure.
+§10.137.
 -/
 structure LogicalProcessNetworkCore {registry : ProtocolRegistry.{u, w, v}}
     {boundary : DriverBoundary.{u}}
@@ -235,15 +238,14 @@ theorem agrees_trans (fragment : NetworkFragment topology)
 
 open Classical in
 /--
-**The fragments decompose the world.**
+**This world's fragments decompose it, so the mixture is writable.**
 
 The mixed network takes each component from `left` or from `right` according to
 whether the fragment reading it is inside the split. Writable exactly because
 `LogicalProcessNetworkCore` has one component per fragment family, indexed the
-way its fragment is.
-
-This is `WorldAgreement.agreesGlue`, and it is what stops a footprint from being
-a decoration. See the module note.
+way its fragment is — a fact about *this* world and not about
+`WorldAgreement.agreesGlue`, which asks only that some mixture exist. See the
+module note.
 -/
 theorem agrees_glue (inside : NetworkFragment topology → Prop)
     (left right : LogicalProcessNetworkCore topology Message Obligations) :

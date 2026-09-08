@@ -253,7 +253,7 @@ different number of steps. Deleting it left `docs/PROCESS.md` §4's observation
 causality with nothing to be stated over — the module was 186 lines with no
 consumer. Carrying it as an index gives `Reachable.observationCausality` without making it
 state; acceptance never reaches it either way, since
-`Grass/Process/Acceptance.lean` does not mention `ProcessRunState`.
+`Grass/Process/Acceptance.lean` does not mention `Segmented`.
 
 **Decided — `ProcessCorrect.progress` is indexed by request.**
 [PROCESS.md](PROCESS.md) §4 writes `progress : MeetsProcessProgress p`. The
@@ -5064,10 +5064,11 @@ number. An untrackable obligation is a sentence, not a record.
 
 ### 10.137 Two premises the corrections contradicted, and neither was noticed
 
-The corrections in §10.136 and §10.137 were reviewed and two of them turned out
-to leave standing the sentences they repudiate. Both are on `main`, both are
-mine, and in each case the correction landed on the *conclusion* while the
-*premise* it was derived from stayed where it was.
+Two corrections on this branch turned out to leave standing the sentences they
+repudiate. Both premises are mine and both were on `main` before this branch
+touched them; in each case the correction landed on the *conclusion* while the
+*premise* it was derived from stayed where it was, phrased differently enough
+that no search for the refutation found it.
 
 **`agreesGlue` is a mixability law, not a coverage law.**
 `Grass/Process/Network/Assertion.lean`'s module note said gluing "is exactly the
@@ -5091,16 +5092,17 @@ over and this repair had broken.
 **And acceptance cannot see the segmentation whatever carries it.**
 `Grass/Process/Run.lean` said the segmentation is an index rather than a field
 "so that an acceptance relation, which sees only `ProcessRunState.history`,
-cannot branch on it". The "so that" does not follow. `Grass/Process/Acceptance.lean` does not mention `ProcessRunState` anywhere, so
-no clause of `ProcessAcceptance` can reach a field of one — which a field of the
-run state would be, exactly as an index is not.
+cannot branch on it". The "so that" does not follow. `Grass/Process/Acceptance.lean` does not mention `Segmented` anywhere, so no
+clause of `ProcessAcceptance` takes one, whether it is carried as an index or as
+a field.
 
 What index-versus-field decides is something else and worth keeping: whether the
 segmentation is part of the state a refinement has to preserve. As a field it
 would be, and a replacement producing the same observations in a different number
 of transitions changes it. That is the first of the module's two tests and it is
 what the earlier draft failed — the right conclusion from the wrong reason, which
-is why three sites and a ledger paragraph all repeated it.
+is why it was repeated at several sites in the Lean and in two ledger
+paragraphs.
 
 **The pattern.** A correction can leave in place not the sentence it corrected
 but the sentence it was *derived from*, which is harder to see: the repaired paragraph

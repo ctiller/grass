@@ -73,9 +73,8 @@ observations are produced by a different number of process transitions, so an
 acceptance stated over the segmentation would be broken by a replacement that
 changes nothing observable. So the segmentation must not be something acceptance
 can read — and it is not: `Grass/Process/Acceptance.lean` never mentions
-`ProcessRunState`, so no clause of `ProcessAcceptance` reaches into the run state
-for anything. What each clause is given, `ProcessCorrect` supplies at the call
-site.
+`Segmented`, so no clause of `ProcessAcceptance` takes one. What each clause is
+given, `ProcessCorrect` supplies at the call site.
 
 Causality is the opposite case. `docs/PROCESS.md` §4 requires the emitting
 segment of each observation to be *retained* through "later weaving, flattening,
@@ -83,12 +82,13 @@ serialization, machine simulation, and projection". Carrying it as an index of
 `Reachable` is what keeps it, and `Reachable.observationCausality` reads it.
 
 What keeps it out of acceptance is what `ProcessAcceptance`'s clauses are stated
-over. `Grass/Process/Acceptance.lean` never mentions `ProcessRunState`, so no
-clause of it can read one, and a field of the run state would be no more visible
-than an index is. An earlier version of this paragraph offered the
-index-versus-field distinction as the reason, which does not entail it, and a
-later one enumerated three of `ProcessAcceptance`'s clauses as though that were
-all of them. §10.137.
+over: `Grass/Process/Acceptance.lean` never mentions `Segmented`, so no clause of
+it takes one, and a field of the run state would be no more readable than an
+index is. Two earlier versions of this paragraph gave reasons that do not entail
+it — the index-versus-field distinction, and then the absence of
+`ProcessRunState` from that file, which is true and about the wrong type, since
+the segmentation is an index of `Reachable` rather than a field of the run state.
+§10.137.
 
 **What index-versus-field does decide** is whether the segmentation is part of
 the state a refinement has to preserve. As a field of `ProcessRunState` it would

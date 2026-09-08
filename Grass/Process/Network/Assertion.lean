@@ -60,13 +60,16 @@ coverage — and `Tests/Process/AssertionFixtures.lean`'s `leakyAgreement` is an
 agreement satisfying every law while its `.obligations` clause forces the whole
 world equal. §10.137.
 
-It is a real obligation on whoever supplies the world, and the shape it demands
-is a product over fragments. `docs/PROCESS.md` §3's `LogicalProcessNetwork` is
-one — seven independent fields, with `instances`, `shared` and the two ledgers
-pointwise over their indices — so the law is satisfiable there. A later world
-that carried a cross-fragment well-formedness invariant *as a field* would not
-satisfy it, and that is the right outcome: such a world's fragments would not be
-independent, and its assertions could not be framed fragment-wise.
+It is a real obligation on whoever supplies the *agreement*, and it demands
+nothing of the world's shape. `docs/PROCESS.md` §3's `LogicalProcessNetwork` is a
+product with one component per fragment family, which is why
+`logicalWorldAgreement` glues componentwise and the law is easy to discharge
+there — but ease is not demand.
+`Tests/Process/AssertionFixtures.lean`'s `blindAgreement` discharges it at a
+world of any shape, including one carrying a cross-fragment invariant as a
+field. What a badly shaped world costs is not this law; it is that a
+componentwise agreement is no longer available, and the assertions it would
+frame have to be framed some other way. §10.137.
 
 ## The world is abstract on purpose
 
@@ -140,7 +143,7 @@ either unstatable or smuggled in through some other fragment's agreement.
 (ProcessInstance topology)`, one live incarnation per slot, with the generation
 inside the stored instance rather than in the key. Keying the fragment by
 `ProcessRef` instead would put two refs that differ only in generation on two
-fragments reading one slot, and `agreesGlue` would then be unsatisfiable at the
+fragments reading one slot, and a componentwise agreement is then unavailable at the
 real world: no mixed network can agree with one and not the other about the same
 field. The cost is that framing over a slot is conservative — a restart replaces
 the incarnation, touches the slot, and any assertion naming it must be

@@ -33,11 +33,11 @@ rebuilt, so a change to the topology surface breaks this file too.
 family, and the instance and channel fields are *functions of their index*. That
 is not incidental convenience: it is what makes `agreesGlue` easy to
 discharge here, since a product mixes componentwise. It is not what `agreesGlue`
-*demands* — `leakyAgreement` below satisfies the law over the same world without
-any such correspondence, which is §10.137. An earlier draft of this fixture had a single
+*demands* — `blindAgreement` below satisfies the law at a world of any shape at
+all. §10.137. An earlier draft of this fixture had a single
 `listenerCursor : Nat` read by every `instanceState` fragment, which made two
 assertions about different slots `Separate` while reading the same field —
-exactly the aliasing `agreesGlue` now forbids.
+exactly the aliasing a componentwise agreement cannot survive.
 -/
 
 namespace Grass.Process.Tests.NetworkAssertions
@@ -396,6 +396,21 @@ def blindAgreement {World : Type} : WorldAgreement serverTopology World where
   agreesGlue := by
     intro _ left _
     exact ⟨left, fun _ _ => trivial, fun _ _ => trivial⟩
+
+/-- A world whose fragments do *not* decompose it: two components tied together
+by a field. -/
+structure TangledWorld where
+  left : Nat
+  right : Nat
+  tied : left = right
+
+/-- **And `blindAgreement` is a `WorldAgreement` over it.**
+
+The consumer, and the claim that matters: `agreesGlue` asks that some mixture
+exist, and the blind agreement always has one. So a world carrying a
+cross-fragment invariant as a field satisfies the law, and what such a world
+costs is a *componentwise* agreement rather than the law itself. §10.137. -/
+def tangledAgreement : WorldAgreement serverTopology TangledWorld := blindAgreement
 
 open Classical in
 /--
