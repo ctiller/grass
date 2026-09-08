@@ -43,6 +43,33 @@ theorem generated_effects_exact
       effectModel.derive (generator.expand parameter) :=
   (generator.generate parameter).effectsExact
 
+/-- `Generator.generated_contract_wellFormed` exposes contract closure for
+every generated parameter instance. -/
+theorem generated_contract_wellFormed
+    (generator : Generator Param Instruction State Effect semantics effectModel)
+    (parameter : Param) :
+    (generator.contract parameter).WellFormed :=
+  (generator.generate parameter).contractWellFormed
+
+/-- The generated instruction count is exactly the length of the generator's
+expanded instruction list. -/
+@[simp] theorem generated_instructionCount
+    (generator : Generator Param Instruction State Effect semantics effectModel)
+    (parameter : Param) :
+    (generator.generate parameter).instructionCount =
+      (generator.expand parameter).length := by
+  rfl
+
+/-- `Generator.generated_execution_classified` transports every successful
+generated execution from its declared entry to an exact exit classification. -/
+theorem generated_execution_classified
+    (generator : Generator Param Instruction State Effect semantics effectModel)
+    (parameter : Param) {before after : State}
+    (entry : (generator.contract parameter).requires before)
+    (executes : semantics.Executes (generator.expand parameter) before after) :
+    ClassifiesExactlyOneExit (generator.contract parameter) after :=
+  (generator.generate parameter).localCorrect before after entry executes
+
 end Generator
 
 end Grass.Construct.Fragment

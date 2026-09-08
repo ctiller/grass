@@ -62,6 +62,12 @@ def generator : Generator Nat Instruction Nat Nat semantics effects where
 example : generator.expand 7 = [.add 7] := by
   simp [generator, Generator.expand, addFragment]
 
+example : (Source.sequence [
+    Source.literal [Instruction.add 1],
+    Source.generated (fragmentId "nested")
+      (.literal [Instruction.add 2, Instruction.add 3])
+  ]).leafCount = 2 := by simp
+
 example :
     (Source.generated (fragmentId "first")
       (.literal [Instruction.add 7])).expand =
@@ -74,10 +80,18 @@ example : (generator.generate 7).instructionCount = 1 := by
     Source.instructionCount]
 example : (generator.generate 7).effects = effects.derive (generator.expand 7) :=
   Generator.generated_effects_exact generator 7
+example : (generator.contract 7).WellFormed :=
+  Generator.generated_contract_wellFormed generator 7
+example : (generator.generate 7).instructionCount = (generator.expand 7).length :=
+  Generator.generated_instructionCount generator 7
 
 example : ClassifiesExactlyOneExit (contract 7) 7 := by
   apply (generator.generate 7).localCorrect 0 7 rfl
   simp [generator, addFragment, semantics, eval, evalInstruction]
+
+example : ClassifiesExactlyOneExit (contract 7) 7 := by
+  apply Generator.generated_execution_classified generator 7 rfl
+  simp [generator, Generator.expand, addFragment, semantics, eval, evalInstruction]
 
 def overlappingExits : BlockContract Nat where
   requires := fun _ => True
@@ -88,5 +102,18 @@ def overlappingExits : BlockContract Nat where
 
 example : ¬ ClassifiesExactlyOneExit overlappingExits 0 := by
   simp [ClassifiesExactlyOneExit, overlappingExits] <;> decide
+
+example {candidate : ExitContract Nat}
+    (classified : ClassifiesExactlyOneExit (contract 7) 7)
+    (member : candidate ∈ (contract 7).exits)
+    (holds : candidate.ensures 7) : candidate.tag = exitTag "normal" := by
+  let normal : ExitContract Nat :=
+    ⟨exitTag "normal", fun state => state = 7⟩
+  have normalMember : normal ∈ (contract 7).exits := by
+    simp [normal, contract]
+  have normalHolds : normal.ensures 7 := by
+    simp [normal]
+  exact classified_exit_tags_equal classified member normalMember
+    holds normalHolds
 
 end Grass.Tests.Construct.Fragment

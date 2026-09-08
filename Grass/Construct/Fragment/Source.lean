@@ -52,6 +52,17 @@ def instructionCount (source : Source Instruction) : Nat := source.expand.length
 @[simp] theorem expand_sequence (children : List (Source Instruction)) :
     (Source.sequence children).expand = children.flatMap expand := by simp [expand]
 
+@[simp] theorem leafCount_literal (instructions : List Instruction) :
+    (Source.literal instructions).leafCount = 1 := by simp [leafCount]
+
+@[simp] theorem leafCount_generated (id : FragmentId)
+    (body : Source Instruction) :
+    (Source.generated id body).leafCount = body.leafCount := by simp [leafCount]
+
+@[simp] theorem leafCount_sequence (children : List (Source Instruction)) :
+    (Source.sequence children).leafCount = (children.map leafCount).sum := by
+  simp [leafCount]
+
 @[simp] theorem instructionCount_literal (instructions : List Instruction) :
     (Source.literal instructions).instructionCount = instructions.length := by
   simp [instructionCount]
