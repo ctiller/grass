@@ -128,11 +128,27 @@ including “worked on my machine,” in addition to literal private topology.
 
 ## 8. Repository tools and staged self-hosting
 
-Correctness-critical repository tooling is production software. A bus reducer,
-review gate, linker, emitter, cache validator, compiler, or audit command can
-invalidate the evidence chain even when it is not shipped inside the user's
-program. Its assurance obligation is proportional to that authority, not to
-the language in which its first version happens to be written.
+Correctness-critical repository tooling is production software. A tool is
+correctness-critical exactly when a review or nomination cites its output as
+evidence, a gate consumes its output in deciding acceptance, or its output
+authorizes or performs merge or publication. “Output” includes a decision,
+exit status, emitted artifact, or durable state; a command which merely advises
+a human and whose output cannot enter any of those uses is outside this
+definition. Thus a bus reducer, review gate, linker, emitter, cache validator,
+compiler, or audit command can invalidate the evidence chain even when it is
+not shipped inside the user's program.
+
+The strongest downstream use fixes the assurance floor. Review or nomination
+evidence requires the language-independent contract, reproducible invocation,
+and positive and negative fixtures at the public boundary. Gate acceptance also
+requires model/state-machine coverage for stateful behavior, fault fixtures for
+effectful behavior, and compatibility fixtures for durable data. Merge or
+publication authority requires all of those plus the crash, retry,
+concurrent-writer, stale-input, exact-effect, and recovery obligations below.
+An obligation whose named behavior is absent is inapplicable, not silently
+waived; for example, a pure reader has no crash-recovery write obligation. This
+output-use ordering, rather than implementation language or a subjective risk
+label, is what “proportional to authority” means in this section.
 
 Each such tool has a language-independent behavioral contract covering:
 
@@ -146,10 +162,28 @@ Each such tool has a language-independent behavioral contract covering:
 The contract is the durable asset. Rust, another native bootstrap language, and
 Grass are replaceable realizations. Implementation-specific structs, exit text,
 Git version strings, and cache layouts enter the contract only when an external
-consumer genuinely observes them. In particular, a reader must not make an
-append-only history unreadable merely because it cannot execute a newly selected
-mutation engine; it reduces and reports the selected state, while the affected
-mutation command fails closed with an explicit unsupported-capability result.
+consumer genuinely observes them.
+
+A forward-compatibility rule is required for selected mutation capabilities: a
+reader which recognizes the base event must not make an append-only history
+unreadable merely because it cannot execute a newly selected mutation engine.
+It must preserve and reduce the recognized event, report the selection as an
+opaque unavailable capability, and make only the affected mutation command fail
+closed with an explicit unsupported-capability result. This is not a current
+V1 behavior. [AGENT_BUS_SCHEMA.md](AGENT_BUS_SCHEMA.md) deliberately rejects
+every unknown field and enum value and has no forward-compatible capability
+envelope.
+
+Therefore that rule has an open dependency on a separately reviewed bus-schema
+revision and its live reader, writer, reducer, and command implementation. The
+schema owner must introduce a bounded, length-delimited capability-selection
+envelope whose unknown optional capability identifiers and payloads can be
+preserved opaquely. The carve-out is limited to that envelope: unknown base
+event kinds, required semantic values, fields outside it, malformed payloads,
+and unsupported schema versions remain rejected. Until that schema and tooling
+revision is implemented and deployed, readers continue to obey the current V1
+strict-rejection rule; this document does not advertise the future rule as an
+existing bus capability.
 
 Porting proceeds from small pure boundaries outward:
 
