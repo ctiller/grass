@@ -20,6 +20,8 @@ invalid.
 | `Branch` | full ref accepted by `git check-ref-format`; product branches additionally obey `refs/heads/agent/<Agent>/<topic>` |
 | `Topic` | lowercase alphanumeric/hyphen, begins and ends alphanumeric, length `1..64` |
 | `PathClaim` | repository-relative exact path or directory prefix ending `/**`; `/`, `.`, and `..` components forbidden |
+| `TreePath` | repository-relative exact non-directory path; `/`, `.`, `..`, and `/**` components forbidden |
+| `FileMode` | one of Git modes `100644`, `100755`, `120000`, or `160000` |
 | `Short` | UTF-8 string of `1..256` bytes after JSON decoding |
 | `Text` | UTF-8 string of `0..4096` bytes after JSON decoding |
 | `StringSet<T>` | JSON array of unique `T`, byte-lexicographically sorted |
@@ -74,7 +76,8 @@ of this schema.
 `StringSet<Agent>`; `product_review_from` is a full `ObjectId` reachable from
 product `main` and is the last bootstrap-exempt product commit. The V1
 `merge_engine`, `merge_engine_version`, and `merge_engine_epoch` fields are
-retained historical data. Decision 137 removes their authority meaning: a
+retained historical data. The successor review protocol removes their authority
+meaning: a
 reader must not require that exact Git version in order to reduce the bus or do
 ordinary work. The root
 `.gitattributes` is exactly `*.jsonl -text` plus LF. Every named coordinator has
@@ -221,8 +224,9 @@ refs = [previous_epoch]
 ```
 
 This event remains in the grammar so existing V2 history is readable. New
-writers do not emit it after Decision 137. Its engine/version fields are
-diagnostics, not requirements imposed on a reader or host.
+writers do not emit it after the successor review protocol is activated. Its
+engine/version fields are diagnostics, not requirements imposed on a reader or
+host.
 
 ## 5. Scope, plan, and progress
 
@@ -602,7 +606,8 @@ authorization cannot widen, narrow, or otherwise rewrite the author's review
 request. Changed paths remain a subset of that unchanged scope.
 
 `merge_engine_epoch` is retained in the V2 wire shape but is diagnostic after
-Decision 137. A version mismatch is not a validation failure.
+the successor review protocol is activated. A version mismatch is not a
+validation failure.
 
 Before this event is published, the exact candidate is available at immutable
 lightweight tag `refs/tags/agent-candidate/<reviewer>/<candidate>`. Structural
@@ -611,6 +616,16 @@ exact tag and product objects and checks parents, tree, message, and tag. It doe
 not reconstruct the merge with local Git. A fetched mismatch is invalid; an unavailable remote
 or object is `unverifiable` and blocks authorization/merge without making the
 bus malformed.
+
+Version two has no field for overlap disclosure, so its host-independent tree
+check deliberately accepts only the safe subset. Let `review_base` here be the
+required unique merge base of `previous_main` and `reviewed_commit`. Outside
+paths changed by `review_base..reviewed_commit`, the candidate entry equals
+`previous_main`; on every changed path, `previous_main` must equal `review_base`
+and the candidate entry equals `reviewed_commit`. A clean merge with both-sides
+changes to one path must wait for an author-published rebased commit or the
+successor schema. This temporary restriction prevents reviewer-created tree
+content without pinning a Git version.
 
 ### Successor approval/landing split
 
@@ -652,6 +667,7 @@ data = {
   product_branch : Branch,
   previous_main : ObjectId,
   candidate : ObjectId,
+  overlap_resolutions : List<OverlapResolution>,
   landing_checks : List<CheckResult>,
   reviewed_scope : StringSet<PathClaim>,
   summary : Text
@@ -659,14 +675,51 @@ data = {
 refs = [approval]
 ```
 
+where:
+
+```text
+TreeEntry = absent | { mode : FileMode, object : ObjectId }
+OverlapResolution = {
+  path : TreePath,
+  base : TreeEntry,
+  reviewed : TreeEntry,
+  previous_main : TreeEntry,
+  candidate : TreeEntry,
+  rationale : Text
+}
+```
+
 Only the reviewer who emitted `approval` emits it. The helper derives the
 reviewed commit from that approval and fetches the exact candidate the reviewer
 constructed with `previous_main` as first parent and that commit as second
-parent. The reviewer reports an ordinary clean merge; every changed path lies
-in the frozen scope,
-and every mandatory landing check derived from the protected-path registry is
+parent. The reviewer reports an ordinary clean merge and never edits the
+prepared candidate tree. Every changed path lies in the frozen scope, the
+candidate tree satisfies the host-independent relation below, and every
+mandatory landing check derived from the protected-path registry is
 present and passed. The registry and check classification come from
 `previous_main`; neither author nor reviewer can omit a protected check.
+
+The tree relation is stated over recursively enumerated Git tree entries, where
+an entry is `absent` or the exact `(mode, object-id)` pair. Let `B`, `A`, `M`,
+and `C` be the trees of `review_base`, `reviewed_commit`, `previous_main`, and
+`candidate`. Let `changed(A,B)` be every path whose entry differs between the
+reviewed source and its base. Linked validation checks:
+
+- outside `changed(A,B)`, `C[p] = M[p]`;
+- where `M[p] = B[p]`, `C[p] = A[p]`; and
+- every remaining path is represented exactly once by an
+  `overlap_resolutions` row containing `p`, `B[p]`, `A[p]`, `M[p]`, `C[p]`,
+  and the reviewer's explanation of the ordinary clean merge result.
+
+There are no extra rows, and each row's entries must equal the fetched trees.
+Renames are represented by their deleted and added paths; modes, symlinks, and
+submodule entries are compared without platform interpretation. This does not
+reconstruct a merge or demand a cross-host candidate object ID. It does make
+every tree entry not inherited verbatim from an unopposed parent explicit and
+independently checkable, so a reviewer cannot silently inject content into the
+merge candidate. An overlap row is disclosure, not permission to hand-edit: if
+ordinary Git cannot make the candidate without manual resolution, the author
+must publish a new reviewed source commit.
 
 No exact Git version or merge-engine epoch participates in successor authority.
 Git is required only to fetch/pull and perform a normal non-force push. A version
@@ -682,15 +735,38 @@ If a push loses to a newer `main`, the approval remains current. The reviewer
 constructs another exact candidate and emits another landing authorization
 after rerunning only landing checks. No event authorizes a candidate whose first
 parent differs from its recorded `previous_main`.
+An authorization may be published after `main` has advanced: publication records
+the exact attempted candidate and is not rejected merely for staleness.
+`merge-ready` then reports that it cannot land, and the same approval is used for
+a fresh candidate on the new base. Thus event-publication latency cannot destroy
+the substantive source review.
 
 The successor nomination schema replaces each free-form required-check string
 with `{ command, phase }`, where `phase` is `review`, `landing`, or
 `post_merge`. The accepting reviewer may strengthen a phase but cannot weaken
 it. The helper unions the nomination with mandatory phase assignments from the
-protected-path registry selected by `review_base`/`previous_main`. Thus an
+protected-path registry in `previous_main`. Thus an
 author cannot move a trust-critical check after landing, while ordinary
 substantive review and expensive audit commands are not repeated for every new
 base.
+
+The registry is the reviewed product-tree file
+`Tools/agent-bus/protected-paths.json`. It is a versioned JSON object containing
+an ordered `classes` array; each class has a stable `key`, a nonempty list of
+repository-relative path globs, and a nonempty list of landing checks shaped as
+`{ key, argv : List<Text> }`. Duplicate keys and ambiguous duplicate check keys
+are invalid. A glob uses `/`-separated normalized path segments; a segment is
+literal or exactly `*`, and only the final segment may be `**`. Character
+classes, `?`, negation, backslashes, and parent/current-directory components are
+invalid. Matching classes are unioned by check key. This section and
+`AGENT_REVIEW.md` own the registry's normative meaning; `g-design` owns changes
+to that meaning or to the protected classes, and the agent-bus implementor owns
+the checked reader. Selecting only `previous_main` is monotone at landing time:
+a path that became protected after source approval cannot be classified away by
+the author or reviewer.
+The registry must exist before successor activation and contain a class matching
+its own path and the checked registry reader, so a candidate cannot weaken the
+mechanism that selects its landing checks.
 
 ### `review.merged`
 
@@ -847,3 +923,42 @@ issues". `limitations` is where blind spots are
 stated, because absence of a finding is not assurance that unexamined
 behavior is correct. The observed event frontier the report pins is the
 envelope's own `observed` field, not a field here.
+
+### Successor `ci.run_observed`
+
+Machine-readable post-merge CI custody uses a distinct event after the next
+schema activation; it does not overload the deliberately verdict-free
+`audit.reported` event:
+
+```text
+data = {
+  landed_commit : ObjectId,
+  check_key : Short,
+  provider : Short,
+  run_identity : Text,
+  conclusion : green | red | cancelled | timed_out | artifact_missing | unavailable,
+  observed_at : Timestamp,
+  issues : StringSet<EventId>,
+  limitations : List<Text>,
+  summary : Text
+}
+refs = issues
+```
+
+Only an active `auditor` emits it. `run_identity` is the provider's immutable run
+identifier, not a dashboard label or branch name. `red`, `cancelled`,
+`timed_out`, and `artifact_missing` require at least one targeted issue;
+`unavailable` requires an infrastructure issue and states that no product
+conclusion was observed. `green` requires an empty issue set. The conclusion is
+a machine-readable observation, **not authority**: reduction appends the record
+to the audit view and changes no issue, review, gate, nomination, or merge state.
+No merge-ready predicate may consume it. A later run may supersede operational
+attention but cannot rewrite the historical observation.
+
+For each landed first-parent `main` commit, the CI auditor emits one
+`ci.run_observed` per post-merge check selected from that commit. A human-facing
+`audit.reported` may cite those event ids as evidence in its summary, but remains
+a broad audit report rather than the CI verdict carrier. Coverage is therefore
+machine-decidable without granting the auditor merge authority: the required
+pair `(landed_commit, check_key)` has a terminal observation whose immutable run
+identity can be inspected. Silence remains absence of evidence, never green.

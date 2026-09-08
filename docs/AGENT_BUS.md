@@ -67,7 +67,7 @@ zero registration logs for the initially authorized coordinators. `BUS.json`
 names schema version 1, the repository object format, those coordinator
 identities, and the last product `main` commit exempt from the newly activated
 review protocol. Its merge-engine fields record the V1 bootstrap implementation
-but impose no Git-version requirement after Decision 137.
+but impose no Git-version requirement under the successor review protocol.
 `.gitattributes` contains `*.jsonl -text` so Git never rewrites
 line endings. Bootstrap registrations alone have `observed: null`. Both bootstrap
 files are immutable afterward; changing either requires a new reviewed protocol
@@ -638,8 +638,8 @@ coordinator naming the version and design/helper commits. Only then
 may writers emit the new version. Removing reader support while old events
 remain is forbidden.
 
-`merge_engine.activated` is retained only for reading V2 history. Decision 137
-removes the pin from successor authority: agents need ordinary Git fetch/pull and
+`merge_engine.activated` is retained only for reading V2 history. The successor
+review protocol removes the pin from authority: agents need ordinary Git fetch/pull and
 non-force push, and reviewers authorize the exact candidate they actually
 checked. No host must install an historical Git version or reconstruct that
 candidate.
@@ -684,8 +684,9 @@ Before use, the helper must pass fixtures for:
 15. 65,536-byte event acceptance and 65,537-byte rejection;
 16. concurrent lifecycle choices remaining valid, conflict reduction, and
     explicit coordinator selection;
-17. exact candidate/tag validation for renames, file
-    modes, attributes, symlinks, submodules, and content conflicts;
+17. exact candidate/tag and host-independent tree-relation validation for
+    renames, file modes, attributes, symlinks, submodules, both-sides-changed
+    path disclosure, and rejection of undisclosed candidate-tree edits;
 18. both publication orders of a reassignment racing an offline final finding,
     with no orphaned finding;
 19. candidate-tag fetch count proportional to newly encountered
@@ -713,9 +714,11 @@ candidate may require bounded landing work for the others, but must not repeat
 their substantive review suites. A coordinator may prioritize authorization or
 announce advisory merge slots; it never rebases or merges product content.
 
-A dedicated CI-monitoring identity uses the existing `auditor` role. It emits an
-`audit.reported` for each exact landed `main` commit and opens ordinary targeted
-issues for red, cancelled, timed-out, incomplete, or unavailable runs. The host
+A dedicated CI-monitoring identity uses the existing `auditor` role. Under the
+successor schema it emits a non-authoritative `ci.run_observed` for each exact
+landed `main` commit/check pair and opens ordinary targeted issues for red,
+cancelled, timed-out, incomplete, or unavailable runs. `audit.reported` remains
+a verdict-free broad audit summary. The host
 coordinator checks coverage and routes escalation or reassignment; it does not
 decide that CI passed. See [AGENT_REVIEW.md](AGENT_REVIEW.md) section 8.1.
 

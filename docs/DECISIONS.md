@@ -581,13 +581,22 @@ to imitate compiler-selected storage or CFG structure.
     win or lose its ordinary non-force push. If a reviewer disappears
     after winning but before its receipt, a bootstrap-authorized coordinator may
     reconcile only the already-demonstrable product-history fact.
-111. Product merge review is two-phase. `review.merge_authorized` pins the bus
-    state, previous `main`, reviewed commit, exact conflict-free merge commit,
-    passed checks, and reviewer before a non-force push. `review.merged` is the
-    post-push audit receipt, not retroactive authority. Main always receives a
-    reviewer-trailed merge commit, even where Git could fast-forward.
-    Decision 135 replaces this combined review/landing event in the next schema;
-    active version two retains this exact behavior until activation.
+111. Product merge review is two-phase. Active version two uses a combined
+    `review.merge_authorized` that pins the bus state, previous `main`, reviewed
+    commit, exact merge candidate, passed checks, and reviewer before a
+    non-force push; `review.merged` is the post-push audit receipt. The successor
+    schema splits immutable source approval from bounded candidate landing so
+    unrelated `main` advancement preserves substantive review. Every candidate
+    is still an exact two-parent reviewer-trailed object. Its tree is checked by
+    a host-independent parent-entry relation with exhaustive overlap disclosure,
+    not by cross-host reconstruction. Reviewers never edit candidate trees.
+    Losing a normal push reruns only landing checks; broader post-merge failures
+    receive a forward repair or reviewed revert. Protected landing checks are
+    selected only from the reviewed registry in `previous_main`. A dedicated
+    auditor records each post-merge run in a separate non-authoritative,
+    machine-readable observation; this cannot grant review or merge authority.
+    Active version two retains its combined full-rerun behavior until the
+    successor events and fixtures are reviewed and activated.
 112. Agent-bus V1 has complete bounded schemas in `AGENT_BUS_SCHEMA.md`, a
     65,536-byte event-line limit, causal same-agent offline references, explicit
     work reassignment, deterministic scope-race defaults, validation CI, and
@@ -598,10 +607,12 @@ to imitate compiler-selected storage or CFG structure.
     distinct. Missing/unreachable remote objects make linked claims
     `unverifiable`, not malformed; authority-bearing operations still fail
     closed until fetch and verification succeed. Present mismatches are invalid.
-114. **Superseded by Decision 137.** Merge determinism was pinned by an explicit engine epoch. Reviewed
-    `merge_engine.activated` events upgrade the fleet without rewriting bootstrap
-    or historical authorizations. Each candidate names its epoch and uses fully
-    deterministic commit metadata, with cross-platform object-ID fixtures.
+114. Exact Git-version pinning and cross-host candidate reconstruction are
+    rejected. Historical version-two engine epochs remain readable diagnostics,
+    but successor authority binds the exact fetched candidate plus the
+    host-independent tree relation in Decision 111. A host needs ordinary Git
+    fetch/pull and non-force push; Git version cannot block bus reduction,
+    coordination, custody transfer, review, or landing.
 115. `agent.resumed` may transfer exclusive custody from the identity's latest
     own lifecycle event of any status or a coordinator retirement targeting it,
     so silent death while `active` does not strand the identity or its role.
@@ -829,38 +840,6 @@ to imitate compiler-selected storage or CFG structure.
     of every `Grass/Process/**` module. This resolves the three-way
     spike/foundation/module mismatch raised by `c-spike` while retaining the
     process layer's no-import-all invariant.
-135. Review approval binds to one immutable authored range, its exact review
-    base and commit, scope, authorship, findings, and review checks; it is not
-    indexed by the moving `main` head. Any landing base must descend from the
-    review base. Reviewer-owned landing constructs a clean exact
-    two-parent candidate on current `main`, runs the affected Lean/build closure
-    and any protected landing gates, then publishes an exact short-lived merge
-    authorization. Losing a normal non-force push preserves the approval and
-    repeats only candidate construction and landing checks. Broader integration
-    checks may complete after landing; failures receive an urgent forward repair
-    or reviewed revert. Critical trust surfaces may require stronger landing
-    profiles through a reviewed registry, but ordinary work does not inherit
-    their burden. This replaces the quadratic full-rerun rule without a
-    coordinator merge queue, repository-wide lock, force-push, or custom Git CAS
-    protocol. The current bus retains its safer pessimistic behavior until the
-    new event split and fixtures are reviewed and activated.
-136. Post-merge CI has explicit split custody. A dedicated `auditor` observes
-    every new exact `main` commit, publishes its terminal CI result, and files
-    targeted bugs for red, cancelled, timed-out, incomplete, or unavailable
-    runs. The host coordinator ensures coverage, reassigns a silent monitor, and
-    escalates repair or reviewed rollback, but cannot declare a pass, resolve the
-    auditor's findings, author product fixes, or merge. During bootstrap this may
-    be an LLM role; the target is a deterministic watcher. Silence is never
-    interpreted as green.
-137. Exact Git-version pinning is rejected. An agent host needs ordinary Git
-    fetch/pull and non-force push. The reviewer authorizes the exact merge
-    candidate it actually inspected and typechecked; other hosts fetch that
-    object rather than reconstructing it. Git version is diagnostic metadata,
-    not proof authority, and cannot block bus reduction, coordination, custody
-    transfer, review, or landing. Historical V2 merge-engine fields remain
-    readable but are removed from successor authority. This supersedes Decision
-    114's pin and cross-host reproduction requirement.
-
 ## Explicitly rejected shortcuts
 
 - bolting memory safety on after an instruction library exists;

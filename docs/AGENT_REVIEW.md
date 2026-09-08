@@ -458,7 +458,9 @@ git push origin <candidate>:refs/heads/main
 that the immutable authored range from `review_base` through `reviewed_commit`,
 its scope, authorship, findings, and review checks were accepted. A landing base
 must descend from `review_base`, but rapid later landing cannot destroy that
-judgment.
+judgment. Because active `main` is already append-only, the descent test is a
+redundant detection of the force-push/history-rewrite condition that section 9
+forbids; it is not what preserves approval across ordinary `main` advancement.
 
 `review.merge_authorized` remains an exact short-lived authorization for one
 candidate. If a normal non-force push loses a race, the reviewer constructs a
@@ -499,6 +501,14 @@ Agent-Bus-Reviewer: <reviewer>
 
 Git version may be recorded for diagnostics, but it is never proof authority and
 cannot block bus reads, coordination, host transfer, review, or landing.
+Reviewers never edit the prepared candidate tree. Linked validation compares
+its tree entries with `review_base`, the reviewed source, and `previous_main`:
+unopposed entries must come verbatim from the corresponding parent, and every
+both-sides-changed path must be exhaustively disclosed by an exact overlap row
+in the landing authorization. A merge requiring manual resolution goes back to
+an author as a new source commit. This characterization is independent of the
+Git version that produced the clean merge and detects undisclosed candidate
+content without reconstructing a candidate object id.
 
 A mechanical, conflict-free merge commit is integration metadata and does not
 make the reviewer a product author. Always creating it gives product history an
@@ -544,7 +554,8 @@ author is the accepted eligible reviewer; selected commit authors match trailers
 and exclude that reviewer; every finding has an explicit terminal disposition;
 no unresolved issue explicitly blocks its nomination chain; current `main`
 equals `previous_main`; the candidate has exactly the required two parents,
-reviewer trailer, and conflict-free tree; a valid immutable `review.approved`
+reviewer trailer, and a tree satisfying the parent-entry/overlap relation; a
+valid immutable `review.approved`
 names its exact second parent; all required landing check results are present;
 authorization `reviewed_scope` exactly equals nomination `review_scope`; every
 changed path is within that scope; and structural bus validation passes. It
@@ -561,8 +572,9 @@ Required checks are classified when nominated:
   repository's cheap structural gates; and
 - **post-merge checks** are broad corroboration allowed to finish after landing.
 
-The helper derives mandatory landing checks from a reviewed protected-path
-registry. An author cannot classify away current-tree validation for the proof
+The helper derives mandatory landing checks from the reviewed
+`Tools/agent-bus/protected-paths.json` registry in `previous_main`. An author
+cannot classify away current-tree validation for the proof
 kernel, agent-bus/schema/merge helper, serialization trust boundaries, or other
 registered critical surfaces. Ordinary leaf libraries do not inherit those
 exceptional gates. Adding a protected class is a proof/tooling-demand change and
@@ -577,18 +589,19 @@ judgment, Lean, tests, CI, and Git history remain independent authorities.
 ### 8.1 Post-merge CI custody
 
 A dedicated registered `auditor` owns continuous CI observation. For every new
-first-parent `main` commit it waits for the configured post-merge checks and
-publishes one `audit.reported` naming that exact commit. A green report has no
-issues. A red, cancelled, missing-artifact, or timed-out run first produces one
-or more ordinary issues against the responsible implementation owner, then
-references them from the audit report. The report records the check/run identity,
-observed conclusion, and limitations; a dashboard color or movable branch name
-is not durable evidence.
+first-parent `main` commit it waits for the configured post-merge checks and,
+after the successor schema activates, publishes one non-authoritative
+`ci.run_observed` per check with the exact commit, immutable run identity,
+machine-readable conclusion, limitations, and referenced issues. Green, red,
+cancelled, timed-out, missing-artifact, and unavailable are distinct. The broad
+`audit.reported` event remains deliberately verdict-free and may summarize or
+cite these observations; it is not asked to encode them in prose. A dashboard
+color or movable branch name is not durable evidence.
 
 The host coordinator owns coverage and escalation, not technical judgment. It
-checks that every landed commit receives a terminal CI audit, requests another
-auditor when the monitor becomes unavailable, and prioritizes a red build for a
-forward repair or reviewed revert. It does not mark checks passed, resolve the
+checks that every landed commit/check pair receives a terminal CI observation,
+requests another auditor when the monitor becomes unavailable, and prioritizes
+a red build for a forward repair or reviewed revert. It does not mark checks passed, resolve the
 auditor's issues, author a fix, or acquire merge authority. An auditor likewise
 cannot block or merge a candidate merely by reporting it. Only a separately
 reviewed protected landing gate may prevent further landings automatically.
@@ -711,8 +724,9 @@ profile. A post-merge failure fixture produces a durable urgent issue and a
 reviewed forward repair or revert rather than rewriting `main`.
 
 CI-custody fixtures cover green, red, cancelled, timed-out, missing-artifact,
-and auditor-loss cases. They prove the audit names the exact landed commit, a red
-report references independently actionable issues, the coordinator detects a
+and auditor-loss cases. They prove the observation names the exact landed
+commit and immutable run, a red observation references independently actionable
+issues, the coordinator detects a
 missing terminal report and reassigns monitoring, and neither role can turn an
 audit report into review or merge authority.
 
