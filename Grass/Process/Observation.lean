@@ -112,9 +112,11 @@ A silent transition still gets a segment entry, because `segments` records what
 each transition emitted and a transition that emitted nothing emitted the empty
 list. It contributes nothing to `flat` — that is `emit_flat` with
 `List.append_nil`. What keeps the segmentation away from acceptance is not that
-it is an index: `ProcessAcceptance.TraceAccepts` takes the flat
-`Trace p.Observation`, so no clause of `ProcessAcceptance` can be given a
-segmentation however it is carried.
+it is an index. The one clause that could conceivably see a segmentation,
+`ProcessAcceptance.TraceAccepts`, takes the flat `Trace p.Observation` and so
+structurally cannot; and no clause of `ProcessAcceptance` mentions `Segmented`
+today, however it is carried. `Grass/Process/Run.lean`'s module note has both
+halves.
 `Grass/Process/Run.lean`'s module note has the argument. §10.137.
 -/
 

@@ -49,8 +49,11 @@ noticed.
 
 `agreesGlue` is the law that excludes it. It says any two worlds can be mixed
 along any set of fragments, and under the equality agreement gluing at a proper
-subset would force `left = right`, so the degenerate agreement is no longer a
-`WorldAgreement`.
+subset would force `left = right` — so wherever the world has two distinct
+inhabitants, the degenerate agreement is no longer a `WorldAgreement`. At a
+subsingleton world it still is one, and harmlessly:
+`subsingleton_of_forced_equality` states the conclusion with that case included,
+where this sentence used to state it without.
 
 **It says less than that, and an earlier version of this paragraph said more.**
 It claimed gluing was "exactly the statement that the fragments name a complete
@@ -69,17 +72,20 @@ there — but ease is not demand.
 world of any shape, including one carrying a cross-fragment invariant as a
 field.
 
-What a badly shaped world costs is not this law, and it is narrower than an
-earlier version of this paragraph said. It is that no *separating componentwise*
-agreement is available: one that reads distinct components of the world at
-distinct fragments.
+What a badly shaped world costs is not this law, and it is narrower than two
+earlier versions of this paragraph said. It is that no agreement *determining*
+distinct tied components at distinct fragments is available — where determining
+means the clause at that fragment pins the component, so that agreeing there
+fixes its value.
 
-An agreement over such a world may still be componentwise in the loose sense.
-`Tests/Process/AssertionFixtures.lean`'s `tangledButGluable` reads one component
-at one fragment and nothing anywhere else, and glues; that file's
-`tangled_no_glue_general` refutes the separating case, where two tied components
-are read apart. The assertions a separating agreement would frame have to be
-framed some other way. §10.137.
+Determining, not reading, and the difference is the whole of it.
+`Tests/Process/AssertionFixtures.lean`'s `orderedSplitAgreement` reads one
+component at one fragment and the other at another — parity here, halves there —
+and glues, because gluing needs a mixture that *agrees* with each argument on its
+side of the split and not one that copies a component from each, and a coarsening
+has the slack for that. What has no glue is `orderedComponentwise`, whose clauses
+pin both. The assertions a determining agreement would frame have to be framed
+some other way. §10.137.
 
 ## The world is abstract on purpose
 
@@ -119,7 +125,9 @@ deliberate edit to this inductive rather than something a mixin author can do
 from outside.
 
 **What it does not close is what an assertion may depend on**, and an earlier
-version of this paragraph said it did. Local adversarial review refuted that by
+version of this paragraph said it did. It also said the refutation worked by
+fixing a component *no fragment names*, which is not what the witness does and
+not a thing this world has. Local adversarial review refuted it by
 building a `WorldAgreement` whose `.obligations` clause quietly also fixes an
 unnamed component of the world: `NetworkAssertion.framed` bounds an assertion
 relative to *the agreement it is given*, and `agreesGlue` forces mixability
@@ -154,9 +162,9 @@ either unstatable or smuggled in through some other fragment's agreement.
 (ProcessInstance topology)`, one live incarnation per slot, with the generation
 inside the stored instance rather than in the key. Keying the fragment by
 `ProcessRef` instead would put two refs that differ only in generation on two
-fragments reading one slot, and no separating componentwise agreement is then
-available at the real world: no mixed network can agree with one and not the
-other about the same field. The cost is that framing over a slot is
+fragments reading one slot, and no agreement determining that slot's contents at
+both of them is then available: no mixed network can be pinned to one and to the
+other at once. The cost is that framing over a slot is
 conservative — a restart replaces
 the incarnation, touches the slot, and any assertion naming it must be
 re-established — which is the correct reading of `docs/FOUNDATION.md` law 22

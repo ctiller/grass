@@ -191,10 +191,12 @@ structure SerialFunctionContract (State : Type w) : Type (w + 1) where
   `Grass/Process/Network/Assertion.lean` records the same failure for
   `NetworkAssertion.framed`, where the fix was `agreesGlue`.
 
-  This is weaker than `agreesGlue` in what it forbids, though not in the way an
-  earlier version of this sentence implied: it forbids the degenerate footprint
-  without forcing the declared one to be the real one, and per §10.137
-  `agreesGlue` does not force that either. Doing better needs the footprint
+  This forbids a different degeneracy from `agreesGlue` rather than a weaker
+  one, and two earlier versions of this sentence called it weaker. It rules out
+  the footprint that separates nothing, which `agreesGlue` permits —
+  `Tests/Process/AssertionFixtures.lean`'s `blindAgreement` is that agreement and
+  satisfies the law. `agreesGlue` rules out the equality agreement, which this
+  permits. Neither forces the declared footprint to be the real one; §10.137. Doing better needs the footprint
   to range over *fragments* of the state rather than over the state as a whole,
   which this layer cannot express — see
   `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.31.

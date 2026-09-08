@@ -2,7 +2,7 @@ import Grass.Process.Network.Assertion
 import Tests.Process.M2GraphFixtures
 
 /-!
-# The footprint is a bound, not a label
+# What the footprint is, and what `agreesGlue` does not make it
 
 `Grass/Process/Network/Assertion.lean` makes two claims that a module cannot
 check about itself, because they are claims about what its types *reject*. This
@@ -10,13 +10,16 @@ fixture checks them.
 
 * `framed` bounds what an assertion may read. `understated_footprint_impossible`
   is that: no assertion with an empty footprint can read `acceptCount`.
-* `agreesGlue` excludes the degenerate *equality* agreement, and no more than
-  that. `fixtureAgreement` discharges it, and
-  `separate_fragments_are_independent` shows the payoff — two worlds agreeing on
-  one fragment and differing on another, which the equality agreement could not
-  exhibit. What it does not do is make the bound mean something in general:
-  `gluing_does_not_bound_the_footprint` refutes that, and `blindAgreement`
-  discharges the law while distinguishing nothing at all.
+* `agreesGlue` excludes the degenerate *equality* agreement, and more besides —
+  `orderedComponentwise_is_not_equality` exhibits a non-equality agreement it
+  also rejects, so "and no more than that", which an earlier version of this
+  bullet said, is wrong in the other direction. `fixtureAgreement` discharges it,
+  and `separate_fragments_are_independent` shows the payoff — two worlds agreeing
+  on one fragment and differing on another, which the equality agreement could
+  not exhibit. What the law does not do is make the footprint a bound in general:
+  `gluing_does_not_bound_the_footprint` refutes that, `leakyLeak` is an assertion
+  whose footprint is a label, and `blindAgreement` discharges the law while
+  distinguishing nothing at all.
 
 It also pins the two compositions `Grass/Process/Network/Channel.lean` has to
 write and would otherwise discover were unwritable:
@@ -40,7 +43,7 @@ discharge here, since a product mixes componentwise. It is not what `agreesGlue`
 all. §10.137. An earlier draft of this fixture had a single
 `listenerCursor : Nat` read by every `instanceState` fragment, which made two
 assertions about different slots `Separate` while reading the same field —
-exactly the aliasing no *separating* componentwise agreement can survive.
+exactly the aliasing no agreement determining both slots can survive.
 -/
 
 namespace Grass.Process.Tests.NetworkAssertions
@@ -408,108 +411,162 @@ def blindAgreement {World : Type fixtureWorld} :
     intro _ left _
     exact ⟨left, fun _ _ => trivial, fun _ _ => trivial⟩
 
-/-- **Two components pinned equal by a field.**
+/-- **A cross-fragment invariant, carried as a field.**
 
-The shape no *separating* componentwise agreement can be built over — one that
-reads `left` at one fragment and `right` at another — which is
-`tangled_no_glue_general` below. A mixture would have to take `left` from one
-argument and `right` from the other, and `tied` forbids it.
+Two genuinely distinct components tied by an inequality — not an aliasing
+witness. The earlier fixture here was a TangledWorld whose two components were
+pinned *equal*, which round eight of local adversarial review showed made every
+determining agreement over it an instance of the equality degeneracy
+`WorldAgreement.subsingleton_of_forced_equality` already covered. This one
+carries the same direction and is not that. §10.137. -/
+structure OrderedWorld where
+  /-- The lower component. -/
+  low : Nat
+  /-- The upper component. -/
+  high : Nat
+  /-- And the invariant tying them, which is the point of the fixture. -/
+  le : low ≤ high
 
-Not every componentwise agreement: `tangledButGluable` reads one component at one
-fragment and nothing anywhere else, and glues. An earlier version of this
-docstring said *any* assignment of these components to fragments has to answer
-for `tied`, which that fixture refutes. Separating is the word doing the work.
+/-- **`blindAgreement` is a `WorldAgreement` over it.**
 
-It is deliberately not a world whose components are *indexed* by
-`NetworkFragment` — nothing here assigns one to the other, and the agreements
-below supply that assignment explicitly rather than leaving it to be read off the
-structure. `tied : left = right` also makes this an *aliasing* witness rather
-than a cross-fragment-invariant one; the direction survives at a non-degenerate
-invariant, but no fixture here checks that. -/
-structure TangledWorld where
-  left : Nat
-  right : Nat
-  tied : left = right
+The easy half: `agreesGlue` asks that some mixture exist, and the blind agreement
+always has one, so a world carrying a cross-fragment invariant as a field does
+satisfy the law. An instantiation and not a consumer — `blindAgreement` is
+polymorphic, so the elaborator checked this when it checked that. -/
+def orderedAgreement : WorldAgreement serverTopology OrderedWorld := blindAgreement
 
-/-- **And `blindAgreement` is a `WorldAgreement` over it.**
+/-- **No agreement that *determines* the two components at two fragments can
+glue**, for every such agreement rather than for one hand-picked relation.
 
-Half of the claim, and the easy half: `agreesGlue` asks that some mixture exist,
-and the blind agreement always has one, so a world carrying a cross-fragment
-invariant as a field does satisfy the law.
+The hypotheses are the whole of it: whatever the agreement is, at `.obligations`
+it pins `low` and at `.observations` it pins `high`. Gluing at `{.obligations}`
+then needs a world whose `low` comes from one argument and whose `high` comes
+from the other, and `le` forbids the pair that crosses.
 
-This is an instantiation and not a consumer — `blindAgreement` is already
-polymorphic, so the elaborator checked this when it checked that. The half that
-had been prose until §10.137's second round is
-`tangled_componentwise_has_no_glue` below. -/
-def tangledAgreement : WorldAgreement serverTopology TangledWorld := blindAgreement
-
-/-- A componentwise agreement over `TangledWorld`: `.obligations` reads `left`
-and every other fragment reads `right`. -/
-def tangledComponentwise :
-    NetworkFragment serverTopology → TangledWorld → TangledWorld → Prop
-  | .obligations, a, b => a.left = b.left
-  | _, a, b => a.right = b.right
-
-/-- **No agreement that separates the two components can glue**, for any such
-agreement rather than for one hand-picked relation.
-
-The hypotheses are the whole of "separating": whatever the agreement is, at
-`.obligations` it determines `left` and at `.observations` it determines `right`.
-Gluing at `{.obligations}` then needs a world whose `left` comes from one
-argument and whose `right` comes from the other, and `tied` forbids exactly that.
-
-`blindAgreement` shows the law does not constrain the world's *shape*. This shows
-what a badly shaped world actually costs, and the two together are §10.137. An
-earlier version stated only the `tangledComponentwise` instance below while its
-docstring generalised — a gap the general form closes for one hypothesis pair and
-the same proof body. -/
-theorem tangled_no_glue_general
-    (Agrees : NetworkFragment serverTopology → TangledWorld → TangledWorld → Prop)
-    (readsLeft : ∀ a b, Agrees .obligations a b → a.left = b.left)
-    (readsRight : ∀ a b, Agrees .observations a b → a.right = b.right) :
-    ¬ (∀ (inside : NetworkFragment serverTopology → Prop) (left right : TangledWorld),
+Determining, not reading. `orderedSplitAgreement` below reads `low` at one
+fragment and `high` at another and glues anyway, so "reads distinct components at
+distinct fragments" is not the hypothesis and an earlier version of the prose in
+`Grass/Process/Network/Assertion.lean` said it was. §10.137. -/
+theorem ordered_no_glue_general
+    (Agrees : NetworkFragment serverTopology → OrderedWorld → OrderedWorld → Prop)
+    (determinesLow : ∀ a b, Agrees .obligations a b → a.low = b.low)
+    (determinesHigh : ∀ a b, Agrees .observations a b → a.high = b.high) :
+    ¬ (∀ (inside : NetworkFragment serverTopology → Prop) (left right : OrderedWorld),
         ∃ mixed, (∀ fragment, inside fragment → Agrees fragment mixed left) ∧
           (∀ fragment, ¬ inside fragment → Agrees fragment mixed right)) := by
   intro glue
   obtain ⟨mixed, inside, outside⟩ :=
-    glue (fun fragment => fragment = .obligations) ⟨0, 0, rfl⟩ ⟨1, 1, rfl⟩
-  have fromLeft : mixed.left = 0 := readsLeft _ _ (inside .obligations rfl)
-  have fromRight : mixed.right = 1 :=
-    readsRight _ _ (outside .observations (by intro same; cases same))
-  rw [mixed.tied, fromRight] at fromLeft
-  exact absurd fromLeft (by decide)
+    glue (fun fragment => fragment = .obligations) ⟨1, 1, Nat.le_refl 1⟩
+      ⟨0, 0, Nat.le_refl 0⟩
+  have fromLow : mixed.low = 1 := determinesLow _ _ (inside .obligations rfl)
+  have fromHigh : mixed.high = 0 :=
+    determinesHigh _ _ (outside .observations (by intro same; cases same))
+  have bound := mixed.le
+  omega
 
-/-- **And the concrete one is an instance of it.** -/
-theorem tangled_componentwise_has_no_glue :
-    ¬ (∀ (inside : NetworkFragment serverTopology → Prop) (left right : TangledWorld),
-        ∃ mixed, (∀ fragment, inside fragment → tangledComponentwise fragment mixed left) ∧
-          (∀ fragment, ¬ inside fragment → tangledComponentwise fragment mixed right)) :=
-  tangled_no_glue_general tangledComponentwise (fun _ _ agreed => agreed)
+/-- The componentwise agreement over it: `.obligations` pins `low`,
+`.observations` pins `high`, everything else says nothing. -/
+def orderedComponentwise :
+    NetworkFragment serverTopology → OrderedWorld → OrderedWorld → Prop
+  | .obligations, a, b => a.low = b.low
+  | .observations, a, b => a.high = b.high
+  | _, _, _ => True
+
+/-- **And it is an instance**, so the general theorem is not vacuous. -/
+theorem orderedComponentwise_has_no_glue :
+    ¬ (∀ (inside : NetworkFragment serverTopology → Prop) (left right : OrderedWorld),
+        ∃ mixed, (∀ fragment, inside fragment → orderedComponentwise fragment mixed left) ∧
+          (∀ fragment, ¬ inside fragment → orderedComponentwise fragment mixed right)) :=
+  ordered_no_glue_general orderedComponentwise (fun _ _ agreed => agreed)
     (fun _ _ agreed => agreed)
 
-/-- **A componentwise agreement over `TangledWorld` that does glue.**
+/-- **So `agreesGlue` excludes more than the equality agreement.**
 
-Reads `left` at `.obligations` and says nothing anywhere else, so it never has to
-mix two tied components. It is here because the corrected prose in
-`Grass/Process/Network/Assertion.lean` originally said a badly shaped world has no
-componentwise agreement at all, which this refutes; what it has none of is a
-*separating* one. §10.137. -/
-def tangledButGluable : WorldAgreement serverTopology TangledWorld where
-  Agrees fragment a b := fragment = .obligations → a.left = b.left
-  agreesRefl := by intro _ _ _; rfl
-  agreesSymm := by intro _ _ _ agreed isObligations; exact (agreed isObligations).symm
+`orderedComponentwise` is reflexive, symmetric and transitive, it is *not*
+equality — two worlds differing in `high` agree at `.obligations` — and
+`agreesGlue` rejects it all the same. An earlier version of this file's header
+said the law excludes the equality agreement "and no more than that", which this
+refutes. §10.137. -/
+theorem orderedComponentwise_is_not_equality :
+    orderedComponentwise .obligations ⟨0, 5, by omega⟩ ⟨0, 7, by omega⟩ ∧
+      (⟨0, 5, by omega⟩ : OrderedWorld) ≠ ⟨0, 7, by omega⟩ := by
+  refine ⟨rfl, ?_⟩
+  intro same
+  have projected := congrArg OrderedWorld.high same
+  simp at projected
+
+/-- An agreement that *reads* `low` at one fragment and `high` at another
+without determining either: it sees `low`'s parity and `high`'s half. -/
+def orderedSplitAgrees :
+    NetworkFragment serverTopology → OrderedWorld → OrderedWorld → Prop
+  | .obligations, a, b => a.low % 2 = b.low % 2
+  | .observations, a, b => a.high / 2 = b.high / 2
+  | _, _, _ => True
+
+open Classical in
+/-- **And it glues.**
+
+Which is why the word in the prose is *determines* and not *reads*. Gluing needs
+a mixture that **agrees** with one argument inside the split and the other
+outside; it does not need one that copies a component from each. A coarsening has
+the slack to do that — here `2 * (right.high / 2) + left.low % 2` — and this
+agreement reads distinct components at distinct fragments in the plainest sense.
+
+So a world carrying a cross-fragment invariant loses agreements that pin its
+components apart, and keeps ones that only look at them. §10.137. -/
+def orderedSplitAgreement : WorldAgreement serverTopology OrderedWorld where
+  Agrees := orderedSplitAgrees
+  agreesRefl := by
+    intro fragment world
+    cases fragment <;> simp [orderedSplitAgrees]
+  agreesSymm := by
+    intro fragment left right agreed
+    cases fragment <;> simp_all [orderedSplitAgrees]
   agreesTrans := by
-    intro _ _ _ _ first second isObligations
-    exact (first isObligations).trans (second isObligations)
+    intro fragment a b c first second
+    cases fragment <;> simp_all [orderedSplitAgrees]
   agreesGlue := by
     intro inside left right
-    by_cases obligationsInside : inside .obligations
-    · refine ⟨left, fun _ _ _ => rfl, ?_⟩
-      intro fragment isOutside isObligations
-      exact absurd (isObligations ▸ obligationsInside) isOutside
-    · refine ⟨right, ?_, fun _ _ _ => rfl⟩
-      intro fragment isInside isObligations
-      exact absurd (isObligations ▸ isInside) obligationsInside
+    by_cases obligationsInside : inside .obligations <;>
+      by_cases observationsInside : inside .observations
+    · refine ⟨left, ?_, ?_⟩
+      · intro f _
+        cases f <;> simp [orderedSplitAgrees]
+      · intro f isOutside
+        cases f <;> simp [orderedSplitAgrees] <;>
+          first
+            | exact absurd obligationsInside isOutside
+            | exact absurd observationsInside isOutside
+    · refine ⟨⟨left.low % 2, 2 * (right.high / 2) + left.low % 2, by omega⟩, ?_, ?_⟩
+      · intro f isInside
+        cases f <;> simp [orderedSplitAgrees] <;>
+          first
+            | omega
+            | exact absurd isInside observationsInside
+      · intro f isOutside
+        cases f <;> simp [orderedSplitAgrees] <;>
+          first
+            | omega
+            | exact absurd obligationsInside isOutside
+    · refine ⟨⟨right.low % 2, 2 * (left.high / 2) + right.low % 2, by omega⟩, ?_, ?_⟩
+      · intro f isInside
+        cases f <;> simp [orderedSplitAgrees] <;>
+          first
+            | omega
+            | exact absurd isInside obligationsInside
+      · intro f isOutside
+        cases f <;> simp [orderedSplitAgrees] <;>
+          first
+            | omega
+            | exact absurd observationsInside isOutside
+    · refine ⟨right, ?_, ?_⟩
+      · intro f isInside
+        cases f <;> simp [orderedSplitAgrees] <;>
+          first
+            | exact absurd isInside obligationsInside
+            | exact absurd isInside observationsInside
+      · intro f _
+        cases f <;> simp [orderedSplitAgrees]
 
 open Classical in
 /--
@@ -571,7 +628,14 @@ def leakyLeak : NetworkAssertion leakyAgreement where
     have same : left = right := agrees .obligations rfl rfl
     rw [same]
 
-/-- **And it distinguishes two worlds its footprint cannot see apart.** -/
+/-- **And it distinguishes two worlds that differ only outside its footprint.**
+
+Not "two worlds its footprint cannot see apart", which an earlier version said
+and which is false of the agreement in play: under `leakyAgreement` the clause at
+`.obligations` forces the whole world equal, so that footprint does separate
+`quiet` from `afterAccept`. That is exactly why the assertion is admissible. It
+is `fixtureAgreement` under which `{.obligations}` cannot tell them apart, and
+that is not the agreement `leakyLeak` is framed against. -/
 theorem leaky_footprint_reads_outside_it :
     ¬ (leakyLeak.holds quiet ↔ leakyLeak.holds afterAccept) := by
   intro same

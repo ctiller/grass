@@ -5148,54 +5148,76 @@ lines above the field docstring now saying the opposite, and
 Both are the refuted claim, in the module the correction is about, and neither
 was in either hunk.
 
-Worse, the replacement claim was false. "What a badly shaped world costs is that
-a componentwise agreement is no longer available" was stated at six sites, and a
-reviewer refuted it by compiling `tangledButGluable`: an agreement over
-`TangledWorld` that reads `left` at `.obligations` and nothing anywhere else,
-which is componentwise and glues. What is unavailable is a *separating*
-componentwise agreement — one reading distinct components at distinct fragments —
-and the word was doing work nobody had defined. All six sites now say separating,
-`tangledButGluable` is in the fixture as the thing that forces the word, and
-`tangled_no_glue_general` states the claim for every separating agreement rather
-than for one hand-picked relation, with the old theorem falling out as its
-instance.
+**And the fixtures had been carrying only the easy half.** `blindAgreement`
+shows the law does not constrain the world's shape — one line, `Agrees := True`.
+The replacement claim, stated at six sites including this entry's own sentence
+about it, was that what a badly shaped world costs is a *componentwise*
+agreement rather than the law. Nothing checked it, in a file whose stated purpose
+is checking claims about what its types reject.
 
-So the pattern is not only that a correction leaves its premises standing. A
-correction can also *overshoot*, and an overshoot is harder to catch than a
-survival, because nothing it contradicts is still in the tree to contradict it.
-The only thing that caught this was someone building the counterexample.
+**Worse, that replacement claim was false**, which the fourth round found by
+compiling the counterexample. A world carrying a cross-fragment invariant does
+have componentwise agreements. What it lacks is narrower, and naming it took two
+more attempts.
+
+The fourth round's fix said *separating*: no agreement reading distinct
+components at distinct fragments. The fifth round refuted that too, and again
+by compiling — `orderedSplitAgreement` reads one component at one fragment and
+the other at another, in the plainest sense of reading, and glues. Gluing needs a
+mixture that *agrees* with each argument on its side of the split; it does not
+need one that copies a component from each, and a coarsening has the slack to
+do neither.
+
+So the word is **determines**. No agreement whose clauses *pin* two tied
+components at two fragments can glue, which is `ordered_no_glue_general`, with
+`orderedComponentwise` as its instance and `orderedSplitAgreement` as the
+neighbour that reads without pinning and survives. Both halves are now in the
+fixture, because the distinction is exactly what three rounds of prose kept
+getting wrong and no sentence had ever been made answerable for.
+
+The witness changed too. It was a TangledWorld whose two components were
+pinned *equal*, and the fifth round showed that made every determining agreement
+over it an instance of the equality degeneracy
+`WorldAgreement.subsingleton_of_forced_equality` already covered — so the theorem
+was that theorem in disguise and its hypotheses were `forcesEqual` wearing
+another name. `OrderedWorld` ties two genuinely distinct components with an
+inequality. Same direction, same proof, no degeneracy.
+
+**The pattern, which is the reason this entry is long.** A correction can leave
+its premises standing, and grep finds that. A correction can also *overshoot*,
+and grep cannot find that, because nothing it contradicts is left in the tree to
+contradict it. Three consecutive rounds found an overshoot here, each one a
+narrowing of the last, and each was caught by somebody writing the
+counterexample rather than by reading. The fifth round found two more of the
+same shape: `agreesGlue` "excludes the equality agreement and no more than
+that", which `orderedComponentwise_is_not_equality` refutes in the other
+direction, and "the degenerate agreement is no longer a `WorldAgreement`", which
+is false at a subsingleton world.
 
 `gluing_does_not_bound_the_footprint` was also weaker than its docstring, which
 promised an assertion "framed by `{.obligations}` ... may depend on anything at
 all" and built none. `leakyLeak` and `leaky_footprint_reads_outside_it` are that
-assertion and its consequence — `understated_footprint_impossible`'s mirror. In
-a file whose subject is claims that outran their code, prose was the wrong place
-for it.
+assertion and its consequence — `understated_footprint_impossible`'s mirror. In a
+file whose subject is claims that outran their code, prose was the wrong place
+for it. Its own one-line docstring then overshot in turn, saying the assertion
+distinguishes two worlds "its footprint cannot see apart" when under
+`leakyAgreement` that footprint separates them, which is why the assertion is
+admissible at all.
 
-**On the script, which the entry above overclaimed.** §10.137 said the sweep
-"has to be a script ... the script is what the next round is answerable to". The
-script is not in the repository, so the next round could not be answerable to it,
-and the reviewer said so. It cannot simply be committed either: `Tools/` is
-c-agent's and Craig's ruling is that its entry points are Rust, which a
-throwaway grep harness is not. Its patterns also caught none of the four sites
-this round found, because they were written from the *third* round's phrasings —
-it catches yesterday's wording, which is the failure mode it was written to end.
-Both facts are recorded here rather than fixed, because fixing either is
-somebody else's file. `agent-bus` `c-process:106` already has the mechanical half
-with the gate's owner.
+And the file's title said "The footprint is a bound, not a label" for all five
+rounds, three lines above a bullet the third round corrected and in the file that
+now contains `leakyLeak`, whose footprint *is* a label.
 
-**And the fixtures were carrying only the easy half.** `blindAgreement` shows the
-law does not constrain the world's shape — one line, `Agrees := True`. The
-replacement claim, stated at four sites, is that what a badly shaped world costs
-is a *componentwise* agreement rather than the law. Nothing checked it, in a file
-whose stated purpose is checking claims about what its types reject. It is now
-`tangled_componentwise_has_no_glue`: gluing `tangledComponentwise` at
-`{.obligations}` would need a world taking `left` from one argument and `right`
-from the other, and `TangledWorld.tied` forbids exactly that. `tangledAgreement`
-stays, relabelled as the instantiation it is rather than the consumer it claimed
-to be — `blindAgreement` is polymorphic, so it carries nothing the elaborator had
-not already checked. `blindAgreement` is now universe-polymorphic too, which the
-prose around it had been assuming.
+**On the script, which an earlier version of this entry overclaimed.** It said
+the sweep "has to be a script ... the script is what the next round is
+answerable to". The script is not in the repository, so no round could be
+answerable to it, and a reviewer said so. It cannot simply be committed either:
+`Tools/` is c-agent's and Craig's ruling is that its entry points are Rust, which
+a throwaway grep harness is not. Its patterns also caught none of the sites the
+later rounds found, because each set was written from the previous round's
+phrasings — it catches yesterday's wording, which is the failure mode it was
+written to end. Recorded as a limit rather than presented as fixed;
+`agent-bus` `c-process:106` has the mechanical half with the gate's owner.
 
 ## 11. The authoring facade
 
