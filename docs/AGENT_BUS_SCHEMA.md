@@ -229,6 +229,17 @@ to support that exact engine/version. Concurrent activations from one predecesso
 form a lifecycle conflict; no candidate may use either until a coordinator
 selects one.
 
+In version two, `merge_engine` has the single structurally valid value `git-ort`;
+another engine family requires a later schema and its dual-version reader.
+Structural reduction does not compare `merge_engine_version` with the reading
+binary's compiled or installed version. It records the declared epoch and applies
+the predecessor/conflict rules for every structurally valid version. A reader
+which cannot establish the linked helper claim or cannot execute that version
+reports the epoch unavailable for candidate construction, authorization, and
+merge readiness; it does not reject the event or stop read-only replay. This
+separation is required for an older helper to read the very activation which
+tells the fleet to install its successor.
+
 ## 5. Scope, plan, and progress
 
 ### `scope.set`

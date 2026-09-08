@@ -276,6 +276,18 @@ preparation stops on concurrent activations until their lifecycle conflict is
 resolved. Every authorization names the one epoch used to build it, so historical
 candidates remain reproducible after fleet upgrades.
 
+Version-two fixes the structurally valid engine family to `git-ort`; changing
+that family requires a schema activation with dual-version readers. Within this
+schema, pure event reduction records and selects a structurally valid activation
+without comparing its version with constants compiled into the reading helper.
+That comparison would make an upgrade event render every older reader unable to
+replay the append-only log. Local version availability and linked validation of
+the named design/helper commits are authority-operation gates: a host which
+cannot validate or execute the selected epoch may still run read-only reduction,
+`tail`, and `status`, but it must refuse candidate construction, authorization,
+and merge readiness with an explicit unavailable result. Installing a compatible
+reviewed helper changes that local capability, not the reduced history.
+
 ### 6.2 Scope
 
 `scope.set` replaces the agent's complete active scope:
@@ -634,6 +646,13 @@ not a schema-version increase. Its reviewed helper must support linked validatio
 of every engine epoch still referenced by retained authorizations. The current
 helper distribution owns any bundled/side-by-side historical engine support;
 individual agents are not required to curate old system Git installations.
+Reduction is capability-independent for the open version field: it retains the
+version declared by every structurally valid `git-ort` activation even when the
+local binary cannot execute or linked-validate that epoch. Unsupported locally
+means the affected authority operation is unavailable, never that replay of the
+bus is malformed. A different engine family is not a value of this schema; it
+uses the schema-upgrade route above so old readers never encounter an unknown
+family as if it were a valid version-two event.
 
 The initial protocol performs no compaction. If storage becomes material,
 closed segments may be archived only under a separately reviewed, exactly
@@ -682,7 +701,10 @@ Before use, the helper must pass fixtures for:
 19. candidate-tag fetch count proportional to newly encountered
     authorizations, not historical candidates;
 20. merge-engine epoch activation, concurrent activation conflict, historical
-    epoch validation, and unsupported-engine refusal;
+    epoch validation, capability-independent replay of a locally unsupported
+    `git-ort` version, schema rejection of another engine family, and refusal of
+    candidate/authorization/merge operations which lack local or linked version
+    support;
 21. custody transfer from active, paused, terminal, and coordinator-retired
     lifecycle predecessors; and
 22. identical candidate tree and commit object IDs on Windows and Linux for the

@@ -610,6 +610,13 @@ to imitate compiler-selected storage or CFG structure.
     a reviewed helper migration. It does not rewrite bootstrap or historical
     authorizations. Once objects are local, verification is a local operation
     over changed paths and tree spines, not a network round trip or checkout.
+    Within the bootstrap schema's fixed `git-ort` family, event reduction is
+    independent of the reading host's version capability: it records and selects
+    a structurally valid version activation even when that host cannot execute
+    it. Missing local or linked support makes only the affected candidate,
+    authorization, and merge operations unavailable; it cannot make append-only
+    history unreducible. Changing engine family, including adopting the future
+    certificate engine, requires a schema activation with dual-version readers.
 115. `agent.resumed` may transfer exclusive custody from the identity's latest
     own lifecycle event of any status or a coordinator retirement targeting it,
     so silent death while `active` does not strand the identity or its role.
