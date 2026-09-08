@@ -98,27 +98,127 @@ inductive RelocationType where
   | addr64
   /-- `IMAGE_REL_AMD64_ADDR32NB`: a 32-bit image-relative address. -/
   | addr32nb
-  /-- `IMAGE_REL_AMD64_REL32`: 32-bit relative to the byte after the field. -/
+  /-- `IMAGE_REL_AMD64_REL32`: 32-bit relative, with the displacement field
+  ending the instruction. -/
   | rel32
+  /-- `REL32_1` through `REL32_5`: 32-bit relative, with `trailing` bytes of
+  the instruction following the displacement field. The parameter is bounded by
+  `RelocationType.ripRelative?`, which is the only way to build one. -/
+  | rel32Trailing (trailing : Nat)
 deriving DecidableEq, Repr, Inhabited
 
-/-- The sixteen-bit type code. -/
+/--
+The sixteen-bit type code.
+
+The `REL32` family is consecutive: `REL32` is 4 and `REL32_n` is `4 + n`. That
+is not a coincidence worth exploiting silently -- `rel32Trailing_code` states
+it, and `ripRelative?` is what keeps `trailing` in the range where it holds. -/
 def RelocationType.code : RelocationType → BitVec 16
   | .addr64 => 0x0001
   | .addr32nb => 0x0003
   | .rel32 => 0x0004
+  | .rel32Trailing n => BitVec.ofNat 16 (4 + n)
 
 /--
-**Distinct relocation kinds have distinct codes.**
+The relocation for a RIP-relative displacement, chosen by what follows it.
+
+`REL32` means "relative to the byte after the four-byte field". When the
+instruction continues past that field -- an immediate, typically -- the target
+is no longer computed from the right place, and COFF provides `REL32_1` through
+`REL32_5` for one through five trailing bytes.
+
+Measured, and the reason this is a function rather than a choice:
+`mov DWORD PTR [rip+disp], imm32` gets `REL32_4`, `mov BYTE PTR [rip+disp],
+imm8` gets `REL32_1`, and `mov WORD PTR [rip+disp], imm16` gets `REL32_2`. A
+writer that reached for plain `REL32` on any of them would produce an address
+wrong by exactly the number of trailing bytes -- a silent misresolution, not a
+link error.
+
+Six or more trailing bytes is refused rather than clamped: no encoding exists,
+and there is no x86-64 instruction with a RIP-relative displacement followed by
+more than an `imm32`. -/
+def RelocationType.ripRelative? (trailing : Nat) : Option RelocationType :=
+  if trailing = 0 then some .rel32
+  else if trailing ≤ 5 then some (.rel32Trailing trailing)
+  else none
+
+/-- **A trailing count of five or fewer is accepted, and more is refused.** -/
+theorem RelocationType.ripRelative?_isSome_iff (trailing : Nat) :
+    (RelocationType.ripRelative? trailing).isSome ↔ trailing ≤ 5 := by
+  unfold ripRelative?
+  split <;> rename_i h
+  · simp; omega
+  · split <;> simp_all
+
+/--
+**The code of a RIP-relative relocation is four plus its trailing count.**
+
+The whole content of the family, stated once. A model that picked the wrong
+member of it produces an address off by the difference, and this is what makes
+the choice checkable rather than a table to be trusted. -/
+theorem RelocationType.ripRelative_code {trailing : Nat} {t : RelocationType}
+    (h : RelocationType.ripRelative? trailing = some t) :
+    t.code = BitVec.ofNat 16 (4 + trailing) := by
+  unfold ripRelative? at h
+  split at h <;> rename_i h0
+  · simp only [Option.some.injEq] at h
+    subst h
+    simp [code, h0]
+  · split at h
+    · simp only [Option.some.injEq] at h
+      subst h
+      rfl
+    · exact absurd h (by simp)
+
+/--
+**The three fixed kinds have distinct codes.**
 
 Stated because the codes are adjacent small integers written by hand from the
 specification, and a transposition between `addr32nb` and `rel32` produces an
 object file that links and runs with every address computed against the wrong
-base. -/
-theorem RelocationType.code_injective {a b : RelocationType}
+base. The `REL32` family needs its own statement, below, because it is
+parameterised. -/
+theorem RelocationType.fixed_code_injective {a b : RelocationType}
+    (ha : a = .addr64 ∨ a = .addr32nb ∨ a = .rel32)
+    (hb : b = .addr64 ∨ b = .addr32nb ∨ b = .rel32)
     (h : a.code = b.code) : a = b := by
-  cases a <;> cases b <;> first | rfl | (exfalso; exact absurd h (by decide))
+  rcases ha with rfl | rfl | rfl <;> rcases hb with rfl | rfl | rfl <;>
+    first | rfl | (exfalso; exact absurd h (by decide))
 
+/--
+**Distinct trailing counts give distinct codes.**
+
+Within the encodable range, which is what `ripRelative?` enforces. This is the
+half of injectivity that matters for the `REL32` family: two relocations
+differing only in how many bytes follow the displacement must not encode alike,
+because the difference is exactly how far off the resolved address would be. -/
+theorem RelocationType.rel32Trailing_code_injective {m n : Nat}
+    (hm : m ≤ 5) (hn : n ≤ 5)
+    (h : (RelocationType.rel32Trailing m).code
+        = (RelocationType.rel32Trailing n).code) : m = n := by
+  have ht := congrArg BitVec.toNat h
+  simp only [code, BitVec.toNat_ofNat,
+             Nat.mod_eq_of_lt (by omega : 4 + m < 65536),
+             Nat.mod_eq_of_lt (by omega : 4 + n < 65536)] at ht
+  omega
+
+/--
+**`rel32` and `rel32Trailing 0` encode alike, and `ripRelative?` picks the
+first.**
+
+The representation has a redundancy, and saying so is better than leaving a
+reader to notice. Both encode to 4, so `RelocationType.code` is not injective
+over the whole type -- only over the three fixed kinds, and separately over the
+trailing counts, which is why those are two theorems rather than one.
+
+A mutation making `ripRelative? 0` return the family member survived every
+other check here, correctly: nothing observable distinguishes them. This pins
+the canonical choice so that two values meaning the same thing do not both
+circulate. -/
+theorem RelocationType.rel32_zero_redundant :
+    RelocationType.rel32.code = (RelocationType.rel32Trailing 0).code
+    ∧ RelocationType.ripRelative? 0 = some .rel32 := by
+  refine ⟨?_, ?_⟩ <;> decide
 /-- One entry of a section's relocation directory: ten bytes. -/
 structure Relocation where
   /-- Offset within the section's raw data of the field to fix up. -/

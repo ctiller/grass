@@ -654,4 +654,59 @@ the cross-record predicate saw it. -/
 theorem demoObject_wellFormed : Object.WellFormed demoObject := by
   refine ⟨?_, ?_, ?_⟩ <;> decide
 
+/-! ## RIP-relative relocations, and the family they come from
+
+Two more objects were measured for this. The first calls an extern and reads a
+global twice; the second writes immediates of three different widths through a
+RIP-relative displacement. Between them they show what decides which member of
+the `REL32` family an instruction needs.
+-/
+
+/--
+**A call and two RIP-relative loads all take plain `REL32`.**
+
+`call callee` puts its displacement at code offset 2, `mov rax, [rip+disp]` at
+9, and `lea rcx, [rip+disp]` at 16 -- and in every case the field is the last
+four bytes of the instruction, so nothing follows it and `REL32` is right. -/
+theorem plain_rel32_relocations :
+    (RelocationType.ripRelative? 0).map RelocationType.code
+      = some 0x0004 := by
+  decide
+
+/--
+**An immediate after the displacement changes the relocation.**
+
+Measured: `mov DWORD PTR [rip+disp], imm32` gets `REL32_4`, `mov BYTE PTR
+[rip+disp], imm8` gets `REL32_1`, and `mov WORD PTR [rip+disp], imm16` gets
+`REL32_2`. The code is four plus the number of trailing bytes in each case.
+
+This is the fact a writer gets wrong by reaching for `REL32` everywhere: the
+linker computes the target relative to the byte after the *field*, so an
+instruction that continues past it resolves short by exactly the bytes that
+follow. -/
+theorem trailing_immediates_pick_the_family :
+    (RelocationType.ripRelative? 4).map RelocationType.code = some 0x0008
+    ∧ (RelocationType.ripRelative? 1).map RelocationType.code = some 0x0005
+    ∧ (RelocationType.ripRelative? 2).map RelocationType.code = some 0x0006 := by
+  refine ⟨?_, ?_, ?_⟩ <;> decide
+
+/--
+**Six trailing bytes is refused.**
+
+No encoding exists past `REL32_5`, and no x86-64 instruction puts more than an
+`imm32` after a RIP-relative displacement. Refusing rather than clamping is
+what keeps a future caller from silently getting `REL32_5`. -/
+theorem six_trailing_bytes_refused :
+    RelocationType.ripRelative? 6 = none := by decide
+
+/--
+**The three fixed kinds still encode distinctly.**
+
+`ADDR32NB` is 3 and `REL32` is 4, adjacent -- a transposition between them
+gives a file that links with every address computed against the wrong base. -/
+theorem fixed_kinds_distinct :
+    RelocationType.addr64.code ≠ RelocationType.addr32nb.code
+    ∧ RelocationType.addr32nb.code ≠ RelocationType.rel32.code := by
+  refine ⟨?_, ?_⟩ <;> decide
+
 end Grass.Tests.Platform.Win32.Coff

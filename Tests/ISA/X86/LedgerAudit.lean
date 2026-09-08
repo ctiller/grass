@@ -119,7 +119,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 135
+def owedBaseline : Nat := 136
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -549,6 +549,13 @@ def owed : List Name :=
     -- missing citation, not a missing measurement.
     `Grass.Platform.Win32.Coff.Machine.code,
     `Grass.Platform.Win32.Coff.RelocationType.code,
+    -- Which member of the REL32 family a RIP-relative displacement needs,
+    -- which the format decides by counting the instruction bytes that follow
+    -- the displacement field: REL32 with none, REL32_n with n. Measured --
+    -- an imm32 gets REL32_4, an imm8 gets REL32_1, an imm16 gets REL32_2 --
+    -- and choosing wrongly resolves the address off by exactly that many
+    -- bytes, silently.
+    `Grass.Platform.Win32.Coff.RelocationType.ripRelative?,
     `Grass.Platform.Win32.Coff.Relocation.toBytes,
     `Grass.Platform.Win32.Coff.SectionName.mk?,
     `Grass.Platform.Win32.Coff.SectionName.toBytes,
