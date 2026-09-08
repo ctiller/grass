@@ -149,7 +149,7 @@ structure Provenance where
   this. It is a field rather than a lookup because without it `extent` would be
   partial, and a descriptor with an empty path would satisfy every range
   condition vacuously — a sixteen-exabyte access was well formed before this
-  existed. M2 checks it against the allocation table; the point here is that no
+  existed. `MemoryState.denialOf` checks it against the allocation table; the point here is that no
   descriptor escapes having *some* declared bound. -/
   rootExtent : ByteRange
   /-- The hierarchical path from the root allocation to what this designates. -/
@@ -280,7 +280,19 @@ theorem SameStorage.trans {p q r : Provenance} (h₁ : p.SameStorage q)
   ⟨h₁.1.trans h₂.1, h₁.2.1.trans h₂.2.1, h₁.2.2.trans h₂.2.2⟩
 
 /--
-`p.Designates root` is the provenance obtained by appending one step.
+`p.descend step` is the provenance obtained by appending one step.
+
+This named `p.Designates root`, which nothing declares and which takes the wrong
+parameter besides. Two documented limits of `Tools/CitationAudit.py` hid it: a space
+inside backticks is not matched by its citation pattern, and a lower-case head is
+dropped as an expression fragment rather than adjudicated. A citation exploiting
+both is invisible to that gate, and this one did.
+
+The first version of this paragraph named those two internals directly and
+the docstring audit reported it, because that gate resolves cited names
+against the **Lean** build while `CitationAudit` also scans the tools. The two
+disagree about whether a Lean docstring may cite a tool function, and nothing says
+which is right; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1e records it.
 
 Extending a path never changes the root, epoch, space, or source, so authority
 derived for a parent is never silently widened by descending into it.
