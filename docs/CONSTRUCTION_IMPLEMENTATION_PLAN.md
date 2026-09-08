@@ -439,7 +439,9 @@ encoding, and proves exact decoding in front of every suffix. Its generic
 progress and consumed-prefix theorems match the importer's structural checks;
 `RoundTripCodec.importEncoded` proves those bytes are accepted whenever every
 reported target resolves. The machine owner remains responsible for
-instantiating the law.
+instantiating the law. For `UInt8` codecs, `rawEncoder` is the exact emission
+adapter and `importEmittedSingleton` closes the one-instruction raw
+emit-then-import equation without claiming an artifact or semantic certificate.
 `ImportedProgram.instructionAtByte?` exposes exact byte-to-instruction lookup;
 its success and failure theorems identify membership plus containment and the
 precise out-of-bounds boundary.

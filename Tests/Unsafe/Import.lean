@@ -74,13 +74,13 @@ private inductive CodecInstruction where
   | computed
 deriving Repr, DecidableEq
 
-private def roundTripCodec : RoundTripCodec Nat CodecInstruction DecodeFailure where
+private def roundTripCodec : RoundTripCodec UInt8 CodecInstruction DecodeFailure where
   decodeOne
     | [] => .error .truncated
     | 0 :: rest => .ok (.plain, rest)
     | 1 :: rest => .ok (.jumpTarget, rest)
     | 2 :: rest => .ok (.computed, rest)
-    | byte :: _ => .error (.unknown byte)
+    | byte :: _ => .error (.unknown byte.toNat)
   controlTargets
     | .plain => []
     | .jumpTarget => [.direct target]
@@ -92,16 +92,16 @@ private def roundTripCodec : RoundTripCodec Nat CodecInstruction DecodeFailure w
   encodedNonempty := by intro instruction; cases instruction <;> decide
   decode_encode := by intro instruction suffix; cases instruction <;> rfl
 
-example (instruction : CodecInstruction) (suffix : List Nat) :
+example (instruction : CodecInstruction) (suffix : List UInt8) :
     roundTripCodec.decodeOne (roundTripCodec.encodeOne instruction ++ suffix) =
       .ok (instruction, suffix) :=
   roundTripCodec.decode_encode instruction suffix
 
-example (instruction : CodecInstruction) (suffix : List Nat) :
+example (instruction : CodecInstruction) (suffix : List UInt8) :
     suffix.length < (roundTripCodec.encodeOne instruction ++ suffix).length :=
   roundTripCodec.encodedProgress instruction suffix
 
-example (instruction : CodecInstruction) (suffix : List Nat) :
+example (instruction : CodecInstruction) (suffix : List UInt8) :
     (roundTripCodec.encodeOne instruction ++ suffix).take
       ((roundTripCodec.encodeOne instruction ++ suffix).length - suffix.length) =
         roundTripCodec.encodeOne instruction :=
@@ -116,6 +116,20 @@ example (instruction : CodecInstruction)
       imported.instructions.map ImportedInstruction.instruction =
         [instruction] :=
   roundTripCodec.importEncoded policy instruction resolved
+
+private def codecTaint : Taint :=
+  ⟨.externalGenerator, "round-trip codec fixture"⟩
+
+example (instruction : CodecInstruction)
+    (resolved : ∀ reported ∈ roundTripCodec.controlTargets instruction,
+      policy.resolves reported = true) :
+    ∃ imported,
+      importBytes roundTripCodec.toDecoder policy
+        (emitRaw (.literal [instruction]) roundTripCodec.rawEncoder
+          codecTaint).bytes = .ok imported ∧
+      imported.instructions.map ImportedInstruction.instruction =
+        [instruction] :=
+  roundTripCodec.importEmittedSingleton policy instruction resolved codecTaint
 
 example : policy.indirectEvidence? indirectSite = some indirectEvidence := rfl
 example : directOnlyPolicy.indirectEvidence? indirectSite = none := rfl

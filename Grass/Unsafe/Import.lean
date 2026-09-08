@@ -1,5 +1,5 @@
 import Grass.Core.Name
-import Grass.Unsafe.Construct
+import Grass.Unsafe.Emit
 
 /-!
 # Raw byte import boundary
@@ -194,6 +194,22 @@ structure RoundTripCodec (Byte : Type w) (Instruction : Type x)
     decodeOne (encodeOne instruction ++ suffix) = .ok (instruction, suffix)
 
 namespace RoundTripCodec
+
+/-- View a byte codec's encoder through the raw emission interface. -/
+def rawEncoder
+    {Instruction : Type x} {DecodeError : Type y}
+    (codec : RoundTripCodec UInt8 Instruction DecodeError) :
+    RawEncoder Instruction :=
+  ⟨codec.encodeOne⟩
+
+/-- `RoundTripCodec.rawEncoder_encode` states that the raw-emission view uses
+the codec encoder definitionally. -/
+@[simp] theorem rawEncoder_encode
+    {Instruction : Type x} {DecodeError : Type y}
+    (codec : RoundTripCodec UInt8 Instruction DecodeError)
+    (instruction : Instruction) :
+    codec.rawEncoder.encode instruction = codec.encodeOne instruction :=
+  rfl
 
 /-- A codec's encoded instruction always makes decoder progress over its suffix. -/
 theorem encodedProgress
@@ -743,6 +759,39 @@ theorem importEncoded
       simp only [importBytes]
       rw [hresult]
       exact ⟨_, rfl, instructionsExact⟩
+
+/-- Raw emission of one supported instruction feeds the exact codec bytes back
+to the importer and returns precisely that instruction. -/
+theorem importEmittedSingleton
+    {State : Type u} {Terminal : Type v}
+    {Instruction : Type x} {DecodeError : Type y}
+    (codec : RoundTripCodec UInt8 Instruction DecodeError)
+    (policy : TargetPolicy State Terminal) (instruction : Instruction)
+    (targetsResolved : ∀ target ∈ codec.controlTargets instruction,
+      policy.resolves target = true)
+    (primaryTaint : Taint) (additionalTaints : List Taint := [])
+    (detail : String := "raw imported bytes") :
+    ∃ program,
+      importBytes codec.toDecoder policy
+        (emitRaw (.literal [instruction]) codec.rawEncoder primaryTaint
+          additionalTaints).bytes detail = .ok program ∧
+      program.instructions.map ImportedInstruction.instruction =
+        [instruction] := by
+  have bytesExact :
+      (emitRaw (.literal [instruction]) codec.rawEncoder primaryTaint
+        additionalTaints).bytes = codec.encodeOne instruction := by
+    calc
+      _ = (Grass.Construct.Fragment.Source.literal [instruction]).expandLocated.flatMap
+          (fun item => codec.encodeOne item.instruction) := by
+            simpa using emitRaw.bytesExact (.literal [instruction])
+              codec.rawEncoder primaryTaint additionalTaints
+      _ = (Grass.Construct.Fragment.Source.literal [instruction]).expand.flatMap
+          codec.encodeOne := by
+            rw [Grass.Construct.Fragment.Source.expand_eq_map_located]
+            rw [List.flatMap_map]
+      _ = codec.encodeOne instruction := by simp
+  rw [bytesExact]
+  exact codec.importEncoded policy instruction targetsResolved detail
 
 end RoundTripCodec
 
