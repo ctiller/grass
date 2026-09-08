@@ -302,6 +302,19 @@ version 1 is permanently sufficient. Foundational vocabularies are versioned.
 Extensions must be conservative for existing profiles or provide explicit
 migration/refinement theorems and renewed adversarial review.
 
+Implementation inventories may label current declaration shapes `frozen`,
+`stable`, or `provisional` for planning, but those labels are non-normative
+status and create no compatibility theorem. In particular,
+[`MEMORY_VOCABULARY.md`](MEMORY_VOCABULARY.md) is an implementation ledger: its labels warn consumers
+about expected churn and do not prevent Grass from rebuilding a shape whose
+proof or consumer evidence is poor. A public memory interface becomes a
+project-level stability commitment only when this model or another owning
+normative document names the exact boundary, its compatibility relation, the
+changes it permits, and the migration/refinement evidence a breaking change
+must supply. That commitment requires design-steward publication and independent
+review; elapsed time, current use, an implementation milestone, or an
+implementor's scope claim cannot create it implicitly.
+
 No initial choice may make a known target impossible without a migration path,
 but Win32 Hello World does not carry proof obligations for unimplemented GPUs,
 devices, or operating systems. Unimplemented behavior is rejected by profile
