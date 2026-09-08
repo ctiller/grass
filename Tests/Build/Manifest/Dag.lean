@@ -87,6 +87,17 @@ def duplicateDag : ManifestDag 2 where
 
 example : ¬duplicateDag.WellFormed := by decide
 
+/-- Duplicate direct edges are rejected rather than consuming fanout twice or
+presenting the same child twice to hierarchical composition. -/
+def duplicateEdgeDag : ManifestDag 2 where
+  nodes := Vec.fromList
+    [ node leafA Vec.empty
+    , node component (Vec.fromList [leafA, leafA]) ]
+
+example : ¬duplicateEdgeDag.WellFormed := by decide
+
+example : checkManifestDag duplicateEdgeDag = none := by decide
+
 def leftParent : ScopeId := ScopeId.root.child "left"
 def rightParent : ScopeId := ScopeId.root.child "right"
 

@@ -38,6 +38,7 @@ def nodesWellFormed {fanout : Nat} :
   | _, [] => true
   | seen, node :: rest =>
       decide (node.scope ∉ seen) &&
+      decide node.dependencies.toList.Nodup &&
       node.dependencies.all (fun dependency => decide (dependency ∈ seen)) &&
       nodesWellFormed (seen ++ [node.scope]) rest
 
@@ -49,6 +50,7 @@ def NodesOrdered {fanout : Nat} :
   | _, [] => True
   | seen, node :: rest =>
       node.scope ∉ seen ∧
+      node.dependencies.toList.Nodup ∧
       (∀ dependency ∈ node.dependencies, dependency ∈ seen) ∧
       NodesOrdered (seen ++ [node.scope]) rest
 
@@ -63,8 +65,8 @@ theorem nodesWellFormed_eq_true_iff {fanout : Nat}
       simp [nodesWellFormed, NodesOrdered, Vec.all_eq_true_iff,
         inductionHypothesis, and_assoc]
 
-/-- The graph has unique scopes and all dependency edges point to earlier
-nodes. This is the executable-order formulation of finite acyclicity. -/
+/-- The graph has unique scopes and dependency edges, and every edge points to
+an earlier node. This is the executable-order formulation of finite acyclicity. -/
 def ManifestDag.WellFormed {fanout : Nat} (dag : ManifestDag fanout) : Prop :=
   nodesWellFormed [] dag.nodes.toList = true
 
