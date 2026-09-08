@@ -5,12 +5,14 @@ import Tests.ISA.X86.CorpusCommon
 
 Emits, for every addressing form this profile can encode, the bytes Grass
 produces and the NASM source line that should assemble to them.
-`Tools/x86-nasm-differential.py` feeds the source to NASM and compares.
+A differential fed the source to NASM and compared. It was removed on
+2026-09-08, so this corpus currently has no consumer; its replacement as a Lean
+test under `Tests/ISA/X86/**` is tracked against c-x86 (c-agent:78).
 
 This is `docs/VALIDATION.md` §2 layer 2 — "compare encoders, decoders,
 assemblers, disassemblers, loaders, emulators, and API observations where
-independent tools exist". It is the only check in the tree that can tell whether
-the model is about x86-64 at all: every theorem in `Grass/ISA/X86/**` relates
+independent tools exist". It was the only check in the tree that could tell
+whether the model is about x86-64 at all: every theorem in `Grass/ISA/X86/**` relates
 Grass's own definitions to each other, and a model with two ModR/M fields
 transposed satisfies all of them.
 
@@ -28,7 +30,7 @@ With a displacement NASM cannot shorten, the two agree exactly and a byte
 comparison is meaningful. A displacement of `8` would make NASM choose `disp8`
 and produce a legitimately different, shorter encoding; that is a real
 difference in policy, not a defect, and it is excluded here rather than papered
-over. `Tools/x86-nasm-differential.py` documents the same choice.
+over. The removed differential documented the same choice.
 
 ## Coverage
 
