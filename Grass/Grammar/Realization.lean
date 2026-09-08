@@ -229,16 +229,87 @@ def FormatSemantics.iso {α β : Type} {format : Format α}
     FormatSemantics (.iso format isomorphism) where
   selectedDerivation input value rest :=
     semantics.selectedDerivation input (isomorphism.backward value) rest
+  selectionPolicy input value rest :=
+    semantics.selectionPolicy input (isomorphism.backward value) rest
   repairableIncompletePrefix := semantics.repairableIncompletePrefix
   irrecoverablyInvalidPrefix := semantics.irrecoverablyInvalidPrefix
-  selectedSound := by
-    intro input value rest selected
-    have derivation : Derives (.iso format isomorphism) input
-        (isomorphism.forward (isomorphism.backward value)) rest :=
-      @Derives.iso α β format isomorphism input rest
-        (isomorphism.backward value) (semantics.selectedSound selected)
-    rw [isomorphism.forward_backward] at derivation
-    exact derivation
+  selectedIff := by
+    intro input value rest
+    constructor
+    · intro selected
+      rcases semantics.selectedIff.1 selected with ⟨derived, policy⟩
+      constructor
+      · have mapped := @Derives.iso α β format isomorphism input rest
+          (isomorphism.backward value) derived
+        simpa only [isomorphism.forward_backward] using mapped
+      · exact policy
+    · rintro ⟨derived, policy⟩
+      exact semantics.selectedIff.2 ⟨derived.iso_inner, policy⟩
+  selectedComplete := by
+    rintro input ⟨value, rest, derived⟩
+    rcases semantics.selectedComplete
+        ⟨isomorphism.backward value, rest, derived.iso_inner⟩ with
+      ⟨innerValue, innerRest, selected⟩
+    exact ⟨isomorphism.forward innerValue, innerRest, by
+      simpa only [isomorphism.backward_forward] using selected⟩
+  selectedDeterministic := by
+    intro input value₁ rest₁ value₂ rest₂ first second
+    have unique := semantics.selectedDeterministic first second
+    constructor
+    · calc
+        value₁ = isomorphism.forward (isomorphism.backward value₁) :=
+          (isomorphism.forward_backward value₁).symm
+        _ = isomorphism.forward (isomorphism.backward value₂) :=
+          congrArg isomorphism.forward unique.1
+        _ = value₂ := isomorphism.forward_backward value₂
+    · exact unique.2
+  repairableNoSelection := by
+    intro input hint repairable selected
+    apply semantics.repairableNoSelection repairable
+    rcases selected with ⟨value, rest, chosen⟩
+    exact ⟨isomorphism.backward value, rest, chosen⟩
+  repairableHasCompletion := by
+    intro input hint repairable
+    rcases semantics.repairableHasCompletion repairable with
+      ⟨suffix, value, rest, selected⟩
+    exact ⟨suffix, isomorphism.forward value, rest, by
+      simpa only [isomorphism.backward_forward] using selected⟩
+  repairableHintExact := by
+    intro input count repairable
+    rcases semantics.repairableHintExact repairable with
+      ⟨suffix, value, rest, suffixLength, selected⟩
+    exact ⟨suffix, isomorphism.forward value, rest, suffixLength, by
+      simpa only [isomorphism.backward_forward] using selected⟩
+  repairableHintMinimal := by
+    intro input count repairable candidate completion
+    apply semantics.repairableHintMinimal repairable candidate
+    rcases completion with ⟨suffix, value, rest, suffixLength, selected⟩
+    exact ⟨suffix, isomorphism.backward value, rest, suffixLength, selected⟩
+  repairableHintUnique := semantics.repairableHintUnique
+  repairableComplete := by
+    intro input noSelection completion
+    apply semantics.repairableComplete
+    · intro innerSelection
+      apply noSelection
+      rcases innerSelection with ⟨value, rest, selected⟩
+      exact ⟨isomorphism.forward value, rest, by
+        simpa only [isomorphism.backward_forward] using selected⟩
+    · rcases completion with ⟨suffix, value, rest, selected⟩
+      exact ⟨suffix, isomorphism.backward value, rest, selected⟩
+  invalidNoCompletion := by
+    intro input errorClass invalid completion
+    apply semantics.invalidNoCompletion invalid
+    rcases completion with ⟨suffix, value, rest, selected⟩
+    exact ⟨suffix, isomorphism.backward value, rest, selected⟩
+  invalidClassUnique := semantics.invalidClassUnique
+  invalidComplete := by
+    intro input noCompletion
+    apply semantics.invalidComplete
+    intro innerCompletion
+    apply noCompletion
+    rcases innerCompletion with ⟨suffix, value, rest, selected⟩
+    exact ⟨suffix, isomorphism.forward value, rest, by
+      simpa only [isomorphism.backward_forward] using selected⟩
 
 /-- Map only successful parse values, preserving both failure classifications
 and the exact unconsumed suffix. -/
@@ -301,33 +372,25 @@ theorem ParserRealizes.iso {α β : Type} {format : Format α}
           contradiction
         simp [ParseResult.map, notNeedMore]
   · intro input error
-    unfold isoParser FormatSemantics.iso
+    unfold isoParser
     cases parsed : parse input with
     | done value rest =>
-        have notInvalid :
-            ¬semantics.irrecoverablyInvalidPrefix input error := by
-          intro invalid
-          have := parser.invalidExact input error |>.2 invalid
-          rw [parsed] at this
-          contradiction
-        simp [ParseResult.map, notInvalid]
+        simp [ParseResult.map]
     | needMore hint =>
-        have notInvalid :
-            ¬semantics.irrecoverablyInvalidPrefix input error := by
-          intro invalid
-          have := parser.invalidExact input error |>.2 invalid
-          rw [parsed] at this
-          contradiction
-        simp [ParseResult.map, notInvalid]
+        simp [ParseResult.map]
     | invalid actualError =>
         simp only [ParseResult.map, ParseResult.invalid.injEq]
-        constructor
-        · intro equal
-          subst error
-          exact parser.invalidExact input actualError |>.1 parsed
-        · intro invalid
-          have exactResult := parser.invalidExact input error |>.2 invalid
-          exact ParseResult.invalid.inj (parsed.symm.trans exactResult)
+        intro equal
+        subst error
+        unfold FormatSemantics.iso
+        exact parser.invalidSound input actualError parsed
+  · intro input errorClass invalid
+    rcases parser.invalidComplete input errorClass invalid with
+      ⟨error, classEq, parsed⟩
+    exact ⟨error, classEq, by
+      unfold isoParser
+      rw [parsed]
+      rfl⟩
   · intro input value rest success
     unfold isoParser at success
     cases parsed : parse input with
