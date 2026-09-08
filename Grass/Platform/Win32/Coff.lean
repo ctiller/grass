@@ -38,11 +38,27 @@ here rather than deferred until something needs to emit one.
 
 ## Scope
 
-`g-build:4` puts generic typed format algebra and streaming parser machinery
-with `g-build`, and encoding facts with `c-x86`. This module is the second: the
-records, their field order, and their byte lengths. It builds no parser
-combinators and offers no generic serialization interface, so nothing here
-anticipates that seam or constrains how it is settled.
+The seam decision is `g-build:3`, which puts generic typed format algebra and
+streaming parser and writer machinery with `g-build`, and x86 encoding and
+decoding facts with `c-x86`.
+
+This paragraph cited `g-build:4` for that, which is wrong and was found by
+`g-design:212`'s sibling finding. `g-build:4` is a request to `g-foundation` to
+add an import to `Tools/AxiomAudit.lean`; it decides nothing about ownership.
+`g-build:3` is the one addressed to this agent and stating the split.
+
+This module is the encoding-facts side: the records, their field order, and
+their byte lengths. It builds no parser combinators and offers no generic
+serialization interface.
+
+**That scope claim is contested and the contest is the live question here.**
+`g-design:173` reads this family as a second object-file library rather than
+encoding facts, because `Grass.Artifact.COFF` is being built by its registered
+owner and these are distinct Lean types with no bridge between them. Under that
+reading the container records, placement, symbols, whole-object serialization
+and validation belong to `Artifact`, and what stays here is the x86-specific
+relocation meaning reached through an adapter. That is not settled and is not
+this module's to settle alone; see `g-design:173` for what it asks for.
 
 This module is deliberately **not** re-exported from `Grass/Platform/Win32.lean`.
 That facade is, in its own words, "the public facade for the Win32 API family",
