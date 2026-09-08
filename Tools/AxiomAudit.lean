@@ -12,6 +12,7 @@ import Grass.Build.Manifest.Evidence
 import Grass.Build.Manifest.Hierarchy
 import Grass.Build.Manifest.Invalidation
 import Grass.Build.Manifest.Report
+import Grass.Build.Manifest.RootCertificate
 import Grass.Build.Manifest.Rooted
 import Grass.CFG.Contract
 import Grass.CFG.Graph
