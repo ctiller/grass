@@ -101,7 +101,7 @@ jobs:
         run: cargo build --release --locked --manifest-path tools/grass-tools/Cargo.toml
 
       - name: Audit axioms
-        run: lake env lean Tools/AxiomAudit.lean
+        run: ./tools/grass-tools/target/release/axiom-audit
 
       - name: Audit verified-program trust closure
         shell: pwsh

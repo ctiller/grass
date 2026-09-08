@@ -102,9 +102,9 @@ addresses would alias, so the bound is not decoration.
 The build must also gate on what it claims to check. `warningAsError` is set in
 `lakefile.toml`, because without it a declaration using `sorry` is a warning and
 `lake build` exits zero; and `.github/workflows/library.yml` runs both the build
-and `Tools/AxiomAudit.lean`, which implements the transitive audit
-[FOUNDATION.md](FOUNDATION.md) §3 demands over every `Grass` declaration. Before
-these, a green build carried no information.
+and the `axiom-audit` binary in `tools/grass-tools`, which implements the
+transitive audit [FOUNDATION.md](FOUNDATION.md) §3 demands over every `Grass`
+declaration. Before these, a green build carried no information.
 
 **Decided.** If no agent has claimed Core, `Std.Logical`, or the lakefile when M1
 starts, this plan takes **temporary custody** of a minimal `Grass.Core.Id` and
@@ -1585,7 +1585,7 @@ with what it used to say.
   no longer serve as the pairing for them. The commit that added the file claimed
   four clauses were mutation-verified; one of the four was `notInert`, and it was not.
   All fourteen are swept now rather than spot-checked.
-- ~~**`Tools/AxiomAudit.lean`'s namespace-gap check had a name-shaped hole with a false
+- ~~**The axiom audit's namespace-gap check had a name-shaped hole with a false
   reason attached.**~~ The check exists because review once appended a root-namespace
   `axiom` to a `Grass/` module and both gates passed. Its exemption list matched
 the four generated-name prefixes as *prefixes* of the last name component, on
@@ -1929,7 +1929,7 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   after the module docstring said it was deleted, with a comment above it describing an
   exemption that was not in force.~~ The same shape as `MemoryProfile.Admits` and
   `OperationFacets.Closes`, in `Tools/`, where no gate looks.
-- ~~**`Tools/AxiomAudit.lean`'s `generatedExact` exemption silenced nothing**, under a
+- ~~**The axiom audit's `generatedExact` exemption silenced nothing**, under a
   comment describing what `generatedNumbered` does.~~ The two entries that comment names
   are numbered equation lemmas; the ten-name list matched nothing in the environment
   while widening the namespace-gap check to any authored declaration ending in one of
@@ -2037,7 +2037,7 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   All twelve deleted; `--inert` added. That makes three tools that grew this check after
   being found with dead entries, which is an argument for it being the default shape.
 - ~~**`Tools/FixtureAudit.py`'s exemption named a consumer that cannot see the
-  fixtures**, and this document repeated it.~~ It said `Tools/AxiomAudit.lean` discovers
+  fixtures**, and this document repeated it.~~ It said the axiom audit discovers
   `VerifiedProgram` producers and names them in its output; that tool imports `Grass.*`
   only, walks `Grass/` on disk, and prints one summary line naming no declaration. The
   real consumer is `#audit_verified_programs`, which `Tests/Foundation.lean` runs at the
@@ -3026,7 +3026,7 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   required the keyword to be the first token on its line and to be followed by
   whitespace *on that line*. It admits a preceding `in` or `;` now and ends at a word
   boundary, and stays anchored rather than becoming a bare `\baxiom\b` because
-  `Tools/AxiomAudit.lean` is itself an exempted file and is *about* axioms.
+  the axiom audit's own source is an exempted file and is *about* axioms.
 
   Second consecutive round that this scan has been walked past, and the second
   consecutive round where the repair was to add the attacker's cases to a self-test that

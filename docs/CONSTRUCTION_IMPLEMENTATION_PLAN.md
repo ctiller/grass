@@ -322,7 +322,7 @@ Every product slice runs, at minimum:
 
 ```text
 lake build
-lake env lean Tools/AxiomAudit.lean
+./tools/grass-tools/target/release/axiom-audit
 pwsh -NoProfile -File ./audit-trust.ps1
 pwsh -NoProfile -File ./check-doc-links.ps1
 pwsh -NoProfile -File ./check-spike-sources.ps1

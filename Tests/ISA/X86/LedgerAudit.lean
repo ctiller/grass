@@ -17,7 +17,7 @@ true by `rfl`. `commonProfileLedger_covers` was `∀ x ∈ L, x ∈ L`.
 `Grass/ISA/X86/Ledger.lean` names the failure mode exactly — "deriving it would
 let the ledger define its own obligation and always discharge it" — and then
 writing the list by hand in the same namespace as the rules did the same thing
-by a different route. `Tools/AxiomAudit.lean` had already learned this lesson
+by a different route. The axiom audit had already learned this lesson
 about import lists and walks the disk instead; this file does the same for
 citations.
 
@@ -30,7 +30,7 @@ obligation entirely while `docs/VALIDATION.md` §1 names "API, ABI rule, binary
 structure" explicitly. A reviewer injected two false uncited ABI facts into
 `Grass/ABI/Win64/Convention.lean` and the summary line came back byte-identical.
 The list now covers all three trees this profile owns. It is still a list rather
-than a disk walk, which is the hazard `Tools/AxiomAudit.lean` solves properly;
+than a disk walk, which is the hazard the axiom audit solves properly;
 closing that here is an open obligation.
 
 `modeledDeclarations` enumerates the declarations of the audited modules. The
@@ -175,7 +175,7 @@ def notModelling : List Name :=
 /--
 Every Lean module found under `root` on disk, as a module name.
 
-The same walk `Tools/AxiomAudit.lean` performs, and for the same reason: a
+The same walk the axiom audit performs, and for the same reason: a
 hand-written module list is a coverage claim nobody checks.
 -/
 partial def modulesOnDisk (root : System.FilePath) (prefix_ : Name) :
@@ -205,7 +205,7 @@ helpers -- `takeByte`, `takeDisp`, `takeImm`, `takeLe32`, `takeLe64` -- were
 never counted as modeled, though each reads instruction bytes and each is
 exactly the kind of declaration this ledger exists to account for.
 
-`Tools/AxiomAudit.lean` had the same defect and the same fix.
+The axiom audit had the same defect and the same fix.
 -/
 def userFacing (n : Name) : Name := (privateToUserName? n).getD n
 
@@ -477,7 +477,7 @@ end Grass.Tests.ISA.X86.LedgerAudit
 open Lean Elab Command Grass.ISA.X86 Grass.Tests.ISA.X86.LedgerAudit in
 run_cmd liftTermElabM do
   let env ← getEnv
-  -- Coverage first, for the reason Tools/AxiomAudit.lean gives: a gate over
+  -- Coverage first, for the reason the axiom audit gives: a gate over
   -- half the tree is not a gate. An audited module that is not imported here
   -- contributes no declarations and silently narrows the obligation.
   for m in auditedModules do

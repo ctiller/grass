@@ -513,7 +513,7 @@ named `String.toByteArray` as a "model" beneath the extern; in fact
 `String.toByteArray` carries the same `@[extern "lean_string_to_utf8"]`, and
 `Vec.toHostBytes`/`ofHostBytes` add `lean_array_mk` and `lean_array_to_list`, so
 at least three externs sit between these theorems and running bytes.
-`Tools/AxiomAudit.lean` cannot see any of them, since an `@[extern]` is not an
+The axiom audit cannot see any of them, since an `@[extern]` is not an
 axiom — so a green audit is not evidence about this boundary, and §3.11's
 criterion 2 must not be read as if it were. Open item 12 raises the missing TCB
 ledger that [FOUNDATION.md](FOUNDATION.md) §3 actually asks for.
@@ -608,7 +608,7 @@ S1 is complete when all of the following hold. The first four hold today.
 
 1. `lake build` is green with `warningAsError = true`, so no declaration uses
    `sorry`.
-2. `lake env lean Tools/AxiomAudit.lean` reports no axiom outside the
+2. `./tools/grass-tools/target/release/axiom-audit` reports no axiom outside the
    [FOUNDATION.md](FOUNDATION.md) §3 allowlist, with **every** module this plan
    owns in its coverage set — `Vec`, `HostBytes`, `Text`, and `Order`. The
    criterion previously named only `Vec` and stopped tracking the library as it
@@ -1006,7 +1006,7 @@ Open, with the owner each is with:
    external-reality assumptions to be "recorded in the TCB ledger"; no such file
    exists in the repository. This library's `@[extern]` dependencies — at least
    `lean_string_to_utf8`, `lean_array_mk`, and `lean_array_to_list` — are
-   recorded in a module comment as a placeholder. `Tools/AxiomAudit.lean` cannot
+   recorded in a module comment as a placeholder. The axiom audit cannot
    see them, since an `@[extern]` is not an axiom, so a green audit is not
    evidence about that boundary. Raised with the coordinator. §3.9.
 13. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` and

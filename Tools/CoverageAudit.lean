@@ -21,7 +21,7 @@ law" rule shipped alongside `truncate` and `clear`, which had none; the
 
 That is not carelessness three times. It is what an unenforced rule does to a
 library changing at this rate, and it was adversarial review rather than the
-author that caught each one. `Tools/AxiomAudit.lean` and the docstring audit
+author that caught each one. The axiom audit and the docstring audit
 exist for the same reason and their module comments say so.
 
 ## What it checks, and what it deliberately does not

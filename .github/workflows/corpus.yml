@@ -28,18 +28,18 @@ jobs:
       # This job is where cross-file references are kept honest, so the retired
       # tool paths belong here too.
       #
-      # The Python docstring auditor and the Lean declaration-name dump it
-      # shelled out to are both gone, replaced by the `docstring-audit` binary
-      # in `tools/grass-tools`. The pattern below is the only place their old
-      # paths are written, because this comment is in the gate's own scope. A
-      # leftover reference to either is worse than a broken link, which is why
-      # it gets a
-      # gate rather than a note: docs/STDLIB_IMPLEMENTATION_PLAN.md listed a run
-      # of the old path as an exit criterion, so a stale path is a criterion
-      # nobody can run, and a docstring resting its claim on a deleted script is
-      # evidence nobody can chase. Both read as verification and neither is.
+      # The Python docstring auditor, the Lean declaration-name dump it shelled
+      # out to, and the Lean axiom audit are all gone, replaced by the
+      # `docstring-audit` and `axiom-audit` binaries in `tools/grass-tools`. The
+      # pattern below is the only place their old paths are written, because this
+      # comment is in the gate's own scope. A leftover reference to any of them is
+      # worse than a broken link, which is why it gets a gate rather than a note:
+      # docs/STDLIB_IMPLEMENTATION_PLAN.md listed a run of two of those paths as
+      # exit criteria, so a stale path is a criterion nobody can run, and a
+      # docstring resting its claim on a deleted script is evidence nobody can
+      # chase. Both read as verification and neither is.
       #
-      # What is matched is those two paths, not the names. Prose saying a tool
+      # What is matched is those three paths, not the names. Prose saying a tool
       # was once called `DocstringAudit.py` is history and reads as history;
       # `Tools/...` is what somebody types into a shell. Case-insensitively,
       # because `tools/` and `Tools/` name the same dead file on a
@@ -52,14 +52,14 @@ jobs:
       # port changed rather than instructions to run anything.
       #
       # The seven other entry points under `Tools/` have not been ported yet, so
-      # this gate names two paths rather than the directory. It grows as they
+      # this gate names three paths rather than the directory. It grows as they
       # land; a gate over the whole directory today would fail on the tools that
       # are still there and still correct to reference.
-      - name: Check no reference to a retired docstring-audit entry point
+      - name: Check no reference to a retired tool entry point
         shell: bash
         run: |
-          if git grep -nEi 'Tools/(DocstringAudit\.py|DeclNames\.lean)' -- . ':(exclude)tools/grass-tools'; then
-            echo "::error::The lines above name a path under Tools/ that no longer exists. That entry point is now the docstring-audit binary in tools/grass-tools. Name the binary the sentence depends on, or write the sentence as history without the dead path."
+          if git grep -nEi 'Tools/(DocstringAudit\.py|DeclNames\.lean|AxiomAudit\.lean)' -- . ':(exclude)tools/grass-tools'; then
+            echo "::error::The lines above name a path under Tools/ that no longer exists. Those entry points are now the docstring-audit and axiom-audit binaries in tools/grass-tools. Name the binary the sentence depends on, or write the sentence as history without the dead path."
             exit 1
           fi
 

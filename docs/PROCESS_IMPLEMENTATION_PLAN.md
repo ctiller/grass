@@ -4528,10 +4528,9 @@ requirements, and it may not be consumed as a complete `ProcessPlan` by
 `e-reviewer:45`, finding `tools-audit-coverage-gaps`, and the second-largest
 claims defect this milestone has recorded after §10.105's twenty.
 
-Main's `c-x86:4` added a coverage guard to `Tools/AxiomAudit.lean` and
-the docstring audit's declaration-name walk: both walk `Grass/` on disk and
-fail if a module exists
-that they do not import. This branch introduces fifty modules under
+Main's `c-x86:4` added a coverage guard to the axiom audit and the docstring
+audit's declaration-name walk: both walk `Grass/` on disk and fail if a module
+exists that they do not import. This branch introduces fifty modules under
 `Grass/Process/` and `Grass/Specification/`, none of them imported by either
 tool, so after the merge both audits failed on coverage rather than on content.
 Adding the fifty imports is mechanical.

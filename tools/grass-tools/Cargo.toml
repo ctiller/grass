@@ -14,14 +14,27 @@ description = "Grass validation and audit tools: source and docstring audits ove
 # into a temporary file, elaborates it with `lake env lean`, and does the judging
 # here. That is what retires the checked-in Lean file it used to shell out to.
 #
+# `axiom-audit` is the same shape for the same reason: which axioms a proof rests
+# on is the kernel's record of the term it checked, and no reading of the source
+# text can recover it. It generates its meta-program, elaborates it, and applies
+# docs/FOUNDATION.md section 3 to the facts that come back. The Lean file it
+# replaces was not shelled out to -- it *was* the tool -- so retiring it also
+# retires the hand-written import list of every module in the library, which is
+# what made that file conflict with `main` on every rebase.
+#
 # This crate is where the remaining validation tools land as they are ported and
-# their equivalence against the originals is demonstrated. It carries one binary
-# today rather than a placeholder for nine, because a `[[bin]]` entry for a tool
-# nobody has verified is a claim this file cannot back.
+# their equivalence against the originals is demonstrated. It carries the two
+# binaries whose equivalence has been demonstrated rather than a placeholder for
+# nine, because a `[[bin]]` entry for a tool nobody has verified is a claim this
+# file cannot back.
 
 [[bin]]
 name = "docstring-audit"
 path = "src/bin/docstring_audit.rs"
+
+[[bin]]
+name = "axiom-audit"
+path = "src/bin/axiom_audit.rs"
 
 [dependencies]
 regex = "1"
