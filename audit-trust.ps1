@@ -186,6 +186,10 @@ $csimpProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$csimpPro
 $runtimeConsumerModule = "AuditRuntimeConsumer$([System.Guid]::NewGuid().ToString('N'))"
 $runtimeConsumerPath = Join-Path (Get-Location).Path "$runtimeConsumerModule.lean"
 $runtimeConsumerOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$runtimeConsumerModule.olean"
+$moduleOwnershipProbeLeaf = "AuditModuleOwnershipProbe$([System.Guid]::NewGuid().ToString('N'))"
+$moduleOwnershipProbeModule = "Grass.Trust.$moduleOwnershipProbeLeaf"
+$moduleOwnershipProbePath = Join-Path (Get-Location).Path "$moduleOwnershipProbeLeaf.lean"
+$moduleOwnershipProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/Grass/Trust/$moduleOwnershipProbeLeaf.olean"
 $auditNonce = [System.Guid]::NewGuid().ToString('N')
 $auditCommand = "grass_trust_audit_$auditNonce"
 $auditMarker = "grass-trust-audit-complete:$auditNonce"
@@ -366,6 +370,39 @@ try {
         -not ($underscoreAxiomNegativeOutput -match "Grass\._unauditedFalse.*rejected axioms")) {
         $underscoreAxiomNegativeOutput | ForEach-Object { Write-Host $_ }
         throw "Trust audit ignored an authored underscore-prefixed axiom."
+    }
+
+    # Module ownership is authoritative. A declaration imported as a Grass
+    # module must not escape merely by choosing a non-Grass namespace. Keep the
+    # poison source at the project root, outside the enumerated Grass/ and Tests/
+    # roots, so concurrent or interrupted runs cannot discover one another's
+    # negative fixtures while Lake can still compile it under the project root.
+    $moduleOwnershipProbe = @(
+        "namespace OutsideGrassNamespace",
+        "@[extern `"grass_trust_module_ownership_probe`"]",
+        "def identityBytes (bytes : ByteArray) : ByteArray := bytes",
+        "end OutsideGrassNamespace"
+    )
+    [System.IO.File]::WriteAllLines($moduleOwnershipProbePath, $moduleOwnershipProbe)
+    $moduleOwnershipBuildOutput = @(
+        & lake env lean $moduleOwnershipProbePath -o $moduleOwnershipProbeOlean 2>&1
+    )
+    if ($LASTEXITCODE -ne 0) {
+        $moduleOwnershipBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the module-ownership trust-audit probe."
+    }
+    $moduleOwnershipConsumerProbe = @(
+        "import Tests.Foundation",
+        "import $moduleOwnershipProbeModule",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $moduleOwnershipConsumerProbe)
+    $moduleOwnershipConsumerOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($moduleOwnershipConsumerOutput -match
+            "OutsideGrassNamespace\.identityBytes.*compiled override.*@\[extern\]")) {
+        $moduleOwnershipConsumerOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit ignored a compiled override outside the owning Grass module's namespace."
     }
 
     $externalProbe = @(
@@ -553,6 +590,12 @@ finally {
     }
     if ([System.IO.File]::Exists($runtimeConsumerOlean)) {
         [System.IO.File]::Delete($runtimeConsumerOlean)
+    }
+    if ([System.IO.File]::Exists($moduleOwnershipProbePath)) {
+        [System.IO.File]::Delete($moduleOwnershipProbePath)
+    }
+    if ([System.IO.File]::Exists($moduleOwnershipProbeOlean)) {
+        [System.IO.File]::Delete($moduleOwnershipProbeOlean)
     }
 }
 
