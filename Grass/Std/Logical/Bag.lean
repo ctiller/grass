@@ -158,7 +158,21 @@ def cons (element : α) (rest : Bag α) : Bag α :=
   Quotient.liftOn rest (fun elements => ofList (element :: elements))
     (fun _ _ equivalent => Quotient.sound (equivalent.cons element))
 
-/-- Multiset union: multiplicities add. Written `+`. -/
+/--
+Multiset union: multiplicities add. Written `+`, and `protected` so that `+` is
+the spelling a consumer arrives at.
+
+Every law about this operation is stated over `+` -- `card_add`, `mem_add`,
+`map_add`, `add_zero`, `zero_add`, `add_comm`, `add_assoc` -- and a goal written
+as `Bag.append x y` reaches none of them, because `simp` sees the application and
+not the instance. That is a naming observation rather than a missing law: the laws
+cover the operation as consumers write it. `protected` is what keeps the second
+spelling out of reach of an `open Bag`, so the observation stays true instead of
+depending on nobody happening to write it.
+
+`Grass/Std/Logical/Vec.lean`'s `append` is the same shape with `++`, and
+`Tools/CoverageAudit.lean` exempts it on exactly this ground.
+-/
 protected def append (left right : Bag α) : Bag α :=
   Quotient.liftOn₂ left right (fun l r => ofList (l ++ r))
     (fun _ _ _ _ leftEquivalent rightEquivalent =>
@@ -167,6 +181,8 @@ protected def append (left right : Bag α) : Bag α :=
 -- `+` only. An `Append` instance would give the same function a second head,
 -- and every law below is stated with `+`, so a `++` goal would be unreachable
 -- for `simp`. `docs/PROCESS.md` §2 writes the run's bag composition with `+`.
+-- The bare name is a second head by the other route, which is why `Bag.append`
+-- is `protected`; `Bag.Mem` already was, and the two were inconsistent.
 instance : Add (Bag α) := ⟨Bag.append⟩
 
 /--
