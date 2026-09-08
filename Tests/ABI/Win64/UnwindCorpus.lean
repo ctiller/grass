@@ -345,6 +345,13 @@ structure Row where
   masm : String
   /-- The predicted `.xdata` bytes, lowercase hex. -/
   xdata : String
+  /-- The unwind operations this row's prologue records.
+
+  Not emitted: the differential reads three tab-separated fields and this is
+  the fourth, so adding it changes no tool input. It is kept so that what the
+  corpus covers is checkable in Lean rather than only by reading the row
+  groups and trusting their names. -/
+  ops : List UnwindOp
 
 /--
 Build a row, or nothing.
@@ -366,7 +373,8 @@ def rowOf (name : String) (steps : List Step) : Option Row :=
       -- the parts that are not directives.
       masm := String.intercalate " | " (steps.flatMap fun st =>
         (if st.instr = "" then [] else [st.instr]) ++ [st.directive])
-      xdata := hexBytes u.toBytes }
+      xdata := hexBytes u.toBytes
+      ops := steps.map Step.op }
 
 /-- The registers a prologue may push: nonvolatile and not `rsp`. -/
 def pushable : List Gpr :=
@@ -546,6 +554,41 @@ a satisfying green line.
 Raising this number is the ordinary way to add rows; lowering it means
 something stopped building and should be explained rather than accommodated. -/
 theorem corpus_length : corpus.length = 100 := by rfl
+
+/-! ### What the corpus covers
+
+`Grass/ABI/Win64/UnwindBytes.lean`'s header says `UNWIND_INFO` for all nine
+operations this profile models is covered by this differential, on 100
+prologues. The second half has always been a theorem -- `corpus_length` --
+and the first half was prose, checkable only by reading thirteen row groups
+and trusting their names.
+
+These make it mechanical. The membership form is deliberate: asserting the
+deduplicated list equals a literal would pin first-occurrence order too, so
+reordering the row groups would fail a test about coverage without coverage
+having changed. -/
+
+/-- Every opcode the encoding uses appears somewhere in the corpus. -/
+theorem corpus_covers_every_opcode :
+    ∀ c ∈ ([0, 1, 2, 3, 4, 5, 8, 9, 10] : List Nat),
+      c ∈ ((corpus.flatMap Row.ops).map (fun o => o.opcode.toNat)) := by
+  decide
+
+/-- And exactly those nine, so a tenth operation added without a row would fail
+here rather than quietly going untested. -/
+theorem corpus_covers_no_others :
+    (((corpus.flatMap Row.ops).map (fun o => o.opcode.toNat)).eraseDups).length
+      = 9 := by
+  rfl
+
+/-- Both `allocLarge` forms are exercised, which the opcode alone cannot show:
+the scaled and unscaled forms share opcode 1 and differ in slot count. Without
+this the corpus could cover the opcode and never the three-slot encoding. -/
+theorem corpus_covers_both_allocLarge_forms :
+    ((((corpus.flatMap Row.ops).filter (fun o => o.opcode = 1)).map
+      UnwindOp.slots).eraseDups) = [2, 3] := by
+  rfl
+
 
 /-- The Spike 1 row agrees with the theorem in `UnwindBytes.lean`, so the
 differential and the proof are checking the same bytes rather than two
