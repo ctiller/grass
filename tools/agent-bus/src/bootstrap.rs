@@ -37,13 +37,28 @@ impl BusConfig {
                  could ever open"
             )));
         }
-        let installed = crate::gitrepo::version()?;
-        if installed != SUPPORTED_MERGE_ENGINE_VERSION {
-            return Err(invalid(format!(
-                "installed git {installed} does not match the pinned merge engine version \
-                 {SUPPORTED_MERGE_ENGINE_VERSION}; activation refuses to run"
-            )));
-        }
+        // Deliberately *not* gated on this host's installed git equalling
+        // `SUPPORTED_MERGE_ENGINE_VERSION`. Activation only *records* the
+        // pin; it never runs the merge engine. The single operation whose
+        // output can depend on the engine version is `git merge-tree
+        // --write-tree` (`gitrepo::merge_tree_write_tree`), reachable only
+        // through `merge_candidate::reconstruct_candidate`, and every path
+        // to that still calls `require_pinned_merge_engine` first. So the
+        // normative rule (AGENT_BUS_SCHEMA.md section 2, "refuses to run on
+        // a different version"; AGENT_REVIEW.md section 7, "`prepare-merge`
+        // uses the merge engine and exact version pinned...") is enforced
+        // exactly where it bites, and a host on a different git still cannot
+        // construct or authorize a candidate.
+        //
+        // Checking it *here* made the pin a precondition for merely starting
+        // a bus, which no rule asks for and which fails in the wrong
+        // direction: on a host whose distribution ships a different git
+        // (Ubuntu's 2.51.0 against this build's pinned 2.53.0) `genesis`
+        // refused outright, and with it every operation that has nothing to
+        // do with merging -- reading the bus, publishing ordinary events,
+        // succession, sync. It also silently made this the only place the
+        // *field* below could get its value from, so the recorded pin and
+        // the activating host's git could never be discussed separately.
         Ok(BusConfig {
             object_format,
             product_review_from,
@@ -109,6 +124,34 @@ impl BusConfig {
 /// authority is the bus's, not this binary's, so a bus pinned to an older git
 /// keeps rejecting a newer host even when this binary was built expecting the
 /// newer one.
+///
+/// **Where this belongs.** Exactly one operation in the crate can produce a
+/// different answer on a different engine version: `git merge-tree
+/// --write-tree` (`gitrepo::merge_tree_write_tree`), reached only through
+/// `merge_candidate::reconstruct_candidate`. Nothing else -- reading the bus,
+/// reducing it, publishing ordinary events, transport, or any of the local
+/// object and ref work, which goes through libgit2 in `gitobjects.rs` -- is
+/// engine-dependent at all. So every call site places this immediately before
+/// its `reconstruct_candidate`, and nowhere earlier: put it further up and a
+/// host on the wrong git is refused for the wrong reason, told its engine is
+/// wrong when what it actually got wrong was the authorship, the scope or the
+/// nomination. It used to gate activation, which is how a host on Ubuntu's git
+/// could not even create or read a bus.
+///
+/// **What it is, and is not, protecting.** It is not what makes a candidate
+/// trustworthy: both publication gates (`coordinator::verify_review_merge_
+/// authorized` and `merge_ready`) independently *rebuild* the candidate and
+/// reject any mismatch, so two hosts whose engines genuinely disagreed would
+/// refuse the merge rather than accept a tree nobody verified. Determinism
+/// itself comes from pinning *configuration* -- `gitrepo::pinned_merge_config_
+/// args`, `--attr-source` and `refuse_ambient_attributes`, every one of them
+/// added in response to a *measured* divergence. This check adds the upfront,
+/// legible refusal in front of that: without it, a host on another engine
+/// meets an unexplained "does not match the deterministic reconstruction"
+/// instead of being told which version the bus expects. AGENT_BUS_SCHEMA.md
+/// section 2 and AGENT_REVIEW.md section 7 require it, so it stays; but its
+/// value is diagnostic, and it must not be placed as though the safety of the
+/// merge rested on it.
 pub(crate) fn require_pinned_merge_engine(state: &crate::state::BusState) -> AbResult<()> {
     let (engine, version) = match state
         .current_merge_engine_epoch
@@ -251,6 +294,59 @@ pub fn genesis(
     let first_event = crate::envelope::Envelope::new(coordinator, 0, observed, &data, []);
     let commit = crate::stream::create_root_commit(repo, &header, &first_event)?;
     Ok((config, epoch, commit))
+}
+
+/// The engine version this host's `git` actually reports, measured once.
+///
+/// Fixtures that build a `BusState` by hand and then have to get *past*
+/// [`require_pinned_merge_engine`] must pin their bus to this, not to
+/// [`SUPPORTED_MERGE_ENGINE_VERSION`]. The two coincide on a host provisioned
+/// with the pinned git and nowhere else, so a fixture spelling the constant is
+/// quietly encoding a property of the *build* as if it were a property of the
+/// *host* -- which is precisely what made a large part of this suite fail on a
+/// host running Ubuntu's git 2.51.0 while asserting things that have nothing
+/// to do with merging. (`pinned_engine_tests` below already did this right;
+/// the fixtures elsewhere did not.)
+///
+/// Cached, because the suite has hundreds of tests and `version` spawns a
+/// subprocess.
+#[cfg(test)]
+pub(crate) fn host_engine_version() -> String {
+    static CACHED: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| crate::gitrepo::version().expect("git must be on PATH"));
+    CACHED.clone()
+}
+
+/// Reports whether this host runs the merge engine version this build pins,
+/// printing why it does not.
+///
+/// A host that does not run the pinned engine cannot construct a candidate,
+/// by design (AGENT_BUS_SCHEMA.md section 2: the helper "refuses to run on a
+/// different version"). That is a real constraint on such a host, not a
+/// defect, so the few tests that need a *real, reduced bus* to get past
+/// [`require_pinned_merge_engine`] -- ones that drive `drain_outbox`
+/// end-to-end, where there is no seam to hand them a differently-pinned state
+/// -- genuinely cannot run there.
+///
+/// They say so out loud and return. Failing would report a correctly
+/// configured helper as broken; passing silently would report an untested
+/// path as tested, which this suite treats as the worse of the two. Every
+/// other test runs on every host: activation, reduction, publication and sync
+/// no longer consult the engine version at all, hand-built fixtures pin
+/// [`host_engine_version`], and the gate's own tests pin a version nobody
+/// runs.
+#[cfg(test)]
+pub(crate) fn requires_the_pinned_engine(what: &str) -> bool {
+    let installed = host_engine_version();
+    if installed == SUPPORTED_MERGE_ENGINE_VERSION {
+        return false;
+    }
+    eprintln!(
+        "SKIPPED {what}: this host runs git {installed}, not the pinned merge engine version \
+         {SUPPORTED_MERGE_ENGINE_VERSION}. Constructing a candidate is refused on such a host by \
+         design, so this test cannot reach what it asserts. Install the pinned git to exercise it."
+    );
+    true
 }
 
 /// A fingerprint of the v2 schema this build implements, printed by
@@ -715,6 +811,51 @@ mod pinned_engine_tests {
         assert!(
             err.contains("0.0.0-not-a-real-git") && err.contains("candidate construction"),
             "the error must name the pin it failed against: {err}"
+        );
+    }
+
+    /// The two halves of the fix for the engine pin having gated the wrong
+    /// thing, asserted together because it is their *combination* that is the
+    /// rule: activation is permissive about this host's git, and the
+    /// candidate path is not.
+    ///
+    /// The first half is the regression. `BusConfig::new` used to refuse
+    /// unless this host's `git --version` equalled
+    /// [`SUPPORTED_MERGE_ENGINE_VERSION`], which made the pin a precondition
+    /// for merely *starting* a bus: on a host running Ubuntu's git 2.51.0
+    /// against this build's pinned 2.53.0, `genesis` refused, and with it
+    /// reading, publishing, succession and sync -- 43 tests in this crate
+    /// that never go near the merge engine. Activation records the pin; it
+    /// does not run the engine, and nothing in AGENT_BUS_SCHEMA.md section 2
+    /// or AGENT_REVIEW.md section 7 asks it to.
+    ///
+    /// On a host that *does* run the pinned engine this half passes either
+    /// way -- the deleted branch is simply unreachable there -- so it
+    /// discriminates only on the hosts the defect was reported from. The
+    /// second half discriminates everywhere: it is what must stay true for
+    /// the first to be safe, and it fails immediately if the gate is ever
+    /// removed along with the activation check.
+    #[test]
+    fn activation_ignores_this_hosts_git_but_candidate_construction_still_refuses_it() {
+        let config = BusConfig::new("sha1".to_string(), ObjectId::parse("0".repeat(40)).unwrap())
+            .expect("activation must not depend on which git this host runs");
+        assert_eq!(
+            config.merge_engine_version, SUPPORTED_MERGE_ENGINE_VERSION,
+            "the bus must still record the version this build validated, whatever this host runs"
+        );
+
+        // ...and the bus that activation just described still refuses a host
+        // that is not on its engine. Pinned to a version nobody runs, so this
+        // is falsifying on every host including one provisioned with the
+        // pinned git.
+        let mut off_pin = config.clone();
+        off_pin.merge_engine_version = "0.0.0-not-a-real-git".to_string();
+        let err = require_pinned_merge_engine(&crate::state::BusState::new(off_pin))
+            .expect_err("a host off the bus's engine must still be refused a candidate")
+            .to_string();
+        assert!(
+            err.contains("0.0.0-not-a-real-git") && err.contains("candidate construction"),
+            "{err}"
         );
     }
 
