@@ -28,7 +28,23 @@ def cyclicNode : DependencyNode 1 where
 
 def cyclicDag : ManifestDag 1 := ⟨Vec.singleton cyclicNode⟩
 
-def emptyChanges (_ : BuildScenario) (_ : ScopeId) : Bool := false
+def noScenarioChanges (_ : ScopeId) : Bool := false
+
+def emptyChanges : ScenarioChangePlan where
+  cold := noScenarioChanges
+  noOp := noScenarioChanges
+  instructionBody := noScenarioChanges
+  localInvariant := noScenarioChanges
+  exportedInterface := noScenarioChanges
+  specificationKey := noScenarioChanges
+  layout := noScenarioChanges
+  providerProfile := noScenarioChanges
+  aggregateRebalance := noScenarioChanges
+  processPrivateState := noScenarioChanges
+  processLocalInvariant := noScenarioChanges
+  processCancellationPoint := noScenarioChanges
+  processExportedChannel := noScenarioChanges
+  processSubsystemLowering := noScenarioChanges
 
 def cyclicReport (scenario : BuildScenario) : BuildRunReport where
   scenario := scenario

@@ -24,6 +24,12 @@ inductive BuildScenario where
   | specificationKey
   | layout
   | providerProfile
+  | aggregateRebalance
+  | processPrivateState
+  | processLocalInvariant
+  | processCancellationPoint
+  | processExportedChannel
+  | processSubsystemLowering
   deriving DecidableEq, Repr
 
 /-- Whether a disposition entails re-elaboration rather than exact replay. -/

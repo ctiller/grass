@@ -9,15 +9,21 @@ open Grass.Build.Manifest Grass.Specification Grass.Std.Logical
 
 def allChanged (_ : ScopeId) : Bool := true
 
-def scenarioChanges : ScenarioChanges
-  | .cold => allChanged
-  | .noOp => nothingChanged
-  | .instructionBody => onlyAChanged
-  | .localInvariant => onlyAChanged
-  | .exportedInterface => interfaceChanged
-  | .specificationKey => onlyAChanged
-  | .layout => onlyAChanged
-  | .providerProfile => interfaceChanged
+def scenarioChanges : ScenarioChangePlan where
+  cold := allChanged
+  noOp := nothingChanged
+  instructionBody := onlyAChanged
+  localInvariant := onlyAChanged
+  exportedInterface := interfaceChanged
+  specificationKey := onlyAChanged
+  layout := onlyAChanged
+  providerProfile := interfaceChanged
+  aggregateRebalance := interfaceChanged
+  processPrivateState := onlyAChanged
+  processLocalInvariant := onlyAChanged
+  processCancellationPoint := onlyAChanged
+  processExportedChannel := interfaceChanged
+  processSubsystemLowering := interfaceChanged
 
 def coldReport : BuildRunReport where
   scenario := .cold
@@ -54,7 +60,13 @@ def completeCampaign : MeasurementCampaign where
     , interfaceEditReport .exportedInterface
     , leafEditReport .specificationKey
     , leafEditReport .layout
-    , interfaceEditReport .providerProfile ]
+    , interfaceEditReport .providerProfile
+    , interfaceEditReport .aggregateRebalance
+    , leafEditReport .processPrivateState
+    , leafEditReport .processLocalInvariant
+    , leafEditReport .processCancellationPoint
+    , interfaceEditReport .processExportedChannel
+    , interfaceEditReport .processSubsystemLowering ]
 
 example : coldReport.ExactFor fixtureDag allChanged := by decide
 example : (leafEditReport .localInvariant).ExactFor fixtureDag onlyAChanged := by decide
@@ -64,13 +76,22 @@ example : (interfaceEditReport .exportedInterface).ExactFor
 example : completeCampaign.Complete := by decide
 example : completeCampaign.isComplete = true := by decide
 example : completeCampaign.ExactFor fixtureDag scenarioChanges := by decide
+example : requiredBuildScenarios.length = 14 := by decide
+example : completeCampaign.runs.length = 14 := by decide
+example : completeCampaign.covers .aggregateRebalance = true := by decide
+example : completeCampaign.covers .processPrivateState = true := by decide
+example : completeCampaign.covers .processLocalInvariant = true := by decide
+example : completeCampaign.covers .processCancellationPoint = true := by decide
+example : completeCampaign.covers .processExportedChannel = true := by decide
+example : completeCampaign.covers .processSubsystemLowering = true := by decide
 
 example : (checkMeasurementCampaign fixtureDag scenarioChanges completeCampaign).isSome =
     true := by decide
 
-/-- Removing the provider-profile sample makes coverage incomplete. -/
+/-- Removing the final process-subsystem-lowering sample makes coverage
+incomplete. -/
 def incompleteCampaign : MeasurementCampaign where
-  runs := completeCampaign.runs.take 7
+  runs := completeCampaign.runs.take 13
 
 example : ¬incompleteCampaign.Complete := by decide
 example : incompleteCampaign.isComplete = false := by decide
@@ -88,11 +109,21 @@ def overRebuildCampaign : MeasurementCampaign where
     , interfaceEditReport .exportedInterface
     , leafEditReport .specificationKey
     , leafEditReport .layout
-    , interfaceEditReport .providerProfile ]
+    , interfaceEditReport .providerProfile
+    , interfaceEditReport .aggregateRebalance
+    , leafEditReport .processPrivateState
+    , leafEditReport .processLocalInvariant
+    , leafEditReport .processCancellationPoint
+    , interfaceEditReport .processExportedChannel
+    , interfaceEditReport .processSubsystemLowering ]
 
 example : overRebuildCampaign.Complete := by decide
 example : ¬overRebuildCampaign.ExactFor fixtureDag scenarioChanges := by decide
 example : checkMeasurementCampaign fixtureDag scenarioChanges overRebuildCampaign = none :=
   by decide
+
+example (scenario : BuildScenario) (required : scenario ∈ requiredBuildScenarios) :
+    ¬(completeCampaign.withoutScenario scenario).Complete :=
+  completeCampaign.withoutScenario_not_complete scenario required
 
 end Grass.Tests.Build.Manifest

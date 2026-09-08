@@ -12,13 +12,14 @@ graph validation and exact rebuild-cone campaign validation.
 namespace Grass.Build.Manifest
 
 /-- A checked manifest DAG paired with a complete, exact measurement campaign. -/
-structure CheckedManifestEvidence (fanout : Nat) (changes : ScenarioChanges) where
+structure CheckedManifestEvidence (fanout : Nat)
+    (changes : ScenarioChangePlan) where
   dag : RootedManifestDag fanout
   campaign : CheckedMeasurementCampaign dag.graph changes
 
 /-- Jointly validate generated graph shape and its measured campaign. -/
 def checkManifestEvidence {fanout : Nat} (dag : ManifestDag fanout)
-    (changes : ScenarioChanges) (campaign : MeasurementCampaign) :
+    (changes : ScenarioChangePlan) (campaign : MeasurementCampaign) :
     Option (CheckedManifestEvidence fanout changes) :=
   match checkRootedManifestDag dag with
   | none => none
@@ -29,7 +30,7 @@ def checkManifestEvidence {fanout : Nat} (dag : ManifestDag fanout)
 
 /-- `checkManifestEvidence_isSome_iff` characterizes joint admission exactly. -/
 theorem checkManifestEvidence_isSome_iff {fanout : Nat}
-    (dag : ManifestDag fanout) (changes : ScenarioChanges)
+    (dag : ManifestDag fanout) (changes : ScenarioChangePlan)
     (campaign : MeasurementCampaign) :
     (checkManifestEvidence dag changes campaign).isSome = true ↔
       dag.Rooted ∧ campaign.Complete ∧ campaign.ExactFor dag changes := by
@@ -46,21 +47,21 @@ theorem checkManifestEvidence_isSome_iff {fanout : Nat}
 
 /-- Successful joint admission exposes the checked graph ordering invariant. -/
 theorem CheckedManifestEvidence.dagWellFormed {fanout : Nat}
-    {changes : ScenarioChanges}
+    {changes : ScenarioChangePlan}
     (evidence : CheckedManifestEvidence fanout changes) :
     evidence.dag.graph.WellFormed :=
   evidence.dag.wellFormed
 
 /-- Successful joint admission exposes complete scenario coverage. -/
 theorem CheckedManifestEvidence.campaignComplete {fanout : Nat}
-    {changes : ScenarioChanges}
+    {changes : ScenarioChangePlan}
     (evidence : CheckedManifestEvidence fanout changes) :
     evidence.campaign.campaign.Complete :=
   evidence.campaign.complete
 
 /-- Successful joint admission exposes exact per-run rebuild cones. -/
 theorem CheckedManifestEvidence.campaignExact {fanout : Nat}
-    {changes : ScenarioChanges}
+    {changes : ScenarioChangePlan}
     (evidence : CheckedManifestEvidence fanout changes) :
     evidence.campaign.campaign.ExactFor evidence.dag.graph changes :=
   evidence.campaign.exact

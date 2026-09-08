@@ -79,14 +79,14 @@ theorem ManifestHierarchy.nodes_exact {hasher : MerkleHasher} {fanout : Nat}
 
 /-- A concrete rooted hierarchy paired with complete exact build measurements. -/
 structure CheckedHierarchyEvidence (hasher : MerkleHasher) (fanout : Nat)
-    (changes : ScenarioChanges) where
+    (changes : ScenarioChangePlan) where
   hierarchy : ManifestHierarchy hasher fanout
   campaign : CheckedMeasurementCampaign hierarchy.dag.graph changes
 
 /-- Jointly admit concrete manifests, their rooted DAG, and measured rebuilds. -/
 def checkHierarchyEvidence {hasher : MerkleHasher} {fanout : Nat}
     (dag : ManifestDag fanout) (manifests : Vec (ManifestNode hasher fanout))
-    (changes : ScenarioChanges) (campaign : MeasurementCampaign) :
+    (changes : ScenarioChangePlan) (campaign : MeasurementCampaign) :
     Option (CheckedHierarchyEvidence hasher fanout changes) :=
   if rooted : dag.Rooted then
     if nodesExact : manifests.map ManifestNode.toDependencyNode = dag.nodes then
@@ -103,7 +103,7 @@ def checkHierarchyEvidence {hasher : MerkleHasher} {fanout : Nat}
 /-- `checkHierarchyEvidence_isSome_iff` characterizes full hierarchy evidence. -/
 theorem checkHierarchyEvidence_isSome_iff {hasher : MerkleHasher} {fanout : Nat}
     (dag : ManifestDag fanout) (manifests : Vec (ManifestNode hasher fanout))
-    (changes : ScenarioChanges) (campaign : MeasurementCampaign) :
+    (changes : ScenarioChangePlan) (campaign : MeasurementCampaign) :
     (checkHierarchyEvidence dag manifests changes campaign).isSome = true ↔
       dag.Rooted ∧ manifests.map ManifestNode.toDependencyNode = dag.nodes ∧
         campaign.Complete ∧ campaign.ExactFor dag changes := by
