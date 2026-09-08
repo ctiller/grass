@@ -780,29 +780,46 @@ goal reached that law.
 | `Vec` | 25 | 72 |
 | `Bag` | 10 | 23 |
 | `HostBytes` | 5 | 12 |
+| `Order` | 3 | 6 |
 | `Text` | 1 | 7 |
-| `Order` | **0** | 6 |
 
 `Byte` is absent because it declares no `@[simp]` law at all — it is two
 `abbrev`s, and there is nothing to delete. That is also how it can be the
 most-reached of the seven and contribute nothing here.
 
-Forty-nine of a hundred and twenty-nine. **This is a statement about the
-fixtures, not about consumers.** It says that eighty laws currently have no
-fixture goal routed through them; it does not say they are wrong, unwanted, or
+Fifty-two of a hundred and twenty-nine. **This is a statement about the
+fixtures, not about consumers.** It says that seventy-seven laws currently have
+no fixture goal routed through them; it does not say they are wrong, unwanted, or
 unreachable, and it does not say anything about demand.
 
-`Order`'s zero has a mechanical explanation, and it is checkable rather than
-plausible: four of its six laws are `empty` cases (`count_empty`,
-`pairwise_empty`, `findIdx?_empty`, `idxOf?_empty`), one is `pairwise_singleton`
-and one is `count_push`, while `Tests/Std/StableSort.lean` builds only concrete
-two- and three-element vectors, which `decide` and `rfl` reduce without ever
-reaching a base case.
+**`Order`'s row was zero when this section was first written, and moving it is
+the best evidence in this document for the criterion below.** The explanation
+offered for the zero was mechanical: four of its six laws are `empty` cases
+(`count_empty`, `pairwise_empty`, `findIdx?_empty`, `idxOf?_empty`), one is
+`pairwise_singleton` and one is `count_push`, while `Tests/Std/StableSort.lean`
+built only concrete two- and three-element vectors, which `decide` and `rfl`
+reduce without ever reaching a base case.
+
+That explanation was right, and it was also a prediction: if the fixtures were
+the reason, then goals written over *general* vectors should reach the base
+cases. `c-stdlib:108` added four such goals — sortedness and multiplicity of an
+empty vector, a search in one, and multiplicity under a permutation — and three
+laws moved from unexercised to load-bearing: `count_empty`, `pairwise_empty` and
+`findIdx?_empty`. No law was written, no law was changed, and the total went from
+forty-nine to fifty-two.
+
+The three that did not move say the same thing from the other side.
+`idxOf?_empty` is an `empty` case like the three that did, and stayed put because
+none of the four goals mentions `idxOf?` — the measurement follows the goals
+someone happened to write, not the shape of the module. `count_push` and
+`pairwise_singleton` need a `push` or a `singleton` in the goal, and a merge sort
+states its correctness over `append`, which is the gap `c-stdlib:108` pins
+separately.
 
 #### What a law with no fixture behind it does and does not mean
 
-The kernel type-checked every one of the eighty, so none is *false*. What is
-unchecked is whether each is the *useful* statement: a law with the wrong
+The kernel type-checked every one of the seventy-seven, so none is *false*. What
+is unchecked is whether each is the *useful* statement: a law with the wrong
 orientation, the wrong side condition, or a normal form nothing else shares will
 type-check and then fail to fire, and nothing here would notice.
 `Vec.get?_push` is the case that shows the concern is not hypothetical — a real
@@ -827,9 +844,15 @@ stated and was corrected by `g-reviewer`. Three shapes, of which one is empty:
   this — a single mutant per law, "delete the attribute" — and a mutation of the
   *statement* would be strictly stronger evidence than anything reported here.
 
-So the eighty are laws for which no consumer-shaped or mutation-killing test
-exists. Writing the first kind against them would raise the number and leave that
-sentence just as true.
+So the seventy-seven are laws for which no consumer-shaped or mutation-killing
+test exists. Writing the first kind against them would raise the number and leave
+that sentence just as true.
+
+**That is not a prediction any more.** Four consumer-shaped goals in
+`c-stdlib:108` moved three of `Order`'s laws across the line without a single law
+being written, and the `Order` paragraph above records which three and why the
+other three stayed. A law-restating fixture would have moved all six and
+established nothing.
 
 #### A third number, from the gate that already runs
 
@@ -880,20 +903,27 @@ after the first meaningless.
 
 #### The tip, and the per-law manifest
 
-Everything above was measured on `38a75bba`. The commits that carry this section
-change no `.lean` file, so the manifest holds at the branch tip as well —
-`git diff 38a75bba HEAD -- 'Grass/**' 'Tests/**'` is empty, which is the check
-rather than the assurance. The manifest below names every law on both sides of
-the line, so a rerun can be diffed against it rather than compared against a
-total.
+Everything above was measured on `7a783b2c`, which is this branch with current
+`main` merged in. The manifest below names every law on both sides of the line,
+so a rerun can be diffed against it rather than compared against a total.
 
-An earlier version of this section reported the `Vec` row from one tip and
-everything else from another, with five spot checks and a prediction covering the
-gap. `g-reviewer:114` was right that a prediction is not a measurement. The whole
-thing was re-run on one tip rather than argued: every module, every law, and the
-results are identical to the mixed-tip run down to the law names — which is
-evidence that the earlier numbers were right and is not a reason to have
-published them that way.
+**This is the third tip this measurement has had, and the second two were
+reviewers catching the same mistake in different disguises.** The first version
+reported one module from one tip and five from another, with spot checks and a
+prediction covering the gap; `g-reviewer:114` refused the prediction and it was
+re-run whole. The second version was measured on one tip and then sat while
+`c-stdlib:108` merged to `main` — a branch whose entire purpose was to add goals
+that reach `Order`'s laws — so the manifest went stale on exactly the module the
+section drew its sharpest conclusion from, while the document still asserted the
+manifest held because no `Grass/**` or `Tests/**` file had changed since.
+`g-reviewer:124` caught that, and the merge-ready gate had already refused the
+authorization for the same reason.
+
+The lesson is not to be more careful. It is that a measurement belongs to a
+commit, that a long-lived branch will be overtaken, and that "nothing relevant
+changed" is a claim about a tree nobody built. `git diff 7a783b2c HEAD --
+'Grass/**' 'Tests/**'` is the check that this manifest still describes the branch
+tip; it is empty, and it is the check rather than the assurance.
 
 **`Vec`** — 25 of 72.
 
@@ -919,488 +949,14 @@ published them that way.
 
 *Not depended on:* `toNat_ofNat`, `ofNat_toNat`, `size_toHostBytes`, `length_ofHostBytes`, `toHostBytes_ofHostBytes`, `ofHostBytes_append`, `toHostBytes_append`.
 
-**`Order`** — 0 of 6.
+**`Order`** — 3 of 6.
 
-*Depended on:* (none).
+*Depended on:* `count_empty`, `pairwise_empty`, `findIdx?_empty`.
 
-*Not depended on:* `count_empty`, `count_push`, `pairwise_empty`, `pairwise_singleton`, `findIdx?_empty`, `idxOf?_empty`.
+*Not depended on:* `count_push`, `pairwise_singleton`, `idxOf?_empty`.
 
 **`Text`** — 1 of 7.
 
 *Depended on:* `decode_utf8`.
 
 *Not depended on:* `length_utf8`, `utf8_empty`, `isValidUTF8_utf8`, `decode?_utf8`, `utf8_decode`, `utf8_append`.
-
-## 4. S2 — Custody consolidation
-
-Goal: the three inherited pieces of §2 become this library's, and the
-`Std.Logical` module tree stops being distributed across three agents' scopes.
-Nothing in S2 is urgent and nothing in it blocks another agent; it is scheduled
-second because it is cheap and because leaving ownership split invites a fourth
-agent to add a fourth piece.
-
-### 4.0 The `ByteSeq` migration, costed three times
-
-This section has been re-costed twice since it was written, and each measurement
-came out larger than the one before. The history is kept rather than overwritten,
-because the pattern in *how* the estimates were wrong is more useful than the
-current number: every one of them generalized from the layer that happened to be
-measured first.
-
-**What holds, and is not in dispute.**
-
-- *Do not retype the use sites to `ByteArray`.* Every `Grass/Memory/*.lean` opens
-  `Grass.Std.Logical`, and `ByteArray` is ambiguous there against the prelude's,
-  so retyping ~83 fields produces ~83 elaboration errors. Whether `ByteSeq` is
-  later retired in favour of a qualified name is a separate cosmetic pass and a
-  naming question for §3.12's owner.
-- *The field declarations survive the change.* `Vec` supplies `length`, `take`,
-  `GetElem?`, `Append`, `DecidableEq` and `Repr`, so a field or parameter typed
-  `ByteSeq` keeps compiling. Every estimate below was built on this, and it is
-  the true part of all of them.
-- *`Byte.lean`'s naming instruction worked.* No module under the memory layer
-  writes `List Byte`. That was necessary and, as the measurements show, not
-  sufficient.
-
-**Estimate 1, refuted: "one line, in `Byte.lean`".** This section used to say the
-migration is "one line — `abbrev ByteSeq := Vec Byte` — after which no field or
-parameter changes at all". That line does not compile where it was proposed: it
-names `Vec`, and `Vec.lean` imports `Byte.lean`, so writing it there is an import
-cycle. The abbreviation has to move, or `ByteArray`'s siting has to be resolved
-first — §4.1 costs the latter and it is small. Found by `c-mem:51`, which ran the
-migration instead of reasoning about it, and reported it to this owner on
-2026-09-07.
-
-**Estimate 2, refuted: "about twenty-two edits, a single sitting".** That figure
-counted `agent/c-mem/memory-obligation-resource` as one line and zero proofs and
-`memory-semantics` as ~7 value-level edits and ~15 proof steps. `c-mem:51`
-rebuilt after making the change: **twenty-five errors**, with the build never
-reaching `Apply.lean`, `State.lean`, `Grass/Op/Step.lean` or any test. What does
-not survive is the proof layer, which discharges goals with
-`List.getElem?_eq_none`, `List.getElem?_eq_some_iff`, `List.getElem?_eq_getElem`
-and `List.length_take` directly rather than through any interface. One site is a
-*statement* rather than a proof: `Apply.lean`'s `observedBytes` builds its result
-as `(List.range n).map`, whose counterpart is `Vec.ofFn`.
-
-**Estimate 3, refuted: that the memory layer is a representative sample.** Both
-measurements above were taken against `Grass/Memory/**`, and the reason given for
-the low cost was that "the memory layer already treats byte sequences
-abstractly — zero pattern matches on a byte sequence, zero concatenations, and
-only four operations used". That is true, and it is exactly what makes it the
-wrong layer to generalize from: it is the one place `ByteSeq` is used through an
-interface rather than as a `List`. The x86 and Win64 layers build byte sequences
-concretely.
-
-- **List literals as `ByteSeq` values.** `Grass/ISA/X86/Bytes.lean` writes
-  `le32`, `le64` and `le16` as bracketed literals of extracted bit slices, and
-  `rexBytes`, `escapeBytes`, `modrmBytes` and `sibBytes` as `[b]` or `[]`;
-  `Grass/ABI/Win64/UnwindBytes.lean` writes `padding` as `[0, 0]` or `[]`. Under
-  `Vec` none of these elaborate, because `Vec` has no literal syntax. **That is
-  §3.5, so this migration is coupled to that open question and neither section
-  knew it.** The repair is `Vec.fromList [...]` at every such site, or the scoped
-  notation §3.5 measures — which is a decision, not a substitution.
-- **Cons patterns as `ByteSeq` consumers.** `Grass/ISA/X86/Decode.lean` reads
-  with `| b :: rest =>` and, in `takeLe64`, an eight-deep
-  `| a :: b :: c :: d :: e :: f :: g :: h :: rest =>`. `Vec` is a structure, so
-  no cons pattern applies to it at all — **and this library has nothing to offer
-  in their place.** `Vec.pop?` is the wrong end: it inverts `push` and returns
-  the *last* element. `head?` and `tail` are struck out in §3.4 as "never reached
-  for", subsumed by `Vec.recOnCons` — which is true for *proving* by induction
-  and false for *writing* a function that consumes a prefix. So the decoder
-  becomes `v.get? 0` paired with `v.drop 1`, and `takeLe64` becomes a length
-  check plus eight indexed reads related back to the suffix by hand.
-
-  That makes the decoder the strongest band-2 case this plan has seen: a named
-  consumer, a named use, and an operation §3.4 retired on the ground that no such
-  consumer existed. It is not scheduled, because `c-x86` has not asked and the
-  migration that would force it is not scheduled either. If `c-x86` does, the
-  front-uncons operation and its laws are written before the rewrite rather than
-  after.
-
-Both are in `c-x86`'s exclusive scope. Reproduce with
-`git grep -n ByteSeq -- Grass/ISA Grass/ABI` and read the bodies rather than the
-signatures: the signatures are what made this look uniform.
-
-**What this library owed first, now supplied.** The `c-mem` review found two
-genuine gaps and both are in: `Vec.ofFn` with `length_ofFn`, `get?_ofFn`, and
-`ofFn_congr`, without which `observedBytes` has no `Vec` spelling a reviewer
-should accept; and `Vec.get?_eq_some_iff` with `Vec.lt_of_get?_eq_some`, the
-missing half of the `get?` characterisation — the module stated the `none` case
-both ways and the `some` case only in the direction that builds one, which is a
-real asymmetry rather than a stylistic one.
-
-**One trap to hand over with it.** `Vec`'s `GetElem?` is definitionally
-`v.toList[i]?`, so `List` lemmas *unify* against a `Vec` and then leave goals
-mixing `Vec.length v` with `v.toList.length`, which `omega` cannot bridge. The
-proof does not fail with a type error; it fails with a nonsense arithmetic goal.
-Adding `Vec.getElem?_eq_get?` to the normalising `simp` set turns the whole class
-into mechanical substitution. Note also that this repository has no mathlib, so
-`by_contra` is unavailable and contrapositives need `Nat.lt_or_ge`.
-
-**Status: unscheduled, and no fourth estimate is offered.** The remaining unknown
-is `c-x86`'s share, which only `c-x86` can measure the way `c-mem:51` measured
-its own. This section will not guess it.
-
-### 4.1 `Byte.lean`
-
-Accepted unchanged, on 2026-09-07. `abbrev Byte := BitVec 8` is exactly what §1
-specifies, and the custody note has been replaced with what actually happened.
-
-**The other half of what this section promised did not happen, and cannot as
-stated.** It said accepting "folds the `ByteArray` declaration back next to
-`Byte`, where §1 groups them", and that the name "currently sits in `Vec.lean`
-only because this agent does not edit a file still under another's custody".
-Custody ended and the fold did not follow, because custody was never what
-prevented it. `Vec.lean` imports `Byte.lean`, so declaring `ByteArray` beside
-`Byte` requires `Byte.lean` to import `Vec` — a cycle.
-
-Breaking the cycle is possible and is defensible on its own terms: `Vec α` is
-generic and needs nothing from `Byte` except to state that one abbreviation, so
-`Vec.lean` could drop the import.
-
-**Its cost is measured, not estimated, because §4.0 records what estimating this
-family of changes has been worth.** Running it — drop the import, declare
-`ByteArray` in `Byte.lean` above `ByteSeq`, rebuild until green — costs one
-`import Grass.Std.Logical.Byte` line in exactly five modules:
-`Grass/Std/Logical/HostBytes.lean`, `Tests/Std/Chunking.lean`,
-`Tests/Std/PartialWrite.lean`, `Tests/Std/VecVocabulary.lean`, and
-`Grass/Build/Cache/Key.lean`. Four are this owner's, the fifth is `g-build`'s and
-`g-build:83` has already authorized an edit there for exactly this, and the tree
-builds green.
-
-**An earlier claim of this owner's said no consumer gains an import at all.**
-`c-stdlib:24` told `c-mem` that, on a tree of 54 build jobs; the tree is 204 now
-and five modules gain one. The claim was not re-checked when the tree grew, which
-is the same failure §4.0 documents in the other direction.
-
-So the change is cheap and unblocked. What it is not is asked for: no consumer
-has said the split costs it anything, which puts it in §1's band 3 and leaves it
-open, with the reason now recorded as the import graph rather than as a custody
-boundary that no longer exists.
-
-`ByteSeq` also does not disappear at acceptance, and §4.0 above costs that
-migration and corrects its own first estimate. The two names coexist until it is
-arranged with the owners §4.0 names; `Byte.lean` and `Vec.lean` record why.
-
-### 4.2 `Bag.lean`
-
-Accepted and moved to `Grass/Std/Logical/Bag.lean` (`c-process:52`,
-`c-stdlib:15`). `c-process:28` designed the handover as a rename and a
-re-export, the module carries no process vocabulary, and that is what it was.
-
-One thing the move did not do: `Grass/Process/Bag.lean` still exists on `main`
-as a near-duplicate of the moved module. Removing it is an edit to
-`c-process`'s exclusive scope, offered as a measured probe in `c-stdlib:55` and
-taken in `c-process:120`.
-
-`c-process:28` flags the representation as one a library owner might revisit:
-`Bag α := Quotient (List.isSetoid α)`, hand-rolled rather than mathlib's
-`Multiset`. This plan inherits it as a declared fact per `coord1:25` and takes no
-position at acceptance. The reason for not ruling immediately is that the choice
-is not really about multisets: `lakefile.toml` carries no dependencies, and
-[FOUNDATION.md](FOUNDATION.md) §3 puts every selected dependency into the TCB and
-build ledgers, so adopting mathlib is a repository-wide reviewed decision that
-this plan cannot take on a container's behalf. If that decision is ever taken,
-replacing the hand-rolled quotient is a small follow-up; until it is, the
-hand-rolled version is the only option, not the worse of two.
-
-### 4.3 `FiniteMap.lean`
-
-Accepted on 2026-09-07, and the custody note has been replaced. The note had
-predicted the transfer would happen "by rename and re-export"; no rename was
-needed, because the module was already sited where its owner wanted it.
-
-Two gaps its author deliberately left are still open:
-
-- **Disjoint union with split and join laws.** `c-mem`'s own M0 requirements name
-  these, and the module comment records their absence as waiting for M3. This is
-  band-2 work under §1: a named consumer with a named use.
-- **A deduplicating count with its own law.** The `domain` docstring records that
-  `domain.length` is not a count of bindings, because the entry list may hold
-  shadowed duplicates, and explicitly defers a correct count to this owner.
-  [MEMORY_MODEL.md](MEMORY_MODEL.md) §3 treats counts as derived caches of the
-  authoritative map, so the law must relate the count to `Binds` rather than to
-  the representation.
-
-Neither is scheduled ahead of `c-mem` reaching the milestone that needs it.
-Writing a disjoint-union split law before seeing the proof that consumes it is
-the guessing §1 band 2 exists to prevent.
-
-## 5. S3 — Demand-driven growth
-
-Nothing in this stage is scheduled. It is a register of what exists to be built,
-what each is blocked on, and who unblocks it, so that a consumer arriving with a
-demand can see whether the demand is buildable.
-
-| Area | Blocked on | Unblocked by |
-|---|---|---|
-| `Std.Owned`: `OwnedVec`, slices, loans, reallocation | loans, initialization, provenance, allocation | `c-mem` M3 and M6 |
-| `StructLayout` and field-offset derivations | a layout consumer; the ABI and artifact layers | whoever owns `Grass.ABI` |
-| ordered maps, sets, hash variants | a consumer with a complexity or ordering demand | none named |
-| worklists: deque, queue, priority queue | CFG discovery and refinement algorithms | whoever owns `Grass.CFG` |
-| `Std.Process` combinators, `ByteFlow` | the process and channel vocabulary | `c-process` |
-| `Std.Protocol` packages | `Std.Process`, and [GRAMMAR.md](GRAMMAR.md) formats | `c-process`, and a grammar owner |
-| grammar and parser combinators | a `Format` denotation to realize | whoever owns `Grass.Grammar` |
-| effect-policy builders | the standard effect outcome type | `g-foundation` |
-
-Two of these have no owner at all today — `Grass.Grammar` and `Grass.CFG` — and
-that is worth stating rather than leaving to be discovered. This plan raises an
-ownership gap with the coordinator when it becomes a blocker, not before.
-
-## 6. Anti-churn policy
-
-The library sits under almost everything, so a change here is a repository-wide
-rebuild. Three rules follow.
-
-**Names before laws.** A declaration's name and signature are what consumers
-write down. Adding a law to an existing name costs a rebuild; changing a name
-costs a rewrite in every consumer. When a choice is uncertain, this plan prefers
-the option that keeps the name stable even if it makes the first proof longer.
-
-**No speculative generality.** A type parameter, a class constraint, or an extra
-field added "so it will be there later" is a constraint every consumer pays for
-immediately and a design that was never reviewed against a use. Band 3 of §1 is
-the mechanism: no consumer, no declaration.
-
-**Deletions are migrations.** `ByteSeq` is the live case. This library will not
-delete a name a consumer is using, even a name this plan considers provisional,
-without the consumer's owner agreeing to the edit. Publishing a replacement and
-leaving the old name until the migration lands is the pattern.
-
-## 7. Risks
-
-**The `Vec`-over-`List` wrapper rots.** Every `List` law a consumer wants has to
-be restated. If restatement lags demand, consumers will reach for `toList` and
-prove things about the representation, which is exactly what the structure was
-chosen to prevent. The mitigation is that `toList` is a visible seam: a proof
-that mentions it in a consumer is reviewable as a missing `Vec` law. There is no
-mechanical check for this today, and this plan does not claim one.
-
-**`Std.Owned` is the real work and it has not started.** Everything shipped so
-far is the pure half of §1 through §5. The ownership half — loans, reallocation
-existentials, `FreshAllocation`, `PinLoan`/`OffsetRef`/`RebaseMap` — is where the
-difficulty is, and it cannot start until `c-mem` lands loans and allocation. The
-risk is that the pure interface, designed without a physical realization in
-front of it, turns out to be the wrong thing to represent. The mitigation is §6's
-name-stability preference and the fact that `Represents` is a relation rather
-than an equality, so a pure `Vec` need not be structurally close to its
-realization.
-
-**The `ByteArray` name is settled late.** Consumers written against a qualified
-`Grass.Std.Logical.ByteArray` before a rename would need editing after one. The
-mitigation is that there are no such consumers yet, which is the argument for
-ruling on §3.12 soon rather than at leisure.
-
-## 8. Decisions and open items
-
-Decided by this plan, recorded here because they are the kind of thing a later
-reader will want a reason for:
-
-1. `Vec α` is a one-field structure over `List α`, not an abbreviation. §3.2.
-2. `Vec` equality is propositional; there is no `Vec.Equiv`. §3.3.
-3. `Vec.get` takes a proof of the bound and there is no `Inhabited`-defaulted
-   accessor. An out-of-range bounded read is not expressible; `get?` serves a
-   caller without the bound.
-4. `Vec.truncate` and `Vec.clear` are provided as [STDLIB.md](STDLIB.md) §3's
-   names even though they are `take` and `empty` at this level, because the
-   `OwnedVec` operations of those names are genuinely different — they must
-   account for released elements — and the pure names should not be the ones
-   that move.
-5. Stages are lettered `S`, not `M`, to avoid collision with
-   [MEMORY_IMPLEMENTATION_PLAN.md](MEMORY_IMPLEMENTATION_PLAN.md). §1.
-
-6. **Superseded twice.** The first rule was "every operation carries at least
-   one law"; the second was "the laws determine the operation up to extensional
-   equality". Adversarial review broke both — the second by a one-line
-   `@[simp] theorem f_def : f v i a = … := rfl`, which pins a function to itself
-   and meets a determination bar in full while the function stays wrong. A
-   determination rule can only say "your laws pin your function"; it cannot say
-   "your function is the right function". The second rule was also internally
-   inconsistent, counting `truncate_eq_take` and `clear_eq_empty` as closing a
-   gap while listing `splitAt_eq`, which has exactly the same definitional-alias
-   shape, as failing.
-
-   **The rule is now observation coverage**, which is checkable and not gameable
-   by a `rfl`: for every operation `f`, this module states either (i) a law
-   computing `(f …).length` **and** a law computing `(f …).get? i`, each in terms
-   of the `length`/`get?` of `f`'s arguments; or (ii) a complete recursion — the
-   value of `f` at `empty` and at `push`. Neither may mention `Vec.toList`, and
-   neither may be `f`'s own definitional body unless its right-hand side is an
-   operation that itself satisfies the bar. Under it `set`, `push`, `take`,
-   `drop`, `map`, `mapIdx`, `zipWith`, `append`, `insertAt`, and `eraseAt` pass
-   on (i); `foldl`, `foldr`, and `flatten` pass on (ii); `truncate`, `clear`, and
-   `splitAt` pass on the alias clause. The bar is adversarial review's, not this
-   plan's, and it is adopted because it survives the attack that killed the
-   previous two.
-
-   **And it is now checked by a program.** The `coverage-audit` binary in
-   `tools/grass-tools` walks the environment for every `def` in
-   `Grass.Std.Logical.Vec` returning a `Vec` and reports any without both laws;
-   it runs in CI beside the axiom and docstring audits. That is the response to
-   the deepest point review made about the rule:
-   it had been rewritten three times, and each version was violated in the very
-   commit that stated it — the coverage rule itself shipped alongside `Vec.sum`
-   and `Vec.count`, both lawless, with `sum` on the right-hand side of
-   `Vec.length_flatten` where every consumer of that law would meet it. Three
-   times is not carelessness; it is what an unenforced rule does at this rate of
-   change. Both operations now carry recursions, and the checker is
-   negative-tested three ways: a lawless `Vec`-returning operation compiles under
-   `lake build` and fails the audit; so does one with a length law and no `get?`
-   law; and so does one carrying two `rfl` self-laws.
-
-   That third test is there because **the checker failed it at first**. Its
-   original version accepted `(f v i).length = (f v i).length` as "a law
-   computing its length" — the same `rfl` attack that had broken the prose rule,
-   working on the program meant to enforce it. The fix, `observesNonVacuously`,
-   requires the non-observing side of the equation to be free of the operation,
-   which is the mechanical form of "neither may be `f`'s own definitional body".
-   Writing the checker did not by itself make the rule safe; attacking the
-   checker did.
-
-   Review also found five holes in the prose version, of which the checker closes
-   the ones that matter by construction: it does not accept an alias cycle
-   (exemptions are a written list, not an inference), it does not infer clause
-   (ii) at all, and it reports the count of declarations outside the bar's reach
-   rather than silently passing them — currently 12 covered, 9 exempt, 43 outside.
-   That last number is the honest measure of how much of the module the rule
-   reaches, and it was invisible while the rule was prose.
-
-   The earlier record, kept as history, not as current rules: It was asserted satisfied on the same page
-   where `Vec.truncate` and `Vec.clear` shipped with no law naming either — now
-   fixed — and, more importantly, counting laws cannot express what the rule was
-   reaching for. A deliberately wrong `insertAt` that ignores its index, and an
-   `eraseAt` that always removes the last element, both satisfy the sole length
-   law those operations carry; the reviewer compiled both. The rule is now: **the
-   laws must determine the operation up to extensional equality.** `set`, `push`,
-   `map`, `take`, `drop`, `flatten`, and `zipWith` meet it. `insertAt`, `eraseAt`,
-   and `splitAt` do not, and are open item 10 rather than being counted as
-   satisfying anything. §3.1.
-7. `Vec` carries the instances a Lean author expects — `DecidableEq`, lawful
-   `BEq`, `Repr`, `GetElem`/`GetElem?` — derived through `toList`. An incomplete
-   wrapper is worse than no wrapper: it has §3.2's cost without its benefit,
-   because a container that cannot be compared or indexed sends its users back to
-   the representation. §3.6.
-8. The crossing to Lean's host `ByteArray` is named rather than a `Coe`, so it is
-   visible at the use site, and it lives in the `Vec` namespace with `Bytes` in
-   its name because `ByteArray` is an `abbrev` and dot notation on it resolves in
-   `Vec`. §3.8.
-9. UTF-8 encoding delegates to Lean's `String.toUTF8` rather than being
-   re-implemented, and the `@[extern]` trust boundary that creates is stated
-   rather than left implicit. §3.9.
-
-Found in a shared tool rather than in this library, and reported rather than
-changed: the docstring audit defined `SELF_NAMING` to exempt a theorem's
-own docstring — its module comment says "a theorem's own docstring is exempt,
-because the theorem beneath it *is* the enforcement" — but the constant is never
-used, so that exemption is not implemented and the gate is stricter than it
-documents. This plan did not change it. Loosening a gate every agent depends on
-is not a unilateral edit, and the workaround is cheap: name the theorem in its
-own docstring, which reads better anyway.
-
-Open, with the owner each is with:
-
-1. **The `ByteArray` name collision**, with the owner of
-   [STDLIB.md](STDLIB.md). §3.12. Twice sharper than when it was first raised.
-   The authored spike sources write bare `ByteArray` in **all five** spikes — an
-   earlier count of four was wrong and the correction strengthens the point — so
-   "keep the name and qualify at the use site" is a change to the author surface
-   and not only to library-internal code. And it is no longer
-   hypothetical: `Tests/Std/HostBytes.lean` is the first module to mention both
-   byte arrays at once, and a bare `ByteArray` in it is an ambiguity error.
-2. **What the representation should be**, with this branch's reviewer in the
-   first instance, and now a four-way question rather than a two-way one. The
-   "adopting `Array` would delete the restatement cost" half of how this item
-   used to read is **refuted**: the probe that tested it kept every body
-   list-shaped, and the genuine port in §3.2 measured ten laws native, four
-   needing `toList`, one awkward. The "settles the literal syntax" half stands.
-   What decides it is §3.2's two-axis measurement, and the constraint found with
-   it: an `Array`-backed arm using core's `DecidableEq (Array α)` costs 37 s of
-   kernel `decide` where the current representation costs 1.3 s, so such an arm
-   must carry a `toList`-routed instance. [HELLO_WORLD.md](HELLO_WORLD.md)
-   forbids `native_decide`, so kernel `decide` is the only evaluation a Grass
-   proof has. §3.2.
-3. **`Vec` has no literal syntax**, which the spike surface needs and which
-   interacts with the previous item. Not settled unilaterally, partly because
-   the only cheap mechanism breaks `Array` literals repository-wide and partly
-   because the authored surface is [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md)'s.
-   §3.5.
-4. **The spike surface's `"...".toUTF8` cannot typecheck** against a Grass
-   `ByteArray`, at three sites, for the same reason and with the same owner as
-   the previous item: dot notation resolves to core's `String.toUTF8`, which
-   returns the host type. `Text.utf8 "..."` is the available spelling. §3.9.
-5. **Resolved, and the reason given was false.** This item said UTF-8 decoding
-   was unbuilt because core supplies no round-trip law and closing it "means
-   proving UTF-8 correctness against a specification, which is a project rather
-   than a function". Adversarial review falsified that: in this toolchain
-   `String` is a structure over its own bytes carrying its own validity proof, so
-   `String.toUTF8` is a projection and `String.fromUTF8` is the constructor, and
-   both round-trip directions are a few lines. `Text.decode`, `Text.decode_utf8`,
-   `Text.utf8_decode`, and `Text.isValidUTF8_utf8` now exist. Recorded rather
-   than deleted, because a named blocker that was not real is the failure mode
-   this plan's band-3 discipline is most exposed to. §3.9.
-6. **`Spikes/2_Sort/Spec.lean`'s `stableSorted` does not typecheck**, in two
-   further ways beyond the previous items, and both are about totality rather
-   than naming. `input[i]` carries no proof that `i` is in range and its binder
-   supplies none, and `(output.findIdx? input[i]).get!` panics exactly when the
-   substantive claim fails, so the specification is silent about the case a
-   wrong sort would hit. `Tests/Std/StableSort.lean` shows the same statement
-   written totally. Owner as for the other authored-surface items. §3.10.
-7. **The `Bag` representation**, inherited undecided from `c-process:28` and
-      genuinely blocked on a dependency question rather than on a container
-   judgement — though less blocked than §4.2 says: [MODULES.md](MODULES.md)'s
-   final line already permits "mathlib and other reviewed Lean dependencies", so
-   what is open is a reviewed addition to `lakefile.toml` and the TCB ledger, not
-   a governance question. §4.2.
-8. **`Grass.Effect`, `Grass.Grammar`, and `Grass.CFG` have no owner**, which
-   blocks `mapM`/`traverse`, the parser combinators, and the worklists
-   respectively. Raised with the coordinator when one becomes a blocker. §3.4,
-   §5.
-9. **Closed.** `Vec.insertAt` and `Vec.eraseAt` now carry their index-shifting
-   laws — `get?_insertAt_lt`/`_self`/`_gt` and `get?_eraseAt_lt`/`_ge` — so they
-   pass decision 6's observation-coverage bar, and the two bogus implementations
-   adversarial review compiled against them are now formally refuted rather than
-   merely disapproved of. `splitAt` passes on the alias clause. They were not
-   withdrawn under band 3 because [STDLIB.md](STDLIB.md) §3 lists `insert` and
-   `erase` among the pure structural results: an undemanded operation can be
-   dropped, a demanded one owes laws. The historical record: `Vec.Permutation` and
-   `Vec.idxOf?` were in this list too until adversarial review found them:
-   `Permutation` promised "the same multiplicities" and no law mentioned
-   multiplicity, so a same-length-same-members relation satisfied all eight of its
-   laws; and `idxOf?` promised "first" and no law said so, which a
-   last-occurrence implementation satisfied. Both are now closed by
-   `Permutation.count_eq` and the strengthened `idxOf?_eq_some`. The remaining
-   three are the ones still open. `insertAt` and `eraseAt`
-   carry only length laws that a wrong implementation satisfies, and
-   `splitAt_eq` is its own definition restated. Either write the index-shifting
-   laws or delete the operations until a consumer forces them — which is what
-   §1 band 3 says to do anyway. §3.1.
-10. **The spike surface calls both `.size` and `.length`** on `Vec`- and
-   `ByteArray`-typed values — `.size` at six sites, `.length` at one — so it is
-   inconsistent with itself and with [STDLIB.md](STDLIB.md) §3, which fixes
-   `length`. A `Vec.size` abbreviation was briefly supplied so both spellings
-   would elaborate, and then removed. Adversarial review pointed out that this is
-   the same question as §3.5's array literals, §3.7's `concat`, and open item 4's
-   `.toUTF8`, and that this plan had answered those three by declining to
-   accommodate and asking for a ruling — then answered this one the opposite way
-   without noticing. Supplying both spellings also removes all pressure to settle
-   it, since the surface can stay inconsistent forever and still compile. Leaving
-   `.size` unresolved is what forces the ruling.
-11. **[STDLIB.md](STDLIB.md) §3 lists `concat` among the composition
-   operations**, and in Lean `List.concat` appends one element while flattening
-   is `List.flatten`. This library ships `Vec.flatten` and leaves `concat`
-   undefined rather than shipping a name that means the opposite of what a Lean
-   author expects. The ambiguity is the [STDLIB.md](STDLIB.md) owner's. §3.7.
-12. **There is no TCB ledger.** [FOUNDATION.md](FOUNDATION.md) §3 requires
-   external-reality assumptions to be "recorded in the TCB ledger"; no such file
-   exists in the repository. This library's `@[extern]` dependencies — at least
-   `lean_string_to_utf8`, `lean_array_mk`, and `lean_array_to_list` — are
-   recorded in a module comment as a placeholder. `Tools/AxiomAudit.lean` cannot
-   see them, since an `@[extern]` is not an axiom, so a green audit is not
-   evidence about that boundary. Raised with the coordinator. §3.9.
-13. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` and
-   therefore `c-mem`'s to make. §4.1.
-
-Items 1, 2, and 3 were all sharpened or found by reading the spike corpus for
-demands rather than by reasoning about the library in isolation, which is an
-argument for doing that reading earlier next time rather than after a
-nomination.
