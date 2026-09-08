@@ -47,6 +47,12 @@ def takeLittleEndian (count : Nat) :
 def writeLittleEndian {count : Nat} : BitVec (8 * count) → Std.Logical.ByteArray :=
   isoWriter (littleEndianIsomorphism count) (@writeExact count)
 
+/-- Little-endian serialization emits exactly its type-indexed byte width. -/
+@[simp] theorem length_writeLittleEndian {count : Nat}
+    (value : BitVec (8 * count)) : (writeLittleEndian value).length = count := by
+  change (bitVecToLittleEndian value).1.length = count
+  exact (bitVecToLittleEndian value).2
+
 /-- The concrete little-endian reader realizes the transported selected semantics. -/
 theorem takeLittleEndian_realizes (count : Nat) :
     ParserRealizes (littleEndianSemantics count) (takeLittleEndian count) :=

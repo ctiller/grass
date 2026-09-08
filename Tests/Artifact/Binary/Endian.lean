@@ -20,6 +20,9 @@ example : takeLittleEndian 2 (Vec.fromList [0x12, 0x34, 0xaa]) =
 example : writeLittleEndian (count := 2) (0x3412 : BitVec 16) =
     Vec.fromList [0x12, 0x34] := by decide
 
+example : (writeLittleEndian (count := 4) (0x12345678 : BitVec 32)).length = 4 := by
+  simp
+
 example : takeBigEndian 2 (writeBigEndian (count := 2) (0x1234 : BitVec 16)) =
     .done 0x1234 Vec.empty := by
   exact takeBigEndian_writeBigEndian 0x1234
