@@ -47,6 +47,12 @@ example : provider.toBlockContract.exitTags =
 example : provider.toBlockContract.WellFormed :=
   CallContract.toBlockContract_wellFormed provider (by decide)
 
+example : provider.findOutcome? (exitTag "normal") = some normal := by rfl
+
+example : provider.findOutcome? (exitTag "fault") = some fault :=
+  provider.findOutcome?_eq_some_of_mem (exitTag "fault") fault
+    (by decide) (by simp [provider]) rfl
+
 def good : CallSite Nat Terminal where
   target := .external (externalId "provider")
   contract := provider
@@ -62,6 +68,19 @@ example : good.actualEntryStack = good.contract.entryStack :=
   CallSite.entryStackExact_of_wellFormed good (by decide)
 example : good.returnTags = good.contract.outcomeTags :=
   CallSite.returnTagsExact_of_wellFormed good (by decide)
+
+example : good.returnTags.Nodup :=
+  CallSite.returnTagsNodup_of_wellFormed good (by decide)
+
+example : good.findReturn? (exitTag "normal") =
+    some ⟨exitTag "normal", .block (blockId "continue")⟩ := by rfl
+
+example : good.findReturn? (exitTag "fault") =
+    some ⟨exitTag "fault", .terminal .failed⟩ := by
+  apply good.findReturn?_eq_some_of_mem (exitTag "fault")
+      ⟨exitTag "fault", .terminal .failed⟩ (by decide)
+  · simp [good]
+  · rfl
 
 def localGood : CallSite Nat Terminal := {
   good with target := .local (blockId "callee")
