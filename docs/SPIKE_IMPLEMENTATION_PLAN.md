@@ -234,8 +234,10 @@ report named `c-x86:1`, which was accurate when read and stale when acted on.
 All four roots are now owned, checked against every agent's latest `scope.set`
 rather than against any owner's description of it: `ISA/X86.lean` and
 `Platform/Win32.lean` by `c-x86:12`, `Assembly/X86.lean` by `g-construct:49`,
-and `Emit.lean` by `g-build:10`, which `g-build:14` records as constrained to
-the checked `VerifiedProgram`/`emitProgram` surface `g-design:71` describes.
+and `Emit.lean` by `g-build:16`, each of those being that agent's latest
+published scope. `g-build:10` claimed `Emit.lean` first and `g-build:14` records
+it as constrained to the checked `VerifiedProgram`/`emitProgram` surface
+`g-design:71` describes.
 `Emit.lean` mattered most of the four and came last: it is the only module all
 five spikes import, so it is where the corpus terminates, and by the time it was
 claimed a second consumer was waiting on the same seam in `g-construct:65`.
@@ -475,16 +477,12 @@ prose a finding falsifies rather than appending a correction beside it, and
 re-read the whole document after a ruling lands rather than only the section
 being edited.
 
-Assigned delivery and published scope are not the same thing, and one gap
-between them is worth recording because it will block a delivery rather than a
-plan. `g-design:71` assigns `Grass.ISA.X86` and `Grass.Platform.Win32` to c-x86,
-but `c-x86:1`'s globs are `Grass/ISA/X86/**` and `Grass/Platform/Win32/**`,
-which match paths *underneath* those directories and not the root facade files
-`Grass/ISA/X86.lean` and `Grass/Platform/Win32.lean` themselves. Both facade
-roots therefore fall outside c-x86's published exclusive scope. c-x86 needs to
-extend that scope, or receive an explicit handoff, before writing either file.
-This is scope bookkeeping, not an ownership dispute: the assignment is settled
-and only the glob does not reach it. Raised with c-x86 rather than left here.
+Assigned delivery and published scope are not the same thing, and the gap this
+section used to record here is closed. `c-x86:1`'s globs `Grass/ISA/X86/**` and
+`Grass/Platform/Win32/**` did not reach the root facade files `g-design:71`
+assigns, and `c-x86:12` names both explicitly. Section 3.0.1 tells that story
+once, for all four roots; it does not need a second present-tense copy in this
+phase, which is the failure this revision exists to end.
 
 The split itself, decided by the user and recorded in `coord1:43`, is by layer
 rather than one owner: machine and platform authority (`ISA/X86`, `ABI/Win64`,
@@ -536,9 +534,15 @@ Exit: `Spikes/1_Hello_World/Program.lean` elaborates and emits a PE.
 
 ### P3 — The specification front end
 
-Owner: `Grass.Semantics.SpecProcess` and the facade modules are g-foundation's
-by its existing `Grass/Semantics/**` claim; the resource and console contract
-families have no owner yet and are the part of this phase still to route.
+Owner: `Grass.Semantics.SpecProcess` is g-foundation's under its
+`Grass/Semantics/**` claim, and the four facade modules are g-foundation's by
+name -- `g-foundation:146` claims `Grass/Spec/Console.lean`,
+`Grass/Spec/Grammar.lean`, `Grass/Spec/Graphics.lean` and
+`Grass/Spec/Resource.lean` exclusively, closing the registered-scope gap
+`c-spike:79` reported. That claim is deliberately shallow: it does not reach the
+underlying console, grammar, graphics and resource contract families, which
+still have no owner and are the part of this phase left to route.
+`g-foundation:148` has asked g-design to name their providers.
 
 Decision 134 converted these from contested to owed. Its `DECISIONS.md` text
 reached main with `g-design:77`; before that it existed only as the bus ruling
