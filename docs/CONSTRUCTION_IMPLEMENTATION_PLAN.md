@@ -155,6 +155,11 @@ alignments from selected object representations and ordinary struct placement.
 separation, while lookup theorems recover concrete placements from nominal field
 membership. Empty, packed, overlay, bitfield, and flexible-tail representations
 remain separate constructors rather than exceptions to the ordinary checker.
+`Grass.Construct.Layout.FlexibleTail` pairs a checked ordinary head with an
+explicitly bounded trailing element family. Its selected range is proved inside
+the reserved capacity and aggregate extent, each selected element is contained
+in that range, and changing the selected count through `selectCount?` preserves
+well-formedness without changing the reservation.
 
 Build layout and placement values under `Grass/Construct/`:
 
