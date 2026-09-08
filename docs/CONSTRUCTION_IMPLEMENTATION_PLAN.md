@@ -155,6 +155,10 @@ alignments from selected object representations and ordinary struct placement.
 separation, while lookup theorems recover concrete placements from nominal field
 membership. Empty, packed, overlay, bitfield, and flexible-tail representations
 remain separate constructors rather than exceptions to the ordinary checker.
+`Grass.Construct.Layout.Packed` separately validates explicit byte placements
+without granting ordinary per-field alignment. It preserves representation
+validity, containment, unique names, and pairwise separation, and exposes an
+exact marker for fields whose selected offsets require unaligned access.
 
 Build layout and placement values under `Grass/Construct/`:
 
