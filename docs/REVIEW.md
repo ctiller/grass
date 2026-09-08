@@ -306,9 +306,13 @@ must not confuse them:
   signature alias. The later declaration is typed by that alias directly, or
   the signature or test module contains a checked inhabitation such as
   `example : Alias := declaration`; prose comparison of two restated types is
-  not evidence of identity. Signature modules live under the owning `Grass/**`
-  module tree and are therefore included by the ordinary Lake build. The module
-  pins its imports, namespace, open scopes, notation and relevant options, uses
+  not evidence of identity. A checked inhabitation lives in a signature module
+  under the owning `Grass/**` tree or a test module under `Tests/**`; both trees
+  are included by the ordinary Lake build. A Lean file outside those Lake-built
+  module trees is not checked evidence merely because it has a `.lean` suffix.
+  In particular, `Spikes/**` files are authored-source mirrors unless a separate
+  gate actually elaborates them. The checking module pins its imports,
+  namespace, open scopes, notation and relevant options, uses
   `set_option autoImplicit false`, and contains no holes, metavariables,
   ellipses, admissions, axioms, or unresolved names. Review records the checked
   declaration names, normalized types, attributes, and referenced-name set.
