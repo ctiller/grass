@@ -1116,4 +1116,46 @@ theorem an_identity_suffices (state : MemoryState) (context : ContextId)
     state.Granted context provenance range intent :=
   MemoryState.granted_of_grantAt hat hcover hholder hshares hgrant haccess hrights
 
+/-! ## Rights do not compose across grants
+
+`Granted` asks, at each byte, for *one* grant that authorizes the access. Holding a
+read grant and a write grant over the same byte is therefore not the same as holding
+a read-write grant, and these are the states that show it.
+
+The plan recorded this as "the safe direction, and it is not stated anywhere".
+`MemoryState.not_granted_of_no_grant_permitting` states it in general; this is the
+witness.
+-/
+
+/-- A *write-only* loan of the same head bytes. `readLoanOfHead` is the read half. -/
+def writeLoanOfHead : AuthorityGrant :=
+  { loanOfHead with rights := { write := true } }
+
+/-- The borrower holds both halves separately, over the same eight bytes. Same
+holder, so §7.3's conflict between distinct contexts does not arise and both issue. -/
+def lentReadAndWrite : MemoryState :=
+  (((unlent.issue? firstLoan readLoanOfHead).getD unlent).issue?
+    secondLoan writeLoanOfHead).getD unlent
+
+theorem both_halves_are_issued :
+    ((unlent.issue? firstLoan readLoanOfHead).getD unlent).issue?
+      secondLoan writeLoanOfHead |>.isSome := by decide
+
+/-- Each intent on its own is authorized, so the refusal below is not the fixture
+failing to grant anything. -/
+theorem each_half_authorizes_its_own_intent :
+    lentReadAndWrite.Granted borrower bufferProv ⟨0, 8⟩ .read ∧
+    lentReadAndWrite.Granted borrower bufferProv ⟨0, 8⟩ .write := by decide
+
+/-- **And the read-modify-write is refused.** Neither grant permits both, and
+`Granted` will not assemble one from two. -/
+theorem the_read_modify_write_is_not_granted :
+    ¬ lentReadAndWrite.Granted borrower bufferProv ⟨0, 8⟩ .readWrite := by decide
+
+/-- The control: one grant permitting both authorizes it. So what the theorem above
+detects is the *composition*, not something else about the state. -/
+theorem one_grant_permitting_both_does_authorize :
+    ((unlent.issue? firstLoan loanOfHead).getD unlent).Granted
+      borrower bufferProv ⟨0, 8⟩ .readWrite := by decide
+
 end Tests.Memory.Loans

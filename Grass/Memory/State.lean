@@ -2326,6 +2326,30 @@ theorem not_granted_of_no_authorizing_entry {state : MemoryState} {context : Con
   obtain ⟨entry, hmem, hauth⟩ := hgranted 0 hsize
   exact h entry hmem (range.start + 0) hauth
 
+/-- **Rights do not compose across grants.**
+
+`Granted` is existential over `grantEntries` at each byte, so authority for an intent
+has to come from *one* grant. A context holding a read grant and a write grant over
+the same byte is therefore not authorized for a read-modify-write unless one of them
+permits both.
+
+That is the safe direction and until now it was only the safe direction: nothing said
+it. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 recorded the gap as "that is the safe
+direction and it is not stated anywhere", which is a description of behaviour rather
+than a guarantee about it. This is the guarantee.
+
+Weaker in hypothesis than `not_granted_of_no_authorizing_entry`, which asks about
+`AuthorizedAt` at every offset. A caller reasoning about *rights* does not have the
+offsets to hand and should not have to invent them. -/
+theorem not_granted_of_no_grant_permitting {state : MemoryState} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange} {intent : AccessIntent}
+    (hne : ¬ range.IsEmpty)
+    (h : ∀ entry ∈ state.grantEntries, ¬ entry.2.rights.Permits intent) :
+    ¬ state.Granted context provenance range intent :=
+  not_granted_of_no_authorizing_entry hne
+    (fun entry hmem _ hauth => h entry hmem hauth.2.2.2.2.2)
+
+
 /--
 **A split preserves the source's authority.**
 
