@@ -256,9 +256,16 @@ structure SubsystemRealization
     (shaped.network.protocol schema).boundary
   boundaryExact : implementation.ExportsExactly
     (shaped.network.protocol schema).boundary
+  abstractBehavior : forall instance : shaped.network.Instance schema,
+    BehaviorContract resources
+  abstractBehaviorExact : forall instance,
+    ExactProtocolInstanceBehavior
+      (shaped.network.protocol schema)
+      (shaped.network.instanceOf schema instance)
+      (abstractBehavior instance)
   refines : forall instance : shaped.network.Instance schema,
     implementation.instantiate instance
-      |>.Refines (shaped.network.instances schema instance)
+      |>.Refines (abstractBehavior instance)
   internalFrontiersClosed : forall instance frontier,
     ReachableInternalFrontier (implementation.instantiate instance) frontier ->
     FrontierRealized frontier
@@ -360,13 +367,16 @@ cannot erase an outstanding provider, resource, safety, or other keyed demand.
 
 The first implementation must include falsification fixtures for an empty
 execution relation, a one-favorable-trace relation, a projection which drops a
-fault or terminal outcome, a finite-only relation presented as complete, and a
-demand without an origin. A one-role identity presentation and a two-role
-composition with a real internal event provide the positive boundary fixtures.
-If the current foundation can express only finite list acceptance, its carrier
-must be named as a finite-prefix intermediate and kept private; it may not
-freeze the public `AbstractNetworkTraceRealizes` name while infinite and
-maximal behavior is absent.
+fault or terminal outcome, a finite-only relation presented as complete, a
+demand without an origin, and a finite-prefix-only carrier exported under the
+public `AbstractNetworkTraceSemantics` or `AbstractNetworkTraceRealizes` name.
+The last fixture must fail to elaborate: privacy and an honestly intermediate
+name are part of the checked boundary, not a review convention. A one-role
+identity presentation and a two-role composition with a real internal event
+provide the positive boundary fixtures. If the current foundation can express
+only finite list acceptance, its carrier must be named as a finite-prefix
+intermediate and kept private; it may not freeze either complete public name
+while infinite and maximal behavior is absent.
 
 `RoleSchema` is finite static syntax; its `Instance` family may be infinite.
 Thus one connection-session schema has a proof polymorphic in
@@ -394,6 +404,15 @@ silently trusted. `VerifiedProgram` accepts `closed.realization` only together
 with its indexed `ClosedBlend`; it never accepts a partial blend or closure
 evidence belonging to another graph. The realization's `.blended` origin
 retains that same dependent provenance after ordinary process APIs hide staging.
+
+`StructuralProcessNetwork` carries an `Instance` identity and one `instanceOf`
+value for each identity; in this presentation that value is precisely the
+admitted protocol input. It deliberately has no per-instance behavior field.
+`SubsystemRealization.abstractBehavior` is the separate Semantics-side carrier:
+`abstractBehaviorExact` indexes each selected contract by both the role protocol
+and that exact `instanceOf` input, and `refines` consumes that contract. Thus a
+realization cannot refine an input value, borrow another instance's behavior, or
+require a nonexistent structural-network projection.
 
 This Act-2 blend is portable. It may introduce a Vulkan, IOCP, or other provider
 requirement and prove refinement to that provider's abstract API model, but it
