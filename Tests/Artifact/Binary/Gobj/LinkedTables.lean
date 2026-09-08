@@ -77,7 +77,7 @@ def tables : GobjLinkedTables where
   relocationIndicesValid := by decide
   relocationLocationsValid := by decide
 
-def scope : SizedByteArray 16 := ⟨Vec.replicate 16 0, by simp⟩
+def scope : StableScopeId := Grass.StableId.mk "owner" "linked"
 def emptyBody : U32LengthPrefixedBytes := ⟨Vec.empty, by decide⟩
 
 def payload : GobjPayload where

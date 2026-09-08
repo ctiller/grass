@@ -6,12 +6,7 @@ namespace Grass.Tests.Artifact.Binary.Gobj.Payload
 
 open Grass.Artifact.Binary.Gobj Grass.Grammar Grass.Std.Logical
 
-def scopeBytes : Std.Logical.ByteArray :=
-  Vec.fromList [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-
-theorem scopeBytes_length : scopeBytes.length = 16 := by decide
-
-def scope : SizedByteArray 16 := ⟨scopeBytes, scopeBytes_length⟩
+def scope : StableScopeId := Grass.StableId.mk "alpha.beta" "gamma"
 
 def emptyBody : U32LengthPrefixedBytes := ⟨Vec.empty, by decide⟩
 
@@ -33,7 +28,7 @@ def payload : GobjPayload where
 
 def suffix : Std.Logical.ByteArray := Vec.fromList [0xfe, 0xed]
 
-example : (writeGobj payload).length = 45 := by
+example : (writeGobj payload).length = 61 := by
   rw [length_writeGobj]
   decide
 
@@ -64,6 +59,31 @@ example : readGobj
 
 example : readGobj
     (Vec.fromList [0x47, 0x4f, 0x42, 0x4a, 0x01, 0x00, 0x00, 0x00,
-      0x10, 0x11, 0x12]) = .needMore (some 13) := by rfl
+      0x02]) = .invalid (.malformed "noncanonical .gobj scope length") := by rfl
+
+example : readGobj
+    (Vec.fromList [0x47, 0x4f, 0x42, 0x4a, 0x01, 0x00, 0x00, 0x00]) =
+      .needMore (some 22) := by rfl
+
+example : readScopeComponent
+    (writeScopeComponent "λ" ++ suffix) = .done "λ" suffix := by
+  exact readScopeComponent_write_append "λ" suffix
+
+example : readScopeComponent (Vec.fromList [1, 0, 0xff]) =
+    .invalid (.malformed "invalid UTF-8 in .gobj scope") := by rfl
+
+example : readScopeComponent (Vec.fromList [1, 1, 0]) =
+    .needMore (some 2) := by rfl
+
+example : readScopeComponent (Vec.fromList [1, 1]) =
+    .needMore (some 3) := by rfl
+
+example : readStableScopeId
+    (writeStableScopeId (Grass.StableId.mk "" "")) =
+      .done (Grass.StableId.mk "" "") Vec.empty := by
+  exact readStableScopeId_write (Grass.StableId.mk "" "")
+
+example : writeStableScopeId (Grass.StableId.mk "a.b" "c") ≠
+    writeStableScopeId (Grass.StableId.mk "a" "b.c") := by decide
 
 end Grass.Tests.Artifact.Binary.Gobj.Payload

@@ -112,6 +112,9 @@ at an explicit adapter; format semantics use `Grass.Std.Logical.ByteArray`.
 ### G2 — `.gobj` and exact resolution
 
 - Freeze a versioned, canonical first-order `GobjPayload` schema.
+- Serialize `StableScopeId` as its two canonical UTF-8 components with
+  unbounded self-delimiting lengths; never substitute a digest, UUID-sized
+  token, dotted display rendering, or external registry handle for identity.
 - Implement parser/writer laws and reject duplicate symbols, bad references,
   invalid permissions, noncanonical order, overflow, and trailing corruption.
 - Connect successful parsing to structural well-formedness.
