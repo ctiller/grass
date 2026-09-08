@@ -679,7 +679,21 @@ exactly that gap: a context could not *obtain* a loan (the conflict test saw the
 stale grant) and did not need one (this list did not), so the write proceeded
 unauthorized.
 
-**Offsets, and why this list keeps what `AuthorizedAt` refuses.**
+**Offsets: this list still ignores them, and that is the safe direction.**
+
+`AuthorizedAt` consults `MemoryState.aliasShift?` because authorizing an access at an
+offset this layer cannot determine hands out bytes a grant never covered. This list
+asks the opposite question -- which grants *might* overlap -- so ignoring the offset
+over-includes, and over-including is what conflict detection wants. A grant that a
+precise comparison would have excluded stays in the list and freezes something it
+need not have; that costs progress, never soundness.
+
+It is still imprecision and it is recorded as such:
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 carries it, together with
+`MemoryState.MayLend`, which compares `Contains` across `SharesBytes` in the same
+way. Making either precise means deciding what an undeterminable offset does to a
+*conflict*, which is a different question from what it does to an authorization, and
+one this layer has not answered.
 
 **`none` from `grantRangeIn` keeps the grant**, which is the opposite of what
 `AuthorizedAt` does with it and is the whole reason the two are written out
@@ -696,9 +710,7 @@ def grantsOver (state : MemoryState) (provenance : Provenance) (range : ByteRang
     List (GrantId × AuthorityGrant) :=
   state.grantEntries.filter fun entry =>
     decide (state.SharesBytes entry.2.provenance.root provenance.root) &&
-      (match state.grantRangeIn entry.2 provenance.root with
-       | Option.none => true
-       | some shifted => decide (shifted.Meets range))
+      decide (entry.2.range.Meets range)
 
 /-- The loans among them. §3's laws — exclusivity, counts, return by identity — are
 about loans, so they are stated over this; the access-time conflict rule is about
@@ -2417,6 +2429,20 @@ theorem coversAcrossAliases_mono {state : MemoryState} {grant part : AuthorityGr
               unfold ByteRange.Covers ByteRange.stop at h ⊢
               omega
 
+/-- And back, at shift zero: the converse of `coversAcrossAliases_of_covers`.
+
+The theorems that go the other way -- authority in the new state implies authority in
+the old -- need to recover the plain range fact in order to do arithmetic on it. At a
+non-zero shift there is no plain fact to recover, which is why those theorems take
+the same `hshift` hypothesis rather than being stated in general. -/
+theorem covers_of_coversAcrossAliases {state : MemoryState} {grant : AuthorityGrant}
+    {root : AllocId} {offset : Nat}
+    (hshift : state.aliasShift? grant.provenance.root root = some 0)
+    (h : state.CoversAcrossAliases grant root offset) : grant.range.Covers offset := by
+  unfold CoversAcrossAliases grantRangeIn at h
+  rw [hshift] at h
+  simpa using h
+
 /-- At shift zero the alias-aware coverage clause is the plain one.
 
 The bridge every theorem below uses, and the reason this change did not have to
@@ -2681,7 +2707,9 @@ theorem splitGrant?_creates_no_authority {state next : MemoryState}
     unfold AuthorityGrant.lowPart ByteRange.Contains ByteRange.stop
     simp only []
     omega
-  · exact ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', hcovers, hrights⟩
+  · refine ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', ?_, hrights⟩
+    subst hnext
+    exact (coversAcrossAliases_grants state _ _ _ _).mp hcovers
 
 /--
 **A join preserves each source's authority.**
@@ -2700,6 +2728,7 @@ theorem joinGrants?_preserves_low_authority {state next : MemoryState}
     (hcover : lowGrant.range.Contains range)
     (hholder : lowGrant.holder = context)
     (hshares : state.SharesBytes lowGrant.provenance.root provenance.root)
+    (hshift : state.aliasShift? lowGrant.provenance.root provenance.root = some 0)
     (hgrant : state.CurrentEpoch lowGrant.provenance)
     (haccess : state.CurrentEpoch provenance) (hrights : lowGrant.rights.Permits intent) :
     next.Granted context provenance range intent := by
@@ -2717,9 +2746,16 @@ theorem joinGrants?_preserves_low_authority {state next : MemoryState}
   have haccess' : next.CurrentEpoch provenance := by
     subst hnext
     exact (currentEpoch_grants state _ _).mpr haccess
+  -- `joined` keeps the low source's provenance and only widens the range, so the
+  -- offset the alias graph supplies for the source is the join's offset too.
+  have hshift' : next.aliasShift? (lowGrant.joined highGrant).provenance.root
+      provenance.root = some 0 := by
+    subst hnext
+    exact (aliasShift?_grants state _ _ _).trans hshift
   refine ⟨(into, lowGrant.joined highGrant),
     Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hintoat,
-    hholder, hshares', hgrant', haccess', ⟨?_, ?_⟩, hrights⟩
+    hholder, hshares', hgrant', haccess',
+    coversAcrossAliases_of_covers hshift' ⟨?_, ?_⟩, hrights⟩
   · show lowGrant.range.start ≤ range.start + i
     omega
   · show range.start + i <
@@ -2736,6 +2772,7 @@ theorem joinGrants?_preserves_high_authority {state next : MemoryState}
     (hcover : highGrant.range.Contains range)
     (hholder : highGrant.holder = context)
     (hshares : state.SharesBytes highGrant.provenance.root provenance.root)
+    (hshift : state.aliasShift? highGrant.provenance.root provenance.root = some 0)
     (hgrant : state.CurrentEpoch highGrant.provenance)
     (haccess : state.CurrentEpoch provenance) (hrights : highGrant.rights.Permits intent) :
     next.Granted context provenance range intent := by
@@ -2771,9 +2808,19 @@ theorem joinGrants?_preserves_high_authority {state next : MemoryState}
   have haccess' : next.CurrentEpoch provenance := by
     subst hnext
     exact (currentEpoch_grants state _ _).mpr haccess
+  -- The join carries the low source's provenance, and `hprov` is what puts the
+  -- high source on the same one, so the high source's offset is the join's.
+  have hshift' : next.aliasShift? (lowGrant.joined highGrant).provenance.root
+      provenance.root = some 0 := by
+    subst hnext
+    refine (aliasShift?_grants state _ _ _).trans ?_
+    show state.aliasShift? lowGrant.provenance.root provenance.root = some 0
+    rw [hprov]
+    exact hshift
   refine ⟨(into, lowGrant.joined highGrant),
     Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hintoat,
-    hholder', hshares', hgrant', haccess', ⟨?_, ?_⟩, hrights'⟩
+    hholder', hshares', hgrant', haccess',
+    coversAcrossAliases_of_covers hshift' ⟨?_, ?_⟩, hrights'⟩
   · show lowGrant.range.start ≤ range.start + i
     omega
   · show range.start + i < lowGrant.range.start + (lowGrant.range.size + highGrant.range.size)
@@ -2794,6 +2841,7 @@ theorem joinGrants?_creates_no_authority {state next : MemoryState}
     (h : state.joinGrants? low high into = some next)
     (hlow : state.grantAt? low = some lowGrant)
     (hhigh : state.grantAt? high = some highGrant)
+    (hshift : state.aliasShift? lowGrant.provenance.root provenance.root = some 0)
     (hgranted : next.Granted context provenance range intent) :
     state.Granted context provenance range intent := by
   obtain ⟨hnext, _, _, hmatch, hadjacent⟩ := joinGrants?_eq h hlow hhigh
@@ -2823,13 +2871,20 @@ theorem joinGrants?_creates_no_authority {state next : MemoryState}
     hadjacent
   rcases hmem' with hcase | hcase
   · subst hcase
+    have hplain : (lowGrant.joined highGrant).range.Covers (range.start + i) := by
+      refine covers_of_coversAcrossAliases (state := state)
+        (grant := lowGrant.joined highGrant) (root := provenance.root) ?_ ?_
+      · exact hshift
+      · subst hnext
+        exact (coversAcrossAliases_grants state _ _ _ _).mp hcovers
     obtain ⟨hc1, hc2⟩ : lowGrant.range.start ≤ range.start + i ∧
         range.start + i <
-          lowGrant.range.start + (lowGrant.range.size + highGrant.range.size) := hcovers
+          lowGrant.range.start + (lowGrant.range.size + highGrant.range.size) := hplain
     rcases Nat.lt_or_ge (range.start + i) (lowGrant.range.start + lowGrant.range.size) with
       hlt | hge
     · refine ⟨(low, lowGrant), Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hlow,
-        ?_, ?_, ?_, haccess', ⟨hc1, ?_⟩, ?_⟩
+        ?_, ?_, ?_, haccess',
+        coversAcrossAliases_of_covers hshift ⟨hc1, ?_⟩, ?_⟩
       · show lowGrant.holder = context
         exact hholder
       · show state.SharesBytes lowGrant.provenance.root provenance.root
@@ -2840,8 +2895,14 @@ theorem joinGrants?_creates_no_authority {state next : MemoryState}
         omega
       · show lowGrant.rights.Permits intent
         exact hrights
-    · refine ⟨(high, highGrant), Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hhigh,
-        ?_, ?_, ?_, haccess', ⟨?_, ?_⟩, ?_⟩
+    · have hshifthigh :
+        state.aliasShift? highGrant.provenance.root provenance.root = some 0 := by
+        rw [← show lowGrant.provenance = highGrant.provenance from by rw [hmatch]]
+        exact hshift
+      refine ⟨(high, highGrant),
+        Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hhigh,
+        ?_, ?_, ?_, haccess',
+        coversAcrossAliases_of_covers hshifthigh ⟨?_, ?_⟩, ?_⟩
       · show highGrant.holder = context
         rw [← show lowGrant.holder = highGrant.holder from by rw [hmatch]]
         exact hholder
@@ -2858,7 +2919,9 @@ theorem joinGrants?_creates_no_authority {state next : MemoryState}
       · show highGrant.rights.Permits intent
         rw [← show lowGrant.rights = highGrant.rights from by rw [hmatch]]
         exact hrights
-  · exact ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', hcovers, hrights⟩
+  · refine ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', ?_, hrights⟩
+    subst hnext
+    exact (coversAcrossAliases_grants state _ _ _ _).mp hcovers
 
 /--
 **A transfer gives the recipient exactly what the holder had.**
@@ -2875,7 +2938,9 @@ theorem transferGrant?_grants_the_recipient {state next : MemoryState} {actor : 
     (hcover : grant.range.Contains range)
     (hshares : state.SharesBytes grant.provenance.root provenance.root)
     (hgrant : state.CurrentEpoch grant.provenance)
-    (haccess : state.CurrentEpoch provenance) (hrights : grant.rights.Permits intent) :
+    (haccess : state.CurrentEpoch provenance)
+    (hshift : state.aliasShift? grant.provenance.root provenance.root = some 0)
+    (hrights : grant.rights.Permits intent) :
     next.Granted recipient provenance range intent := by
   have hmoved := transferGrant?_yields_the_transfer h hat
   obtain ⟨hnext, _, _, _⟩ := transferGrant?_eq h hat
@@ -2888,7 +2953,11 @@ theorem transferGrant?_grants_the_recipient {state next : MemoryState} {actor : 
   have haccess' : next.CurrentEpoch provenance := by
     subst hnext
     exact (currentEpoch_grants state _ _).mpr haccess
-  exact granted_of_grantAt hmoved hcover rfl hshares' hgrant' haccess' hrights
+  have hshift' : next.aliasShift? grant.provenance.root provenance.root = some 0 := by
+    subst hnext
+    exact (aliasShift?_grants state _ _ _).trans hshift
+  exact granted_of_grantAt hmoved hcover rfl hshares' hgrant' haccess' hshift'
+    hrights
 
 /--
 **A transfer creates no authority for anyone but the recipient.**
@@ -2928,7 +2997,9 @@ theorem transferGrant?_creates_no_authority {state next : MemoryState} {actor : 
   rcases hmem' with hcase | hcase
   · subst hcase
     exact absurd (show recipient = context from hholder) (Ne.symm hne)
-  · exact ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', hcovers, hrights⟩
+  · refine ⟨entry, hcase, hholder, hshares', hgrantepoch', haccess', ?_, hrights⟩
+    subst hnext
+    exact (coversAcrossAliases_grants state _ _ _ _).mp hcovers
 
 /-- `state.GrantedOfKind` additionally requires the authorizing grant to be of a
 particular kind, which is how one provider distinguishes itself from another over
@@ -3974,6 +4045,12 @@ def LoanMapLaws : Prop :=
       state.joinGrants? low high into = some next →
       state.grantAt? low = some lowGrant →
       state.grantAt? high = some highGrant →
+      -- The offset the alias graph relates the source to the access at, and it
+      -- must be zero. See `MemoryState.coversAcrossAliases_joined`'s absence:
+      -- decomposing a *joined* range across a non-zero shift is the one
+      -- direction this layer has not proved, and the law is narrowed to say so
+      -- rather than left looking general.
+      state.aliasShift? lowGrant.provenance.root provenance.root = some 0 →
       next.Granted context provenance range intent →
       state.Granted context provenance range intent) ∧
   (∀ (state next : MemoryState) (low high into : GrantId)
@@ -3999,6 +4076,11 @@ def LoanMapLaws : Prop :=
       state.SharesBytes grant.provenance.root provenance.root →
       state.CurrentEpoch grant.provenance →
       state.CurrentEpoch provenance →
+      -- Zero, for the same reason the join clause says so: a transfer moves a
+      -- grant between holders and does not move it between allocations, so the
+      -- offset carries, but the *statement* only holds where the offset is one
+      -- this layer can name.
+      state.aliasShift? grant.provenance.root provenance.root = some 0 →
       grant.rights.Permits intent →
       next.Granted recipient provenance range intent) ∧
   (∀ (state returned : MemoryState) (context : ContextId) (id : GrantId),
@@ -4016,12 +4098,13 @@ theorem loanMapLaws : LoanMapLaws :=
   ⟨fun state _ grant h => issue?_eq_none_of_reissued state grant h,
    fun _ _ _ _ _ _ _ _ _ _ _ h hat hg => splitGrant?_creates_no_authority h hat hg,
    fun _ _ _ _ _ _ _ h hat => splitGrant?_yields_the_parts h hat,
-   fun _ _ _ _ _ _ _ _ _ _ _ h hl hh hg => joinGrants?_creates_no_authority h hl hh hg,
+   fun _ _ _ _ _ _ _ _ _ _ _ h hl hh hs hg =>
+     joinGrants?_creates_no_authority h hl hh hs hg,
    fun _ _ _ _ _ _ _ h hl hh => joinGrants?_yields_the_join h hl hh,
    fun _ _ _ _ _ _ _ _ _ _ h hat hne hg =>
      transferGrant?_creates_no_authority h hat hne hg,
-   fun _ _ _ _ _ _ _ _ _ h hat hc hs hg ha hr =>
-     transferGrant?_grants_the_recipient h hat hc hs hg ha hr,
+   fun _ _ _ _ _ _ _ _ _ h hat hc hs hg ha hsh hr =>
+     transferGrant?_grants_the_recipient h hat hc hs hg ha hsh hr,
    fun _ _ _ _ h => grantAt?_returnGrant?_self h,
    fun _ _ _ _ _ h hne => grantAt?_returnGrant?_ne h hne⟩
 

@@ -1104,7 +1104,12 @@ theorem a_non_holder_is_granted_nothing (state : MemoryState) (context : Context
     MemoryState.not_authorizedAt_of_other_holder (h entry hmem)
 
 /-- **And a grant identity is enough to establish authority**, without knowing what
-else the state holds. -/
+else the state holds -- given the offset.
+
+`hshift` is new. "Authority over these bytes" is a claim about offsets, and an
+identity plus a range says nothing about how the grant's allocation and the
+access's are aligned. At shift zero this is the theorem it always was; at any
+other shift the grant covers different bytes than the ones being asked about. -/
 theorem an_identity_suffices (state : MemoryState) (context : ContextId)
     (provenance : Provenance) (range : ByteRange) (intent : AccessIntent)
     (id : GrantId) (grant : AuthorityGrant) (hat : state.grantAt? id = some grant)
@@ -1112,8 +1117,10 @@ theorem an_identity_suffices (state : MemoryState) (context : ContextId)
     (hshares : state.SharesBytes grant.provenance.root provenance.root)
     (hgrant : state.CurrentEpoch grant.provenance)
     (haccess : state.CurrentEpoch provenance)
+    (hshift : state.aliasShift? grant.provenance.root provenance.root = some 0)
     (hrights : grant.rights.Permits intent) :
     state.Granted context provenance range intent :=
-  MemoryState.granted_of_grantAt hat hcover hholder hshares hgrant haccess hrights
+  MemoryState.granted_of_grantAt hat hcover hholder hshares hgrant haccess hshift
+    hrights
 
 end Tests.Memory.Loans
