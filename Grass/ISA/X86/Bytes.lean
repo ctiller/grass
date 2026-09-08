@@ -421,6 +421,58 @@ def encodeMemInsn (escape : Bool) (opcode : Byte) (w : Bool) (reg : RegField)
       imm := imm }
 
 /--
+**`encodeMemInsn` derives `REX.R` and the `ModR/M` reg field from one argument.**
+
+The obligation `Grass/ISA/X86/Addressing.lean` records against `rex`: that
+function takes `regExtended` as a bare `Bool` with nothing tying it to whatever
+register the caller passed to `modrm`, so a caller naming `r13` in the `reg`
+field and forgetting `regExtended` gets a legal instruction naming `rbp`
+instead. That header says pairing the two is this function's job. This is the
+statement that it does.
+
+Both come from `reg`, and this says so of the encoding actually produced rather
+than of the source text. A future edit that took the extension from somewhere
+else would falsify it. -/
+theorem encodeMemInsn_reg_paired {escape : Bool} {opcode : Byte} {w : Bool}
+    {reg : RegField} {m : MemOperand} {imm : Immediate} {i : InsnEncoding}
+    (h : encodeMemInsn escape opcode w reg m imm = some i) :
+    (∀ mr, i.modrm = some mr → mr.reg = reg.bits)
+    ∧ (∀ p, i.rex = some p → p.r = BitVec.ofBool reg.extended) := by
+  unfold encodeMemInsn at h
+  rw [Option.map_eq_some_iff] at h
+  obtain ⟨e, _, hi⟩ := h
+  subst hi
+  refine ⟨?_, ?_⟩
+  · intro mr hmr
+    simp only [Option.some.injEq] at hmr
+    subst hmr
+    rfl
+  · intro pfx hp
+    by_cases hn : (w || reg.extended || (e.rexX == 1) || (e.rexB == 1)) = true
+    · simp only [hn, if_true] at hp
+      simp only [Option.some.injEq] at hp
+      subst hp
+      rfl
+    · simp only [hn] at hp
+      exact absurd hp (by simp)
+
+/--
+**A `/digit` form never sets `REX.R`.**
+
+The other half of the same obligation. `REX.R` extends a register number, and a
+`/digit` field is an opcode extension with no register to extend -- setting it
+would name a bit the processor reads as part of an opcode selector.
+`RegField.ext_not_extended` says the field reports no extension; this says the
+encoder therefore emits none. -/
+theorem encodeMemInsn_ext_no_rexR {escape : Bool} {opcode : Byte} {w : Bool}
+    {d : BitVec 3} {m : MemOperand} {imm : Immediate} {i : InsnEncoding}
+    (h : encodeMemInsn escape opcode w (.ext d) m imm = some i) :
+    ∀ p, i.rex = some p → p.r = 0 := by
+  intro pfx hp
+  have := (encodeMemInsn_reg_paired h).2 pfx hp
+  simpa using this
+
+/--
 `MOV r32, imm32` — `B8+rd id`.
 
 The third place a register number can appear, after `ModRm.reg` and `ModRm.rm`:

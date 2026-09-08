@@ -330,8 +330,20 @@ The split has a cost this signature does not fix: `regExtended` is an unchecked
 gets a legal instruction naming `rbp` instead. Nor may it be set on a `/digit`
 form, where REX.R has no meaning. Pairing the two is the job of the
 instruction-level encoder — `encodeMemInsn` in `Grass/ISA/X86/Bytes.lean` takes
-the register once and derives both — and is an **open obligation** here rather
-than a property of this function.
+the register once and derives both — and is not a property of this function.
+
+That was recorded here as an open obligation, on the grounds that the
+pairing happened one layer up and nothing stated it.
+`Grass.ISA.X86.encodeMemInsn_reg_paired` now does, of the encoding
+actually produced rather than of the source text: the `ModR/M` reg field
+is `reg.bits` and the `REX.R` bit is `reg.extended`, both from the same
+argument, so an edit taking the extension from somewhere else falsifies
+it. `Grass.ISA.X86.encodeMemInsn_ext_no_rexR` covers the `/digit` half,
+where `REX.R` would name a bit the processor reads as part of an opcode
+selector.
+
+What remains true here is only the narrower thing: `rex` on its own
+cannot enforce the pairing, because it never sees the register.
 -/
 def rex (e : RmEncoding) (w regExtended : Bool) : Rex :=
   Rex.of w regExtended (e.rexX == 1) (e.rexB == 1)
