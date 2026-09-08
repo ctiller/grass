@@ -566,8 +566,19 @@ instructions justifies nothing -- but it is the reason this is stated for a
 given instruction rather than as non-inhabitation.
 
 This is the correct state for a security premise whose evidence is missing. It
-becomes constructible when the AMD manual is retrievable again, and
-`Tools/source-liveness.py` is what will notice.
+becomes constructible when the AMD manual is retrievable again.
+
+This said `Tools/source-liveness.py` "is what will notice". It is what *can*
+notice, and nothing runs it. No workflow invokes it, and none invokes the
+`Tests/ISA/X86/SourceCorpus.lean` emitter that produces its input, so the
+retrieval statuses this premise rests on are checkable rather than checked.
+That is the same shape as the gap the tool was written to close --
+`livenessProbe` had no reader, so the tool became the reader, and the reader
+has no caller. Someone has to run both halves.
+
+Which is not hypothetical: running it by hand on 2026-09-08 is what found
+that the AMD URL had gone from a 200-with-shell to a genuine 404 and that a
+sibling APM volume resolves. See `Grass/ISA/X86/Sources.lean`.
 -/
 theorem no_justification_while_amd_unretrievable
     (j : JustifiedCostModel Insn Vals) (i : Insn) : False := by
