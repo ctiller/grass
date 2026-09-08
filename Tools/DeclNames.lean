@@ -3,8 +3,12 @@ import Grass.ABI.Win64.Convention
 import Grass.ABI.Win64.Unwind
 import Grass.ABI.Win64.UnwindBytes
 import Grass.Build.Cache.Key
+import Grass.Build.Manifest.Campaign
+import Grass.Build.Manifest.Comparison
 import Grass.Build.Manifest.Core
+import Grass.Build.Manifest.Dag
 import Grass.Build.Manifest.Invalidation
+import Grass.Build.Manifest.Report
 import Grass.CFG.Contract
 import Grass.CFG.Graph
 import Grass.Certificate
