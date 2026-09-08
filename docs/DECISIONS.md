@@ -717,12 +717,17 @@ to imitate compiler-selected storage or CFG structure.
     oracle diagnostic, but it is not part of the architectural fault ledger.
     This resolves `c-mem:21` and makes the provisional M2 behavior normative.
 127. Obligation-ledger transformation is indexed by the exact operation exit
-    and is independent of memory-effect visibility. An operation that can
+    and is not inferred from memory-effect visibility. An operation that can
     complete, fault, interrupt, cancel, or commit partially declares, through
     its owning protocol theorem, the exact ledger transformation for every
     admitted outcome and the linearization point or staged points at which each
     transformation takes effect. A fault before such a point preserves that
     obligation fragment; a fault after it applies the declared transformation.
+    For a protocol-declared effect/obligation pair, the concrete effect and its
+    ledger delta share one commit point, so their visibility is co-determined
+    without making the ledger a byte-effect inference. The memory profile must
+    respect that protocol-owned placement; it does not author a second ledger
+    schedule.
     Staged transformations require separate substeps or an explicit
     outcome-indexed relation. Grass may not infer ledger behavior from committed
     byte counts or from the delta constructor: always applying a discharge can

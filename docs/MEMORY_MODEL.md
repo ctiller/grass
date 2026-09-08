@@ -298,9 +298,12 @@ profile identifies that same attempted substep as its faulting operation.
 Thus an out-of-range or stale fault index is invalid profile input, never a
 request to complete the whole operation.
 
-The profile supplies the ordered visibility relation for partial or restartable
-operations. It must state which reads, writes, events, and obligation deltas are
-visible at each possible frontier. The common stepper consumes that relation;
+The profile supplies the ordered visibility relation for reads, writes, and
+events in partial or restartable operations. The owning protocol theorem
+declares the commit point of each obligation delta and every coupled
+effect/obligation group; the profile's visibility relation must be consistent
+with those declarations. The profile does not independently choose ledger
+semantics. The common stepper consumes the resulting relation;
 it may not continue after denial, discard an observed fault, or infer a later
 fault merely because one was offered by the environment. Required negative
 fixtures cover denial before a declared fault, an invalid fault index, and a
@@ -312,11 +315,15 @@ protocol identifies coupled commit groups, including an authority acquisition
 or transfer and the obligation delta that installs its matching duty. Every
 visible prefix is closed under that pairing: both members commit at the same
 linearization point or neither does. The same rule couples a release with the
-delta discharging its duty. A profile that places an acquiring write before its
-release obligation is malformed and rejected, even when each member would be
-well formed and applicable in isolation. The mandatory frontier fixtures include
-that rejected schedule and controls for a fault before and after a correctly
-paired group.
+delta discharging its duty. A profile that separates any paired members is
+malformed and rejected, even when each member would be well formed and
+applicable in isolation. Mandatory negative fixtures cover an acquiring or
+transferring effect visible before its duty delta, the mirror schedule with the
+duty delta visible first, and a release visible before its discharge delta. The
+effect cases include at least read-modify-write, fence, API-call, and transfer
+operations rather than treating plain writes as the whole rule. Positive
+controls place both members at one commit point and cover faults before and
+after that correctly paired group.
 
 An external contract violation terminates modeled assurance at that boundary:
 the prior prefix remains proved, while no post-boundary functional claim is
@@ -348,6 +355,10 @@ Every memory-capable profile must provide:
 - consistency-graph well-formedness for every admitted execution;
 - race-freedom consequences for verified authority/event combinations;
 - synchronization and obligation-transfer laws;
+- exact correspondence from every fault/denial frontier to its committed
+  effect and ledger prefix, closure of every visible prefix under every
+  protocol-declared effect/obligation pairing, and the mandatory positive and
+  negative frontier fixtures above;
 - allocator/arena freshness, teardown, and epoch invalidation;
 - call-stack/frame lifetime preservation;
 - erasure preservation for ghost memory and obligation operations;

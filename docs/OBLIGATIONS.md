@@ -51,11 +51,13 @@ The memory/operation proof package relates each possible fault frontier to the
 exact committed ledger prefix, proves that prefix closed under every declared
 pairing, and proves every retained or fault-created delta well formed and
 applicable. It includes discriminating fixtures for faults before, at, and
-after a ledger commit point; a negative fixture in which an acquiring write is
-visible but its release duty is scheduled later must be rejected. Positive
-controls commit both halves together and expose neither half when a fault lies
-before their group. Merely showing that one successful path updates the ledger
-is insufficient.
+after a ledger commit point. Mandatory negative fixtures reject an acquiring or
+transferring effect visible before its duty delta, the mirror schedule with the
+duty delta visible first, and a release visible before its discharge delta.
+They cover read-modify-write, fence, API-call, and transfer acquisitions rather
+than only plain writes. Positive controls commit both halves together and
+expose neither half when a fault lies before their group. Merely showing that
+one successful path updates the ledger is insufficient.
 
 CFG block contracts list obligations allowed and forbidden on entry and exit.
 Calls and jumps prove ledger compatibility. Macros may introduce obligations and
