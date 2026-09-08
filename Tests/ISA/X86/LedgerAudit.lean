@@ -5,6 +5,7 @@ import Grass.ISA.X86.Profile
 import Grass.ABI.Win64.UnwindBytes
 import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Profile
+import Grass.Platform.Win32.Coff
 
 /-!
 # Ledger coverage gate
@@ -90,7 +91,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
-   `Grass.Platform.Win32.Profile]
+   `Grass.Platform.Win32.Profile, `Grass.Platform.Win32.Coff]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -104,7 +105,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 105
+def owedBaseline : Nat := 113
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -461,7 +462,31 @@ def owed : List Name :=
     -- The opcode table is the largest single block of uncited vendor fact in
     -- the tree: every row asserts what follows an opcode in the byte stream.
     `Grass.ISA.X86.opcodeTable, `Grass.ISA.X86.decodeInsn,
-    `Grass.ISA.X86.decodeOperands ]
+    `Grass.ISA.X86.decodeOperands,
+    -- The COFF object records. Every one of these is a Microsoft PE/COFF
+    -- specification fact rather than a choice: the machine code `0x8664`, the
+    -- three relocation type codes, and the field order, field width and
+    -- padding of the file header, the section header, the section name and
+    -- the relocation. They are uncited for a different reason than the x86
+    -- rows above -- there the AMD half of the DECISIONS 15 intersection is
+    -- unretrievable, whereas here the anchor is a single vendor document that
+    -- has simply not been added to `Grass.ISA.X86.Sources` yet, because that
+    -- module is an *ISA* source list and a file-format specification is not an
+    -- instruction-set reference. Where a PE/COFF anchor belongs is a real
+    -- question and not one this list should answer silently.
+    --
+    -- They are checked against a real object file today -- see
+    -- `Tests/Platform/Win32/CoffFixture.lean`, which holds the twenty, forty
+    -- and ten byte records `ml64` actually wrote -- so the debt here is a
+    -- missing citation, not a missing measurement.
+    `Grass.Platform.Win32.Coff.Machine.code,
+    `Grass.Platform.Win32.Coff.RelocationType.code,
+    `Grass.Platform.Win32.Coff.Relocation.toBytes,
+    `Grass.Platform.Win32.Coff.SectionName.mk?,
+    `Grass.Platform.Win32.Coff.SectionName.toBytes,
+    `Grass.Platform.Win32.Coff.SectionHeader.toBytes,
+    `Grass.Platform.Win32.Coff.FileHeader.toBytes,
+    `Grass.Platform.Win32.Coff.FileHeader.sectionTableOffset ]
 
 /-- The declarations this gate holds the ledger responsible for. -/
 def modeledDeclarations : MetaM (Array Name) := do
