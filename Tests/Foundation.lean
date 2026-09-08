@@ -567,6 +567,7 @@ def infiniteSystem : RelationalSystem rejectingSpec.AuditEvent where
   extendsRefl := fun _ => trivial
   extendsTrans := fun _ _ => trivial
   stepExtends := fun _ => trivial
+  terminalNoStep terminal := False.elim terminal
 
 def infiniteBehavior : ProgramBehavior rejectingSpec where
   system := infiniteSystem
@@ -623,37 +624,47 @@ def pendingSpec : SpecProcess where
   acceptsInfinite := fun _ _ => False
   requirements := noDemands
 
-/-- A frontier with no enabled relational step and one exact outstanding
-environment request. -/
+/-- One observable step reaches a frontier with no enabled relational step and
+one exact outstanding environment request. -/
 def system : RelationalSystem pendingSpec.AuditEvent where
-  State := Unit
+  State := Bool
   Choice := Bool
   Graph := Unit
-  Initial := fun _ _ => True
-  Step := fun _ _ _ _ _ _ => False
+  Initial := fun state _ => state = false
+  Step := fun _ state choice event nextState _ =>
+    state = false ∧ choice = false ∧ event = () ∧ nextState = true
   Terminal := fun _ _ => False
   InfiniteConsistent := fun _ _ _ _ _ => True
   Extends := fun _ _ => True
   extendsRefl := fun _ => trivial
   extendsTrans := fun _ _ => trivial
   stepExtends := fun _ => trivial
+  terminalNoStep terminal := False.elim terminal
 
 def behavior : ProgramBehavior pendingSpec where
   system := system
   inputOf := fun _ => ()
-  waitsFor := fun _ _ request => request = true
+  waitsFor := fun state _ request => state = true ∧ request = true
 
 def initialPrefix : system.ExecutionPrefix :=
   @RelationalSystem.ExecutionPrefix.initial pendingSpec.AuditEvent
-    system () () trivial
+    system false () rfl
 
-def pending : behavior.EnvironmentPending initialPrefix.state initialPrefix.graph := by
-  refine ⟨true, rfl, ?_⟩
-  intro _ _ _ _ step
-  exact step
+theorem reachesWaiting : system.Steps initialPrefix.state initialPrefix.graph
+    [()] true () := by
+  exact .step (choice := false) .refl ⟨rfl, rfl, rfl, rfl⟩
+
+def pending : behavior.EnvironmentPending true () := by
+  refine ⟨true, ⟨rfl, rfl⟩, ?_⟩
+  intro choice event nextState nextGraph step
+  exact Bool.noConfusion step.1
 
 example : pendingSpec.AcceptsComplete ()
-    (behavior.observeMaximal initialPrefix (.pending pending)) := trivial
+    (behavior.observeMaximal initialPrefix (.pending reachesWaiting pending)) := trivial
+
+/-- Pending observation includes every event taken before the environment wait. -/
+example : behavior.observeMaximal initialPrefix
+    (.pending reachesWaiting pending) = CompleteObservation.pending [()] := rfl
 
 end EnvironmentPendingFixture
 

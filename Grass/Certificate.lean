@@ -108,8 +108,9 @@ theorem observe_appendInfinitePrefix (behavior : ProgramBehavior spec)
 
 /-- An exhaustive maximal continuation from one exact finite frontier.
 
-Environment-pending carries an exact request and evidence that no relational
-step is enabled, distinct from both finite termination and authored infinite
+Environment-pending carries the exact finite suffix to a waiting frontier,
+then an exact request and evidence that no relational step is enabled there.
+It remains distinct from both finite termination and authored infinite
 execution. -/
 inductive MaximalContinuation (behavior : ProgramBehavior spec)
     (state : behavior.system.State) (graph : behavior.system.Graph)
@@ -119,7 +120,11 @@ inductive MaximalContinuation (behavior : ProgramBehavior spec)
       {finalGraph : behavior.system.Graph}
       (steps : behavior.system.Steps state graph events finalState finalGraph)
       (terminal : behavior.system.Terminal finalState finalGraph)
-  | pending (waiting : behavior.EnvironmentPending state graph)
+  | pending {events : List spec.AuditEvent}
+      {finalState : behavior.system.State}
+      {finalGraph : behavior.system.Graph}
+      (steps : behavior.system.Steps state graph events finalState finalGraph)
+      (waiting : behavior.EnvironmentPending finalState finalGraph)
   | infinite (execution : behavior.system.InfiniteContinuation
       state graph priorEvents)
 
@@ -132,8 +137,8 @@ def observeMaximal (behavior : ProgramBehavior spec)
   match continuation with
   | .finite (events := events) _ _ =>
       .finite (spec.observationProjection.project (execution.events ++ events))
-  | .pending _ =>
-      .pending (spec.observationProjection.project execution.events)
+  | .pending (events := events) _ _ =>
+      .pending (spec.observationProjection.project (execution.events ++ events))
   | .infinite infinite =>
       .infinite (InfiniteObservation.ofEventStream spec.observationProjection
         execution.events infinite.eventAt)
@@ -362,9 +367,9 @@ def mapMaximal (refinement : BehaviorRefinement concrete abstract)
   cases continuation with
   | finite steps terminal =>
       exact .finite (refinement.mapSteps steps) (refinement.terminal terminal)
-  | pending waiting =>
+  | pending steps waiting =>
       let mapped := refinement.pending waiting.waiting waiting.noStep
-      exact .pending {
+      exact .pending (refinement.mapSteps steps) {
         request := refinement.mapChoice waiting.request
         waiting := mapped.1
         noStep := mapped.2
@@ -379,8 +384,7 @@ theorem mapMaximal_refl (behavior : ProgramBehavior spec)
     (refl behavior).mapMaximal continuation = continuation := by
   cases continuation with
   | finite => rfl
-  | pending waiting =>
-      apply congrArg ProgramBehavior.MaximalContinuation.pending
+  | pending steps waiting =>
       cases waiting
       rfl
   | infinite execution =>
@@ -401,8 +405,7 @@ theorem mapMaximal_trans (lowerMiddle : BehaviorRefinement lower middle)
       middleUpper.mapMaximal (lowerMiddle.mapMaximal continuation) := by
   cases continuation with
   | finite => rfl
-  | pending waiting =>
-      apply congrArg ProgramBehavior.MaximalContinuation.pending
+  | pending steps waiting =>
       cases waiting
       rfl
   | infinite execution =>
