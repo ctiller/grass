@@ -428,6 +428,165 @@ theorem readSectionContents_writeSectionDescription_append_of_pos
     rw [Vec.drop_append_of_length_eq prefixRelocationLength]
     rfl
 
+/-- Canonical section bytes parse back to their exact dependent contents for
+every combination of present and absent raw-data, relocation, and line-number
+regions. An absent region is read at COFF's distinguished zero pointer and its
+zero-width reader leaves the complete file untouched. -/
+theorem readSectionContents_writeSectionDescription_append
+    (description : SectionDescription) (offset : Nat)
+    (filePrefix suffix : Std.Logical.ByteArray)
+    (prefixLength : filePrefix.length = offset)
+    (rawFits : description.rawData.length < 2 ^ 32)
+    (relocationCountFits : description.relocations.length < 2 ^ 16)
+    (lineCountFits : description.lineNumbers.length < 2 ^ 16)
+    (endFits : offset + description.byteLength < 2 ^ 32) :
+    readSectionContents (description.headerAt offset)
+        (filePrefix ++ writeSectionDescription description ++ suffix) =
+      .done (description.contentsAt offset rawFits relocationCountFits
+        lineCountFits) Vec.empty := by
+  let contents := description.contentsAt offset rawFits relocationCountFits
+    lineCountFits
+  let file := filePrefix ++ writeSectionDescription description ++ suffix
+  have offsetFits : offset < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  have relocationOffsetFits :
+      offset + description.rawData.length < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  have lineOffsetFits :
+      offset + description.rawData.length +
+        10 * description.relocations.length < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  have rawPointer :
+      (description.headerAt offset).pointerToRawData.toNat =
+        if description.rawData.length = 0 then 0 else offset := by
+    by_cases empty : description.rawData.length = 0
+    · simp [empty,
+        description.headerAt_pointerToRawData_of_empty offset empty]
+    · simp [empty, description.headerAt_pointerToRawData_of_pos offset
+        (Nat.pos_of_ne_zero empty) offsetFits]
+  have relocationPointer :
+      (description.headerAt offset).pointerToRelocations.toNat =
+        if description.relocations.length = 0 then 0
+        else offset + description.rawData.length := by
+    by_cases empty : description.relocations.length = 0
+    · simp [empty,
+        description.headerAt_pointerToRelocations_of_empty offset empty]
+    · simp [empty, description.headerAt_pointerToRelocations_of_pos offset
+        (Nat.pos_of_ne_zero empty) relocationOffsetFits]
+  have linePointer :
+      (description.headerAt offset).pointerToLineNumbers.toNat =
+        if description.lineNumbers.length = 0 then 0
+        else offset + description.rawData.length +
+          10 * description.relocations.length := by
+    by_cases empty : description.lineNumbers.length = 0
+    · simp [empty,
+        description.headerAt_pointerToLineNumbers_of_empty offset empty]
+    · simp [empty, description.headerAt_pointerToLineNumbers_of_pos offset
+        (Nat.pos_of_ne_zero empty) lineOffsetFits]
+  have rawRegion : ∃ rest,
+      file.drop contents.header.rawDataSpan.offset =
+        writeSectionRawData contents.rawData ++ rest := by
+    by_cases empty : description.rawData.length = 0
+    · have rawEmpty : description.rawData = Vec.empty :=
+        (Vec.eq_empty_iff_length_eq_zero description.rawData).2 empty
+      refine ⟨file, ?_⟩
+      simp [file, contents, SectionHeader.rawDataSpan,
+        description.headerAt_pointerToRawData_of_empty offset empty,
+        writeSectionRawData, writeExact, rawEmpty]
+    · have positive := Nat.pos_of_ne_zero empty
+      refine ⟨writeRelocations description.relocations ++
+        writeLineNumbers description.lineNumbers ++ suffix, ?_⟩
+      simp only [file, contents, SectionDescription.contentsAt_header,
+        SectionHeader.rawDataSpan, writeSectionDescription, Vec.append_assoc]
+      rw [description.headerAt_pointerToRawData_of_pos offset positive
+        offsetFits]
+      rw [Vec.drop_append_of_length_eq prefixLength]
+      rfl
+  have relocationRegion : ∃ rest,
+      file.drop contents.header.relocationSpan.offset =
+        writeRelocationBlock contents.relocations ++ rest := by
+    by_cases empty : description.relocations.length = 0
+    · have writtenEmpty : writeRelocations description.relocations = Vec.empty :=
+        (Vec.eq_empty_iff_length_eq_zero _).2 (by simp [empty])
+      refine ⟨file, ?_⟩
+      have pointerZero : contents.header.relocationSpan.offset = 0 := by
+        simp [contents, SectionHeader.relocationSpan,
+          description.headerAt_pointerToRelocations_of_empty offset empty]
+      have blockEmpty : writeRelocationBlock contents.relocations = Vec.empty := by
+        change writeRelocations description.relocations = Vec.empty
+        exact writtenEmpty
+      rw [pointerZero, Vec.drop_zero, blockEmpty, Vec.empty_append]
+    · have positive := Nat.pos_of_ne_zero empty
+      have prefixRawLength :
+          (filePrefix ++ description.rawData).length =
+            offset + description.rawData.length := by simp [prefixLength]
+      refine ⟨writeLineNumbers description.lineNumbers ++ suffix, ?_⟩
+      simp only [file, contents, SectionDescription.contentsAt_header,
+        SectionHeader.relocationSpan, writeSectionDescription,
+        Vec.append_assoc]
+      rw [description.headerAt_pointerToRelocations_of_pos offset positive
+        relocationOffsetFits]
+      rw [← Vec.append_assoc filePrefix description.rawData]
+      rw [Vec.drop_append_of_length_eq prefixRawLength]
+      rfl
+  have lineRegion : ∃ rest,
+      file.drop contents.header.lineNumberSpan.offset =
+        writeLineNumberBlock contents.lineNumbers ++ rest := by
+    by_cases empty : description.lineNumbers.length = 0
+    · have writtenEmpty : writeLineNumbers description.lineNumbers = Vec.empty :=
+        (Vec.eq_empty_iff_length_eq_zero _).2 (by simp [empty])
+      refine ⟨file, ?_⟩
+      have pointerZero : contents.header.lineNumberSpan.offset = 0 := by
+        simp [contents, SectionHeader.lineNumberSpan,
+          description.headerAt_pointerToLineNumbers_of_empty offset empty]
+      have blockEmpty : writeLineNumberBlock contents.lineNumbers = Vec.empty := by
+        change writeLineNumbers description.lineNumbers = Vec.empty
+        exact writtenEmpty
+      rw [pointerZero, Vec.drop_zero, blockEmpty, Vec.empty_append]
+    · have positive := Nat.pos_of_ne_zero empty
+      have prefixRelocationLength :
+          (filePrefix ++ description.rawData ++
+            writeRelocations description.relocations).length =
+            offset + description.rawData.length +
+              10 * description.relocations.length := by
+        simp [prefixLength]
+      refine ⟨suffix, ?_⟩
+      simp only [file, contents, SectionDescription.contentsAt_header,
+        SectionHeader.lineNumberSpan, writeSectionDescription,
+        Vec.append_assoc]
+      rw [description.headerAt_pointerToLineNumbers_of_pos offset positive
+        lineOffsetFits]
+      rw [← Vec.append_assoc filePrefix description.rawData]
+      rw [← Vec.append_assoc (filePrefix ++ description.rawData)
+        (writeRelocations description.relocations)]
+      rw [Vec.drop_append_of_length_eq prefixRelocationLength]
+      rfl
+  rcases rawRegion with ⟨rawSuffix, rawAt⟩
+  rcases relocationRegion with ⟨relocationSuffix, relocationsAt⟩
+  rcases lineRegion with ⟨lineSuffix, linesAt⟩
+  apply readSectionContents_of_regions contents file rawSuffix relocationSuffix
+    lineSuffix
+  · simp only [file, contents, SectionDescription.contentsAt_header,
+      SectionHeader.requiredContentEnd, SectionHeader.rawDataSpan,
+      SectionHeader.relocationSpan, SectionHeader.lineNumberSpan,
+      ByteSpan.endExclusive, Vec.length_append, length_writeSectionDescription]
+    rw [description.headerAt_sizeOfRawData offset rawFits]
+    rw [description.headerAt_numberOfRelocations offset relocationCountFits]
+    rw [description.headerAt_numberOfLineNumbers offset lineCountFits]
+    rw [rawPointer, relocationPointer, linePointer]
+    by_cases rawEmpty : description.rawData.length = 0
+    all_goals by_cases relocationEmpty : description.relocations.length = 0
+    all_goals by_cases lineEmpty : description.lineNumbers.length = 0
+    all_goals simp_all
+    all_goals unfold SectionDescription.byteLength at endFits ⊢
+    all_goals omega
+  · exact rawAt
+  · exact relocationsAt
+  · exact linesAt
+
 /-- Serialize all section descriptions in source order. -/
 private def writeSectionDescriptionList :
     List SectionDescription → Std.Logical.ByteArray

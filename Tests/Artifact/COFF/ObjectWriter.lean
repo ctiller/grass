@@ -91,6 +91,32 @@ example :
     (by decide) (by decide) (by decide) (by decide) (by decide) (by decide)
     (by decide) (by decide)
 
+example :
+    readSectionContents (textDescription.headerAt 4)
+        (Vec.replicate 4 0 ++ writeSectionDescription textDescription ++
+          Vec.singleton 0xff) =
+      .done (textDescription.contentsAt 4 (by decide) (by decide) (by decide))
+        Vec.empty := by
+  exact readSectionContents_writeSectionDescription_append textDescription 4
+    (Vec.replicate 4 0) (Vec.singleton 0xff) (by decide) (by decide)
+    (by decide) (by decide) (by decide)
+
+def emptySectionDescription : SectionDescription :=
+  { textDescription with
+    rawData := Vec.empty
+    relocations := Vec.empty
+    lineNumbers := Vec.empty }
+
+example :
+    readSectionContents (emptySectionDescription.headerAt 4)
+        (Vec.replicate 4 0 ++ writeSectionDescription emptySectionDescription ++
+          Vec.singleton 0xff) =
+      .done (emptySectionDescription.contentsAt 4 (by decide) (by decide)
+        (by decide)) Vec.empty := by
+  exact readSectionContents_writeSectionDescription_append
+    emptySectionDescription 4 (Vec.replicate 4 0) (Vec.singleton 0xff)
+    (by decide) (by decide) (by decide) (by decide) (by decide)
+
 example : objectDescription.Writable = true := by decide
 
 example : (writeSectionDescription textDescription).length =
