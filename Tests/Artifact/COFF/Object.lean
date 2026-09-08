@@ -67,6 +67,18 @@ theorem readObject_encodedObject :
     readObject encodedObject = .done expectedObject Vec.empty := by
   rfl
 
+example : readSectionContentsList [layoutSection] encodedObject =
+    .done [objectSectionContents] Vec.empty := by
+  have reads : ∀ content ∈ [objectSectionContents],
+      readSectionContents content.header encodedObject =
+        .done content Vec.empty := by
+    intro content member
+    simp only [List.mem_singleton] at member
+    subst content
+    rfl
+  simpa [objectSectionContents] using
+    readSectionContentsList_of_reads [objectSectionContents] encodedObject reads
+
 def noSymbolsHeader : Header :=
   { layoutHeader with pointerToSymbolTable := 0, numberOfSymbols := 0 }
 

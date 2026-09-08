@@ -98,7 +98,7 @@ theorem readSectionContents_of_regions (contents : SectionContents)
   rw [linesAt, readLineNumberBlock_write_append]
 
 /-- Read independently addressed contents for every header in source order. -/
-private def readSectionContentsList :
+def readSectionContentsList :
     List SectionHeader → Std.Logical.ByteArray → ParseResult (List SectionContents)
   | [], _ => .done [] Vec.empty
   | header :: headers, file =>
@@ -111,8 +111,24 @@ private def readSectionContentsList :
     | .needMore hint => .needMore hint
     | .invalid error => .invalid error
 
+/-- Exact reads for every content value compose into an exact list read in
+source order. This is the list-level sequencing law for independently
+addressed section regions. -/
+theorem readSectionContentsList_of_reads (contents : List SectionContents)
+    (file : Std.Logical.ByteArray)
+    (reads : ∀ content ∈ contents,
+      readSectionContents content.header file = .done content Vec.empty) :
+    readSectionContentsList (contents.map SectionContents.header) file =
+      .done contents Vec.empty := by
+  induction contents with
+  | nil => rfl
+  | cons content contents ih =>
+      simp only [List.map_cons, readSectionContentsList]
+      rw [reads content (by simp)]
+      rw [ih (fun tail member => reads tail (by simp [member]))]
+
 /-- Successful section-content collection retains the exact input headers. -/
-private theorem readSectionContentsList_headers {headers file contents rest}
+theorem readSectionContentsList_headers {headers file contents rest}
     (success : readSectionContentsList headers file = .done contents rest) :
     contents.map SectionContents.header = headers := by
   induction headers generalizing contents rest with
