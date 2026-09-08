@@ -367,7 +367,7 @@ theorem get?_set_ne (v : Vec α) {i j : Nat} (h : j ≠ i) (a : α) :
 
 /-- The combined framing law, in the shape a consumer applies it: an update is
 visible at its own index and nowhere else. -/
-theorem get?_set (v : Vec α) (i j : Nat) (a : α) :
+@[simp] theorem get?_set (v : Vec α) (i j : Nat) (a : α) :
     (v.set i a).get? j =
       if j = i then (if i < v.length then some a else none) else v.get? j := by
   by_cases h : j = i
@@ -758,6 +758,16 @@ theorem length_drop_lt_of_pos (v : Vec α) {n k : Nat} (hk : 0 < k) (hn : n < v.
 
 @[simp] theorem isPrefix_refl (v : Vec α) : v.IsPrefix v := ⟨empty, append_empty v⟩
 
+/--
+The introduction rule. `Vec.isPrefix_refl` covers the degenerate case and this
+covers every other one: `IsPrefix` is defined as the existence of a remainder, so
+a consumer producing one exhibits the remainder, and an append is where it comes
+from. Written because the goal `u.IsPrefix (u ++ v)` — a streaming consumer
+asking whether what it has committed is still a prefix of what it has seen —
+reached no law at all.
+-/
+@[simp] theorem isPrefix_append (u v : Vec α) : u.IsPrefix (u ++ v) := ⟨v, rfl⟩
+
 theorem IsPrefix.trans {u v w : Vec α} (h₁ : u.IsPrefix v) (h₂ : v.IsPrefix w) :
     u.IsPrefix w := by
   obtain ⟨r₁, hr₁⟩ := h₁
@@ -879,7 +889,7 @@ theorem map_map (g : β → γ) (f : α → β) (v : Vec α) :
   apply toList_injective
   simp [map]
 
-theorem map_append (f : α → β) (v w : Vec α) : (v ++ w).map f = v.map f ++ w.map f := by
+@[simp] theorem map_append (f : α → β) (v w : Vec α) : (v ++ w).map f = v.map f ++ w.map f := by
   apply toList_injective
   simp [map]
 
@@ -1170,7 +1180,7 @@ is the leak the rule exists to catch. Adversarial review found it. -/
 @[simp] theorem sum_push (v : Vec Nat) (a : Nat) : sum (v.push a) = sum v + a := by
   simp [sum, foldl, push]
 
-theorem sum_append (v w : Vec Nat) : sum (v ++ w) = sum v + sum w := by
+@[simp] theorem sum_append (v w : Vec Nat) : sum (v ++ w) = sum v + sum w := by
   induction w using recOnPush with
   | empty => simp [sum, foldl, empty]
   | push u a ih =>

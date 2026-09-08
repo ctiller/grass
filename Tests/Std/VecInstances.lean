@@ -242,4 +242,70 @@ conditional `Vec.get?_push_lt` supplied by hand. -/
 example (v : Vec Nat) (a : Nat) (i : Nat) (h : i < v.length) :
     (v.push a).get? i = v.get? i := by simp [h]
 
+/-! ## The conditional laws, which were stated and out of the `simp` set
+
+Four separate gaps found this session had one cause. `Vec` states a law in two
+forms: a narrow one about a specific index or shape, marked `@[simp]`, and a
+general conditional one covering every case, not marked. A goal a consumer writes
+lands on the general case, reaches nothing, and stops on a term the module has a
+law about.
+
+`Vec.get?_push` was the first instance and was fixed by writing the general form.
+The rest did not need writing — `Vec.get?_replicate`, `Vec.get?_eq_none_iff`,
+`Vec.get?_set`, `Vec.sum_append`, `Vec.map_append` and
+`Grass/Std/Logical/FiniteMap.lean`'s `lookup_insert` and `lookup_erase` were all
+already there. They needed the attribute.
+
+Each was applied on its own against the whole tree before the next, because
+adding a law to the `simp` set can break a proof that closed without it, and
+`Vec.ofHostBytes_append` did exactly that to its own module.
+-/
+
+section ConditionalLaws
+
+variable {α β : Type}
+
+/-! ### Update framing, which the memory layer applies
+
+`Vec.get?_set_self` was `@[simp]` and `Vec.get?_set` — the form covering a read
+at any index — was not, so the framing half of the law was unreachable. -/
+
+example (v : Vec α) (i : Nat) (a : α) (h : i < v.length) :
+    (v.set i a).get? i = some a := by simp [h]
+
+example (v : Vec α) (i j : Nat) (a : α) (h : j ≠ i) :
+    (v.set i a).get? j = v.get? j := by simp [h]
+
+/-! ### Homomorphisms over `++`
+
+`Vec.sum_push` and `Vec.map_push` were `@[simp]`; the `append` forms were not, so
+a fold that concatenated rather than pushed stopped. -/
+
+example (u v : Vec Nat) : (u ++ v).sum = u.sum + v.sum := by simp
+
+example (u v : Vec α) (f : α → β) : (u ++ v).map f = u.map f ++ v.map f := by simp
+
+/-! ### Prefix introduction
+
+`Vec.isPrefix_refl` covered the degenerate case. `IsPrefix` is the existence of a
+remainder, so the general introduction is an append, and it had no law — a
+streaming consumer asking whether what it committed is still a prefix of what it
+has seen reached nothing. -/
+
+example (u v : Vec α) : u.IsPrefix (u ++ v) := by simp
+
+/-! ### What is *not* a gap, recorded so the list above is not read as longer
+than it is
+
+`(v.take n).length + (v.drop n).length = v.length` reduces under `simp` to
+`min n v.length + (v.length - n) = v.length` and then wants `omega`. That is
+arithmetic a consumer finishes, not a missing law, and the same is true of the
+`FiniteMap` goal in `Tests/Std/CollectionInstances.lean` that needs case
+analysis over an `if`. -/
+
+example (v : Vec α) (n : Nat) : (v.take n).length + (v.drop n).length = v.length := by
+  simp; omega
+
+end ConditionalLaws
+
 end Grass.Tests.Std.Instances

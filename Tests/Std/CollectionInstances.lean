@@ -191,4 +191,85 @@ example : (Id.run do
       n := n + 1
     return n) = 0 := by simp
 
+/-! ## `FiniteMap`: the framing laws, which are the point of the module
+
+`Grass/Std/Logical/FiniteMap.lean`'s own module comment says the framing lemmas
+are the point of it — "almost every proof in the memory layer reduces to 'this
+update did not touch the key I am reading'" — and `FiniteMap` is the module with
+the most product consumers in this library, six of them, all under
+`Grass/Memory`.
+
+Those goals did not close. `FiniteMap.lookup_insert_self` and
+`FiniteMap.lookup_erase_self` were `@[simp]`, and `FiniteMap.lookup_insert` and
+`FiniteMap.lookup_erase` — the forms covering a lookup at *any* key, which is
+what framing means — were not. The same shape as `Vec.get?_set` and for the same
+reason; `Tests/Std/VecInstances.lean` collects the family.
+-/
+
+section Framing
+
+variable {K V : Type} [DecidableEq K]
+
+example (m : FiniteMap K V) (k o : K) (v : V) (h : o ≠ k) :
+    (m.insert k v).lookup o = m.lookup o := by simp [h]
+
+example (m : FiniteMap K V) (k o : K) (h : o ≠ k) :
+    (m.erase k).lookup o = m.lookup o := by simp [h]
+
+example (m : FiniteMap K V) (k : K) (v : V) : (m.insert k v).Binds k := by
+  simp [FiniteMap.Binds]
+
+example (m : FiniteMap K V) (k : K) : ¬ (m.erase k).Binds k := by
+  simp [FiniteMap.Binds]
+
+/-! Through the notation, since that is how a consumer writes the empty map. -/
+
+example (k : K) : ¬ (∅ : FiniteMap K V).Binds k := by simp [FiniteMap.Binds]
+
+/-! ### Not a gap: two inserts commuting
+
+`FiniteMap.lookup_insert` reduces this to nested `if`s and the rest is case
+analysis on the key, which a consumer does. It is here because the two goals
+above and this one look alike, and only the first two were about the library. -/
+
+example (m : FiniteMap K V) (a b o : K) (x y : V) (hab : a ≠ b) :
+    ((m.insert a x).insert b y).lookup o = ((m.insert b y).insert a x).lookup o := by
+  simp only [FiniteMap.lookup_insert]
+  by_cases ha : o = a
+  · subst ha; simp [hab]
+  · by_cases hb : o = b
+    · subst hb; simp [ha]
+    · simp [ha, hb]
+
+end Framing
+
+/-! ## `Bag`: unexercised and reachable, which is the distinction §3.13 draws
+
+`docs/STDLIB_IMPLEMENTATION_PLAN.md` §3.13 measures ten of `Bag`'s twenty-three
+`@[simp]` laws as load-bearing for some fixture, and the thirteen that are not
+are exactly the `ofList` and `map` families. The section says an unexercised law
+is a question rather than a defect. These four goals are that question answered
+for `Bag`: they are consumer-shaped, they were written after the measurement, and
+every one closes without anything being added.
+
+So `Bag`'s thirteen are unexercised because nothing consumes them — the process
+layer still imports its own `Grass/Process/Bag.lean` — and not because they
+cannot be reached. That is the opposite finding to `FiniteMap`'s above, from the
+same probe, which is why both are in this file.
+-/
+
+section BagReachable
+
+example (l : List α) : (Bag.ofList l).card = l.length := by simp
+
+example (l : List α) (a : α) :
+    (Bag.ofList (a :: l)).card = (Bag.ofList l).card + 1 := by simp
+
+example (x y : Bag α) {β : Type} (f : α → β) : (x + y).map f = x.map f + y.map f := by simp
+
+example (l : List α) {β : Type} (f : α → β) :
+    (Bag.ofList l).map f = Bag.ofList (l.map f) := by simp
+
+end BagReachable
+
 end Grass.Tests.Std.Collections
