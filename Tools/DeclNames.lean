@@ -2,6 +2,8 @@ import Lean
 import Grass.ABI.Win64.Convention
 import Grass.ABI.Win64.Unwind
 import Grass.ABI.Win64.UnwindBytes
+import Grass.Artifact.Binary.Primitive
+import Grass.Artifact.Binary.Realization
 import Grass.Build.Cache.Key
 import Grass.Certificate
 import Grass.Core.Context
@@ -10,6 +12,8 @@ import Grass.Core.Generational
 import Grass.Core.Identifiers
 import Grass.Core.Name
 import Grass.Core.Uid
+import Grass.Grammar.Core
+import Grass.Grammar.Realization
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.Citation
