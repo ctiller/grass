@@ -1,57 +1,68 @@
 import Grass.Build.Manifest.Hierarchy
+import Grass.Core.Demand
 
 /-!
-# Certificate gates over manifest hierarchies
+# Foundation certificate gates over manifest hierarchies
 
-`CertifiedManifestHierarchy` consumes an externally supplied leaf-certificate
-family and aggregate composition relation. Build/Manifest neither defines nor
-weakens those verification gates; it requires evidence at every concrete node
-already aligned with the rooted manifest DAG.
+`CertifiedManifestHierarchy` consumes `DemandCertificateFamily`, the
+g-foundation certificate gate, indexed by each exact manifest identity. It has
+no caller-selected certificate type or composition relation. Concrete child
+adjacency comes from `ManifestHierarchy.childrenExact`, so a parent certificate
+can obtain the exact foundation certificate attached to every actual child.
 -/
 
 namespace Grass.Build.Manifest
 
-open Grass.Build.Cache Grass.Std.Logical
+open Grass Grass.Build.Cache Grass.Std.Logical
 
 universe u
 
-/-- The external certificate obligation for one concrete manifest node. -/
-def ManifestNode.CertificateGate {hasher : MerkleHasher} {fanout : Nat}
-    (LeafCertificate : LeafManifest hasher → Type u)
-    (Summary : Type) (Composes : Vec ChildSummary → Summary → Prop) :
-    ManifestNode hasher fanout → Prop
-  | .leaf manifest => Nonempty (LeafCertificate manifest)
-  | .aggregate manifest =>
-      Nonempty (AggregateCertificate manifest Summary Composes)
+/-- A g-foundation demand certificate attached to one exact manifest identity.
+The identity is a type index, so substituting any semantic environment,
+artifact, summary, child vector, or root input changes the required certificate
+type. Measurements and dispositions remain outside semantic identity. -/
+structure ManifestCertificate (identity : ManifestIdentity) where
+  demands : DemandFamily.{u}
+  evidence : DemandCertificateFamily demands
 
-/-- A rooted aligned hierarchy with every external certificate gate inhabited. -/
+/-- A rooted, exactly aligned hierarchy with a g-foundation demand certificate
+for every concrete manifest node. -/
 structure CertifiedManifestHierarchy {hasher : MerkleHasher} {fanout : Nat}
-    (hierarchy : ManifestHierarchy hasher fanout)
-    (LeafCertificate : LeafManifest hasher → Type u)
-    (Summary : Type) (Composes : Vec ChildSummary → Summary → Prop) where
-  certified : ∀ node ∈ hierarchy.manifests,
-    node.CertificateGate LeafCertificate Summary Composes
+    (hierarchy : ManifestHierarchy hasher fanout) where
+  certified : ∀ node ∈ hierarchy.manifests, ManifestCertificate node.identity
 
-/-- `CertifiedManifestHierarchy.certificateFor` exposes a named node's gate. -/
-theorem CertifiedManifestHierarchy.certificateFor
+/-- Obtain the exact identity-indexed foundation certificate for one concrete
+node selected from the hierarchy. -/
+def CertifiedManifestHierarchy.certificateFor
     {hasher : MerkleHasher} {fanout : Nat}
     {hierarchy : ManifestHierarchy hasher fanout}
-    {LeafCertificate : LeafManifest hasher → Type u}
-    {Summary : Type} {Composes : Vec ChildSummary → Summary → Prop}
-    (certificates : CertifiedManifestHierarchy hierarchy LeafCertificate
-      Summary Composes)
+    (certificates : CertifiedManifestHierarchy hierarchy)
     (node : ManifestNode hasher fanout) (present : node ∈ hierarchy.manifests) :
-    node.CertificateGate LeafCertificate Summary Composes :=
+    ManifestCertificate.{0} node.identity :=
   certificates.certified node present
+
+/-- Every direct child consumed by a concrete parent selects an actual child
+node and its exact identity-indexed g-foundation certificate. -/
+theorem CertifiedManifestHierarchy.childCertificate
+    {hasher : MerkleHasher} {fanout : Nat}
+    {hierarchy : ManifestHierarchy hasher fanout}
+    (certificates : CertifiedManifestHierarchy hierarchy)
+    (parent : ManifestNode hasher fanout) (parentPresent : parent ∈ hierarchy.manifests)
+    (child : ChildSummary) (childPresent : child ∈ parent.childSummaries) :
+    ∃ actual ∈ hierarchy.manifests,
+      actual.childSummary = child ∧
+        Nonempty (ManifestCertificate.{0} actual.identity) := by
+  obtain ⟨actual, actualPresent, exactSummary⟩ :=
+    (concreteChildrenExact_iff hierarchy.manifests).mp hierarchy.childrenExact
+      parent parentPresent child childPresent
+  exact ⟨actual, actualPresent, exactSummary,
+    ⟨certificates.certificateFor actual actualPresent⟩⟩
 
 /-- A certified hierarchy still exposes its exact manifest-to-DAG alignment. -/
 theorem CertifiedManifestHierarchy.nodesExact
     {hasher : MerkleHasher} {fanout : Nat}
     {hierarchy : ManifestHierarchy hasher fanout}
-    {LeafCertificate : LeafManifest hasher → Type u}
-    {Summary : Type} {Composes : Vec ChildSummary → Summary → Prop}
-    (_certificates : CertifiedManifestHierarchy hierarchy LeafCertificate
-      Summary Composes) :
+    (_certificates : CertifiedManifestHierarchy hierarchy) :
     hierarchy.manifests.map ManifestNode.toDependencyNode =
       hierarchy.dag.graph.nodes :=
   hierarchy.nodesExact

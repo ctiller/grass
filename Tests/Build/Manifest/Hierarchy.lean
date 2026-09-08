@@ -40,7 +40,6 @@ def measurement : BuildMeasurement where
 def leaf (scope : ScopeId) : LeafManifest hasher where
   scope := scope
   cache := cache
-  manifestRoot := digest
   publicSummary := digest
   artifact := digest
   measurement := measurement
@@ -53,12 +52,11 @@ def child (scope : ScopeId) : ChildSummary where
 
 def aggregate (scope : ScopeId) (children : Vec ChildSummary)
     (nonempty : children.length ≠ 0 := by decide)
-    (bounded : children.length ≤ 2 := by decide) : AggregateManifest 2 where
+    (bounded : children.length ≤ 2 := by decide) : AggregateManifest hasher 2 where
   scope := scope
   children := children
   nonempty := nonempty
   bounded := bounded
-  manifestRoot := digest
   publicSummary := digest
   measurement := measurement
 
@@ -105,19 +103,19 @@ def forgedChildManifests : Vec (ManifestNode hasher 2) := Vec.fromList
   , .aggregate (aggregate component (Vec.fromList [forgedChild, child leafB]))
   , .aggregate (aggregate product (Vec.singleton (child component))) ]
 
-def changedAggregateRootManifests : Vec (ManifestNode hasher 2) := Vec.fromList
+def changedAggregatePublicSummaryManifests : Vec (ManifestNode hasher 2) := Vec.fromList
   [ .leaf (leaf leafA)
   , .leaf (leaf leafB)
   , .aggregate { aggregate component (Vec.fromList [child leafA, child leafB]) with
-      manifestRoot := differentDigest }
+      publicSummary := differentDigest }
   , .aggregate (aggregate product (Vec.singleton (child component))) ]
 
-def changedFinalRootManifests : Vec (ManifestNode hasher 2) := Vec.fromList
+def changedFinalPublicSummaryManifests : Vec (ManifestNode hasher 2) := Vec.fromList
   [ .leaf (leaf leafA)
   , .leaf (leaf leafB)
   , .aggregate (aggregate component (Vec.fromList [child leafA, child leafB]))
   , .aggregate { aggregate product (Vec.singleton (child component)) with
-      manifestRoot := differentDigest } ]
+      publicSummary := differentDigest } ]
 
 def changedAggregateMeasurementManifests : Vec (ManifestNode hasher 2) := Vec.fromList
   [ .leaf (leaf leafA)
@@ -157,17 +155,19 @@ example : forgedChildManifests.map ManifestNode.toDependencyNode = fixtureDag.no
 example : ¬ConcreteChildrenExact forgedChildManifests := by decide
 example : checkManifestHierarchy fixtureDag forgedChildManifests = none := by decide
 
-example : changedAggregateRootManifests.map ManifestNode.toDependencyNode =
+example : changedAggregatePublicSummaryManifests.map ManifestNode.toDependencyNode =
     fixtureDag.nodes := by decide
-example : ¬ConcreteChildrenExact changedAggregateRootManifests := by decide
-example : checkHierarchyStructure fixtureDag changedAggregateRootManifests
+example : ¬ConcreteChildrenExact changedAggregatePublicSummaryManifests := by decide
+example : checkHierarchyStructure fixtureDag changedAggregatePublicSummaryManifests
     completeCampaign = none := by decide
 
-example : ConcreteChildrenExact changedFinalRootManifests := by decide
-example : (checkManifestHierarchy fixtureDag changedFinalRootManifests).isSome = true :=
+example : ConcreteChildrenExact changedFinalPublicSummaryManifests := by decide
+example : (checkManifestHierarchy fixtureDag
+    changedFinalPublicSummaryManifests).isSome = true :=
   by decide
-example : ¬completeCampaign.ObservesManifests changedFinalRootManifests := by decide
-example : checkHierarchyStructure fixtureDag changedFinalRootManifests
+example : ¬completeCampaign.ObservesManifests
+    changedFinalPublicSummaryManifests := by decide
+example : checkHierarchyStructure fixtureDag changedFinalPublicSummaryManifests
     completeCampaign = none := by decide
 
 example : ConcreteChildrenExact changedAggregateMeasurementManifests := by decide

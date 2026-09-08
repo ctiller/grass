@@ -123,7 +123,7 @@ structure RetainedBuildRun where
   envelope : EvidenceEnvelope
   report : BuildRunReport
   inputs : Vec ScopeInputTransition
-  manifestIdentities : Vec ManifestIdentity
+  manifestIdentities : Vec ManifestRecordIdentity
 
 /-- Scopes visited by the build report, in manifest traversal order. -/
 def BuildRunReport.visitedScopes (report : BuildRunReport) : Vec ScopeId :=
@@ -140,7 +140,7 @@ def RetainedBuildRun.inputScopes (run : RetainedBuildRun) : Vec ScopeId :=
 
 /-- Scope order of the exact manifest identities named by one report. -/
 def RetainedBuildRun.manifestScopes (run : RetainedBuildRun) : Vec ScopeId :=
-  run.manifestIdentities.map ManifestIdentity.scope
+  run.manifestIdentities.map ManifestRecordIdentity.scope
 
 /-- Change lookup derived from the retained exact input transition. Missing
 scopes are not treated as changed; exact structural admission separately

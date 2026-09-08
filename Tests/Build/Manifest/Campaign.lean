@@ -50,27 +50,29 @@ def fixtureChildSummary (scope : ScopeId) : ChildSummary where
   manifestRoot := manifestDigest
   publicSummary := manifestDigest
 
-def fixtureLeafIdentity (scope : ScopeId) : ManifestIdentity :=
+def fixtureLeafIdentity (scope : ScopeId) : ManifestRecordIdentity :=
   .leaf {
-    scope := scope
-    environment := fixtureManifestEnvironment
-    cacheKey := manifestDigest
-    manifestRoot := manifestDigest
-    publicSummary := manifestDigest
-    artifact := manifestDigest
+    identity := {
+      scope := scope
+      environment := fixtureManifestEnvironment
+      cacheKey := manifestDigest
+      manifestRoot := manifestDigest
+      publicSummary := manifestDigest
+      artifact := manifestDigest }
     measurement := fixtureManifestMeasurement
     disposition := .cacheHit }
 
 def fixtureAggregateIdentity (scope : ScopeId) (children : Vec ChildSummary) :
-    ManifestIdentity :=
+    ManifestRecordIdentity :=
   .aggregate {
-    scope := scope
-    children := children
-    manifestRoot := manifestDigest
-    publicSummary := manifestDigest
+    identity := {
+      scope := scope
+      children := children
+      manifestRoot := manifestDigest
+      publicSummary := manifestDigest }
     measurement := fixtureManifestMeasurement }
 
-def fixtureManifestIdentities : Vec ManifestIdentity := Vec.fromList
+def fixtureManifestIdentities : Vec ManifestRecordIdentity := Vec.fromList
   [ fixtureLeafIdentity leafA
   , fixtureLeafIdentity leafB
   , fixtureAggregateIdentity component

@@ -53,6 +53,14 @@ inductive MerkleAtom where
   | generator (digest : Digest)
   | options (digest : Digest)
   | auditPolicy (digest : Digest)
+  | leafManifestTag
+  | aggregateManifestTag
+  | manifestScope (scope : ScopeId)
+  | manifestPublicSummary (digest : Digest)
+  | manifestArtifact (digest : Digest)
+  | childManifestRoot (digest : Digest)
+  | childPublicSummary (digest : Digest)
+  | noMoreManifestChildren
   deriving DecidableEq, Repr
 
 /-- A proof-independent Merkle preimage. Tree shape and leaf domains are part of

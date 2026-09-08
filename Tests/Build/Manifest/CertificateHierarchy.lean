@@ -1,11 +1,11 @@
 import Grass.Build.Manifest.CertificateHierarchy
 import Tests.Build.Manifest.Hierarchy
 
-/-! # Manifest certificate-gate fixtures -/
+/-! # Exact manifest certificate-gate fixtures -/
 
 namespace Grass.Tests.Build.Manifest.CertificateHierarchy
 
-open Grass.Build.Manifest Grass.Std.Logical
+open Grass Grass.Build.Manifest Grass.Std.Logical
 open Grass.Tests.Build.Manifest
 open Grass.Tests.Build.Manifest.Hierarchy
 
@@ -15,47 +15,62 @@ def hierarchy : ManifestHierarchy hasher 2 where
   nodesExact := by decide
   childrenExact := by decide
 
-def LeafCertificate (_ : LeafManifest hasher) := Unit
+inductive NoDemand
 
-def CountsChildren (children : Vec ChildSummary) (summary : Nat) : Prop :=
-  summary = children.length
+def noDemands : DemandFamily where
+  Key := NoDemand
+  keys := []
+  complete := fun key => nomatch key
+  unique := by simp
+  identity := fun key => nomatch key
+  identityInjective := fun left => nomatch left
+  kind := fun key => nomatch key
+  statement := fun key => nomatch key
 
-theorem gateForNode (node : ManifestNode hasher 2) :
-    node.CertificateGate LeafCertificate Nat CountsChildren := by
-  cases node with
-  | leaf => exact ⟨()⟩
-  | aggregate manifest =>
-      exact ⟨{
-        summary := manifest.children.length
-        composition := rfl }⟩
+theorem noDemandEvidence : DemandCertificateFamily noDemands where
+  discharge := fun key => nomatch key
 
-theorem certificates : CertifiedManifestHierarchy hierarchy LeafCertificate
-    Nat CountsChildren where
+/-- Even a shard with no additional demands carries the concrete
+g-foundation certificate type indexed by its exact manifest identity; the old
+`Unit` certificate-family and `True` composition parameters no longer exist. -/
+def certificateForIdentity (identity : ManifestIdentity) :
+    ManifestCertificate identity where
+  demands := noDemands
+  evidence := noDemandEvidence
+
+def certificates : CertifiedManifestHierarchy hierarchy where
   certified := by
     intro node _present
-    exact gateForNode node
+    exact certificateForIdentity node.identity
 
 example (node : ManifestNode hasher 2) (present : node ∈ hierarchy.manifests) :
-    node.CertificateGate LeafCertificate Nat CountsChildren :=
+    ManifestCertificate node.identity :=
   certificates.certificateFor node present
 
 example : hierarchy.manifests.map ManifestNode.toDependencyNode =
     hierarchy.dag.graph.nodes :=
   certificates.nodesExact
 
-/-- An uninhabited leaf gate prevents certification of a hierarchy containing
-a leaf, even though all manifest and DAG metadata is structurally valid. -/
-def ImpossibleLeafCertificate (_ : LeafManifest hasher) := Empty
+def componentNode : ManifestNode hasher 2 :=
+  .aggregate (aggregate component (Vec.fromList [child leafA, child leafB]))
 
-example : ¬Nonempty (CertifiedManifestHierarchy hierarchy
-    ImpossibleLeafCertificate Nat CountsChildren) := by
-  rintro ⟨candidate⟩
-  have present : (.leaf (leaf leafA) : ManifestNode hasher 2) ∈
-      hierarchy.manifests := by
-    apply Vec.mem_iff_mem_toList.mpr
-    exact List.mem_cons_self
-  have gate := candidate.certificateFor (.leaf (leaf leafA)) present
-  rcases gate with ⟨impossible⟩
-  exact nomatch impossible
+theorem componentPresent : componentNode ∈ hierarchy.manifests := by
+  apply Vec.mem_iff_mem_toList.mpr
+  simp [hierarchy, manifests, componentNode]
+
+example : componentNode ∈ hierarchy.manifests := componentPresent
+example : child leafA ∈ componentNode.childSummaries := by decide
+
+/-- Aggregate lookup returns the actual child node, its exact exported summary,
+and the foundation certificate indexed by that child's full manifest identity. -/
+example : ∃ actual ∈ hierarchy.manifests,
+    actual.childSummary = child leafA ∧
+      Nonempty (ManifestCertificate.{0} actual.identity) := by
+  exact certificates.childCertificate componentNode componentPresent
+    (child leafA) (by decide)
+
+/-- A forged child summary cannot pass the hierarchy needed by the certificate
+gate, even though its scope-only dependency DAG is unchanged. -/
+example : checkManifestHierarchy fixtureDag forgedChildManifests = none := by decide
 
 end Grass.Tests.Build.Manifest.CertificateHierarchy

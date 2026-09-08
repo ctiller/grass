@@ -17,7 +17,7 @@ open Grass.Build.Cache Grass.Std.Logical
 /-- A concrete leaf or aggregate manifest occupying one hierarchy node. -/
 inductive ManifestNode (hasher : MerkleHasher) (fanout : Nat) where
   | leaf (manifest : LeafManifest hasher)
-  | aggregate (manifest : AggregateManifest fanout)
+  | aggregate (manifest : AggregateManifest hasher fanout)
 
 /-- Scope exported by either concrete manifest-node form. -/
 def ManifestNode.scope {hasher : MerkleHasher} {fanout : Nat} :
@@ -36,6 +36,12 @@ def ManifestNode.identity {hasher : MerkleHasher} {fanout : Nat} :
     ManifestNode hasher fanout → ManifestIdentity
   | .leaf manifest => manifest.identity
   | .aggregate manifest => manifest.identity
+
+/-- Full proof-free record including non-semantic observation fields. -/
+def ManifestNode.recordIdentity {hasher : MerkleHasher} {fanout : Nat} :
+    ManifestNode hasher fanout → ManifestRecordIdentity
+  | .leaf manifest => manifest.recordIdentity
+  | .aggregate manifest => manifest.recordIdentity
 
 /-- Compact identity exported to a concrete parent. -/
 def ManifestNode.childSummary {hasher : MerkleHasher} {fanout : Nat} :
@@ -139,7 +145,7 @@ def StructuralCampaign.ObservesManifests {hasher : MerkleHasher} {fanout : Nat}
     (campaign : StructuralCampaign)
     (manifests : Vec (ManifestNode hasher fanout)) : Prop :=
   campaign.runs.all (fun run => decide
-    (run.manifestIdentities = manifests.map ManifestNode.identity)) = true
+    (run.manifestIdentities = manifests.map ManifestNode.recordIdentity)) = true
 
 instance StructuralCampaign.instDecidableObservesManifests
     {hasher : MerkleHasher} {fanout : Nat} (campaign : StructuralCampaign)
@@ -154,7 +160,7 @@ theorem StructuralCampaign.observesManifests_iff
     (manifests : Vec (ManifestNode hasher fanout)) :
     campaign.ObservesManifests manifests ↔
       ∀ run ∈ campaign.runs,
-        run.manifestIdentities = manifests.map ManifestNode.identity := by
+        run.manifestIdentities = manifests.map ManifestNode.recordIdentity := by
   simp [StructuralCampaign.ObservesManifests, Vec.all_eq_true_iff]
 
 /-- A concrete rooted hierarchy paired with a complete structurally exact
