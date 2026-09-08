@@ -133,6 +133,12 @@ structural lists. Its four named projection theorems let certificate consumers
 recover identity uniqueness, entry resolution, local closure, and target closure
 without unfolding the executable checker.
 
+`Graph.locatedEdges`, `Graph.edgeKeys`, and `Graph.findEdge?` derive canonical
+edge identity directly from nested source blocks. Their membership, soundness,
+and existence theorems keep edge lookup proof-bearing even for raw malformed
+graphs with repeated block identities; graph well-formedness eliminates those
+duplicates rather than making lookup partial or block-first.
+
 ### C1 — Joins, loops, calls, and stack shapes
 
 Extend the CFG kernel without introducing an authored parallel manifest:
