@@ -96,6 +96,7 @@ import Grass.Resource.Axis
 import Grass.Semantics.Execution
 import Grass.Semantics.Observation
 import Grass.Semantics.SpecProcess
+import Grass.Semantics.TargetOutcomeProjection
 import Grass.Specification.Boundary
 import Grass.Specification.Scope
 import Grass.Std.Logical.Bag
