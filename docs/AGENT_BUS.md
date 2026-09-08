@@ -66,8 +66,8 @@ becomes mandatory. It contains `_bus/BUS.json`, `.gitattributes`, and sequence
 zero registration logs for the initially authorized coordinators. `BUS.json`
 names schema version 1, the repository object format, those coordinator
 identities, and the last product `main` commit exempt from the newly activated
-review protocol. It also pins the initial V1 merge engine, exact version, and
-bootstrap epoch event.
+review protocol. Its merge-engine fields record the V1 bootstrap implementation
+but impose no Git-version requirement after Decision 137.
 `.gitattributes` contains `*.jsonl -text` so Git never rewrites
 line endings. Bootstrap registrations alone have `observed: null`. Both bootstrap
 files are immutable afterward; changing either requires a new reviewed protocol
@@ -269,12 +269,10 @@ identity's scope. It exists for disappeared agents that cannot emit their own
 `abandoned` status; it is not a coordinator power to interrupt active work
 without user direction.
 
-`merge_engine.activated` upgrades candidate construction without changing the
-event schema. A bootstrap-authorized coordinator names the exact preceding
-engine epoch plus reviewed design/helper commits, engine, and version. Candidate
-preparation stops on concurrent activations until their lifecycle conflict is
-resolved. Every authorization names the one epoch used to build it, so historical
-candidates remain reproducible after fleet upgrades.
+`merge_engine.activated` is retained only to read V2 history. New writers do not
+emit it. Historical engine/version values are diagnostics; candidate authority
+comes from the exact fetched object the reviewer checked, not reproducing it on
+another host.
 
 ### 6.2 Scope
 
@@ -552,7 +550,7 @@ after `product_review_from` in immutable `BUS.json`.
 
 Linked validation fetches exact product commits and candidate tags referenced by
 new events from the canonical product remote, then checks reachability, commit
-trailers, roles, candidate parents/tree/message, merge-engine reconstruction,
+trailers, roles, candidate parents/tree/message and exact candidate tag,
 review eligibility, and product-history facts. A present object that mismatches
 its claim is `invalid`. A remote outage, unavailable remote, or absent object is
 `unverifiable`, not structural corruption: read-only reduction and unrelated
@@ -640,11 +638,11 @@ coordinator naming the version and design/helper commits. Only then
 may writers emit the new version. Removing reader support while old events
 remain is forbidden.
 
-Changing only the pinned merge implementation uses `merge_engine.activated`,
-not a schema-version increase. Its reviewed helper must support linked validation
-of every engine epoch still referenced by retained authorizations. The current
-helper distribution owns any bundled/side-by-side historical engine support;
-individual agents are not required to curate old system Git installations.
+`merge_engine.activated` is retained only for reading V2 history. Decision 137
+removes the pin from successor authority: agents need ordinary Git fetch/pull and
+non-force push, and reviewers authorize the exact candidate they actually
+checked. No host must install an historical Git version or reconstruct that
+candidate.
 
 The initial protocol performs no compaction. If storage becomes material,
 closed segments may be archived only under a separately reviewed, exactly
@@ -686,7 +684,7 @@ Before use, the helper must pass fixtures for:
 15. 65,536-byte event acceptance and 65,537-byte rejection;
 16. concurrent lifecycle choices remaining valid, conflict reduction, and
     explicit coordinator selection;
-17. deterministic candidate construction/tag validation for renames, file
+17. exact candidate/tag validation for renames, file
     modes, attributes, symlinks, submodules, and content conflicts;
 18. both publication orders of a reassignment racing an offline final finding,
     with no orphaned finding;

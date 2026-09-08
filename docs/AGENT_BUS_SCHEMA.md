@@ -72,13 +72,11 @@ of this schema.
 
 `object_format` is `sha1`; coordinator names form a nonempty
 `StringSet<Agent>`; `product_review_from` is a full `ObjectId` reachable from
-product `main` and is the last bootstrap-exempt product commit. `merge_engine`
-is `git-ort` in V1 and `merge_engine_version` is the exact semantic version
-validated by the helper at bootstrap. The example version is illustrative; the
-implemented helper publishes its reviewed supported version before bootstrap,
-fixes all merge options, and refuses to run on a different version.
-`merge_engine_epoch` names one bootstrap coordinator registration in the same
-root commit and identifies the initial engine epoch. The root
+product `main` and is the last bootstrap-exempt product commit. The V1
+`merge_engine`, `merge_engine_version`, and `merge_engine_epoch` fields are
+retained historical data. Decision 137 removes their authority meaning: a
+reader must not require that exact Git version in order to reduce the bus or do
+ordinary work. The root
 `.gitattributes` is exactly `*.jsonl -text` plus LF. Every named coordinator has
 its sequence-zero registration in the same orphan root commit, and no other
 agent log occurs there.
@@ -222,12 +220,9 @@ data = {
 refs = [previous_epoch]
 ```
 
-Only a bootstrap-authorized coordinator emits it. `previous_epoch` is the
-currently selected bootstrap registration or prior engine activation. Linked
-validation requires the design/helper commits on product `main` and the helper
-to support that exact engine/version. Concurrent activations from one predecessor
-form a lifecycle conflict; no candidate may use either until a coordinator
-selects one.
+This event remains in the grammar so existing V2 history is readable. New
+writers do not emit it after Decision 137. Its engine/version fields are
+diagnostics, not requirements imposed on a reader or host.
 
 ## 5. Scope, plan, and progress
 
@@ -593,8 +588,8 @@ refs = unique ([nomination, merge_engine_epoch] + every finding_dispositions.cha
 
 Only the accepting reviewer emits it. The candidate is a prepared merge commit
 not yet on `main`. Its first parent is `previous_main`, its second parent is
-`reviewed_commit`, its tree is the pinned helper's conflict-free merge result,
-and its message contains exactly one matching
+`reviewed_commit`, the reviewer reports an ordinary clean merge, and its message
+contains exactly one matching
 `Agent-Bus-Reviewer` trailer. It is invalid if the reviewer authored any commit
 introduced relative to `previous_main`, any introduced non-review-merge commit
 lacks an `Agent-Bus-Agent` trailer, its exact author set differs from the request,
@@ -606,15 +601,14 @@ result is `passed`.
 authorization cannot widen, narrow, or otherwise rewrite the author's review
 request. Changed paths remain a subset of that unchanged scope.
 
-`merge_engine_epoch` is the selected engine epoch visible in the authorization's
-`observed` state and is the exact implementation used to prepare/reconstruct the
-candidate.
+`merge_engine_epoch` is retained in the V2 wire shape but is diagnostic after
+Decision 137. A version mismatch is not a validation failure.
 
 Before this event is published, the exact candidate is available at immutable
 lightweight tag `refs/tags/agent-candidate/<reviewer>/<candidate>`. Structural
 validation checks the event shape and lifecycle. Linked validation fetches the
-exact tag and product objects and checks parents, tree, message, merge-engine
-reconstruction, and tag. A fetched mismatch is invalid; an unavailable remote
+exact tag and product objects and checks parents, tree, message, and tag. It does
+not reconstruct the merge with local Git. A fetched mismatch is invalid; an unavailable remote
 or object is `unverifiable` and blocks authorization/merge without making the
 bus malformed.
 
@@ -658,21 +652,25 @@ data = {
   product_branch : Branch,
   previous_main : ObjectId,
   candidate : ObjectId,
-  merge_engine_epoch : EventId,
   landing_checks : List<CheckResult>,
   reviewed_scope : StringSet<PathClaim>,
   summary : Text
 }
-refs = [approval, merge_engine_epoch]
+refs = [approval]
 ```
 
 Only the reviewer who emitted `approval` emits it. The helper derives the
-reviewed commit from that approval and reconstructs the exact candidate with
-`previous_main` as first parent and that commit as second parent. The merge is
-clean under the selected engine, every changed path lies in the frozen scope,
+reviewed commit from that approval and fetches the exact candidate the reviewer
+constructed with `previous_main` as first parent and that commit as second
+parent. The reviewer reports an ordinary clean merge; every changed path lies
+in the frozen scope,
 and every mandatory landing check derived from the protected-path registry is
 present and passed. The registry and check classification come from
 `previous_main`; neither author nor reviewer can omit a protected check.
+
+No exact Git version or merge-engine epoch participates in successor authority.
+Git is required only to fetch/pull and perform a normal non-force push. A version
+string may be retained in diagnostic output but is not a schema field or gate.
 
 Review checks bind to the selected authored source. Landing checks bind to the
 exact combined candidate and are intentionally small: affected Lean/build

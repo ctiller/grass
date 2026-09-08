@@ -187,6 +187,10 @@ exists and replaces a silent monitor; it does not interpret the check or declare
 success. This specialization changes no role authority and needs no new event
 kind. `AGENT_REVIEW.md` section 8.1 owns the operational rule.
 
+Host readiness requires ordinary Git fetch/pull and non-force push, not an exact
+Git-version match. Version information is diagnostic only and cannot block
+coordination or custody transfer.
+
 Version one currently calls this least-authority identity `observer`. No such
 identity was registered when this decision was drafted. Version two renames the
 wire role to `auditor` rather than preserving two overlapping roles. During

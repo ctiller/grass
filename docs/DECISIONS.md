@@ -598,7 +598,7 @@ to imitate compiler-selected storage or CFG structure.
     distinct. Missing/unreachable remote objects make linked claims
     `unverifiable`, not malformed; authority-bearing operations still fail
     closed until fetch and verification succeed. Present mismatches are invalid.
-114. Merge determinism is pinned by an explicit engine epoch. Reviewed
+114. **Superseded by Decision 137.** Merge determinism was pinned by an explicit engine epoch. Reviewed
     `merge_engine.activated` events upgrade the fleet without rewriting bootstrap
     or historical authorizations. Each candidate names its epoch and uses fully
     deterministic commit metadata, with cross-platform object-ID fixtures.
@@ -832,7 +832,7 @@ to imitate compiler-selected storage or CFG structure.
 135. Review approval binds to one immutable authored range, its exact review
     base and commit, scope, authorship, findings, and review checks; it is not
     indexed by the moving `main` head. Any landing base must descend from the
-    review base. Reviewer-owned landing constructs a clean deterministic
+    review base. Reviewer-owned landing constructs a clean exact
     two-parent candidate on current `main`, runs the affected Lean/build closure
     and any protected landing gates, then publishes an exact short-lived merge
     authorization. Losing a normal non-force push preserves the approval and
@@ -852,6 +852,14 @@ to imitate compiler-selected storage or CFG structure.
     auditor's findings, author product fixes, or merge. During bootstrap this may
     be an LLM role; the target is a deterministic watcher. Silence is never
     interpreted as green.
+137. Exact Git-version pinning is rejected. An agent host needs ordinary Git
+    fetch/pull and non-force push. The reviewer authorizes the exact merge
+    candidate it actually inspected and typechecked; other hosts fetch that
+    object rather than reconstructing it. Git version is diagnostic metadata,
+    not proof authority, and cannot block bus reduction, coordination, custody
+    transfer, review, or landing. Historical V2 merge-engine fields remain
+    readable but are removed from successor authority. This supersedes Decision
+    114's pin and cross-host reproduction requirement.
 
 ## Explicitly rejected shortcuts
 

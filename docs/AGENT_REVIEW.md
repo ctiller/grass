@@ -480,21 +480,16 @@ the reviewer merges the selected commit, not whatever the branch later names.
 Later commits stay outside `main` and require a later merge under an active
 nomination. The helper and receipt make this boundary visible.
 
-`prepare-merge` uses the merge engine and exact version pinned in immutable
-`BUS.json` or the currently selected `merge_engine.activated` epoch, with fixed
-helper-owned options and repository attributes from `previous_main`. It requires
-one merge base, refuses conflicts, submodule
-ambiguity, unsupported filters, and platform-dependent path collisions, and
-constructs the commit itself. The acceptance corpus covers renames, modes,
-attributes, symlinks, submodules, and conflicting edits. Reviewers never edit a
-prepared candidate tree.
+`prepare-merge` uses the reviewer's installed Git to make an ordinary clean merge
+against `previous_main`. No exact Git version is required. The host requirement
+is simply a Git implementation capable of fetching/pulling the repository and
+making a normal non-force push.
 
-Candidate commit identity is deterministic. The helper emits exactly two parents
-in the stated order; fixed author and committer
-`Grass Agent Bus <agent-bus@invalid>`; timestamp one second after the greater
-parent committer timestamp in UTC (overflow is rejected); no optional encoding,
-signature, or mergetag headers; canonical Git header order and LF bytes; and
-exact UTF-8 message:
+The resulting exact candidate is what the reviewer inspects, typechecks,
+publishes under its immutable candidate tag, and authorizes. Other hosts fetch
+and validate that object; they do not rerun the merge and demand the same object
+ID. The candidate has exactly two parents in the stated order and one matching
+reviewer trailer:
 
 ```text
 agent-bus candidate
@@ -502,8 +497,8 @@ agent-bus candidate
 Agent-Bus-Reviewer: <reviewer>
 ```
 
-For identical epoch, parents, and reviewer, Windows and Linux must produce the
-same tree and commit object ID.
+Git version may be recorded for diagnostics, but it is never proof authority and
+cannot block bus reads, coordination, host transfer, review, or landing.
 
 A mechanical, conflict-free merge commit is integration metadata and does not
 make the reviewer a product author. Always creating it gives product history an
@@ -695,7 +690,7 @@ bypasses performed outside it:
 10. a merge receipt not matching product Git history;
 11. treating post-selection branch commits as included in the completed merge;
 12. authorization before its immutable candidate tag is fetchable; and
-13. candidate construction with an unpinned merge engine or helper options.
+13. changing the exact candidate tree after it was reviewed and authorized.
 
 It also rejects product commits attributed to a `reviewer` identity and any
 attempt to change an identity's registered role.
