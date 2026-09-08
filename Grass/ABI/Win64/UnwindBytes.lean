@@ -32,11 +32,24 @@ used once by hand while working out the field orders, and the paragraph
 described that session rather than the check. A reviewer caught it.
 
 The distinction matters because it changes what is covered. `UNWIND_INFO` for
-all nine operations this profile models is covered, on 100 prologues.
-`UnwindTail.flags`, `UnwindTail.handlerRva`, `UnwindTail.toBytes`,
-`RuntimeFunction.toBytes`, `PdataSection.toBytes` and `SearchablePdata.toBytes`
-are covered by nothing: every corpus row uses `.noHandler` and none emits
-`.pdata`.
+all nine operations this profile models is covered by that differential, on 100
+prologues, and every row of it uses `.noHandler`.
+
+The handler tail and the `.pdata` records are covered a different way, in
+`Tests/ABI/Win64/UnwindMeasured.lean`: recorded measurements rather than a
+re-run. `UnwindTail.flags`, `UnwindTail.handlerRva`, `UnwindTail.toBytes`,
+`RuntimeFunction.toBytes` and `PdataSection.toBytes` are checked there against
+bytes `ml64` actually wrote, by evaluation, with no assembler involved.
+
+That shape was chosen because it survives. Handler rows lived in the corpus
+briefly and were deleted with the differential that read them, since that tool
+belongs to another owner and runs only on Windows; the measurements outlived
+both. It is the right shape here for a second reason too -- these records do
+not move, so a recorded measurement catches what a re-run would. It is *not*
+the right shape for the encoder differentials, where the corpus is generated
+and the point is to re-run a moving corpus against a live assembler.
+
+`SearchablePdata.toBytes` remains covered by nothing.
 
 ## What ml64 was measured to do, and why none of it is checked here
 
