@@ -126,7 +126,30 @@ def empty : Vec α := ⟨[]⟩
 
 instance : EmptyCollection (Vec α) := ⟨empty⟩
 
+/--
+`∅` and `Vec.empty` are the same sequence.
+
+Stated as `simp` because the `EmptyCollection` instance above makes `∅`
+*typecheck* without making it *rewrite*: `simp` does not see through the instance
+projection, so a goal written with the notation loses `Vec.empty_append` and
+`Vec.append_empty`, which are the two laws a consumer reaches for immediately
+after writing it.
+
+Found by porting `Grass/Process/ByteFlow/Ingress.lean` from `List Byte` to
+`Vec Byte`, which is `c-process`'s stated intent for that module. Everything else
+that port needs already existed; this was the whole gap, and without it two
+conservation obligations there fail with `unsolved goals` after every other
+substitution is made.
+-/
+@[simp] theorem emptyCollection_eq_empty : (∅ : Vec α) = empty := rfl
+
 instance : Inhabited (Vec α) := ⟨empty⟩
+
+/-- `default` is the empty sequence, stated so `simp` can use the `empty` laws on
+a goal that reached `Vec` through an `Inhabited` obligation. Third instance of the
+same shape as `Vec.emptyCollection_eq_empty` and `Vec.get_eq_iff_get?_eq`: an
+instance makes a term typecheck without making `simp` see through it. -/
+@[simp] theorem default_eq_empty : (default : Vec α) = empty := rfl
 
 /-- The one-element sequence. -/
 def singleton (a : α) : Vec α := ⟨[a]⟩
@@ -185,6 +208,34 @@ theorem isEmpty_iff_length_eq_zero (v : Vec α) : v.isEmpty = true ↔ v.length 
 theorem get?_eq_some_get (v : Vec α) (i : Nat) (h : i < v.length) :
     v.get? i = some (v.get i h) :=
   List.getElem?_eq_getElem h
+
+/--
+A total read equals `a` exactly when the checked read yields `some a`.
+
+`simp` because it points the only way that is useful. `Vec.get?_eq_some_get`
+states the same correspondence in the other direction, which rewrites the
+accessor that has laws into the accessor that has none: this module states
+twenty-eight `get?` laws and no `get` law, so a goal driven towards `get` stops.
+
+**What drives it there is Lean core's `simp` set, not elaboration.** `v[i]?`
+reaches `Vec.get?` definitionally, through the `GetElem?` instance and
+`Vec.getElem?_eq_get?`, which is `rfl`. It is `getElem?_pos` — core's, from
+`LawfulGetElem` — that rewrites `v[i]?` to `some v[i]`, and `Vec.getElem_eq_get`
+that turns the result into `get`. So the hazard is not in how the notation
+elaborates but in what the default `simp` set does to it afterwards, and a bare
+`get?` goal written without notation is never pushed towards `get` at all. An
+earlier version of this comment said both notations elaborate through `get`; the
+conclusion held and the mechanism was wrong.
+
+Two limits worth knowing. It fires only with `get` on the left, so
+`a = v.get i h` is untouched. And on a goal with `get` on both sides it produces
+the lopsided `v.get? i = some (w.get i hw)` rather than a `get?`-on-both-sides
+normal form — recoverable, and the shape `Vec.ext_of_get` obligations take.
+-/
+@[simp] theorem get_eq_iff_get?_eq {v : Vec α} {i : Nat} {h : i < v.length} {a : α} :
+    v.get i h = a ↔ v.get? i = some a := by
+  rw [get?_eq_some_get v i h]
+  exact ⟨fun e => by rw [e], fun e => (Option.some.inj e).symm ▸ rfl⟩
 
 theorem get?_eq_none (v : Vec α) {i : Nat} (h : v.length ≤ i) : v.get? i = none := by
   simp only [get?, List.getElem?_eq_none_iff]
@@ -352,6 +403,42 @@ theorem get?_push_lt (v : Vec α) (a : α) {i : Nat} (h : i < v.length) :
 @[simp] theorem get?_push_self (v : Vec α) (a : α) : (v.push a).get? v.length = some a := by
   simp [get?, push, length]
 
+/--
+Reading *any* index of a pushed sequence.
+
+`Vec.get?_push_self` reads the top and `Vec.get?_push_lt` reads below it, and
+between them they cover the cases — but neither is usable on a sequence pushed
+more than once, which is the shape a consumer that *builds* a sequence actually
+has.
+
+The reason is the interaction of two `simp` laws rather than a missing case.
+`Vec.length_push` normalises `(v.push a).length` to `v.length + 1`, so a goal
+about `((v.push a).push b).get? i` arrives with `i` as `v.length + 1`, while
+`get?_push_self`'s left side wants the unnormalised `(v.push a).length`. `simp`
+will never produce that shape, so the law cannot fire. Measured before this was
+written: of six read-after-push goals, `simp` closed only the single-push read at
+the top. Two pushes reading the top, two pushes reading below it, and both
+concrete indices into a two-element sequence built from `Vec.empty` all reported
+no progress.
+
+This states the case split instead, so the index never has to match a
+denormalised form. `Tests/Std/VecInstances.lean` pins all six.
+
+`get?_push_self` is kept rather than removed. It is subsumed — dropping its
+`@[simp]` breaks no fixture once this exists — but it is the cleaner one-step
+rewrite for the goal it names, the two agree wherever both apply, and removing a
+public `simp` law is a change for consumers this module cannot see.
+-/
+@[simp] theorem get?_push (v : Vec α) (a : α) (i : Nat) :
+    (v.push a).get? i =
+      if i < v.length then v.get? i else if i = v.length then some a else none := by
+  rcases Nat.lt_trichotomy i v.length with h | h | h
+  · rw [get?_push_lt v a h, if_pos h]
+  · subst h; rw [get?_push_self, if_neg (Nat.lt_irrefl _), if_pos rfl]
+  · rw [if_neg (Nat.not_lt.mpr (Nat.le_of_lt h)), if_neg (Nat.ne_of_gt h)]
+    simp only [get?, push, toList_fromList, length] at *
+    exact List.getElem?_eq_none (by simp; omega)
+
 @[simp] theorem pop?_empty : (empty : Vec α).pop? = none := rfl
 
 /-- `pop?` inverts `push`. -/
@@ -459,6 +546,24 @@ owes a law, or a consumer cannot tell which pure operation it was given. -/
 @[simp] theorem clear_eq_empty (v : Vec α) : v.clear = (empty : Vec α) := rfl
 
 @[simp] theorem length_clear (v : Vec α) : v.clear.length = 0 := rfl
+
+/--
+The empty sequence's list is empty.
+
+Deliberately the *only* `toList` reduction marked `simp`, and the exception needs
+its reason stated, because `Vec.toList` is the representation seam this whole
+module exists to keep narrow. A `simp` set that dissolves a `Vec` into a `List`
+on sight undoes the argument for the structure: consumers would stop writing
+`Vec`'s API and start writing `List`'s, which is the leak a private structure was
+chosen to prevent.
+
+Iteration is the one place where going to `List` is not a leak, because that is
+how the `ForIn` instance is defined — `Vec.forIn_eq_forIn_toList` states it, and
+this lemma is what lets the empty case finish there rather than stopping on
+`Vec.empty.toList = []`. Anything else that wants a `toList` fact should name it,
+not get it from `simp`.
+-/
+@[simp] theorem toList_empty : (empty : Vec α).toList = [] := rfl
 
 @[simp] theorem toList_append (v w : Vec α) : (v ++ w).toList = v.toList ++ w.toList := rfl
 
@@ -805,6 +910,34 @@ theorem get?_zipWith (f : α → β → γ) (v : Vec α) (w : Vec β) (i : Nat) 
     foldr f init (v.push a) = foldr f (f a init) v := by
   simp [foldr, push]
 
+/--
+The cons law for `foldr`: the first element is folded last.
+
+`Vec.recOnCons` was added because a consumer review found `recOnPush` hands an
+induction hypothesis about the wrong end of a stream that is read from the head.
+The recursor landed and this did not, so `induction v using Vec.recOnCons`
+produced a `singleton a ++ w` goal that `Vec.foldr_push` could not touch — the
+same shape as the gap `recOnCons` itself was added to close, one level up.
+`Grass/Build/Cache/Key.lean` is the module that hits it: its
+`importedSummariesTree` is a `Vec.foldr` and its docstring claims the tree
+retains import order, which is a statement about this law.
+-/
+@[simp] theorem foldr_cons (f : α → β → β) (init : β) (a : α) (w : Vec α) :
+    foldr f init (singleton a ++ w) = f a (foldr f init w) := rfl
+
+/--
+The cons law for `foldl`: the first element is folded first, into the
+accumulator.
+
+Stated alongside `Vec.foldr_cons` rather than because a consumer asked. A
+recursor with a law for one fold and not the other is the asymmetry this section
+exists to remove, and leaving `foldl` out would reproduce it for the next reader
+who happens to accumulate leftwards.
+-/
+@[simp] theorem foldl_cons (f : β → α → β) (init : β) (a : α) (w : Vec α) :
+    foldl f init (singleton a ++ w) = foldl f (f init a) w := rfl
+
+
 /-!
 ## Predicates and search
 -/
@@ -950,6 +1083,14 @@ to the underlying list.
 -/
 instance {m : Type v → Type w} [Monad m] : ForIn m (Vec α) α where
   forIn v init f := ForIn.forIn v.toList init f
+
+/-- Iterating a sequence is iterating its list, stated so `simp` can use the
+`List` iteration laws. The same shape as `Vec.emptyCollection_eq_empty`: the
+instance makes the loop typecheck without making `simp` see through it. This one
+was missed when the other three landed, in the commit that stated the rule. -/
+@[simp] theorem forIn_eq_forIn_toList {m : Type v → Type w} [Monad m] {β : Type v}
+    (v : Vec α) (init : β) (f : α → β → m (ForInStep β)) :
+    forIn v init f = forIn v.toList init f := rfl
 
 /--
 Equality is agreement at every index, as an iff.

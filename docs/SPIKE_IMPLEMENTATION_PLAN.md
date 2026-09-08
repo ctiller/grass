@@ -193,6 +193,49 @@ question, `g-design:71` did not rule on it, Vulkan is not the Win32 API family,
 and the graphics platform owner is not registered. Renaming it by analogy would
 be inventing a ruling.
 
+### 3.0.1 The facade roots, and who names them
+
+`docs/MODULES.md` now declares all four facades in the tree with their owners:
+`Assembly/X86.lean` as the first-class x86 assembly authoring facade owned by
+the construction and lowering workstream, `ISA/X86.lean` as the lower
+machine-authority facade owned by c-x86 and deliberately outside the
+author-facing set, `Platform/Win32.lean` as the Win32 API family facade, and
+`Emit.lean` as the safe verified-emission facade. All four are signature-only
+with measured dependency cones, and each requires fixtures demonstrating both
+what resolves and what does not.
+
+`c-spike:36` reported that every one of those roots sat outside the directory
+glob of the owner assigned to deliver it, since a glob does not reach a sibling
+file. `coord1:78` ruled explicit listing: an assigned facade root is not
+implicitly in the assignee's scope, and the owner names the root file in its own
+`scope.set` beside the glob. The reasoning is worth keeping because it
+generalizes past this case -- an implicit rule creates ownership no tool can
+see, and scope-conflict detection and every third-party check operate on the
+published globs, so a facade root covered only by convention is a claim
+agent-bus cannot verify or report a collision on.
+
+That ruling also corrected c-spike's evidence. It re-derived the four instances
+against each owner's latest published scope rather than the ones the report
+cited, and found c-x86 had already fixed its half unprompted at `c-x86:12`. The
+report named `c-x86:1`, which was accurate when read and stale when acted on.
+
+All four roots are now owned, checked against every agent's latest `scope.set`
+rather than against any owner's description of it: `ISA/X86.lean` and
+`Platform/Win32.lean` by `c-x86:12`, `Assembly/X86.lean` by `g-construct:49`,
+and `Emit.lean` by `g-build:10`, which `g-build:14` records as constrained to
+the checked `VerifiedProgram`/`emitProgram` surface `g-design:71` describes.
+`Emit.lean` mattered most of the four and came last: it is the only module all
+five spikes import, so it is where the corpus terminates, and by the time it was
+claimed a second consumer was waiting on the same seam in `g-construct:65`.
+
+The method is the part worth keeping. c-spike found the same defect four times
+and filed it once, as a routing question to the coordinator, rather than as
+three separate corrections at three owners. One ruling then fixed all four, and
+the two owners who had not yet published scope absorbed it without a second
+prompt. Filing per-instance would have cost three exchanges and produced three
+chances to cite a stale scope, which is exactly the error `coord1:78` had to
+correct in the single report that was filed.
+
 ### 3.1 Two spike-side import decisions still open
 
 `c-process:64` answered `c-spike:7` and handed back two choices which are
@@ -216,11 +259,20 @@ Neither can be settled by that principle alone yet, because the names the spikes
 actually use are not in the modules the repointing would name.
 `Spikes/5_Spinning_Cube/Process.lean` uses `BlendedProcessGraph`,
 `ClosedBlend` and `ProcessRealization.blend`, and none of the three is in
-`Grass/Process/Weave/Blend.lean` at `agent/c-process/m4-weave-and-composition`,
-which holds `VocabularyEmbedding`, `DisjointWeave` and `routing_is_forced`.
+`Grass/Process/Weave/Blend.lean`, which holds `VocabularyEmbedding`,
+`DisjointWeave` and `routing_is_forced`. That module reached main with
+`c-process:71` at 28a24f6, and each half of this claim was re-checked against
+main rather than carried forward: the three names it holds are there, and the
+three the spike wants are in no file under `Grass/` at all.
 `Spikes/4_Web_Server/Cancellation.lean` uses `CancellationPolicy`, which is in
 `Cancellation/Policy.lean`, but also `CancellationSummary` and
-`CancellationPolicyRealizes`, which are in none of the three leaves. Repointing
+`CancellationPolicyRealizes`, which are in none of the three leaves. Check that
+second pair by declaration and not by `grep -l`: `CancellationSummary` does
+appear in `Cancellation/Compose.lean`, but only at line 37 inside prose
+comparing that module to PROCESS.md §3, and a name found only in a docstring is
+not a declaration. `boundaryProjection` sets the same trap in
+`Grass/Process/Network/Plan.lean`, where the only match is the module note
+quoting the pre-128 shape of a structure that no longer has the field. Repointing
 an import at a module that will not contain the name is not a fix; it moves the
 error rather than removing it. The open question to c-process is therefore
 placement -- where these five names will live -- and the import lines follow
@@ -281,12 +333,46 @@ count. It does not hide.
 exists and passes. Checked rather than assumed: all 123 fenced blocks across
 the five documents carry an immediate classification, block identities are
 unique, and all 20 authored blocks match their files byte for byte after
-newline normalization. The script needs PowerShell 7 and this machine has only
-5.1, so that was established by reimplementing its three tests and
-negative-testing the reimplementation -- changing one byte of
-`Spikes/1_Hello_World/Spec.lean` reports the mismatch, deleting one
+newline normalization.
+
+An earlier revision of this section said the script needs PowerShell 7, that
+this machine has only 5.1, and that the result had therefore been established
+by reimplementing the three tests rather than by running the script. The first
+clause was untested and is wrong; it is retracted at `c-spike:46` and amended
+at `c-spike:47`. Windows PowerShell 5.1 Desktop runs `check-spike-sources.ps1`
+directly and it exits 0, as do `check-doc-links.ps1` and g-foundation's
+`audit-trust.ps1`. c-spike runs its own gates and does not depend on a reviewer
+for them.
+
+The reimplementation was still worth having, for the reason that outlives the
+error: it was negative-tested, and the script was not. Changing one byte of
+`Spikes/1_Hello_World/Spec.lean` reports the mismatch; deleting one
 classification comment from `docs/SPIKE_2.md` reports the unclassified block.
-So the drift this plan guards against is drift from a known-good state.
+A gate that has only ever been seen to pass is not yet known to be able to
+fail. So the drift this plan guards against is drift from a known-good state,
+measured by an instrument that has been shown to move.
+
+**What can the corpus falsify?** Counted rather than assumed, because a library
+owner asking "will the spikes catch it if I get this wrong" deserves a number.
+Across the five spikes there are 3 success terminals and 15 non-success ones --
+3 in Spike 1, 6 in Spike 2, 6 in Spike 3, and none in Spikes 4 and 5, which are
+process-shaped and carry no `@terminal` labels at all. Of the 15, six are the
+partial-write case, `writeFailed` and `noProgress`, exactly one of each in all
+three assembly spikes; three are `stdoutUnavailable`, where nothing was ever
+offered, which is the cheap negative for any rule that demands a destination
+for an uncommitted suffix.
+
+The gap is the part worth publishing. **Not one of the 15 is `.cancelled`** --
+zero across all five spikes. Any obligation that splits failure from
+cancellation is exercised six times on one branch and never on the other, so a
+wrong cancellation rule passes the whole corpus. That is filed at `c-spike:50`
+against the first library change it actually bears on, c-process's repair of
+`closed_streams_committed_everything`, and it will recur for every later one:
+by `c-stdlib:29`'s bar a repair has to be shown both satisfiable and still
+refusing what it exists to refuse, and today the corpus can only do the first
+for cancellation. Closing it means an authored cancellation consumer, which is
+c-spike's to write once a library owner names the vocabulary -- not something
+to invent ahead of one.
 
 The inventory in section 2 is sizing evidence, not an instrument. It answered
 "how much work is there and who owns it" once, well enough to order this plan.
@@ -391,14 +477,27 @@ This remains the single largest block in the plan and the only reason no spike
 can emit a file.
 
 `Grass.Assembly.X86` -- `asm_source`, `AsmSource`, `MachineOperand`,
-`AddressOperand`, `VerifiedFragment`, `FragmentConstructorClosure`, `BlockContract`,
+`AddressOperand`, `VerifiedFragment`, `FragmentConstructorClosure`,
+`StaticObjectTable` with its `static_objects` macro, `BlockContract`,
 `MacroTable`, and the `@placement`, `@invariant`, `@terminal`, `@audit`,
 `@violation_edge`, `@containment_tail` annotations.
 `Grass.Platform.Win32` -- `PlatformPlan`, the Win64 ABI, `FrameLayout.derive`,
 `StructLayout.derive`, `withStack`, `withCallFrame`, the import table.
-`Grass.Emit` -- `StaticObjectTable`, the `static_objects` macro, the PE writer.
+`Grass.Emit` -- the PE writer, and the checked `emitProgram` over
+`VerifiedProgram`.
 Plus `TargetProjection` / `TargetOutcomeProjection` and the
 `verify_assembly … deriving_standard_process_from … with …` tactic.
+
+`StaticObjectTable` and the `static_objects` macro were listed under
+`Grass.Emit` here and that was wrong. `c-x86:6` grouped `static_objects` with
+the construction and lowering vocabulary when it read
+`Spikes/1_Hello_World/Program.lean`, and `docs/ASSEMBLY_CONSTRUCTION.md` settles
+it: `StaticObjectTable` is a field of `AuthoredSourceInputs`, the dependent
+inputs to `asm_source`, beside `FragmentConstructorClosure` and
+`LayoutSelection`. They are construction vocabulary and belong with
+`Grass.Assembly.X86`. c-spike raised this to g-build in `c-spike:35` as a
+boundary it could not resolve; the evidence was in a normative document it had
+not read, and the answer did not need g-build at all.
 
 Acceptance conditions, not optional extras: block contracts are derived from
 annotations, not authored (section 4); and source closure, cancellation maps and
@@ -500,8 +599,47 @@ rulings such as `coord1:4` -- which g-design has been discharging in c-spike's
 absence and which now returns here. One sequencing consequence rather than an
 ownership one: `agent/g-design/normative-design` carries unmerged edits to
 `Spikes/4_Web_Server/Process.lean`, `Spikes/5_Spinning_Cube/Process.lean`,
-`docs/SPIKE_4.md` and `docs/SPIKE_5.md` at 136b20a, so c-spike takes custody of
-those four after that branch lands rather than racing it. It does not
+`docs/SPIKE_4.md` and `docs/SPIKE_5.md` -- at c09c82a as this is written, having
+moved from 136b20a, and still changing all four against its merge-base with
+main. So c-spike takes custody of those four after that branch lands rather than
+racing it. That sequencing now binds a second obligation: `g-design:96`'s
+resynchronization of Spikes 4 and 5, which `c-process:71` triggered by landing
+the author-facing shape, targets exactly these four files. It waits on this
+branch as well as on the two placement answers `c-spike:41` asks c-process for,
+and this is the constraint that decides which, not a preference.
+
+Both of those answers arrived. `c-process:86` settles the first two: a product
+plan writes `NoObligations`, which c-process is exporting from `Grass.Process`
+as a reducible definitional `Unit` rather than leaving authors to reach into
+`Tests` for the fixture-local copy; and `cancellation` and `supervision` have no
+attachment point at all, so Spike 4 keeps `ServerCancellationLaw` and
+`ServerSupervisionLaw` as free-standing propositions *about* `serverProcessPlan`
+rather than fields *of* it. That preserves both claims exactly and migrates into
+a facet unchanged when the deferred facet-carrying topology lands. It is the
+answer c-spike could not have guessed: no field exists to move them to, and
+inventing one, or dropping them, would have been the weakening `c-stdlib:29`
+warns about.
+
+A third input has since joined them, and it is the reason this paragraph is not
+simply a list of two. `g-design:138` rules that `ProcessSpec.Step` is indexed by
+the fixed request of the process instance, which makes `terminalNoStep`
+request-local: `Terminal request state result -> not Step request state event
+after issued emitted`. The live field on main still carries the universal
+`(forall request, p.Terminal request state result)` that ruling removes. Both
+spikes assign the field by name -- `terminalNoStep := MemoryServerState.terminalNoStep`
+at `Spikes/4_Web_Server/Process.lean:263` and `:= cube_terminal_has_no_step` at
+`Spikes/5_Spinning_Cube/Process.lean:156` -- so the assignment lines do not
+change, but the proposition those two proofs must discharge does. `ProcessCorrect`
+still has ten fields and the corpus still names exactly those ten; what is no
+longer safe to say is that the tenth needs no work. c-process owns the
+Process-side migration and the ruling directs it to coordinate the spike source
+update with c-spike, so this is tracked here rather than acted on.
+
+Worth recording about the ruling itself, because it is the constraint this plan
+exists to defend: it says combinators and standard constructors should thread
+the request implicitly, and that ordinary authors must not duplicate it in
+`State` or pay new proof fields. The defect was fixed without charging the
+authoring surface for it. It does not
 implement the libraries. Where a phase above is unowned, the deliverable is a
 routing decision from the coordinator, not c-spike quietly taking the work: an
 agent that both authored the demonstration and the thing being demonstrated

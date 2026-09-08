@@ -1,0 +1,47 @@
+[package]
+name = "grass-tools"
+version = "0.1.0"
+edition = "2021"
+description = "Grass validation and audit tools: docstring and source audits, and the Win64 unwind differential"
+
+# Each tool is a self-contained binary with no shared library. The scripts these
+# replace were self-contained too, and each is invoked independently by
+# `.github/workflows/library.yml`; keeping them separate means a change to one
+# cannot silently alter another's verdict.
+#
+# `docstring-audit` still needs Lean, because the set of names the build knows
+# has no reading outside the environment. It generates the meta-program it needs
+# into a temporary file, elaborates it with `lake env lean`, and does the judging
+# here. That is what retires the checked-in Lean file it used to shell out to.
+#
+# This crate is where the remaining validation tools land as they are ported and
+# their equivalence against the originals is demonstrated. It carries three
+# binaries rather than a placeholder for nine, because a `[[bin]]` entry for a
+# tool nobody has verified is a claim this file cannot back. The four tools that
+# shell out to NASM, NDISASM or a wrapper NASM assembles are ported and unlanded
+# for exactly that reason: neither assembler could be run here, so no
+# differential against the Python original exists for them yet.
+#
+# `win64-unwind-differential` and `source-liveness` are the two whose oracles
+# could be run: `ml64.exe` ships with the MSVC build tools, and a probe against
+# an HTTP server is a probe whether the server is a publisher or a loopback
+# socket.
+
+[[bin]]
+name = "docstring-audit"
+path = "src/bin/docstring_audit.rs"
+
+[[bin]]
+name = "source-liveness"
+path = "src/bin/source_liveness.rs"
+
+[[bin]]
+name = "win64-unwind-differential"
+path = "src/bin/win64_unwind_differential.rs"
+
+[dependencies]
+regex = "1"
+tempfile = "3"
+
+[profile.release]
+debug = false

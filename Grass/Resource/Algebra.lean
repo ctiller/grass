@@ -4,9 +4,44 @@ import Grass.Resource.Axis
 # The generic resource algebra
 
 `docs/RESOURCES.md` §4: "Both tiers use the open resource algebra." This module
-is that algebra. It is imported by `Semantics`, which cannot state `SpecProcess`
-without it, and instantiated by `Process.Resource`, which builds network
-holdings and capacity credit on top.
+is that algebra. It is *intended* for a semantics layer that cannot state its
+process type without it, and for a process layer that builds network holdings and
+capacity credit on top — and neither exists. An earlier version of this sentence named
+both as present-tense importers; review checked and found the only importer is
+`Tests/Resource/CompositionSplit.lean`. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2
+records the consequence: `compatible` is the *partial* in partial commutative and the
+reason every law here is conditioned, and its only nontrivial instance is consumed by
+nothing, so no proof in this tree has discharged a nontrivial compatibility side
+condition.
+
+**The full extent, since a later review measured it and the paragraph above concedes
+only the importer question.** Of the twenty laws `OrderedPartialCommutativeResourceLaws`
+declares, three are ever projected — `combineCancel`, `alternativeIdem` and
+`alternativeLeCombine` — and all three uses are inside that one fixture; the other
+seventeen are discharged by `Counting.laws` and `Exclusive.laws` and read by nothing.
+`ResourceModel`, `HasResourceAxis`, `HasResourceLimit` and `ResourceLimit` have no
+values or instances anywhere under `Grass/` or `Tests/`. `Counting.algebra` is built
+and used by nothing, and `Exclusive` — the namespace that exists to show `compatible`
+is not a hedge — is used by nothing either.
+
+So this is a facility whose only safety property is that nothing calls it, which is
+the defect class this branch has spent eleven rounds finding elsewhere in the layer.
+It is kept rather than deleted because M7 and M9 are the stated consumers and
+rewriting a twenty-law bundle later is worse than carrying it; what is not acceptable
+is carrying it while a reader assumes it is load-bearing. Two audit blind spots hide
+the extent from the gates: `ResourceAlgebra.compatible` is invisible to
+`Tools/ConsultedAudit.py` because `StepPolicy.compatible` satisfies the same name,
+and **seven of the nine** lifecycle and exhaustion constructors are on
+`Tools/ReachabilityAudit.py`'s allowlist as declared-ahead-of-its-milestone.
+
+The other two are `ResourceExhaustionPolicy.profileSpecific` and
+`ResourceLifecyclePolicy.profileSpecific`, and they are worse off than the seven: they
+are on no allowlist and nothing reports them, because `FaultVisibility.profileSpecific`
+is built in `Tests/` and that tool matches short names. An allowlist entry at least
+leaves a record of a decision; same-name blindness leaves none, and entries for these
+two would be reported by `--inert` as suppressing nothing, so they are named here
+instead. This sentence said "every", which counted the constructors that leave a trace
+and not the two that do not.
 
 ## Reconciling two sketches
 
@@ -365,8 +400,11 @@ theorem laws : OrderedPartialCommutativeResourceLaws compatible combine alternat
   alternativeMonotone := fun a b c _ => by simp only [alternative]; omega
   alternativeLeCombine := fun a b _ => by simp only [alternative, combine]; omega
 
-/-- Two held exclusive resources are incompatible. This is the fact that makes
-`h2.credit.double` fail rather than silently double count. -/
+/-- Two held exclusive resources are incompatible. This is the fact a
+double-counting demand would fail against, and an earlier version of this line named
+a specific corpus obligation as though that obligation consumed it. None does — this
+namespace has no consumer at all, which `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2
+records. -/
 theorem not_compatible_of_both_held {a b : Nat} (ha : a ≠ 0) (hb : b ≠ 0) :
     ¬ compatible a b := by
   rintro (h | h)
