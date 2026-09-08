@@ -469,7 +469,7 @@ mod tests {
             object_format: "sha1".to_string(),
             product_review_from: oid(root),
             merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: "1.2.3-no-build-ever-pinned-this".to_string(),
         }
     }
 
