@@ -298,11 +298,12 @@ copied the wrong pattern from `FiniteMap`.
 absence is a band-3 item under §1 with a named blocker, not an oversight:
 
 **Read this table against §3.13 before trusting it.** Several rows say a thing is
-undemanded, and that is true, but §3.13 measures what "demand" currently means: one
-product module in the whole tree can reach `Vec`, and `Spikes/` is not a build
-target, so most of the consumers this section reasons about are prospective. The
-absences are still right — guessing at a law is worse than waiting — but "no
-consumer has demanded it" is weaker evidence here than it sounds.
+undemanded, and that is true, but §3.13 measures what "demand" currently means:
+of a hundred and five product modules, one can reach `Vec`, and `Spikes/` is not
+a build target, so most of the consumers this section reasons about are
+prospective. The absences are still right — guessing at a law is worse than
+waiting — but "no consumer has demanded it" is weaker evidence here than it
+sounds.
 
 
 | Absent | Blocked on |
@@ -701,20 +702,35 @@ cost it describes is real and permanent, and a future reader meeting the
 ambiguity error deserves to find the reason rather than rediscover the
 argument.
 
-### 3.13 Who actually consumes this library, measured
+### 3.13 Who consumes this library, and which laws anything depends on
 
 Every band judgement in §1 and every "no consumer has demanded it" in §3.4 rests
-on a model of who consumes this library. That model had never been measured. It
-has now, two ways, and both results are worth having in front of a reader before
-they trust a band judgement.
+on a model of who consumes this library. That model had never been measured.
 
-#### Reach: which product modules can see each module
+**Two measurements follow. They are independent, they count three different
+populations, and neither is evidence for the other.** The populations are
+*product reach* — modules under `Grass/` outside this library that can see a
+module; *fixture reach* — modules under `Tests/` that can; and *simp-lemma
+dependence* — laws some fixture goal is actually routed through. The first two
+are properties of the import graph and say nothing about proofs; the third is a
+property of the proofs and says nothing about who imports anything. An earlier draft of this
+section presented them as one story — "coverage tracks demand" — and `g-reviewer`
+refuted it from the section's own tables: `Bag` and `HostBytes` have zero product
+consumers and substantial fixture dependence, and `Vec` has fewer product
+consumers than `FiniteMap` and three times as many load-bearing laws. The claim
+was drawn from the two endpoints while the middle contradicted it. What each
+measurement establishes on its own is below; nothing here relates them.
+
+#### Measurement 1: reach, on the import graph
 
 Build the import graph over `Grass/**` and `Tests/**` and ask, for each module of
-this library, which modules under `Grass/` outside `Grass/Std/Logical/` can reach
-it transitively.
+this library, which modules under `Grass/` *outside* `Grass/Std/Logical/` can
+reach it transitively.
 
-| Module | Product modules that reach it | Fixtures that reach it |
+There are 105 such product modules and 89 fixture modules, so those are the
+denominators of both columns.
+
+| Module | Product modules that reach it (of 105) | Fixtures that reach it (of 89) |
 |---|---|---|
 | `Byte` | 16 | 32 |
 | `FiniteMap` | 6 | 12 |
@@ -724,27 +740,41 @@ it transitively.
 | `Order` | 0 | 1 |
 | `Bag` | 0 | 1 |
 
-**The flagship type has one product consumer.** `Grass/Build/Cache/Key.lean` is
-the only module under `Grass/` outside this library that can reach `Vec`, and it
-reaches it for one field's type. `Byte` and `FiniteMap` are the two modules
-carrying the library's weight, and neither is what §1 spends its argument on.
+**The flagship type has one product consumer, out of a hundred and five.**
+`Grass/Build/Cache/Key.lean` is the only module under `Grass/` outside this
+library that can reach `Vec`, and it reaches it for one field's type. `Byte` and
+`FiniteMap` are the only two of the seven that more than one product module can
+reach, and neither is what §1 spends its argument on.
 
-This is not a surprise once stated — `Spikes/` is not a build target, so the
-corpus §3.4 reasons about does not compile, and the consumers it describes are
-prospective. It is worth stating because "no consumer has demanded it" reads like
-a measurement of demand when it is mostly a measurement of the corpus not being
-built yet.
+This is explainable: `Spikes/` is not a build target, so the corpus §3.4 reasons
+about does not compile, and the consumers it describes are prospective. It is
+worth stating anyway, because "no consumer has demanded it" reads like a
+measurement of demand when it is largely a measurement of the corpus not being
+built yet. That is the whole of what this measurement supports. It says nothing
+about whether the laws are good, whether the fixtures are adequate, or what
+should be written next.
 
-`Bag`'s zero is a different thing and is a defect rather than a stage: the
-process layer still imports its own `Grass/Process/Bag.lean`, so the library copy
-has no consumer at all. §4.2 records that; `c-process:120` took the port.
+`Bag`'s zero is a defect rather than a stage: the process layer still imports its
+own `Grass/Process/Bag.lean`, so the library copy has no consumer at all. §4.2
+records it and `c-process:120` took the port.
 
-#### Coverage: which laws any fixture actually depends on
+*Procedure.* Collect every `^import <module>` line under `Grass/**` and
+`Tests/**`; a file's module name is its path with `/` replaced by `.` and `.lean`
+dropped. Then, for each library module, take the transitive closure. The table
+was computed twice by different traversals — a forward reachability test from
+every module, and a reverse breadth-first expansion from each library module over
+the inverted edge set — and the two agree on every cell. That is a check against a
+bug in one traversal, not against a wrong edge set: both read the same `import`
+lines, so a module reaching another by some means other than a direct `import`
+would be invisible to both.
 
-Strip one `@[simp]` at a time, rebuild the whole `Tests` target, and record
-whether anything breaks. Breaking means some fixture goal needed it.
+#### Measurement 2: attribute-deletion coverage, on the build
 
-| Module | Laws load-bearing for a fixture | Total `@[simp]` |
+For each `@[simp] theorem` in a module, delete the attribute, rebuild the whole
+`Tests` target, and record whether anything fails. Failure means some fixture
+goal reached that law.
+
+| Module | Laws a fixture depends on | Total `@[simp]` |
 |---|---|---|
 | `FiniteMap` | 8 | 9 |
 | `Vec` | 25 | 72 |
@@ -753,51 +783,150 @@ whether anything breaks. Breaking means some fixture goal needed it.
 | `Text` | 1 | 7 |
 | `Order` | **0** | 6 |
 
-`Byte` is absent from this table because it declares no `@[simp]` law at all: it
-is two `abbrev`s, and there is nothing to strip. That is also why it can be the
-most-reached module in the tree and contribute nothing here.
+`Byte` is absent because it declares no `@[simp]` law at all — it is two
+`abbrev`s, and there is nothing to delete. That is also how it can be the
+most-reached of the seven and contribute nothing here.
 
-Forty-nine of a hundred and twenty-nine. **The two tables tell the same story:**
-`FiniteMap` has the most product consumers and the highest coverage; `Order` has
-none of either. Coverage tracks demand, and there is not much demand yet.
+Forty-nine of a hundred and twenty-nine. **This is a statement about the
+fixtures, not about consumers.** It says that eighty laws currently have no
+fixture goal routed through them; it does not say they are wrong, unwanted, or
+unreachable, and it does not say anything about demand.
 
-**This is a list of questions, not a defect list, and the distinction is the
-whole point.** A law nothing exercises is not wrong — the kernel type-checked it —
-but it is unverified in the only sense a fixture can verify: no goal depends on
-it, so a law with the wrong orientation, the wrong side condition, or the wrong
-normal form would sit there looking correct. `Vec.get?_push` is the case that
-proves the concern is real: it was a genuine gap, `simp` could not close a
-read-after-push, and no fixture noticed until one was written to look for it.
+`Order`'s zero has a mechanical explanation, and it is checkable rather than
+plausible: four of its six laws are `empty` cases (`count_empty`,
+`pairwise_empty`, `findIdx?_empty`, `idxOf?_empty`), one is `pairwise_singleton`
+and one is `count_push`, while `Tests/Std/StableSort.lean` builds only concrete
+two- and three-element vectors, which `decide` and `rfl` reduce without ever
+reaching a base case.
 
-`Order`'s zero has a benign explanation that is worth checking rather than
-assuming: its six laws are all empty, singleton and `push` base cases, and
-`Tests/Std/StableSort.lean` works with concrete two- and three-element vectors
-that `decide` and `rfl` reduce without reaching a law. That explains the number
-without excusing it.
+#### What a law with no fixture behind it does and does not mean
 
-**What this section is not.** It is not an argument for writing fixtures against
-the other eighty laws. Fixtures written to raise this number would exercise the
-laws in the shape the fixture author chose, which is the shape the law is already
-stated in, and would measure nothing. The number goes up when a consumer arrives,
-which is §1's band rule working rather than failing.
+The kernel type-checked every one of the eighty, so none is *false*. What is
+unchecked is whether each is the *useful* statement: a law with the wrong
+orientation, the wrong side condition, or a normal form nothing else shares will
+type-check and then fail to fire, and nothing here would notice.
+`Vec.get?_push` is the case that shows the concern is not hypothetical — a real
+gap where `simp` could not close a read-after-push, found only when a goal was
+written to look for it.
 
-**Which tips these were taken on, since they are not all the same.** The `Vec`
-row was measured on `befcdb19`, the tip of `agent/c-stdlib/vec-literal-probe`,
-which carries two fixtures not yet on `main`; the other five rows and both
-reach tables were measured on `790a2455`, which has merged. The two extra
-fixtures close by `rfl` and so should reach no `simp` law, but that is a
-prediction, and the five laws they could plausibly touch — `length_fromList`,
-`toList_fromList`, `get?_fromList`, `toList_append`, `length_append` — were
-re-run on `main` and gave the same answers. The full 72-law run was not repeated.
+**Not every fixture would add evidence, and this is the criterion rather than a
+blanket refusal.** An earlier draft of this section said flatly that fixtures
+written against the remaining laws "would measure nothing", which is false as
+stated and was corrected by `g-reviewer`. Three shapes, of which one is empty:
 
-**Rerunning it.** Both measurements are scripts over the import graph and the
-build; neither is checked in, because a tool that takes forty minutes and is run
-once a milestone is not a gate. The method is stated above in enough detail to
-redo, and the first run of the coverage measurement was wrong in a way worth
-knowing about: matching a declaration by name without a trailing boundary is a
-prefix match, so `get?_push` also matched `get?_push_self` and three laws were
-reported as unmeasurable when each is declared exactly once. The number was 22
-before that was fixed and 25 after.
+- **Law-restating — adds nothing.** The goal is the law's own statement, closed
+  by `simp [thatLaw]`. It cannot fail unless the law fails to elaborate. It moves
+  the number in the table above without changing what is known.
+- **Consumer-shaped — worth writing.** A goal a caller would actually write,
+  left for `simp` to discharge by whatever route it finds. It can fail for a
+  reason its author did not encode, which is exactly how `Vec.get?_push` was
+  found: nobody set out to test that law, because it did not exist.
+- **Mutation-killing — worth writing, and stronger.** A goal that breaks when the
+  law is perturbed in a plausible wrong direction: orientation reversed, a bound
+  off by one, a side condition dropped. Measurement 2 is the crudest instance of
+  this — a single mutant per law, "delete the attribute" — and a mutation of the
+  *statement* would be strictly stronger evidence than anything reported here.
+
+So the eighty are laws for which no consumer-shaped or mutation-killing test
+exists. Writing the first kind against them would raise the number and leave that
+sentence just as true.
+
+#### A third number, from the gate that already runs
+
+The observation-coverage audit reports its own reach every time CI runs it, and
+the line is worth reading beside the two tables: *14 `Vec`-returning operations
+each carry a length law and a `get?` law; 9 exempt by clause (ii) or the alias
+clause; 44 declarations outside the bar's reach.* Those 44 are operations
+returning `Bool`, `Nat`, `Option` or `Prop`, which decision 6's clause (i) cannot
+be phrased over, and the audit counts and lists them rather than passing them
+silently.
+
+That is a different population again — declarations, not laws, and reachability
+of a *rule* rather than of a proof — so it is not addable to anything above. It
+is here because it is the same discipline: a checker that states what it cannot
+see is worth more than one that reports a clean run over a scope it never names.
+
+#### Reproducing measurement 2 exactly
+
+The first run of this measurement was wrong, and the way it was wrong is the
+reason this subsection exists. Matching a declaration by name without a trailing
+boundary is a prefix match: the needle for `get?_push` also matched
+`get?_push_self`, so three laws were reported unmeasurable when each is declared
+exactly once. The number was 22 before that was fixed and 25 after — an error in
+the direction that understated the fixtures' reach.
+
+The procedure, in full:
+
+1. **Extract.** Every match of `^@\[simp\] theorem ([A-Za-z_][A-Za-z0-9_'?!]*)`
+   over the module source, in file order. Multi-line and non-`theorem` `@[simp]`
+   declarations are out of scope and this module family has none.
+2. **Confirm the baseline.** `lake build Tests` must succeed before any edit. If
+   it does not, stop: every later result would be a false positive.
+3. **Isolate one law.** Match `@\[simp\] theorem <name>(?![A-Za-z0-9_'?!])` —
+   the negative lookahead is the fix above, and the character class is Lean's
+   identifier tail, so `\b` is wrong here. If the pattern matches other than
+   exactly once, skip the law and report it as skipped rather than guessing.
+4. **Mutate.** Replace that one match with `theorem <name>`, leaving the file
+   otherwise byte-identical. One law at a time; never two.
+5. **Classify.** `lake build Tests`, no timeout. Non-zero exit means the law is
+   depended upon; zero means it is not. No output parsing, so a failure for any
+   reason counts — which is conservative in the direction of over-reporting
+   dependence.
+6. **Restore.** Rewrite the original bytes and rebuild, unconditionally, before
+   the next law and on any error path.
+
+Runs must be serial. Two mutations live in one tree at once make every result
+after the first meaningless.
+
+#### The tip, and the per-law manifest
+
+Everything above was measured on `38a75bba`. The manifest below names every law
+on both sides of the line, so a rerun can be diffed against it rather than
+compared against a total.
+
+An earlier version of this section reported the `Vec` row from one tip and
+everything else from another, with five spot checks and a prediction covering the
+gap. `g-reviewer:114` was right that a prediction is not a measurement. The whole
+thing was re-run on one tip rather than argued: every module, every law, and the
+results are identical to the mixed-tip run down to the law names — which is
+evidence that the earlier numbers were right and is not a reason to have
+published them that way.
+
+**`Vec`** — 25 of 72.
+
+*Depended on:* `emptyCollection_eq_empty`, `default_eq_empty`, `length_fromList`, `get_eq_iff_get?_eq`, `length_push`, `get?_push`, `toList_empty`, `toList_append`, `length_append`, `empty_append`, `length_drop`, `take_zero`, `drop_zero`, `drop_drop`, `length_map`, `get?_map`, `get?_mapIdx`, `length_zipWith`, `foldl_push`, `foldr_push`, `foldr_cons`, `foldl_cons`, `not_mem_empty`, `forIn_eq_forIn_toList`, `flatten_singleton`.
+
+*Not depended on:* `toList_fromList`, `fromList_toList`, `get?_fromList`, `length_empty`, `get?_empty`, `length_singleton`, `get?_singleton_zero`, `length_replicate`, `length_ofFn`, `get?_ofFn`, `length_range`, `get?_range`, `length_set`, `get?_set_self`, `get?_push_self`, `pop?_empty`, `pop?_push`, `truncate_eq_take`, `length_truncate`, `clear_eq_empty`, `length_clear`, `append_empty`, `length_take`, `append_splitAt`, `take_append`, `drop_append`, `take_length`, `drop_length`, `isPrefix_refl`, `map_empty`, `map_singleton`, `map_push`, `length_mapIdx`, `foldl_empty`, `foldr_empty`, `mem_singleton`, `mem_append`, `mem_push`, `getElem_eq_get`, `getElem?_eq_get?`, `flatten_empty`, `sum_empty`, `sum_push`, `length_flatten`, `flatten_append`, `flatten_push`, `allNonEmpty_empty`.
+
+**`Bag`** — 10 of 23.
+
+*Depended on:* `empty_eq_zero`, `emptyCollection_eq_zero`, `add_zero`, `card_zero`, `card_singleton`, `card_cons`, `card_add`, `mem_cons`, `mem_singleton`, `mem_add`.
+
+*Not depended on:* `ofList_nil`, `ofList_cons`, `ofList_append`, `card_ofList`, `mem_ofList`, `zero_add`, `mem_zero`, `map_ofList`, `map_zero`, `map_cons`, `map_add`, `card_map`, `mem_map`.
+
+**`FiniteMap`** — 8 of 9.
+
+*Depended on:* `findValue_nil`, `findValue_cons_self`, `findValue_eraseKey_self`, `emptyCollection_eq_empty`, `lookup_empty`, `lookup_insert_self`, `lookup_erase_self`, `isEmpty_empty`.
+
+*Not depended on:* `eraseKey_nil`.
+
+**`HostBytes`** — 5 of 12.
+
+*Depended on:* `ofUInt8_toUInt8`, `toUInt8_ofUInt8`, `getElem?_toHostBytes`, `get?_ofHostBytes`, `ofHostBytes_toHostBytes`.
+
+*Not depended on:* `toNat_ofNat`, `ofNat_toNat`, `size_toHostBytes`, `length_ofHostBytes`, `toHostBytes_ofHostBytes`, `ofHostBytes_append`, `toHostBytes_append`.
+
+**`Order`** — 0 of 6.
+
+*Depended on:* (none).
+
+*Not depended on:* `count_empty`, `count_push`, `pairwise_empty`, `pairwise_singleton`, `findIdx?_empty`, `idxOf?_empty`.
+
+**`Text`** — 1 of 7.
+
+*Depended on:* `decode_utf8`.
+
+*Not depended on:* `length_utf8`, `utf8_empty`, `isValidUTF8_utf8`, `decode?_utf8`, `utf8_decode`, `utf8_append`.
 
 ## 4. S2 — Custody consolidation
 
