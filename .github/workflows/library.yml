@@ -147,7 +147,12 @@ jobs:
 
       - name: Install the pinned toolchain
         run: |
-          curl -sSfL -o elan-init.exe https://github.com/leanprover/elan/releases/download/v4.2.3/elan-init-x86_64-pc-windows-msvc.exe
+          # elan publishes one Windows asset and it is a zip containing
+          # `elan-init.exe`; there has never been a bare
+          # `elan-init-x86_64-pc-windows-msvc.exe` to download, so this step
+          # was a guaranteed 404 and this job has never run.
+          curl -sSfL -o elan-init.zip https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-pc-windows-msvc.zip
+          unzip -q elan-init.zip
           ./elan-init.exe -y --default-toolchain none
           echo "$USERPROFILE/.elan/bin" >> "$GITHUB_PATH"
 
