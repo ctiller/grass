@@ -14,7 +14,7 @@ namespace Grass.Construct
 open Grass.Core
 open Grass.Construct.Layout
 
-universe u
+universe u u₁ u₂
 
 /-- Consumer-supplied compatibility rule between object representations and
 physical locations. -/
@@ -109,6 +109,14 @@ def fieldsCompatible (placement : Placement layout policy) : Bool :=
 def FieldsCompatible (placement : Placement layout policy) : Prop :=
   PairsCompatible policy layout.fields placement.fields
 
+/-- Name-indexed compatibility projected from the exact positional placement
+checker for use by lowering consumers. -/
+def FieldsCompatibleByName (placement : Placement layout policy) : Prop :=
+  ∀ placed ∈ layout.fields,
+    ∃ selected ∈ placement.fields,
+      selected.name = placed.field.name ∧
+        policy.accepts placed.field.repr selected.location = true
+
 @[simp] theorem fieldsCompatible_eq_true_iff
     (placement : Placement layout policy) :
     placement.fieldsCompatible = true ↔ placement.FieldsCompatible := by
@@ -146,6 +154,119 @@ theorem fieldNamesExact_of_wellFormed (placement : Placement layout policy)
 theorem fieldsCompatible_of_wellFormed (placement : Placement layout policy)
     (h : placement.WellFormed) : placement.FieldsCompatible :=
   (wellFormed_iff placement).mp h |>.2
+
+/-- A valid placement inherits nominal uniqueness from its checked layout. -/
+theorem fieldNamesNodup_of_wellFormed (placement : Placement layout policy)
+    (closed : placement.WellFormed) : placement.fieldNames.Nodup := by
+  rw [placement.fieldNamesExact_of_wellFormed closed]
+  exact layout.fieldNamesNodup_of_wellFormed
+    (placement.layoutWellFormed_of_wellFormed closed)
+
+private theorem eq_of_mem_of_mem_of_map_nodup
+    {α : Type u₁} {β : Type u₂} (key : α → β)
+    {items : List α} {left right : α}
+    (unique : (items.map key).Nodup)
+    (leftMem : left ∈ items) (rightMem : right ∈ items)
+    (sameKey : key left = key right) : left = right := by
+  induction items with
+  | nil => simp at leftMem
+  | cons head tail ih =>
+      rw [List.map_cons, List.nodup_cons] at unique
+      rw [List.mem_cons] at leftMem rightMem
+      rcases leftMem with rfl | leftMem
+      · rcases rightMem with rfl | rightMem
+        · rfl
+        · exfalso
+          apply unique.1
+          rw [sameKey]
+          exact List.mem_map.mpr ⟨right, rightMem, rfl⟩
+      · rcases rightMem with rfl | rightMem
+        · exfalso
+          apply unique.1
+          rw [← sameKey]
+          exact List.mem_map.mpr ⟨left, leftMem, rfl⟩
+        · exact ih unique.2 leftMem rightMem
+
+/-- `Placement.field_eq_of_mem_of_mem_of_name_eq` proves that two entries in a
+valid placement with the same logical name are the same selected location. -/
+theorem field_eq_of_mem_of_mem_of_name_eq
+    (placement : Placement layout policy) (left right : FieldLocation Location)
+    (closed : placement.WellFormed)
+    (leftMem : left ∈ placement.fields) (rightMem : right ∈ placement.fields)
+    (sameName : left.name = right.name) : left = right := by
+  exact eq_of_mem_of_mem_of_map_nodup FieldLocation.name
+    (placement.fieldNamesNodup_of_wellFormed closed) leftMem rightMem sameName
+
+/-- Under `Placement.WellFormed`, nominal lookup returns the exact authored
+field-location entry already held by the caller. -/
+theorem lookup?_eq_some_of_mem
+    (placement : Placement layout policy) (name : Name)
+    (field : FieldLocation Location) (closed : placement.WellFormed)
+    (member : field ∈ placement.fields) (hasName : field.name = name) :
+    placement.lookup? name = some field := by
+  have nameMember : name ∈ placement.fieldNames := by
+    simp [fieldNames]
+    exact ⟨field, member, hasName⟩
+  obtain ⟨found, foundLookup⟩ := placement.locationForName name nameMember
+  have foundMem := mem_of_lookup? foundLookup
+  have foundName := name_of_lookup? foundLookup
+  have foundEq : found = field :=
+    placement.field_eq_of_mem_of_mem_of_name_eq found field closed
+      foundMem member (foundName.trans hasName.symm)
+  simpa [foundEq] using foundLookup
+
+private theorem pairsCompatible_by_name
+    (policy : LocationPolicy profile Location)
+    (placed : List (PlacedField profile))
+    (selected : List (FieldLocation Location))
+    (namesExact : selected.map FieldLocation.name =
+      placed.map fun field => field.field.name)
+    (compatible : PairsCompatible policy placed selected) :
+    ∀ field ∈ placed,
+      ∃ location ∈ selected,
+        location.name = field.field.name ∧
+          policy.accepts field.field.repr location.location = true := by
+  induction placed generalizing selected with
+  | nil => simp
+  | cons head tail ih =>
+      cases selected with
+      | nil => simp at namesExact
+      | cons selectedHead selectedTail =>
+          simp only [List.map_cons, List.cons.injEq] at namesExact
+          simp only [PairsCompatible] at compatible
+          intro field member
+          rw [List.mem_cons] at member
+          rcases member with rfl | member
+          · exact ⟨selectedHead, by simp, namesExact.1, compatible.1⟩
+          · rcases ih selectedTail namesExact.2 compatible.2 field member with
+              ⟨location, locationMem, nameExact, accepted⟩
+            exact ⟨location, by simp [locationMem], nameExact, accepted⟩
+
+/-- `Placement.fieldsCompatibleByName_of_wellFormed` exposes pointwise policy
+acceptance by logical field identity rather than positional list recursion. -/
+theorem fieldsCompatibleByName_of_wellFormed
+    (placement : Placement layout policy) (closed : placement.WellFormed) :
+    placement.FieldsCompatibleByName := by
+  apply pairsCompatible_by_name policy layout.fields placement.fields
+  · exact placement.fieldNamesExact_of_wellFormed closed
+  · exact placement.fieldsCompatible_of_wellFormed closed
+
+/-- A successful nominal lookup in a valid placement satisfies the consumer's
+location policy for the corresponding authored layout field. -/
+theorem accepts_of_layout_mem_of_lookup
+    (placement : Placement layout policy) (closed : placement.WellFormed)
+    (placed : PlacedField profile) (placedMem : placed ∈ layout.fields)
+    (selected : FieldLocation Location)
+    (found : placement.lookup? placed.field.name = some selected) :
+    policy.accepts placed.field.repr selected.location = true := by
+  rcases placement.fieldsCompatibleByName_of_wellFormed closed placed placedMem with
+    ⟨accepted, acceptedMem, acceptedName, policyAccepts⟩
+  have selectedMem := mem_of_lookup? found
+  have selectedName := name_of_lookup? found
+  have selectedEq : selected = accepted :=
+    placement.field_eq_of_mem_of_mem_of_name_eq selected accepted closed
+      selectedMem acceptedMem (selectedName.trans acceptedName.symm)
+  simpa [selectedEq] using policyAccepts
 
 /-- Every logical field in a well-formed placement has a concrete selected
 physical location. -/

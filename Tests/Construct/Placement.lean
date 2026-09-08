@@ -56,8 +56,20 @@ example : selected.fieldNames = layout.fieldNames :=
   selected.fieldNamesExact_of_wellFormed (by decide)
 example : selected.FieldsCompatible :=
   selected.fieldsCompatible_of_wellFormed (by decide)
+example : selected.FieldsCompatibleByName :=
+  selected.fieldsCompatibleByName_of_wellFormed (by decide)
+example : selected.fieldNames.Nodup :=
+  selected.fieldNamesNodup_of_wellFormed (by decide)
 example : ∃ field, selected.lookup? ⟨"tag"⟩ = some field :=
   selected.locationForLayoutField (by decide) ⟨"tag"⟩ (by decide)
+
+example : selected.lookup? ⟨"value"⟩ = some ⟨⟨"value"⟩, ⟨1, 8, 8⟩⟩ :=
+  selected.lookup?_eq_some_of_mem ⟨"value"⟩ ⟨⟨"value"⟩, ⟨1, 8, 8⟩⟩
+    (by decide) (by simp [selected]) rfl
+
+example : policy.accepts word (Location.mk 1 8 8) = true :=
+  selected.accepts_of_layout_mem_of_lookup (by decide) (field "value" word 4)
+    (by simp [layout, field]) ⟨⟨"value"⟩, ⟨1, 8, 8⟩⟩ (by decide)
 
 def missing : Placement layout policy := {
   selected with fields := [⟨⟨"tag"⟩, ⟨0, 1, 1⟩⟩]
