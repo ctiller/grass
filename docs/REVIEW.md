@@ -281,12 +281,15 @@ their non-normative or not-yet-connected status can be stated honestly.
 A static documentation audit is ordinary tooling, not semantic authority. It
 may cheaply enforce an explicitly syntactic contract such as “a strong-claim
 sentence carries a resolvable evidence reference”; it may not report that the
-referenced evidence proves the English claim. The existing
-`Tools/DocstringAudit.py` is ratified here as a repository-wide, deliberately
+referenced evidence proves the English claim. The `docstring-audit` binary in
+`tools/grass-tools` is ratified here as a repository-wide, deliberately
 under-reporting check for a machine-recognizable subset of the vocabulary above.
-It predates this checklist and remains authoritative only for its documented
-syntactic contract and governed `Grass/**/*.lean` paths; its green result is not
-proof that no comment overclaims.
+It predates this checklist in its former Python implementation and remains
+authoritative only for its documented syntactic contract and governed
+`Grass/**/*.lean` paths; its green result is not proof that no comment
+overclaims. Replacing its implementation does not silently change that contract;
+the compatibility and review-record rules in
+[AGENT_REVIEW.md](AGENT_REVIEW.md) still apply.
 
 Before a new audit, or an expansion of an existing audit's defect class or
 governed paths, becomes a repository-wide mandatory gate, its proposal requires

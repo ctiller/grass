@@ -133,6 +133,12 @@ thread_local! {
 /// prompt reading a terminal that is not there. Killing only the parent
 /// leaves the real culprit running and holding the pipe, so the wait never
 /// ends.
+///
+/// Correct for *any* pid the caller can signal, with no precondition on how
+/// it was spawned. That is not a detail: the unix half reaches the tree
+/// through the child's process group, which only works when the child leads
+/// one, and a caller that did not arrange that used to get a silent no-op
+/// instead of a kill (see the unix branch below).
 fn kill_process_tree(pid: u32) {
     #[cfg(test)]
     KILLS_REQUESTED.with(|c| c.set(c.get() + 1));
@@ -157,10 +163,34 @@ fn kill_process_tree(pid: u32) {
     }
     #[cfg(unix)]
     {
-        // The child was put in its own process group (see `spawn_git`), so a
-        // negative pid signals the whole group in one call.
+        // A negative pid signals a whole *process group*, which is how this
+        // reaches the transport children `git` spawned -- the unix analogue
+        // of `taskkill /T` above. `spawn_and_wait` puts every child it
+        // starts into its own group (`process_group(0)`) precisely so that
+        // group is exactly this subprocess and its descendants.
+        //
+        // But `-pid` names a group only when `pid` *leads* one, and nothing
+        // in this function's signature says a caller arranged that. Where
+        // one did not, `kill(-pid, ...)` matches no process at all: it
+        // returns -1/`ESRCH` and kills nothing, silently, because the return
+        // value was discarded. The deadline above then reported a kill it
+        // had never performed and the child ran on holding its pipe --
+        // exactly the failure the deadline exists to prevent. Windows never
+        // had this: `taskkill /T` walks the tree from the pid itself and
+        // needs no cooperation from the spawn site.
+        //
+        // So: group first, and the bare pid only if the group signal reached
+        // nothing. The order and the condition both matter. Signalling
+        // `pid` alone reaches the direct child but not its grandchildren, so
+        // it is a strictly weaker kill that must never *replace* the group
+        // signal -- only stand in when that killed nothing at all. `kill`
+        // returns 0 if it signalled at least one process, and a group whose
+        // id is `pid` necessarily contains `pid` as its leader, so a zero
+        // return means the strong form already did the job.
         unsafe {
-            libc_kill(-(pid as i32), 9);
+            if libc_kill(-(pid as i32), 9) != 0 {
+                libc_kill(pid as i32, 9);
+            }
         }
     }
 }
@@ -1321,6 +1351,17 @@ mod outer_tests {
     /// deadline *invokes* it) is the test below. Splitting them is deliberate:
     /// an earlier single test asserted only the error text and a bounded wall
     /// clock, both of which stay true when the kill does nothing at all.
+    ///
+    /// The child here is spawned plainly, with no process group of its own,
+    /// and that is now load-bearing rather than incidental. On unix
+    /// `kill_process_tree` reaches the tree via `kill(-pid, ...)`, which
+    /// signals nothing at all unless `pid` leads a group; this child does
+    /// not, so before the fallback in `kill_process_tree` existed the kill
+    /// returned `ESRCH`, killed nothing, and this test failed on every unix
+    /// host -- the whole timeout machinery quietly terminating no process.
+    /// It passed on Windows throughout, because `taskkill /T` works from the
+    /// pid regardless. The grandchild test below covers the other direction,
+    /// that the weaker fallback did not displace the group kill.
     #[test]
     fn kill_process_tree_actually_terminates_the_child() {
         let mut child = blocking_command()
@@ -1350,6 +1391,74 @@ mod outer_tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
+    }
+
+    /// The reason `kill_process_tree` signals a process *group* at all, and
+    /// the guard on the fallback added for a non-group-leading child: a
+    /// grandchild must die too.
+    ///
+    /// This is the case that actually matters in production. `git fetch` and
+    /// `git push` hand the transport to a child of their own, and that
+    /// grandchild is normally the one blocked on a dead socket or an
+    /// unanswerable credential prompt. `spawn_and_wait` therefore spawns
+    /// with `process_group(0)`, which this test reproduces exactly; if the
+    /// pid fallback had been written to *replace* the group signal rather
+    /// than to stand in when it reached nothing, the direct child would die
+    /// and the grandchild would survive, and no other test would notice.
+    ///
+    /// Unix-only, and it does not run on the Windows host this was written
+    /// on: `process_group` is a unix `CommandExt` method and process groups
+    /// have no Windows analogue. The equivalent Windows reach is `taskkill
+    /// /T`, exercised by the test above.
+    #[cfg(unix)]
+    #[test]
+    fn kill_process_tree_reaches_a_grandchild_of_a_group_leading_child() {
+        use std::io::BufRead;
+        use std::os::unix::process::CommandExt;
+
+        // A shell that backgrounds a grandchild, reports its pid, and then
+        // waits. Job control is off in a non-interactive shell, so the
+        // grandchild stays in the shell's own process group -- which is the
+        // group `process_group(0)` just created, and therefore the group
+        // `kill_process_tree` will signal.
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 30 & echo $!; wait"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+
+        let mut line = String::new();
+        std::io::BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        let grandchild: i32 = line.trim().parse().unwrap_or_else(|e| {
+            panic!("the fixture must report its grandchild's pid, got {line:?}: {e}")
+        });
+
+        // Signal 0 checks for existence without delivering anything -- the
+        // grandchild is not our child, so `try_wait` cannot be used on it.
+        let alive = |pid: i32| unsafe { libc_kill(pid, 0) == 0 };
+        assert!(
+            alive(grandchild),
+            "the fixture's grandchild exited on its own; it cannot demonstrate a kill"
+        );
+
+        kill_process_tree(child.id());
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while alive(grandchild) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the grandchild was still running 10s after kill_process_tree, so the kill \
+                 reached only the direct child"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        // Reap the direct child so it does not linger as a zombie.
+        let _ = child.wait();
     }
 
     /// `g-reviewer:29`: an unbounded subprocess can hang every agent-bus

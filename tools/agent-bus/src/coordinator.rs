@@ -37,6 +37,25 @@ pub struct RejectedCandidate {
 pub struct DrainResult {
     pub published: Vec<EventId>,
     pub rejected: Vec<RejectedCandidate>,
+    /// Candidates this drain neither published nor rejected, and left in the
+    /// outbox exactly as it found them.
+    ///
+    /// A rejection is a claim this host is entitled to make: the candidate
+    /// was understood and found wanting, and the receipt says so durably. A
+    /// hold is the opposite -- this host could not understand the candidate
+    /// well enough to judge it, or could not write down its judgement, so it
+    /// declines to be the one that destroys it. Both are reported; neither
+    /// stops the rest of the queue.
+    pub held: Vec<HeldCandidate>,
+}
+
+/// One candidate left in the outbox untouched, and why. Held candidates are
+/// offered again on the next drain, so a newer binary -- or the same one on
+/// a filesystem that will accept a write -- can still publish them.
+#[derive(Debug, Clone)]
+pub struct HeldCandidate {
+    pub path: String,
+    pub reason: String,
 }
 
 /// Drains every pending candidate in `agent`'s local outbox, in submission
@@ -102,9 +121,23 @@ pub fn drain_outbox(
     let epoch = crate::registry::read_epoch(repo, &registry_tip)?;
     crate::registry::authorize_stream_write(&epoch, agent, host, coordinator_custody_epoch)?;
 
-    let pending = crate::outbox::list_pending(git_common_dir, agent)?;
+    let listing = crate::outbox::list_pending(git_common_dir, agent)?;
+    // Entries this host could not read at all are reported and left where
+    // they are; they must not stop the readable ones from being drained.
+    let mut held: Vec<HeldCandidate> = listing
+        .unreadable
+        .iter()
+        .map(|u| HeldCandidate {
+            path: u.path.display().to_string(),
+            reason: u.reason.clone(),
+        })
+        .collect();
+    let pending = listing.pending;
     if pending.is_empty() {
-        return Ok(DrainResult::default());
+        return Ok(DrainResult {
+            held,
+            ..DrainResult::default()
+        });
     }
 
     // Fetch first, before reading anything else, when the batch needs it --
@@ -169,7 +202,56 @@ pub fn drain_outbox(
     let mut envelopes = Vec::with_capacity(pending.len());
     let mut rejected = Vec::new();
     for (path, candidate) in &pending {
-        let data = candidate.typed_data()?;
+        // A candidate whose payload will not parse is rejected with a durable
+        // receipt, exactly like every other bad candidate in this loop --
+        // never propagated with `?`.
+        //
+        // It used to abort the whole drain. `g-design` submitted an
+        // `issue.opened` whose `evidence` array held a prose sentence where
+        // an event id belongs; that one typo held **77** urgent candidates
+        // behind it, none of which had anything wrong with them, and no
+        // receipt was written for any of them -- so from the author's side
+        // `submit` had returned success 77 times and the queue simply stopped
+        // moving with nothing to say why.
+        //
+        // The whole point of per-candidate receipts is that one bad event
+        // costs its author a retry rather than costing the fleet its queue.
+        // Parsing is the first thing this loop does, so the one failure that
+        // was not isolated was the one guaranteed to hit first.
+        //
+        // A kind this binary has never heard of is held, not rejected. That
+        // is the one parse failure that says nothing about the candidate:
+        // the author may be running a newer binary that knows the kind
+        // perfectly well, and rejecting it here would delete a valid event
+        // and hand its author a receipt blaming them for a typo they did not
+        // make. Holding costs a line of output per drain and keeps the event
+        // publishable by whichever coordinator can understand it.
+        if !crate::events::EventData::all_kinds().contains(&candidate.kind.as_str()) {
+            held.push(HeldCandidate {
+                path: path.display().to_string(),
+                reason: format!(
+                    "kind {:?} is unknown to this binary, so it is held for a coordinator                      that knows it rather than rejected as malformed",
+                    candidate.kind
+                ),
+            });
+            continue;
+        }
+        let data = match candidate.typed_data() {
+            Ok(d) => d,
+            Err(e) => {
+                let reason = format!("candidate payload does not parse: {e}");
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
+                    reason,
+                    &mut rejected,
+                    &mut held,
+                );
+                continue;
+            }
+        };
         // Gate 17: fail closed rather than validate a currency-sensitive
         // candidate against a stale cached cut just because the fresh probe
         // above failed -- reject it outright, with the fetch's own error,
@@ -181,11 +263,15 @@ pub fn drain_outbox(
                     "requires a current-as-of-remote-probe view (gate 17) but the fetch failed: \
                      {fetch_err}"
                 );
-                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
                     reason,
-                });
+                    &mut rejected,
+                    &mut held,
+                );
                 continue;
             }
         }
@@ -204,11 +290,15 @@ pub fn drain_outbox(
         if let crate::events::EventData::ReviewMergeAuthorized(d) = &data {
             if let Err(e) = verify_review_merge_authorized(repo, remote, &state, agent, d) {
                 let reason = e.to_string();
-                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
                     reason,
-                });
+                    &mut rejected,
+                    &mut held,
+                );
                 continue;
             }
         }
@@ -226,6 +316,28 @@ pub fn drain_outbox(
         if let crate::events::EventData::ReviewMergeReconciled(d) = &data {
             if let Err(e) = verify_review_merge_reconciled(repo, remote, &state, d) {
                 let reason = e.to_string();
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
+                    reason,
+                    &mut rejected,
+                    &mut held,
+                );
+                continue;
+            }
+        }
+        // Gate 12's "audience resolution is exact". `apply` deliberately
+        // does not check it -- see `apply_broadcast_published` -- because
+        // the state it resolves against is mutable, unpinned, and routinely
+        // not yet applied when the broadcast is replayed. Here it is: this
+        // is the publishing host, `state` is its freshly-fetched reduction,
+        // and the publisher is claiming a snapshot it computed from exactly
+        // this view moments ago.
+        if let crate::events::EventData::BroadcastPublished(d) = &data {
+            if let Err(e) = verify_broadcast_published(&state, d) {
+                let reason = e.to_string();
                 reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
                 rejected.push(RejectedCandidate {
                     kind: candidate.kind.clone(),
@@ -233,6 +345,51 @@ pub fn drain_outbox(
                 });
                 continue;
             }
+        }
+        if let Err(e) = verify_declared_role_matches_roster(&state, agent, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
+        if let Err(e) = verify_schema_activation_advances(&state, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
+        if let Err(e) = verify_author_active(&state, agent, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
+        if let Err(e) = verify_participants_active(&state, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
+        if let Err(e) = verify_predecessor_not_contested(&state, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
         }
         // AGENT_BUS_SCHEMA.md section 8's "inherited_findings equals every
         // still-open finding". `apply` checks only that no finding is named
@@ -244,20 +401,28 @@ pub fn drain_outbox(
         // from exactly this view moments ago.
         if let Err(e) = verify_review_reassignment_inherits_open_findings(&state, &data) {
             let reason = e.to_string();
-            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-            rejected.push(RejectedCandidate {
-                kind: candidate.kind.clone(),
+            record_rejection(
+                git_common_dir,
+                agent,
+                path,
+                candidate,
                 reason,
-            });
+                &mut rejected,
+                &mut held,
+            );
             continue;
         }
         if let Err(e) = verify_object_ids_resolve(repo, &data) {
             let reason = e.to_string();
-            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-            rejected.push(RejectedCandidate {
-                kind: candidate.kind.clone(),
+            record_rejection(
+                git_common_dir,
+                agent,
+                path,
+                candidate,
                 reason,
-            });
+                &mut rejected,
+                &mut held,
+            );
             continue;
         }
         // A frontier this host cannot build rejects *this* candidate, with a
@@ -278,11 +443,15 @@ pub fn drain_outbox(
             Ok(observed) => observed,
             Err(e) => {
                 let reason = e.to_string();
-                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
                     reason,
-                });
+                    &mut rejected,
+                    &mut held,
+                );
                 continue;
             }
         };
@@ -300,11 +469,25 @@ pub fn drain_outbox(
                 next_seq += 1;
             }
             Err(e) => {
-                reject_candidate(git_common_dir, agent, path, candidate, &e.to_string())?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
-                    reason: e.to_string(),
-                });
+                // This arm is the last one, and it was the one left behind.
+                //
+                // The other eight rejection paths were routed through
+                // `record_rejection`, but `dry_run`'s -- the final semantic
+                // rejection, and the one every well-formed-but-invalid
+                // candidate actually reaches -- still propagated a receipt
+                // write failure with `?`, aborting the whole drain and
+                // leaving every later valid candidate unpublished. Exactly
+                // the outage the rest of the change exists to remove, still
+                // reachable through the busiest door.
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
+                    e.to_string(),
+                    &mut rejected,
+                    &mut held,
+                );
             }
         }
     }
@@ -346,6 +529,7 @@ pub fn drain_outbox(
     Ok(DrainResult {
         published,
         rejected,
+        held,
     })
 }
 
@@ -353,6 +537,43 @@ pub fn drain_outbox(
 /// alongside the reason, to a `rejected/` receipt in the same outbox
 /// directory -- durable local evidence the author (or a human) can inspect,
 /// without it blocking any later candidate's contiguous sequence.
+/// Rejects `candidate` and records the outcome, without ever failing the
+/// drain.
+///
+/// `reject_candidate` writes to the filesystem, and every call site used to
+/// propagate that write's failure with `?`. That made the whole
+/// per-candidate rejection design conditional on a write succeeding: a
+/// read-only outbox directory, a full disk, or a lock on the receipt path
+/// turned *every* rejection arm back into the whole-drain abort this loop
+/// exists to avoid.
+///
+/// When the receipt cannot be written the candidate is held rather than
+/// removed. Removing it is only safe because the receipt preserves it; with
+/// no receipt, removal would be the silent discard the module contract
+/// forbids.
+fn record_rejection(
+    git_common_dir: &Path,
+    agent: &Agent,
+    path: &Path,
+    candidate: &crate::outbox::Candidate,
+    reason: String,
+    rejected: &mut Vec<RejectedCandidate>,
+    held: &mut Vec<HeldCandidate>,
+) {
+    match reject_candidate(git_common_dir, agent, path, candidate, &reason) {
+        Ok(()) => rejected.push(RejectedCandidate {
+            kind: candidate.kind.clone(),
+            reason,
+        }),
+        Err(e) => held.push(HeldCandidate {
+            path: path.display().to_string(),
+            reason: format!(
+                "would be rejected ({reason}), but the receipt could not be written, so the candidate is held rather than discarded: {e}"
+            ),
+        }),
+    }
+}
+
 fn reject_candidate(
     git_common_dir: &Path,
     agent: &Agent,
@@ -564,10 +785,28 @@ fn verify_review_merge_authorized(
     if chain.current_nomination != d.nomination {
         return Ok(());
     }
-    // The verifying host must also be on the pinned engine: reconstructing
-    // the candidate below with a different ORT version would disagree with a
-    // perfectly honest reviewer and reject a valid authorization.
-    crate::bootstrap::require_pinned_merge_engine(state)?;
+    // AGENT_BUS_SCHEMA.md section 10: an unresolved issue whose `blocks` set
+    // names an event in the active nomination chain blocks authorization.
+    //
+    // This is the publication-time verdict, and publication time is the only
+    // place it can honestly be reached. `apply` cannot ask it: reduction
+    // orders events by `refs`, never by `observed`, so during replay an
+    // authorization is routinely applied before an issue its own frontier
+    // saw, and any answer there depends on the lexicographic accident of two
+    // agent names -- while a host that had fetched the issue would be unable
+    // to reduce the bus at all. Here there is no replay order to be at the
+    // mercy of: `state` is this host's fully-reduced view, freshly fetched by
+    // `drain_outbox`, and the question "can I already see that this chain is
+    // blocked?" has one answer.
+    //
+    // Cheap, and deliberately ahead of the candidate reconstruction below,
+    // which shells out to Git repeatedly.
+    if let Some(blocking) = crate::apply::blocking_issue_for_chain(state, chain) {
+        return Err(invalid(format!(
+            "issue {blocking} is unresolved and blocks nomination chain {}; resolve or reject it before authorizing the merge",
+            d.nomination
+        )));
+    }
     let expected_authors: std::collections::BTreeSet<Agent> =
         chain.current_request.authors.iter().cloned().collect();
     crate::merge_candidate::verify_authorship(
@@ -577,6 +816,17 @@ fn verify_review_merge_authorized(
         d.previous_main.as_str(),
         d.reviewed_commit.as_str(),
     )?;
+    // The verifying host must also be on the pinned engine: reconstructing
+    // the candidate below with a different ORT version would disagree with a
+    // perfectly honest reviewer and reject a valid authorization.
+    //
+    // Deliberately here rather than at the top of this gate. Nothing above is
+    // engine-dependent -- `blocking_issue_for_chain` reads reduced state and
+    // `verify_authorship` reads commit trailers through libgit2 -- so an
+    // authorization that is wrong about its *authors* must say so, not blame
+    // this host's git. Same reasoning as the `merge_engine_epoch` check at the
+    // end of this function, and see `require_pinned_merge_engine`'s own doc.
+    crate::bootstrap::require_pinned_merge_engine(state)?;
     let reconstructed = crate::merge_candidate::reconstruct_candidate(
         repo,
         d.previous_main.as_str(),
@@ -602,6 +852,24 @@ fn verify_review_merge_authorized(
         return Err(invalid(format!(
             "candidate tag refs/tags/{tag} is not fetchable from {remote}; other agents could \
              not verify this merge"
+        )));
+    }
+    // Checked last, after this gate's own reconstruction work, so a
+    // candidate that is wrong in a more specific way still says so.
+    // `apply` checks only that the epoch names a real activation, which is
+    // all it can soundly do -- a later `merge_engine.activated` moves
+    // `current_merge_engine_epoch` and this authorization neither references
+    // nor need have observed it, so asking there made reduction itself
+    // order-dependent. Here the state is this host's fully-reduced view.
+    if Some(&d.merge_engine_epoch) != state.current_merge_engine_epoch.as_ref() {
+        return Err(invalid(format!(
+            "merge_engine_epoch {} is not the currently selected merge engine epoch ({}); re-run the merge on the current engine before authorizing",
+            d.merge_engine_epoch,
+            state
+                .current_merge_engine_epoch
+                .as_ref()
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "none selected yet".to_string())
         )));
     }
     Ok(())
@@ -657,6 +925,33 @@ fn verify_review_merge_reconciled(
         Ok(crate::events::EventData::ReviewMergeAuthorized(_)) => {}
         _ => return Ok(()),
     }
+    // A receipt already exists for this chain and this host can see it.
+    //
+    // `apply` refuses only the author's *own* duplicate, which is all it can
+    // soundly do: a reviewer's `review.merged` and a coordinator's
+    // `review.merge_reconciled` come from different agents who need not have
+    // observed each other, so refusing that pairing during replay would make
+    // reduction depend on arrival order. Recording both is correct there --
+    // `audit_main` asks whether *any* receipt names the commit.
+    //
+    // But publishing a second one when this host can already see the first
+    // is a caller doing something incoherent, and here there is no ordering
+    // question: `state` is this host's fully-reduced view. Reconciliation
+    // exists for a reviewer that went quiet, so a chain that already carries
+    // a receipt is precisely the case that does not need reconciling.
+    if let Ok(crate::events::EventData::ReviewMergeAuthorized(auth)) = auth_env.typed_data() {
+        if let Some(chain) = state
+            .review_chain_by_nomination
+            .get(&auth.nomination)
+            .and_then(|root| state.reviews.get(root))
+        {
+            if let Some(existing) = chain.merged.iter().chain(chain.reconciled.iter()).next() {
+                return Err(invalid(format!(
+                    "this chain already carries receipt {existing}; reconciliation records a merge nobody receipted, not a second receipt for one already recorded"
+                )));
+            }
+        }
+    }
     const MAIN_PROBE_REF: &str = "refs/agent-bus/reconcile-main-probe";
     let fetch = crate::gitrepo::fetch_refspecs(
         repo,
@@ -683,6 +978,150 @@ fn verify_review_merge_reconciled(
     Ok(())
 }
 
+/// The *author* of an event whose authority depends on being a live
+/// coordinator must still be active.
+///
+/// The sibling `verify_participants_active` below relocated exactly this
+/// question for the agents an event *names*; this is the same relocation
+/// for the agent that *writes* it, and it exists because
+/// `apply::require_bootstrap_coordinator` can no longer ask. `active()`
+/// reads `retired`, which only ever gets set by *another* coordinator's
+/// `agent.retired` on a *different* stream -- causally unordered against
+/// this event, so during replay the answer depended on fetch order and a
+/// retired coordinator's own back-history became fatal on some hosts and
+/// harmless on others. Here `state` is the publishing host's fully-reduced
+/// view, so there is one answer, and refusing costs nothing recoverable:
+/// the author resubmits after `agent.resumed`.
+///
+/// The listed kinds are every kind whose `apply` handler reaches
+/// `require_bootstrap_coordinator`. For the three reassignment kinds that
+/// reach it only when the author is *not* the item's opener/author, the
+/// check is deliberately unconditional rather than a duplicate of `apply`'s
+/// opener/author test: in the other branch the author is the opener or a
+/// named review author, and a retired one has no business reassigning its
+/// own work either. Kinds an inactive agent legitimately publishes --
+/// `agent.resumed` above all, which only a retired agent ever has cause to
+/// write -- are deliberately absent.
+fn verify_author_active(
+    state: &crate::state::BusState,
+    agent: &Agent,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    use crate::events::EventData as E;
+    let needs_live_author = matches!(
+        data,
+        E::AgentRetired(_)
+            | E::SchemaActivated(_)
+            | E::MergeEngineActivated(_)
+            | E::ReviewMergeReconciled(_)
+            | E::LifecycleConflictResolved(_)
+            | E::IssueReassigned(_)
+            | E::DependencyReassigned(_)
+            | E::ReviewReassigned(_)
+            // The four whose handlers ask `require_self_active_role`. That
+            // checks the publisher has not stood down, which is sound during
+            // replay because `agent.status` shares the publisher's stream;
+            // it deliberately does not read `retired`, which a coordinator
+            // sets from a different stream. This is where the `retired` half
+            // is asked instead.
+            | E::ScopeSet(_)
+            | E::AuditReported(_)
+            | E::HandoffOffered(_)
+            | E::ReviewNominated(_)
+    );
+    if !needs_live_author {
+        return Ok(());
+    }
+    match state.agents.get(agent) {
+        // Unregistered is `apply`'s own refusal to make, with its own
+        // message; not duplicated here.
+        None => Ok(()),
+        Some(ag) if ag.active() => Ok(()),
+        Some(_) => Err(invalid(format!(
+            "{agent} is retired or otherwise inactive, so it cannot publish this event"
+        ))),
+    }
+}
+
+/// Every agent this event names must still be active.
+///
+/// `apply` checks only that they hold the right role, which is fixed at
+/// registration and therefore ordered ahead of everything. Liveness is not:
+/// `agent.status` and `agent.retired` live on the named agent's own stream,
+/// which this event neither references nor need have observed, so asking
+/// during replay made a nomination fatal on a host that had fetched the
+/// reviewer's retirement and harmless on one that had not.
+///
+/// Here `state` is the publishing host's fully-reduced view, so a nominator
+/// is held to what it could actually have seen.
+fn verify_participants_active(
+    state: &crate::state::BusState,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    use crate::events::EventData as E;
+    let named: Vec<&Agent> = match data {
+        E::ReviewNominated(d) => d
+            .authors
+            .iter()
+            .chain(std::iter::once(&d.reviewer))
+            .collect(),
+        E::ReviewReassigned(d) => vec![&d.reviewer],
+        _ => return Ok(()),
+    };
+    for agent in named {
+        match state.agents.get(agent) {
+            Some(ag) if ag.active() => {}
+            Some(_) => {
+                return Err(invalid(format!(
+                "{agent} is retired or otherwise inactive, so it cannot take part in this review"
+            )))
+            }
+            None => return Err(invalid(format!("{agent} is not a registered agent"))),
+        }
+    }
+    Ok(())
+}
+
+/// AGENT_BUS_SCHEMA.md's "a transition may not build on a predecessor whose
+/// own disposition is still an open race".
+///
+/// `apply` cannot ask this. `ExclusiveTracker::is_contested` reads group
+/// membership, which grows as concurrent candidates reduce, and nothing this
+/// event carries references the candidate that contests its predecessor --
+/// so asking during replay made the same two events fatal on one host and
+/// harmless on another, decided by which was fetched first.
+///
+/// Here `state` is the publishing host's own fully-reduced view, so the
+/// question has one answer. A publisher that genuinely cannot see the
+/// competing claim yet is not stopped, and should not be: it has committed
+/// no error, and the resulting group is reconciled by
+/// `lifecycle.conflict_resolved` exactly as an ordinary race is.
+fn verify_predecessor_not_contested(
+    state: &crate::state::BusState,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    use crate::events::EventData as E;
+    let predecessor = match data {
+        E::MergeEngineActivated(d) => &d.previous_epoch,
+        E::IssueResolved(d) => &d.assignment,
+        E::IssueRejected(d) => &d.assignment,
+        E::IssueReassigned(d) => &d.previous_assignment,
+        E::DependencyResolved(d) => &d.assignment,
+        E::DependencyRejected(d) => &d.assignment,
+        E::DependencyReassigned(d) => &d.previous_assignment,
+        E::HandoffAccepted(d) => &d.handoff,
+        E::HandoffDeclined(d) => &d.handoff,
+        E::HandoffWithdrawn(d) => &d.handoff,
+        _ => return Ok(()),
+    };
+    if state.exclusive.is_contested(predecessor) {
+        return Err(invalid(format!(
+            "{predecessor} is itself part of an unresolved lifecycle conflict; a coordinator must publish lifecycle.conflict_resolved for it before anything builds on it"
+        )));
+    }
+    Ok(())
+}
+
 /// Rejects a well-formed-but-nonexistent object id in any of the three
 /// fields that carry one as a plain, unvalidated `ObjectId`:
 /// `agent.registered`'s `product_base`, `scope.set`'s `base_code_commit`,
@@ -699,6 +1138,78 @@ fn verify_review_merge_reconciled(
 /// `base_code_commit`/`code_commit` are lower-stakes (correctable by a
 /// follow-up `scope.set`, or merely evidence rather than a binding field
 /// respectively) but the same silent-typo failure mode applies to both.
+/// AGENT_BUS_SCHEMA.md section 4: a `schema.activated`'s "`version` is
+/// greater than all previously activated versions."
+///
+/// `apply` cannot ask this. `schema.activated` references no predecessor at
+/// all (`SchemaActivated::referenced_ids` is empty), so two activations from
+/// different coordinators get no edge between them and `apply::
+/// topological_order` is free to replay a higher version first -- which made
+/// the lower one fatal on hosts that happened to fetch in that order, and
+/// made two coordinators activating the *same* version fatal in both. See
+/// `apply::apply_schema_activated`, which now takes the maximum, for the
+/// full argument.
+///
+/// Here `state` is the publishing host's own fully-reduced view, so the
+/// question has one answer. A coordinator that genuinely cannot see a
+/// concurrent activation yet is not stopped, and should not be: it has
+/// committed no error, and the two activations reconcile to the higher
+/// AGENT_BUS_SCHEMA.md section 2.1: a registration's declared `primary_role`
+/// must match the roster epoch's binding for that agent, since it is the
+/// declared role that grants authority.
+///
+/// `apply` cannot ask this. It used to, against `state.roster_epoch` --
+/// whatever epoch happened to be current on the reducing host -- so a later
+/// registry transition that merely restated a binding retroactively
+/// invalidated an already-published `agent.registered`, and `reduce`'s bare
+/// `?` turned that into every host being unable to read the bus at all,
+/// permanently. It was also host-local: two hosts at different registry tips
+/// gave different answers for the same event.
+///
+/// Here the registration and the registry transition are written together by
+/// the same command (`cli::register` lands the transition, then drains the
+/// event), so the comparison is against the epoch this registration is
+/// actually being published into, and it cannot move afterwards.
+fn verify_declared_role_matches_roster(
+    state: &crate::state::BusState,
+    agent: &Agent,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    let crate::events::EventData::AgentRegistered(d) = data else {
+        return Ok(());
+    };
+    if let Some(binding) = state
+        .roster_epoch
+        .as_ref()
+        .and_then(|e| e.active_members.get(agent))
+    {
+        if binding.role != d.primary_role {
+            return Err(invalid(format!(
+                "registers as {} but the roster epoch binds {agent} as {} -- the declared role must match the registry, since it is the declared one that grants authority",
+                d.primary_role, binding.role
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// version on every host either way.
+fn verify_schema_activation_advances(
+    state: &crate::state::BusState,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    let crate::events::EventData::SchemaActivated(d) = data else {
+        return Ok(());
+    };
+    if d.version <= state.activated_schema_version {
+        return Err(invalid(format!(
+            "schema version {} is not greater than the currently activated {}",
+            d.version, state.activated_schema_version
+        )));
+    }
+    Ok(())
+}
+
 /// AGENT_BUS_SCHEMA.md section 8: a `review.reassigned` must inherit every
 /// finding still open on the chain, exactly once.
 ///
@@ -782,6 +1293,40 @@ fn verify_object_ids_resolve(repo: &Path, data: &crate::events::EventData) -> Ab
     Ok(())
 }
 
+/// docs/AGENT_COORDINATION_EVOLUTION.md section 4.2, gate 12: the claimed
+/// `audience_snapshot` must equal `audience_selector` resolved against
+/// `audience_epoch`.
+///
+/// `Ok(())` when the epoch is not known to this host: that is an ordinary
+/// validation failure `apply::dry_run` reports moments later with a
+/// clearer, epoch-specific message, so it is not duplicated here.
+fn verify_broadcast_published(
+    state: &crate::state::BusState,
+    d: &crate::events::BroadcastPublished,
+) -> AbResult<()> {
+    let epoch = match state.known_epochs.get(&d.audience_epoch) {
+        Some(e) => e,
+        None => return Ok(()),
+    };
+    let resolved = crate::apply::resolve_audience(state, &d.audience_selector, epoch);
+    let claimed: std::collections::BTreeSet<Agent> = d.audience_snapshot.iter().cloned().collect();
+    if resolved != claimed {
+        let missing: Vec<String> = resolved
+            .difference(&claimed)
+            .map(|a| a.to_string())
+            .collect();
+        let extra: Vec<String> = claimed
+            .difference(&resolved)
+            .map(|a| a.to_string())
+            .collect();
+        return Err(invalid(format!(
+            "audience_snapshot does not match audience_selector resolved against epoch {}: missing {:?}, unexpected {:?}",
+            d.audience_epoch, missing, extra
+        )));
+    }
+    Ok(())
+}
+
 fn requires_complete_frontier(data: &crate::events::EventData) -> bool {
     match data {
         crate::events::EventData::BroadcastPublished(d) => {
@@ -827,6 +1372,20 @@ fn requires_complete_frontier(data: &crate::events::EventData) -> bool {
 /// on a different validation path.
 fn requires_synced_snapshot(data: &crate::events::EventData) -> bool {
     use crate::events::EventData;
+    // A broadcast whose audience resolves against `subscribed_topics` or
+    // `scope` is currency-sensitive whatever its acknowledgement setting.
+    // `verify_broadcast_published` is the *only* place gate 12's exactness
+    // is now checked -- reduction has no sound way to ask it -- and
+    // resolving a mutable selector against a stale cached cut lets that
+    // single check accept a snapshot omitting a subscriber who has already
+    // published remotely. Reduction then records the wrong audience, and no
+    // later synchronization repairs it. An informational broadcast needs no
+    // complete frontier, so `requires_complete_frontier` does not cover it.
+    if let EventData::BroadcastPublished(d) = data {
+        if crate::apply::broadcast_audience_reads_mutable_state(d) {
+            return true;
+        }
+    }
     requires_complete_frontier(data)
         || matches!(
             data,
@@ -876,6 +1435,57 @@ mod tests {
 
     fn a(name: &str) -> Agent {
         Agent::parse(name.to_string()).unwrap()
+    }
+
+    /// The declared-role rule, pinned where it is now enforced.
+    ///
+    /// `apply` used to ask it, against whatever roster epoch was current on
+    /// the reducing host, so a later transition that merely restated a
+    /// binding retroactively invalidated an already-published
+    /// `agent.registered` and made the bus unreadable for everyone. It is
+    /// asked here instead, where the registration and the registry
+    /// transition are written by the same command and the answer cannot move
+    /// afterwards.
+    #[test]
+    fn verify_declared_role_matches_roster_refuses_a_mismatch() {
+        use crate::events::AgentRegistered;
+        use crate::registry::MemberBinding;
+
+        let aud = a("aud");
+        let mut state = crate::state::BusState::new(minimal_config());
+        let mut members = std::collections::BTreeMap::new();
+        members.insert(
+            aud.clone(),
+            MemberBinding {
+                role: Role::Auditor,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        state.roster_epoch = Some(crate::registry::RosterEpoch::root(
+            ObjectId::parse("0".repeat(40)).unwrap(),
+            members,
+        ));
+
+        let declare = |role| {
+            EventData::AgentRegistered(AgentRegistered {
+                display_name: short("Auditor"),
+                primary_role: role,
+                purpose: text("audits"),
+                product_base: None,
+                product_branch: None,
+                provider: None,
+                model: None,
+            })
+        };
+
+        let err = verify_declared_role_matches_roster(&state, &aud, &declare(Role::Implementor))
+            .expect_err("an auditor may not register as an implementor");
+        assert!(err.to_string().contains("must match the registry"), "{err}");
+
+        verify_declared_role_matches_roster(&state, &aud, &declare(Role::Auditor))
+            .expect("the honest declaration passes");
     }
 
     fn short(s: &str) -> Short {
@@ -972,6 +1582,7 @@ mod tests {
         assert!(
             crate::outbox::list_pending(repo.path(), &coord1)
                 .unwrap()
+                .pending
                 .is_empty(),
             "fixture must have an empty outbox, or it tests the wrong path"
         );
@@ -1097,6 +1708,7 @@ mod tests {
             .is_some());
         assert!(crate::outbox::list_pending(repo.path(), &alice)
             .unwrap()
+            .pending
             .is_empty());
     }
 
@@ -1142,6 +1754,494 @@ mod tests {
 
         let (_header, log) = crate::stream::read_stream(repo.path(), &coord1).unwrap();
         assert_eq!(log.len(), 3); // genesis registration + the two status events
+    }
+
+    /// A candidate whose payload does not parse is rejected on its own and
+    /// does not take the rest of the outbox down with it.
+    ///
+    /// This is the live g-design outage. An `issue.opened` was submitted with
+    /// a prose sentence sitting in `evidence`, where an event id belongs.
+    /// `typed_data()` was called with `?` before any per-candidate rejection
+    /// path could run, so the parse error propagated out of `drain_outbox`
+    /// and aborted the whole drain. **77** urgent candidates queued behind
+    /// that one typo stopped moving, none of them defective, and because the
+    /// abort happened before any receipt was written, the author's `submit`
+    /// had returned success for every one of them and nothing said why the
+    /// queue had stalled.
+    ///
+    /// The malformed candidate is built field-by-field rather than through
+    /// `Candidate::new`, because `Candidate::new` takes an already-parsed
+    /// `EventData` and so cannot express the thing being tested: a payload
+    /// that got as far as the outbox and only fails when the coordinator
+    /// reads it back. That is exactly how the real one arrived.
+    ///
+    /// The ordinary candidates are submitted on either side of the bad one so
+    /// the assertion is about isolation and not merely about surviving a
+    /// trailing failure -- `after` is the one that used to be lost.
+    #[test]
+    fn drain_outbox_rejects_an_unparseable_candidate_without_dropping_the_rest() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        crate::outbox::submit(
+            repo.path(),
+            "client-1",
+            &status_candidate(&coord1, "before"),
+        )
+        .unwrap();
+
+        let malformed = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.opened".to_string(),
+            data: serde_json::json!({
+                "target": "coord1",
+                "issue_kind": "correctness",
+                "severity": "critical",
+                "summary": "an issue whose evidence is prose",
+                "locations": [],
+                "reproduction": [],
+                "blocks": [],
+                "evidence": ["Lean probe compiled successfully against exact branch tip"],
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-2", &malformed).unwrap();
+
+        crate::outbox::submit(repo.path(), "client-3", &status_candidate(&coord1, "after"))
+            .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+
+        // Both well-formed candidates published, including the one queued
+        // behind the failure.
+        assert_eq!(
+            drained.published,
+            vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]
+        );
+
+        // The bad one is accounted for, by kind and with a reason that names
+        // what the author has to fix. A silent drop would be its own outage:
+        // the author would again be told nothing.
+        assert_eq!(drained.rejected.len(), 1);
+        assert_eq!(drained.rejected[0].kind, "issue.opened");
+        assert!(
+            drained.rejected[0].reason.contains("does not parse")
+                && drained.rejected[0].reason.contains("malformed event id"),
+            "rejection reason should name the parse failure and the bad field, got: {}",
+            drained.rejected[0].reason
+        );
+
+        // The outbox is drained: nothing is left stuck behind the failure.
+        assert!(crate::outbox::list_pending(repo.path(), &coord1)
+            .unwrap()
+            .pending
+            .is_empty());
+
+        let (_header, log) = crate::stream::read_stream(repo.path(), &coord1).unwrap();
+        assert_eq!(log.len(), 3); // genesis registration + the two good events
+    }
+
+    /// The receipt is the whole point of a rejection, so the test reads it
+    /// off disk.
+    ///
+    /// Asserting only on the returned `rejected` vector was not enough: an
+    /// implementation that deleted the candidate and wrote no receipt at all
+    /// passed the earlier version of this test, which is precisely the silent
+    /// discard the module contract forbids. Removing a candidate is only safe
+    /// *because* the receipt preserves it, so the receipt -- and the fact that
+    /// it round-trips the original payload -- is what has to be pinned.
+    #[test]
+    fn a_rejected_candidate_leaves_a_receipt_that_round_trips_its_payload() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        let malformed = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.opened".to_string(),
+            data: serde_json::json!({
+                "target": "coord1",
+                "issue_kind": "correctness",
+                "severity": "critical",
+                "summary": "an issue whose evidence is prose",
+                "locations": [],
+                "reproduction": [],
+                "blocks": [],
+                "evidence": ["Lean probe compiled successfully against exact branch tip"],
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-1", &malformed).unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+        assert_eq!(drained.rejected.len(), 1);
+
+        let rejected_dir = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
+        let receipts: Vec<_> = std::fs::read_dir(&rejected_dir)
+            .expect("a rejection must create the receipt directory")
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert_eq!(
+            receipts.len(),
+            1,
+            "exactly one receipt, for the one rejection"
+        );
+
+        let receipt: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&receipts[0]).unwrap()).unwrap();
+        assert!(receipt["reason"]
+            .as_str()
+            .unwrap()
+            .contains("does not parse"));
+        // The payload survives verbatim. Without this the receipt would record
+        // that something was thrown away without recording what, and the
+        // author could not reconstruct the event to resubmit it.
+        let recorded: Candidate = serde_json::from_value(receipt["candidate"].clone())
+            .expect("the receipt must hold a candidate");
+        assert_eq!(recorded, malformed);
+    }
+
+    /// An outbox file that is not a candidate at all does not stop the
+    /// candidates beside it, and is held rather than destroyed.
+    ///
+    /// The payload-parse fix alone did not achieve this: `list_pending` runs
+    /// before the drain loop, so a file that failed to deserialize as a
+    /// `Candidate` aborted the drain without ever reaching the per-candidate
+    /// rejection. Same outage, one layer earlier, and reached first.
+    #[test]
+    fn drain_outbox_holds_an_unreadable_file_without_dropping_the_rest() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        crate::outbox::submit(
+            repo.path(),
+            "client-1",
+            &status_candidate(&coord1, "before"),
+        )
+        .unwrap();
+        let junk = crate::outbox::outbox_dir(repo.path(), &coord1).join("client-2.json");
+        std::fs::write(&junk, br#"{"not": "a candidate"}"#).unwrap();
+        crate::outbox::submit(repo.path(), "client-3", &status_candidate(&coord1, "after"))
+            .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+
+        assert_eq!(
+            drained.published,
+            vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]
+        );
+        assert_eq!(drained.held.len(), 1);
+        assert!(drained.held[0]
+            .reason
+            .contains("is not a readable candidate"));
+        // Held means held: this host could not tell a broken writer from a
+        // newer binary's envelope, so it must not be the one to delete it.
+        assert!(junk.exists(), "a held file stays on disk");
+    }
+
+    /// A candidate whose *kind* this binary does not know is held, not
+    /// rejected.
+    ///
+    /// This is the one case where treating every parse failure as an author
+    /// defect is worse than the abort it replaced. Every agent on a host
+    /// shares one `git_common_dir`, and the fleet demonstrably runs more than
+    /// one build at a time, so an unknown kind is far more likely to mean
+    /// "the author is ahead of this coordinator" than "the author made a
+    /// typo". Rejecting it would delete a valid event and hand its author a
+    /// receipt blaming them for it.
+    #[test]
+    fn drain_outbox_holds_a_kind_this_binary_does_not_know() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        let from_the_future = Candidate {
+            agent: coord1.clone(),
+            kind: "review.merge_superseded".to_string(),
+            data: serde_json::json!({ "whatever": "a later schema knows this" }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-1", &from_the_future).unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "client-2",
+            &status_candidate(&coord1, "ordinary"),
+        )
+        .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1)]);
+        assert!(
+            drained.rejected.is_empty(),
+            "an unknown kind is not the author's fault: {:?}",
+            drained.rejected
+        );
+        assert_eq!(drained.held.len(), 1);
+        assert!(drained.held[0].reason.contains("unknown to this binary"));
+
+        // Still pending, so a coordinator that knows the kind can publish it.
+        let still = crate::outbox::list_pending(repo.path(), &coord1).unwrap();
+        assert_eq!(still.pending.len(), 1);
+        assert_eq!(still.pending[0].1.kind, "review.merge_superseded");
+        assert!(
+            std::fs::read_dir(crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected"))
+                .map(|d| d.count())
+                .unwrap_or(0)
+                == 0,
+            "a held candidate must not get a rejection receipt"
+        );
+    }
+
+    /// The semantic rejection path -- `apply::dry_run`'s -- also holds
+    /// instead of aborting when its receipt cannot be written.
+    ///
+    /// The sibling test covers the *parse* arm, and covering only that is
+    /// what let this survive: the parse arm is reached by a payload that
+    /// will not deserialize at all, while `dry_run`'s arm is reached by
+    /// every candidate that is well-formed but invalid, which is the common
+    /// case by a wide margin. It was the last of the nine rejection paths
+    /// still propagating a receipt-write failure with `?`, so a read-only or
+    /// blocked `rejected/` directory still aborted the whole drain through
+    /// the busiest door in the loop.
+    ///
+    /// The candidate here parses cleanly and is refused on its content -- an
+    /// `issue.acknowledged` naming an issue that does not exist -- so it
+    /// reaches `dry_run` rather than the parse arm, which is the whole point.
+    #[test]
+    fn an_unwritable_receipt_on_the_semantic_path_holds_and_still_publishes_the_rest() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        // Parses fine; refused by `dry_run` because the issue it names was
+        // never opened.
+        let semantically_invalid = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.acknowledged".to_string(),
+            data: serde_json::json!({
+                "issue": "coord1:9000",
+                "assignment": "coord1:9001",
+                "note": "acknowledging an issue that does not exist",
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-1", &semantically_invalid).unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "client-2",
+            &status_candidate(&coord1, "queued behind the unwritable rejection"),
+        )
+        .unwrap();
+
+        // A *file* where the receipt directory must go, so `create_dir_all`
+        // can never succeed. `list_pending` only considers `.json` files, so
+        // the blocker is invisible to the listing.
+        let blocker = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .expect("an unwritable receipt must not fail the drain");
+
+        // The later valid candidate published.
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1)]);
+        assert!(drained.rejected.is_empty());
+        assert_eq!(drained.held.len(), 1);
+        assert!(
+            drained.held[0]
+                .reason
+                .contains("receipt could not be written"),
+            "the hold must say why it could not reject: {}",
+            drained.held[0].reason
+        );
+
+        // Held on disk, not destroyed: the receipt is what makes removal
+        // safe, and there is no receipt.
+        let still = crate::outbox::list_pending(repo.path(), &coord1).unwrap();
+        assert_eq!(still.pending.len(), 1);
+        assert_eq!(still.pending[0].1.kind, "issue.acknowledged");
+    }
+
+    /// A receipt that cannot be written holds the candidate instead of
+    /// aborting the drain -- and does not destroy it.
+    ///
+    /// Every rejection arm in the loop called `reject_candidate(...)?`, so
+    /// the entire per-candidate rejection design was conditional on a
+    /// filesystem write succeeding. If it failed, all eight arms turned back
+    /// into the whole-drain abort the loop exists to prevent, including the
+    /// two arms added for earlier outages.
+    ///
+    /// A plain file where the `rejected/` directory needs to be reproduces it
+    /// portably: `list_pending` only considers `.json` files, so the blocker
+    /// is invisible to the listing, and `create_dir_all` can never succeed.
+    /// The candidate must survive, because with no receipt there is nothing
+    /// else recording it.
+    #[test]
+    fn a_receipt_that_cannot_be_written_holds_the_candidate_and_spares_the_drain() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        let malformed = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.opened".to_string(),
+            data: serde_json::json!({
+                "target": "coord1",
+                "issue_kind": "correctness",
+                "severity": "critical",
+                "summary": "prose where an event id belongs",
+                "locations": [],
+                "reproduction": [],
+                "blocks": [],
+                "evidence": ["not an event id"],
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-1", &malformed).unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "client-2",
+            &status_candidate(&coord1, "behind the unwritable rejection"),
+        )
+        .unwrap();
+
+        // A *file* named `rejected`, so the receipt directory cannot be made.
+        let blocker = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .expect("an unwritable receipt must not fail the drain");
+
+        // The candidate behind it still published.
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1)]);
+        assert!(drained.rejected.is_empty());
+        assert_eq!(drained.held.len(), 1);
+        assert!(
+            drained.held[0]
+                .reason
+                .contains("receipt could not be written"),
+            "the hold must say why it could not reject: {}",
+            drained.held[0].reason
+        );
+
+        // Not destroyed: the receipt is what makes removal safe, and there is
+        // no receipt.
+        let still = crate::outbox::list_pending(repo.path(), &coord1).unwrap();
+        assert_eq!(still.pending.len(), 1);
+        assert_eq!(still.pending[0].1.kind, "issue.opened");
     }
 
     /// Gate 18, end to end through the real coordinator path: an urgent
@@ -1273,6 +2373,7 @@ mod tests {
         // entry is gone (not stuck retrying forever) but durably recorded.
         assert!(crate::outbox::list_pending(repo.path(), &coord1)
             .unwrap()
+            .pending
             .is_empty());
         let rejected_dir = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
         let entries: Vec<_> = std::fs::read_dir(&rejected_dir).unwrap().collect();
@@ -3009,6 +4110,15 @@ mod tests {
 
     #[test]
     fn drain_outbox_rejects_review_merge_authorized_with_a_candidate_that_does_not_reconstruct() {
+        // Drives the real `drain_outbox`, so the bus it reduces is pinned by
+        // `genesis` to this build's engine version and there is no seam to
+        // hand it a differently-pinned state -- see
+        // `bootstrap::requires_the_pinned_engine`.
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_rejects_review_merge_authorized_with_a_candidate_that_does_not_reconstruct",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         // A syntactically valid but *wrong* candidate id -- never actually
         // built by `merge_candidate::reconstruct_candidate`.
@@ -3034,6 +4144,11 @@ mod tests {
 
     #[test]
     fn drain_outbox_rejects_review_merge_authorized_with_no_candidate_tag_at_all() {
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_rejects_review_merge_authorized_with_no_candidate_tag_at_all",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -3067,6 +4182,11 @@ mod tests {
     #[test]
     fn drain_outbox_rejects_review_merge_authorized_with_a_candidate_tag_that_never_reached_origin()
     {
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_rejects_review_merge_authorized_with_a_candidate_tag_that_never_reached_origin",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -3091,6 +4211,90 @@ mod tests {
             drained.rejected[0].reason.contains("is not fetchable from"),
             "{}",
             drained.rejected[0].reason
+        );
+    }
+
+    /// The currency half of the `merge_engine_epoch` rule, in its new home.
+    ///
+    /// `apply` checks only that the epoch names a real activation, because
+    /// that is all reduction can soundly do: the authorization references
+    /// the epoch it names, so that one is always applied first, but a
+    /// *later* `merge_engine.activated` moves the selection and this event
+    /// neither references nor need have observed it. Asking there made the
+    /// same two events reduce on a host that replayed the authorization
+    /// first and fail on one that replayed the activation first.
+    ///
+    /// Here there is no replay order: `state` is the publishing host's own
+    /// fully-reduced view. Without this test the currency rule would have
+    /// been deleted rather than moved --
+    /// `a_superseded_merge_engine_epoch_still_reduces` asserts reduction
+    /// accepts exactly what this refuses, and one of the pair alone would
+    /// look like a regression.
+    #[test]
+    fn the_authorization_gate_refuses_a_stale_merge_engine_epoch() {
+        let f = build_review_fixture(Some("zoe"));
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            f.repo.path(),
+            &f.previous_main,
+            &f.feature_commit,
+            &f.reviewer,
+        )
+        .unwrap();
+        // Everything else about this candidate is genuinely valid, so the
+        // gate reaches its last check rather than stopping earlier.
+        let tag = crate::merge_candidate::candidate_tag_name(&f.reviewer, &candidate);
+        crate::gitrepo::tag_lightweight(f.repo.path(), &tag, &candidate).unwrap();
+        let push = crate::gitrepo::run(
+            f.repo.path(),
+            &["push", &f.remote, &format!("refs/tags/{tag}")],
+        )
+        .unwrap();
+        assert!(push.success, "{push:?}");
+
+        let snapshot =
+            crate::sync::cached_snapshot(f.repo.path(), f.repo.path()).expect("reduce fixture");
+        let mut state = snapshot.state;
+
+        let d = match merge_authorized_candidate(&f, &candidate)
+            .typed_data()
+            .unwrap()
+        {
+            EventData::ReviewMergeAuthorized(d) => d,
+            other => panic!("fixture built the wrong event: {other:?}"),
+        };
+
+        // The epoch the authorization names is real and this host runs its
+        // engine, so nothing else in the gate objects to it -- but the bus
+        // has since selected a different one.
+        //
+        // "This host runs its engine" has to be spelled `host_engine_version`
+        // rather than the compile-time `SUPPORTED_MERGE_ENGINE_VERSION`: the
+        // two are equal only on a host provisioned with the pinned git, and
+        // anywhere else this fixture claimed an engine the host does not have,
+        // so the gate refused for that reason and never reached the stale
+        // -epoch refusal under test. See `bootstrap::host_engine_version`.
+        let newer = EventId::new(&f.coord1, 4242);
+        let host_engine = short(&crate::bootstrap::host_engine_version());
+        state.merge_engine_info.insert(
+            d.merge_engine_epoch.clone(),
+            (
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                host_engine.clone(),
+            ),
+        );
+        state.merge_engine_info.insert(
+            newer.clone(),
+            (short(crate::bootstrap::SUPPORTED_MERGE_ENGINE), host_engine),
+        );
+        state.current_merge_engine_epoch = Some(newer.clone());
+
+        let err = verify_review_merge_authorized(f.repo.path(), &f.remote, &state, &f.reviewer, &d)
+            .expect_err("an authorization pinned to a superseded engine must not publish");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("is not the currently selected merge engine epoch")
+                && msg.contains(&newer.to_string()),
+            "the message must name the epoch that is current now: {msg}"
         );
     }
 
@@ -3150,12 +4354,21 @@ mod tests {
     /// `current_merge_engine_epoch` (see `merge_authorized_candidate`'s own
     /// comment) -- a real, separate, pre-existing gap this task does not
     /// fix -- so full end-to-end acceptance is not yet reachable. What this
-    /// test instead proves is that this gate specifically did *not* reject
-    /// the candidate: the rejection reason that does surface names the
-    /// known unrelated downstream cause, not any of this gate's own error
-    /// text.
+    /// test instead proves is that this gate's own substantive checks did
+    /// not reject the candidate: the rejection that surfaces is the known
+    /// unrelated `merge_engine_epoch` currency failure, and none of the
+    /// authorship, reconstruction or candidate-tag text appears.
+    ///
+    /// That currency check now lives in this gate too (it cannot live in
+    /// `apply`, which has no sound way to ask it), so it is deliberately
+    /// absent from the exclusion list below.
     #[test]
     fn drain_outbox_review_merge_authorized_gate_passes_a_genuinely_valid_candidate() {
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_review_merge_authorized_gate_passes_a_genuinely_valid_candidate",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -3217,6 +4430,11 @@ mod tests {
     /// ran `prepare-merge` could never validly drain the authorization.
     #[test]
     fn drain_outbox_review_merge_authorized_gate_accepts_a_tag_never_fetched_into_this_checkout() {
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_review_merge_authorized_gate_accepts_a_tag_never_fetched_into_this_checkout",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -3269,6 +4487,101 @@ mod tests {
                 "rejection should not come from verify_review_merge_authorized, got: {reason}"
             );
         }
+    }
+
+    /// Gate 17 for a broadcast whose audience resolves against mutable
+    /// state, and the reason the predicate cannot simply defer to
+    /// `requires_complete_frontier`.
+    ///
+    /// An informational `TopicSubscribers` broadcast needs no complete
+    /// frontier, so before this it was validated against whatever cached cut
+    /// `drain_outbox` happened to hold. `verify_broadcast_published` is now
+    /// the *only* place gate 12's exactness is checked -- reduction has no
+    /// sound way to ask it -- so a stale cut there means the single check
+    /// can accept a snapshot that omits a subscriber who has already
+    /// published remotely, and reduction then records the wrong audience
+    /// with no later synchronization able to repair it.
+    #[test]
+    fn a_mutable_selector_broadcast_requires_a_synced_snapshot_without_a_complete_frontier() {
+        let (_state, epoch) = state_with_subscribers(&[("alice", Role::Implementor, &[])]);
+        let informational =
+            EventData::BroadcastPublished(broadcast_to_subscribers(&epoch, &["alice"]));
+        assert!(
+            requires_synced_snapshot(&informational),
+            "a mutable-selector broadcast must demand a fresh cut"
+        );
+        assert!(
+            !requires_complete_frontier(&informational),
+            "fixture: if this ever needs a complete frontier the first clause would satisfy the assertion above and it would stop testing anything"
+        );
+
+        // And the narrowing is real: a selector that reads only the pinned
+        // epoch is not made currency-sensitive by this rule.
+        let mut immutable = broadcast_to_subscribers(&epoch, &["alice"]);
+        immutable.audience_selector = crate::common::AudienceSelector::Agents(
+            crate::scalars::StringSet::from_iter([a("alice")]),
+        );
+        let immutable = EventData::BroadcastPublished(immutable);
+        assert!(
+            !requires_synced_snapshot(&immutable),
+            "an explicit-list selector resolves from the pinned epoch and needs no fresh cut"
+        );
+    }
+
+    /// The predicate above is only worth anything if `drain_outbox` actually
+    /// calls `verify_broadcast_published`. This drives the whole path and
+    /// fails if that call site is deleted.
+    ///
+    /// A subscription is published to the remote *after* this checkout's
+    /// cached snapshot was taken, so a snapshot that names only the
+    /// previously-known subscriber is stale-correct and fresh-wrong. Gate 17
+    /// forces the fresh cut; gate 12 then rejects it.
+    #[test]
+    fn drain_outbox_rejects_a_broadcast_whose_audience_went_stale_on_the_remote() {
+        let f = build_two_host_broadcast_fixture();
+
+        // alice publishes to release.main subscribers, naming only bob --
+        // true when alice last synced, false now that carol has subscribed
+        // on the other host.
+        crate::outbox::submit(f.alice_repo.path(), "bcast", &f.broadcast_naming(&["bob"])).unwrap();
+        let drained = drain_outbox(
+            f.alice_repo.path(),
+            f.alice_repo.path(),
+            &a("alice"),
+            &short("host-a"),
+            0,
+            &f.remote,
+        )
+        .expect("draining must not error, it must reject the candidate");
+        assert!(drained.published.is_empty(), "{drained:?}");
+        assert_eq!(drained.rejected.len(), 1, "{drained:?}");
+        let reason = &drained.rejected[0].reason;
+        assert!(
+            reason.contains("audience_snapshot does not match") && reason.contains("carol"),
+            "the stale snapshot must be refused, naming who was missed: {reason}"
+        );
+
+        // The exact current audience is accepted.
+        crate::outbox::submit(
+            f.alice_repo.path(),
+            "bcast2",
+            &f.broadcast_naming(&["bob", "carol"]),
+        )
+        .unwrap();
+        let drained = drain_outbox(
+            f.alice_repo.path(),
+            f.alice_repo.path(),
+            &a("alice"),
+            &short("host-a"),
+            0,
+            &f.remote,
+        )
+        .expect("the current snapshot publishes");
+        assert!(
+            drained.rejected.is_empty(),
+            "the exact current audience must publish: {drained:?}"
+        );
+        assert!(!drained.published.is_empty(), "{drained:?}");
     }
 
     /// A `review.merge_authorized` naming an unknown nomination must not be
@@ -3390,6 +4703,187 @@ mod tests {
         let push = crate::gitrepo::run(dir, &["push", &remote, "refs/heads/main"]).unwrap();
         assert!(push.success, "{push:?}");
         (origin, remote)
+    }
+
+    /// Two checkouts sharing one origin: alice publishes from `alice_repo`,
+    /// and carol's `subscription.set` reaches the origin from a *second*
+    /// clone that alice has never fetched.
+    ///
+    /// Deliberately two real repositories. Several critical defects in this
+    /// crate were invisible to single-repository tests, and "alice's cached
+    /// view is behind the remote" is precisely the condition that cannot be
+    /// simulated inside one clone.
+    struct TwoHostBroadcast {
+        alice_repo: tempfile::TempDir,
+        #[allow(dead_code)]
+        other_repo: tempfile::TempDir,
+        #[allow(dead_code)]
+        origin: tempfile::TempDir,
+        remote: String,
+        epoch_id: ObjectId,
+    }
+
+    impl TwoHostBroadcast {
+        fn broadcast_naming(&self, snapshot: &[&str]) -> Candidate {
+            let mut d = broadcast_to_subscribers_with_epoch(&self.epoch_id, snapshot);
+            d.summary = short("release cut");
+            Candidate::new(&a("alice"), &EventData::BroadcastPublished(d), vec![])
+        }
+    }
+
+    fn broadcast_to_subscribers_with_epoch(
+        epoch_id: &ObjectId,
+        snapshot: &[&str],
+    ) -> crate::events::BroadcastPublished {
+        crate::events::BroadcastPublished {
+            topics: crate::scalars::StringSet::from_iter([
+                crate::scalars::CoordinationTopic::parse("release.main".into()).unwrap(),
+            ]),
+            importance: crate::common::Importance::Informational,
+            summary: short("s"),
+            detail: text("d"),
+            affected_paths: crate::scalars::StringSet::default(),
+            affected_interfaces: crate::scalars::StringSet::default(),
+            product_commits: crate::scalars::StringSet::default(),
+            audience_selector: crate::common::AudienceSelector::TopicSubscribers(
+                crate::scalars::CoordinationTopic::parse("release.main".into()).unwrap(),
+            ),
+            audience_epoch: epoch_id.clone(),
+            audience_snapshot: crate::scalars::StringSet::from_iter(snapshot.iter().map(|n| a(n))),
+            acknowledgement: crate::common::AckRequirement::None,
+            deadline: None,
+            supersedes: crate::scalars::StringSet::default(),
+            workaround: None,
+            expiry_condition: None,
+        }
+    }
+
+    fn build_two_host_broadcast_fixture() -> TwoHostBroadcast {
+        use crate::events::AgentRegistered;
+        use crate::registry::MemberBinding;
+
+        let repo = init_repo();
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+        let coord1 = a("coord1");
+
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let (_config, epoch, _commit) = crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host-a"),
+        )
+        .unwrap();
+
+        let mut members = epoch.active_members.clone();
+        for name in ["alice", "bob", "carol"] {
+            members.insert(
+                a(name),
+                MemberBinding {
+                    role: Role::Implementor,
+                    host: short("host-a"),
+                    coordinator_custody_epoch: 0,
+                    standby: None,
+                },
+            );
+        }
+        let epoch = crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
+
+        for name in ["alice", "bob", "carol"] {
+            let ag = a(name);
+            crate::outbox::submit(
+                repo.path(),
+                &format!("{ag}-reg"),
+                &Candidate::new(
+                    &ag,
+                    &EventData::AgentRegistered(AgentRegistered {
+                        display_name: short(name),
+                        primary_role: Role::Implementor,
+                        purpose: text("x"),
+                        product_base: None,
+                        product_branch: None,
+                        provider: None,
+                        model: None,
+                    }),
+                    vec![],
+                ),
+            )
+            .unwrap();
+            // `drain_outbox` alone only writes local refs; the origin is
+            // what the second checkout clones from.
+            let (drained, receipt) =
+                drain_and_publish(repo.path(), repo.path(), &ag, &short("host-a"), 0, &remote)
+                    .unwrap();
+            assert!(drained.rejected.is_empty(), "{drained:?}");
+            assert!(receipt.rejected.is_empty(), "{receipt:?}");
+        }
+
+        // bob subscribes, and alice sees it.
+        let subscribe = |repo: &Path, who: &Agent, host: &str| {
+            crate::outbox::submit(
+                repo,
+                &format!("{who}-sub"),
+                &Candidate::new(
+                    who,
+                    &EventData::SubscriptionSet(crate::events::SubscriptionSet {
+                        topics: crate::scalars::StringSet::from_iter([
+                            crate::scalars::CoordinationTopic::parse("release.main".into())
+                                .unwrap(),
+                        ]),
+                    }),
+                    vec![],
+                ),
+            )
+            .unwrap();
+            let (drained, receipt) =
+                drain_and_publish(repo, repo, who, &short(host), 0, &remote).unwrap();
+            assert!(drained.rejected.is_empty(), "{drained:?}");
+            assert!(receipt.rejected.is_empty(), "{receipt:?}");
+        };
+        subscribe(repo.path(), &a("bob"), "host-a");
+
+        // The registry has to reach the origin before a second checkout can
+        // read it; publishing a stream only pushes that stream's own ref.
+        let push = crate::gitrepo::run(
+            repo.path(),
+            &[
+                "push",
+                &remote,
+                "+refs/heads/agent-registry:refs/heads/agent-registry",
+            ],
+        )
+        .unwrap();
+        assert!(push.success, "{push:?}");
+
+        // A second checkout of the same origin. carol subscribes from there,
+        // so the subscription exists on the remote and nowhere in `repo` --
+        // which is the condition a single-repository test cannot create, and
+        // exactly the one this whole fix is about.
+        let other = tempfile::tempdir().unwrap();
+        let clone = std::process::Command::new("git")
+            .args(["clone", "--quiet", &remote])
+            .arg(other.path().join("wc"))
+            .status()
+            .unwrap();
+        assert!(clone.success());
+        let other_wc = other.path().join("wc");
+        let fetch =
+            crate::gitrepo::run(&other_wc, &["fetch", &remote, "+refs/heads/*:refs/heads/*"])
+                .unwrap();
+        assert!(fetch.success, "{fetch:?}");
+        subscribe(&other_wc, &a("carol"), "host-a");
+
+        TwoHostBroadcast {
+            alice_repo: repo,
+            other_repo: other,
+            origin,
+            remote,
+            epoch_id: epoch.id.clone(),
+        }
     }
 
     /// AGENT_COORDINATION_EVOLUTION.md's currency rule (gate 17): a
@@ -3763,6 +5257,14 @@ mod tests {
 
     #[test]
     fn drain_outbox_rejects_review_merge_reconciled_when_main_was_never_advanced() {
+        // The reconciliation gate itself is engine-independent, but its
+        // fixture is not: `authorized_and_published` has to get a real
+        // `review.merge_authorized` through the publication gate first.
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_rejects_review_merge_reconciled_when_main_was_never_advanced",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         let (candidate, authorization_id) = authorized_and_published(&f);
         // `main` deliberately left at `previous_main` -- the candidate was
@@ -3812,6 +5314,13 @@ mod tests {
     /// reconciliation.
     #[test]
     fn drain_outbox_accepts_review_merge_reconciled_when_main_was_genuinely_advanced() {
+        // See the sibling rejection test: the fixture needs a genuinely
+        // published authorization, which needs the pinned engine.
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_accepts_review_merge_reconciled_when_main_was_genuinely_advanced",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         let (candidate, authorization_id) = authorized_and_published(&f);
         git(
@@ -3845,5 +5354,356 @@ mod tests {
         let drained = drain_coord1(&f);
         assert!(drained.rejected.is_empty(), "{:?}", drained.rejected);
         assert_eq!(drained.published.len(), 1);
+    }
+
+    // --------------------------------------------- gate 12, audience exactness
+
+    /// Builds a state with `members` active in one epoch, each subscribed to
+    /// the topics named for them.
+    fn state_with_subscribers(
+        members: &[(&str, Role, &[&str])],
+    ) -> (crate::state::BusState, crate::registry::RosterEpoch) {
+        let mut active = std::collections::BTreeMap::new();
+        for (name, role, _) in members {
+            active.insert(
+                a(name),
+                crate::registry::MemberBinding {
+                    role: *role,
+                    host: short("host1"),
+                    coordinator_custody_epoch: 0,
+                    standby: None,
+                },
+            );
+        }
+        let epoch =
+            crate::registry::RosterEpoch::root(ObjectId::parse("0".repeat(40)).unwrap(), active);
+        let mut state = crate::state::BusState::new(crate::bootstrap::BusConfig {
+            object_format: "sha1".to_string(),
+            product_review_from: ObjectId::parse("1".repeat(40)).unwrap(),
+            merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
+            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+        });
+        state.known_epochs.insert(epoch.id.clone(), epoch.clone());
+        state.roster_epoch = Some(epoch.clone());
+        for (name, role, topics) in members {
+            let agent = a(name);
+            state.agents.insert(
+                agent.clone(),
+                crate::state::AgentState {
+                    agent: agent.clone(),
+                    display_name: short(name),
+                    primary_role: *role,
+                    purpose: text("p"),
+                    provider: None,
+                    model: None,
+                    status: LifecycleStatus::Active,
+                    status_note: text(""),
+                    product_branch: None,
+                    product_commit: None,
+                    last_lifecycle_event: EventId::new(&agent, 0),
+                    retired: false,
+                    scope: None,
+                    plan: None,
+                    progress_tail: vec![],
+                    next_seq: 1,
+                    subscribed_topics: crate::scalars::StringSet::from_iter(topics.iter().map(
+                        |t| crate::scalars::CoordinationTopic::parse((*t).to_string()).unwrap(),
+                    )),
+                },
+            );
+        }
+        (state, epoch)
+    }
+
+    fn broadcast_to_subscribers(
+        epoch: &crate::registry::RosterEpoch,
+        snapshot: &[&str],
+    ) -> crate::events::BroadcastPublished {
+        crate::events::BroadcastPublished {
+            topics: crate::scalars::StringSet::from_iter([
+                crate::scalars::CoordinationTopic::parse("release.main".into()).unwrap(),
+            ]),
+            importance: crate::common::Importance::Informational,
+            summary: short("s"),
+            detail: text("d"),
+            affected_paths: crate::scalars::StringSet::default(),
+            affected_interfaces: crate::scalars::StringSet::default(),
+            product_commits: crate::scalars::StringSet::default(),
+            audience_selector: crate::common::AudienceSelector::TopicSubscribers(
+                crate::scalars::CoordinationTopic::parse("release.main".into()).unwrap(),
+            ),
+            audience_epoch: epoch.id.clone(),
+            audience_snapshot: crate::scalars::StringSet::from_iter(snapshot.iter().map(|n| a(n))),
+            acknowledgement: crate::common::AckRequirement::None,
+            deadline: None,
+            supersedes: crate::scalars::StringSet::default(),
+            workaround: None,
+            expiry_condition: None,
+        }
+    }
+
+    /// Gate 12 ("audience resolution is exact") lives here, not in `apply`.
+    ///
+    /// `apply_broadcast_published` deliberately does not check it: the state
+    /// a selector resolves against is mutable and unpinned, and reduction
+    /// orders events by `refs` rather than by `observed`, so the deciding
+    /// `subscription.set` is routinely applied after the broadcast. Asking
+    /// there wedged honest publishers. Here `state` is the publishing host's
+    /// own fully-reduced view, so the question has one answer.
+    #[test]
+    fn verify_broadcast_published_enforces_audience_exactness() {
+        let (state, epoch) = state_with_subscribers(&[
+            ("alice", Role::Implementor, &[]),
+            ("bob", Role::Implementor, &["release.main"]),
+            ("carol", Role::Implementor, &["release.main"]),
+        ]);
+
+        verify_broadcast_published(&state, &broadcast_to_subscribers(&epoch, &["bob", "carol"]))
+            .expect("the exact resolved audience is accepted");
+
+        let err = verify_broadcast_published(&state, &broadcast_to_subscribers(&epoch, &["bob"]))
+            .expect_err("a snapshot omitting a subscriber is refused");
+        assert!(
+            err.to_string().contains("missing [\"carol\"]"),
+            "the message must name who was dropped: {err}"
+        );
+
+        let err = verify_broadcast_published(
+            &state,
+            &broadcast_to_subscribers(&epoch, &["bob", "carol", "alice"]),
+        )
+        .expect_err("a snapshot naming a non-subscriber is refused");
+        assert!(
+            err.to_string().contains("unexpected [\"alice\"]"),
+            "the message must name who was invented: {err}"
+        );
+    }
+
+    /// An unknown epoch is left to `apply::dry_run`, which reports it with a
+    /// clearer message moments later -- this gate must not duplicate it.
+    #[test]
+    fn verify_broadcast_published_defers_an_unknown_epoch() {
+        let (mut state, epoch) =
+            state_with_subscribers(&[("alice", Role::Implementor, &["release.main"])]);
+        state.known_epochs.clear();
+        verify_broadcast_published(&state, &broadcast_to_subscribers(&epoch, &["nobody-here"]))
+            .expect("an unknown epoch is deferred, not judged");
+    }
+
+    // ------------------------------------- contested-predecessor publication gate
+
+    /// The other half of `apply::building_on_a_contested_predecessor_still_
+    /// reduces`: reduction records such an event, publication refuses it.
+    ///
+    /// Reduction cannot ask the question -- `is_contested` reads group
+    /// membership that grows as concurrent candidates reduce, and nothing
+    /// the event carries references the candidate that contests its
+    /// predecessor, so the answer depended on fetch order. Here `state` is
+    /// the publishing host's own fully-reduced view and there is one answer.
+    ///
+    /// Covers every kind the gate dispatches on, because the mapping from
+    /// event to predecessor field is exactly where a future kind gets
+    /// forgotten, and a forgotten kind fails open.
+    #[test]
+    fn the_publication_gate_refuses_a_contested_predecessor() {
+        use crate::events::{
+            DependencyReassigned, DependencyRejected, DependencyResolved, HandoffAccepted,
+            HandoffDeclined, HandoffWithdrawn, IssueReassigned, IssueRejected, IssueResolved,
+        };
+
+        let contested = EventId::new(&a("alice"), 3);
+        let quiet = EventId::new(&a("alice"), 9);
+
+        // A state in which `contested` is a member of a live two-candidate
+        // race, and `quiet` is not.
+        let mut state = crate::state::BusState::new(crate::bootstrap::BusConfig {
+            object_format: "sha1".to_string(),
+            product_review_from: ObjectId::parse("1".repeat(40)).unwrap(),
+            merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
+            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+        });
+        state
+            .exclusive
+            .record("issue:race", &contested)
+            .expect("first candidate");
+        state
+            .exclusive
+            .record("issue:race", &EventId::new(&a("bob"), 4))
+            .expect("second, concurrent candidate");
+        assert!(state.exclusive.is_contested(&contested));
+
+        let text = |t: &str| Text::parse(t.to_string()).unwrap();
+        let with = |p: &EventId| -> Vec<EventData> {
+            vec![
+                EventData::IssueResolved(IssueResolved {
+                    issue: p.clone(),
+                    assignment: p.clone(),
+                    summary: text("s"),
+                    fix_commit: None,
+                    verification: vec![],
+                }),
+                EventData::IssueRejected(IssueRejected {
+                    issue: p.clone(),
+                    assignment: p.clone(),
+                    reason: text("r"),
+                    normative_refs: vec![],
+                }),
+                EventData::IssueReassigned(IssueReassigned {
+                    issue: p.clone(),
+                    previous_assignment: p.clone(),
+                    previous_target: a("bob"),
+                    new_target: a("carol"),
+                    reason: text("r"),
+                }),
+                EventData::DependencyResolved(DependencyResolved {
+                    dependency: p.clone(),
+                    assignment: p.clone(),
+                    summary: text("s"),
+                    product_commit: None,
+                    verification: vec![],
+                }),
+                EventData::DependencyRejected(DependencyRejected {
+                    dependency: p.clone(),
+                    assignment: p.clone(),
+                    reason: text("r"),
+                }),
+                EventData::DependencyReassigned(DependencyReassigned {
+                    dependency: p.clone(),
+                    previous_assignment: p.clone(),
+                    previous_target: a("bob"),
+                    new_target: a("carol"),
+                    reason: text("r"),
+                }),
+                EventData::HandoffAccepted(HandoffAccepted {
+                    handoff: p.clone(),
+                    note: text(""),
+                }),
+                EventData::HandoffDeclined(HandoffDeclined {
+                    handoff: p.clone(),
+                    reason: text("r"),
+                }),
+                EventData::HandoffWithdrawn(HandoffWithdrawn {
+                    handoff: p.clone(),
+                    reason: text("r"),
+                }),
+            ]
+        };
+
+        for data in with(&contested) {
+            let err = verify_predecessor_not_contested(&state, &data)
+                .expect_err("a contested predecessor must not publish");
+            assert!(
+                err.to_string()
+                    .contains("is itself part of an unresolved lifecycle conflict"),
+                "{}: {err}",
+                data.kind()
+            );
+        }
+        for data in with(&quiet) {
+            verify_predecessor_not_contested(&state, &data).unwrap_or_else(|e| {
+                panic!(
+                    "an uncontested predecessor must publish ({}): {e}",
+                    data.kind()
+                )
+            });
+        }
+    }
+
+    /// The other half of `apply::a_reviewer_retiring_concurrently_with_a_
+    /// nomination_still_reduces`: reduction records it, publication refuses
+    /// it.
+    #[test]
+    fn the_publication_gate_refuses_an_inactive_participant() {
+        let (mut state, _epoch) = state_with_subscribers(&[
+            ("alice", Role::Implementor, &[]),
+            ("bob", Role::Reviewer, &[]),
+        ]);
+        let nomination = |reviewer: &str| {
+            EventData::ReviewNominated(crate::events::ReviewRequest {
+                authors: crate::scalars::StringSet::from_iter([a("alice")]),
+                product_branch: crate::scalars::Branch::parse("refs/heads/agent/alice/x".into())
+                    .unwrap(),
+                reviewer: a(reviewer),
+                required_checks: vec![],
+                review_scope: crate::scalars::StringSet::from_iter([
+                    crate::scalars::PathClaim::parse("Grass/**".into()).unwrap(),
+                ]),
+                summary: text("s"),
+                target_branch: crate::scalars::Branch::parse("refs/heads/main".into()).unwrap(),
+                evidence: crate::scalars::StringSet::default(),
+            })
+        };
+        let data = nomination("bob");
+
+        verify_participants_active(&state, &data).expect("an active reviewer publishes normally");
+
+        state.agents.get_mut(&a("bob")).unwrap().retired = true;
+        let err = verify_participants_active(&state, &data)
+            .expect_err("a retired reviewer must not be handed a review");
+        assert!(
+            err.to_string().contains("retired or otherwise inactive"),
+            "{err}"
+        );
+
+        // An agent nobody registered is a different failure, and says so.
+        let unknown = nomination("nobody");
+        let err = verify_participants_active(&state, &unknown).expect_err("unknown agent");
+        assert!(err.to_string().contains("not a registered agent"), "{err}");
+    }
+
+    /// The `retired` half of author liveness, in its new home.
+    ///
+    /// `require_self_active_role` deliberately does not read `retired`:
+    /// `apply_retired` requires a coordinator and forbids retiring yourself,
+    /// so the flag always arrives on somebody else's stream and reading it
+    /// during replay made a retired agent's own published history unreducible
+    /// (`apply::an_agent_retired_by_a_coordinator_can_still_have_its_own_history_reduced`).
+    ///
+    /// The rule is not dropped, it is asked here. Covering all four kinds
+    /// whose handlers gave it up, plus one that never asked it, because the
+    /// kind list is exactly where an addition gets forgotten and a forgotten
+    /// kind fails open.
+    #[test]
+    fn the_publication_gate_refuses_a_retired_author() {
+        let (mut state, _epoch) = state_with_subscribers(&[
+            ("alice", Role::Implementor, &[]),
+            ("aud", Role::Auditor, &[]),
+        ]);
+
+        let scope_set = EventData::ScopeSet(crate::events::ScopeSet {
+            base_code_commit: ObjectId::parse("2".repeat(40)).unwrap(),
+            exclusive: crate::scalars::StringSet::from_iter([crate::scalars::PathClaim::parse(
+                "Grass/**".into(),
+            )
+            .unwrap()]),
+            shared: crate::scalars::StringSet::default(),
+            exports: crate::scalars::StringSet::default(),
+            depends_on: vec![],
+            note: text("n"),
+        });
+
+        // Active: publishes.
+        verify_author_active(&state, &a("alice"), &scope_set)
+            .expect("an active author publishes normally");
+
+        state.agents.get_mut(&a("alice")).unwrap().retired = true;
+        let err = verify_author_active(&state, &a("alice"), &scope_set)
+            .expect_err("a retired author must not publish a scope claim");
+        assert!(
+            err.to_string().contains("retired or otherwise inactive"),
+            "{err}"
+        );
+
+        // A kind the gate deliberately does not cover is unaffected, so the
+        // list is doing real work rather than matching everything.
+        let status = EventData::AgentStatus(crate::events::AgentStatusEvent {
+            status: LifecycleStatus::Active,
+            note: text("back"),
+            product_branch: None,
+            product_commit: None,
+        });
+        verify_author_active(&state, &a("alice"), &status).expect(
+            "agent.status is how a retired identity would be resumed; it must not be gated here",
+        );
     }
 }

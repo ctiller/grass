@@ -16,11 +16,22 @@ agree at every key. Representations are deliberately not normalized, so
 propositional equality of the underlying entry list is finer than `Equiv` and is
 never the right relation to use.
 
-**Custody note.** `Grass.Std.Logical` is not owned by the memory agent. This
-module is temporary custody under `docs/MEMORY_IMPLEMENTATION_PLAN.md` §2. It
-contains only what milestones M1 through M3 consume and is expected to transfer
-to the `Std.Logical` owner by rename and re-export. In particular the disjoint
-union and its split/join laws are deliberately absent until M3 needs them.
+**Custody, settled.** This module was written under `c-mem`'s temporary custody
+per `docs/MEMORY_IMPLEMENTATION_PLAN.md` §2. That custody ended on 2026-09-07:
+offered as `c-mem:47`, accepted as `c-stdlib:19`, and `Grass/Std/Logical/**` is
+the `Std.Logical` owner's exclusive claim from `c-stdlib:21`. `coord1:32` asked
+that the marker be replaced on acceptance rather than stripped before the offer,
+and this is that replacement, late.
+
+The note also predicted the wrong mechanism: it expected the transfer to happen
+"by rename and re-export", and no rename was needed, because the module was
+already sited where its owner wanted it. What did come with the handoff is
+recorded in `c-mem:47` — the framing lemmas on `agent/c-mem/provider-cleanup`
+reach this module through that branch's own review rather than through the
+transfer.
+
+Unchanged by any of that: the disjoint union and its split/join laws are
+deliberately absent until a consumer needs them.
 -/
 
 namespace Grass.Std.Logical
@@ -108,6 +119,22 @@ variable [DecidableEq K]
 def empty : FiniteMap K V := ⟨[]⟩
 
 instance : EmptyCollection (FiniteMap K V) := ⟨empty⟩
+
+omit [DecidableEq K] in
+/--
+`∅` and `FiniteMap.empty` are the same map.
+
+Stated as `simp` because the `EmptyCollection` instance above makes the notation
+*typecheck* without making it *rewrite*: `simp` does not see through the instance
+projection, so a goal written with `∅` reaches neither `lookup_empty` nor
+`isEmpty_empty`, which are the two laws a consumer wants the moment they write it.
+
+Oriented towards `empty` because that is what this module's laws are stated
+about. `Grass/Std/Logical/Bag.lean` orients the same bridge towards `0` instead,
+for the same reason in its own module: the direction follows the theorems, not
+the notation.
+-/
+@[simp] theorem emptyCollection_eq_empty : (∅ : FiniteMap K V) = empty := rfl
 
 /-- The value bound to `key`, if any. -/
 def lookup (m : FiniteMap K V) (key : K) : Option V := findValue m.entries key
