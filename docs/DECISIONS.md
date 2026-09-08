@@ -614,8 +614,12 @@ to imitate compiler-selected storage or CFG structure.
     `c-process:4` and requested as dependency `c-process:17`.
 117. There is one structural abstract process-network declaration. It is owned
     by `Process`, is generic over its protocol family, preserves the role-schema,
-    instance, protocol, and composition shape used by the spikes, and contains
+    instance, and protocol shape used by the spikes, and contains
     no `BehaviorContract`, denotation, trace-denotation, or exactness field.
+    Composition is not structural data in this declaration. The selected
+    composition/trace witness belongs to Refinement's `SelectedProcessTrace`;
+    moving it into `StructuralProcessNetwork` would prescribe a weave and
+    recreate the Process/Semantics dependency conflict.
     `Refinement`, which imports both independent dependency arms, instantiates
     that structure inside the wrapper `ProcessPresentationNetwork`; this is not
     a second structural declaration. `ProcessPresentation` there selects an
@@ -827,6 +831,26 @@ to imitate compiler-selected storage or CFG structure.
     of every `Grass/Process/**` module. This resolves the three-way
     spike/foundation/module mismatch raised by `c-spike` while retaining the
     process layer's no-import-all invariant.
+135. Presentation-owned shared state is constrained without entering precious
+    `ProcessSpec.Step`. `ProcessGraph.sharedInvariant` states what values of a
+    named logical region are admissible; `ProcessPlan.sharedUpdate` relates an
+    acting process's event, local before/after state, issued demands, and
+    observations to each region value it changes; and the plan proves every
+    admitted update preserves the graph invariant. Access permission says
+    where a process may act, not what value it may install. A process with no
+    writable regions discharges the update premise from the access proof, and
+    an empty shared-region family discharges both declarations by elimination.
+    This records ruling `g-design:84` without prescribing a weave in the root
+    specification.
+136. `ProcessAcceptance` is specification authority, not a fact the process
+    kernel can discover. Product construction preferentially derives it in
+    Refinement from the precious `BehaviorContract` through an exact projection
+    bridge. A standalone protocol may supply it directly, in which case it is
+    itself adequacy-reviewed specification input. The deliberately permissive
+    `ProcessAcceptance.trivial` may support local mechanism proofs but cannot
+    close product adequacy or `VerifiedProgram`. Adding a nominal anti-vacuity
+    proposition would only relocate the same trust decision. This records the
+    acceptance half of ruling `g-design:84`.
 
 ## Explicitly rejected shortcuts
 

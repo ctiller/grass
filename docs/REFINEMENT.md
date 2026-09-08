@@ -172,6 +172,16 @@ structure ProcessPresentation (spec : SpecProcess resources) where
     TransportedProcessRequirements network trace denotationExact =
       spec.requirements
 
+structure ProcessBehaviorBridge
+    (p : ProcessSpec) (contract : BehaviorContract resources) where
+  acceptance : ProcessAcceptance p
+  projectionsExact : AcceptanceProjectionsAreExactlyBehaviorContract
+    p contract acceptance
+
+def ProcessAcceptance.fromBehaviorContract
+    (bridge : ProcessBehaviorBridge p contract) : ProcessAcceptance p :=
+  bridge.acceptance
+
 structure StagedProcessPresentation
     {R : Type u} [ResourceModel R] {resources : R}
     (spec : SpecProcess resources) where
@@ -300,6 +310,12 @@ def PartialProcessRealization.close
       partial) :
     ClosedBlend partial complete coherent
 ```
+
+`ProcessBehaviorBridge` proves each acceptance projection is the corresponding
+projection of the precious `BehaviorContract`; it does not accept arbitrary
+predicates followed by proofs that the process happens to satisfy them. The
+bridge belongs here because Refinement sees both the precious behavior and the
+replaceable process arm.
 
 `RoleSchema` is finite static syntax; its `Instance` family may be infinite.
 Thus one connection-session schema has a proof polymorphic in

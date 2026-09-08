@@ -416,6 +416,7 @@ structure ProcessGraph (registry : ProtocolRegistry)
     (registry.protocol (protocolKey root)) boundary
   maySpawn : ProcessKind -> ProcessKind -> Prop
   sharedAccess : ProcessKind -> SharedRegion -> LogicalAccess
+  sharedInvariant : (region : SharedRegion) -> SharedState region -> Prop
   population : PopulationLaw ProcessKind
 
 structure ProcessTopologyCore (registry : ProtocolRegistry)
@@ -657,6 +658,18 @@ structure ProcessPlan (registry : ProtocolRegistry) (boundary : DriverBoundary)
   channel : (edge : ChannelKind) ->
     ChannelContract toProcessTopology (Message edge)
       (logicalWorldAgreement toProcessTopology Message) edge
+  sharedUpdate : (kind : ProcessKind) ->
+    (event : (registry.protocol (protocolKey kind)).Event) ->
+    (beforeLocal afterLocal : (registry.protocol (protocolKey kind)).State) ->
+    (issued : Bag (registry.protocol (protocolKey kind)).Demand) ->
+    (observed : ObservationSegment
+      (registry.protocol (protocolKey kind)).Observation) ->
+    (region : SharedRegion) -> SharedState region -> SharedState region -> Prop
+  sharedUpdatePreserves : forall kind event beforeLocal afterLocal issued
+      observed region (before after : SharedState region),
+    sharedUpdate kind event beforeLocal afterLocal issued observed region
+      before after ->
+    sharedInvariant region before -> sharedInvariant region after
   boundaryProjection : RootLocalDemandProjection toProcessTopology boundary
 
 abbrev LogicalProcessNetwork (plan : ProcessPlan registry boundary) :=
@@ -1190,13 +1203,15 @@ structure ChildOccurrence (plan : ProcessPlan registry boundary)
 
 inductive ChildLifecycleEvent (occurrence : ChildOccurrence plan request)
   | pending
-  | intermediate (event : IntermediateEvent request.key)
-  | succeeded (result : TerminalSuccess request.key request.request)
-  | failed (failure : TerminalFailure request.key request.request)
+  | intermediate (event : (registry.protocol request.key).Event)
+  | terminated (result : (registry.protocol request.key).TerminalResult)
   | cancellationAcknowledged (reason : CancelReason)
-  | interrupted (demand : Demand) (reason : InterruptReason demand)
-  | faulted (fault : ChildFault)
-  | environmentViolation (violation : EnvironmentViolation)
+  | interrupted
+      (demand : (registry.protocol request.key).Demand)
+      (reason : (registry.protocol request.key).InterruptReason demand)
+  | faulted (fault : (registry.protocol request.key).LogicalFault)
+  | environmentViolation
+      (violation : (registry.protocol request.key).EnvironmentViolation)
   | died (disposition : ChildDeathDisposition occurrence)
 ```
 
@@ -1509,22 +1524,39 @@ These patterns enrich one process algebra rather than create an Erlang backend.
 The application author supplies only semantic facts specific to the process:
 
 ```lean
-structure ProcessCorrect (p : ProcessSpec) where
+structure ProcessAcceptance (p : ProcessSpec) where
+  TerminalAccepts : p.Request -> p.TerminalResult -> Prop
+  TraceAccepts : Trace p.Observation -> Prop
+  DemandsWellFormed : Bag p.Demand -> Prop
+  ViewAccepts : (facet : ViewFacet p.State) ->
+    p.State -> facet.View -> Prop
+  Demanded : p.Observation -> Prop
+  terminalRemainder : TerminalRemainderLaw p
+
+structure ProcessCorrect (p : ProcessSpec) (accept : ProcessAcceptance p) where
   Invariant : p.State -> Prop
   initial : ∀ request s issued emitted,
     p.Initial request s issued emitted -> Invariant s
   initialDemands : ∀ request s issued emitted,
-    p.Initial request s issued emitted -> DemandsWellFormed issued
+    p.Initial request s issued emitted -> accept.DemandsWellFormed issued
   preserved : ∀ s event s' demands emitted,
     Invariant s -> p.Step s event s' demands emitted -> Invariant s'
   terminal : ∀ request s result,
-    Invariant s -> p.Terminal request s result -> TerminalAccepts p result
-  terminalNoStep : NoProcessStepFromTerminal p
-  viewAccepts : OptionalViewAccepts p Invariant
-  observationsAccept : ∀ run,
-    ProcessRun p run -> TraceAccepts p run.observations
-  demandsWellFormed : ∀ step, StepOf p step -> DemandsWellFormed step.demands
-  progress : MeetsProcessProgress p
+    Invariant s -> p.Terminal request s result ->
+      accept.TerminalAccepts request result
+  terminalNoStep : forall state after result event issued emitted,
+    (forall request, p.Terminal request state result) ->
+    ¬ p.Step state event after issued emitted
+  viewAccepts : forall facet, p.view = some facet ->
+    forall state, Invariant state ->
+      accept.ViewAccepts facet state (facet.render state)
+  observationsAccept : forall request segmented runState,
+    Reachable accept.terminalRemainder request segmented runState ->
+      accept.TraceAccepts runState.history
+  demandsWellFormed : forall state after event issued emitted,
+    Invariant state -> p.Step state event after issued emitted ->
+      accept.DemandsWellFormed issued
+  progress : forall request, MeetsProcessProgress p accept Invariant request
 
 theorem ProcessRun.observationCausality
     (run : ProcessRun p request) :
@@ -1600,6 +1632,14 @@ structure ProcessPlanRealizes {R : Type u} [ResourceModel R]
   demands : MeetsAllIndependentDemands plan spec
   resources : ResourceAxisRealizationFamily spec plan
 ```
+
+`ProcessAcceptance` is trusted specification input when supplied directly. The
+preferred product path derives it from the precious `BehaviorContract`; a
+standalone protocol suite may supply it directly only as an adequacy-reviewed
+specification authority. `ProcessAcceptance.trivial` remains useful for local
+mechanism proofs, but cannot close product adequacy or `VerifiedProgram`.
+Adding an anti-vacuity proposition to the record would merely move this trust
+claim rather than prove that the chosen acceptance expresses product intent.
 
 `observationCausality` is generic bookkeeping, not an application proof field.
 It retains the exact initial/transition segment which generated each observation
