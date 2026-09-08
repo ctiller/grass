@@ -1095,14 +1095,31 @@ fn reset_issue_to_conflict(
         if issue.current_assignment != *assignment {
             // A provisional reassignment already ran before this conflict
             // was detected (exclusive::winner() gives a lone candidate the
-            // group's effect until a second member arrives) -- retract
-            // exactly what it added, not just the derived `status`/
-            // `current_*` fields. Any later member of the same group
-            // observes current_assignment already at baseline and takes
-            // this branch as a no-op, so this fires at most once per race
-            // regardless of group size or processing order (gates 15/16).
+            // group's effect until a second member arrives) -- retract what
+            // it added to the *derived* view, not just `status`/`current_*`.
+            // Any later member of the same group observes current_assignment
+            // already at baseline and takes this branch as a no-op, so this
+            // fires at most once per race regardless of group size or
+            // processing order (gates 15/16).
+            //
+            // `assignment_target` is deliberately NOT retracted, and that
+            // distinction is the whole point. It is not a derived view; it is
+            // the append-only record of which target each assignment id was
+            // addressed to, and every later event that names an assignment
+            // resolves it through this map. Removing an entry made honest
+            // events fail: an ack naming the provisional assignment -- which
+            // its own `refs` legitimately cite, so `topological_order`
+            // guarantees it is applied *after* -- got "unknown assignment"
+            // and, with no per-event isolation in `reduce`, took the whole
+            // bus down on every host. Reproduced on a cold `reduce` of three
+            // ordinary events, deterministically, for every agent naming
+            // tried.
+            //
+            // Keeping it is confluent: each reassignment inserts its own id
+            // as a fresh key, so any order of the same events yields the same
+            // map. It was the *conditional removal* that made state depend on
+            // arrival order, never the insertion.
             let provisional = issue.current_assignment.clone();
-            issue.assignment_target.remove(&provisional);
             issue.reassignment_chain.retain(|id| id != &provisional);
         }
         issue.current_assignment = assignment.clone();
@@ -1153,6 +1170,31 @@ fn apply_issue_reassigned(
     // is answered instead.
     let key = issue_key(&d.previous_assignment);
     state.exclusive.record(&key, &env.id)?;
+    // Which target this assignment id was addressed to is a fact about *this
+    // event*, true whether or not it goes on to win the race, so it is
+    // recorded before the disposition is consulted.
+    //
+    // It used to be recorded only on the winning path, inside
+    // `issue_reassign_effect`, which left the map holding whichever
+    // candidate happened to be provisional -- different keys in different
+    // replay orders, a gate 15/16 break. The obvious repair was to retract
+    // the provisional entry when the race was detected, and that is what
+    // this code did; it converged, but it made the map lie. Every later
+    // event resolves an assignment id here, so an honest acknowledgement
+    // naming the retracted id -- which its own `refs` cite, so
+    // `topological_order` guarantees it is applied afterwards -- got
+    // "unknown assignment" and took the bus down on every host.
+    //
+    // Recording every candidate satisfies both: the map is the same in
+    // every order because keys are event ids, and every id anyone can
+    // legitimately name stays resolvable. `current_assignment` and
+    // `reassignment_chain` remain the derived, retractable view of who
+    // actually holds the issue.
+    if let Some(issue) = state.issues.get_mut(&d.issue) {
+        issue
+            .assignment_target
+            .insert(env.id.clone(), d.new_target.clone());
+    }
     match state.exclusive.disposition(&key, &env.id) {
         Disposition::Applies => {
             issue_reassign_effect(state, &env.id, d);
@@ -1318,8 +1360,12 @@ fn reset_dependency_to_conflict(
     if let Some(dep) = state.dependencies.get_mut(dependency_id) {
         dep.status = ItemStatus::LifecycleConflict;
         if dep.current_assignment != *assignment {
+            // `assignment_target` is append-only here for the same reason as
+            // in `reset_issue_to_conflict`: it is how every later event
+            // resolves an assignment id, and retracting an entry made an
+            // honest acknowledgement or disposition naming the provisional
+            // assignment fail, taking the bus down fleet-wide.
             let provisional = dep.current_assignment.clone();
-            dep.assignment_target.remove(&provisional);
             dep.reassignment_chain.retain(|id| id != &provisional);
         }
         dep.current_assignment = assignment.clone();
@@ -1364,6 +1410,14 @@ fn apply_dependency_reassigned(
     // is answered instead.
     let key = dependency_key(&d.previous_assignment);
     state.exclusive.record(&key, &env.id)?;
+    // Recorded for every candidate, win or lose -- see the identical
+    // reasoning in `apply_issue_reassigned`. This map is how later events
+    // resolve an assignment id, so it must hold every id anyone can
+    // legitimately name, and it must hold the same ones in every order.
+    if let Some(dep) = state.dependencies.get_mut(&d.dependency) {
+        dep.assignment_target
+            .insert(env.id.clone(), d.new_target.clone());
+    }
     match state.exclusive.disposition(&key, &env.id) {
         Disposition::Applies => {
             dependency_reassign_effect(state, &env.id, d);
@@ -4686,16 +4740,33 @@ mod tests {
                 "both racing candidates' provisional chain entries must be fully retracted: {:?}",
                 issue.reassignment_chain
             );
+            // `assignment_target` keeps all three: the opening assignment
+            // and both racing candidates. It is the append-only record of
+            // which target each assignment id was addressed to, not a
+            // derived view of the current one, and every later event that
+            // names an assignment resolves it here. Retracting the losing
+            // entry made an honest ack naming it fail with "unknown
+            // assignment" and took the bus down fleet-wide --
+            // `an_ack_naming_a_retracted_provisional_assignment_still_reduces`
+            // is that case.
             assert_eq!(
                 issue.assignment_target.len(),
-                1,
-                "only the issue's own opening assignment id should remain: {:?}",
+                3,
+                "every assignment id ever issued stays resolvable: {:?}",
                 issue.assignment_target
             );
         }
         assert_eq!(
             forward.issues[&issue_env.id].reassignment_chain,
             reverse.issues[&issue_env.id].reassignment_chain
+        );
+        // The map is the same either way round, which is the property that
+        // actually matters: keys are assignment ids, so insertion order
+        // cannot show through. It was the *conditional removal* that made
+        // this state depend on arrival order, never the insertion.
+        assert_eq!(
+            format!("{:?}", forward.issues[&issue_env.id].assignment_target),
+            format!("{:?}", reverse.issues[&issue_env.id].assignment_target),
         );
 
         // Resolving to the winner must append it exactly once -- not twice
@@ -4720,7 +4791,13 @@ mod tests {
         let issue = &state.issues[&issue_env.id];
         assert_eq!(issue.reassignment_chain, vec![to_carol_env.id.clone()]);
         assert_eq!(issue.current_target, carol);
-        assert_eq!(issue.assignment_target.len(), 2);
+        // The chain holds only the winner; `assignment_target` still holds
+        // all three ids. That asymmetry is the design: the chain is the
+        // derived history of who has actually held the issue, while the map
+        // answers "who was assignment X addressed to" for any id a later
+        // event may name -- including the loser's, which its target may
+        // legitimately have acknowledged before learning it lost.
+        assert_eq!(issue.assignment_target.len(), 3);
     }
 
     /// Adversarial-review regression: `acknowledged_assignments` (unlike a
@@ -4877,11 +4954,18 @@ mod tests {
                 "{:?}",
                 dep.reassignment_chain
             );
-            assert_eq!(dep.assignment_target.len(), 1);
+            // Append-only, for the reason given in the issue twin above:
+            // this map is how later events resolve an assignment id, so
+            // retracting the loser made honest events fail.
+            assert_eq!(dep.assignment_target.len(), 3);
         }
         assert_eq!(
             forward.dependencies[&dep_env.id].reassignment_chain,
             reverse.dependencies[&dep_env.id].reassignment_chain
+        );
+        assert_eq!(
+            format!("{:?}", forward.dependencies[&dep_env.id].assignment_target),
+            format!("{:?}", reverse.dependencies[&dep_env.id].assignment_target),
         );
     }
 
@@ -10100,5 +10184,128 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// An acknowledgement naming a reassignment that lost a race must still
+    /// reduce.
+    ///
+    /// alice opens an issue on bob, alice reassigns it to carol, carol
+    /// acknowledges the assignment it was handed -- citing it in its own
+    /// `refs`, so `topological_order` guarantees the ack is applied after
+    /// it -- and concurrently a coordinator reassigns the same baseline to
+    /// dave.
+    ///
+    /// The two reassignments contest. `reset_issue_to_conflict` used to
+    /// retract the provisional entry from `assignment_target`, so carol's
+    /// honest ack then failed with "unknown assignment", and with no
+    /// per-event isolation in `reduce` that was every host unable to read
+    /// the bus, permanently, since the log is append-only.
+    ///
+    /// Run under two coordinator names because the first diagnosis of this
+    /// class blamed `EventId` ordering. It is not name-luck: on a cold
+    /// `reduce` of complete streams the second reassignment has the shorter
+    /// dependency chain and is ready first either way, so both spellings
+    /// wedged. Both must now reduce.
+    #[test]
+    fn an_ack_naming_a_retracted_provisional_assignment_still_reduces() {
+        let run = |coord_name: &str| -> Result<(), String> {
+            let alice = a("alice");
+            let bob = a("bob");
+            let carol = a("carol");
+            let dave = a("dave");
+            let coord = a(coord_name);
+            let members: Vec<(&str, Role)> = vec![
+                ("alice", Role::Implementor),
+                ("bob", Role::Implementor),
+                ("carol", Role::Implementor),
+                ("dave", Role::Implementor),
+                (coord_name, Role::Coordinator),
+            ];
+            let epoch = epoch_with(&members);
+            let mut known = BTreeMap::new();
+            known.insert(epoch.id.clone(), epoch.clone());
+
+            let issue_env = Envelope::new(
+                &alice,
+                1,
+                no_frontier(),
+                &EventData::IssueOpened(IssueOpened {
+                    target: bob.clone(),
+                    issue_kind: IssueKind::Bug,
+                    severity: Priority::Normal,
+                    summary: text("s"),
+                    code_commit: None,
+                    locations: vec![],
+                    expected: None,
+                    observed_behavior: None,
+                    reproduction: vec![],
+                    blocks: StringSet::default(),
+                    evidence: StringSet::default(),
+                }),
+                [],
+            );
+            let to_carol = Envelope::new(
+                &alice,
+                2,
+                no_frontier(),
+                &EventData::IssueReassigned(IssueReassigned {
+                    issue: issue_env.id.clone(),
+                    previous_assignment: issue_env.id.clone(),
+                    previous_target: bob.clone(),
+                    new_target: carol.clone(),
+                    reason: text("r1"),
+                }),
+                [],
+            );
+            let ack = Envelope::new(
+                &carol,
+                1,
+                frontier_seeing(&[&to_carol.id]),
+                &EventData::IssueAcknowledged(IssueAcknowledged {
+                    issue: issue_env.id.clone(),
+                    assignment: to_carol.id.clone(),
+                    note: text("mine"),
+                }),
+                [],
+            );
+            let to_dave = Envelope::new(
+                &coord,
+                1,
+                no_frontier(),
+                &EventData::IssueReassigned(IssueReassigned {
+                    issue: issue_env.id.clone(),
+                    previous_assignment: issue_env.id.clone(),
+                    previous_target: bob.clone(),
+                    new_target: dave.clone(),
+                    reason: text("r2"),
+                }),
+                [],
+            );
+            let streams: BTreeMap<Agent, Vec<Envelope>> = BTreeMap::from([
+                (
+                    alice.clone(),
+                    vec![register(&alice, Role::Implementor), issue_env, to_carol],
+                ),
+                (bob.clone(), vec![register(&bob, Role::Implementor)]),
+                (
+                    carol.clone(),
+                    vec![register(&carol, Role::Implementor), ack],
+                ),
+                (dave.clone(), vec![register(&dave, Role::Implementor)]),
+                (
+                    coord.clone(),
+                    vec![register(&coord, Role::Coordinator), to_dave],
+                ),
+            ]);
+            reduce(config(), Some(epoch), known, &streams)
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        };
+        let carol_ish = run("carol1");
+        let c_dash = run("c-one");
+        assert!(
+            carol_ish.is_ok() && c_dash.is_ok(),
+            "cold reduce must not wedge: carol1={carol_ish:?} c-one={c_dash:?}"
+        );
     }
 }
