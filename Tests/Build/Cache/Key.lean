@@ -27,6 +27,30 @@ def environmentA : SemanticEnvironment where
 def environmentB : SemanticEnvironment :=
   { environmentA with source := ⟨Vec.singleton 1⟩ }
 
+def firstImport : ImportedSummary where
+  scope := ScopeId.root.child "first"
+  summary := ⟨Vec.singleton 1⟩
+
+def secondImport : ImportedSummary where
+  scope := ScopeId.root.child "second"
+  summary := ⟨Vec.singleton 2⟩
+
+def orderedImports : Vec ImportedSummary :=
+  Vec.fromList [firstImport, secondImport]
+
+def reversedImports : Vec ImportedSummary :=
+  Vec.fromList [secondImport, firstImport]
+
+example : importedSummariesTree orderedImports ≠
+    importedSummariesTree reversedImports := by
+  apply importedSummariesTree_ne_of_ne
+  decide
+
+example : importedSummariesTree (Vec.singleton firstImport) ≠
+    importedSummariesTree orderedImports := by
+  apply importedSummariesTree_ne_of_ne
+  decide
+
 example : cacheKey constantHasher environmentA = cacheKey constantHasher environmentB := rfl
 
 example : environmentA ≠ environmentB := by decide

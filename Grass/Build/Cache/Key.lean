@@ -86,6 +86,50 @@ def importedSummariesTree (imports : Vec ImportedSummary) : MerkleTree :=
         rest)
     (.leaf .noMoreImports)
 
+/-- `importedSummariesTree_injective` proves that the canonical Merkle preimage
+retains the complete ordered import sequence, before any selected hasher is
+applied. -/
+theorem importedSummariesTree_injective :
+    ∀ first second : Vec ImportedSummary,
+      importedSummariesTree first = importedSummariesTree second →
+        first = second := by
+  intro first
+  induction first using Vec.recOnCons with
+  | empty =>
+    intro second
+    induction second using Vec.recOnCons with
+    | empty => intro _; rfl
+    | cons imported rest _ =>
+      intro equality
+      simp [importedSummariesTree] at equality
+  | cons imported rest inductionHypothesis =>
+    intro second
+    induction second using Vec.recOnCons with
+    | empty =>
+      intro equality
+      simp [importedSummariesTree] at equality
+    | cons other tail _ =>
+      intro equality
+      obtain ⟨scope, summary⟩ := imported
+      obtain ⟨otherScope, otherSummary⟩ := other
+      simp only [importedSummariesTree, Vec.foldr_cons,
+        MerkleTree.branch.injEq, MerkleTree.leaf.injEq,
+        MerkleAtom.importScope.injEq, MerkleAtom.importSummary.injEq] at equality
+      obtain ⟨⟨scopeExact, summaryExact⟩, tailExact⟩ := equality
+      have restExact : rest = tail := inductionHypothesis tail (by
+        simpa [importedSummariesTree] using tailExact)
+      subst restExact
+      subst scopeExact
+      subst summaryExact
+      rfl
+
+/-- Distinct ordered import sequences have distinct canonical preimage trees. -/
+theorem importedSummariesTree_ne_of_ne
+    {first second : Vec ImportedSummary} (different : first ≠ second) :
+    importedSummariesTree first ≠ importedSummariesTree second :=
+  fun equality => different
+    (importedSummariesTree_injective first second equality)
+
 /-- Canonical tree shape for every semantic-environment component. -/
 def SemanticEnvironment.merkleTree (environment : SemanticEnvironment) : MerkleTree :=
   let audit := .leaf (.auditPolicy environment.auditPolicy)
