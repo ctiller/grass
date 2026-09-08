@@ -907,4 +907,47 @@ theorem subR64Imm32_decodes (r : Gpr) (v : BitVec 32) (rest : ByteSeq) :
     decodeInsn ((subR64Imm32 r v).toBytes ++ rest) = .ok (subR64Imm32 r v, rest) :=
   decodes_of_specShape (by rfl) (subR64Imm32_wellFormed r v) rest
 
+
+/-! ### The two `B8+rd` encoders
+
+`decodes_of_specShape` cannot reach these. `specShapeFor` requires
+`immPromotedByRexW == false`, and the `B8+rd` row is the one row in the table
+where it is true: the same opcode takes an `imm32` without `REX.W` and an
+`imm64` with it. That is exactly the fact `OpcodeSpec.immSizeFor` exists to
+carry, so these instantiate `decodeInsn_toBytes` directly rather than through a
+`Bool` predicate that was written to assume the promotion away.
+
+They are also the two encoders that most wanted the corollary. `movRegImm64` is
+the only producer of `Immediate.i64` anywhere in this library, and the section
+above records what that cost: a reviewer reversed `le64` and `takeLe64`
+together and every gate stayed green, because no oracle emitted the form.
+
+With these two, every encoder in `Grass/ISA/X86/Bytes.lean` has a round-trip
+corollary: all nine of `movRegImm32`, `movRegImm64`, `leaR64`, `callMem64`,
+`movMem32Imm32`, `movMem64Imm32`, `pushR64`, `subR64Imm8` and `subR64Imm32`.
+A tenth encoder added without one would be the gap reopening, and nothing
+mechanical will notice -- this list is the only place the count is written
+down. -/
+
+/-- `MOV r32, imm32` round-trips through its bytes.
+
+The case split is on the register for the same reason as `pushR64_decodes`: the
+register rides in the opcode, so each of the sixteen names a different row. -/
+theorem movRegImm32_decodes (r : Gpr) (v : BitVec 32) (rest : ByteSeq) :
+    decodeInsn ((movRegImm32 r v).toBytes ++ rest) = .ok (movRegImm32 r v, rest) := by
+  cases r <;>
+    exact decodeInsn_toBytes rest (by rfl) ⟨rfl, rfl, rfl, rfl⟩ (movRegImm32_wellFormed _ _)
+
+/-- `MOV r64, imm64` round-trips through its bytes.
+
+The interesting half of the pair. This encoding carries `REX.W`, so
+`OpcodeSpec.immSizeFor` promotes the row's `imm32` to `imm64` and the decoder
+must read eight immediate bytes rather than four. A decoder that ignored the
+promotion would read `48 B8` plus four bytes and resume in the middle of the
+immediate, which is the failure `Immediate.i64`'s own docstring describes. -/
+theorem movRegImm64_decodes (r : Gpr) (v : BitVec 64) (rest : ByteSeq) :
+    decodeInsn ((movRegImm64 r v).toBytes ++ rest) = .ok (movRegImm64 r v, rest) := by
+  cases r <;>
+    exact decodeInsn_toBytes rest (by rfl) ⟨rfl, rfl, rfl, rfl⟩ (movRegImm64_wellFormed _ _)
+
 end Grass.ISA.X86
