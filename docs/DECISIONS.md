@@ -827,6 +827,88 @@ to imitate compiler-selected storage or CFG structure.
     of every `Grass/Process/**` module. This resolves the three-way
     spike/foundation/module mismatch raised by `c-spike` while retaining the
     process layer's no-import-all invariant.
+135. `Grass.Effect` is the optional high-level sequential proof-economy layer
+    specified by `EFFECTS.md`. It uses open dependent operation families,
+    finite duplicate-free rows, a well-founded free request/continuation program,
+    relational rooted operation-history theories, explicit requirement summaries, and
+    composable source-to-target handlers. Effect-row typeclasses establish
+    membership only. An explicit effect-lowering plan selects local abstract
+    handlers and feeds its derived requirements into the single
+    `PlatformPlan.ProviderEnv`; only that later owner selects physical providers
+    and establishes global dictionary coherence. Neutral Specification owns the
+    dependent, authority-indexed `ProviderDemandFamily` and exact binding-view
+    carrier. Opaque origin scopes and demands carry the authority as a type
+    index rather than a caller-filled descriptor tag; owner-specific
+    substitution constructors prevent Effect from
+    discharging memory, resource, obligation, ABI, platform, or ISA demands.
+    Extension-authority registries are finite composable values with
+    stable-identity-preserving embeddings, not an unparameterized global table.
+    Provider provenance is carried by indexed sidecar certificates over the
+    stable five-field `DriverBoundary`, so a provider change does not alter the
+    semantic boundary type.
+    The handoff retains the exact
+    upstream effect theory/model identity, so equal requirement names cannot
+    substitute a different dictionary semantics. Every effect-generated
+    operation has an exact, possibly empty or multi-origin registered subfamily,
+    and sequential, explicit, and blended
+    Process sources derive one coverage-complete, conservative provider-demand
+    family from a sidecar certificate over their stable selected boundary and a finite exact image of every
+    selected plan role (without closing the open registry), with
+    bidirectional coverage/no-extra/origin-provenance-exactness proofs; local
+    operation origins point into that family. A certified wrapper around the
+    raw relational program also retains an exact dependent
+    `DirectProgramDerivation`; the Effect adapter
+    stores its program/model/progress/adapter proof there while provider demands
+    remain indexed only by the stable plan/model boundary. Thus the handoff cannot be removed by repackaging a
+    correctness proof. The exact `ProcessPlanSource` projects definitionally
+    from the portable model through Act 3; a platform plan cannot re-author it.
+    Provider disposition may run over a compact authority-equivalent summary,
+    but a checked transport reconstructs the disposition over that exact origin
+    and proves its forwarded family equivalent to the family consumed by later
+    stages. Thus `ProjectedDriverCertificate.originRequirementConnections`
+    discharges the provider-owned realization members and forwards every other
+    authority with its exact origin into the later staged families. Equal
+    origin IDs and descriptors do not authorize union: collisions require the
+    opaque same-origin provenance retained by the originating scope and slot.
+    Effect plans use generated nominal lowering identities; distinct plans
+    compose only with disjoint identities, while sharing requires equality of
+    the exact dependent plans. Handler proofs preserve
+    complete and pending-prefix behavior, ordered observations, and account for
+    every discharged and introduced requirement, including both simulation
+    directions whenever equivalence is claimed. Effect requirements do not
+    create, transfer, discharge, or adopt obligations: a later owned binding
+    connects a neutral requirement to the canonical operation/obligation
+    protocol. The lowering plan is indexed by the exact source row model and
+    carries one whole-row simulation relation, including frame/overlap,
+    observation, pending, and extension laws; independent handlers cannot
+    clobber sibling representations. Every nonterminal operation history must
+    extend or begin an allowed infinite chain, and provider refinement includes
+    request/domain coverage in addition to provider-to-model soundness.
+    Long-running scheduling, channels, pending occurrences,
+    cancellation, faults, and supervision remain Process concerns. General
+    Effect adapters preserve proper pending-history progress and its observations;
+    the zero-ceremony atomic sequential adapter is valid only when no such
+    progress exists. Adapters
+    may embed well-founded effect programs without making Process core depend on the
+    Effect implementation. Process owns one open
+    `RegisteredDirectOperationModel` seam. An independent owner-issued operation
+    family fixes operation constructors, relations, provider footprints, and
+    citations; each program binding selects only registered operations and proves
+    aggregate and raw-program connection laws. The machine certificate connects
+    every concrete instruction/API call back to those selected operations.
+    Process derives occurrence origins rather than accepting an origin function
+    or caller predicate. Dynamic issued-bag
+    slots receive opaque monotone realization-private tokens; events carry a
+    handle indexed by an opaque exact occurrence state, and issuance results
+    biject those handles with the original dependent issuance slots, so two
+    equal-valued pending demands remain separately completable and consumed
+    epochs cannot be fabricated or replayed.
+    Direct serial functions and first-class authored
+    assembly may refine the same specification requirements without constructing
+    a decorative effect-program witness. This is the proposed resolution of
+    `coord1:73`; the current Lean gate does not implement it, and the assigned
+    foundation implementation is gated on the explicit negative fixtures in
+    `EFFECTS.md` and `VERIFIED_PROGRAM.md`.
 
 ## Explicitly rejected shortcuts
 

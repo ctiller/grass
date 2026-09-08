@@ -20,6 +20,12 @@ or bounded mutually recursive group. It publishes a small signature and hides
 its topology and proofs.
 
 ```lean
+structure ProviderDemandSummary where
+  family : ProviderDemandFamily
+  canonicalManifest : Array ProviderDemandManifestEntry
+  manifestExact : CanonicalManifestReferencesEveryDemandExactlyOnce
+    family canonicalManifest
+
 structure ProcessSignature where
   id : StableProcessSignatureId
   requests : InterfaceFamily
@@ -41,12 +47,23 @@ structure ProcessShardCertificate (sig : ProcessSignature) where
   private realization : ProcessRealization topology
   private localProof : LocalProcessCorrect realization
   public boundary : RealizesProcessSignature realization sig
+  public providerOriginsExact :
+    sig.providers.family.AuthorityEquiv
+      realization.providers.providerDemands
 ```
 
 The public theorem type contains `sig`, including its semantic `behavior`, but
 not `topology`, `State`, a global registry, or the source of child processes. A
 body edit with the same behavioral and operational boundary rebuilds the shard
 certificate but does not alter its consumers.
+
+`ProviderDemandSummary` is lossless proof data, not a hash/count approximation:
+its family retains every origin ID and dependent descriptor. The canonical
+manifest is only a deterministic review/cache rendering and cannot replace
+`family`. It records stable origin/capability/authority and exported declaration
+identities; it does not serialize a dependent proposition or prove two function
+bodies equal. `providerOriginsExact` makes dropping or rewriting an origin a
+shard type error.
 
 `ProcessTraceContract` is an abstract input/event/result/observation trace
 relation, not merely an interface shape. The certificate's public theorem means:
@@ -230,11 +247,19 @@ structure RootProcessCertificate {R : Type} (root : SpecProcess R) where
   requirementOrigins : EveryContractClauseHasRootOrigin signature.behavior root
   rootRefinement : signature.behavior.Refines root.behavior
   observationExact : signature.observations.Refines root.observationFilter
+  providerFamily : ProviderDemandFamily
+  providerCompositionExact : ExactOriginPreservingShardDemandUnion
+    aggregate providerFamily
+  signatureProvidersExact :
+    signature.providers.family.AuthorityEquiv providerFamily
 ```
 
 `VerifiedProgram root` consumes this root certificate. Replacement under an
 unchanged signature is sound because the signature retains the same behavioral
 relation, not merely because its messages and resource summaries still line up.
+`PortableProgramCertificate.providerDemandExtractionExact` is constructed from
+`providerCompositionExact` and `signatureProvidersExact`; it never reconstructs
+origins from the canonical manifest.
 
 ## 7. Staged blending and heterogeneous lowering
 

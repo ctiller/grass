@@ -8,6 +8,28 @@ There is exactly one precious semantic index: the root `SpecProcess`. Other
 specification DSLs and semantic subprocesses have already been composed and
 captured into that value; implementation process graphs merely realize it.
 
+**Implementation status.** The Lean `Grass.Verify.VerifiedProgram` currently in
+the repository is an earlier vertical skeleton and does not yet implement every
+field in this document. In particular its current five-certificate gate does not
+retain `ProviderDemandFamily`, `StagedObligationFamily`, Effect progress, or
+`AllRequirementsDischarged`. It therefore is not evidence that an Effect-derived
+program satisfies this contract and must not be used to merge one. The Effect
+milestone is gated on extending the actual certificate types and end-to-end
+theorem so that provider-origin removal and a terminal-vacuous infinite loop are
+negative elaboration fixtures. This document defines that required destination;
+the implementation plan must land the connections before claiming completion.
+
+Before any Effect-derived program reaches the implementation, the current
+five-certificate structure and writer must be visibly type-separated as
+provisional (for example, `ProvisionalVerifiedProgram` and
+`emitProvisionalProgram` in an experimental namespace), or replaced outright by
+the complete gate below. The public names `VerifiedProgram` and `emitProgram`
+are reserved for a certificate carrying every closure demanded here. A comment,
+module status note, or convention at call sites is not type separation. The
+transition fixture constructs the current infinite nonterminal behavior and
+proves that it cannot inhabit the final public gate merely because terminal
+soundness has no premise to consume.
+
 ## 1. Conceptual interface
 
 ```lean
@@ -89,22 +111,53 @@ with total origin maps. Target-specific facts are never inserted into the
 precious `SpecProcess.requirements`:
 
 ```lean
-structure StagedObligationFamily
-    (spec : SpecProcess resources)
+structure StagedObligationFamily {R : Type u} [ResourceModel R]
+    {resources : R} (spec : SpecProcess resources)
+    {profile : PlatformProfile}
     (projection : TargetProjection spec profile)
-    (plan : PlatformPlan spec.driverBoundary.requirements)
+    {requirements : RequirementSet}
+    (plan : PlatformPlan projection requirements)
+    (forwarded : ProviderDemandFamily)
     (source : MachineSource plan)
     (artifact : Artifact plan) where
   portable : DemandFamily := spec.requirements
-  projected : DerivedDemandFamily portable
-  provider : DerivedDemandFamily projected
-  machine : DerivedDemandFamily provider
-  artifact : DerivedDemandFamily machine
-  origins : EveryDerivedDemandHasOnePriorStageOrigin
-  disjoint : PairwiseDisjointKeys portable projected provider machine artifact
+  projected : DerivedDemandFamily portable.identities
+  providerInput : DemandFamily
+  forwardedIncorporation : ExactOriginPreservingUnionOfProjectedAndForwarded
+    projected forwarded providerInput
+  provider : DerivedDemandFamily providerInput.identities
+  machine : DerivedDemandFamily provider.allKeys
+  artifact : DerivedDemandFamily machine.allKeys
+  origins : EveryDerivedDemandHasOnePriorStageOrForwardedOrigin
+  disjoint : PairwiseDisjointStagedAndForwardedOrigins
+    portable projected forwarded provider machine artifact
+
+structure OriginDispositionFeedsStagedFamilyExactly
+    {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {projection : TargetProjection spec profile}
+    {requirements : RequirementSet}
+    {plan : PlatformPlan projection requirements}
+    {originDemands : ProviderDemandFamily}
+    {bindingView : ProviderBindingView}
+    {forwarded : ProviderDemandFamily}
+    {source : MachineSource plan}
+    {artifact : Artifact plan}
+    (connections : ExactAuthorityRespectingRequirementDisposition
+      originDemands bindingView)
+    (forwardedExact : connections.exactForwardedFamily.AuthorityEquiv forwarded)
+    (staged : StagedObligationFamily
+      spec projection plan forwarded source artifact) where
+  dispositionForwardedExact :
+    connections.exactForwardedFamily.AuthorityEquiv forwarded
+  agreesWithDriverBridge : dispositionForwardedExact = forwardedExact
+  lookupExact : forall origin,
+    connections.exactForwardedFamily.lookupView origin =
+      forwarded.lookupView origin
 
 structure ImplementationConstraintIndex
-    (staged : StagedObligationFamily spec projection plan source artifact) where
+    (staged : StagedObligationFamily spec projection plan forwarded source artifact) where
   entries : (key : staged.disjointUnion.Key) ->
     ImplementationConstraint staged.disjointUnion[key]
   originExact : EveryEntryHasItsStagedOrigin staged entries
@@ -112,9 +165,9 @@ structure ImplementationConstraintIndex
     staged.disjointUnion.dependencyEdges
 
 structure AllRequirementsDischarged
-    (staged : StagedObligationFamily spec projection plan source artifact)
+    (staged : StagedObligationFamily spec projection plan forwarded source artifact)
     (index : ImplementationConstraintIndex staged)
-    (program : GhostProgram spec.driverBoundary realization) where
+    (program : GhostProgramFor staged) where
   witness : (key : index.entries.Key) ->
     index.entries[key].Witness program
   coverage : EveryCapturedOccurrenceUsesExactlyOneWitness spec index witness
@@ -129,13 +182,26 @@ the first stale closing term ill-typed; a prose checklist cannot independently
 strengthen or weaken it. Requirement closure is the meta-theorem over the union
 and is never one of the demands it closes.
 
+The exact family forwarded by Act 3 is an index of `StagedObligationFamily`, not
+an informal side output. `forwardedIncorporation` converts every origin-specific
+entry into the next-stage constraint while preserving its authority, descriptor,
+and origin ID. Machine and artifact stages may discharge or forward it only
+through the corresponding owner constructor. `VerifiedProgram.requirementClosure`
+then supplies `AllRequirementsDischarged` for the complete indexed family; the
+end-to-end theorem consumes that value. No later certificate can simply omit the
+forwarded family.
+
 ```lean
 structure PortableProgramCertificate {R : Type u} [ResourceModel R]
     {resources : R} (spec : SpecProcess resources) where
-  model : PortableProcessModel spec.driverBoundary
+  model : PortableProcessModel spec
   correctness : ModelSatisfiesSpecification model spec
   boundary : ProcessBoundary
   exportsBoundary : ModelExportsBoundary model boundary
+  providerDemandSummary : ProviderDemandFamily
+  providerDemandExtractionExact :
+    providerDemandSummary.AuthorityEquiv
+      model.processOrigin.providerDemands
   demands : DemandCertificateFamily spec.requirements model
 
 structure ProjectedDriverCertificate {R : Type u} [ResourceModel R]
@@ -146,9 +212,35 @@ structure ProjectedDriverCertificate {R : Type u} [ResourceModel R]
   driverSummary : DriverBoundarySummary portable.boundary plan
   blendRequirementsExact :
     plan.requirements = portable.model.processOrigin.accumulatedRequirements
+  summaryRequirementConnections : ExactAuthorityRespectingRequirementDisposition
+    portable.providerDemandSummary plan.providerEnv.bindingView
+  forwardedRequirementsExact :
+    summaryRequirementConnections.exactForwardedFamily.AuthorityEquiv
+      driverSummary.forwardedRequirements
   providerCoherence : OneGloballyCoherentProviderAbiIsaEnvironment
     plan portable.model.processOrigin
   projectionCorrect : ProjectionAndDriverRefine portable projection driverSummary
+
+def ProjectedDriverCertificate.processOrigin
+    (driver : ProjectedDriverCertificate portable projection) :
+    ProcessPlanSource spec portable.model.realization.boundary
+      portable.model.realization.boundaryCertificate :=
+  portable.model.processOrigin
+
+def ProjectedDriverCertificate.originRequirementConnections
+    (driver : ProjectedDriverCertificate portable projection) :
+    ExactAuthorityRespectingRequirementDisposition
+      driver.processOrigin.providerDemands
+      driver.plan.providerEnv.bindingView :=
+  portable.providerDemandExtractionExact.transportDisposition
+    driver.summaryRequirementConnections
+
+theorem ProjectedDriverCertificate.originForwardedRequirementsExact
+    (driver : ProjectedDriverCertificate portable projection) :
+    driver.originRequirementConnections.exactForwardedFamily.AuthorityEquiv
+      driver.driverSummary.forwardedRequirements :=
+  (portable.providerDemandExtractionExact.transportDisposition_forwardedExact
+    driver.summaryRequirementConnections).trans driver.forwardedRequirementsExact
 
 structure MachineCertificate {R : Type u} [ResourceModel R]
     {resources : R} {spec : SpecProcess resources}
@@ -156,11 +248,17 @@ structure MachineCertificate {R : Type u} [ResourceModel R]
   blend : MachineBlend driver
   source : MachineSource driver.plan
   sourceExact : source = blend.exactSource
-  summary : MachineBoundarySummary driver.driverSummary
+  summary : MachineBoundarySummary
+    driver.driverSummary driver.driverSummary.forwardedRequirements
+  forwardedIncorporated : OriginPreservingDemandIncorporation
+    driver.driverSummary.forwardedRequirements summary.requirements
   implementationModels : ImplementationBundle source portable.model
+  operationCorrespondence :
+    EveryMachineAndProviderCallCorrespondsExactlyToRegisteredPortableOperation
+      source portable.model implementationModels
   localCertificates : MachineDemandCertificateFamily source summary
   closedBlendCoverage : SourceCoversExactlyEveryClosedBlendScope
-    source driver.plan.processOrigin blend
+    source driver.processOrigin blend
   sourceAndMachineCorrect : SourceRefinesDriverExactly source summary driver
 
 structure ArtifactCertificate {R : Type u} [ResourceModel R]
@@ -178,9 +276,46 @@ structure VerifiedProgram {R : Type u} [ResourceModel R]
   driver : ProjectedDriverCertificate portable projection
   machine : MachineCertificate driver
   artifact : ArtifactCertificate machine
+  staged : StagedObligationFamily spec projection driver.plan
+    driver.driverSummary.forwardedRequirements machine.source artifact.linked
+  stagedOrigin : OriginDispositionFeedsStagedFamilyExactly
+    driver.originRequirementConnections
+    driver.originForwardedRequirementsExact staged
+  constraintIndex : ImplementationConstraintIndex staged
+  requirementClosure : AllRequirementsDischarged
+    staged constraintIndex machine.blend.ghostProgram
   endToEnd : LoadedBytesSatisfySpecification
     (write artifact.linked) spec portable projection driver machine artifact
+    stagedOrigin requirementClosure
 ```
+
+`providerDemandExtractionExact` is the program-local proof that the compact
+stable summary is the coverage-complete union selected by the exact portable
+origin. `summaryRequirementConnections` performs the shard-sized provider
+work; `originRequirementConnections` is the definition that transports that
+disposition through `providerDemandExtractionExact` to the exact portable
+origin, and `originForwardedRequirementsExact` composes its transported
+forwarded family back to the driver summary. These are checked dependent
+bridges, not lookup by name. For an Effect-generated boundary the summary
+contains the applicable `ProviderRealizesEffectPlan.requirementConnections` (or
+its equivalence-strength extension). It discharges provider-owned members and feeds
+the authority-equivalent forwarded family into the later staged obligation families; a memory,
+resource, obligation, ABI, platform, or ISA origin cannot disappear at Act 3.
+`stagedOrigin` makes that composition an explicit input to final closure rather
+than leaving the end-to-end theorem to rediscover it.
+A direct operation contributes no member only when its exact registered origin
+subfamily is empty. Sequential, explicit, and blended sources all derive the union;
+changing or repackaging a correctness proof cannot erase it. Thus the effect
+plan, rooted histories, adapter proof, and provider dictionary remain adjacent in the final certificate without making
+the provider proof's theorem type depend on continuations or making
+`VerifiedProgram` itself Effect-specific. A program-body edit rebuilds extraction
+and adapter proofs; an unchanged handoff summary reuses its provider certificate.
+`MachineCertificate.operationCorrespondence` is bidirectional: every authored
+machine instruction or API call is attributed to the exact registered portable
+operation it realizes, and every selected portable operation is covered by its
+source region. Since provider footprints are owned by the independent operation
+registry, neither a custom assembly author nor a direct-program binder can hide
+a provider-using call behind a provider-free surrogate.
 
 Each tier is compiled/exported through its small summary. Private process state
 changes reopen the portable proof but not a consumer whose boundary is
@@ -195,7 +330,7 @@ memory, concurrency, progress, termination, resource, obligation,
 applicability, diagnostic, and artifact theorems. Grouping them by dependency
 tier does not conflate their statements or make one theorem discharge another.
 
-`VerifiedProgram` remains indexed only by the precious `spec`. `portable.model.origin`
+`VerifiedProgram` remains indexed only by the precious `spec`. `portable.model.processOrigin`
 records whether the plan was synthesized from a sequential relational program
 or explicitly authored; both have already elaborated to the same universal
 process algebra. The exact registry, population, local/shared state partition,

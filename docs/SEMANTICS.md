@@ -434,6 +434,503 @@ structure RequirementFamily where
   unique : demands.Keys.Nodup
 ```
 
+### Typed lower-layer requirements
+
+`Specification` also supplies a generic progress-policy carrier which semantic
+DSLs instantiate without importing `Semantics`:
+
+```lean
+structure MaximalExecutionPolicy (Execution : Type u) where
+  accepts : Execution -> Prop
+  namedFrontier : Execution -> Option StableId
+```
+
+The exact junction to one `SpecProcess` is owned by `Refinement`; the neutral
+record neither knows Effect nor selects a progress contract itself.
+
+Theorem demands above are not the same object as capabilities which a later
+lowering or provider must supply. `Specification` also owns the neutral carrier
+for those latter demands so Effect and Process need not import Platform:
+
+```lean
+inductive BuiltinRequirementAuthority
+  | effect | process | memory | resource | obligation | abi | platform | isa
+  deriving DecidableEq
+
+opaque ExtensionAuthorityOwner : Type
+def ExtensionAuthorityOwner.stableId : ExtensionAuthorityOwner -> StableId
+
+syntax (name := declareExtensionAuthority)
+  "declare_extension_authority " ident " => " term : command
+
+structure ExtensionAuthorityRegistry where
+  Entry : Type
+  entries : List Entry
+  complete : forall entry, entry ∈ entries
+  unique : entries.Nodup
+  owner : Entry -> ExtensionAuthorityOwner
+  key : Entry -> StableId := fun entry => (owner entry).stableId
+  keyInjective : Function.Injective key
+  freshFromBuiltins : forall entry, key entry ∉ builtinRequirementAuthorityKeys
+
+structure ExtensionAuthorityContainedIn
+    (registry : ExtensionAuthorityRegistry)
+    (registries : List ExtensionAuthorityRegistry) : Prop where
+  locate : forall entry : registry.Entry,
+    exists target, exists member : target ∈ registries, exists targetEntry,
+      target.key targetEntry = registry.key entry /\
+      target.owner targetEntry = registry.owner entry
+
+structure ExtensionAuthorityEmbedding
+    (small large : ExtensionAuthorityRegistry) where
+  entry : small.Entry -> large.Entry
+  keyExact : forall source, large.key (entry source) = small.key source
+  ownerExact : forall source, large.owner (entry source) = small.owner source
+  injective : Function.Injective entry
+
+structure ExtensionAuthorityKeysDisjointOrExact
+    (left right : ExtensionAuthorityRegistry) : Prop where
+  collisionOwnerExact : forall leftEntry rightEntry,
+    left.key leftEntry = right.key rightEntry ->
+      left.owner leftEntry = right.owner rightEntry
+
+def PairwiseExtensionAuthorityKeysDisjointOrExact
+    (registries : List ExtensionAuthorityRegistry) : Prop :=
+  registries.Pairwise ExtensionAuthorityKeysDisjointOrExact
+
+structure ExtensionAuthorityUnionPlan
+    (registries : List ExtensionAuthorityRegistry)
+    (compatible : PairwiseExtensionAuthorityKeysDisjointOrExact registries) where
+  merged : ExtensionAuthorityRegistry
+  include : forall registry, registry ∈ registries ->
+    ExtensionAuthorityEmbedding registry merged
+  coverage : forall entry : merged.Entry,
+    exists registry member source,
+      (include registry member).entry source = entry
+
+def ExtensionAuthorityRegistry.normalize
+    (registries : List ExtensionAuthorityRegistry)
+    (compatible : PairwiseExtensionAuthorityKeysDisjointOrExact registries) :
+    ExtensionAuthorityUnionPlan registries compatible
+def ExtensionAuthorityUnionPlan.includeCompatible
+    (plan : ExtensionAuthorityUnionPlan registries compatible)
+    (registry : ExtensionAuthorityRegistry)
+    (contained : ExtensionAuthorityContainedIn registry registries) :
+    ExtensionAuthorityEmbedding registry plan.merged
+def ExtensionAuthorityRegistry.mergePlan
+    (left right : ExtensionAuthorityRegistry)
+    (compatible : ExtensionAuthorityKeysDisjointOrExact left right) :
+    ExtensionAuthorityUnionPlan [left, right] compatible.asPairwise
+def ExtensionAuthorityRegistry.merge ... := (mergePlan ...).merged
+def ExtensionAuthorityRegistry.leftEmbedding ... := (mergePlan ...).include ...
+def ExtensionAuthorityRegistry.rightEmbedding ... := (mergePlan ...).include ...
+theorem ExtensionAuthorityRegistry.normalize_proof_irrelevant ...
+theorem ExtensionAuthorityRegistry.normalize_permutation ...
+
+structure RegisteredExtensionAuthority
+    (registry : ExtensionAuthorityRegistry) where
+  entry : registry.Entry
+
+def RegisteredExtensionAuthority.reindex
+    (embedding : ExtensionAuthorityEmbedding source target)
+    (authority : RegisteredExtensionAuthority source) :
+    RegisteredExtensionAuthority target
+theorem RegisteredExtensionAuthority.reindex_key ...
+theorem RegisteredExtensionAuthority.reindex_id ...
+theorem RegisteredExtensionAuthority.reindex_comp ...
+
+inductive RequirementAuthority
+  | builtin (owner : BuiltinRequirementAuthority)
+  | extension {registry : ExtensionAuthorityRegistry}
+      (owner : RegisteredExtensionAuthority registry)
+
+structure ProviderBindingView where
+  Entry : Type
+  entries : List Entry
+  complete : forall entry, entry ∈ entries
+  key : Entry -> ProviderKey
+  dictionary : Entry -> Type
+  selected : (entry : Entry) -> dictionary entry
+  unique : Function.Injective key
+
+opaque RequirementOriginScope (authority : RequirementAuthority) : Type
+
+namespace RequirementOriginScope
+def namespace : RequirementOriginScope authority -> ScopeId
+def Slot : RequirementOriginScope authority -> Type
+def slots (scope : RequirementOriginScope authority) : List scope.Slot
+theorem complete (scope : RequirementOriginScope authority) :
+  forall slot, slot ∈ scope.slots
+theorem unique (scope : RequirementOriginScope authority) : scope.slots.Nodup
+def slotKey (scope : RequirementOriginScope authority) : scope.Slot -> StableId
+theorem slotKeyInjective (scope : RequirementOriginScope authority) :
+  Function.Injective scope.slotKey
+end RequirementOriginScope
+
+structure ProviderDemandDescriptor where
+  capabilityKey : ProviderRequirementKey
+  statement : ProviderBindingView -> Prop
+
+opaque ProviderDemand (authority : RequirementAuthority) : Type
+def ProviderDemand.introduce
+    (scope : RequirementOriginScope authority) (slot : scope.Slot)
+    (descriptor : ProviderDemandDescriptor) : ProviderDemand authority
+def ProviderDemand.originId : ProviderDemand authority -> RequirementOriginId
+def ProviderDemand.descriptor : ProviderDemand authority -> ProviderDemandDescriptor
+theorem ProviderDemand.introduce_origin_exact ...
+theorem ProviderDemand.introduce_descriptor_exact ...
+
+structure RequirementOriginScopeEmbedding
+    (embedding : ExtensionAuthorityEmbedding source target)
+    (authority : RegisteredExtensionAuthority source)
+    (scope : RequirementOriginScope (.extension authority)) where
+  targetScope : RequirementOriginScope
+    (.extension (authority.reindex embedding))
+  slot : scope.Slot ≃ targetScope.Slot
+  namespaceExact : targetScope.namespace = scope.namespace
+  slotKeyExact : forall sourceSlot,
+    targetScope.slotKey (slot sourceSlot) = scope.slotKey sourceSlot
+
+def RequirementOriginScope.reindex
+    (embedding : ExtensionAuthorityEmbedding source target)
+    (authority : RegisteredExtensionAuthority source)
+    (scope : RequirementOriginScope (.extension authority)) :
+    RequirementOriginScopeEmbedding embedding authority scope
+theorem RequirementOriginScope.reindex_id ...
+theorem RequirementOriginScope.reindex_comp ...
+def ProviderDemand.reindex
+    (embedding : ExtensionAuthorityEmbedding source target)
+    (authority : RegisteredExtensionAuthority source)
+    (demand : ProviderDemand (.extension authority)) :
+    ProviderDemand (.extension (authority.reindex embedding))
+theorem ProviderDemand.reindex_originId ...
+theorem ProviderDemand.reindex_descriptor ...
+theorem ProviderDemand.reindex_id ...
+theorem ProviderDemand.reindex_comp ...
+theorem ProviderDemand.introduce_reindex
+    (scope : RequirementOriginScope (.extension authority))
+    (slot : scope.Slot) :
+    ProviderDemand.reindex embedding authority
+        (ProviderDemand.introduce scope slot descriptor) =
+      ProviderDemand.introduce
+        (RequirementOriginScope.reindex embedding authority scope).targetScope
+        ((RequirementOriginScope.reindex embedding authority scope).slot slot)
+        descriptor
+
+structure SomeProviderDemand where
+  authority : RequirementAuthority
+  demand : ProviderDemand authority
+
+opaque SameRequirementOriginProvenance
+    (left right : SomeProviderDemand) : Prop
+theorem SameRequirementOriginProvenance.refl
+    (demand : SomeProviderDemand) : SameRequirementOriginProvenance demand demand
+theorem SameRequirementOriginProvenance.symm ...
+theorem SameRequirementOriginProvenance.trans ...
+theorem SameRequirementOriginProvenance.reindex ...
+
+inductive RequirementAuthorityId
+  | builtin (owner : BuiltinRequirementAuthority)
+  | extension (key : StableId)
+
+structure ProviderDemandView where
+  authority : RequirementAuthorityId
+  originId : RequirementOriginId
+  descriptor : ProviderDemandDescriptor
+
+def ProviderDemand.view : ProviderDemand authority -> ProviderDemandView
+def SomeProviderDemand.view : SomeProviderDemand -> ProviderDemandView
+theorem ProviderDemand.reindex_view ...
+theorem SameRequirementOriginProvenance.viewExact
+    (same : SameRequirementOriginProvenance left right) :
+    left.view = right.view
+
+opaque ProviderDemandFamily : Type
+
+def ProviderDemandFamily.authorityRegistry :
+    ProviderDemandFamily -> ExtensionAuthorityRegistry
+def ProviderDemandFamily.origins :
+    ProviderDemandFamily -> Finset RequirementOriginId
+def ProviderDemandFamily.lookup :
+    ProviderDemandFamily -> RequirementOriginId -> Option SomeProviderDemand
+def ProviderDemandFamily.lookupView
+    (family : ProviderDemandFamily) (origin : RequirementOriginId) :
+    Option ProviderDemandView := (family.lookup origin).map SomeProviderDemand.view
+theorem ProviderDemandFamily.lookup_exact ...
+theorem ProviderDemandFamily.lookupView_exact ...
+theorem ProviderDemandFamily.lookup_extension_registered ...
+def OriginsDisjointOrSameOriginProvenance
+    (left right : ProviderDemandFamily) : Prop :=
+  forall origin leftDemand rightDemand,
+    left.lookup origin = some leftDemand ->
+    right.lookup origin = some rightDemand ->
+    SameRequirementOriginProvenance leftDemand rightDemand
+structure ProviderDemandFamily.ExtEq
+    (left right : ProviderDemandFamily) : Prop where
+  sameOrigins : left.origins = right.origins
+  sameViews : forall origin, left.lookupView origin = right.lookupView origin
+def ProviderDemandFamily.supportRegistry
+    (family : ProviderDemandFamily) : ExtensionAuthorityRegistry
+structure SupportedProviderDemand (registry : ExtensionAuthorityRegistry) where
+  view : ProviderDemandView
+  authorityWitness : ViewAuthorityRealizedByRegistry view registry
+def ProviderDemandFamily.supportEmbedding
+    (family : ProviderDemandFamily) :
+    ExtensionAuthorityEmbedding family.supportRegistry family.authorityRegistry
+def ProviderDemandFamily.supportLookup
+    (family : ProviderDemandFamily) (origin : RequirementOriginId) :
+    Option (SupportedProviderDemand family.supportRegistry)
+theorem ProviderDemandFamily.lookup_from_support ...
+theorem ProviderDemandFamily.support_exact ...
+theorem ProviderDemandFamily.support_noExtras ...
+structure ProviderDemandFamily.AuthorityEquiv
+    (left right : ProviderDemandFamily) : Prop where
+  commonRegistry : ExtensionAuthorityRegistry
+  includeLeft : ExtensionAuthorityEmbedding left.supportRegistry commonRegistry
+  includeRight : ExtensionAuthorityEmbedding right.supportRegistry commonRegistry
+  semantic : left.ExtEq right
+  lookupCorrespondence : forall origin,
+    StructurallySameReindexedLookup
+      (left.supportLookup origin) includeLeft
+      (right.supportLookup origin) includeRight
+theorem ProviderDemandFamily.AuthorityEquiv.refl ...
+theorem ProviderDemandFamily.AuthorityEquiv.symm ...
+theorem ProviderDemandFamily.AuthorityEquiv.trans ...
+theorem ProviderDemandFamily.AuthorityEquiv.transportCompatibility
+    (left : firstLeft.AuthorityEquiv secondLeft)
+    (right : firstRight.AuthorityEquiv secondRight)
+    (compatible : OriginsDisjointOrSameOriginProvenance firstLeft firstRight) :
+    OriginsDisjointOrSameOriginProvenance secondLeft secondRight
+theorem ProviderDemandFamily.AuthorityEquiv.union
+    (left : firstLeft.AuthorityEquiv secondLeft)
+    (right : firstRight.AuthorityEquiv secondRight)
+    (firstCompatible : OriginsDisjointOrSameOriginProvenance firstLeft firstRight) :
+    (firstLeft.union firstRight firstCompatible).AuthorityEquiv
+      (secondLeft.union secondRight
+        (left.transportCompatibility right firstCompatible))
+
+def ExactlyOneOf (left right : Prop) : Prop :=
+  (left ∨ right) ∧ ¬ (left ∧ right)
+
+structure ExactAuthorityRespectingRequirementDisposition
+    (demands : ProviderDemandFamily) (provider : ProviderBindingView) where
+  IsForwarded : (origin : RequirementOriginId) ->
+    (view : ProviderDemandView) -> Prop
+  classification : forall origin demand,
+    demands.lookupView origin = some demand ->
+      ExactlyOneOf
+        (DemandDischargedByItsOwningProvider origin demand provider)
+        (IsForwarded origin demand)
+  exactForwardedFamily : ProviderDemandFamily
+  forwardedExact : forall origin demand,
+    exactForwardedFamily.lookupView origin = some demand <->
+      demands.lookupView origin = some demand /\ IsForwarded origin demand
+  authorityPreserved : EveryForwardedLookupRetainsExactOriginOwnerAndDescriptor
+    demands exactForwardedFamily IsForwarded
+
+def ProviderDemandFamily.AuthorityEquiv.transportDisposition
+    (equivalent : left.AuthorityEquiv right)
+    (disposition : ExactAuthorityRespectingRequirementDisposition left provider) :
+    ExactAuthorityRespectingRequirementDisposition right provider
+
+theorem ProviderDemandFamily.AuthorityEquiv.transportDisposition_forwardedExact
+    (equivalent : left.AuthorityEquiv right)
+    (disposition : ExactAuthorityRespectingRequirementDisposition left provider) :
+    (equivalent.transportDisposition disposition).exactForwardedFamily.AuthorityEquiv
+      disposition.exactForwardedFamily
+theorem ProviderDemandFamily.ext_sameRegistry
+    (sameRegistry : left.authorityRegistry = right.authorityRegistry)
+    (sameOrigins : left.origins = right.origins)
+    (sameViews : forall origin, left.lookupView origin = right.lookupView origin) :
+    left = right
+def ProviderDemandFamily.empty : ProviderDemandFamily
+def ProviderDemandFamily.singleton
+    (demand : ProviderDemand authority) : ProviderDemandFamily
+def ProviderDemandFamily.ofScope
+    (scope : RequirementOriginScope authority)
+    (descriptor : scope.Slot -> ProviderDemandDescriptor) : ProviderDemandFamily
+def ProviderDemandFamily.union
+    (left right : ProviderDemandFamily)
+    (compatible : OriginsDisjointOrSameOriginProvenance left right) :
+    ProviderDemandFamily
+def ProviderDemandFamily.reindex
+    (family : ProviderDemandFamily)
+    (embedding : ExtensionAuthorityEmbedding family.authorityRegistry target) :
+    ProviderDemandFamily
+theorem ProviderDemandFamily.reindex_lookup_reindexes ...
+theorem ProviderDemandFamily.reindex_lookupView
+    (family : ProviderDemandFamily) :
+    (family.reindex embedding).lookupView origin = family.lookupView origin
+theorem ProviderDemandFamily.reindex_extEq
+    (family : ProviderDemandFamily) :
+    ProviderDemandFamily.ExtEq (family.reindex embedding) family
+theorem ProviderDemandFamily.reindex_authorityRegistry ...
+theorem ProviderDemandFamily.reindex_id ...
+theorem ProviderDemandFamily.reindex_comp ...
+def ProviderDemandFamily.reindexTo
+    (plan : ExtensionAuthorityUnionPlan registries compatible)
+    (family : ProviderDemandFamily)
+    (contained : ExtensionAuthorityContainedIn family.authorityRegistry
+      registries) : ProviderDemandFamily :=
+  family.reindex (plan.includeCompatible family.authorityRegistry contained)
+theorem ProviderDemandFamily.union_assoc_coherent
+    (plan : ExtensionAuthorityUnionPlan [leftRegistry, middleRegistry, rightRegistry]
+      pairwiseCompatibility)
+    (leftMiddle : OriginsDisjointOrSameOriginProvenance left middle)
+    (middleRight : OriginsDisjointOrSameOriginProvenance middle right)
+    (leftMiddleRight : OriginsDisjointOrSameOriginProvenance (left.union middle leftMiddle) right)
+    (leftMiddleRight' : OriginsDisjointOrSameOriginProvenance left (middle.union right middleRight)) :
+    ProviderDemandFamily.reindexTo plan
+        ((left.union middle leftMiddle).union right leftMiddleRight)
+        (leftMiddleRight.nestedAuthoritiesContained pairwiseCompatibility) =
+      ProviderDemandFamily.reindexTo plan
+        (left.union (middle.union right middleRight) leftMiddleRight')
+        (leftMiddleRight'.nestedAuthoritiesContained pairwiseCompatibility)
+
+def ProviderDemandFamily.CertifiedBy
+    (demands : ProviderDemandFamily) (view : ProviderBindingView) : Prop :=
+  forall originId packed, demands.lookup originId = some packed ->
+    packed.demand.descriptor.statement view
+```
+
+`ProviderBindingView` is an exact dependent snapshot, not a string-keyed map or
+a provider-selection algorithm. `PlatformPlan.ProviderEnv` constructs one such
+view and proves that it contains exactly its selected dictionaries. Earlier
+layers can therefore carry statements about the future binding without knowing
+how a platform environment is built.
+
+The built-in tags and their pairwise-distinctness are ordinary finite inductive
+data centralized here; no downstream owner definition or axiom is required.
+Extension registries are explicit composable values, never one unparameterized
+global table. Independent packages publish a finite registry. `normalize`
+checks pairwise stable-key compatibility once and constructs one canonical
+union plus origin-preserving embeddings for any arity; binary `merge` is only a
+convenience projection of that plan. A larger composition reindexes extension
+authorities through the plan's embeddings without changing their stable
+identity. Thus adding an extension does not edit a core
+sum or global registry, and a freely asserted `Contains` proof is not authority.
+Reindexing is functorial across scopes, demands, and families: identity is
+extensionally identity, successive embeddings equal their composition, and the
+two associations of a three-registry family union are transported into the
+same canonical three-way `ExtensionAuthorityUnionPlan`.
+`union_assoc_coherent` consumes every same-origin-provenance compatibility witness and
+proves equality there; no `Classical.choice`, proof-irrelevant registry cast, or ad hoc
+rewriting of dependent statements is part of the public construction.
+The normalized registry uses the finite subtype of stable keys occurring in the
+input registries, paired with the nominal owner carried by that key, as its
+`Entry`. `includeCompatible` maps an entry to its key, owner, and occurrence
+proof. Normalization sorts the finite union by the specified lexicographic order
+on the `(owner, localName)` fields of `StableId` and is deterministic under
+proof irrelevance.
+`normalize_permutation` proves that permuting the input registries produces the
+same normalized registry and embeddings; no hidden representative is chosen.
+
+Compatibility is semantic and therefore transports across
+`AuthorityEquiv`. The common `AuthorityEquiv.union` path asks the composer for
+only the compatibility witness on the families it actually has; it derives the
+reindexed side internally. Requiring both witnesses would expose proof
+representation churn as author ceremony and would permit the two sides to
+disagree about a fact that authority equivalence already fixes.
+
+`StableId` is serialization and collision-diagnostic data, not extension
+authority. `ExtensionAuthorityOwner` is opaque and has no public constructor.
+The `declare_extension_authority name => stableId` command is the sole creation
+surface: its checked elaborator emits a fresh nominal owner declaration and the
+kernel-checked stable-ID projection theorem. It does not accept a caller-
+supplied token type, so two `Unit` aliases cannot collapse independently
+declared owners. Equal-key compatibility therefore requires equality of the
+owner witnesses, and every embedding preserves it. Reusing an imported owner's
+published witness is an explicit adoption of that authority; reproducing its
+string key alone is insufficient. The command implementation and generated
+declaration shape are trust-audited, and negative fixtures attempt duplicate-key
+owners from separate modules. Normalization deduplicates equal keys only under
+the typed owner-equality proof and retains the nominal owner in the merged
+entry. `includeCompatible` requires key *and owner* containment; key occurrence
+alone cannot construct an embedding.
+
+A tag is descriptive data, not itself authority. Every extension authority is
+dependently indexed by its exact selected registry and packages an entry of
+that registry; no equality proof or dependent cast is needed to recover the
+source of an embedding.
+`RequirementOriginScope` is opaque and indexed by that complete authority; its raw
+constructor is not public. Each built-in owner exports only typed scope
+constructors for its own index, and an extension obtains the corresponding
+indexed scope from an entry of a reviewed registry. `ProviderDemand` retains
+that dependent authority, while a heterogeneous family stores
+`SomeProviderDemand`. Hence an existing memory demand cannot be
+repackaged as Effect-owned merely by filling an `authority` field: no such field
+or raw scope constructor exists. Owner layers export their indexed substitution
+constructors, not competing unindexed tags. `ProviderRequirementKey`,
+`ProviderKey`, and the theorem-demand `RequirementKey` are distinct nominal
+wrappers even when all contain a Core `ScopeId`. Equality in one domain cannot
+be used as equality in another.
+
+`ProviderDemandView` is the only representation accepted by semantic
+requirement predicates. It contains the built-in owner or extension stable key,
+origin identity, and exact descriptor, but not an extension registry value,
+entry representation, or membership proof. `ProviderDemand.reindex_view`
+therefore makes registry reindexing provably invisible to semantic
+requirements while the dependent demand remains available for construction and
+lookup. `ProviderDemandFamily.lookupView` is the registry-independent
+observation used by `ExtEq` and semantic proofs; dependent
+`lookup` remains available to constructors, and its reindex theorem states
+structural correspondence rather than an ill-typed raw equality between
+differently indexed packages. Raw family equality additionally requires equal
+`authorityRegistry` values through `ext_sameRegistry`. In particular reindexing
+into a larger registry is semantically equivalent, not equal, to its source.
+`supportRegistry` is the minimal owner registry induced by extension demands
+which actually occur in `lookup`; its no-extras theorem excludes unused ambient
+entries. `AuthorityEquiv` is the stronger certificate-facing relation: it
+embeds both support registries into one registry and requires dependent lookup
+correspondence there. It is reflexive, symmetric, and transitive. Transitivity
+normalizes only the three finite supports, so unrelated conflicting entries in
+larger storage registries cannot block certificate-DAG composition.
+Owner-specific disposition, forwarding, sharding, and final closure use
+`AuthorityEquiv`; bare `ExtEq` is only for semantic predicates already proved
+insensitive to registry representation.
+`transportDisposition` uses the dependent lookup correspondence to transport
+each discharge/forward classification, then constructs the forwarded family
+from exactly the transported forwarded members. Its
+`transportDisposition_forwardedExact` theorem is the mandatory bridge to the
+original forwarded family. A final certificate may not consume a disposition
+over a compact summary without composing this theorem back to the exact origin
+family.
+This prevents a well-typed requirement predicate from changing truth
+merely because composition embeds its extension into a larger registry.
+
+Origins are local dependent construction data, not entries in a global static
+registry: an authority-indexed finite scope can generate descriptors containing
+an arbitrary exact locally constructed lowering-plan value. `ProviderDemand`
+is opaque and its only constructor derives the origin ID and authority from the
+selected scope and slot while storing that exact descriptor. A witness for one
+demand cannot be reused after changing its capability key, replacing its
+statement with `True`, or changing its authority index. This is proof
+provenance, not an attempt to infer the semantic subject of an arbitrary `Prop`:
+mandatory memory, obligation, ABI, and ISA gates generate their own indexed
+origins independently of the precious application spec, so inventing a
+redundant Effect-owned assertion never removes the owner-generated demand.
+`originId` identifies one exact proof-obligation occurrence, while
+`descriptor.capabilityKey` identifies the provider capability it needs. Several origins may
+legitimately demand one capability and all remain in the family; provider
+selection deduplicates capabilities separately.
+
+Requirement substitution is an indexed inductive family, not an unchecked map.
+Every entry is forwarded with a typed semantic implication, introduced with a
+reviewed authority, or discharged by a constructor owned by its exact
+`RequirementAuthority`. In particular Effect's discharge constructor requires
+the `.builtin .effect` index; it cannot discharge entries owned
+by the memory, resource, obligation, ABI, platform, or ISA authorities. There is deliberately no generic constructor
+which accepts an arbitrary proof and erases its owner. `ProviderDemandFamily`'s
+representation is hidden. Its public equality is extensional over `lookup`, and
+serialization alone chooses canonical order. `union` retains repeated capability
+keys, composes the participating extension registries through checked
+embeddings, and requires a proof that origin scopes are disjoint or that equal
+origin IDs carry `SameRequirementOriginProvenance`. That opaque witness retains
+the originating scope/slot and authority path as well as the exact descriptor;
+descriptor equality alone cannot construct it. Standard
+hierarchical scopes derive this proof automatically; a collision is rejected at
+construction rather than leaving an `Except` inside a claimed total envelope.
+
 `VerifiedProgram` discharges every key separately and records the semantic
 facets actually consumed by its proof. Composition may derive a new demand from
 several old ones, but it cannot conflate them into one opaque “program correct”

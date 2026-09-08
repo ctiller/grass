@@ -2,21 +2,32 @@
 
 ## 1. Effect demands and provider choice
 
-High- and mid-level APIs use law-bearing typeclasses. An abstract class may name
-console, filesystem, graphics, process, allocation, or synchronization effects;
-a more specific class may demand Vulkan, Metal, Win32, or another provider.
+High- and mid-level APIs may use law-bearing typeclasses. Before Act 3 an
+abstract Effect class establishes membership in one explicitly selected
+portable effect row; it does not project from, search for, or select a physical
+provider. A more specific portable family may demand Vulkan, Metal, Win32, or
+another named API protocol without yet choosing its concrete dictionary.
 
-Programs are parameterized by an explicit `ProviderEnv` owned by the
-`PlatformPlan`. Effect classes are projections from that environment and are
-indexed by a nominal provider key whose type-level identity includes the selected
-profile. The exact dictionary/environment value used to elaborate and prove the
-high-level program is retained through realization; Grass must not re-run ambient
-instance search and obtain a second dictionary for the same key.
+Programs at Act 3 are parameterized by an explicit `ProviderEnv` owned by the
+`PlatformPlan`. Post-Act-3 provider capability classes may be projections from
+that environment and are indexed by a nominal provider key whose type-level
+identity includes the selected profile. The retained upstream value is the exact
+portable theory/model/requirement handoff. `ProviderRealizesEffectPlan` connects
+that value to the one physical dictionary in `ProviderEnv`; no physical
+dictionary is used to elaborate the portable effect program. Grass must not
+re-run ambient instance search and obtain a second dictionary for the same key.
 
 Realization proves dictionary identity, not merely equality of key names. An
 alternative implementation may enforce uniqueness by construction, but two
 instances with different operations or laws for one key must be unrepresentable
 in one verified environment.
+
+`ProviderEnv.bindingView : ProviderBindingView` is a transparent exact snapshot
+of those selected dependent dictionaries. Its construction proof states that
+every and only environment entry occurs once and that lookup returns the same
+dictionary value. Earlier `ProviderDemandFamily` values are certified against
+this view; Platform owns construction and global coherence, while neutral
+Specification owns only the carrier and typed demand relation.
 
 Intentional multi-provider use requires distinct keys and a compatibility or
 noninteraction proof. Platform, ISA, and set of APIs used remain independent

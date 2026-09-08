@@ -15,8 +15,11 @@ semantic policy.
    interruptible, faulting, and hostile-environment executions.
 3. Review [MEMORY_MODEL.md](MEMORY_MODEL.md) and [OBLIGATIONS.md](OBLIGATIONS.md)
    together; attempt alias, lifetime, race, teardown, and failure attacks.
-4. Trace one high-level effect through [REFINEMENT.md](REFINEMENT.md),
+4. Trace one high-level effect through [EFFECTS.md](EFFECTS.md),
+   [REFINEMENT.md](REFINEMENT.md), a process adapter or direct assembly proof,
    [INSTRUCTIONS.md](INSTRUCTIONS.md), and [PLATFORM_ABI.md](PLATFORM_ABI.md).
+   Verify that requirements are neither lost nor mistaken for obligations and
+   that provider choice is explicit and coherent.
 5. Attempt to prove one program while emitting a different artifact using gaps in
    [ARTIFACTS.md](ARTIFACTS.md) and [VERIFIED_PROGRAM.md](VERIFIED_PROGRAM.md).
 6. Challenge every external assertion using [VALIDATION.md](VALIDATION.md).

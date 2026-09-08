@@ -37,6 +37,15 @@ frontier, or the following lower-level relational escape hatch for transitions
 which issue or resolve several effects together:
 
 ```lean
+inductive DirectIssuance (Initial : ...) (Step : ...) where
+  | initial (...)
+  | step (...)
+
+structure DirectIssueOccurrence (Initial : ...) (Step : ...) where
+  issuance : DirectIssuance Initial Step
+  demand : EffectDemand boundary
+  slot : Fin (issuance.issued.count demand)
+
 structure DirectRelationalProgram (boundary : DriverBoundary) where
   State Request TerminalResult : Type
   Initial : Request -> State ->
@@ -48,17 +57,115 @@ structure DirectRelationalProgram (boundary : DriverBoundary) where
   Pending : State -> AbstractDemandBag (EffectDemand boundary)
   initialEquation : EveryInitialOutputEqualsPending Initial Pending
   transitionEquation : EveryStepHasExactConsumedIssuedPendingEquation Step Pending
-  sites : FiniteDependentEffectSiteInventory Initial Step
-  binding : forall occurrence,
-    occurrence \u2208 DynamicOccurrences Initial Step ->
+  binding : forall occurrence : DirectIssueOccurrence Initial Step,
     ExactSiteProtocolAndChildBinding occurrence
   terminal : Request -> State -> TerminalResult -> Prop
   terminalDisposition : EveryTerminalStateClassifiesEveryPendingOccurrence
 
+abbrev DynamicOccurrence (program : DirectRelationalProgram boundary) :=
+  DirectIssueOccurrence program.Initial program.Step
+
+opaque LiveDynamicOccurrence (program : DirectRelationalProgram boundary) : Type
+opaque DirectOccurrenceState (program : DirectRelationalProgram boundary) : Type
+def DirectOccurrenceState.initial : DirectOccurrenceState program
+def DirectOccurrenceState.live
+    (state : DirectOccurrenceState program) : List (LiveDynamicOccurrence program)
+opaque LiveOccurrenceHandle (state : DirectOccurrenceState program) : Type
+def LiveOccurrenceHandle.occurrence
+    (handle : LiveOccurrenceHandle state) : LiveDynamicOccurrence program
+
+opaque DirectIssueResult
+    (before : DirectOccurrenceState program)
+    (issuance : DirectIssuance program.Initial program.Step) : Type
+def DirectIssueResult.after
+    (result : DirectIssueResult before issuance) : DirectOccurrenceState program
+def DirectIssueResult.introduced
+    (result : DirectIssueResult before issuance) :
+    List (LiveOccurrenceHandle result.after)
+theorem DirectIssueResult.introducedNodup
+    (result : DirectIssueResult before issuance) : result.introduced.Nodup
+def DirectIssueResult.slots
+    (result : DirectIssueResult before issuance) :
+    { handle : LiveOccurrenceHandle result.after //
+        handle ∈ result.introduced } ≃
+      Sigma fun demand : EffectDemand boundary =>
+        Fin (issuance.issued.count demand)
+theorem DirectIssueResult.introducedExact ...
+theorem DirectIssueResult.priorExact ...
+
+opaque DirectProgramDerivation
+    (boundaryCertificate : CertifiedDriverBoundary boundary)
+    (program : DirectRelationalProgram boundary) : Type
+def DirectProgramDerivation.operationRequires ...
+def DirectProgramDerivation.operationOrigins ...
+theorem DirectProgramDerivation.operationOrigins_exact ...
+theorem DirectProgramDerivation.operationOrigins_contained ...
+theorem DirectProgramDerivation.operationOrigins_aggregateExact ...
+theorem DirectProgramDerivation.connectsExactly ...
+
+opaque DirectOperationModelOwner : Type
+opaque RegisteredOperationFamily
+    (boundaryCertificate : CertifiedDriverBoundary boundary) : Type
+def RegisteredOperationFamily.Operation
+    (family : RegisteredOperationFamily boundaryCertificate)
+    (demand : EffectDemand boundary) : Type
+def RegisteredOperationFamily.lowerRequirements
+    (family : RegisteredOperationFamily boundaryCertificate)
+    (demand : EffectDemand boundary)
+    (operation : family.Operation demand) :
+    RegisteredOperationOrigins boundaryCertificate.providers.demands demand
+opaque OwnerIssuedDirectOperationModel
+    (owner : DirectOperationModelOwner)
+    (boundaryCertificate : CertifiedDriverBoundary boundary)
+    (program : DirectRelationalProgram boundary) : Type
+structure DirectOperationSemantics
+    (boundaryCertificate : CertifiedDriverBoundary boundary)
+    (program : DirectRelationalProgram boundary) where
+  family : RegisteredOperationFamily boundaryCertificate
+  selected : forall occurrence : DynamicOccurrence program,
+    family.Operation occurrence.demand
+  aggregateExact : AggregateOperationOriginViews
+      (fun occurrence => family.lowerRequirements
+        occurrence.demand (selected occurrence)) =
+    ExactUsedLowerRequirementViewsOf selected program
+  connectsInitial : EveryInitialIssuanceSelectsExactlyItsOperations
+    program.Initial selected
+  connectsStep : EveryStepIssuanceSelectsExactlyItsOperations
+    program.Step selected
+  bindingExact : EverySelectedOperationUsesTheProgramBindingExactly
+    program.binding selected
+opaque RegisteredDirectOperationModel
+    (boundaryCertificate : CertifiedDriverBoundary boundary)
+    (program : DirectRelationalProgram boundary) : Type
+def RegisteredDirectOperationModel.register
+    (issued : OwnerIssuedDirectOperationModel owner boundaryCertificate program) :
+    RegisteredDirectOperationModel boundaryCertificate program
+def DirectProgramDerivation.certify
+    (model : RegisteredDirectOperationModel boundaryCertificate program) :
+    DirectProgramDerivation boundaryCertificate program
+
+structure CertifiedDirectProgram
+    (boundary : DriverBoundary)
+    (boundaryCertificate : CertifiedDriverBoundary boundary) where
+  program : DirectRelationalProgram boundary
+  derivation : DirectProgramDerivation boundaryCertificate program
+
+def CertifiedDirectProgram.originDemands
+    (program : CertifiedDirectProgram boundary boundaryCertificate) :
+    ProviderDemandFamily := boundaryCertificate.providers.demands
+
+def CertifiedDirectProgram.operationOrigins
+    (program : CertifiedDirectProgram boundary boundaryCertificate)
+    (occurrence : DynamicOccurrence program.program) :=
+  program.derivation.operationOrigins occurrence
+
 structure DirectProgramRealizes {R : Type u} [ResourceModel R]
     {resources : R} (spec : SpecProcess resources)
-    (program : DirectRelationalProgram spec.driverBoundary) where
-  invariant : program.State -> Prop
+    {boundary : DriverBoundary}
+    {boundaryCertificate : CertifiedDriverBoundary boundary}
+    (program : CertifiedDirectProgram boundary boundaryCertificate) where
+  boundaryProjection : ExactDriverBoundaryProjection boundary spec.driverBoundary
+  invariant : program.program.State -> Prop
   initial : DirectInitialSimulation spec program invariant
   step : DirectStepSimulation spec program invariant
   terminal : DirectTerminalSimulation spec program invariant
@@ -69,14 +176,38 @@ structure DirectProgramRealizes {R : Type u} [ResourceModel R]
 and produces one conventional, replaceable process presentation. The input
 already contains the program decomposition and correctness proof; neither the
 adapter's topology nor its chosen child placement becomes precious.
+`boundaryProjection` permits a realization boundary to carry derived lower
+requirements while proving that its portable observation, input, and demand
+view projects exactly to `spec.driverBoundary`; an unrelated boundary cannot be
+smuggled through the implicit certificate index.
+The provider-demand family is the conservative certified-boundary envelope.
+Every dynamic occurrence's possibly empty or multi-origin subfamily is
+`program.derivation.operationOrigins occurrence`: a function of the opaque
+derivation and exact occurrence, not merely its dependent demand and not caller-
+populated evidence. The derivation is constructible only from an opaque
+owner-issued program binding selecting operations from an independently
+registered operation family. That family fixes each operation's relation,
+provider footprint, owner, and source citation; the binding proves aggregate
+exactness and connection to the raw program. The factory derives origins by
+filtering the certified boundary. An arbitrary `Requires := False` predicate is
+not a construction input, and the machine certificate must connect every
+authored instruction/API call back to the exact selected registered operation.
+`operationOrigins_exact`, `operationOrigins_contained`, and
+`operationOrigins_aggregateExact` connect it respectively to that occurrence's
+selected lower path, the conservative boundary, and the exact aggregate of used
+lower requirements. Thus two equal logical demands may choose different
+lowerings without either proof omitting or relabelling an origin. Provider
+certificates are not duplicated per call site. The raw relational program stays
+free of provider and finite-site fields; only the certified wrapper enters the
+complete proof chain.
 
 ### Construction
 
-The adapter uses one root process whose local state is `program.State`. Each
+The adapter uses one root process whose local state is `program.program.State`. Each
 dynamic occurrence named by an `Initial` or `Step` witness becomes either:
 
 - an internal serial transition;
-- one standard child-protocol demand at a declared effect site; or
+- one standard child-protocol demand at a dynamic typed occurrence; or
 - one root external event.
 
 The generated network state is the direct state plus a finite map from live
@@ -99,9 +230,10 @@ when two demands have equal payloads.
 
 For a direct internal step, the root makes the corresponding process step and
 the occurrence map is unchanged. For an effect issue, the adapter allocates one
-fresh occurrence, inserts one child and escrow, and the demand-bag equation
+fresh monotone epoch for every multiplicity-indexed
+`DirectIssueOccurrence.slot`, inserts one child and escrow, and the demand-bag equation
 follows by multiset insertion. For a result, interruption, failure, or
-cancellation resolution, it consumes the exact occurrence and uses that
+cancellation resolution, it consumes the exact live epoch/slot token and uses that
 standard child protocol's result projection. A transition may consume a result
 and issue further demands in the same step; `transitionEquation` gives the
 single exact bag equation relating consumed, issued, and before/after
@@ -109,6 +241,22 @@ single exact bag equation relating consumed, issued, and before/after
 simulation plus `terminalDisposition` for the live map. Induction gives every finite prefix. The supplied complete-execution
 coverage and a standard coinductive lifting give infinite, divergent, pending,
 fault, and terminal shapes.
+The token, occurrence state, handle, and issue result are realization-private
+and opaque. `DirectIssueResult.slots` bijects introduced handles with the exact
+dependent slots of the witnessed issuance, so an equal demand from another
+initial/step witness cannot be substituted. Erasure counts live tokens by
+demand to obtain the precious bag. Events accept a
+`LiveOccurrenceHandle` indexed by the exact current occurrence state. A caller
+cannot fabricate a same-epoch token, and a consumed handle does not typecheck
+against the post-consumption state; completed epochs are never reused.
+
+For a law-bearing operation which exposes observations while still pending, the
+adapter state additionally retains its exact rooted history. A pending-progress
+step keeps the same occurrence and escrow, advances only along the selected
+model's proper `Extends` relation, and appends exactly the new observation
+segment. The canonical waiting-occurrence sigma prevents omitting an effect
+decision by choosing an empty carrier. Atomic operations use the same theorem
+with an exact selected model proving that no proper pending step exists.
 
 The reverse direction is not guessed: canonical network transitions are
 generated only by the cases above, so inversion on the transition constructor
@@ -118,14 +266,14 @@ network normally proves only the refinement direction its specification needs.
 
 ### Automation boundary
 
-The library generates bookkeeping for declared effect sites. It does not find a
+The library generates bookkeeping for dynamic typed occurrences. It does not find a
 loop invariant, decide which arbitrary subexpression is an effect, invent a
 child protocol, prove `DirectProgramRealizes`, or infer a simulation relation
 from an arbitrary `Prop`.
 
-For `SequentialMachine`, the library also generates the declared effect sites:
-they are a structural fold over the finite typed decision syntax. Its proof is
-one induction over `SequentialDecision`. `.internal` preserves the live
+For `SequentialMachine`, the library generates the occurrence identity and
+dependent binding from the typed decision. Its proof is one induction over
+`SequentialDecision`. `.internal` preserves the live
 occurrence map, `.effect demand resume` allocates exactly one fresh occurrence
 whose result type fixes the continuation, and `.terminal` requires the map to
 be empty or to have the explicitly selected terminal disposition. This covers
@@ -141,7 +289,7 @@ is inspected when implementing or auditing the generic constructor, not filled
 once per application.
 
 For the gzip fixture, standard byte-input, byte-output, allocation, and
-terminal combinators derive the effect sites, exact occurrences, pending
+terminal combinators derive the effect frontiers, exact occurrences, pending
 equations, bindings, and dispositions.  The meaningful reusable proof inputs
 are exactly the streaming transducer relation, exhaustive failure behavior,
 bounded resource theorem, and conditional-progress theorem.  The compressor's
@@ -154,14 +302,22 @@ bookkeeping fails this section even if the theorem is provable.
 Hello, sort, and fixed-gzip must use the same closed standard-realizer registry,
 and each application fixture must select its realization with one expression.
 Adding a new result constructor to a used effect must leave one local unmatched
-case. Removing an effect site must remove its generated child. Reordering two
-independent declared sites must not require an application proof edit. A custom
+case. Removing an effect decision must remove its generated child. Reordering two
+independent typed decisions must not require an application proof edit. A custom
 relation without `DirectProgramRealizes` must fail immediately rather than start
 proof search. Dedicated fixtures cover a zero-effect transition; two equal
 demand values issued as distinct occurrences; an initially pending demand; an
 issue followed by cancellation; and a result consumption plus new issue in one
 transition. Mutating any issued/consumed multiplicity or dependent child binding
 must break the local bag equation rather than a later global theorem.
+The duplicate-demand fixture completes one exact handle and proves the other
+remains live; fabricating a sibling with the same epoch or replaying the
+consumed handle must fail locally. A registered provider-using operation fixture must also fail
+when its owner-derived requirement predicate is replaced by `False`, before a
+`DirectProgramDerivation` can be constructed.
+Another fixture uses one streaming wait whose history emits a byte before its
+result: the general adapter must expose that prefix without consuming the
+occurrence, while selecting the atomic pending model must fail.
 
 ### Status and fallback
 

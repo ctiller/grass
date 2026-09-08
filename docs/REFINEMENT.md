@@ -46,10 +46,30 @@ reviewed construction input, not a derived register-allocation result.
 Authors express the minimal precious specification using ordinary Lean models:
 functional observations, outcome/status policy, safety, progress, liveness, and
 terminal resource demands actually required. A generated-code route may also
-express structure using high-level monads and prove that program satisfies the
-specification. The direct authored-assembly route does not require a decorative
-monadic program witness. Missing lower-layer facilities are introduced as
-nominal capability requirements with laws, not assumed implementations.
+express well-founded sequential structure using the open law-bearing language in
+[EFFECTS.md](EFFECTS.md) and prove that program satisfies the specification.
+That is an optional proof-economy route, not the meaning of the specification.
+The direct authored-assembly route does not require a decorative monadic program
+witness. Missing lower-layer facilities are introduced as nominal capability
+requirements with laws, not assumed implementations.
+
+When this route uses `Grass.Effect`, the spec-indexed junction lives here rather
+than in Effect's dependency cone:
+
+```lean
+structure EffectSpecJunction (spec : SpecProcess resources)
+    (model : EffectRowModel row) (Initial : model.World -> Prop)
+    (program : EffectProgram row alpha) where
+  adequate : EffectProgramAdequate model Initial program
+  progressPolicy : MaximalExecutionPolicy (EffectMaximalExecution adequate)
+  progressExact : ProgressPolicyEquivalent progressPolicy
+    (NeutralProjectionOfSelectedSpecProgress spec)
+  meetsProgress : EffectProgramMeetsProgress adequate progressPolicy
+  behavior : EffectProgramBehaviorRefinesSpec spec model Initial program
+```
+
+Thus Effect remains importable without `Semantics`; this bridge alone mentions
+the exact `SpecProcess`.
 
 The authored specification body may be relational or an abstract spec-process
 network. Spec processes expose only logical roles, typed channels, linear/shared
@@ -101,8 +121,11 @@ novel code, but it is an explicit escape hatch. It does not justify removing
 the ordinary high-level theorem boundary or making assembly authors repeat
 portable application proofs.
 
-Portable code may demand an abstract effect; target-specific code may demand a
-specific provider family. Requirements remain explicit data/propositions so
+Portable code may demand an abstract effect family; target-specific code may
+select a local effect handler through an explicit lowering plan. Effect-row
+typeclasses prove membership only and never choose a provider. The one
+`PlatformPlan.ProviderEnv` later selects physical providers coherently for the
+accumulated requirements. Requirements remain explicit data/propositions so
 they can be propagated and reviewed.
 
 ## Act 2: weave
@@ -285,13 +308,16 @@ structure ClosedBlend
       partial) where
   realization : ProcessRealization spec
   provenance : ClosedBlendProvenance spec realization.boundary
-    realization.registry realization.plan realization.correct
+    realization.boundaryCertificate realization.registry
+    realization.registryCertificate realization.plan realization.providers
+    realization.correct
   exactSource : ProvenanceNamesExactPartialGraphAndCertificates
     provenance partial
   exactClosure : ProvenanceNamesExactClosureEvidence
     provenance complete coherent
   originExact : realization.origin = .blended
-    realization.registry realization.plan realization.correct provenance
+    realization.registry realization.registryCertificate realization.plan
+    realization.providers realization.correct provenance
 
 def PartialProcessRealization.close
     (partial : PartialProcessRealization shaped graph)
@@ -335,26 +361,71 @@ projection and a coherent platform plan exist. After selection, the same lens
 supports a second, machine-indexed blend:
 
 ```lean
-structure MachineSubsystemRealization
+opaque MachineIsa {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {portable : PortableProgramCertificate spec}
+    {projection : TargetProjection spec profile}
+    (driver : ProjectedDriverCertificate portable projection) : Type
+
+opaque ClosedScopeMachineSource {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {portable : PortableProgramCertificate spec}
+    {projection : TargetProjection spec profile}
     (driver : ProjectedDriverCertificate portable projection)
-    (scope : ClosedProcessOriginScope driver.plan.processOrigin) where
-  source : HeterogeneousMachineSource driver.plan scope
+    (scope : ClosedProcessOriginScope driver.processOrigin)
+    (isa : MachineIsa driver) : Type
+
+structure HeterogeneousMachineSource {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {portable : PortableProgramCertificate spec}
+    {projection : TargetProjection spec profile}
+    (driver : ProjectedDriverCertificate portable projection)
+    (scope : ClosedProcessOriginScope driver.processOrigin) where
+  isa : MachineIsa driver
+  source : ClosedScopeMachineSource driver scope isa
+  syntaxOwnedByIsa : SourceUsesExactlyRegisteredIsaSyntax source isa
+  platformCompatible : IsaAcceptedByPlatformPlan isa driver.plan
+
+structure MachineSubsystemRealization {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {portable : PortableProgramCertificate spec}
+    {projection : TargetProjection spec profile}
+    (driver : ProjectedDriverCertificate portable projection)
+    (scope : ClosedProcessOriginScope driver.processOrigin) where
+  source : HeterogeneousMachineSource driver scope
   local : SourceRefinesExactClosedScope source scope
   boundary : MachineSourceExportsExactDriverBoundary source scope
   crossIsa : EveryCrossIsaEdgeConnected source driver.plan scope
 
-structure MachineBlend
+structure MachineBlend {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {portable : PortableProgramCertificate spec}
+    {projection : TargetProjection spec profile}
     (driver : ProjectedDriverCertificate portable projection) where
-  origin : ProcessPlanSource spec driver.plan.boundary
-  originExact : origin = driver.plan.processOrigin
-  nodes : forall scope : ClosedProcessOriginScope origin,
-    MachineSubsystemRealization driver (originExact ▸ scope)
+  nodes : forall scope : ClosedProcessOriginScope driver.processOrigin,
+    MachineSubsystemRealization driver scope
   coverage : EveryReachableClosedScopeAppearsExactlyOnce nodes
   coherent : MachineSourcesAbiIsaAndProviderCoherent driver nodes
+
+def MachineBlend.exactSource {R : Type u} [ResourceModel R]
+    {resources : R} {spec : SpecProcess resources}
+    {profile : PlatformProfile}
+    {portable : PortableProgramCertificate spec}
+    {projection : TargetProjection spec profile}
+    {driver : ProjectedDriverCertificate portable projection}
+    (blend : MachineBlend driver) : MachineSource driver.plan :=
+  MachineSource.compose blend.nodes blend.coverage blend.coherent
 ```
 
 `MachineCertificate` consumes this exact `MachineBlend`, whose dependent
-`origin` is the exact `ProcessPlanSource` value retained by the platform plan.
+`driver.processOrigin` is definitionally the exact `ProcessPlanSource` value
+retained by the portable process model; the platform plan has no origin field
+that it can re-author.
 For a `.blended` origin that value contains the exact graph and closure
 certificates; it cannot be reconstructed from a lookalike plan or replaced by
 an extensionally similar source. This is where one team may finish the Vulkan
@@ -386,6 +457,63 @@ ambient search. Realization proves that the exact dictionary used by upstream
 definitions and proofs is the selected provider. Provider identities and
 environment evidence are ghost-propagated through requirements, ABIs, blocks,
 calls, and obligations.
+
+When the upstream route used `Grass.Effect`, that layer exports only its
+transparent `plan.handoff : EffectProviderHandoff plan`. This Act owns the cross-layer proof:
+
+```lean
+structure ProviderRealizesEffectPlan
+    (providerEnv : PlatformPlan.ProviderEnv)
+    (plan : EffectLoweringPlan identity source sourceModel) where
+  viewRealization : EffectPlanRealizedByView plan providerEnv.bindingView
+  environmentCoherence : SelectedViewEntriesAreTheExactProviderEnvDictionaries
+    providerEnv
+  inheritedDisposition : ExactAuthorityRespectingRequirementDisposition
+    plan.handoff.requirements providerEnv.bindingView
+  forwardedRequirements : ProviderDemandFamily
+  forwardedExact : forwardedRequirements.AuthorityEquiv
+    inheritedDisposition.exactForwardedFamily
+
+def ProviderRealizesEffectPlan.requirementConnections
+    (certificate : ProviderRealizesEffectPlan providerEnv plan) :
+    ExactAuthorityRespectingRequirementDisposition
+      plan.providerDemands providerEnv.bindingView :=
+  combineDisposition
+    certificate.inheritedDisposition
+    (dischargeAll plan.realizationDemands
+      (plan.realizationDemands_certified_iff.mpr certificate.viewRealization))
+
+theorem ProviderRealizesEffectPlan.requirementConnections_forwardedExact
+    (certificate : ProviderRealizesEffectPlan providerEnv plan) :
+    (certificate.requirementConnections).exactForwardedFamily.AuthorityEquiv
+      certificate.forwardedRequirements
+
+structure EquivalentProviderRealizesEffectPlan ... extends
+    ProviderRealizesEffectPlan providerEnv plan where
+  historyCoverage : EverySelectedHistoryHasAProviderOperationPrefix ...
+```
+
+The Effect adapter stores these demands in the exact registered origin subfamily
+of every generated effect-operation occurrence. Sequential, explicit, and blended sources
+derive one conservative provider-demand summary from the selected boundary and
+every protocol selected by a plan role, including roles unused by one execution.
+`ProjectedDriverCertificate.summaryRequirementConnections` consumes the
+compact resulting family against its exact `ProviderEnv`.
+`originRequirementConnections` transports that disposition through the
+portable certificate's `AuthorityEquiv`, and
+`originForwardedRequirementsExact` connects the transported output to the exact
+driver-forwarded family: provider-owned members are discharged, while every
+memory/resource/obligation/ABI/ISA or later member is forwarded with its
+original origin into the next staged family. For an
+Effect origin, `requirementConnections` is the local constructor.
+`requirementConnections_forwardedExact` is the authority-preserving bridge from
+that returned disposition to the certificate summary; projected-driver
+construction consumes it rather than reading `forwardedRequirements` alone.
+Equal requirement names or sets cannot substitute a
+different effect theory, operation history, observation lens, or provider
+dictionary. The base theorem is directed refinement. Coverage/reflection is
+required only when the selected claim is equivalence or explicitly preserves
+the source's nondeterminism.
 
 One provider key has one realization. Intentional multi-backend programs use
 distinct keys and prove their coexistence. Platform, ISA, and API set are
