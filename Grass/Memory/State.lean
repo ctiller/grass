@@ -3514,12 +3514,20 @@ theorem rangeInitialized_congr_of_agrees {a b : MemoryState} {id : AllocId}
         simp only [Option.bind_some] at hc
         unfold ByteStore.InitializedAt at this ⊢
         rw [hc]; exact this
+      
 
-/-- A write depends on its allocation and nothing else, so two states agreeing
-about that allocation write it identically. -/
+/-- A write depends on the record it names and the store that record is a view
+onto, so two states agreeing about both write it identically.
+
+The store hypothesis is new with `g-design:185`. The bytes used to live in the
+record, so agreeing about the allocation was agreeing about everything a write
+reads; they live in `MemoryState.backings` now, and two states with the same record
+and different stores write different results. -/
 theorem cellAt?_write_congr {a b : MemoryState} {id : AllocId}
-    (h : a.allocations.lookup id = b.allocations.lookup id) (start : Nat)
-    (bytes : ByteSeq) (initializes : Bool) (offset : Nat) :
+    (h : a.allocations.lookup id = b.allocations.lookup id)
+    (hb : ∀ record, a.allocations.lookup id = some record →
+      a.backings.lookup record.backing = b.backings.lookup record.backing)
+    (start : Nat) (bytes : ByteSeq) (initializes : Bool) (offset : Nat) :
     (a.write id start bytes initializes).cellAt? id offset =
       (b.write id start bytes initializes).cellAt? id offset := by
   unfold write cellAt?
@@ -3529,17 +3537,32 @@ theorem cellAt?_write_congr {a b : MemoryState} {id : AllocId}
     simp only [ha, hl]
   | some r =>
     have ha : a.allocations.lookup id = some r := by rw [h, hl]
-    simp only [ha, FiniteMap.lookup_insert_self]
+    have hstore := hb r ha
+    simp only [ha, hl, hstore]
+    cases hs : b.backings.lookup r.backing with
+    | none => simp only [ha, hl]
+    | some store => simp only [FiniteMap.lookup_insert_self, ha, hl]
 
 /--
-**Writes to different allocations commute**, whatever ranges they name.
+**Writes to allocations that do not share bytes commute**, whatever ranges they
+name.
 
 The companion to `write_comm`, which needs disjoint ranges because it is about one
-allocation. Here disjointness is free: `docs/MEMORY_MODEL.md` §2 makes distinct
-`AllocId`s distinct storage by construction, so two writes to different
-allocations cannot interfere however their offsets compare.
+allocation. Here disjointness is free -- but the hypothesis that makes it free
+changed. It used to be `a ≠ b`, on the reading of `docs/MEMORY_MODEL.md` §2 that
+distinct `AllocId`s are distinct storage by construction. `g-design:185` denies
+exactly that: two views onto one backing are distinct identities whose writes land
+in one store, and at overlapping backing offsets they do not commute. The
+hypothesis is now `¬ SharesBytes`, which is the question that was always being
+asked.
+
+This is the sharpest instance of the pattern the changeover keeps turning up. The
+theorem was true on `main`, and true *because* the model was wrong -- `write` wrote
+only the named allocation, so no two identities could interfere. Implementing
+sharing is what makes the old hypothesis insufficient.
 -/
-theorem write_comm_of_ne (state : MemoryState) {a b : AllocId} (hne : a ≠ b)
+theorem write_comm_of_ne (state : MemoryState) {a b : AllocId}
+    (hshare : ¬ state.SharesBytes a b)
     (sa : Nat) (ba : ByteSeq) (ia : Bool) (sb : Nat) (bb : ByteSeq) (ib : Bool) :
     ((state.write a sa ba ia).write b sb bb ib).AgreesOn
       ((state.write b sb bb ib).write a sa ba ia) := by
@@ -3568,7 +3591,7 @@ undischarged for exactly that reason. These connect the two.
 
 Placement is not authority in `docs/MEMORY_MODEL.md` §2's sense: provenance decides
 what an access may touch, and two allocations at one base are still distinct storage
-unless `aliases` says otherwise. It is not *unread* by `denialOf`, which is a
+unless they name the same backing. It is not *unread* by `denialOf`, which is a
 different claim and was made here — `placementWraps` and
 `addressDisagreesWithPlacement` both read the base. What placement answers is the
 further question of whether two offsets name the same machine byte. -/
@@ -3678,12 +3701,13 @@ theorem write_comm (state : MemoryState) (id : AllocId) {a b : Nat}
 /-- An initializing write initializes what it wrote, provided the allocation is
 there. The state-level form of `ByteStore.initialized_write`. -/
 theorem rangeInitialized_write (state : MemoryState) {id : AllocId} {start : Nat}
-    {bytes : ByteSeq} {record : AllocationRecord}
-    (hfound : state.allocations.lookup id = some record) :
+    {bytes : ByteSeq} {record : AllocationRecord} {store : ByteStore}
+    (hfound : state.allocations.lookup id = some record)
+    (hs : state.backings.lookup record.backing = some store) :
     (state.write id start bytes true).RangeInitialized id ⟨start, bytes.length⟩ := by
   unfold RangeInitialized write
-  simp only [hfound, FiniteMap.lookup_insert_self]
-  exact ByteStore.initialized_write record.bytes start bytes
+  simp only [hfound, hs, FiniteMap.lookup_insert_self]
+  exact ByteStore.initialized_write store (record.origin + start) bytes
 
 
 /-- **A provenance in a superseded epoch is not live.** `docs/MEMORY_MODEL.md` §2:
