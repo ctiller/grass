@@ -587,6 +587,32 @@ theorem demoObject_long_name_resolves :
       = [0x62, 0x65, 0x74, 0x61, 0x5f, 0x6c, 0x6f, 0x6e, 0x67] := by
   decide
 
+/--
+And the byte after it is the NUL that ends it.
+
+The theorem above takes exactly nine bytes, which is the length of the name and
+one short of what a reader needs: nothing in it distinguishes a table whose
+entries are NUL-terminated from one separated by any other byte. A sweep
+changing `stringEntry`'s terminator to `1` left every test in the repository
+green, this one included, because the differing byte sat one past the end of
+what it looked at.
+-/
+theorem demoObject_long_name_terminated :
+    ((stringTableBytes demoObject.strings).drop 4).take 10
+      = [0x62, 0x65, 0x74, 0x61, 0x5f, 0x6c, 0x6f, 0x6e, 0x67, 0x00] := by
+  decide
+
+/-- A two-name table in full, so the terminator is checked where it *separates*
+as well as where it ends.
+
+`ab` and `cd`: a four-byte self-inclusive size, then each name followed by its
+NUL. Without the middle one a linker reads a single symbol named `abcd`, which
+is the failure the terminator exists to prevent and is not visible in a
+one-name table at all. -/
+example : stringTableBytes [[0x61, 0x62], [0x63, 0x64]]
+    = [0x0A, 0x00, 0x00, 0x00, 0x61, 0x62, 0x00, 0x63, 0x64, 0x00] := by
+  decide
+
 /-! ## Auxiliary section records
 
 Every section symbol in both measured objects declares one auxiliary record and
