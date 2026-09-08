@@ -38,19 +38,25 @@ instance (symbols : GobjSymbolTable) (sections : GobjSectionTable) :
   unfold GobjSymbolTable.ValidForSections
   infer_instance
 
-/-- A relocation starts at an existing byte in the section it names. -/
+/-- Executable structural location check for a relocation-bearing section. -/
+def GobjRelocation.isLocationValidFor (entry : GobjRelocation)
+    (sections : GobjSectionTable) : Bool :=
+  match sections.entries.get? entry.sectionIndex.toNat with
+  | some target =>
+    match target.profile with
+    | .noRelocations => false
+    | .relocatable _ => decide (entry.offset.toNat < target.contents.bytes.length)
+  | none => false
+
+/-- A relocation starts at an existing byte in a relocation-bearing section. -/
 def GobjRelocation.LocationValidFor (entry : GobjRelocation)
     (sections : GobjSectionTable) : Prop :=
-  match sections.entries.get? entry.sectionIndex.toNat with
-  | some target => entry.offset.toNat < target.contents.bytes.length
-  | none => False
+  entry.isLocationValidFor sections = true
 
 instance (entry : GobjRelocation) (sections : GobjSectionTable) :
     Decidable (entry.LocationValidFor sections) := by
   unfold GobjRelocation.LocationValidFor
-  cases h : sections.entries.get? entry.sectionIndex.toNat with
-  | none => infer_instance
-  | some target => infer_instance
+  infer_instance
 
 /-- Every relocation location is an existing byte of its named section. -/
 def GobjRelocationTable.LocationsValidFor (relocations : GobjRelocationTable)

@@ -41,12 +41,15 @@ instance (entry : GobjRelocation) (sectionCount symbolCount : Nat) :
 The target ISA layer supplies the facts; the artifact layer consumes only a
 positive byte width. Returning `none` rejects an unknown kind. -/
 structure RelocationKindInterpretation where
+  profile : GobjRelocationProfileId
   patchWidth : BitVec 32 → Option Nat
   patchWidth_positive : ∀ {kind width}, patchWidth kind = some width → 0 < width
 
 /-- An interpretation assigning the same positive width to every kind. -/
-def RelocationKindInterpretation.constant (width : Nat) (positive : 0 < width) :
+def RelocationKindInterpretation.constant (profile : GobjRelocationProfileId)
+    (width : Nat) (positive : 0 < width) :
     RelocationKindInterpretation where
+  profile := profile
   patchWidth _ := some width
   patchWidth_positive := by
     intro kind observed h
@@ -54,35 +57,62 @@ def RelocationKindInterpretation.constant (width : Nat) (positive : 0 < width) :
     subst observed
     exact positive
 
+/-- An interpretation recognizing exactly one numeric kind. -/
+def RelocationKindInterpretation.singleKind
+    (profile : GobjRelocationProfileId) (knownKind : BitVec 32)
+    (width : Nat) (positive : 0 < width) : RelocationKindInterpretation where
+  profile := profile
+  patchWidth kind := if kind = knownKind then some width else none
+  patchWidth_positive := by
+    intro kind observed h
+    split at h
+    next =>
+      simp only [Option.some.injEq] at h
+      subst observed
+      exact positive
+    next => contradiction
+
+/-- Target-owned registry selected by a serialized nominal profile identity. -/
+structure RelocationProfileRegistry where
+  resolve : GobjRelocationProfileId → Option RelocationKindInterpretation
+
+/-- Executable complete check of a resolved relocation. -/
+def GobjRelocation.isValidFor (entry : GobjRelocation)
+    (registry : RelocationProfileRegistry)
+    (sections : GobjSectionTable) (symbols : GobjSymbolTable) : Bool :=
+  decide (entry.IndicesValid sections.entries.length symbols.entries.length) &&
+    match sections.entries.get? entry.sectionIndex.toNat with
+    | none => false
+    | some target =>
+      match target.profile with
+      | .noRelocations => false
+      | .relocatable profile =>
+        match registry.resolve profile with
+        | none => false
+        | some interpretation =>
+          decide (interpretation.profile = profile) &&
+            match interpretation.patchWidth entry.kind with
+            | none => false
+            | some width =>
+              decide (entry.offset.toNat < target.contents.bytes.length) &&
+                decide (entry.offset.toNat + width ≤ target.contents.bytes.length)
+
 /-- Complete generic validity of a resolved relocation.
 
 The selected section and symbol must exist, the target must recognize the kind,
 and the positive-width patch must fit entirely in the selected section. The
 addition is performed in `Nat`, so it cannot wrap like fixed-width arithmetic. -/
 def GobjRelocation.ValidFor (entry : GobjRelocation)
-    (interpretation : RelocationKindInterpretation)
+    (registry : RelocationProfileRegistry)
     (sections : GobjSectionTable) (symbols : GobjSymbolTable) : Prop :=
-  entry.IndicesValid sections.entries.length symbols.entries.length ∧
-    match interpretation.patchWidth entry.kind with
-    | none => False
-    | some width =>
-      match sections.entries.get? entry.sectionIndex.toNat with
-      | none => False
-      | some target =>
-        entry.offset.toNat < target.contents.bytes.length ∧
-          entry.offset.toNat + width ≤ target.contents.bytes.length
+  entry.isValidFor registry sections symbols = true
 
 instance (entry : GobjRelocation)
-    (interpretation : RelocationKindInterpretation)
+    (registry : RelocationProfileRegistry)
     (sections : GobjSectionTable) (symbols : GobjSymbolTable) :
-    Decidable (entry.ValidFor interpretation sections symbols) := by
+    Decidable (entry.ValidFor registry sections symbols) := by
   unfold GobjRelocation.ValidFor
-  cases hwidth : interpretation.patchWidth entry.kind with
-  | none => infer_instance
-  | some width =>
-      cases hsection : sections.entries.get? entry.sectionIndex.toNat with
-      | none => infer_instance
-      | some target => infer_instance
+  infer_instance
 
 /-- Serialize one fixed-width target-independent relocation entry. -/
 def writeGobjRelocation (entry : GobjRelocation) : Std.Logical.ByteArray :=
@@ -213,33 +243,33 @@ instance (table : GobjRelocationTable) (sections : GobjSectionTable)
 
 /-- Every relocation in a table is completely valid under one target profile. -/
 def GobjRelocationTable.ValidFor (table : GobjRelocationTable)
-    (interpretation : RelocationKindInterpretation)
+    (registry : RelocationProfileRegistry)
     (sections : GobjSectionTable) (symbols : GobjSymbolTable) : Prop :=
   ∀ entry ∈ table.entries.toList,
-    entry.ValidFor interpretation sections symbols
+    entry.ValidFor registry sections symbols
 
 instance (table : GobjRelocationTable)
-    (interpretation : RelocationKindInterpretation)
+    (registry : RelocationProfileRegistry)
     (sections : GobjSectionTable) (symbols : GobjSymbolTable) :
-    Decidable (table.ValidFor interpretation sections symbols) := by
+    Decidable (table.ValidFor registry sections symbols) := by
     unfold GobjRelocationTable.ValidFor
     infer_instance
 
 /-- A relocation table admitted across the target-aware resolved boundary. -/
 structure ResolvedGobjRelocationTable
-    (interpretation : RelocationKindInterpretation)
+    (registry : RelocationProfileRegistry)
     (sections : GobjSectionTable) (symbols : GobjSymbolTable) where
   table : GobjRelocationTable
-  valid : table.ValidFor interpretation sections symbols
+  valid : table.ValidFor registry sections symbols
 
 /-- Check all target-aware patch bounds and retain their proof on success. -/
 def resolveGobjRelocationTable
-    (interpretation : RelocationKindInterpretation)
+    (registry : RelocationProfileRegistry)
     (sections : GobjSectionTable) (symbols : GobjSymbolTable)
     (table : GobjRelocationTable) :
     Except ParseError
-      (ResolvedGobjRelocationTable interpretation sections symbols) :=
-  if valid : table.ValidFor interpretation sections symbols then
+      (ResolvedGobjRelocationTable registry sections symbols) :=
+  if valid : table.ValidFor registry sections symbols then
     .ok { table := table, valid := valid }
   else
     .error (.malformed ".gobj relocation patch is out of bounds or unknown")

@@ -81,44 +81,103 @@ example : ¬ badTable.IndicesValid sections symbols := by decide
 def boundedContents : U32LengthPrefixedBytes :=
   ⟨Vec.fromList [0x90, 0x90, 0xc3], by decide⟩
 
-def boundedSection : GobjSection :=
-  { sectionEntry with contents := boundedContents }
+def profileOwner : U32LengthPrefixedBytes :=
+  ⟨Vec.fromList [0x67], by decide⟩
+
+def profileA : GobjRelocationProfileId where
+  owner := profileOwner
+  name := symbolName
+  version := 1
+
+def profileB : GobjRelocationProfileId where
+  owner := profileOwner
+  name := sectionName
+  version := 1
+
+def boundedSection : GobjSection where
+  name := sectionName
+  alignment := ⟨0, by decide⟩
+  permissions := ⟨1, by decide⟩
+  profile := .relocatable profileA
+  contents := boundedContents
 
 def boundedSections : GobjSectionTable :=
   ⟨Vec.singleton boundedSection, by decide⟩
 
 def emptySections : GobjSectionTable :=
-  ⟨Vec.singleton sectionEntry, by decide⟩
+  ⟨Vec.singleton { boundedSection with contents := emptyBody }, by decide⟩
 
 def boundedEntry (offset : BitVec 64) : GobjRelocation :=
   { entry with sectionIndex := 0, targetSymbolIndex := 0, offset := offset }
 
 def widthOne : RelocationKindInterpretation :=
-  .constant 1 (by decide)
+  .singleKind profileA 4 1 (by decide)
 
 def widthTwo : RelocationKindInterpretation :=
-  .constant 2 (by decide)
+  .singleKind profileB 4 2 (by decide)
+
+def registry : RelocationProfileRegistry where
+  resolve profile :=
+    if profile = profileA then some widthOne
+    else if profile = profileB then some widthTwo
+    else none
 
 /-- An empty selected section has no valid relocation start. -/
-example : ¬ (boundedEntry 0).ValidFor widthOne emptySections symbols := by decide
+example : ¬ (boundedEntry 0).ValidFor registry emptySections symbols := by decide
 
 /-- The first byte beyond the section is not a relocation start. -/
-example : ¬ (boundedEntry 3).ValidFor widthOne boundedSections symbols := by decide
+example : ¬ (boundedEntry 3).ValidFor registry boundedSections symbols := by decide
 
 /-- Conversion to `Nat` prevents a maximal fixed-width offset from wrapping. -/
 example : ¬ (boundedEntry 18446744073709551615).ValidFor
-    widthOne boundedSections symbols := by decide
+    registry boundedSections symbols := by decide
 
 /-- A one-byte patch may start at the final byte. -/
-example : (boundedEntry 2).ValidFor widthOne boundedSections symbols := by decide
+example : (boundedEntry 2).ValidFor registry boundedSections symbols := by decide
 
 /-- A multi-byte patch beginning at the final byte crosses the section end. -/
-example : ¬ (boundedEntry 2).ValidFor widthTwo boundedSections symbols := by decide
+def profileBSections : GobjSectionTable :=
+  ⟨Vec.singleton { boundedSection with profile := .relocatable profileB },
+    by decide⟩
 
-example : (resolveGobjRelocationTable widthOne boundedSections symbols
+example : ¬ (boundedEntry 2).ValidFor registry profileBSections symbols := by decide
+
+def profileC : GobjRelocationProfileId where
+  owner := profileOwner
+  name := symbolName
+  version := 2
+
+def unknownProfileSections : GobjSectionTable :=
+  ⟨Vec.singleton { boundedSection with profile := .relocatable profileC },
+    by decide⟩
+
+example : ¬ (boundedEntry 0).ValidFor registry unknownProfileSections symbols :=
+  by decide
+
+example : ¬ { boundedEntry 0 with kind := 99 }.ValidFor
+    registry boundedSections symbols := by decide
+
+def noRelocationSections : GobjSectionTable :=
+  ⟨Vec.singleton { boundedSection with profile := .noRelocations }, by decide⟩
+
+example : ¬ (boundedEntry 0).ValidFor registry noRelocationSections symbols :=
+  by decide
+
+def heterogeneousSections : GobjSectionTable :=
+  ⟨Vec.fromList [boundedSection,
+    { boundedSection with profile := .relocatable profileB }], by decide⟩
+
+def heterogeneousRelocations : GobjRelocationTable :=
+  ⟨Vec.fromList [boundedEntry 2,
+    { boundedEntry 1 with sectionIndex := 1 }], by decide⟩
+
+example : heterogeneousRelocations.ValidFor registry heterogeneousSections
+    symbols := by decide
+
+example : (resolveGobjRelocationTable registry boundedSections symbols
     ⟨Vec.singleton (boundedEntry 2), by decide⟩).isOk := by decide
 
-example : resolveGobjRelocationTable widthTwo boundedSections symbols
+example : resolveGobjRelocationTable registry profileBSections symbols
     ⟨Vec.singleton (boundedEntry 2), by decide⟩ =
       .error (.malformed
         ".gobj relocation patch is out of bounds or unknown") := by rfl
