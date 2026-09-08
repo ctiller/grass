@@ -262,4 +262,92 @@ all. -/
 theorem measured_object_table_not_searchable :
     SearchablePdata.mk? measuredTwoFunctions.functions = none := by decide
 
+/-! ## Fields the fixtures above cannot distinguish
+
+A sweep over `UNWIND_INFO`'s header packing and tail flags found five fields
+that no test in the repository pinned, and the reason each escaped is visible in
+the fixtures above.
+
+`noFrame` is `⟨0, 0⟩`: two nibbles that are both zero cannot show a swap, so
+`FrameOffset` and `FrameRegister` exchanging places changed nothing. `ml64Tail`
+is `.bothHandlers`, whose flag value 3 is pinned by `ml64Tail_flags` -- but 3 is
+what `EHANDLER` and `UHANDLER` make together, and neither was checked alone, so
+exchanging 1 and 2 was invisible. And no fixture saves a register or an XMM
+register, so neither scaling divisor was exercised.
+
+These are byte-level facts with byte-level consequences: a swapped frame nibble
+makes the unwinder restore from the wrong register, exchanged handler flags make
+Windows call a termination handler where an exception handler was meant, and a
+wrong divisor points a restore at the wrong stack slot.
+-/
+
+/-- A prologue that establishes a frame pointer, with an offset that differs
+from the register's number so the two nibbles are told apart. `rbp` is register
+5, and `FrameOffset` 6 means `rsp + 96`.
+
+The code offsets are what `ml64` would produce: `push rbp` is one byte and
+`lea rbp, [rsp+96]` is five, since 96 fits a `disp8`. `onePush` cannot be used
+here -- `UnwindInfo.mk?` refuses a declared frame register in a prologue with no
+`UWOP_SET_FPREG`, which is `framePointerDeclared` doing its job. -/
+def framedRbp : Layout :=
+  ⟨[⟨.pushNonvolatile .rbp, 1⟩, ⟨.setFramePointer .rbp 96, 6⟩], 6⟩
+
+/-- `FrameOffset` is the high nibble and `FrameRegister` the low one: `0x65`,
+not `0x56`. Checked through `toBytes`, so it pins the serializer rather than
+restating the structure's field order. -/
+theorem framedRbp_header_byte :
+    ((UnwindInfo.mk? framedRbp ⟨5, 6⟩ ml64Tail).map UnwindInfo.toBytes).map
+        (fun bs => bs.take 4)
+      = some [0x19, 0x06, 0x02, 0x65] := by
+  decide
+
+/-- The same header with no frame writes `0x00` in that byte, which is what
+makes `0x65` above evidence rather than a coincidence of position. -/
+theorem noFrame_header_byte :
+    ((UnwindInfo.mk? onePush noFrame ml64Tail).map UnwindInfo.toBytes).map
+        (fun bs => bs.take 4)
+      = some [0x19, 0x01, 0x01, 0x00] := by
+  decide
+
+/-! ### The two handler flags, separately
+
+`UNW_FLAG_EHANDLER` is 1 and `UNW_FLAG_UHANDLER` is 2. `ml64Tail_flags` pins
+their combination; these pin each, which is what an exchange would break. -/
+
+theorem exceptionHandler_flag : (UnwindTail.exceptionHandler 0 [0]).flags = 1 := by
+  decide
+
+theorem terminationHandler_flag :
+    (UnwindTail.terminationHandler 0 [0]).flags = 2 := by decide
+
+/-- And the combination is their bitwise or, rather than a third number that
+happens to be 3. -/
+theorem bothHandlers_flag_is_or :
+    (UnwindTail.bothHandlers 0 [0]).flags
+      = (UnwindTail.exceptionHandler 0 [0]).flags
+        ||| (UnwindTail.terminationHandler 0 [0]).flags := by
+  decide
+
+/-! ### The two scaling divisors
+
+`UWOP_SAVE_NONVOL` scales its offset by 8 and `UWOP_SAVE_XMM128` by 16, because
+the saved value is eight bytes in one case and sixteen in the other. The offsets
+below are chosen so the two divisors give different answers: at 16 bytes, /8 is
+2 and /16 is 1; at 32, /16 is 2 and /8 is 4. -/
+
+/-- `mov [rsp+16], rbx` records 16/8 = 2. -/
+theorem saveNonvolatile_scaled_by_eight :
+    (PlacedOp.toBytes ⟨.saveNonvolatile .rbx 16, 5⟩)
+      = [5, 0x34, 0x02, 0x00] := by
+  decide
+
+/-- `movaps [rsp+32], xmm6` records 32/16 = 2, from twice the offset. Two
+operations, the same stored value, different byte counts saved -- which is the
+whole content of the divisor differing. -/
+theorem saveXmm128_scaled_by_sixteen :
+    (PlacedOp.toBytes ⟨.saveXmm128 .xmm6 32, 5⟩)
+      = [5, 0x68, 0x02, 0x00] := by
+  decide
+
+
 end Grass.Tests.ABI.Win64.Measured
