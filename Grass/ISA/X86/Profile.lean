@@ -517,8 +517,17 @@ here", which was false — adding a `def` to `Addressing.lean` changed nothing.
 route. The obligation now comes from the Lean environment in
 `Tests/ISA/X86/LedgerAudit.lean`, which enumerates the declarations of the
 modeled modules and holds the ledger to them. Nothing in this file can shrink
-it, and the honest current figure is that 6 of 73 modeled declarations carry a
-citation.
+it.
+
+That audit prints the current figure on every build, and this paragraph used to
+repeat it: "6 of 73 modeled declarations carry a citation". The modeled set has
+since grown past two hundred and fifty, so the sentence was wrong by more than
+threefold while sitting next to the gate that computes it correctly.
+
+The number is not restated here now. A count copied into prose is a second
+spelling of something a gate already computes, and the two agree only until
+someone adds a declaration -- which is the same hazard this file's own header
+records for duplicated ABI constants. Read the audit's line.
 -/
 
 /-! ## Open citation work
