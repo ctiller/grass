@@ -112,7 +112,7 @@ declaration listed here that no longer exists fails the citation audit.
 
 | Declaration | What is expected to change | Owner / milestone |
 |---|---|---|
-| `ByteSeq` | Becomes `Vec Byte` when `Std.Logical` lands `Vec`. Recorded since M1. | stdlib owner |
+| `ByteSeq` | Still `List Byte`. `Vec` has landed, so this is due rather than waiting; `c-stdlib:97` measures the siting cost as one import line in five modules, and reports the abbrev does not have to move down after all. Recorded since M1. | stdlib owner |
 | `AddressSpace` | Gains fields as device and GPU profiles arrive. | M9 |
 | `AdmittedVocabulary` | Gains a registry whenever a new open nominal identity is introduced, and has five times already: ordering modes, ordering scopes, and three justification registries. A profile constructing one positionally will break. | this layer, ongoing |
 | `AuthorityGrant` | Gains `lifetime` and `conditions`, which §3's map carries and this does not. Deliberately deferred: a field nothing consults is the defect this layer has removed three times, and a bounded lifetime has something to mean once frames exist. | M4 |
