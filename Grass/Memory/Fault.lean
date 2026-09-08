@@ -54,74 +54,112 @@ end FaultClassId
 /--
 How much of an access actually happened.
 
-`committed` is the count of bytes whose effect is visible afterwards. It is
-carried by every non-complete outcome because §1 requires a profile to state
-which earlier effects survive a later substep's fault, and a status that omitted
-the count could not express that.
+Reads and writes are counted **separately**, for the reason `Committed` counts
+them separately: a read-modify-write that observed its operand and faulted before
+storing committed eight bytes of read and none of write, and one number cannot say
+that. A single count was carried here until review pointed out that the separation
+`Committed` gained stopped at the outcome and never reached the status — so the
+event recorded `max`, and `committedBytes` answered eight for an access that wrote
+nothing.
+
+§1 requires a profile to state which earlier effects survive a later substep's
+fault, which is why the counts are carried at all.
 -/
 inductive AccessStatus where
-  /-- Every byte the access named took effect. -/
-  | completed
-  /-- The access stopped early without faulting, committing `committed` bytes. -/
-  | partialCommit (committed : Nat)
-  /-- The access faulted after committing `committed` bytes. -/
-  | faulted (fault : FaultClassId) (committed : Nat)
+  /-- Every byte the access named took effect, for each thing its intent said it
+  would do, having observed `reads` bytes and written `writes`. -/
+  | completed (reads writes : Nat)
+  /-- The access stopped early without faulting, having observed `reads` bytes and
+  written `writes`. -/
+  | partialCommit (reads writes : Nat)
+  /-- The access faulted having observed `reads` bytes and written `writes`. -/
+  | faulted (fault : FaultClassId) (reads writes : Nat)
 deriving DecidableEq, Repr
 
 namespace AccessStatus
 
-/-- The number of bytes this outcome committed, given the size the access named. -/
-def committedBytes : AccessStatus → Nat → Nat
-  | .completed, size => size
-  | .partialCommit committed, _ => committed
-  | .faulted _ committed, _ => committed
+/--
+The number of bytes this outcome *wrote*. The count an initialization or framing
+argument wants: what a read observed does not change memory.
 
-/-- `status.IsComplete` holds when the whole access took effect. -/
+`completed` carries its counts like the others rather than answering "the whole
+range". It did answer that, on both counts, which meant a completed *load* — and
+every ordinary load lands on `completed` — claimed to have written its whole range.
+That is the conflation the two-count split was made to remove, surviving in the
+one constructor the split did not touch, and review found it one round later.
+-/
+def committedWrites : AccessStatus → Nat
+  | .completed _ writes => writes
+  | .partialCommit _ writes => writes
+  | .faulted _ _ writes => writes
+
+/-- The number of bytes this outcome *observed*. -/
+def committedReads : AccessStatus → Nat
+  | .completed reads _ => reads
+  | .partialCommit reads _ => reads
+  | .faulted _ reads _ => reads
+
+/-- `status.IsComplete` holds when the whole access took effect — every byte its
+intent said it would touch, and no fault.
+
+Nothing in `Grass/` consumes this yet; M8's consistency model is its intended
+reader. Worth knowing that it was false for every load and store this model could
+perform until `AccessOutcome.status`'s completeness test was made intent-relative,
+which review found by asking what a completed load reports — a predicate with no
+consumer is a predicate nothing was checking. -/
 def IsComplete : AccessStatus → Prop
-  | .completed => True
+  | .completed _ _ => True
   | _ => False
 
 instance : (status : AccessStatus) → Decidable status.IsComplete
-  | .completed => .isTrue trivial
-  | .partialCommit _ | .faulted _ _ => .isFalse (fun h => h)
+  | .completed _ _ => .isTrue trivial
+  | .partialCommit _ _ | .faulted _ _ _ => .isFalse (fun h => h)
 
 /-- `status.IsFaulted` holds when the access raised an architectural fault. -/
 def IsFaulted : AccessStatus → Prop
-  | .faulted _ _ => True
+  | .faulted _ _ _ => True
   | _ => False
 
 instance : (status : AccessStatus) → Decidable status.IsFaulted
-  | .faulted _ _ => .isTrue trivial
-  | .completed | .partialCommit _ => .isFalse (fun h => h)
+  | .faulted _ _ _ => .isTrue trivial
+  | .completed _ _ | .partialCommit _ _ => .isFalse (fun h => h)
 
 /--
-`status.WellFormed size` holds when the committed count does not exceed the size
-the access named.
+`status.WellFormed size` holds when neither committed count exceeds the size the
+access named.
 
 A status committing more bytes than the access covered would describe an effect
-outside the access's own range, which no profile may declare.
+outside the access's own range, which no profile may declare. Both counts, because
+a status that bounded only the larger of them would let the other exceed the range
+unnoticed — which is what a single conflated count did.
 -/
 def WellFormed (status : AccessStatus) (size : Nat) : Prop :=
-  status.committedBytes size ≤ size
+  status.committedReads ≤ size ∧ status.committedWrites ≤ size
 
 instance (status : AccessStatus) (size : Nat) : Decidable (status.WellFormed size) :=
-  inferInstanceAs (Decidable (_ ≤ _))
+  inferInstanceAs (Decidable (_ ∧ _))
 
-@[simp] theorem committedBytes_completed (size : Nat) :
-    AccessStatus.completed.committedBytes size = size := rfl
+@[simp] theorem committedWrites_completed (reads writes : Nat) :
+    (AccessStatus.completed reads writes).committedWrites = writes := rfl
 
-@[simp] theorem wellFormed_completed (size : Nat) :
-    AccessStatus.completed.WellFormed size := Nat.le_refl _
+@[simp] theorem committedReads_completed (reads writes : Nat) :
+    (AccessStatus.completed reads writes).committedReads = reads := rfl
 
-@[simp] theorem not_isComplete_faulted (fault : FaultClassId) (committed : Nat) :
-    ¬ (AccessStatus.faulted fault committed).IsComplete := fun h => h
+@[simp] theorem not_isComplete_faulted (fault : FaultClassId) (reads writes : Nat) :
+    ¬ (AccessStatus.faulted fault reads writes).IsComplete := fun h => h
 
 /--
-A faulting access is not a no-op. Its committed prefix is exactly what it says,
-and a proof may not assume it is zero.
+A faulting access is not a no-op. Its committed prefixes are exactly what it says,
+and a proof may not assume either is zero.
 -/
-theorem committedBytes_faulted (fault : FaultClassId) (committed size : Nat) :
-    (AccessStatus.faulted fault committed).committedBytes size = committed := rfl
+theorem committedWrites_faulted (fault : FaultClassId) (reads writes : Nat) :
+    (AccessStatus.faulted fault reads writes).committedWrites = writes := rfl
+
+/-- **A faulted read-modify-write can report a read it kept and a write it did
+not make.** The outcome `Committed`'s two counts exist for, now expressible at the
+status as well. -/
+theorem committedReads_faulted (fault : FaultClassId) (reads writes : Nat) :
+    (AccessStatus.faulted fault reads writes).committedReads = reads := rfl
 
 end AccessStatus
 
@@ -132,6 +170,14 @@ Whether an operation may be restarted after an interruption or fault.
 instructions to declare the state handlers observe them from and the rules for
 retry. `Grass.Op.FacetName.restartability` is how a profile demands it and
 `Grass.Op.OperationFacets.Closes` is the check, so this has no default.
+
+**Declared and not enforced.** `StepPolicy.requiredFacets` can demand the facet
+exist, and `AccessDescriptor.restartability` carries a value, but nothing in the
+transition reads either, so `docs/MEMORY_MODEL.md` §7.4's retry rules have no
+mechanism behind them here. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records it.
+Note also that this field *does* default, to `.notRestartable`, which is the
+conservative direction but is the defaulting discipline `FaultVisibility`
+deliberately refuses.
 -/
 inductive Restartability where
   /-- The operation may be re-executed from its start with the same effect. -/
