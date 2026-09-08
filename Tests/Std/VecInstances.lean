@@ -125,4 +125,87 @@ example (v w : Vec Nat) : decide (v = w) = (v == w) := by
   · simp [h]
   · simp [h, beq_eq_false_iff_ne.mpr h]
 
+/-! ## The instances rewrite, not just typecheck
+
+Every section above checks that a notation or an instance *elaborates* on a
+`Vec`. That is not the same as checking that a proof about one can *proceed*,
+and the gap between the two is what `Grass/Std/Logical/Vec.lean`'s bridge lemmas
+close: `simp` does not see through an instance projection, so a goal written with
+`∅`, `default`, `v[i]` or `for` loses the laws stated about `Vec.empty`,
+`Vec.get?` and `Vec.toList` — the laws a consumer reaches for immediately after
+writing the notation.
+
+That failure is silent in the worst way. The notation typechecks, so nothing
+looks wrong until a proof stops with `unsolved goals` on a step that reads as
+trivial, and the author has no reason to suspect the notation rather than the
+law.
+
+Each bridge gets two examples here. The first is a bare `simp`, so that removing
+the corresponding `@[simp]` from the library breaks this fixture — which is the
+only way it can tell a load-bearing lemma from a decorative one. The second pins
+the hazard itself: the underlying law, named explicitly and applied on its own,
+makes no progress against the notation.
+
+Run that way round to check it: strip one `@[simp]` from the library and rebuild
+this module. All five fail, each at the example written for it —
+`Vec.emptyCollection_eq_empty` and `Vec.forIn_eq_forIn_toList` at two examples
+apiece, the other three at one. A bridge that could be removed without breaking
+anything here would be a bridge this fixture is not actually testing.
+-/
+
+example (v : Vec Nat) : (∅ : Vec Nat) ++ v = v := by simp
+
+/-- error: `simp` made no progress -/
+#guard_msgs in
+example (v : Vec Nat) : (∅ : Vec Nat) ++ v = v := by simp only [Vec.empty_append]
+
+/-! `Vec.emptyCollection_eq_empty` is the lemma that separates those two, and the
+shape above is not invented for the fixture: it is what two conservation
+obligations in a `Grass/Process/ByteFlow/Ingress.lean` port reduce to once the
+sequence type is `Vec`, reported to `c-process` at `c-stdlib:49`. -/
+
+example : (default : Vec Nat) ++ (default : Vec Nat) = default := by simp
+
+/-- error: `simp` made no progress -/
+#guard_msgs in
+example : (default : Vec Nat) ++ (default : Vec Nat) = default := by
+  simp only [Vec.append_empty]
+
+/-! ### Indexing
+
+This pair is the sharpest of the four, because the positive example is not
+`rfl` — it genuinely needs the rewrite, where the `∅` and `default` goals happen
+to also hold definitionally. `Vec.get_eq_iff_get?_eq` is what turns the total
+read into the checked one, at which point `Vec.get?_push_self` applies; without
+it the goal is stated in terms of `Vec.get`, about which this module proves
+nothing at all. -/
+
+example (v : Vec Nat) (a : Nat) : (v.push a).get v.length (by simp) = a := by simp
+
+/-- error: `simp` made no progress -/
+#guard_msgs in
+example (v : Vec Nat) (a : Nat) : (v.push a).get v.length (by simp) = a := by
+  simp only [Vec.get?_push_self]
+
+/-! ### Iteration
+
+`Vec.forIn_eq_forIn_toList` routes a loop to `List`'s iteration laws, and
+`Vec.toList_empty` is what lets the empty case finish there. The residual `rfl`
+below is `Id`'s `pure`, not a `Vec` obligation: `simp` discharges every step that
+is this module's to discharge and stops at `pure n = n`. -/
+
+example (v : Vec Nat) : (Id.run do
+    let mut n : Nat := 0
+    for _ in v do
+      n := n + 1
+    return n) = v.toList.length := by
+  simp [Id.run]
+  rfl
+
+example : (Id.run do
+    let mut n : Nat := 0
+    for _ in (∅ : Vec Nat) do
+      n := n + 1
+    return n) = 0 := by simp
+
 end Grass.Tests.Std.Instances

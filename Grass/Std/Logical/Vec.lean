@@ -511,6 +511,22 @@ owes a law, or a consumer cannot tell which pure operation it was given. -/
 
 @[simp] theorem length_clear (v : Vec α) : v.clear.length = 0 := rfl
 
+/--
+The empty sequence's list is empty.
+
+Deliberately the *only* `toList` reduction marked `simp`, and the exception needs
+its reason stated, because `Vec.toList` is the representation seam this whole
+module exists to keep narrow. A `simp` set that dissolves a `Vec` into a `List`
+on sight undoes the argument for the structure: consumers would stop writing
+`Vec`'s API and start writing `List`'s, which is the leak a private structure was
+chosen to prevent.
+
+Iteration is the one place where going to `List` is not a leak, because that is
+how the `ForIn` instance is defined — `Vec.forIn_eq_forIn_toList` states it, and
+this lemma is what lets the empty case finish there rather than stopping on
+`Vec.empty.toList = []`. Anything else that wants a `toList` fact should name it,
+not get it from `simp`.
+-/
 @[simp] theorem toList_empty : (empty : Vec α).toList = [] := rfl
 
 @[simp] theorem toList_append (v w : Vec α) : (v ++ w).toList = v.toList ++ w.toList := rfl
