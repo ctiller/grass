@@ -664,13 +664,37 @@ fn apply_schema_activated(
 ) -> AbResult<()> {
     require_bootstrap_coordinator(state, &env.agent)?;
     require_complete_frontier(state, env)?;
-    if d.version <= state.activated_schema_version {
-        return Err(invalid(format!(
-            "{}: schema version {} is not greater than the currently activated {}",
-            env.id, d.version, state.activated_schema_version
-        )));
-    }
-    state.activated_schema_version = d.version;
+    // AGENT_BUS_SCHEMA.md section 4's "`version` is greater than all
+    // previously activated versions" is deliberately *not* asked here, and
+    // the complete-frontier requirement above buys nothing towards it.
+    // `SchemaActivated::referenced_ids` is empty (this event names no
+    // predecessor at all), so two activations from different coordinators
+    // get no edge between them in `topological_order` -- which builds edges
+    // from `refs` and each stream's own predecessor, never from `observed`.
+    // Replaying v3 then v2 therefore hit "not greater than the currently
+    // activated 3" while v2-then-v3 was fine, and two coordinators
+    // activating the *same* version were fatal in both orders. With
+    // `reduce`'s bare `?` and an append-only log that is every host unable
+    // to reduce the bus at all, permanently (round-9 sweep, C3).
+    //
+    // What replaces it is the operation this field's own definition already
+    // describes -- "highest version seen so far". A maximum over a set is
+    // commutative and idempotent, so every linear extension of the same
+    // events lands on the identical value, and no ordering is ever fatal.
+    // A concurrent lower activation is simply subsumed by the higher one
+    // rather than being a fleet-wide error, which is also the only answer
+    // that is stable: nothing in the event records a predecessor, so there
+    // is no baseline for the `ExclusiveTracker` "contested, reset to the
+    // shared pre-race value" treatment `apply_merge_engine_activated` gets
+    // just below -- that treatment needs a `previous_epoch` field, which is
+    // a normative schema change, not a fix (see this task's report).
+    //
+    // `coordinator::verify_schema_activation_advances` asks the advancement
+    // question at publication instead, against the publishing host's
+    // fully-reduced view, where there is no replay order to be at the mercy
+    // of -- the same relocation `verify_predecessor_not_contested` and
+    // `verify_author_active` already are.
+    state.activated_schema_version = state.activated_schema_version.max(d.version);
     Ok(())
 }
 
@@ -1773,26 +1797,45 @@ fn apply_finding_disposition(
     let chain = state
         .review_chain(nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {nomination}", env.id)))?;
-    // Authority belongs to the reviewer of the chain's *current* nomination
-    // link specifically -- a reviewer who has since been superseded by a
-    // reassignment must not retain disposal authority merely by citing
-    // their own now-stale nomination id, even though that id's own
-    // nomination_reviewer entry never gets removed (it stays as a durable
-    // record of who accepted that particular link). See the identical
-    // comment in `apply_review_accept` for why this is a no-op rather than
-    // an `Err`: a hard failure here would permanently break reduction of
-    // the entire bus, not just this chain.
-    if chain.current_nomination != *nomination {
-        return Ok(());
-    }
+    // Authority belongs to the reviewer of the link this event *names*, and
+    // whether the chain has since moved past that link is deliberately not
+    // asked here.
+    //
+    // It used to be, as a no-op ("a superseded reviewer must not retain
+    // disposal authority by citing a now-stale nomination id"). A no-op is
+    // total, which is what round 3 needed, but it is not confluent, which is
+    // the other half of the same requirement: `current_nomination` moves
+    // under a concurrent `review.reassigned`, and `topological_order` builds
+    // edges from `refs` and each stream's own predecessor, never from
+    // `observed` -- so a disposal and a reassignment that both merely
+    // reference the same nomination have no edge between them. Reduce the
+    // disposal first and the finding is disposed; reduce the reassignment
+    // first and the disposal silently evaporates. Two hosts that fetched the
+    // same streams in a different order then hold permanently different
+    // state, which is gates 15/16 broken exactly where the round-3 fix
+    // looked correct in isolation (round-9 sweep, found while making C5's
+    // own event pair converge rather than merely reduce).
+    //
+    // What remains is the half that is sound in every order: the reviewer
+    // recorded for the *named* link, written once when that link was created
+    // and never rewritten, and reachable because this event references the
+    // nomination. `coordinator::verify_disposition_targets_the_current_
+    // nomination` asks the superseded-reviewer question at publication
+    // instead, against the publishing host's fully-reduced view.
     let reviewer = chain.nomination_reviewer.get(nomination).cloned();
     if reviewer.as_ref() != Some(&env.agent) {
         return Err(invalid(format!(
-            "{}: only the accepting reviewer for the current nomination may dispose of findings",
+            "{}: only the named nomination's accepting reviewer may dispose of findings",
             env.id
         )));
     }
-    if !chain.accepted() {
+    // `accepted_nominations.contains(nomination)`, not `chain.accepted()`:
+    // the latter tests the *current* link, which is the mutable fact just
+    // discussed. This one is stable -- the acceptance can only have come
+    // from `env.agent` (the check above), so it sits earlier on this very
+    // stream and a predecessor edge orders it before this event in every
+    // linear extension.
+    if !chain.accepted_nominations.contains(nomination) {
         return Err(invalid(format!(
             "{}: the named reviewer must accept the nomination before disposing of findings",
             env.id
@@ -1867,9 +1910,37 @@ fn apply_review_reassigned(
             env.id
         )));
     }
-    if d.reviewer == chain.current_request.reviewer {
+    // Compared against the reviewer of the link this event actually
+    // *replaces*, never against whoever is currently in force. `chain.
+    // current_request.reviewer` moves the moment a first, genuinely
+    // concurrent reassignment from the same predecessor is reduced
+    // (`confirm_review_reassigned` overwrites `current_request` whole), and
+    // nothing this event carries references that competitor -- so two
+    // reassignments naming the same replacement reviewer, which is what an
+    // author and a coordinator independently picking the same alternate
+    // looks like, were fatal in *both* orders, and with `reduce`'s bare `?`
+    // that is every host permanently unable to reduce the bus (round-9
+    // sweep, C4).
+    //
+    // `nomination_reviewer[d.replaces]` is the sound reading of the same
+    // rule, and the more faithful one: `d.replaces` is in `refs`, so its
+    // link is ordered before this event in every linear extension, and its
+    // entry is written once when that link is created and never rewritten
+    // afterwards (`reset_review_to_conflict` only ever removes a
+    // *provisional* link's entry, and removes it from
+    // `review_chain_by_nomination` in the same breath -- so the chain
+    // lookup above has already failed by then). The rule it enforces is
+    // "replacing link X with X's own reviewer is a no-op nobody meant to
+    // publish", which is what the message says and what the check was for;
+    // in the sequential case the two readings are the same value, because
+    // `current_nomination == d.replaces`.
+    //
+    // `.get`, not `.unwrap`: totality here is the whole point, and a
+    // missing entry is the pre-race baseline being absent, not a rule this
+    // event broke.
+    if chain.nomination_reviewer.get(&d.replaces) == Some(&d.reviewer) {
         return Err(invalid(format!(
-            "{}: replacement reviewer must differ from the current reviewer",
+            "{}: replacement reviewer must differ from the replaced nomination's reviewer",
             env.id
         )));
     }
@@ -1882,22 +1953,37 @@ fn apply_review_reassigned(
     if !is_author {
         require_bootstrap_coordinator(state, &env.agent)?;
     }
-    let still_open: std::collections::BTreeSet<(EventId, String)> = chain
-        .findings
-        .iter()
-        .filter(|(_, f)| f.disposition == FindingDisposition::Open)
-        .map(|(k, _)| k.clone())
-        .collect();
-    let inherited: std::collections::BTreeSet<(EventId, String)> = d
-        .inherited_findings
-        .iter()
-        .map(|f| (f.changes_event.clone(), f.finding_id.as_str().to_string()))
-        .collect();
-    if inherited != still_open || d.inherited_findings.len() != inherited.len() {
-        return Err(invalid(format!(
-            "{}: inherited_findings must equal every still-open finding exactly once",
-            env.id
-        )));
+    // AGENT_BUS_SCHEMA.md section 8's "inherited_findings equals every
+    // still-open finding exactly once" is deliberately *not* asked here.
+    // Both sides of that equality move under events this one references
+    // nothing of: the open set shrinks under a concurrent `review.findings_
+    // cleared`/`_superseded` (which this event references only the
+    // *changes* event behind, never the disposition itself) and grows under
+    // a concurrent `review.changes_requested`. Reduce a clear first and the
+    // sets no longer match, so the reassignment was fatal; reduce it second
+    // and the identical pair was fine -- one host wedged and one not, with
+    // no per-event isolation in `reduce` to contain it (round-9 sweep, C5).
+    //
+    // Dropping it costs no reduced state: `inherited_findings` is a
+    // declaration about the author's view, not an input to reduction --
+    // `confirm_review_reassigned` carries `chain.findings` across the new
+    // link whole and never reads this field -- so the two orders now agree
+    // byte for byte rather than one of them failing.
+    // `coordinator::verify_review_reassignment_inherits_open_findings` asks
+    // the equality at publication instead, against the publishing host's
+    // fully-reduced view, which is the only place that view exists.
+    //
+    // What survives is the half that is a pure function of the event
+    // itself, and so gives the same answer in every order: the same finding
+    // may not be inherited twice.
+    let mut inherited = std::collections::BTreeSet::new();
+    for f in &d.inherited_findings {
+        if !inherited.insert((f.changes_event.clone(), f.finding_id.as_str().to_string())) {
+            return Err(invalid(format!(
+                "{}: duplicate inherited finding {}",
+                env.id, f.finding_id
+            )));
+        }
     }
 
     let root = chain.root.clone();
@@ -6730,8 +6816,16 @@ mod tests {
         assert_eq!(state.activated_schema_version, 2);
     }
 
+    /// The reduction half of the pair that replaced
+    /// `schema_activated_requires_a_strictly_increasing_version`: a
+    /// non-advancing activation is *accepted* by `apply` and subsumed by the
+    /// higher version, rather than being an `Err` that `reduce`'s bare `?`
+    /// turns into a permanently unreducible bus. The refusal half moved to
+    /// `coordinator::verify_schema_activation_advances`, pinned by
+    /// `drain_outbox_rejects_a_schema_activation_that_does_not_advance`
+    /// -- see `probe3`'s regression tests below for why (round-9 sweep, C3).
     #[test]
-    fn schema_activated_requires_a_strictly_increasing_version() {
+    fn schema_activated_takes_the_maximum_rather_than_refusing_a_lower_version() {
         let mut state = empty_state(&[("coord1", Role::Coordinator)]);
         let coord1 = a("coord1");
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
@@ -6744,19 +6838,30 @@ mod tests {
                 helper_commit: hash(2),
             })
         };
-        let first_env = Envelope::new(&coord1, 1, complete_frontier(&epoch), &activate(2), []);
+        let first_env = Envelope::new(&coord1, 1, complete_frontier(&epoch), &activate(3), []);
         apply_ok(&mut state, &first_env);
-        assert_eq!(state.activated_schema_version, 2);
+        assert_eq!(state.activated_schema_version, 3);
 
         let same_version_env =
-            Envelope::new(&coord1, 2, complete_frontier(&epoch), &activate(2), []);
-        let err = apply_event(&mut state, &same_version_env).unwrap_err();
-        assert!(err.to_string().contains("is not greater than"), "{err}");
+            Envelope::new(&coord1, 2, complete_frontier(&epoch), &activate(3), []);
+        apply_ok(&mut state, &same_version_env);
+        assert_eq!(state.activated_schema_version, 3);
 
         let lower_version_env =
-            Envelope::new(&coord1, 2, complete_frontier(&epoch), &activate(1), []);
-        let err = apply_event(&mut state, &lower_version_env).unwrap_err();
-        assert!(err.to_string().contains("is not greater than"), "{err}");
+            Envelope::new(&coord1, 3, complete_frontier(&epoch), &activate(1), []);
+        apply_ok(&mut state, &lower_version_env);
+        assert_eq!(
+            state.activated_schema_version, 3,
+            "a lower activation is subsumed, never applied and never fatal"
+        );
+
+        let higher_version_env =
+            Envelope::new(&coord1, 4, complete_frontier(&epoch), &activate(4), []);
+        apply_ok(&mut state, &higher_version_env);
+        assert_eq!(
+            state.activated_schema_version, 4,
+            "and the handler still actually records a genuine advance"
+        );
     }
 
     #[test]
@@ -8639,7 +8744,7 @@ mod tests {
         let err = apply_event(&mut state, &cleared_env).unwrap_err();
         assert!(
             err.to_string()
-                .contains("only the accepting reviewer for the current nomination may dispose"),
+                .contains("only the named nomination's accepting reviewer may dispose"),
             "{err}"
         );
     }
@@ -8683,17 +8788,25 @@ mod tests {
         assert!(err.to_string().contains("unknown finding"), "{err}");
     }
 
-    /// Round-3 adversarial review, Critical finding: a `Err` here would
+    /// Round-3 adversarial review, Critical finding: an `Err` here would
     /// propagate via `reduce()`'s bare `?` with no per-event isolation,
     /// permanently breaking reduction of the *entire* bus for every host
     /// that has fetched both streams -- not merely this one review chain --
     /// the moment a genuinely concurrent disposal and reassignment (two
     /// independently-published, single-writer streams, neither observing
-    /// the other) are reduced together. The fix is a no-op: bob's stale
-    /// disposal simply does not apply, and the finding stays exactly as the
-    /// reassignment (which inherited it) left it.
+    /// the other) are reduced together.
+    ///
+    /// Round-9 sweep: that fix was a no-op, which is total but *not*
+    /// confluent. Nothing orders the disposal against the reassignment (see
+    /// `apply_finding_disposition`), so "does bob's disposal apply" was
+    /// decided by replay order -- a silent permanent divergence between
+    /// hosts. The disposal is now recorded in either order, with its own
+    /// provenance, and `coordinator::verify_disposition_targets_the_current_
+    /// nomination` refuses it at publication for any host that can actually
+    /// see the reassignment. This test's name and shape are kept so the
+    /// round-3 scenario stays pinned; what changed is the answer.
     #[test]
-    fn ignores_finding_disposal_against_a_stale_nomination() {
+    fn records_finding_disposal_against_a_stale_nomination_rather_than_dropping_it() {
         let mut state = empty_state(&[]);
         let alice = a("alice");
         let bob = a("bob");
@@ -8761,8 +8874,11 @@ mod tests {
         let key = (changes_env.id.clone(), "f1".to_string());
         assert_eq!(
             state.reviews[&root].findings[&key].disposition,
-            FindingDisposition::Open,
-            "bob's stale disposal must not have taken effect"
+            FindingDisposition::Cleared {
+                by_event: cleared_env.id.clone()
+            },
+            "bob's concurrent disposal is recorded, with provenance, in whichever order it is \
+             replayed -- the policy refusal lives at publication now"
         );
     }
 
@@ -9064,15 +9180,15 @@ mod tests {
         );
     }
 
-    /// Round-4 adversarial review, Significant finding: `apply_review_
-    /// reassigned`'s inherited-findings check compares `inherited !=
-    /// still_open` as *sets*, so a naive implementation dropping the
-    /// accompanying `d.inherited_findings.len() != inherited.len()` length
-    /// check would silently accept a reassignment that cites the one open
-    /// finding twice (the duplicate collapses to the same set under the
-    /// `!=` comparison). This was previously entirely untested -- no test
-    /// exercised the "inherited_findings must equal every still-open
-    /// finding exactly once" rejection at all, duplicate or otherwise.
+    /// Round-4 adversarial review, Significant finding: a set comparison
+    /// alone silently accepts a reassignment that cites the one open finding
+    /// twice, because the duplicate collapses under the comparison. The
+    /// round-9 sweep (C5) moved the "equals every still-open finding" half
+    /// of that rule to `coordinator::verify_review_reassignment_inherits_
+    /// open_findings` -- the open set is concurrently mutable, so reduction
+    /// cannot ask it -- but the no-duplicates half is a pure function of the
+    /// event's own payload, gives the same answer in every replay order, and
+    /// so stays here. This pins that surviving half.
     #[test]
     fn rejects_a_reassignment_that_cites_the_same_open_finding_twice() {
         let alice = a("alice");
@@ -9123,8 +9239,7 @@ mod tests {
         );
         let err = apply_event(&mut state, &reassign_env).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("inherited_findings must equal every still-open finding exactly once"),
+            err.to_string().contains("duplicate inherited finding f1"),
             "{err}"
         );
     }
@@ -10100,5 +10215,382 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Round-9 sweep, C3: two coordinators activating a schema without
+    /// having observed each other.
+    ///
+    /// `schema.activated` names no predecessor, so `topological_order` -- which
+    /// builds edges from `refs` and each stream's own predecessor, never from
+    /// `observed` -- puts no edge between the two, and the complete-frontier
+    /// requirement buys nothing towards ordering them. Replaying the higher
+    /// version first hit "schema version 2 is not greater than the currently
+    /// activated 3"; `reduce`'s bare `?` turns that into every host on the
+    /// fleet permanently unable to reduce an append-only log.
+    ///
+    /// Both halves are asserted here because the second is the one that shows
+    /// this was never merely an ordering nuisance: two coordinators activating
+    /// the *same* version -- an ordinary duplicate, not misuse -- were fatal
+    /// in *both* orders. See `coordinator::drain_outbox_rejects_a_schema_
+    /// activation_that_does_not_advance` for the paired half: the advancement
+    /// rule itself is still enforced, at publication, where the question has
+    /// one answer.
+    #[test]
+    fn two_concurrent_schema_activations_reduce_and_converge_in_either_order() {
+        let c1 = a("c-one");
+        let c2 = a("c-two");
+        let epoch = epoch_with(&[("c-one", Role::Coordinator), ("c-two", Role::Coordinator)]);
+        let mut known_epochs = BTreeMap::new();
+        known_epochs.insert(epoch.id.clone(), epoch.clone());
+        let c1_reg = register(&c1, Role::Coordinator);
+        let c2_reg = register(&c2, Role::Coordinator);
+        let base = reduce(
+            config(),
+            Some(epoch.clone()),
+            known_epochs,
+            &BTreeMap::from([
+                (c1.clone(), vec![c1_reg.clone()]),
+                (c2.clone(), vec![c2_reg.clone()]),
+            ]),
+        )
+        .expect("the registration prefix reduces");
+
+        let activate = |who: &Agent, version: u32| {
+            Envelope::new(
+                who,
+                1,
+                complete_seeing(&base, &[]),
+                &EventData::SchemaActivated(SchemaActivated {
+                    version,
+                    design_commit: hash(11),
+                    helper_commit: hash(12),
+                }),
+                [],
+            )
+        };
+
+        // Different versions: the descending order used to be fatal.
+        let v2 = activate(&c1, 2);
+        let v3 = activate(&c2, 3);
+        let ascending = reduce_onto(base.clone(), &[v2.clone(), v3.clone()])
+            .expect("v2-then-v3 reduces (it always did)");
+        let descending = reduce_onto(base.clone(), &[v3.clone(), v2.clone()])
+            .expect("v3-then-v2 must reduce too, or every host that fetched c-two first wedges");
+        for (label, state) in [("ascending", &ascending), ("descending", &descending)] {
+            assert_eq!(
+                state.activated_schema_version, 3,
+                "{label}: the higher activation must actually be recorded, not skipped"
+            );
+            assert!(
+                state.events.contains_key(&v2.id) && state.events.contains_key(&v3.id),
+                "{label}: both activations must be reduced, not dropped"
+            );
+        }
+        // The whole state, not one field. A narrow compare has already let a
+        // real order-dependent write through in this file -- see
+        // `an_authorization_racing_a_blocking_issue_converges_in_either_order`.
+        assert_eq!(
+            format!("{ascending:#?}"),
+            format!("{descending:#?}"),
+            "the two valid orders must converge on identical state"
+        );
+
+        // Same version from both coordinators: this pair was fatal in *both*
+        // orders, so neither host could reduce at all.
+        let same_a = activate(&c1, 2);
+        let same_b = activate(&c2, 2);
+        let forward = reduce_onto(base.clone(), &[same_a.clone(), same_b.clone()])
+            .expect("c-one-then-c-two reduces");
+        let reverse = reduce_onto(base.clone(), &[same_b.clone(), same_a.clone()])
+            .expect("c-two-then-c-one reduces");
+        for (label, state) in [("forward", &forward), ("reverse", &reverse)] {
+            assert_eq!(
+                state.activated_schema_version, 2,
+                "{label}: the activation must actually be recorded"
+            );
+            assert!(
+                state.events.contains_key(&same_a.id) && state.events.contains_key(&same_b.id),
+                "{label}: both activations must be reduced, not dropped"
+            );
+        }
+        assert_eq!(
+            format!("{forward:#?}"),
+            format!("{reverse:#?}"),
+            "two coordinators activating the same version must converge"
+        );
+    }
+
+    /// Round-9 sweep, C4: an author and a coordinator independently picking
+    /// the same alternate reviewer.
+    ///
+    /// The replacement-reviewer check used to compare against `chain.
+    /// current_request.reviewer`, which the first of two concurrent
+    /// candidates has already moved by the time the second is applied --
+    /// and nothing either event carries references the other, so
+    /// `topological_order` is free to pick either. Both orders therefore hit
+    /// "replacement reviewer must differ from the current reviewer" and the
+    /// whole bus stopped reducing on every host.
+    ///
+    /// Comparing against the *replaced* link's own reviewer is the sound
+    /// reading: `d.replaces` is in `refs`, so its entry is already applied,
+    /// and it is written once and never rewritten. The last block asserts the
+    /// rule still bites, so this is a re-pointing rather than a deletion.
+    #[test]
+    fn two_reassignments_naming_the_same_replacement_reviewer_reduce_and_converge() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let zed = a("zed");
+        let coord1 = a("coord1");
+        let epoch = epoch_with(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Reviewer),
+            ("zed", Role::Reviewer),
+            ("coord1", Role::Coordinator),
+        ]);
+        let mut known_epochs = BTreeMap::new();
+        known_epochs.insert(epoch.id.clone(), epoch.clone());
+
+        let alice_reg = register(&alice, Role::Implementor);
+        let bob_reg = register(&bob, Role::Reviewer);
+        let zed_reg = register(&zed, Role::Reviewer);
+        let coord1_reg = register(&coord1, Role::Coordinator);
+        let request = review_request(&[&alice], &bob);
+        let nominate_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::ReviewNominated(request.clone()),
+            [],
+        );
+        let base = reduce(
+            config(),
+            Some(epoch.clone()),
+            known_epochs,
+            &BTreeMap::from([
+                (alice.clone(), vec![alice_reg, nominate_env.clone()]),
+                (bob.clone(), vec![bob_reg]),
+                (zed.clone(), vec![zed_reg]),
+                (coord1.clone(), vec![coord1_reg]),
+            ]),
+        )
+        .expect("the nomination prefix reduces");
+
+        let reassign_to = |who: &Agent, seq: u64, reviewer: &Agent, reason: &str| {
+            Envelope::new(
+                who,
+                seq,
+                frontier_seeing(&[&nominate_env.id]),
+                &EventData::ReviewReassigned(ReviewReassigned {
+                    authors: request.authors.clone(),
+                    product_branch: request.product_branch.clone(),
+                    reviewer: reviewer.clone(),
+                    required_checks: request.required_checks.clone(),
+                    review_scope: request.review_scope.clone(),
+                    summary: request.summary.clone(),
+                    target_branch: request.target_branch.clone(),
+                    evidence: request.evidence.clone(),
+                    replaces: nominate_env.id.clone(),
+                    reason: text(reason),
+                    inherited_findings: vec![],
+                }),
+                [],
+            )
+        };
+        let by_author = reassign_to(&alice, 2, &zed, "author picked zed");
+        let by_coord = reassign_to(&coord1, 1, &zed, "coordinator also picked zed");
+
+        let author_first = reduce_onto(base.clone(), &[by_author.clone(), by_coord.clone()])
+            .expect("author-then-coordinator must reduce");
+        let coord_first = reduce_onto(base.clone(), &[by_coord.clone(), by_author.clone()])
+            .expect("coordinator-then-author must reduce");
+        for (label, state) in [
+            ("author_first", &author_first),
+            ("coord_first", &coord_first),
+        ] {
+            // Both candidates must have been *recorded* as competing claims,
+            // not quietly skipped: that is what turns the race into the
+            // documented lifecycle conflict a coordinator can then resolve.
+            assert!(
+                state.exclusive.is_contested(&by_author.id)
+                    && state.exclusive.is_contested(&by_coord.id),
+                "{label}: both reassignments must join the same exclusive group"
+            );
+            let chain = state
+                .review_chain(&nominate_env.id)
+                .expect("the chain still resolves");
+            assert_eq!(
+                chain.decline_or_withdraw_or_reassign_status,
+                ItemStatus::LifecycleConflict,
+                "{label}: the chain must be left contested, awaiting a resolution"
+            );
+        }
+        assert_eq!(
+            format!("{author_first:#?}"),
+            format!("{coord_first:#?}"),
+            "the two valid orders must converge on identical state"
+        );
+
+        // The rule itself is intact: naming the replaced link's own reviewer
+        // is still refused, in the one reading that gives the same answer in
+        // every order.
+        let to_the_same_reviewer = reassign_to(&alice, 2, &bob, "pointless");
+        let err = reduce_onto(base, &[to_the_same_reviewer])
+            .expect_err("replacing bob's link with bob again is still refused");
+        assert!(
+            err.to_string().contains(
+                "replacement reviewer must differ from the replaced nomination's reviewer"
+            ),
+            "{err}"
+        );
+    }
+
+    /// Round-9 sweep, C5: a reassignment racing the reviewer's own clearing
+    /// of a finding it inherits.
+    ///
+    /// The reassignment references the `review.changes_requested` its
+    /// inherited findings came from, but nothing references the
+    /// `review.findings_cleared` that closes one -- so `topological_order`
+    /// may put the clear either side of it. Clear-first shrank the open set
+    /// out from under "inherited_findings must equal every still-open finding
+    /// exactly once" and the whole bus stopped reducing; reassign-first was
+    /// fine. See `coordinator::drain_outbox_rejects_a_reassignment_that_drops
+    /// _an_open_finding` for the paired half: the equality is still enforced,
+    /// at publication, against a view that actually exists.
+    #[test]
+    fn a_reassignment_racing_a_finding_clear_reduces_and_converges_in_either_order() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let zed = a("zed");
+        let epoch = epoch_with(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Reviewer),
+            ("zed", Role::Reviewer),
+        ]);
+        let mut known_epochs = BTreeMap::new();
+        known_epochs.insert(epoch.id.clone(), epoch.clone());
+
+        let alice_reg = register(&alice, Role::Implementor);
+        let bob_reg = register(&bob, Role::Reviewer);
+        let zed_reg = register(&zed, Role::Reviewer);
+        let request = review_request(&[&alice], &bob);
+        let nominate_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::ReviewNominated(request.clone()),
+            [],
+        );
+        let accept_env = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewNominationAccepted(ReviewNominationAccepted {
+                nomination: nominate_env.id.clone(),
+                note: text(""),
+            }),
+            [],
+        );
+        let changes_env = Envelope::new(
+            &bob,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                nomination: nominate_env.id.clone(),
+                reviewed_commit: hash(5),
+                findings: vec![finding("f1")],
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        let base = reduce(
+            config(),
+            Some(epoch.clone()),
+            known_epochs,
+            &BTreeMap::from([
+                (alice.clone(), vec![alice_reg, nominate_env.clone()]),
+                (
+                    bob.clone(),
+                    vec![bob_reg, accept_env.clone(), changes_env.clone()],
+                ),
+                (zed.clone(), vec![zed_reg]),
+            ]),
+        )
+        .expect("the changes-requested prefix reduces");
+
+        let clear_env = Envelope::new(
+            &bob,
+            3,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewFindingsCleared(ReviewFindingsCleared {
+                nomination: nominate_env.id.clone(),
+                changes_event: changes_env.id.clone(),
+                finding_id: short("f1"),
+                resolved_commit: hash(6),
+                summary: text("fixed"),
+            }),
+            [],
+        );
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+            &EventData::ReviewReassigned(ReviewReassigned {
+                authors: request.authors.clone(),
+                product_branch: request.product_branch.clone(),
+                reviewer: zed.clone(),
+                required_checks: request.required_checks.clone(),
+                review_scope: request.review_scope.clone(),
+                summary: request.summary.clone(),
+                target_branch: request.target_branch.clone(),
+                evidence: request.evidence.clone(),
+                replaces: nominate_env.id.clone(),
+                reason: text("bob went quiet"),
+                inherited_findings: vec![crate::common::FindingRef {
+                    changes_event: changes_env.id.clone(),
+                    finding_id: short("f1"),
+                }],
+            }),
+            [],
+        );
+
+        let reassign_first = reduce_onto(base.clone(), &[reassign_env.clone(), clear_env.clone()])
+            .expect("reassign-then-clear must reduce (it always did)");
+        let clear_first = reduce_onto(base.clone(), &[clear_env.clone(), reassign_env.clone()])
+            .expect(
+                "clear-then-reassign must reduce too, or every host that fetched bob first wedges",
+            );
+        for (label, state) in [
+            ("reassign_first", &reassign_first),
+            ("clear_first", &clear_first),
+        ] {
+            let chain = state
+                .review_chain(&reassign_env.id)
+                .expect("the reassignment must extend the chain, not be skipped");
+            assert_eq!(
+                chain.current_nomination, reassign_env.id,
+                "{label}: the reassignment must actually take effect"
+            );
+            assert_eq!(
+                chain.nomination_reviewer.get(&reassign_env.id),
+                Some(&zed),
+                "{label}: the new link must name the replacement reviewer"
+            );
+            let disposed = chain
+                .findings
+                .get(&(changes_env.id.clone(), "f1".to_string()))
+                .expect("the finding survives the transfer");
+            assert_eq!(
+                disposed.disposition,
+                FindingDisposition::Cleared {
+                    by_event: clear_env.id.clone()
+                },
+                "{label}: the clear must actually be recorded, not silently skipped"
+            );
+        }
+        assert_eq!(
+            format!("{reassign_first:#?}"),
+            format!("{clear_first:#?}"),
+            "the two valid orders must converge on identical state"
+        );
     }
 }

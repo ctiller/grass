@@ -279,6 +279,33 @@ pub fn drain_outbox(
             });
             continue;
         }
+        if let Err(e) = verify_schema_activation_advances(&state, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
+        if let Err(e) = verify_review_reassignment_inherits_open_findings(&state, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
+        if let Err(e) = verify_disposition_targets_the_current_nomination(&state, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
         if let Err(e) = verify_object_ids_resolve(repo, &data) {
             let reason = e.to_string();
             reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
@@ -899,6 +926,123 @@ fn verify_predecessor_not_contested(
     if state.exclusive.is_contested(predecessor) {
         return Err(invalid(format!(
             "{predecessor} is itself part of an unresolved lifecycle conflict; a coordinator must publish lifecycle.conflict_resolved for it before anything builds on it"
+        )));
+    }
+    Ok(())
+}
+
+/// AGENT_BUS_SCHEMA.md section 4: a `schema.activated`'s "`version` is
+/// greater than all previously activated versions."
+///
+/// `apply` cannot ask this. `schema.activated` references no predecessor at
+/// all (`SchemaActivated::referenced_ids` is empty), so two activations from
+/// different coordinators get no edge between them and `apply::
+/// topological_order` is free to replay a higher version first -- which made
+/// the lower one fatal on hosts that happened to fetch in that order, and
+/// made two coordinators activating the *same* version fatal in both. See
+/// `apply::apply_schema_activated`, which now takes the maximum, for the
+/// full argument.
+///
+/// Here `state` is the publishing host's own fully-reduced view, so the
+/// question has one answer. A coordinator that genuinely cannot see a
+/// concurrent activation yet is not stopped, and should not be: it has
+/// committed no error, and the two activations reconcile to the higher
+/// version on every host either way.
+fn verify_schema_activation_advances(
+    state: &crate::state::BusState,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    let crate::events::EventData::SchemaActivated(d) = data else {
+        return Ok(());
+    };
+    if d.version <= state.activated_schema_version {
+        return Err(invalid(format!(
+            "schema version {} is not greater than the currently activated {}",
+            d.version, state.activated_schema_version
+        )));
+    }
+    Ok(())
+}
+
+/// AGENT_BUS_SCHEMA.md section 8: a `review.reassigned`'s
+/// `inherited_findings` must equal every still-open finding on the chain,
+/// exactly once. Transfer carries the open review across intact, so an
+/// author who quietly drops a finding on the way past is exactly what this
+/// forbids.
+///
+/// `apply` cannot ask this. The open set moves under a concurrent
+/// `review.findings_cleared`/`_superseded` or `review.changes_requested`,
+/// none of which this event references, so during replay the answer depended
+/// on which of two causally unordered events a host reduced first -- see
+/// `apply::apply_review_reassigned`, which now keeps only the
+/// duplicate-inheritance half, for the full argument.
+///
+/// Here `state` is the publishing host's own fully-reduced view: the author
+/// is being held to the chain as it could actually have seen it, moments
+/// before publishing. `Ok(())` for a nomination this host does not know --
+/// that is an ordinary validation failure `apply::dry_run` reports a few
+/// lines later with its own clearer message, so it is not duplicated here.
+fn verify_review_reassignment_inherits_open_findings(
+    state: &crate::state::BusState,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    let crate::events::EventData::ReviewReassigned(d) = data else {
+        return Ok(());
+    };
+    let Some(chain) = state.review_chain(&d.replaces) else {
+        return Ok(());
+    };
+    let still_open: std::collections::BTreeSet<(EventId, String)> = chain
+        .findings
+        .iter()
+        .filter(|(_, f)| f.disposition == crate::state::FindingDisposition::Open)
+        .map(|(k, _)| k.clone())
+        .collect();
+    let inherited: std::collections::BTreeSet<(EventId, String)> = d
+        .inherited_findings
+        .iter()
+        .map(|f| (f.changes_event.clone(), f.finding_id.as_str().to_string()))
+        .collect();
+    if inherited != still_open || d.inherited_findings.len() != inherited.len() {
+        return Err(invalid(
+            "inherited_findings must equal every still-open finding exactly once".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// A reviewer superseded by a `review.reassigned` may not go on disposing of
+/// the chain's findings by citing its own now-stale nomination id.
+///
+/// `apply` cannot ask this. `ReviewChain::current_nomination` moves under a
+/// concurrent reassignment that a disposal references nothing of, so asking
+/// during replay decided the finding's disposition by which of two causally
+/// unordered events a host reduced first -- a silent, permanent divergence
+/// between hosts rather than a refusal. See
+/// `apply::apply_finding_disposition`, which now checks only the *named*
+/// link's reviewer, for the full argument.
+///
+/// Here `state` is the publishing host's own fully-reduced view, so the
+/// question has one answer, and a reviewer that genuinely has not seen the
+/// reassignment yet is not stopped -- it has committed no error, and its
+/// disposal is recorded with its own provenance either way.
+fn verify_disposition_targets_the_current_nomination(
+    state: &crate::state::BusState,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    use crate::events::EventData as E;
+    let nomination = match data {
+        E::ReviewFindingsCleared(d) => &d.nomination,
+        E::ReviewFindingsSuperseded(d) => &d.nomination,
+        _ => return Ok(()),
+    };
+    let Some(chain) = state.review_chain(nomination) else {
+        return Ok(());
+    };
+    if chain.current_nomination != *nomination {
+        return Err(invalid(format!(
+            "{nomination} is no longer this review's current nomination ({} is); only the current link's reviewer disposes of its findings",
+            chain.current_nomination
         )));
     }
     Ok(())
@@ -2232,6 +2376,115 @@ mod tests {
         );
     }
 
+    /// The publication half of the pair that replaced `apply.rs`'s
+    /// `schema_activated_requires_a_strictly_increasing_version` (round-9
+    /// sweep, C3).
+    ///
+    /// Reduction has to take the maximum: `schema.activated` names no
+    /// predecessor, so nothing orders two coordinators' activations against
+    /// each other and refusing a non-advancing one made the whole bus
+    /// unreducible on whichever hosts had fetched in the wrong order (and,
+    /// for two activations of the *same* version, on every host in both
+    /// orders). AGENT_BUS_SCHEMA.md's "greater than all previously activated
+    /// versions" is enforced here instead, against one host's fully-reduced
+    /// view -- so a coordinator that can see the higher activation is still
+    /// stopped from publishing a lower one.
+    #[test]
+    fn drain_outbox_rejects_a_schema_activation_that_does_not_advance() {
+        let repo = init_repo();
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let (_config, epoch, _commit) = crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        // Gate 17: schema activation is currency-sensitive, so every drain
+        // below fetches `remote` first. Push after each one, exactly as a
+        // real coordinator would -- a local tip left ahead of origin makes
+        // the *next* fetch the thing that fails, and the candidate would then
+        // be rejected for that instead of for the rule under test.
+        let push = || {
+            let tip = crate::stream::read_stream_tip(repo.path(), &coord1)
+                .unwrap()
+                .unwrap();
+            crate::publish::publish(
+                repo.path(),
+                &remote,
+                &[
+                    crate::publish::RefUpdate::new(crate::registry::REGISTRY_REF, epoch.id.clone()),
+                    crate::publish::RefUpdate::new(
+                        crate::stream::stream_ref(&coord1).into_string(),
+                        tip,
+                    ),
+                ],
+            )
+            .unwrap();
+        };
+        push();
+
+        let activate = |version: u32| {
+            Candidate::new(
+                &coord1,
+                &EventData::SchemaActivated(crate::events::SchemaActivated {
+                    version,
+                    design_commit: ObjectId::parse("a".repeat(40)).unwrap(),
+                    helper_commit: ObjectId::parse("b".repeat(40)).unwrap(),
+                }),
+                vec![],
+            )
+        };
+
+        crate::outbox::submit(repo.path(), "v3", &activate(3)).unwrap();
+        let first = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            &remote,
+        )
+        .unwrap();
+        assert!(first.rejected.is_empty(), "{:?}", first.rejected);
+        assert_eq!(
+            first.published,
+            vec![EventId::new(&coord1, 1)],
+            "a genuine advance must still publish, or this test proves nothing"
+        );
+        push();
+
+        for (label, version) in [("same", 3u32), ("lower", 2)] {
+            crate::outbox::submit(repo.path(), label, &activate(version)).unwrap();
+            let drained = drain_outbox(
+                repo.path(),
+                repo.path(),
+                &coord1,
+                &short("host1"),
+                0,
+                &remote,
+            )
+            .unwrap();
+            assert!(drained.published.is_empty(), "{label}: {drained:?}");
+            assert_eq!(drained.rejected.len(), 1, "{label}: {drained:?}");
+            assert_eq!(drained.rejected[0].kind, "schema.activated");
+            assert!(
+                drained.rejected[0]
+                    .reason
+                    .contains("is not greater than the currently activated 3"),
+                "{label}: {}",
+                drained.rejected[0].reason
+            );
+        }
+    }
+
     #[test]
     fn drain_outbox_rejects_an_agent_not_in_the_current_epoch() {
         let repo = init_repo();
@@ -3467,6 +3720,304 @@ mod tests {
             "{}",
             drained.rejected[0].reason
         );
+    }
+
+    // ---------------------------------------------------------------
+    // The two review gates the round-9 reduction-DoS sweep relocated here
+    // (C5 and the disposal-confluence defect it uncovered). Both questions
+    // are about state a concurrent, causally-unordered event moves, so
+    // `apply` cannot ask them at all -- see `verify_review_reassignment_
+    // inherits_open_findings` and `verify_disposition_targets_the_current_
+    // nomination` for the argument, and `apply.rs`'s own paired reduction
+    // tests for the other half.
+
+    fn drain_as(f: &ReviewFixture, agent: &Agent) -> DrainResult {
+        drain_outbox(
+            f.repo.path(),
+            f.repo.path(),
+            agent,
+            &short("host1"),
+            0,
+            &f.remote,
+        )
+        .unwrap()
+    }
+
+    /// Pushes the registry tip and every named agent's current stream tip to
+    /// `f.remote`.
+    ///
+    /// Not tidiness: reassignment is currency-sensitive (gate 17), so its
+    /// drain fetches first, and a local stream left ahead of origin makes
+    /// *that fetch* the thing that rejects the next candidate -- which would
+    /// quietly turn every gate test below into a test of gate 17 instead.
+    fn push_streams(f: &ReviewFixture, agents: &[&Agent]) {
+        let tip = crate::registry::read_registry_tip(f.repo.path())
+            .unwrap()
+            .expect("a registry root");
+        let mut updates = vec![crate::publish::RefUpdate::new(
+            crate::registry::REGISTRY_REF,
+            tip,
+        )];
+        for ag in agents {
+            if let Some(stream_tip) = crate::stream::read_stream_tip(f.repo.path(), ag).unwrap() {
+                updates.push(crate::publish::RefUpdate::new(
+                    crate::stream::stream_ref(ag).into_string(),
+                    stream_tip,
+                ));
+            }
+        }
+        crate::publish::publish(f.repo.path(), &f.remote, &updates).unwrap();
+    }
+
+    /// Registers one more `Role::Reviewer` identity on `f`'s bus, so a
+    /// reassignment has a legitimate replacement to name --
+    /// `build_review_fixture` deliberately has exactly one reviewer.
+    fn add_reviewer(f: &ReviewFixture, name: &str) -> Agent {
+        let newcomer = a(name);
+        let tip = crate::registry::read_registry_tip(f.repo.path())
+            .unwrap()
+            .expect("a registry root");
+        let epoch = crate::registry::read_epoch(f.repo.path(), &tip).unwrap();
+        let mut members = epoch.active_members.clone();
+        members.insert(
+            newcomer.clone(),
+            crate::registry::MemberBinding {
+                role: Role::Reviewer,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        crate::registry::propose_transition(f.repo.path(), &epoch, members).unwrap();
+        crate::outbox::submit(
+            f.repo.path(),
+            &format!("{newcomer}-reg"),
+            &Candidate::new(
+                &newcomer,
+                &EventData::AgentRegistered(crate::events::AgentRegistered {
+                    display_name: short(newcomer.as_str()),
+                    primary_role: Role::Reviewer,
+                    purpose: text("x"),
+                    product_base: None,
+                    product_branch: None,
+                    provider: None,
+                    model: None,
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+        let drained = drain_as(f, &newcomer);
+        assert!(drained.rejected.is_empty(), "{:?}", drained.rejected);
+        newcomer
+    }
+
+    /// `build_review_fixture` plus a replacement reviewer and one open
+    /// finding raised by the accepted reviewer -- the state both gates below
+    /// need. Everything is pushed, so the gate under test is what each drain
+    /// actually reaches.
+    fn review_with_one_open_finding() -> (ReviewFixture, Agent, EventId) {
+        let f = build_review_fixture(Some("zoe"));
+        let carol = add_reviewer(&f, "carol");
+        crate::outbox::submit(
+            f.repo.path(),
+            "changes",
+            &Candidate::new(
+                &f.reviewer,
+                &EventData::ReviewChangesRequested(crate::events::ReviewChangesRequested {
+                    nomination: f.nomination.clone(),
+                    reviewed_commit: ObjectId::parse(f.feature_commit.clone()).unwrap(),
+                    findings: vec![crate::common::Finding {
+                        id: short("f1"),
+                        priority: crate::common::Priority::Normal,
+                        locations: vec![],
+                        rationale: text("needs a test"),
+                        closure_conditions: text("add one"),
+                    }],
+                    evidence: crate::scalars::StringSet::default(),
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+        let drained = drain_as(&f, &f.reviewer);
+        assert!(drained.rejected.is_empty(), "{:?}", drained.rejected);
+        let changes = drained.published[0].clone();
+        let coord1 = f.coord1.clone();
+        let author = f.author.clone();
+        let reviewer = f.reviewer.clone();
+        push_streams(&f, &[&coord1, &author, &reviewer, &carol]);
+        (f, carol, changes)
+    }
+
+    /// A `review.reassigned` copying `build_review_fixture`'s nomination
+    /// exactly except for the reviewer, inheriting `inherited`.
+    fn reassign_candidate(
+        f: &ReviewFixture,
+        to: &Agent,
+        inherited: Vec<crate::common::FindingRef>,
+    ) -> Candidate {
+        use crate::scalars::{Branch, PathClaim, StringSet};
+        Candidate::new(
+            &f.author,
+            &EventData::ReviewReassigned(crate::events::ReviewReassigned {
+                authors: StringSet::from_iter(vec![f.author.clone()]),
+                product_branch: Branch::parse("refs/heads/agent/zoe/feature".into()).unwrap(),
+                reviewer: to.clone(),
+                required_checks: vec![text("build")],
+                review_scope: StringSet::from_iter(vec![
+                    PathClaim::parse("feature.txt".into()).unwrap()
+                ]),
+                summary: text("add feature"),
+                target_branch: Branch::parse("refs/heads/main".into()).unwrap(),
+                evidence: StringSet::default(),
+                replaces: f.nomination.clone(),
+                reason: text("aiden went quiet"),
+                inherited_findings: inherited,
+            }),
+            vec![],
+        )
+    }
+
+    /// The publication half of C5's pair. `apply` had to stop asking this --
+    /// a concurrent `review.findings_cleared` moves the open set out from
+    /// under the comparison, and nothing orders the two -- so the rule lives
+    /// here, where `state` is one host's fully-reduced view.
+    ///
+    /// Both directions are asserted: the reassignment that silently drops the
+    /// open finding is refused, and the one that carries it across publishes.
+    /// The refusal alone would pass just as well against a gate that rejected
+    /// every reassignment.
+    #[test]
+    fn drain_outbox_rejects_a_reassignment_that_drops_an_open_finding() {
+        let (f, carol, changes) = review_with_one_open_finding();
+
+        crate::outbox::submit(
+            f.repo.path(),
+            "drops",
+            &reassign_candidate(&f, &carol, vec![]),
+        )
+        .unwrap();
+        let drained = drain_as(&f, &f.author);
+        assert!(drained.published.is_empty(), "{drained:?}");
+        assert_eq!(drained.rejected.len(), 1, "{drained:?}");
+        assert_eq!(drained.rejected[0].kind, "review.reassigned");
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("inherited_findings must equal every still-open finding exactly once"),
+            "{}",
+            drained.rejected[0].reason
+        );
+
+        crate::outbox::submit(
+            f.repo.path(),
+            "carries",
+            &reassign_candidate(
+                &f,
+                &carol,
+                vec![crate::common::FindingRef {
+                    changes_event: changes,
+                    finding_id: short("f1"),
+                }],
+            ),
+        )
+        .unwrap();
+        let drained = drain_as(&f, &f.author);
+        assert!(drained.rejected.is_empty(), "{:?}", drained.rejected);
+        assert_eq!(drained.published.len(), 1, "{drained:?}");
+    }
+
+    /// The publication half of the disposal-confluence defect the C5 fix
+    /// uncovered: `apply_finding_disposition` used to treat a disposal citing
+    /// a superseded nomination as a no-op, which is total but not confluent
+    /// (nothing orders the disposal against the reassignment, so whether it
+    /// applied was decided by replay order). Reduction now records it either
+    /// way; the policy -- only the current link's reviewer disposes of its
+    /// findings -- is enforced here, where the publisher's own view answers
+    /// it.
+    ///
+    /// The accepted current reviewer's identical disposal publishing is the
+    /// falsifying half: without it this would pass against a gate that
+    /// refused every disposal.
+    #[test]
+    fn drain_outbox_rejects_a_finding_disposal_against_a_superseded_nomination() {
+        let (f, carol, changes) = review_with_one_open_finding();
+
+        crate::outbox::submit(
+            f.repo.path(),
+            "reassign",
+            &reassign_candidate(
+                &f,
+                &carol,
+                vec![crate::common::FindingRef {
+                    changes_event: changes.clone(),
+                    finding_id: short("f1"),
+                }],
+            ),
+        )
+        .unwrap();
+        let drained = drain_as(&f, &f.author);
+        assert!(drained.rejected.is_empty(), "{:?}", drained.rejected);
+        let new_link = drained.published[0].clone();
+        let (coord1, author, reviewer) = (f.coord1.clone(), f.author.clone(), f.reviewer.clone());
+        push_streams(&f, &[&coord1, &author, &reviewer, &carol]);
+
+        let clear = |by: &Agent, nomination: &EventId| {
+            Candidate::new(
+                by,
+                &EventData::ReviewFindingsCleared(crate::events::ReviewFindingsCleared {
+                    nomination: nomination.clone(),
+                    changes_event: changes.clone(),
+                    finding_id: short("f1"),
+                    resolved_commit: ObjectId::parse(f.feature_commit.clone()).unwrap(),
+                    summary: text("fixed"),
+                }),
+                vec![],
+            )
+        };
+
+        // aiden, superseded, cites the nomination it was still the reviewer
+        // of.
+        crate::outbox::submit(
+            f.repo.path(),
+            "stale-clear",
+            &clear(&reviewer, &f.nomination),
+        )
+        .unwrap();
+        let drained = drain_as(&f, &reviewer);
+        assert!(drained.published.is_empty(), "{drained:?}");
+        assert_eq!(drained.rejected.len(), 1, "{drained:?}");
+        assert_eq!(drained.rejected[0].kind, "review.findings_cleared");
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("no longer this review's current nomination"),
+            "{}",
+            drained.rejected[0].reason
+        );
+
+        // carol, the current reviewer, accepts and disposes of the same
+        // inherited finding -- which must go through.
+        crate::outbox::submit(
+            f.repo.path(),
+            "accept",
+            &Candidate::new(
+                &carol,
+                &EventData::ReviewNominationAccepted(crate::events::ReviewNominationAccepted {
+                    nomination: new_link.clone(),
+                    note: text("ok"),
+                }),
+                vec![],
+            ),
+        )
+        .unwrap();
+        let drained = drain_as(&f, &carol);
+        assert!(drained.rejected.is_empty(), "{:?}", drained.rejected);
+        crate::outbox::submit(f.repo.path(), "clear", &clear(&carol, &new_link)).unwrap();
+        let drained = drain_as(&f, &carol);
+        assert!(drained.rejected.is_empty(), "{:?}", drained.rejected);
+        assert_eq!(drained.published.len(), 1, "{drained:?}");
     }
 
     // ---------------------------------------------------------------

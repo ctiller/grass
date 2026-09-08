@@ -243,6 +243,22 @@ than on every read.
   graceful no-ops rather than hard rejections -- a hard `Err` here would
   permanently break reduction of the *entire* bus for every host that
   fetches both streams, not just the one affected chain.
+- **...but a no-op is only half the requirement**: totality stops the bus
+  wedging; *confluence* is the other half, and a no-op conditioned on
+  mutable state (typically `ReviewChain::current_nomination`, which a
+  concurrent `review.reassigned` moves) does not have it -- whether the
+  event applied then depends on replay order, so two hosts that fetched the
+  same streams in a different order hold permanently different state. Where
+  a question is about state a concurrent, causally-unordered event can move,
+  the durable answer is to relocate it to publication time
+  (`coordinator::verify_*`, which runs against one host's fully-reduced
+  view) and leave reduction reading only what `refs` reaches, the event's
+  own stream, or registration-time facts. `apply_finding_disposition` and
+  `apply_schema_activated` are the worked examples; the remaining
+  `current_nomination` no-ops (`apply_review_accept`,
+  `apply_review_changes`, `apply_review_closing`,
+  `apply_review_merge_authorized`) are the same shape and still awaiting
+  the same treatment.
 - **Git-linked merge validation is layered, not duplicated in one place**:
   `apply::apply_review_merge_authorized` checks the event's own internal
   bus-state consistency (pure, no git access); `coordinator::verify_review_
