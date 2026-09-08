@@ -4368,4 +4368,444 @@ mod tests {
             "agent.status is how a retired identity would be resumed; it must not be gated here",
         );
     }
+
+    // ------------------------------------ the relocated gates' call sites
+    //
+    // Every gate above (`verify_participants_active`, `verify_predecessor_
+    // not_contested`, `verify_broadcast_published`) was *moved here* out of
+    // `apply`, and `apply`'s own tests now pin that it no longer asks. So
+    // the only thing standing between each rule and being enforced nowhere
+    // at all is one call site in `drain_outbox` -- and the tests above call
+    // each function directly, which cannot see that call site.
+    //
+    // Proven by mutation: deleting all three call sites from `drain_outbox`
+    // left the whole suite green (554 unit + 68 CLI). The tests below drive
+    // the real coordinator path instead, and assert the specific rejection
+    // *wording*, not merely that something was refused -- with a call site
+    // gone the candidate is often still rejected further downstream for an
+    // unrelated reason, and only the wording tells the two apart.
+
+    /// A real bus on a real `origin`: `coord1` from genesis plus each of
+    /// `members` registered and drained, with the registry and every stream
+    /// already published -- what gate 17's fetch needs to find before any
+    /// currency-sensitive candidate can be drained.
+    struct BusFixture {
+        repo: tempfile::TempDir,
+        #[allow(dead_code)]
+        origin: tempfile::TempDir,
+        remote: String,
+        coord1: Agent,
+        epoch: crate::registry::RosterEpoch,
+    }
+
+    impl BusFixture {
+        /// Pushes the registry epoch and every active member's current
+        /// stream tip, exactly as a real coordinator would. `synced_snapshot`
+        /// fetches non-forced, so a local tip left ahead of the remote makes
+        /// the *next* currency-sensitive drain fail on the fetch rather than
+        /// on whatever the test is actually about.
+        fn push_bus(&self) {
+            let mut updates = vec![crate::publish::RefUpdate::new(
+                crate::registry::REGISTRY_REF,
+                self.epoch.id.clone(),
+            )];
+            for member in self.epoch.active_members.keys() {
+                if let Some(tip) = crate::stream::read_stream_tip(self.repo.path(), member).unwrap()
+                {
+                    updates.push(crate::publish::RefUpdate::new(
+                        crate::stream::stream_ref(member).into_string(),
+                        tip,
+                    ));
+                }
+            }
+            crate::publish::publish(self.repo.path(), &self.remote, &updates).unwrap();
+        }
+
+        fn submit(&self, label: &str, agent: &Agent, data: &EventData) {
+            crate::outbox::submit(
+                self.repo.path(),
+                label,
+                &Candidate::new(agent, data, vec![]),
+            )
+            .unwrap();
+        }
+
+        fn drain(&self, agent: &Agent) -> DrainResult {
+            drain_outbox(
+                self.repo.path(),
+                self.repo.path(),
+                agent,
+                &short("host1"),
+                0,
+                &self.remote,
+            )
+            .unwrap()
+        }
+
+        /// Drains and asserts nothing was refused -- for the setup steps,
+        /// where a silent rejection would otherwise leave the state the test
+        /// actually cares about un-built and the assertion vacuous.
+        fn drain_expecting_success(&self, agent: &Agent) -> Vec<EventId> {
+            let drained = self.drain(agent);
+            assert!(
+                drained.rejected.is_empty(),
+                "fixture step for {agent} was rejected: {:?}",
+                drained.rejected
+            );
+            drained.published
+        }
+    }
+
+    fn build_bus_fixture(members: &[(&str, Role)]) -> BusFixture {
+        let repo = init_repo();
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let (_config, epoch, _commit) = crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        let mut active = epoch.active_members.clone();
+        for (name, role) in members {
+            active.insert(
+                a(name),
+                crate::registry::MemberBinding {
+                    role: *role,
+                    host: short("host1"),
+                    coordinator_custody_epoch: 0,
+                    standby: None,
+                },
+            );
+        }
+        let epoch = crate::registry::propose_transition(repo.path(), &epoch, active).unwrap();
+
+        let f = BusFixture {
+            repo,
+            origin,
+            remote,
+            coord1,
+            epoch,
+        };
+        for (name, role) in members {
+            let ag = a(name);
+            f.submit(
+                &format!("{ag}-reg"),
+                &ag,
+                &EventData::AgentRegistered(crate::events::AgentRegistered {
+                    display_name: short(ag.as_str()),
+                    primary_role: *role,
+                    purpose: text("x"),
+                    product_base: None,
+                    product_branch: None,
+                    provider: None,
+                    model: None,
+                }),
+            );
+            f.drain_expecting_success(&ag);
+        }
+        f.push_bus();
+        f
+    }
+
+    /// `verify_participants_active`'s call site, through the real drain.
+    ///
+    /// `the_publication_gate_refuses_an_inactive_participant` above calls the
+    /// gate directly, so deleting its `drain_outbox` call site changed
+    /// nothing anywhere in the suite -- and `apply` deliberately no longer
+    /// asks (`apply::a_reviewer_retiring_concurrently_with_a_nomination_
+    /// still_reduces`), so the rule would then have been enforced nowhere.
+    ///
+    /// The reviewer keeps the `Reviewer` role the whole time -- roles are
+    /// immutable and `apply` still checks that one -- so the *only* thing
+    /// that can refuse this nomination is the liveness gate.
+    #[test]
+    fn drain_outbox_rejects_a_nomination_naming_a_retired_reviewer() {
+        let f = build_bus_fixture(&[("zoe", Role::Implementor), ("aiden", Role::Reviewer)]);
+        let zoe = a("zoe");
+        let aiden = a("aiden");
+
+        f.submit(
+            "retire",
+            &f.coord1,
+            &EventData::AgentRetired(crate::events::AgentRetired {
+                target: aiden.clone(),
+                previous_lifecycle: EventId::new(&aiden, 0),
+                reason: text("went quiet"),
+                user_authority: text("craig"),
+            }),
+        );
+        f.drain_expecting_success(&f.coord1);
+
+        let nomination = EventData::ReviewNominated(crate::events::ReviewRequest {
+            authors: crate::scalars::StringSet::from_iter([zoe.clone()]),
+            product_branch: crate::scalars::Branch::parse("refs/heads/agent/zoe/feature".into())
+                .unwrap(),
+            reviewer: aiden.clone(),
+            required_checks: vec![],
+            review_scope: crate::scalars::StringSet::from_iter([crate::scalars::PathClaim::parse(
+                "feature.txt".into(),
+            )
+            .unwrap()]),
+            summary: text("add feature"),
+            target_branch: crate::scalars::Branch::parse("refs/heads/main".into()).unwrap(),
+            evidence: crate::scalars::StringSet::default(),
+        });
+        f.submit("nominate", &zoe, &nomination);
+
+        let drained = f.drain(&zoe);
+        assert!(
+            drained.published.is_empty(),
+            "a retired reviewer must not be handed a review: {:?}",
+            drained.published
+        );
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("aiden is retired or otherwise inactive"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    /// `verify_predecessor_not_contested`'s call site, through the real
+    /// drain -- the publication half of `apply::building_on_a_contested_
+    /// predecessor_still_reduces`, built here from genuinely concurrent
+    /// published events rather than a hand-seeded `ExclusiveTracker`.
+    ///
+    /// The failure this closes is a fail-*open*, not a mis-worded rejection:
+    /// `apply_merge_engine_activated` records a contested activation in
+    /// `merge_engine_info` unconditionally (deliberately -- see its own
+    /// comment), so with the call site deleted the third activation below
+    /// passes `dry_run` and is published. Nothing else in the suite noticed.
+    #[test]
+    fn drain_outbox_rejects_an_activation_built_on_a_contested_predecessor() {
+        let f = build_bus_fixture(&[("coord2", Role::Coordinator)]);
+        let coord1 = f.coord1.clone();
+        let coord2 = a("coord2");
+        let head =
+            ObjectId::parse(crate::gitrepo::rev_parse(f.repo.path(), "HEAD").unwrap()).unwrap();
+        let activation = |previous: &EventId| {
+            EventData::MergeEngineActivated(crate::events::MergeEngineActivated {
+                previous_epoch: previous.clone(),
+                merge_engine: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                merge_engine_version: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                design_commit: head.clone(),
+                helper_commit: head.clone(),
+            })
+        };
+
+        // The genesis activation: a fresh bus has no prior activation to
+        // name, so it names its own registration (the bootstrap exception in
+        // `apply_merge_engine_activated`).
+        f.submit(
+            "engine-genesis",
+            &coord1,
+            &activation(&EventId::new(&coord1, 0)),
+        );
+        let genesis_epoch = f.drain_expecting_success(&coord1)[0].clone();
+        f.push_bus();
+
+        // Two genuinely concurrent successors from two different
+        // coordinators, both built on `genesis_epoch`: neither is refused
+        // (neither committed an error), and the pair is what makes each of
+        // them contested.
+        f.submit("engine-a", &coord1, &activation(&genesis_epoch));
+        let contested = f.drain_expecting_success(&coord1)[0].clone();
+        f.push_bus();
+        f.submit("engine-b", &coord2, &activation(&genesis_epoch));
+        f.drain_expecting_success(&coord2);
+        f.push_bus();
+
+        // Now build on the loser-or-winner-nobody-has-picked-yet.
+        f.submit("engine-c", &coord1, &activation(&contested));
+        let drained = f.drain(&coord1);
+        assert!(
+            drained.published.is_empty(),
+            "an unresolved race must not become a foundation: {:?}",
+            drained.published
+        );
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0].reason.contains(&format!(
+                "{contested} is itself part of an unresolved lifecycle conflict"
+            )),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    /// `verify_broadcast_published`'s call site, through the real drain.
+    ///
+    /// Gate 12's exactness cannot live in `apply` (see `apply_broadcast_
+    /// published`'s own comment), so with this call site deleted a broadcast
+    /// claiming an audience nobody resolves to is published and reduced
+    /// perfectly happily, on every host, forever.
+    ///
+    /// Both directions of "not equal" are asserted, because the two halves
+    /// of the message come from two separate set differences.
+    #[test]
+    fn drain_outbox_rejects_a_broadcast_whose_audience_snapshot_is_wrong() {
+        let f = build_bus_fixture(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
+        let alice = a("alice");
+        let bob = a("bob");
+        let topic = crate::scalars::CoordinationTopic::parse("release.main".into()).unwrap();
+
+        f.submit(
+            "subscribe",
+            &alice,
+            &EventData::SubscriptionSet(crate::events::SubscriptionSet {
+                topics: crate::scalars::StringSet::from_iter([topic.clone()]),
+            }),
+        );
+        f.drain_expecting_success(&alice);
+
+        let broadcast = |snapshot: &[&Agent]| {
+            EventData::BroadcastPublished(crate::events::BroadcastPublished {
+                topics: crate::scalars::StringSet::from_iter([topic.clone()]),
+                importance: crate::common::Importance::Informational,
+                summary: short("s"),
+                detail: text("d"),
+                affected_paths: crate::scalars::StringSet::default(),
+                affected_interfaces: crate::scalars::StringSet::default(),
+                product_commits: crate::scalars::StringSet::default(),
+                audience_selector: crate::common::AudienceSelector::TopicSubscribers(topic.clone()),
+                audience_epoch: f.epoch.id.clone(),
+                audience_snapshot: crate::scalars::StringSet::from_iter(
+                    snapshot.iter().map(|ag| (*ag).clone()),
+                ),
+                acknowledgement: crate::common::AckRequirement::None,
+                deadline: None,
+                supersedes: crate::scalars::StringSet::default(),
+                workaround: None,
+                expiry_condition: None,
+            })
+        };
+
+        // `bob` never subscribed and `alice` did, so this snapshot is wrong
+        // in both directions at once.
+        f.submit("invented-audience", &f.coord1, &broadcast(&[&bob]));
+        let drained = f.drain(&f.coord1);
+        assert!(
+            drained.published.is_empty(),
+            "an inexact audience must not publish: {:?}",
+            drained.published
+        );
+        assert_eq!(drained.rejected.len(), 1);
+        let reason = &drained.rejected[0].reason;
+        assert!(
+            reason.contains("audience_snapshot does not match audience_selector resolved against"),
+            "{reason}"
+        );
+        assert!(reason.contains("missing [\"alice\"]"), "{reason}");
+        assert!(reason.contains("unexpected [\"bob\"]"), "{reason}");
+
+        // The honest snapshot goes through the identical path, so the
+        // rejection above is the gate's verdict and not something structural
+        // about this fixture's broadcasts.
+        f.submit("honest-audience", &f.coord1, &broadcast(&[&alice]));
+        let published = f.drain_expecting_success(&f.coord1);
+        assert_eq!(published.len(), 1);
+    }
+
+    /// The blocking-issue rule's *arrival* in `verify_review_merge_
+    /// authorized`.
+    ///
+    /// `apply::review_merge_authorized_is_recorded_even_when_an_open_issue_
+    /// blocks_the_chain` pins that reduction no longer refuses it, and
+    /// `merge_ready::tests::rejects_a_blocking_issue` pins the pre-push
+    /// gate's copy. Neither reaches this one: deleting the check from
+    /// `verify_review_merge_authorized` left the whole suite green, so
+    /// "moved, not removed" was only half true -- an authorization a
+    /// blocking issue forbids could still be *published*, and `merge-ready`
+    /// is a separate command nothing forces a reviewer to run.
+    ///
+    /// The issue is opened by the coordinator (an auditor may not carry a
+    /// nonempty `blocks` set) and pushed, because a `review.merge_authorized`
+    /// candidate is currency-sensitive: the gate judges the freshly-fetched
+    /// cut, so an issue that never reached `origin` is one this host is
+    /// entitled not to see.
+    #[test]
+    fn drain_outbox_rejects_a_merge_authorization_an_unresolved_issue_blocks() {
+        let f = build_review_fixture(Some("zoe"));
+
+        let issue = EventData::IssueOpened(crate::events::IssueOpened {
+            target: f.author.clone(),
+            issue_kind: crate::events::IssueKind::Bug,
+            severity: crate::common::Priority::Critical,
+            summary: text("the feature regresses startup"),
+            code_commit: None,
+            locations: vec![],
+            expected: None,
+            observed_behavior: None,
+            reproduction: vec![],
+            blocks: crate::scalars::StringSet::from_iter([f.nomination.clone()]),
+            evidence: crate::scalars::StringSet::default(),
+        });
+        crate::outbox::submit(
+            f.repo.path(),
+            "blocking-issue",
+            &Candidate::new(&f.coord1, &issue, vec![]),
+        )
+        .unwrap();
+        let opened = drain_outbox(
+            f.repo.path(),
+            f.repo.path(),
+            &f.coord1,
+            &short("host1"),
+            0,
+            &f.remote,
+        )
+        .unwrap();
+        assert!(opened.rejected.is_empty(), "{:?}", opened.rejected);
+        let issue_id = opened.published[0].clone();
+        crate::publish::publish(
+            f.repo.path(),
+            &f.remote,
+            &[crate::publish::RefUpdate::new(
+                crate::stream::stream_ref(&f.coord1).into_string(),
+                crate::stream::read_stream_tip(f.repo.path(), &f.coord1)
+                    .unwrap()
+                    .unwrap(),
+            )],
+        )
+        .unwrap();
+
+        // Everything else about this authorization is genuinely correct --
+        // the candidate is the real deterministic reconstruction -- so the
+        // blocking issue is the only thing left to refuse it.
+        let candidate = crate::merge_candidate::reconstruct_candidate(
+            f.repo.path(),
+            &f.previous_main,
+            &f.feature_commit,
+            &f.reviewer,
+        )
+        .unwrap();
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &candidate),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0].reason.contains(&format!(
+                "issue {issue_id} is unresolved and blocks nomination chain {}",
+                f.nomination
+            )),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
 }

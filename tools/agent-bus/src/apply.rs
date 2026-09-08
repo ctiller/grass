@@ -5948,6 +5948,21 @@ mod tests {
         );
     }
 
+    /// `apply_subscription_set` is the only thing in this crate that ever
+    /// writes `AgentState::subscribed_topics`, so this is the only test that
+    /// can pin what it records -- and for a while it pinned nothing at all.
+    ///
+    /// When gate 12's audience exactness moved out of `apply_broadcast_
+    /// published` (see its own comment) into `coordinator::verify_broadcast_
+    /// published`, the broadcast below stopped being able to disagree with
+    /// the subscription: `state.broadcasts.contains_key(&env.id)` then held
+    /// for any subscription whatsoever, including none. Confirmed by
+    /// mutation -- making `apply_subscription_set` record nothing left the
+    /// whole suite green.
+    ///
+    /// So the handler's effect is asserted directly, and then separately
+    /// that `resolve_audience` -- the only reader, and the reason the field
+    /// exists -- actually sees it.
     #[test]
     fn broadcast_topic_subscribers_resolves_from_subscription_set() {
         let mut state = empty_state(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
@@ -5955,6 +5970,10 @@ mod tests {
         let bob = a("bob");
         apply_ok(&mut state, &register(&alice, Role::Implementor));
         apply_ok(&mut state, &register(&bob, Role::Implementor));
+        assert!(
+            state.agents[&alice].subscribed_topics.is_empty(),
+            "registering subscribes an agent to nothing, or the assertion below proves nothing"
+        );
         apply_ok(
             &mut state,
             &Envelope::new(
@@ -5967,14 +5986,43 @@ mod tests {
                 [],
             ),
         );
-        let epoch_id = state.roster_epoch.as_ref().unwrap().id.clone();
+        let epoch = state.roster_epoch.as_ref().unwrap().clone();
+
+        // What the handler recorded, on the subscriber and on nobody else.
+        assert_eq!(
+            state.agents[&alice].subscribed_topics,
+            StringSet::from_iter([topic("safety.memory")])
+        );
+        assert!(
+            state.agents[&bob].subscribed_topics.is_empty(),
+            "one agent's subscription must not leak onto another's"
+        );
+
+        // And that a `TopicSubscribers` audience is resolved from it.
+        assert_eq!(
+            resolve_audience(
+                &state,
+                &crate::common::AudienceSelector::TopicSubscribers(topic("safety.memory")),
+                &epoch,
+            ),
+            BTreeSet::from([alice.clone()])
+        );
+        assert!(
+            resolve_audience(
+                &state,
+                &crate::common::AudienceSelector::TopicSubscribers(topic("release.main")),
+                &epoch,
+            )
+            .is_empty(),
+            "a topic nobody subscribed to must resolve to nobody"
+        );
 
         let env = Envelope::new(
             &alice,
             2,
             no_frontier(),
             &EventData::BroadcastPublished(broadcast(
-                epoch_id,
+                epoch.id.clone(),
                 crate::common::AudienceSelector::TopicSubscribers(topic("safety.memory")),
                 &[&alice],
                 crate::common::AckRequirement::None,
