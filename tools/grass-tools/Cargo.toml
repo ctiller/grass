@@ -8,6 +8,14 @@ description = "Grass validation and audit tools: differential checks against ind
 # scripts these replace were self-contained too, and each is invoked
 # independently by `.github/workflows/library.yml`; keeping them separate
 # means a change to one cannot silently alter another's verdict.
+#
+# `axiom-audit` and `coverage-audit` replace Lean meta-programs rather than
+# Python scripts, and each still needs Lean: the kernel's axiom record and an
+# elaborated `Expr` have no reading outside the environment. Each generates the
+# meta-program it needs into a temporary file, elaborates it with
+# `lake env lean`, and does the judging here. `docstring-audit` obtains its
+# declaration-name oracle the same way, which is what retires
+# `Tools/DeclNames.lean`.
 
 [[bin]]
 name = "x86-nasm-differential"
@@ -36,6 +44,14 @@ path = "src/bin/docstring_audit.rs"
 [[bin]]
 name = "source-liveness"
 path = "src/bin/source_liveness.rs"
+
+[[bin]]
+name = "axiom-audit"
+path = "src/bin/axiom_audit.rs"
+
+[[bin]]
+name = "coverage-audit"
+path = "src/bin/coverage_audit.rs"
 
 [dependencies]
 anyhow = "1"

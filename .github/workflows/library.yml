@@ -12,7 +12,7 @@ name: Library build
 #
 # A third check is about prose. Four adversarial review rounds each found a
 # docstring asserting a property the code did not have, including one naming a
-# theorem that did not exist. Tools/DocstringAudit.py requires a strong claim in
+# theorem that did not exist. The docstring-audit tool requires a strong claim in
 # a definition or module comment to name the type or theorem enforcing it.
 #
 # A fourth check is about laws. docs/STDLIB_IMPLEMENTATION_PLAN.md decision 6
@@ -20,7 +20,7 @@ name: Library build
 # a law computing its get?. That rule was stated in prose three times and
 # violated in the same commit that stated it each time - most recently by
 # Vec.sum, on the right-hand side of a law consumers apply. lake build says
-# nothing about it: an operation with no law compiles. Tools/CoverageAudit.lean
+# nothing about it: an operation with no law compiles. The coverage-audit tool
 # is what says something.
 #
 # The x86 differentials check something no Lean theorem can. Every theorem in
@@ -87,7 +87,7 @@ jobs:
         run: cargo build --release --locked --manifest-path tools/grass-tools/Cargo.toml
 
       - name: Audit axioms
-        run: lake env lean Tools/AxiomAudit.lean
+        run: ./tools/grass-tools/target/release/axiom-audit
 
       - name: Audit verified-program trust closure
         shell: pwsh
@@ -100,7 +100,7 @@ jobs:
         run: lake env lean Tests/ISA/X86/LedgerAudit.lean
 
       - name: Audit observation coverage
-        run: lake env lean Tools/CoverageAudit.lean
+        run: ./tools/grass-tools/target/release/coverage-audit
 
       - name: Install NASM
         run: sudo apt-get update && sudo apt-get install -y nasm

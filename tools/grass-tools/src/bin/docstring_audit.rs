@@ -35,12 +35,47 @@
 //! `encodeMem_is_canonical_and_injective_over_all_addresses`, which does not exist;
 //! the identical sentence with the backticks removed failed. That is precisely the
 //! defect this file's own header cites as its reason for existing. Names are now
-//! checked against `Tools/DeclNames.lean`, which prints every declaration the build
-//! knows. A sentence that hedges -- "intended", "not enforced", "owes",
-//! "open obligation", and the like -- is exempt, because saying a property is not yet
-//! mechanised is exactly the honest alternative the rule asks for.
+//! checked against every declaration the build knows, obtained by
+//! [`declaration_names`]. A sentence that hedges -- "intended", "not enforced",
+//! "owes", "open obligation", and the like -- is exempt, because saying a property
+//! is not yet mechanised is exactly the honest alternative the rule asks for.
 //!
 //! Exit status is 1 if any claim is unbacked.
+//!
+//! # Where the name list comes from
+//!
+//! It used to come from `Tools/DeclNames.lean`, a Lean meta-program this tool shelled
+//! out to. That file's own comment explains why it existed: "The tool cannot be given
+//! a Lean environment, so this prints one for it."
+//!
+//! It still cannot. What changed is that the meta-program is now generated here, at
+//! run time, into a temporary file that `lake env lean` elaborates under the
+//! repository's pinned toolchain -- so no `.lean` file has to be kept in step with
+//! this one by hand. [`decl_names_lean_source`] is the whole of it, and it is the
+//! Lean file's logic unchanged: every constant in the environment, `private`
+//! mangling stripped so a docstring can name a private theorem by the name it is
+//! written under, internals dropped.
+//!
+//! Not restricted to `Grass`: docstrings legitimately name core declarations --
+//! `BitVec`, `List.find?`, `Option.isSome` -- and a checker that rejected those would
+//! push authors towards naming nothing rather than towards naming something real.
+//!
+//! The name list is not a proof and not an audit. It is a fact dump, and this tool
+//! still cannot tell whether the named theorem proves the sentence. It closes one
+//! gap: whether the name resolves at all.
+//!
+//! ## Its coverage is checked, not assumed
+//!
+//! `Tools/DeclNames.lean` carried the same coverage guard `Tools/AxiomAudit.lean`
+//! did, for the same reason: a module missing from its hand-written import list
+//! would silently shrink the name set, and every docstring naming one of that
+//! module's declarations would be reported as naming nothing. A loud failure beats a
+//! mystery finding.
+//!
+//! Generating the imports from the same tree walk that produces the file list is
+//! what makes the list unable to fall behind. The comparison is kept anyway: the
+//! generated snippet reports `env.header.moduleNames` back and
+//! [`declaration_names`] fails if a module under `Grass/` is absent from it.
 //!
 //! # One deliberate departure from the Python
 //!
@@ -67,7 +102,7 @@
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::sync::OnceLock;
 
@@ -227,29 +262,55 @@ fn not_ident_re() -> &'static Regex {
 /// A missing oracle is a failure, not a skip: an audit that passes because it
 /// could not obtain the name list is worse than no audit, which is the mistake
 /// this function was added to correct.
-fn declaration_names() -> Result<HashSet<String>, String> {
-    let output = Command::new("lake")
-        .args(["env", "lean", "Tools/DeclNames.lean"])
-        .output()
-        .map_err(|err| {
-            format!("could not obtain the declaration list from Tools/DeclNames.lean:\n{err}")
-        })?;
-
-    // `text=True, encoding="utf-8", errors="replace"` in the Python; lossy decoding
-    // substitutes the same U+FFFD, and the universal-newline translation that came
-    // with it is absorbed by `py_splitlines`.
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !output.status.success() {
-        let combined = format!("{stdout}{}", String::from_utf8_lossy(&output.stderr));
-        let capped: String = py_strip(&combined).chars().take(2000).collect();
+///
+/// `modules` is the module list the tree walk found; it becomes the generated
+/// snippet's import list and the set the coverage check is made against.
+fn declaration_names(modules: &[String]) -> Result<HashSet<String>, String> {
+    if let Some(bad) = modules.iter().find(|m| !is_plain_module_name(m)) {
         return Err(format!(
-            "could not obtain the declaration list from Tools/DeclNames.lean:\n{capped}"
+            "could not obtain the declaration list: {bad} is not a module name that can be \
+             imported without quoting. Rename the file, or teach `decl_names_lean_source` to quote."
         ));
     }
+    let records = run_decl_names(modules)?;
+    let (imported, names) = parse_decl_records(&records)?;
 
+    let missing: Vec<&String> = modules.iter().filter(|m| !imported.contains(*m)).collect();
+    if !missing.is_empty() {
+        let mut message = String::from(
+            "declaration list coverage gap: these modules exist under Grass/ but were not \
+             imported by the generated declaration list, so every docstring naming one of their \
+             declarations would be reported as naming nothing:\n",
+        );
+        for module in missing {
+            let _ = writeln!(message, "  {module}");
+        }
+        return Err(message.trim_end().to_string());
+    }
+
+    let known = known_names(names.iter().map(String::as_str));
+    // A short name list turns honest docstrings into findings, so it is refused
+    // rather than reported against. The number is the expanded set's, as it was.
+    if known.len() < 1000 {
+        return Err(format!(
+            "declaration list has only {} entries, which cannot be right; refusing to report a \
+             clean audit against it",
+            known.len()
+        ));
+    }
+    Ok(known)
+}
+
+/// Turn the raw name list into the set a docstring is checked against.
+///
+/// Every name, plus every dotted suffix of one, because a docstring names a
+/// declaration the way a reader would -- `writeBack.w32_clears_high`, not
+/// `Grass.ISA.X86.writeBack.w32_clears_high` -- and demanding the fully qualified
+/// form would push authors towards naming nothing.
+fn known_names<'a>(names: impl Iterator<Item = &'a str>) -> HashSet<String> {
     let mut known: HashSet<String> = HashSet::new();
-    for line in py_splitlines(&stdout) {
-        let name = py_strip(line);
+    for name in names {
+        let name = py_strip(name);
         if name.is_empty() || name.contains(' ') {
             continue;
         }
@@ -267,14 +328,188 @@ fn declaration_names() -> Result<HashSet<String>, String> {
     for sort in ["Prop", "Type", "Sort"] {
         known.insert(sort.to_string());
     }
-    if known.len() < 1000 {
-        return Err(format!(
-            "declaration list has only {} entries, which cannot be right; refusing to report a \
-             clean audit against it",
-            known.len()
-        ));
+    known
+}
+
+/// Parse the tab-separated record set the generated snippet writes.
+///
+/// The grammar is three record kinds, one per line: `M<TAB>module` for an imported
+/// module, `N<TAB>name` for a declaration, and `Z<TAB>count` for the terminator,
+/// carrying the number of `N` records.
+///
+/// The terminator is the point of the format. A Lean process killed part-way
+/// through, or a disk that filled, would otherwise hand back a shorter name list
+/// that parses perfectly -- and a short name list turns honest docstrings into
+/// findings, which is the failure mode this oracle exists to prevent rather than
+/// cause.
+///
+/// A name is everything after the first tab, so a declaration whose name contains
+/// one is skipped by the space and length filters in [`known_names`] rather than
+/// destroying the parse.
+fn parse_decl_records(text: &str) -> Result<(HashSet<String>, Vec<String>), String> {
+    let mut imported: HashSet<String> = HashSet::new();
+    let mut names: Vec<String> = Vec::new();
+    let mut terminator: Option<usize> = None;
+    for (index, line) in text.lines().enumerate() {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if line.is_empty() {
+            continue;
+        }
+        let number = index + 1;
+        if terminator.is_some() {
+            return Err(format!(
+                "declaration list: record {number} follows the terminator: {line:?}"
+            ));
+        }
+        match line.split_once('\t') {
+            Some(("M", module)) => {
+                imported.insert(module.to_string());
+            }
+            Some(("N", name)) => names.push(name.to_string()),
+            Some(("Z", count)) => {
+                terminator = Some(count.parse::<usize>().map_err(|err| {
+                    format!("declaration list: record {number} has an unreadable count: {err}")
+                })?)
+            }
+            _ => {
+                return Err(format!(
+                    "declaration list: record {number} is not a record this tool wrote: {line:?}"
+                ))
+            }
+        }
     }
-    Ok(known)
+    match terminator {
+        None => Err(
+            "declaration list: the record set has no terminator, so it names some of the build's \
+             declarations rather than all of them. Refusing to report unbacked claims against a \
+             partial name list."
+                .to_string(),
+        ),
+        Some(count) if count != names.len() => Err(format!(
+            "declaration list: the record set claims {count} declarations and carries {}, so it \
+             was truncated in transit.",
+            names.len()
+        )),
+        Some(_) => Ok((imported, names)),
+    }
+}
+
+/// Whether a module name can be written after `import` without quoting.
+///
+/// Generating an import list means a file name reaches the elaborator as syntax.
+/// Every module in this tree is `UpperCamelCase`, but a file named `x-y.lean`
+/// would produce a parse error inside a generated file the reader never sees, and
+/// the diagnosis would be a puzzle. Refusing it by name is the self-healing
+/// version of that failure.
+fn is_plain_module_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.split('.').all(|part| {
+            let mut chars = part.chars();
+            matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '\'')
+        })
+}
+
+/// A Lean string literal for `text`, so a Windows path survives being pasted into
+/// generated source.
+fn lean_string_literal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for ch in text.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            _ => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The generated meta-program: `Tools/DeclNames.lean`'s body, with the import list
+/// filled in from disk and the output written where the caller asked.
+fn decl_names_lean_source(modules: &[String], out: &Path) -> String {
+    let imports = modules
+        .iter()
+        .map(|m| format!("import {m}\n"))
+        .collect::<String>();
+    let out_literal = lean_string_literal(&out.to_string_lossy());
+    format!(
+        r#"import Lean
+{imports}
+open Lean
+
+run_cmd do
+  let env ← Elab.Command.liftCoreM getEnv
+  let mut lines : Array String := #[]
+  for m in env.header.moduleNames do
+    lines := lines.push ("M\t" ++ toString m)
+  let mut named : Nat := 0
+  for (name, _) in env.constants.toList do
+    let user := (privateToUserName? name).getD name
+    unless user.isInternal do
+      named := named + 1
+      lines := lines.push ("N\t" ++ toString user)
+  lines := lines.push ("Z\t" ++ toString named)
+  IO.FS.writeFile {out_literal} (String.intercalate "\n" lines.toList ++ "\n")
+"#
+    )
+}
+
+/// Elaborate the generated snippet under the repository's toolchain and read back
+/// the records.
+///
+/// `lake env lean` is how `.github/workflows/library.yml` invoked
+/// `Tools/DeclNames.lean`, and it is what puts the built `.olean` files on
+/// `LEAN_PATH`; the working directory therefore has to be the repository root,
+/// exactly as it did before.
+///
+/// The record set goes to a file rather than to standard output so a Lean
+/// diagnostic can never be mistaken for a declaration name.
+fn run_decl_names(modules: &[String]) -> Result<String, String> {
+    let dir = tempfile::Builder::new()
+        .prefix("grass-decl-names")
+        .tempdir()
+        .map_err(|err| format!("could not obtain the declaration list: {err}"))?;
+    let script = dir.path().join("DeclNamesProbe.lean");
+    let records = dir.path().join("records.tsv");
+    fs::write(&script, decl_names_lean_source(modules, &records))
+        .map_err(|err| format!("could not obtain the declaration list: {err}"))?;
+
+    let output = Command::new("lake")
+        .args(["env", "lean"])
+        .arg(&script)
+        .output()
+        .map_err(|err| format!("could not obtain the declaration list:\n{err}"))?;
+    // `errors="replace"` in the Python this replaces; lossy decoding substitutes the
+    // same U+FFFD.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !output.status.success() {
+        let combined = format!("{stdout}{}", String::from_utf8_lossy(&output.stderr));
+        let capped: String = py_strip(&combined).chars().take(2000).collect();
+        return Err(format!("could not obtain the declaration list:\n{capped}"));
+    }
+    fs::read_to_string(&records).map_err(|err| {
+        let capped: String = py_strip(&stdout).chars().take(2000).collect();
+        format!("could not obtain the declaration list ({err}):\n{capped}")
+    })
+}
+
+/// The dotted module name of every file the tree walk found.
+///
+/// The same walk that produces the audit's file list produces its import list, so
+/// the two cannot disagree about what the tree contains -- which is the coverage
+/// hazard `Tools/DeclNames.lean` had to guard against by hand.
+fn module_names(files: &[(String, PathBuf)]) -> Vec<String> {
+    let mut modules: Vec<String> = files
+        .iter()
+        .filter_map(|(posix, _)| posix.strip_suffix(".lean"))
+        .map(|stem| stem.replace('/', "."))
+        .collect();
+    modules.sort();
+    modules.dedup();
+    modules
 }
 
 /// Split a docstring block into sentences.
@@ -506,7 +741,7 @@ fn run() -> Result<ExitCode, String> {
         return Err(zero_files_message(&names));
     }
 
-    let known = declaration_names()?;
+    let known = declaration_names(&module_names(&files))?;
     let mut findings = Vec::new();
     for (posix, path) in &files {
         findings.extend(check(posix, &read_source(path)?, &known));
@@ -923,6 +1158,107 @@ mod tests {
         assert!(
             files.is_empty(),
             "a missing root must yield no files, which is what `run` then refuses"
+        );
+    }
+
+    // --- the declaration-name oracle --------------------------------------
+
+    #[test]
+    fn the_module_list_is_the_file_list() {
+        let files = vec![
+            ("Grass/Certificate.lean".to_string(), PathBuf::new()),
+            ("Grass/ISA/X86/Decode.lean".to_string(), PathBuf::new()),
+            ("Grass/Memory.lean".to_string(), PathBuf::new()),
+        ];
+        assert_eq!(
+            module_names(&files),
+            vec![
+                "Grass.Certificate".to_string(),
+                "Grass.ISA.X86.Decode".to_string(),
+                "Grass.Memory".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_generated_snippet_imports_every_module_the_walk_found() {
+        let modules = vec![
+            "Grass.Certificate".to_string(),
+            "Grass.ISA.X86.Decode".to_string(),
+        ];
+        let source = decl_names_lean_source(&modules, Path::new("out.tsv"));
+        assert!(source.contains("import Grass.Certificate\n"));
+        assert!(source.contains("import Grass.ISA.X86.Decode\n"));
+        assert_eq!(source.matches("\nimport Grass.").count(), 2);
+        // `private` mangling is stripped so a docstring may name a private theorem.
+        assert!(source.contains("privateToUserName?"));
+    }
+
+    #[test]
+    fn records_parse_into_the_module_set_and_the_name_list() {
+        let text = "M\tGrass.Certificate\nN\tGrass.encode\nN\tGrass.encode_is_injective\nZ\t2\n";
+        let (imported, names) = parse_decl_records(text).expect("well-formed");
+        assert!(imported.contains("Grass.Certificate"));
+        assert_eq!(names.len(), 2);
+        assert_eq!(names[1], "Grass.encode_is_injective");
+    }
+
+    #[test]
+    fn a_truncated_name_list_is_refused_rather_than_audited_against() {
+        // A short name list makes honest docstrings look like fabrications, which
+        // is the failure this oracle exists to prevent rather than cause.
+        let message = parse_decl_records("N\tGrass.encode\n")
+            .expect_err("a set with no terminator must be refused");
+        assert!(message.contains("no terminator"), "{message}");
+
+        let message = parse_decl_records("N\tGrass.encode\nZ\t900\n")
+            .expect_err("a disagreeing count must be refused");
+        assert!(message.contains("truncated in transit"), "{message}");
+    }
+
+    #[test]
+    fn an_unrecognised_record_is_refused() {
+        assert!(parse_decl_records("hello\nZ\t0\n").is_err());
+        assert!(parse_decl_records("Z\t0\nN\tGrass.encode\n").is_err());
+    }
+
+    #[test]
+    fn every_dotted_suffix_of_a_name_is_known() {
+        let known = known_names(["Grass.ISA.X86.writeBack.w32_clears_high"].into_iter());
+        for expected in [
+            "Grass.ISA.X86.writeBack.w32_clears_high",
+            "ISA.X86.writeBack.w32_clears_high",
+            "writeBack.w32_clears_high",
+            "w32_clears_high",
+            // Sorts are not constants and are added by hand.
+            "Prop",
+            "Type",
+            "Sort",
+        ] {
+            assert!(known.contains(expected), "{expected}");
+        }
+    }
+
+    #[test]
+    fn a_name_with_a_space_is_dropped_rather_than_breaking_the_set() {
+        let known = known_names(["«a b»", "", "Grass.f"].into_iter());
+        assert!(known.contains("Grass.f"));
+        assert!(!known.contains("«a b»"));
+    }
+
+    #[test]
+    fn a_module_name_needing_quotes_is_refused_by_name() {
+        assert!(is_plain_module_name("Grass.ISA.X86.Decode"));
+        assert!(!is_plain_module_name("Grass.x-y"));
+        assert!(!is_plain_module_name("Grass.9Lives"));
+        assert!(!is_plain_module_name("Grass."));
+    }
+
+    #[test]
+    fn a_windows_path_survives_becoming_a_lean_literal() {
+        assert_eq!(
+            lean_string_literal(r"C:\tmp\records.tsv"),
+            "\"C:\\\\tmp\\\\records.tsv\""
         );
     }
 
