@@ -554,7 +554,9 @@ at any footprint whatsoever, and reduce every framing obligation in the weave to
 "the worlds are identical". Nothing was unsound; everything was useless, and no
 theorem in the module noticed. The fix is `agreesGlue`: any two worlds can be
 mixed along any set of fragments, which the equality agreement fails. It does not
-say the fragments cover the world — §10.137 records the refutation. Two further defects came from the same review: the frame rule
+say the fragments cover the world — §10.137 records the refutation.
+
+Two further defects came from the same review: the frame rule
 was not stated in the shape `docs/PROCESS.md` §8 asks for (scope-disjointness
 implies preservation, not agreement-implies-preservation), and `Separate` had no
 consumer anywhere, so the separating conjunction's formation gate gated nothing.
@@ -1111,7 +1113,8 @@ built, the fixtures passed, and the module's own docstring was wrong:
 - an uninhabitable `ProcessCorrect`, whose `handlesEveryEvent` field demanded a
   step from a state `terminalNoStep` forbids one from;
 - an assertion footprint that bounded nothing, because `WorldAgreement` admitted
-  the equality relation (§10.11's neighbourhood, fixed by `agreesGlue`);
+  the equality relation (§10.11's neighbourhood; `agreesGlue` excluded that one
+  agreement and, per §10.137, no more);
 - a lifecycle enumeration derived from the transition family rather than from
   the endings, which gave no state to an acknowledged cancellation;
 - an escrow law that forbade self-merging but admitted coalescing *cycles*, in
@@ -5136,6 +5139,50 @@ grepping. It is that the sweep has to be a script that outputs every hit for
 reading, rather than a search I remember to run and report having run. The
 phrasings go in the script when the claim is refuted, not afterwards from
 memory; the script is what the next round is answerable to.
+
+**Fourth round, and the correction had overshot.** Two sites survived inside
+`Grass/Process/Network/Assertion.lean` itself — the `WorldAgreement` structure
+docstring saying `agreesGlue` "is what makes framing *say* anything", thirty
+lines above the field docstring now saying the opposite, and
+`subsingleton_of_forced_equality` claiming it "makes the claim true instead".
+Both are the refuted claim, in the module the correction is about, and neither
+was in either hunk.
+
+Worse, the replacement claim was false. "What a badly shaped world costs is that
+a componentwise agreement is no longer available" was stated at six sites, and a
+reviewer refuted it by compiling `tangledButGluable`: an agreement over
+`TangledWorld` that reads `left` at `.obligations` and nothing anywhere else,
+which is componentwise and glues. What is unavailable is a *separating*
+componentwise agreement — one reading distinct components at distinct fragments —
+and the word was doing work nobody had defined. All six sites now say separating,
+`tangledButGluable` is in the fixture as the thing that forces the word, and
+`tangled_no_glue_general` states the claim for every separating agreement rather
+than for one hand-picked relation, with the old theorem falling out as its
+instance.
+
+So the pattern is not only that a correction leaves its premises standing. A
+correction can also *overshoot*, and an overshoot is harder to catch than a
+survival, because nothing it contradicts is still in the tree to contradict it.
+The only thing that caught this was someone building the counterexample.
+
+`gluing_does_not_bound_the_footprint` was also weaker than its docstring, which
+promised an assertion "framed by `{.obligations}` ... may depend on anything at
+all" and built none. `leakyLeak` and `leaky_footprint_reads_outside_it` are that
+assertion and its consequence — `understated_footprint_impossible`'s mirror. In
+a file whose subject is claims that outran their code, prose was the wrong place
+for it.
+
+**On the script, which the entry above overclaimed.** §10.137 said the sweep
+"has to be a script ... the script is what the next round is answerable to". The
+script is not in the repository, so the next round could not be answerable to it,
+and the reviewer said so. It cannot simply be committed either: `Tools/` is
+c-agent's and Craig's ruling is that its entry points are Rust, which a
+throwaway grep harness is not. Its patterns also caught none of the four sites
+this round found, because they were written from the *third* round's phrasings —
+it catches yesterday's wording, which is the failure mode it was written to end.
+Both facts are recorded here rather than fixed, because fixing either is
+somebody else's file. `agent-bus` `c-process:106` already has the mechanical half
+with the gate's owner.
 
 **And the fixtures were carrying only the easy half.** `blindAgreement` shows the
 law does not constrain the world's shape — one line, `Agrees := True`. The

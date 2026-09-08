@@ -40,7 +40,7 @@ discharge here, since a product mixes componentwise. It is not what `agreesGlue`
 all. §10.137. An earlier draft of this fixture had a single
 `listenerCursor : Nat` read by every `instanceState` fragment, which made two
 assertions about different slots `Separate` while reading the same field —
-exactly the aliasing a componentwise agreement cannot survive.
+exactly the aliasing no *separating* componentwise agreement can survive.
 -/
 
 namespace Grass.Process.Tests.NetworkAssertions
@@ -341,8 +341,11 @@ were a comment. This is the part that would not.
 truth value, because there is nothing to agree about. Two worlds differing only
 in `acceptCount` then force a contradiction.
 
-So the footprint is a genuine upper bound on what an assertion may depend on,
-which is the property `frame` is sound by. If `framed` were weakened to hold
+So the footprint is a genuine upper bound on what an assertion may depend on
+*under this agreement*, which is the property `frame` is sound by here. Not in
+general: `leaky_footprint_reads_outside_it` builds the assertion that reads past
+its footprint under `leakyAgreement`, and `frame` is stated over an arbitrary
+agreement. If `framed` were weakened to hold
 only at equal worlds this theorem would stop being provable and this file would
 fail to build.
 
@@ -407,16 +410,22 @@ def blindAgreement {World : Type fixtureWorld} :
 
 /-- **Two components pinned equal by a field.**
 
-The shape a componentwise agreement cannot be built over, which is what
-`tangled_componentwise_has_no_glue` below shows. The pinning is the whole
-content: any assignment of these components to fragments has to answer for
-`tied`, and a mixture taking `left` from one world and `right` from another
-cannot.
+The shape no *separating* componentwise agreement can be built over — one that
+reads `left` at one fragment and `right` at another — which is
+`tangled_no_glue_general` below. A mixture would have to take `left` from one
+argument and `right` from the other, and `tied` forbids it.
+
+Not every componentwise agreement: `tangledButGluable` reads one component at one
+fragment and nothing anywhere else, and glues. An earlier version of this
+docstring said *any* assignment of these components to fragments has to answer
+for `tied`, which that fixture refutes. Separating is the word doing the work.
 
 It is deliberately not a world whose components are *indexed* by
-`NetworkFragment` — nothing here assigns one to the other, and the componentwise
-agreement below supplies that assignment explicitly rather than leaving it to be
-read off the structure. -/
+`NetworkFragment` — nothing here assigns one to the other, and the agreements
+below supply that assignment explicitly rather than leaving it to be read off the
+structure. `tied : left = right` also makes this an *aliasing* witness rather
+than a cross-fragment-invariant one; the direction survives at a non-degenerate
+invariant, but no fixture here checks that. -/
 structure TangledWorld where
   left : Nat
   right : Nat
@@ -441,28 +450,66 @@ def tangledComponentwise :
   | .obligations, a, b => a.left = b.left
   | _, a, b => a.right = b.right
 
-/-- **And no `agreesGlue` exists for it**, which is the claim four docstrings
-had been making in prose.
+/-- **No agreement that separates the two components can glue**, for any such
+agreement rather than for one hand-picked relation.
 
-`blindAgreement` shows the law does not constrain the world's *shape*.
-This shows what a badly shaped world actually costs: not the law, but a
-componentwise agreement over it. Gluing at `{.obligations}` would need a world
-whose `left` comes from one argument and whose `right` comes from the other, and
-`tied` forbids exactly that.
+The hypotheses are the whole of "separating": whatever the agreement is, at
+`.obligations` it determines `left` and at `.observations` it determines `right`.
+Gluing at `{.obligations}` then needs a world whose `left` comes from one
+argument and whose `right` comes from the other, and `tied` forbids exactly that.
 
-So the two together are the whole of §10.137: the shape is not what `agreesGlue`
-demands, and it is what a componentwise discharge needs. -/
-theorem tangled_componentwise_has_no_glue :
+`blindAgreement` shows the law does not constrain the world's *shape*. This shows
+what a badly shaped world actually costs, and the two together are §10.137. An
+earlier version stated only the `tangledComponentwise` instance below while its
+docstring generalised — a gap the general form closes for one hypothesis pair and
+the same proof body. -/
+theorem tangled_no_glue_general
+    (Agrees : NetworkFragment serverTopology → TangledWorld → TangledWorld → Prop)
+    (readsLeft : ∀ a b, Agrees .obligations a b → a.left = b.left)
+    (readsRight : ∀ a b, Agrees .observations a b → a.right = b.right) :
     ¬ (∀ (inside : NetworkFragment serverTopology → Prop) (left right : TangledWorld),
-        ∃ mixed, (∀ fragment, inside fragment → tangledComponentwise fragment mixed left) ∧
-          (∀ fragment, ¬ inside fragment → tangledComponentwise fragment mixed right)) := by
+        ∃ mixed, (∀ fragment, inside fragment → Agrees fragment mixed left) ∧
+          (∀ fragment, ¬ inside fragment → Agrees fragment mixed right)) := by
   intro glue
   obtain ⟨mixed, inside, outside⟩ :=
     glue (fun fragment => fragment = .obligations) ⟨0, 0, rfl⟩ ⟨1, 1, rfl⟩
-  have fromLeft : mixed.left = 0 := inside .obligations rfl
-  have fromRight : mixed.right = 1 := outside .observations (by intro same; cases same)
+  have fromLeft : mixed.left = 0 := readsLeft _ _ (inside .obligations rfl)
+  have fromRight : mixed.right = 1 :=
+    readsRight _ _ (outside .observations (by intro same; cases same))
   rw [mixed.tied, fromRight] at fromLeft
   exact absurd fromLeft (by decide)
+
+/-- **And the concrete one is an instance of it.** -/
+theorem tangled_componentwise_has_no_glue :
+    ¬ (∀ (inside : NetworkFragment serverTopology → Prop) (left right : TangledWorld),
+        ∃ mixed, (∀ fragment, inside fragment → tangledComponentwise fragment mixed left) ∧
+          (∀ fragment, ¬ inside fragment → tangledComponentwise fragment mixed right)) :=
+  tangled_no_glue_general tangledComponentwise (fun _ _ agreed => agreed)
+    (fun _ _ agreed => agreed)
+
+/-- **A componentwise agreement over `TangledWorld` that does glue.**
+
+Reads `left` at `.obligations` and says nothing anywhere else, so it never has to
+mix two tied components. It is here because the corrected prose in
+`Grass/Process/Network/Assertion.lean` originally said a badly shaped world has no
+componentwise agreement at all, which this refutes; what it has none of is a
+*separating* one. §10.137. -/
+def tangledButGluable : WorldAgreement serverTopology TangledWorld where
+  Agrees fragment a b := fragment = .obligations → a.left = b.left
+  agreesRefl := by intro _ _ _; rfl
+  agreesSymm := by intro _ _ _ agreed isObligations; exact (agreed isObligations).symm
+  agreesTrans := by
+    intro _ _ _ _ first second isObligations
+    exact (first isObligations).trans (second isObligations)
+  agreesGlue := by
+    intro inside left right
+    by_cases obligationsInside : inside .obligations
+    · refine ⟨left, fun _ _ _ => rfl, ?_⟩
+      intro fragment isOutside isObligations
+      exact absurd (isObligations ▸ obligationsInside) isOutside
+    · refine ⟨right, ?_, fun _ _ _ => rfl⟩
+      intro fragment isInside isObligations
+      exact absurd (isObligations ▸ isInside) obligationsInside
 
 open Classical in
 /--
@@ -501,10 +548,33 @@ def leakyAgreement : WorldAgreement serverTopology FixtureWorld where
       · intro _ _ _; rfl
 
 /-- **So agreement at one fragment can determine every other**, and gluing does
-not forbid it. An assertion framed by `{.obligations}` under this agreement may
-depend on anything at all. -/
+not forbid it. -/
 theorem gluing_does_not_bound_the_footprint (left right : FixtureWorld)
     (agreed : leakyAgreement.Agrees .obligations left right) : left = right :=
   agreed rfl
+
+/-- **And here is the assertion that reads outside its own footprint.**
+
+`understated_footprint_impossible`'s mirror. It is framed by `{.obligations}` and
+its truth depends on `region .acceptCount`, which that footprint does not name —
+admissible because `leakyAgreement`'s clause at `.obligations` forces the whole
+world equal, so `framed` is discharged without the assertion reading only what it
+declared.
+
+The docstring above used to assert this in prose. In a file whose subject is
+claims that outran their code, that was the wrong place for it. §10.137. -/
+def leakyLeak : NetworkAssertion leakyAgreement where
+  holds world := 0 < world.acceptCount
+  footprint fragment := fragment = .obligations
+  framed := by
+    intro left right agrees
+    have same : left = right := agrees .obligations rfl rfl
+    rw [same]
+
+/-- **And it distinguishes two worlds its footprint cannot see apart.** -/
+theorem leaky_footprint_reads_outside_it :
+    ¬ (leakyLeak.holds quiet ↔ leakyLeak.holds afterAccept) := by
+  intro same
+  exact absurd (same.mpr Nat.zero_lt_one) (Nat.lt_irrefl 0)
 
 end Grass.Process.Tests.NetworkAssertions

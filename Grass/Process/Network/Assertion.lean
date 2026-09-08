@@ -67,9 +67,19 @@ product with one component per fragment family, which is why
 there — but ease is not demand.
 `Tests/Process/AssertionFixtures.lean`'s `blindAgreement` discharges it at a
 world of any shape, including one carrying a cross-fragment invariant as a
-field. What a badly shaped world costs is not this law; it is that a
-componentwise agreement is no longer available, and the assertions it would
-frame have to be framed some other way. §10.137.
+field.
+
+What a badly shaped world costs is not this law, and it is narrower than an
+earlier version of this paragraph said. It is that no *separating componentwise*
+agreement is available: one that reads distinct components of the world at
+distinct fragments.
+
+An agreement over such a world may still be componentwise in the loose sense.
+`Tests/Process/AssertionFixtures.lean`'s `tangledButGluable` reads one component
+at one fragment and nothing anywhere else, and glues; that file's
+`tangled_no_glue_general` refutes the separating case, where two tied components
+are read apart. The assertions a separating agreement would frame have to be
+framed some other way. §10.137.
 
 ## The world is abstract on purpose
 
@@ -144,9 +154,10 @@ either unstatable or smuggled in through some other fragment's agreement.
 (ProcessInstance topology)`, one live incarnation per slot, with the generation
 inside the stored instance rather than in the key. Keying the fragment by
 `ProcessRef` instead would put two refs that differ only in generation on two
-fragments reading one slot, and a componentwise agreement is then unavailable at the
-real world: no mixed network can agree with one and not the other about the same
-field. The cost is that framing over a slot is conservative — a restart replaces
+fragments reading one slot, and no separating componentwise agreement is then
+available at the real world: no mixed network can agree with one and not the
+other about the same field. The cost is that framing over a slot is
+conservative — a restart replaces
 the incarnation, touches the slot, and any assertion naming it must be
 re-established — which is the correct reading of `docs/FOUNDATION.md` law 22
 anyway, since a stale reference is meant to fail its generation check rather
@@ -209,8 +220,12 @@ An interface rather than a definition, because the world is
 `Grass/Process/Network/Plan.lean`'s and a plan needs the channel contracts this
 module supports.
 
-The first three laws are what a framing argument uses. `agreesGlue` is what
-makes framing *say* anything; see the module note.
+The first three laws are what a framing argument uses. `agreesGlue` excludes
+the *equality* agreement, under which framing would say nothing at all. It does
+not make a footprint a bound in general —
+`Tests/Process/AssertionFixtures.lean`'s `gluing_does_not_bound_the_footprint`
+refutes that, and an earlier version of this sentence asserted it. See the module
+note. §10.137.
 -/
 structure WorldAgreement {registry : ProtocolRegistry.{u, w, v}}
     {boundary : DriverBoundary.{u}}
@@ -261,7 +276,15 @@ would have at most one value, and there would be nothing to frame.
 Stated here rather than left to the reader because it is the whole reason
 `agreesGlue` is a field: an earlier revision of this module claimed `framed` was
 "the whole content" of a `NetworkAssertion`, and the equality agreement was the
-one-line refutation. This theorem is what makes the claim true instead.
+one-line refutation.
+
+This theorem kills that one agreement. It does not make the claim true in
+general, and a further earlier version of this sentence said it did:
+`Tests/Process/AssertionFixtures.lean`'s `leakyAgreement` satisfies every law
+while one fragment's clause fixes the whole world, and `forcesEqual` fails there
+— at `.observations`, where the leak is vacuous — so this theorem does not fire.
+`leaky_footprint_reads_outside_it` builds the assertion that reads outside its
+own footprint. §10.137.
 -/
 theorem subsingleton_of_forced_equality (agreement : WorldAgreement topology World)
     (forcesEqual : ∀ fragment left right,

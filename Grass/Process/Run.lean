@@ -72,8 +72,12 @@ refinement: when a role is replaced by a flattened subsystem, the *same*
 observations are produced by a different number of process transitions, so an
 acceptance stated over the segmentation would be broken by a replacement that
 changes nothing observable. So the segmentation must not be something acceptance
-can read — and it is not: `Grass/Process/Acceptance.lean` never mentions
-`Segmented`, so no clause of `ProcessAcceptance` takes one. What each clause is
+can read — and it structurally is not. `ProcessAcceptance.TraceAccepts` takes
+`Trace p.Observation`, the *flat* trace, so the one clause that could conceivably
+see a segmentation cannot be given one. Corroborating rather than load-bearing:
+`Grass/Process/Acceptance.lean` never mentions `Segmented` either, so no clause
+takes one today. (That file does mention `Segment`, in
+`ProcessAcceptance.SegmentIsDemanded`; the two names are different types.) What each clause is
 given, `ProcessCorrect` supplies at the call site.
 
 Causality is the opposite case. `docs/PROCESS.md` §4 requires the emitting
