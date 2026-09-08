@@ -19,13 +19,12 @@ theorem takeByte_realizes : ParserRealizes anyByteSemantics takeByte := by
       | nil => simp [takeByte, anyByteSemantics, Vec.empty, Vec.get?, eq_comm]
       | cons first tail =>
         simp [takeByte, anyByteSemantics, Vec.empty, Vec.get?]
-  · intro input error
+  · intro input error success
     cases input with
     | fromList bytes =>
-      cases bytes with
-      | nil => simp [takeByte, anyByteSemantics, Vec.get?]
-      | cons first tail =>
-        simp [takeByte, anyByteSemantics, Vec.get?]
+      cases bytes <;> simp [takeByte, Vec.get?] at success
+  · intro input errorClass invalid
+    simp [anyByteSemantics] at invalid
   · intro input value rest success
     exact takeByte_done success
 

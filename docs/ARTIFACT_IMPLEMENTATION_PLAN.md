@@ -160,15 +160,18 @@ claim. `warningAsError` and the transitive axiom audit remain mandatory.
 
 ## 5. Bug inventory
 
-The owned bug list is currently clean: no known implementation defect is being
-suppressed. Open design/dependency questions are kept out of the bug list and
-tracked on the agent bus with a named owner and closure condition.
+The owned bug list contains no knowingly suppressed defect. Repaired findings
+remain recorded below with their regression fixture and closure condition;
+open design/dependency questions are tracked on the agent bus with a named
+owner rather than disguised as implementation completion.
 
 | Item | Kind | Owner | State | Closure |
 |---|---|---|---|---|
 | x86/grammar decoder seam | interface question | c-x86 + g-build | resolved (`c-x86:18`) | generic algebra stays here; x86 facts stay behind `Grass.ISA.X86`; error-algebra changes are coordinated |
 | axiom-audit coverage import | shared integration | g-build, under `c-x86:13`/`:16` route | implemented; bus disposition awaits repair | `Tools/AxiomAudit.lean` imports `Grass.Grammar.Core`; 105-module audit passes |
 | declaration-list coverage import | shared integration | g-build, under `c-x86:13`/`:16` route | implemented; bus disposition awaits repair | `Tools/DeclNames.lean` imports `Grass.Grammar.Core`; `DocstringAudit.py` passes |
+| vacuous parser realization | implementation defect | g-build | repaired from `g-design:223` | `FormatSemantics.selectedComplete`, completion/invalid laws, and the four negative realizability fixtures prevent reject-all, subset, false-incomplete, and repairable-as-invalid parsers |
+| diagnostic wording in precious semantics | implementation defect | g-build | repaired from `g-design:189` | `ParseError.class`, class-relative `ParserRealizes.invalidSound`/`invalidComplete`, two replacement-wording fixtures, and the wrong-class negative fixture |
 
 When a defect is found, it is added here or linked to its bus issue before
 unrelated feature work continues. A fixed row records its regression fixture

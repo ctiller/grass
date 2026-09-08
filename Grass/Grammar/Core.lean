@@ -18,7 +18,16 @@ open Grass.Std.Logical
 
 universe u v
 
-/-- Stable, format-independent classes of syntactic failure.
+/-- Stable, format-independent classes of syntactic failure. These classes are
+precious; diagnostic strings attached by an implementation are not. -/
+inductive ParseErrorClass where
+  | malformed
+  | unsupported
+  | arithmeticOverflow
+  | trailingInput
+deriving DecidableEq, Repr
+
+/-- A classified parse failure with non-precious diagnostic context.
 
 Format-specific details are data attached by higher layers. `trailingInput` is
 kept distinct from `malformed`: a prefix parser may lawfully return the suffix,
@@ -29,6 +38,13 @@ inductive ParseError where
   | arithmeticOverflow (context : String)
   | trailingInput
 deriving DecidableEq, Repr
+
+/-- Project an implementation diagnostic to its precious failure class. -/
+def ParseError.class : ParseError → ParseErrorClass
+  | .malformed _ => .malformed
+  | .unsupported _ => .unsupported
+  | .arithmeticOverflow _ => .arithmeticOverflow
+  | .trailingInput => .trailingInput
 
 /-- The precious three-way classification of a finite input buffer. -/
 inductive ParseResult (α : Type u) where
@@ -104,6 +120,55 @@ inductive Derives : {α : Type} → Format α → Std.Logical.ByteArray → α �
       Derives (.iso inner isomorphism) input (isomorphism.forward value) rest
 
 namespace Derives
+
+/-- The outer format constructor determines the corresponding derivation
+shape. This dependent helper supports constructor-specific inversion without
+assuming any executable parser. -/
+theorem outerShape {α : Type} {format : Format α}
+    {input : Std.Logical.ByteArray} {value : α}
+    {rest : Std.Logical.ByteArray}
+    (derivation : Derives format input value rest) :
+    match format with
+    | .byte accepts =>
+        input = Vec.singleton value ++ rest ∧ accepts value
+    | _ => True := by
+  induction derivation <;> simp_all
+
+/-- A byte-format derivation consumes exactly its leading byte. -/
+theorem byteInput {accepts : Byte → Prop} {input : Std.Logical.ByteArray}
+    {value : Byte} {rest : Std.Logical.ByteArray}
+    (derivation : Derives (.byte accepts) input value rest) :
+    input = Vec.singleton value ++ rest :=
+  (outerShape derivation).1
+
+/-- A byte-format derivation carries the format's acceptance proof. -/
+theorem byteAccepted {accepts : Byte → Prop} {input : Std.Logical.ByteArray}
+    {value : Byte} {rest : Std.Logical.ByteArray}
+    (derivation : Derives (.byte accepts) input value rest) : accepts value :=
+  (outerShape derivation).2
+
+/-- Every derivation consumes a prefix and retains the exact remaining suffix. -/
+theorem consumesPrefix {α : Type} {format : Format α}
+    {input : Std.Logical.ByteArray} {value : α}
+    {rest : Std.Logical.ByteArray}
+    (derivation : Derives format input value rest) :
+    ∃ consumed, input = consumed ++ rest := by
+  induction derivation with
+  | pure value input => exact ⟨Vec.empty, by simp⟩
+  | byte accepts value rest accepted => exact ⟨Vec.singleton value, rfl⟩
+  | seq left right leftPrefix rightPrefix =>
+      rcases leftPrefix with ⟨leftBytes, rfl⟩
+      rcases rightPrefix with ⟨rightBytes, rfl⟩
+      exact ⟨leftBytes ++ rightBytes, by simp [Vec.append_assoc]⟩
+  | choiceLeft derivation choicePrefix => exact choicePrefix
+  | choiceRight derivation choicePrefix => exact choicePrefix
+  | repeatZero item input => exact ⟨Vec.empty, by simp⟩
+  | repeatSucc head tail headPrefix tailPrefix =>
+      rcases headPrefix with ⟨headBytes, rfl⟩
+      rcases tailPrefix with ⟨tailBytes, rfl⟩
+      exact ⟨headBytes ++ tailBytes, by simp [Vec.append_assoc]⟩
+  | refine derivation accepted refinedPrefix => exact refinedPrefix
+  | iso derivation mappedPrefix => exact mappedPrefix
 
 /-- Prefix-format derivations are stable under an arbitrary appended suffix.
 The parsed value is unchanged and the exact residual bytes gain that suffix.
