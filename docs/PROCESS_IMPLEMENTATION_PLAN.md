@@ -5227,9 +5227,12 @@ reach" `sent` were saying it of a value that did not exist.
 
 That is §10.132's own headline defect — a step into a world is not a run that
 reaches it — recurring in the sentence written to claim the invariant is not
-vacuous. `a_real_run` is the execution, three constructors long, and
-`a_real_run_holds_an_unkilled_root` reads the invariant off it rather than off
-the world. The entry's rule that a sentence a reviewer had to refute by writing
+vacuous. `a_real_run` is the execution -- a single `send` step from `World.withRoot` to
+`sent` -- and `a_real_run_holds_an_unkilled_root` reads the invariant off it
+rather than off the world. An earlier version of this sentence called it "three
+constructors long", which is this entry's own first rule broken in the sentence
+recording it: `StepsTo` has two constructors, the run uses both, and
+`theSendStep` is a structure instance rather than a third. The entry's rule that a sentence a reviewer had to refute by writing
 Lean should become the Lean applies to sentences the *author* wrote as well.
 
 The same round found the conclusion weaker than the name: the theorem was called
@@ -5238,6 +5241,38 @@ step did not touch the slot, and it concluded only that the instance was already
 dead. Two tokens: the negative branch has `inScope` in hand and was throwing it
 away. The rule about hypotheses added to make a proof go through has a mirror —
 a conclusion narrowed to what one call site happened to need.
+
+**Round sixteen, and every finding was in text rounds fourteen and fifteen had
+just written.** That is the entry.
+
+Five defects, none older than two rounds. `Restarts.authorized` cited
+`parentless_slot_survives` as the proof that the family admits a restart at the
+root's slot -- a disjunction offered as an inhabitance proof of its right
+disjunct, when the honest argument is structural and sits two declarations away
+in that theorem's own docstring. Both `died_cast` docstrings named
+`Detaches.identityPreserved` as something the cast bridges; it has five uses and
+all five are `EndsInstance.nowEnded`, because the `detach` branch stopped using a
+cast when round fourteen rewrote it. This entry called `a_real_run` "three
+constructors long" when `StepsTo` has two and the run uses both -- the first rule
+in this section, broken in the sentence recording the round that established it.
+Two docstrings said the eight `no_run_reaches_*` corollaries are "stated against"
+`dying_was_supervised`, which names `UnkilledRootAt` and never that theorem, and
+attributed undeadness to `parentless_slot_survives`, which does not supply it.
+
+And `notAlreadyDead` was still universally quantified where the proof spends one
+instance, so specialising it to `reason` gives a strictly stronger theorem that
+the old form refused: a step changing an already-dead instance's death *reason*
+found it recording a parent. Round fourteen found that shape in this
+declaration's hypotheses. It was one binder further in.
+
+**What sixteen rounds have actually measured.** The Lean has not been wrong since
+round one. What is wrong, every round, is the prose -- and increasingly the prose
+written by the previous round's fix. A correction is a new claim, made in a hurry,
+about code that has just changed underneath it, and it gets the same scrutiny the
+original never had only because somebody reads it cold afterwards. Rounds
+fourteen through sixteen produced eleven corrections and nine new defects between
+them. The rate is not obviously falling, and the honest reading is that a fix
+should be reviewed as a change rather than trusted as a repair.
 
 ### 10.135 A role that may write no region owes nothing
 

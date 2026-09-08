@@ -1190,11 +1190,20 @@ structure Restarts (before after : plan.LogicalProcessNetwork)
 
   The intended reading is that if a root ends the program is over, and starting
   again is a new run — `ExactInitialNetwork`, not a transition. Nothing in this
-  family enforces that: `ProcessPlan.parentless_slot_survives` is the proof that
-  a restart at the root's slot is a step the family admits, and
-  `ProcessPlan.execution_holds_an_unkilled_root` has to take its absence as a
-  hypothesis rather than derive it. `agent-bus` `g-design:167` is the open
-  question.
+  family enforces that, and the argument is structural: `restartsAChild` above
+  constrains only the new incarnation, so no field of `Restarts` refuses one at a
+  parentless slot. `ProcessPlan.parentless_slot_survives` is the separate fact
+  that such a restart is the *only* way a parentless slot loses its instance,
+  which is why `ProcessPlan.execution_holds_an_unkilled_root` takes its absence
+  as a hypothesis rather than deriving it.
+
+  An earlier version of this paragraph cited `parentless_slot_survives` for the
+  first claim as well, which it cannot carry: a disjunction is not an inhabitance
+  proof of its right disjunct, and that theorem holds just as well at a plan
+  whose restart relation is empty everywhere. `serverPlan` is such a plan --
+  `Tests/Process/PreservationFixtures.lean`'s `no_restart_at_the_root_slot`
+  refutes the relation there -- and no witness of a root restart exists anywhere
+  in the corpus. `agent-bus` `g-design:167` is the open question.
 
   Found by working `ProcessPlan.wellFormed_preserved` clause by clause and asking
   which constructor could break each. `Spawns` was fixed in the same pass and
@@ -2298,10 +2307,11 @@ form in two lines, and every consumer takes that one.
 
 Note that `dead` and the disjuncts are stated at the *incarnation's* own kind.
 `ProcessInstance.lifecycle` is indexed by the incarnation's `kind`, not the
-slot's; what needs `ProcessLifecycle.died_cast` is `EndsInstance.nowEnded`,
-whose `ending` argument is at the slot's kind, and `Detaches.identityPreserved`,
-whose lifecycle clause relates two incarnations of possibly different kinds.
-Both are inside the proof and neither reaches the statement. §10.134.
+slot's; what needs `ProcessLifecycle.died_cast` is `EndsInstance.nowEnded`, whose
+`ending` argument is at the slot's kind, in the five ending branches that carry
+one. It is inside the proof and does not reach the statement. An earlier version
+of this sentence also named `Detaches.identityPreserved`; the `detach` branch
+goes through `wasAttached` and uses no cast at all. §10.134.
 -/
 theorem dying_was_supervised_or_untouched (transition : plan.NetworkTransition before after)
     {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
@@ -2476,8 +2486,16 @@ theorem dying_was_supervised_or_untouched (transition : plan.NetworkTransition b
 **A step that kills a *live* instance found it recording a current parent.**
 
 `dying_was_supervised_or_untouched` with the right disjunct refused. This is the
-form every consumer takes, and the form the eight `no_run_reaches_*` corollaries
-in `Tests/Process/PreservationFixtures.lean` are stated against.
+form `ProcessPlan.execution_holds_an_unkilled_root` consumes -- its only consumer
+in the tree -- and through it the eight `no_run_reaches_*` corollaries in
+`Tests/Process/PreservationFixtures.lean`, which name `UnkilledRootAt` and not
+this theorem.
+
+`notAlreadyDead` is specialised to `reason`, because that is the only instance
+the proof spends and the `∀` form refused a real consequence: a step that changes
+an already-dead instance's death *reason* found it recording a parent. Round
+fourteen found this shape in this declaration's hypothesis; round sixteen found
+it one binder further in.
 
 `notAlreadyDead` is a hypothesis here and not a premise of the theorem above,
 which is the distinction round fourteen of local adversarial review drew: the
@@ -2488,13 +2506,12 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
     {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
     {was now : ProcessInstance plan.topology} {reason : ProcessDeathReason}
     (foundBefore : before.instances kind slot = some was)
-    (notAlreadyDead : ∀ earlier : ProcessDeathReason,
-      was.lifecycle ≠ ProcessLifecycle.died earlier)
+    (notAlreadyDead : was.lifecycle ≠ ProcessLifecycle.died reason)
     (foundAfter : after.instances kind slot = some now)
     (dead : now.lifecycle = ProcessLifecycle.died reason) :
     was.parentage.currentParent ≠ none :=
   (transition.dying_was_supervised_or_untouched foundBefore foundAfter dead).resolve_right
-    (fun both => notAlreadyDead reason both.1)
+    (fun both => notAlreadyDead both.1)
 
 /--
 Parentlessness carried across a step's identity clause is still parentlessness.
@@ -2541,8 +2558,10 @@ uniqueness rather than existence.
 That is `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.132's last section, and
 stating the theorem this way is what turns it from a suspicion into a fact:
 restart is not *a* way to lose the root, it is the *only* way. A plan whose root
-role no permitted parent can spawn therefore holds a parentless undead instance
-in that slot along every execution, which is
+role no permitted parent can spawn therefore keeps *an* instance in that slot,
+still parentless, along every execution. That it is also undead is
+`dying_was_supervised`'s contribution and not this theorem's; the two together
+are
 `Tests/Process/PreservationFixtures.lean`'s
 `every_run_holds_an_unkilled_root`. Whether that instance is the *root* is a
 further step, for the reason `Grass/Process/Network/Initial.lean` gives: a

@@ -474,7 +474,8 @@ theorem execution_holds_an_unkilled_root
       ⟨now, foundNow, stillParentless⟩ | ⟨allocation, emitted, localEmitted, restart⟩
     · refine ⟨now, foundNow, stillParentless, ?_⟩
       intro reason dead
-      exact step.transition.dying_was_supervised found unkilled foundNow dead parentless
+      exact step.transition.dying_was_supervised found (unkilled reason) foundNow dead
+        parentless
     · exact absurd restart (noRestart _ _ allocation emitted localEmitted)
 
 /-- And a whole family of them, which is what §8's aggregate consumes. -/

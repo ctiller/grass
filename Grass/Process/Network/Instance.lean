@@ -145,10 +145,11 @@ root.
 `NetworkTransition.dying_was_supervised` is stated at the incarnation's own kind
 too, and needs no bridge; an earlier version of this sentence said it was stated
 at the slot's kind, which was true of the revision that named it and not of this
-one. What this bridges is inside that proof: `EndsInstance.nowEnded`, whose
-`ending` argument *is* at the slot's kind, and `Detaches.identityPreserved`,
-whose lifecycle clause relates two incarnations of possibly different kinds.
-§10.134.
+one. What this bridges is inside
+`NetworkTransition.dying_was_supervised_or_untouched`'s proof —
+`dying_was_supervised` itself is two lines and casts nothing — namely
+`EndsInstance.nowEnded`, whose `ending` argument *is* at the slot's kind, in the
+five ending branches that carry one. Those five are its only uses. §10.134.
 -/
 theorem died_cast {registry : ProtocolRegistry.{u, w, v}}
     {boundary : DriverBoundary.{u}}
