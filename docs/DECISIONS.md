@@ -577,15 +577,23 @@ to imitate compiler-selected storage or CFG structure.
     `review.reassigned`, preserving the request and its open findings and
     requiring a different reviewer to accept. Only that reviewer may clear or
     explicitly supersede inherited findings. A published merge
-    authorization remains an immutable candidate-specific verdict and can only
-    win or lose its pinned product compare-and-swap. If a reviewer disappears
-    after winning but before its receipt, a bootstrap-authorized coordinator may
-    reconcile only the already-demonstrable product-history fact.
-111. Product merge review is two-phase. `review.merge_authorized` pins the bus
-    state, previous `main`, reviewed commit, exact conflict-free merge commit,
-    passed checks, and reviewer before a non-force push. `review.merged` is the
-    post-push audit receipt, not retroactive authority. Main always receives a
-    reviewer-trailed merge commit, even where Git could fast-forward.
+    acceptance implicitly. Under the review successor an exact snapshot
+    acceptance remains owned by its accepting reviewer; reassignment requires a
+    fresh acceptance. If a reviewer disappears after a valid push but before its
+    receipt, a bootstrap-authorized coordinator may reconcile only the already
+    demonstrable product-history fact.
+111. Product merge review separates durable acceptance of an immutable authored
+    snapshot from its later clean integration into current `main`. Snapshot
+    acceptance contains no `previous_main` and does not expire merely because
+    unrelated product history advances. The same reviewer constructs and checks
+    a deterministic two-parent merge against current `main`, then pushes it
+    without force; no bus publication or coordinator round trip occurs between
+    the final current-state gate and that push. A lost push race rebuilds locally
+    and reuses only checks whose declared complete inputs are unchanged. The
+    post-push receipt is audit evidence, not retroactive authority. Historical
+    candidate-specific authorizations retain their original meaning until the
+    reviewed successor in [AGENT_REVIEW_SUCCESSOR.md](AGENT_REVIEW_SUCCESSOR.md)
+    is implemented and explicitly activated.
 112. Agent-bus V1 has complete bounded schemas in `AGENT_BUS_SCHEMA.md`, a
     65,536-byte event-line limit, causal same-agent offline references, explicit
     work reassignment, deterministic scope-race defaults, validation CI, and
