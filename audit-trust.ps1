@@ -37,6 +37,8 @@ param(
         "Grass.BehaviorRefinement.trans_assoc",
         "Grass.BehaviorRefinement.mapSteps",
         "Grass.BehaviorRefinement.mapInfinite",
+        "Grass.BehaviorRefinement.mapInfinite_prefixEvents",
+        "Grass.BehaviorRefinement.mapInfinite_prefixSteps",
         "Grass.BehaviorRefinement.mapInfinite_refl",
         "Grass.BehaviorRefinement.mapInfinite_trans",
         "Grass.BehaviorRefinement.mapCompletion",
