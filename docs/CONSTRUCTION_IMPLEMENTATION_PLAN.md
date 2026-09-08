@@ -265,6 +265,11 @@ missing check and any additional missing obligations. `Raw.map` and
 cannot contain a certificate type, and the unsafe namespace exposes no
 taint-removal or certificate constructor.
 
+`Grass.Unsafe.Step` delegates execution exactly to `Grass.Op.step`. Because the
+raw encoding's connection to the caller-selected `SomeOperation` is unchecked,
+the adapter adds `MissingCheck.semantics` as the primary taint and retains every
+previously missing check beside the generic step outcome.
+
 Exit criteria include round trips for supported raw instructions, structured
 errors for unknown/ambiguous bytes and targets, exact stepping agreement with
 `Grass.Op.step`, and exact byte/list input passed to the artifact writer.

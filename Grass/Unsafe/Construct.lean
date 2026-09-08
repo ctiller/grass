@@ -102,6 +102,12 @@ def x86Instruction (encoding : InsnEncoding) (primary : MissingCheck)
     (additional : List MissingCheck := []) : X86Instruction :=
   Raw.unchecked encoding primary additional
 
+/-- `x86Instruction_taint` recovers the missing-check account exactly. -/
+@[simp] theorem x86Instruction_taint (encoding : InsnEncoding)
+    (primary : MissingCheck) (additional : List MissingCheck) :
+    (x86Instruction encoding primary additional).taint =
+      ⟨primary, additional⟩ := rfl
+
 /-- Serialize raw x86; `Construct.x86Bytes_taint` proves its taint is unchanged. -/
 def x86Bytes (instruction : X86Instruction) : Bytes :=
   Raw.map (source := .x86Instruction) (target := .bytes)
