@@ -45,6 +45,15 @@ revert, or administrator exception. Urgency may shorten latency, not remove the
 second agent. The live bus branch is coordination state, not product history,
 and follows its separate single-writer protocol.
 
+Normative publication has an additional ownership gate. For every path that
+[`README.md`](README.md) identifies as part of the normative corpus, each commit
+introducing a delta at that path carries the current design steward's authorship
+trailer and the steward coordinates the nominated branch. Other agents submit
+findings and candidate patches to the steward; they do not turn a local design
+choice into project law by placing it in a convenient product commit. Reviewers
+reject a candidate that violates this gate even when its Lean build and tests
+pass. Generated or mechanically mirrored normative text is still normative.
+
 No participant force-pushes any protocol branch: not `main`, a product branch,
 or `agent-bus`. Product branches advance through ordinary commits and merges.
 Mistakes are corrected by new commits. This keeps every reviewed snapshot
@@ -528,6 +537,13 @@ reviewer trailer, and conflict-free tree; all required check results are present
 authorization `reviewed_scope` exactly equals nomination `review_scope`; every
 changed path is within that scope; and structural bus validation passes. It
 outputs the exact candidate object ID to push.
+
+The changed-path and authorship audit also applies the normative publication
+gate above. Until the helper performs that check directly, the reviewer records
+it as a required manual check in the authorization. CI and `audit-main` should
+report any normative-path commit lacking the steward trailer, but the cheap
+local path remains ordinary Git inspection; no network lock or repository-wide
+re-elaboration is required.
 
 The authorization consumes the bus state named by its `observed` field. Events
 published later do not retroactively change that verdict. This makes the

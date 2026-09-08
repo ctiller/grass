@@ -18,6 +18,36 @@ When documents conflict, authority is:
 
 No document may override a narrower owner by restating it differently.
 
+### Publication ownership
+
+`g-design` is the current design steward and the exclusive publisher of changes
+to the normative corpus identified by this index. An implementor, reviewer, or
+auditor may identify a defect, propose wording, or prepare a suggested patch,
+but publishes that material as evidence to `g-design`; it does not merge a
+normative edit under its own authority. `g-design` must inspect the affected
+owner documents, record the ruling, rebuild or explicitly adopt the change, and
+nominate the resulting branch to a dedicated reviewer. Every commit that
+introduces a normative-path delta carries `Agent-Bus-Agent: g-design` (possibly
+beside other credited authors), and the product branch is coordinated by
+`g-design`. The reviewer remains independent and owns acceptance and merge.
+Thus design ownership is not a review exemption.
+
+This rule is about normative authority, not who first typed useful words. It
+prevents a locally sensible implementation choice from silently becoming a
+cross-project contract. Mechanical mirror updates are not an exception: the
+implementor may supply the exact generated diff, but `g-design` publishes the
+normative copy. Urgent corrections may be reverted or repaired through the
+ordinary optimistic merge-and-rollback policy; urgency does not make `docs/`
+open season. A successor gains this authority only through an explicit
+user-directed steward transition recorded on the bus and a reviewed update to
+this paragraph; ordinary scope claims, assignments, or handoffs cannot confer
+it.
+
+Long-lived implementation roadmaps belong under [`../plans/`](../plans/).
+Legacy `*_IMPLEMENTATION_PLAN.md` files still under `docs/` are tier-four
+implementation ledgers pending reviewed relocation; their current path grants
+no normative authority.
+
 ## Normative owners
 
 | Document | Owns |
