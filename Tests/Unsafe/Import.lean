@@ -82,6 +82,17 @@ example (evidence : IndirectTargetEvidence policy.graph.blockIds)
 example : policy.resolves (.indirect indirectSite) = true ↔
     (policy.indirectEvidence? indirectSite).isSome = true :=
   policy.resolves_indirect_iff indirectSite
+example : (policy.resolution? (.direct target)).isSome = true := by decide
+example : (policy.resolution? (.indirect indirectSite)).isSome = true := by decide
+example (reported : ControlTarget) :
+    (policy.resolution? reported).isSome = policy.resolves reported :=
+  policy.resolution?_isSome_eq_resolves reported
+example (resolution : TargetPolicy.ResolvedControlTarget policy (.direct target)) :
+    target ∈ policy.graph.blockIds :=
+  TargetPolicy.block_mem_of_resolution resolution
+example (resolution : TargetPolicy.ResolvedControlTarget policy (.indirect indirectSite)) :
+    ∃ evidence, policy.indirectEvidence? indirectSite = some evidence :=
+  TargetPolicy.indirectEvidence_of_resolution resolution
 
 private def summarize
     (result : Except (ImportError DecodeFailure)
@@ -145,6 +156,12 @@ example (imported : ImportedProgram Nat String Nat Instruction)
     (reported : ControlTarget) (hreported : reported ∈ instruction.controlTargets) :
     imported.policy.resolves reported = true :=
   imported.controlTargetResolved instruction hinstruction reported hreported
+example (imported : ImportedProgram Nat String Nat Instruction)
+    (instruction : ImportedInstruction Nat Instruction)
+    (hinstruction : instruction ∈ imported.instructions)
+    (reported : ControlTarget) (hreported : reported ∈ instruction.controlTargets) :
+    ∃ resolution, imported.policy.resolution? reported = some resolution :=
+  imported.controlTargetResolution instruction hinstruction reported hreported
 
 example : (importBytes decoder policy [1, 1]).map (fun _ => ()) =
     .error (.unresolvedControlTarget 0 (.direct missing)) := by rfl

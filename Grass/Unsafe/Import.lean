@@ -52,6 +52,61 @@ def resolves {State : Type u} {Terminal : Type v}
   | .direct block => policy.graph.blockIds.contains block
   | .indirect site => (policy.indirectEvidence? site).isSome
 
+/-- Proof-bearing evidence that one reported target is admitted by a policy. -/
+inductive ResolvedControlTarget {State : Type u} {Terminal : Type v}
+    (policy : TargetPolicy State Terminal) : ControlTarget → Type where
+  | direct {block : BlockId} (member : block ∈ policy.graph.blockIds) :
+      ResolvedControlTarget policy (.direct block)
+  | indirect {site : Name}
+      (selected : (policy.indirectEvidence? site).isSome = true) :
+      ResolvedControlTarget policy (.indirect site)
+
+/-- Resolve a reported target to finite proof-bearing policy evidence. -/
+def resolution? {State : Type u} {Terminal : Type v}
+    (policy : TargetPolicy State Terminal) :
+    (target : ControlTarget) → Option (ResolvedControlTarget policy target)
+  | .direct block =>
+      if member : block ∈ policy.graph.blockIds then
+        some (.direct member)
+      else
+        none
+  | .indirect site =>
+      if selected : (policy.indirectEvidence? site).isSome = true then
+        some (.indirect selected)
+      else
+        none
+
+/-- Proof-bearing resolution succeeds exactly when the policy Boolean accepts. -/
+theorem resolution?_isSome_eq_resolves
+    {State : Type u} {Terminal : Type v}
+    (policy : TargetPolicy State Terminal) (target : ControlTarget) :
+    (policy.resolution? target).isSome = policy.resolves target := by
+  cases target with
+  | direct block =>
+      by_cases member : block ∈ policy.graph.blockIds <;>
+        simp [resolution?, resolves, member]
+  | indirect site =>
+      by_cases selected : (policy.indirectEvidence? site).isSome = true <;>
+        simp [resolution?, resolves, selected]
+
+/-- Direct resolution evidence exposes graph-block membership. -/
+theorem block_mem_of_resolution
+    {State : Type u} {Terminal : Type v}
+    {policy : TargetPolicy State Terminal} {block : BlockId}
+    (resolution : ResolvedControlTarget policy (.direct block)) :
+    block ∈ policy.graph.blockIds := by
+  cases resolution with
+  | direct member => exact member
+
+/-- Indirect resolution evidence exposes the exact selected finite evidence. -/
+theorem indirectEvidence_of_resolution
+    {State : Type u} {Terminal : Type v}
+    {policy : TargetPolicy State Terminal} {site : Name}
+    (resolution : ResolvedControlTarget policy (.indirect site)) :
+    ∃ evidence, policy.indirectEvidence? site = some evidence := by
+  cases resolution with
+  | indirect selected => exact Option.isSome_iff_exists.mp selected
+
 /-- Successful indirect lookup returns evidence for the requested site. -/
 theorem site_of_indirectEvidence?
     {State : Type u} {Terminal : Type v}
@@ -324,6 +379,20 @@ theorem controlTargetResolved
     program.policy.resolves target = true :=
   importTargetsResolved_elim program.policy.resolves program.instructions
     program.targetsResolved instruction hinstruction target htarget
+
+/-- Every reported target of an accepted instruction has concrete finite
+policy-resolution evidence. -/
+theorem controlTargetResolution
+    {State : Type u} {Terminal : Type v} {Byte : Type w}
+    {Instruction : Type x}
+    (program : ImportedProgram State Terminal Byte Instruction)
+    (instruction : ImportedInstruction Byte Instruction)
+    (hinstruction : instruction ∈ program.instructions)
+    (target : ControlTarget) (htarget : target ∈ instruction.controlTargets) :
+    ∃ resolution, program.policy.resolution? target = some resolution := by
+  apply Option.isSome_iff_exists.mp
+  rw [program.policy.resolution?_isSome_eq_resolves target]
+  exact program.controlTargetResolved instruction hinstruction target htarget
 
 /-- Every accepted imported instruction owns a nonempty source-byte slice. -/
 theorem instructionBytesNonempty
