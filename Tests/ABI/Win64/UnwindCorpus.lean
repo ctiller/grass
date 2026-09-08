@@ -150,6 +150,7 @@ def length : Step → Nat
   -- machine frame's code offset zero however many operations follow it.
   | .pushFrame _ => 0
 
+
 /-- The largest save offset for which `ml64` writes the near form.
 
 Measured, not derived: a binary search with the allocation held constant, so it
@@ -181,6 +182,87 @@ def op : Step → UnwindOp
       if off ≤ ml64LastNearSave then .saveXmm128 r off
       else .saveXmm128Far r off
   | .pushFrame withErrorCode => .pushMachineFrame withErrorCode
+
+/-! ### The small/large boundary
+
+`op` puts the boundary at 128, which its docstring says is exactly
+`UnwindOp.SmallAllocEncodable`'s range. Nothing in Lean held it there: a
+mutation moving it to 127 left every theorem in this file green, including the
+agreement theorem below, because that theorem compares *lengths* and both
+allocation operations encode from the immediate's magnitude -- so which unwind
+opcode `op` picks is invisible to it.
+
+Only `Tools/win64-unwind-differential.py` would have noticed, and that needs an
+assembler this build does not have. These pin it here so a host without `ml64`
+still catches the boundary moving. -/
+
+/-- 128 is the last small allocation, and it is `SmallAllocEncodable`'s bound
+rather than a constant of this corpus's own. -/
+example : Step.op (.alloc 128) = .allocSmall 128 := rfl
+example : UnwindOp.SmallAllocEncodable 128 := by decide
+
+/-- One above it is the large form, and is not small-encodable. -/
+example : Step.op (.alloc 136) = .allocLarge 136 := rfl
+example : ¬ UnwindOp.SmallAllocEncodable 136 := by decide
+
+/-- The bottom of the range is the small form too, so the boundary is an upper
+bound and not a window. -/
+example : Step.op (.alloc 8) = .allocSmall 8 := rfl
+
+/--
+**The encoder-derived lengths agree with the ones `ml64` validated.**
+
+`length` above is a hand-written claim about encodings, kept honest by the
+differential against `ml64`'s own `SizeOfProlog`.
+`Grass.ABI.Win64.UnwindOp.prologueSize` computes the same quantity a different
+way, from the instruction encoders in `Grass.ISA.X86`. Two models of one fact,
+and nothing related them until this.
+
+That is the arrangement `Grass/ABI/Win64/Convention.lean` complains about
+elsewhere -- a number spelled twice in two places that had to agree by hand --
+and the cost here would have been higher, because only one of the two is
+answerable to an assembler. The encoder model has no oracle of its own on this
+host; the corpus does. Relating them points `ml64`'s authority at the encoders.
+
+Stated in the direction that holds. Wherever the encoder model gives an answer
+it is `ml64`'s answer; the converse is false and should be, since `length`
+covers all six step kinds and `prologueSize` refuses four of them. The corpus
+stays the wider model, and this makes it the authority over the overlap rather
+than a second opinion beside it.
+
+Finding the disagreement is what prompted the theorem. `prologueSize` gave
+`allocLarge` the `imm32` form unconditionally, which is right for every
+allocation `ml64` describes that way but wrong for the operation, since
+`LargeAllocEncodable` permits `n` from 8 -- it reported seven bytes for
+`sub rsp, 8`. The corpus, which derives the form from the immediate, was right.
+-/
+theorem prologueSize_agrees_with_length (s : Step) (k : Nat)
+    (h : (Step.op s).prologueSize = some k) : k = s.length := by
+  cases s
+  case push r =>
+    simp only [Step.op, UnwindOp.prologueSize, UnwindOp.prologueInsns,
+      Option.map_eq_some_iff] at h
+    obtain ⟨_, hi, rfl⟩ := h
+    cases hi
+    cases r <;> rfl
+  case alloc n =>
+    simp only [Step.op] at h
+    split at h <;>
+      (simp only [UnwindOp.prologueSize, UnwindOp.prologueInsns,
+         Option.map_eq_some_iff] at h
+       split at h <;>
+         (obtain ⟨_, hi, rfl⟩ := h
+          cases hi
+          simp only [Step.length]
+          first
+            | (rw [if_pos (by omega : n ≤ 127)]; rfl)
+            | (rw [if_neg (by omega : ¬ n ≤ 127)]; rfl)))
+  all_goals
+    simp only [Step.op] at h
+    first
+      | (split at h <;>
+          simp [UnwindOp.prologueSize, UnwindOp.prologueInsns] at h)
+      | simp [UnwindOp.prologueSize, UnwindOp.prologueInsns] at h
 
 /-- The header nibbles this step establishes, if any. `FrameOffset` is scaled by
 sixteen. -/

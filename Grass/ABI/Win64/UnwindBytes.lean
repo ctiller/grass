@@ -1249,13 +1249,21 @@ Which of the two `SUB` forms an allocation uses is the interesting part, because
 it is where the byte count stops being a fixed stride. The `imm8` form is
 sign-extended, so it reaches 127; `allocSmall 128` is legal as an unwind
 operation and needs the seven-byte `imm32` form.
+
+Both allocation operations share that rule, which is why they share an arm.
+Which `SUB` form an assembler picks is a fact about the immediate's magnitude
+and not about which unwind opcode was chosen to describe it. This used to give
+`allocLarge` the `imm32` form unconditionally, which is right for every
+allocation an assembler would describe that way -- `ml64` reaches for
+`UWOP_ALLOC_LARGE` only above 128 -- but wrong as a statement about the
+operation, since `UnwindOp.LargeAllocEncodable` permits `n` from 8. It
+reported seven bytes for `sub rsp, 8`, which is four.
 -/
 def prologueInsns : UnwindOp → Option (List InsnEncoding)
   | .pushNonvolatile r => some [pushR64 r]
-  | .allocSmall n =>
+  | .allocSmall n | .allocLarge n =>
       if n ≤ 127 then some [subR64Imm8 .rsp (BitVec.ofNat 8 n)]
       else some [subR64Imm32 .rsp (BitVec.ofNat 32 n)]
-  | .allocLarge n => some [subR64Imm32 .rsp (BitVec.ofNat 32 n)]
   | _ => Option.none
 
 /-- Bytes those instructions occupy. -/
@@ -1285,7 +1293,7 @@ theorem prologueSize_pos {op : UnwindOp} {k : Nat}
     split at h <;> (first | (have hk := Option.some.inj h; subst hk; exact one _) | (subst h; exact one _))
   case allocLarge n =>
     simp only [prologueSize, prologueInsns] at h
-    first | (have hk := Option.some.inj h; subst hk; exact one _) | (subst h; exact one _)
+    split at h <;> (first | (have hk := Option.some.inj h; subst hk; exact one _) | (subst h; exact one _))
   all_goals simp [prologueSize, prologueInsns] at h
 
 end UnwindOp
