@@ -12,6 +12,7 @@ import Grass.Platform.Win32.CoffStrings
 import Grass.Platform.Win32.CoffPdata
 import Grass.Platform.Win32.CoffXdata
 import Grass.Platform.Win32.CoffAux
+import Grass.Platform.Win32.CoffWellFormed
 
 /-!
 # Ledger coverage gate
@@ -103,7 +104,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.CoffStrings,
    `Grass.Platform.Win32.CoffPdata,
    `Grass.Platform.Win32.CoffXdata,
-   `Grass.Platform.Win32.CoffAux]
+   `Grass.Platform.Win32.CoffAux,
+   `Grass.Platform.Win32.CoffWellFormed]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -117,7 +119,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 133
+def owedBaseline : Nat := 135
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -139,7 +141,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 77
+def notBehaviourBaseline : Nat := 78
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -396,7 +398,10 @@ def notBehaviour : List Name :=
     -- symbol with its auxiliary record, and both halves are cited above.
     `Grass.Platform.Win32.Coff.AuxSectionDefinition.plain,
     `Grass.Platform.Win32.Coff.symbolRecordCount,
-    `Grass.Platform.Win32.Coff.symbolTableBytes ]
+    `Grass.Platform.Win32.Coff.symbolTableBytes,
+    -- A one-line restatement of `ResolvableIn` at the entry level, carrying no
+    -- fact the row above does not.
+    `Grass.Platform.Win32.Coff.SymbolEntry.SectionResolvable ]
 
 /--
 Declarations that genuinely model external behaviour and have no citation yet.
@@ -626,7 +631,16 @@ def owed : List Name :=
     -- entries to skip, and a relocation's symbol index counts every one of
     -- them.
     `Grass.Platform.Win32.Coff.SymbolEntry.count,
-    `Grass.Platform.Win32.Coff.SymbolEntry.toBytes ]
+    `Grass.Platform.Win32.Coff.SymbolEntry.toBytes,
+    -- What it means for an object's internal references to resolve, which the
+    -- format decides and this profile does not. `ResolvableIn` encodes that
+    -- sections are numbered from one and that zero, -1 and -2 name no section;
+    -- `RelocationsInRange` encodes that a relocation's `symbolIndex` is an
+    -- index into the symbol table's *records*. Both are conditions a linker
+    -- imposes, and neither produces a diagnostic when violated -- which is why
+    -- they are stated rather than assumed.
+    `Grass.Platform.Win32.Coff.SectionNumber.ResolvableIn,
+    `Grass.Platform.Win32.Coff.Section.RelocationsInRange ]
 
 /-- The declarations this gate holds the ledger responsible for. -/
 def modeledDeclarations : MetaM (Array Name) := do

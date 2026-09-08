@@ -145,6 +145,7 @@ structure SymbolEntry where
   symbol : Symbol
   /-- The auxiliary section definition, and the section it describes. -/
   aux : Option (AuxSectionDefinition × Section)
+deriving DecidableEq
 
 /-- How many eighteen-byte table entries this contributes. -/
 def SymbolEntry.count (e : SymbolEntry) : Nat :=

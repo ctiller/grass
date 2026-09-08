@@ -307,6 +307,10 @@ structure Section where
   relocations : List Relocation
   /-- Section flags. -/
   characteristics : BitVec 32
+-- Decidable equality so that cross-record predicates over a concrete object --
+-- "this auxiliary record describes a section this file has" -- can be checked
+-- by evaluation rather than by hand.
+deriving DecidableEq
 
 /-- Bytes the relocation directory occupies. -/
 def Section.relocationSize (s : Section) : Nat := 10 * s.relocations.length

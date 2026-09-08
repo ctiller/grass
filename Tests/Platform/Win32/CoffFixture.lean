@@ -3,6 +3,7 @@ import Grass.Platform.Win32.CoffSymbol
 import Grass.Platform.Win32.CoffPdata
 import Grass.Platform.Win32.CoffXdata
 import Grass.Platform.Win32.CoffAux
+import Grass.Platform.Win32.CoffWellFormed
 
 /-!
 # COFF records, against a real object file
@@ -470,12 +471,33 @@ def textSection : Section where
   relocations := []
   characteristics := 0x60500020
 
+/--
+The demo's own `.pdata` entries.
+
+`alphaEntry` and `betaEntry` name symbols 12, 13 and 14, which are the indices
+those functions have in the object `ml64` produced -- an object with fifteen
+records. This file has five, so reusing them would describe relocations pointing
+past the end of its own symbol table.
+
+`Object.WellFormed` caught exactly that: the first version of `demoObject` did
+reuse them, and it was not well formed. These are the same two functions
+renumbered for the table this object actually has -- symbol 2 is the function,
+symbol 3 is the `.xdata` section it unwinds through. -/
+def demoPdataEntries : List PdataEntry :=
+  [ { functionSymbol := 2, unwindSymbol := 3
+      functionLength := 5, unwindOffset := 0 }
+  , { functionSymbol := 2, unwindSymbol := 3
+      functionLength := 7, unwindOffset := 8 } ]
+
+/-- `.xdata`, named so the demo's symbol table can define it. -/
+def demoXdataName : SectionName :=
+  ⟨[0x2e, 0x78, 0x64, 0x61, 0x74, 0x61], by decide⟩
+
 /-- The three sections in file order. -/
 def demoSections : List Section :=
   [ textSection
-  , pdataSection pdataName [alphaEntry, betaEntry]
-  , xdataSection ⟨[0x2e, 0x78, 0x64, 0x61, 0x74, 0x61], by decide⟩
-      [alphaUnwind, betaUnwind] [] ]
+  , pdataSection pdataName demoPdataEntries
+  , xdataSection demoXdataName [alphaUnwind, betaUnwind] [] ]
 
 /--
 Three table entries from two symbols.
@@ -494,7 +516,13 @@ def demoSymbols : List SymbolEntry :=
         { name := .long 4
           value := 5, sectionNumber := .section_ 1, type := 0x0020
           storageClass := 2, numberOfAuxSymbols := 0 }
-      aux := none } ]
+      aux := none }
+  , { symbol :=
+        { name := .short demoXdataName
+          value := 0, sectionNumber := .section_ 3, type := 0
+          storageClass := 3, numberOfAuxSymbols := 1 }
+      aux := some (AuxSectionDefinition.plain,
+                   xdataSection demoXdataName [alphaUnwind, betaUnwind] []) } ]
 
 /-- The whole object. -/
 def demoObject : Object where
@@ -507,10 +535,10 @@ def demoObject : Object where
 **The file's size is exactly its parts.**
 
 Twenty bytes of header, one hundred and twenty of section table, fifty-two of
-data, sixty of relocations, fifty-four of symbol table -- three records, not
-two -- and fourteen of string table. No padding and no slack, which is what makes every offset below mean
+data, sixty of relocations, ninety of symbol table -- five records for three
+symbols -- and fourteen of string table. No padding and no slack, which is what makes every offset below mean
 what it says. -/
-theorem demoObject_length : demoObject.toBytes.length = 320 := by decide
+theorem demoObject_length : demoObject.toBytes.length = 356 := by decide
 
 /-- **The section table starts at byte twenty and holds three headers.** -/
 theorem demoObject_sectionTable :
@@ -525,7 +553,7 @@ reader would follow: `.text` at 140, `.pdata` at 152, `.xdata` at 176. -/
 theorem demoObject_data_offsets :
     ((demoObject.toBytes.drop 140).take 12) = textSection.data
     ∧ ((demoObject.toBytes.drop 152).take 24)
-        = (pdataSection pdataName [alphaEntry, betaEntry]).data
+        = (pdataSection pdataName demoPdataEntries).data
     ∧ ((demoObject.toBytes.drop 176).take 16)
         = xdataBytes [alphaUnwind, betaUnwind] := by
   decide
@@ -534,15 +562,15 @@ theorem demoObject_data_offsets :
 **The symbol table is where the file header points, and reports three
 records for two symbols.**
 
-The count is the point. Two symbols are defined; one of them is a section
-symbol with an auxiliary record, so the table holds three eighteen-byte
-entries and the header must say three. A writer reporting two would leave every
-relocation index past the auxiliary record pointing one entry early -- at a
-section symbol rather than at the function it meant. -/
+The count is the point. Three symbols are defined; two of them are section
+symbols with auxiliary records, so the table holds five eighteen-byte entries
+and the header must say five. A writer reporting three would leave every
+relocation index past the first auxiliary record pointing two entries early --
+at a section symbol rather than at the function it meant. -/
 theorem demoObject_symbolTable :
     demoObject.fileHeader.pointerToSymbolTable.toNat = 252
-    ∧ demoObject.fileHeader.numberOfSymbols.toNat = 3
-    ∧ ((demoObject.toBytes.drop 252).take 54)
+    ∧ demoObject.fileHeader.numberOfSymbols.toNat = 5
+    ∧ ((demoObject.toBytes.drop 252).take 90)
         = symbolTableBytes demoSymbols := by
   decide
 
@@ -609,5 +637,21 @@ theorem sectionSymbol_with_aux_is_two_entries :
                       pdataSection pdataName [alphaEntry, betaEntry])
        } : SymbolEntry).toBytes.length = 36 := by
   decide
+
+/--
+**And the whole object is internally consistent.**
+
+`Object.WellFormed` on a real file: every relocation names a record the table
+has, every symbol names a section that exists, and every auxiliary record
+describes a section of this object.
+
+This is the theorem that failed first. `demoObject` originally reused
+`alphaEntry` and `betaEntry`, whose symbol indices are 12, 13 and 14 -- correct
+for the fifteen-record object `ml64` wrote and past the end of this one's
+five. Nothing else in this file noticed: the lengths were right, every offset
+resolved, and the bytes were exactly what the model said they should be. Only
+the cross-record predicate saw it. -/
+theorem demoObject_wellFormed : Object.WellFormed demoObject := by
+  refine ⟨?_, ?_, ?_⟩ <;> decide
 
 end Grass.Tests.Platform.Win32.Coff
