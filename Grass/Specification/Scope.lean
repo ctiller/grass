@@ -25,12 +25,12 @@ It sits in `Grass.Specification` rather than in `Grass.Process` because
 `Grass.Semantics` and `Grass.Process`, and a scope identity is used on both
 sides of that diamond.
 
-## Placement
+## Provisional physical placement
 
-This is a specification namespace, not a generative execution identity.
-Keeping it beside `RequirementKey` makes that distinction explicit while
-preserving the neutral dependency layer required by the Process/Semantics
-diamond.
+Decision 132 assigns this dependency-minimal identifier to `Grass.Core` and
+distinguishes it from a generative execution `Uid`.  It remains physically in
+`Grass.Specification` for source compatibility until that import and namespace
+migration is made explicitly; the current path is not its normative owner.
 -/
 
 namespace Grass.Specification
