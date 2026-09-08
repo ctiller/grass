@@ -1777,20 +1777,40 @@ fn apply_review_changes(
     let chain = state
         .review_chain(&d.nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.nomination)))?;
-    if chain.current_nomination != d.nomination {
-        // See the identical comment in `apply_review_accept`: a no-op, not
-        // an `Err` -- a hard failure here would permanently break reduction
-        // of the entire bus, not just this chain.
-        return Ok(());
-    }
-    let reviewer = chain.nomination_reviewer.get(&d.nomination).unwrap();
+    // Judged against the link this event *names*, never against whichever
+    // link is currently in force -- the same correction
+    // `apply_review_accept` needed, for the same reason.
+    //
+    // There used to be a `current_nomination != d.nomination` no-op here.
+    // It replaced an `Err` that was a confirmed fleet-wide DoS, and it did
+    // stop that; but it made whether the findings were recorded depend on
+    // whether a racing reassignment had been replayed yet, so two hosts
+    // ended up with different `chain.findings` and nothing reported a
+    // problem. Silent permanent divergence is worse than the loud failure it
+    // replaced, because nothing surfaces it.
+    //
+    // Recording is confluent: `findings` is keyed by `(this event's id,
+    // finding id)`, so every extension inserts the same entries. And it is
+    // not merely safe but necessary -- an `inherited_findings` set is
+    // computed from this map, so a host that dropped a finding here would
+    // disagree with one that kept it about what a later reassignment must
+    // carry.
+    let reviewer = chain
+        .nomination_reviewer
+        .get(&d.nomination)
+        .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.nomination)))?;
     if reviewer != &env.agent {
         return Err(invalid(format!(
             "{}: only the accepting reviewer may request changes",
             env.id
         )));
     }
-    if !chain.accepted() {
+    // The *named* link's acceptance, not `chain.accepted()`, which asks
+    // about the current link and so moves under a concurrent reassignment.
+    // This reviewer accepted this link or it did not; that answer is fixed
+    // in every order, because `accepted_nominations` is keyed by nomination
+    // id and the acceptance is on this same reviewer's stream.
+    if !chain.accepted_nominations.contains(&d.nomination) {
         return Err(invalid(format!(
             "{}: the named reviewer must accept the nomination before requesting changes",
             env.id
@@ -9318,14 +9338,23 @@ mod tests {
         assert!(!chain.accepted());
     }
 
-    /// Companion to `ignores_finding_disposal_against_a_stale_nomination`
-    /// for `apply_review_changes`: bob accepts, then loses a genuinely
-    /// concurrent reassignment race he never observed. His changes-request
-    /// against the stale nomination must be a no-op, not a fatal `Err` that
-    /// would (via `reduce()`'s bare `?` propagation) break reduction of the
-    /// entire bus for any host that later fetches both streams.
+    /// bob accepts, then loses a genuinely concurrent reassignment race he
+    /// never observed. His changes-request against that link must be
+    /// *recorded* -- neither a fatal `Err`, which would break reduction of
+    /// the entire bus via `reduce()`'s bare `?`, nor a no-op.
+    ///
+    /// The no-op was the round-3 fix for the `Err`, and it is what this test
+    /// used to assert. It stopped the outage and introduced a quieter fault:
+    /// whether the findings were recorded depended on whether the racing
+    /// reassignment had been replayed yet, so two hosts held different
+    /// `chain.findings` with nothing reporting a problem. That is not merely
+    /// untidy -- `inherited_findings` is computed from this map, so the two
+    /// hosts would then disagree about what a later reassignment must carry.
+    ///
+    /// Recording is confluent: `findings` is keyed by `(changes event id,
+    /// finding id)`, so every order inserts the same entries.
     #[test]
-    fn ignores_review_changes_requested_against_a_stale_nomination() {
+    fn records_review_changes_requested_against_a_stale_nomination() {
         let alice = a("alice");
         let bob = a("bob");
         let carol = a("carol");
@@ -9374,10 +9403,21 @@ mod tests {
         apply_ok(&mut state, &changes_env);
 
         let root = state.review_chain_by_nomination[&nominate_env.id].clone();
-        assert!(
-            state.reviews[&root].findings.is_empty(),
-            "bob's stale changes-request must not have recorded any finding"
+        let chain = &state.reviews[&root];
+        assert_eq!(
+            chain.findings.len(),
+            1,
+            "bob's changes-request against the link it named must be recorded"
         );
+        assert!(
+            chain
+                .findings
+                .contains_key(&(changes_env.id.clone(), "f1".to_string())),
+            "and keyed by the changes event's own id, which is what makes it order-independent"
+        );
+        // It changes no decision about the link now in force: that link has
+        // its own reviewer, who has not accepted and has filed nothing.
+        assert_ne!(chain.current_nomination, nominate_env.id);
     }
 
     /// Round-3 adversarial review, Significant finding: AGENT_BUS.md section
