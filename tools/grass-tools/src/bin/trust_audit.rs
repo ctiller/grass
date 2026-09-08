@@ -43,7 +43,7 @@
 //!
 //! # The audit checks itself, and that is most of this file
 //!
-//! Roughly two thirds of `audit-trust.ps1` is not the audit. It is ten adversarial
+//! Roughly two thirds of `audit-trust.ps1` is not the audit. It is eleven adversarial
 //! probes that each construct a way to smuggle an unverified artefact past
 //! `Grass/Trust/Audit.lean` and require the audit to notice. They exist because the
 //! audit is a Lean meta-program over an environment, and a meta-program that has
@@ -509,7 +509,7 @@ impl Drop for RepositoryProbe {
 /// The two things the audit asks of Lean.
 ///
 /// A trait rather than an inherent impl for one reason, and it is the reason this
-/// port exists in the shape it does. Six of the ten probes below pass *because*
+/// port exists in the shape it does. Six of the eleven probes below pass *because*
 /// their `lake env lean` exited non-zero, so the whole audit is a program that
 /// spends most of its time reading failing exit statuses and must never let one
 /// become its own. That is the bug `audit-trust.ps1` shipped for 39 consecutive
@@ -595,7 +595,9 @@ impl Lean {
 // The probes.
 // ---------------------------------------------------------------------------
 
-/// The ten adversarial probes, in the order `audit-trust.ps1` ran them.
+/// The eleven adversarial probes, in the order `audit-trust.ps1` ran them.
+/// The eleventh, `module_ownership`, was added to that script on main while
+/// this port was retiring it.
 ///
 /// Each is named for the smuggling route it models. The two helpers below express
 /// the only two shapes: "the audit must have refused this, saying <pattern>" and
@@ -1032,6 +1034,49 @@ impl<'a, L: LeanDriver> Probes<'a, L> {
     /// persisted non-meta compiler dependency modules instead, which is what the
     /// three-module arrangement below is for -- source module, replacement module,
     /// and a consumer compiled with the local attribute in scope.
+    /// Module ownership is authoritative: a declaration imported as a Grass
+    /// module must not escape the audit merely by choosing a non-Grass
+    /// namespace.
+    ///
+    /// Ported from `audit-trust.ps1`, which grew this probe on main while
+    /// this branch was retiring the script. Taking the deletion without it
+    /// would have dropped an adversarial check silently -- the failure mode
+    /// this whole port exists to make impossible.
+    ///
+    /// The poison source lives at the repository root, outside the
+    /// enumerated `Grass/` and `Tests/` roots, so concurrent or interrupted
+    /// runs cannot discover one another's negative fixtures while Lake can
+    /// still compile it.
+    fn module_ownership(&self, repository: &Path) -> Result<(), String> {
+        let probe = RepositoryProbe::new(repository, "ModuleOwnership");
+        let build = self.lean.compile(
+            &probe,
+            &[
+                "namespace OutsideGrassNamespace".to_string(),
+                "@[extern \"grass_trust_module_ownership_probe\"]".to_string(),
+                "def identityBytes (bytes : ByteArray) : ByteArray := bytes".to_string(),
+                "end OutsideGrassNamespace".to_string(),
+            ],
+        )?;
+        if !build.ok {
+            return Err(format!(
+                "Could not compile the module-ownership trust-audit probe.
+{}",
+                build.transcript()
+            ));
+        }
+        let run = self.lean.elaborate(&[
+            "import Tests.Foundation".to_string(),
+            format!("import {}", probe.module),
+            "#audit_verified_programs".to_string(),
+        ])?;
+        expect_refused(
+            &run,
+            &line_pattern(r"OutsideGrassNamespace\.identityBytes.*compiled override.*@\[extern\]"),
+            "Trust audit ignored a compiled override outside the owning Grass module's namespace.",
+        )
+    }
+
     fn expired_scoped_csimp(&self, repository: &Path) -> Result<(), String> {
         let source = RepositoryProbe::new(repository, "CsimpSource");
         let build = self.lean.compile(
@@ -1110,7 +1155,7 @@ impl<'a, L: LeanDriver> Probes<'a, L> {
 
 /// The whole audit, over an injected Lean driver.
 ///
-/// The ten probes run in the order `audit-trust.ps1` ran them. Six of them pass
+/// The eleven probes run in the order `audit-trust.ps1` ran them. Six of them pass
 /// only when the elaboration they drove *failed*, and the last thing this function
 /// does before returning `Ok` is one of those six. Every one of those statuses is
 /// consumed into this `Result` and nowhere else; see [`exit_status`].
@@ -1131,6 +1176,7 @@ fn audit<L: LeanDriver>(lean: &L, repository: &Path, scan: &Scan) -> Result<Stri
     probes.wrapped_producer_from_import(repository)?;
     probes.implemented_by_replacement(repository)?;
     probes.extern_replacement(repository)?;
+    probes.module_ownership(repository)?;
     probes.expired_scoped_csimp(repository)?;
 
     Ok(passing_line(reported, scan.entrypoint.len()))
@@ -1621,7 +1667,7 @@ mod tests {
 
     /// The exact sequence of Lean invocations a passing audit makes, in order.
     ///
-    /// Six of the ten probes pass *because* the elaboration failed; those carry
+    /// Six of the eleven probes pass *because* the elaboration failed; those carry
     /// `false`. The three probes that need an imported module compile it first, and
     /// a compile must succeed for its probe to mean anything. Read the `false`
     /// entries as "this probe's whole point is that Lean rejected it".
@@ -1698,6 +1744,18 @@ mod tests {
             (
                 false,
                 vec!["ExternalRuntimeAuditProbe.identityBytes is extern".to_string()],
+            ),
+            // module_ownership: one compile, then a refusal. Ordered here
+            // because the probe runs before expired_scoped_csimp, and this
+            // script is positional -- an entry in the wrong place silently
+            // feeds one probe's scripted answer to a different probe.
+            (true, vec![]),
+            (
+                false,
+                vec![
+                    "OutsideGrassNamespace.identityBytes has a compiled override via @[extern]"
+                        .to_string(),
+                ],
             ),
             // expired_scoped_csimp: three compiles, then the final refusal. This is
             // the last Lean invocation of the whole run, and it exits non-zero.

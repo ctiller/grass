@@ -50,6 +50,17 @@ private def isGeneratedFlatConstructor
 private def allowedAxiom (name : Name) : Bool :=
   name == ``propext || name == ``Classical.choice || name == ``Quot.sound
 
+/-- A compiled implementation that is not the logical definition seen by the
+kernel. Project declarations may not carry either form, even when their written
+namespace differs from the module which owns them. -/
+private def compiledOverride (environment : Environment) (name : Name) : Option String :=
+  if (Compiler.getImplementedBy? environment name).isSome then
+    some "@[implemented_by]"
+  else if (getExternAttrData? environment name).isSome then
+    some "@[extern]"
+  else
+    none
+
 private def producesClosedVerifiedProgram (type : Expr) : MetaM Bool :=
   withTransparency .all do
     forallTelescopeReducing type fun parameters result => do
@@ -293,6 +304,9 @@ def auditVerifiedPrograms : CommandElabM Unit := do
   let projectDeclarations := declarations.filter fun candidate =>
     isProjectDeclaration environment candidate.1
   for (name, info) in projectDeclarations do
+    if let some overrideKind := compiledOverride environment name then
+      throwError "project declaration '{name}' uses unverified compiled override \
+        '{overrideKind}'"
     if info.isUnsafe then
       throwError "project declaration '{name}' is unsafe"
     let axioms ← collectAxioms name
