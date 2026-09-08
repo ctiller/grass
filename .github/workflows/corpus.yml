@@ -10,20 +10,45 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Raised from 5 when the two corpus checks became Rust binaries that this
+    # job builds from source. The build is small -- two dependencies, no Lean --
+    # but it is not free, and a timeout sized for two script invocations would
+    # start failing on a cold cargo registry rather than on a finding.
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      # Both corpus checks were PowerShell scripts until now, and this job ran
+      # them under a PowerShell 7 shell. Nothing either of them checks is
+      # Windows-specific; only their author was. The cost of that was not
+      # portability in the abstract: `doc-links` is a `required_check` on review
+      # nominations (docs/AGENT_REVIEW.md), and an agent on a Linux host had no
+      # way to run it before nominating, because PowerShell 7 is not on an
+      # ordinary Linux box. It worked here only because GitHub's ubuntu image
+      # happens to ship one.
+      #
+      # Built once, before either runs, so a tool that does not compile fails the
+      # job before any check has had a chance to report a misleading pass. The
+      # unit tests come first for the same reason they do in library.yml: they
+      # are the safety case for the port, and `cargo build` exiting 0 says
+      # nothing about whether the empty-scan refusals still work.
+      - name: Test the corpus tools
+        run: cargo test --locked --manifest-path tools/grass-tools/Cargo.toml
+
+      - name: Build the corpus tools
+        run: cargo build --release --locked --manifest-path tools/grass-tools/Cargo.toml
+
       - name: Check spike source views
-        shell: pwsh
-        run: ./check-spike-sources.ps1
+        run: ./tools/grass-tools/target/release/spike-sources
 
       - name: Check local documentation links
-        shell: pwsh
-        run: ./check-doc-links.ps1
+        run: ./tools/grass-tools/target/release/doc-links
 
       # This job is where cross-file references are kept honest, so the retired
       # tool paths belong here too.
@@ -56,10 +81,42 @@ jobs:
       # land; a gate over the whole directory today would fail on the tools that
       # are still there and still correct to reference.
       - name: Check no reference to a retired docstring-audit entry point
-        shell: bash
         run: |
           if git grep -nEi 'Tools/(DocstringAudit\.py|DeclNames\.lean)' -- . ':(exclude)tools/grass-tools'; then
             echo "::error::The lines above name a path under Tools/ that no longer exists. That entry point is now the docstring-audit binary in tools/grass-tools. Name the binary the sentence depends on, or write the sentence as history without the dead path."
+            exit 1
+          fi
+
+      # The same rule for the three PowerShell scripts that used to sit at the
+      # repository root, now the `trust-audit`, `doc-links` and `spike-sources`
+      # binaries in `tools/grass-tools`.
+      #
+      # It is a separate step from the one above because it is a separate claim
+      # with a separate remedy, and because the gate above is scoped to `Tools/`
+      # -- these three were at the root, so no widening of that pattern reaches
+      # them. The exemption is the same and is needed for the same reason: each
+      # ported binary's module comment says which script it replaces and which
+      # of that script's defects it reproduces on purpose, and those sentences
+      # are the port's safety case rather than instructions to run anything.
+      #
+      # This step's own pattern is inside the search scope, which is why the
+      # alternation is written with the extension outside the group: the text
+      # `...-sources)\.ps1` does not match the expression it spells, so the gate
+      # does not find itself. The message below names no dead path for the same
+      # reason. That is not cleverness for its own sake -- the alternative is an
+      # exclusion for this file, and a gate that cannot see the workflow that
+      # runs it is one edit away from being switched off silently.
+      #
+      # Eleven of these references were live run instructions when the port
+      # landed: a pull-request checklist, README and CONTRIBUTING validation
+      # blocks, and the per-spike "run this to check" line in all five spike
+      # documents. Every one of them told a reader to run a file that is not
+      # there. A reader who tries it learns nothing except that the instruction
+      # is stale; a reader who does not try it believes a check ran.
+      - name: Check no reference to a retired root validation script
+        run: |
+          if git grep -nEi '(audit-trust|check-doc-links|check-spike-sources)\.ps1' -- . ':(exclude)tools/grass-tools'; then
+            echo "::error::The lines above name a PowerShell script at the repository root that no longer exists. Those three checks are now the trust-audit, doc-links and spike-sources binaries in tools/grass-tools. Name the binary the sentence depends on, or write the sentence as history without the dead path."
             exit 1
           fi
 

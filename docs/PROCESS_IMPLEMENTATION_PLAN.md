@@ -1342,7 +1342,7 @@ adds three mandatory fields to every authored spec — `InterruptReason`,
 `LogicalFault`, and `EnvironmentViolation` — so neither spike literal would
 elaborate against the declaration as implemented.
 [MODULES.md](MODULES.md) makes those files the golden author-surface test, and
-`check-spike-sources.ps1` compares them against the fenced blocks in
+the `spike-sources` tool compares them against the fenced blocks in
 [SPIKE_4.md](SPIKE_4.md) and [SPIKE_5.md](SPIKE_5.md) rather than against the
 library, so the existing gate will not catch it.
 

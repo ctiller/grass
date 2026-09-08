@@ -323,9 +323,9 @@ Every product slice runs, at minimum:
 ```text
 lake build
 lake env lean Tools/AxiomAudit.lean
-pwsh -NoProfile -File ./audit-trust.ps1
-pwsh -NoProfile -File ./check-doc-links.ps1
-pwsh -NoProfile -File ./check-spike-sources.ps1
+cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin trust-audit
+cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin doc-links
+cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin spike-sources
 cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin docstring-audit
 git diff --check
 ```

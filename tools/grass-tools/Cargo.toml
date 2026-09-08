@@ -14,14 +14,40 @@ description = "Grass validation and audit tools: source and docstring audits ove
 # into a temporary file, elaborates it with `lake env lean`, and does the judging
 # here. That is what retires the checked-in Lean file it used to shell out to.
 #
+# `trust-audit` needs Lean for the same reason, and for a second one: two thirds
+# of it is ten adversarial probes that each construct a way to smuggle an
+# unverified artefact past `Grass/Trust/Audit.lean` and require the audit to
+# notice. A probe is a Lean elaboration whose *failure* is the passing result, so
+# this binary spends most of its time reading exit statuses it wants to be
+# non-zero -- and must never let one of them become its own. See
+# `src/bin/trust_audit.rs`.
+#
+# `doc-links` and `spike-sources` need nothing but the filesystem. They were
+# PowerShell only because their author was on Windows, not because anything they
+# check is. `doc-links` in particular is a `required_check` on review nominations
+# (`docs/AGENT_REVIEW.md`), so a developer who cannot run it cannot check their
+# own work before nominating it.
+#
 # This crate is where the remaining validation tools land as they are ported and
-# their equivalence against the originals is demonstrated. It carries one binary
-# today rather than a placeholder for nine, because a `[[bin]]` entry for a tool
-# nobody has verified is a claim this file cannot back.
+# their equivalence against the originals is demonstrated. It carries four
+# binaries rather than a placeholder for ten, because a `[[bin]]` entry for a
+# tool nobody has verified is a claim this file cannot back.
 
 [[bin]]
 name = "docstring-audit"
 path = "src/bin/docstring_audit.rs"
+
+[[bin]]
+name = "trust-audit"
+path = "src/bin/trust_audit.rs"
+
+[[bin]]
+name = "doc-links"
+path = "src/bin/doc_links.rs"
+
+[[bin]]
+name = "spike-sources"
+path = "src/bin/spike_sources.rs"
 
 [dependencies]
 regex = "1"

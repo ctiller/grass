@@ -103,9 +103,23 @@ jobs:
       - name: Audit axioms
         run: lake env lean Tools/AxiomAudit.lean
 
+      # This step ran a PowerShell script under a PowerShell 7 shell until now,
+      # and the change of language is the smaller half of what it fixes.
+      #
+      # That shell exits the step with `$LASTEXITCODE` -- the status of the
+      # last native command the script ran. The script never called `exit`, and
+      # the last native command on its *success* path was the scoped-csimp
+      # probe's `lake env lean`, which the audit requires to fail. Passing the
+      # audit therefore guaranteed a non-zero exit: this gate failed all 39 of
+      # its last 39 runs while printing "Trust audit passed ..." as its final
+      # line. A gate that always fails hides a regression exactly as well as one
+      # that always passes.
+      #
+      # The binary's exit status is a function of its verdict and of nothing
+      # else, and a test pins the status of the success path specifically --
+      # asserting on the message is what let the original survive.
       - name: Audit verified-program trust closure
-        shell: pwsh
-        run: ./audit-trust.ps1
+        run: ./tools/grass-tools/target/release/trust-audit
 
       - name: Audit docstring claims
         run: ./tools/grass-tools/target/release/docstring-audit

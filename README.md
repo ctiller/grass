@@ -58,12 +58,12 @@ Build the foundation API without warnings (so `sorry` is an error), audit every
 concrete `VerifiedProgram` producer, and check the named public theorem roots
 with:
 
-```powershell
+```bash
 lake build
-pwsh ./audit-trust.ps1
+cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin trust-audit
 ```
 
-The trust script generates a temporary audit import over every library and test
+The trust audit generates a temporary audit import over every library and test
 module. Its Lean command unfolds even irreducible result aliases to discover
 concrete `VerifiedProgram` producers and audits every declaration originating
 in those project modules, including declarations outside the `Grass` namespace.
@@ -79,13 +79,17 @@ warning-as-error setting independently rejects admission mechanisms.
 The corpus checks verify that annotated spike documents and their comment-free
 authored Lean views remain exact:
 
-```powershell
-pwsh ./check-spike-sources.ps1
-pwsh ./check-doc-links.ps1
+```bash
+cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin spike-sources
+cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin doc-links
 ```
 
 The last two commands are corpus consistency checks, not compilation or proof
-checking. The implementation ratchet remains documented in
+checking. `spike-sources` takes spike numbers to narrow the check, as in
+`--bin spike-sources -- 1`. All four validation tools are Rust binaries in
+`tools/grass-tools` and need nothing but a Rust toolchain, except `trust-audit`,
+which drives `lake env lean` and so needs the pinned Lean toolchain and a built
+library as well. The implementation ratchet remains documented in
 [docs/IMPLEMENTATION_RATCHET.md](docs/IMPLEMENTATION_RATCHET.md).
 
 ## Contributing and security

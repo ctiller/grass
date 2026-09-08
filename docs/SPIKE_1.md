@@ -1258,7 +1258,7 @@ cannot silently strengthen the proof contract.
 ## Exact authored source snapshot
 
 This snapshot is the exact comment-free source maintained under
-`Spikes/1_Hello_World/`. Run `./check-spike-sources.ps1 -Spike 1` to check the
+`Spikes/1_Hello_World/`. Run `cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin spike-sources -- 1` to check the
 normalized cross-view equality and block classifications.
 
 ### `Program.lean`

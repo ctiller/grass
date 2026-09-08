@@ -15,8 +15,8 @@ validation work. Write “none” when this change adds none.
 
 ## Validation
 
-- [ ] `pwsh ./check-spike-sources.ps1` passes.
-- [ ] `pwsh ./check-doc-links.ps1` passes.
+- [ ] `cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin spike-sources` passes.
+- [ ] `cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin doc-links` passes.
 - [ ] No cache, local worktree, credential, generated binary, or editor state is included.
 - [ ] The change preserves first-class assembly authoring where applicable.
 - [ ] A distinct reviewer has reviewed the selected branch snapshot.

@@ -185,8 +185,8 @@ implementation-leakage fixtures.
 So three of the four drafted names stand unchanged and only the platform
 spelling moved. `g-design:71` directed c-spike to update and resynchronize only
 the Platform import, which this branch does: four authored sources and their
-four byte-exact `SPIKE_n.md` mirror blocks, in one pass, verified by
-`check-spike-sources.ps1` and negative-tested by desynchronizing one side alone.
+four byte-exact `SPIKE_n.md` mirror blocks, in one pass, verified by the
+spike-source mirror check and negative-tested by desynchronizing one side alone.
 `Spikes/5_Spinning_Cube/Process.lean` still imports
 `Grass.Platform.Win10.Vulkan13`, deliberately: it raises the same shape of
 question, `g-design:71` did not rule on it, Vulkan is not the Win32 API family,
@@ -329,7 +329,7 @@ from generated-structural to authored, and when that happens it appears as a
 new declaration in a file under `Spikes/` -- in the diff, in review, in the
 count. It does not hide.
 
-**Do the two views still match?** That is `check-spike-sources.ps1`, which
+**Do the two views still match?** That is the `spike-sources` tool, which
 exists and passes. Checked rather than assumed: all 123 fenced blocks across
 the five documents carry an immediate classification, block identities are
 unique, and all 20 authored blocks match their files byte for byte after
@@ -339,10 +339,12 @@ An earlier revision of this section said the script needs PowerShell 7, that
 this machine has only 5.1, and that the result had therefore been established
 by reimplementing the three tests rather than by running the script. The first
 clause was untested and is wrong; it is retracted at `c-spike:46` and amended
-at `c-spike:47`. Windows PowerShell 5.1 Desktop runs `check-spike-sources.ps1`
-directly and it exits 0, as do `check-doc-links.ps1` and g-foundation's
-`audit-trust.ps1`. c-spike runs its own gates and does not depend on a reviewer
-for them.
+at `c-spike:47`. Windows PowerShell 5.1 Desktop ran the spike-source mirror
+check directly and it exited 0, as did the documentation-link check and
+g-foundation's trust audit. c-spike runs its own gates and does not depend on a
+reviewer for them. All three have since been ported to Rust binaries in
+`tools/grass-tools`, so the question of which PowerShell a host has no longer
+arises.
 
 The reimplementation was still worth having, for the reason that outlives the
 error: it was negative-tested, and the script was not. Changing one byte of
@@ -419,13 +421,21 @@ change falsifies a drafted import. Add each spike to the default target as soon
 as it can compile -- which for every spike means after P0 and P2 -- and keep the
 mirror check running in CI until then. That is the whole of this phase.
 
-`check-spike-sources.ps1` is portable as of this branch. It called
+The spike-source mirror check became portable on this branch. It called
 `[IO.Path]::GetRelativePath`, which exists only on .NET Core and .NET 5+, so it
-ran in CI -- `corpus.yml` invokes it with `shell: pwsh` -- and died on its first
-file for anyone without PowerShell 7. A gate whose purpose is to be run before
-you push is the wrong thing to have working only after you push. Verified under
+ran in CI -- which invoked it through PowerShell 7 -- and died on its first file
+for anyone without PowerShell 7. A gate whose purpose is to be run before you
+push is the wrong thing to have working only after you push. Verified under
 Windows PowerShell 5.1 and negative-tested: a changed source byte and a deleted
 classification comment each fail it.
+
+That fix reached the wrong half of the problem, and the check is now the
+`spike-sources` binary in `tools/grass-tools`. Making the script run on both
+PowerShells left it needing a PowerShell, which a Linux host does not have:
+CI passed only because GitHub's ubuntu image happens to ship one. The same
+applies to the documentation-link check, which docs/AGENT_REVIEW.md makes a
+`required_check` on nominations -- so the gate an author most needs to run
+before nominating was the one they could not run at all.
 
 Exit: `lake build` fails when a spike references a name the libraries no longer
 provide.

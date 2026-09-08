@@ -30,12 +30,12 @@ both the annotated document and its comment-free authored source.
 
 Run the repository's current consistency check from its root:
 
-```powershell
+```bash
 lake build
 lake build Tests
-pwsh ./audit-trust.ps1
-pwsh ./check-spike-sources.ps1
-pwsh ./check-doc-links.ps1
+cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin trust-audit
+cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin spike-sources
+cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin doc-links
 ```
 
 The Lake commands compile the Lean libraries, and the trust command audits

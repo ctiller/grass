@@ -1403,7 +1403,7 @@ requires a feature-specific realization plus its own citations and probes.
 ## Exact authored source snapshot
 
 This snapshot is the exact comment-free source maintained under
-`Spikes/3_Gzip/`. Run `./check-spike-sources.ps1 -Spike 3` to check the
+`Spikes/3_Gzip/`. Run `cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin spike-sources -- 3` to check the
 normalized cross-view equality and block classifications.
 
 ### `Assembly.lean`
