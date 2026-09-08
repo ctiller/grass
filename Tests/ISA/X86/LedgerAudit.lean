@@ -804,13 +804,86 @@ def subjectAnchor (env : Environment) (s : Name) : Option Name := Id.run do
 
 /-- Gate A: a subject names a declaration, or a declaration plus exactly one
 discriminator segment. -/
-def anchorFault (env : Environment) (s : Name) : Option String :=
+inductive AnchorFault where
+  /-- The subject names no declaration and is not a declaration's prefix. -/
+  | noDeclaration
+  /-- It anchors to a declaration, but more than one segment short of it, so
+  it could stand for several. -/
+  | tooBroad (anchor : Name)
+
+/-- What to tell the author about one fault. -/
+def AnchorFault.message : AnchorFault → String
+  | .noDeclaration => "names no declaration and has no declaration prefix"
+  | .tooBroad a => s!"anchors only to {a}, which is more than one segment short"
+
+def anchorFault (env : Environment) (s : Name) : Option AnchorFault :=
   match subjectAnchor env s with
-  | none => some "names no declaration and has no declaration prefix"
+  | none => some .noDeclaration
   | some a =>
       if s.components.length - a.components.length > 1 then
-        some s!"anchors only to {a}, which is more than one segment short"
+        some (.tooBroad a)
       else none
+
+/--
+The summary line's account of Gate A, partitioned the way the gate is.
+
+`g-design:233`: the previous version counted the combined fault list and
+rendered every nonempty result as "N anchoring to no declaration", so a
+too-broad subject produced a correct per-subject error followed by a false
+summary. That is the same defect the commit introducing it set out to close --
+a summary asserting a classification it had not made -- committed one layer in.
+
+Partitioned rather than reported as a neutral total, and derived from
+`AnchorFault` rather than by re-testing the subjects, so there is one
+classification with two renderings instead of two that must agree.
+-/
+def anchorSummaryOf : List AnchorFault → String
+  | [] => "all anchoring to real declarations"
+  | faults =>
+      let n := (faults.filter (fun f => match f with
+                  | .noDeclaration => true | _ => false)).length
+      let b := faults.length - n
+      if b = 0 then s!"{n} anchoring to no declaration"
+      else if n = 0 then s!"{b} anchoring more than one segment short"
+      else s!"{n} anchoring to no declaration and {b} more than one segment short"
+
+/-! ### The summary tells the truth about each fault class
+
+`g-design:233` asked for these by name, and the third is the one that would have
+caught the defect: a single too-broad subject used to be reported as "1 of them
+anchoring to no declaration", which is a false classification printed under a
+correct per-subject error. -/
+
+/-- Clean only when there is nothing to report. -/
+example : anchorSummaryOf [] = "all anchoring to real declarations" := rfl
+
+/-- A subject naming no declaration. -/
+example : anchorSummaryOf [.noDeclaration] = "1 anchoring to no declaration" :=
+  rfl
+
+/-- A subject resolving more than one segment short. This is the case the
+previous summary misreported. -/
+example : anchorSummaryOf [.tooBroad `Grass.ISA.X86]
+    = "1 anchoring more than one segment short" := rfl
+
+/-- Both classes at once, counted separately. -/
+example : anchorSummaryOf [.noDeclaration, .tooBroad `Grass.ISA.X86]
+    = "1 anchoring to no declaration and 1 more than one segment short" := rfl
+
+/-- The clean phrase has exactly one producer: the `[]` arm.
+
+`g-design:233` asked for an assertion that it appears only when there are no
+faults. Stated over all lists it needs string-inequality reasoning against
+interpolated numerals, which Lean does not make cheap and which would buy a
+fragile proof rather than a clear one. The three examples above cover the three
+shapes a nonempty list can take, and the definition above has one arm producing
+this string and three producing others.
+
+If that stops being obvious -- another arm, or a shared prefix -- this comment
+is the thing to distrust, and the fix is to return a structured value and render
+it separately rather than to argue about strings. -/
+example : anchorSummaryOf [] = "all anchoring to real declarations" := rfl
+
 
 /-- Gate B: some ledger subject anchors to this declaration. -/
 def accountedBy (env : Environment) (subjects : List Name) (d : Name) : Bool :=
@@ -856,7 +929,7 @@ nor notModelling, so nothing decides whether its declarations owe citations"
   let anchorFaults := subjects.filterMap fun s =>
     (anchorFault env s).map (fun m => (s, m))
   for (s, m) in anchorFaults do
-    logError m!"ledger subject {s} {m}"
+    logError m!"ledger subject {s} {m.message}"
 
   -- Gate B: every modeled declaration is accounted for.
   let modeled ← modeledDeclarations
@@ -919,9 +992,7 @@ reviewed edit if a genuinely new declaration belongs here."
   -- "all anchoring to real declarations" unconditionally, so a run that had
   -- just logged a subject naming no declaration still printed the reassuring
   -- phrase beside the error.
-  let anchorSummary :=
-    if anchorFaults.isEmpty then "all anchoring to real declarations"
-    else s!"{anchorFaults.length} of them anchoring to no declaration"
+  let anchorSummary := anchorSummaryOf (anchorFaults.map Prod.snd)
   let cited := modeled.filter (accountedBy env subjects ·)
   logInfo m!"ledger audit: {modeled.size} modeled declarations -- \
 {cited.size} carry a citation, {owed.length} owed, \
