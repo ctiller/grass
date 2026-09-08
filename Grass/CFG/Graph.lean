@@ -38,6 +38,7 @@ structure LocatedEdge (Terminal : Type v) where
   edge : Edge Terminal
 deriving Repr, DecidableEq
 
+/-- Canonical source-and-exit identity of one located structural edge. -/
 def LocatedEdge.key {Terminal : Type v} (located : LocatedEdge Terminal) : EdgeKey :=
   ⟨located.source, located.edge.exit⟩
 
