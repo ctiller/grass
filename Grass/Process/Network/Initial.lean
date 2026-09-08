@@ -28,7 +28,9 @@ program never starts in.
 ## The payoff
 
 `initial_is_wellformed` is why the exactness is worth the fields. Six of
-`WellFormed`'s clauses are discharged *because* nothing else exists yet:
+`WellFormed`'s clauses are discharged *because* nothing else exists yet, save
+`sharedInvariantHolds`, which comes from `ExactInitialNetwork`'s own
+`sharedInvariantAtStart`:
 there is no second instance to violate root uniqueness, no recorded parent to
 be invalid, and no escrow to hold a reroute that never lands, an occurrence on
 the wrong session, or two entries sharing a nominal. The remaining two come from
@@ -267,7 +269,7 @@ theorem nothing_has_a_parent {kind : plan.topology.ProcessKind}
 
 Most of `WellFormed`'s clauses hold *because* nothing else exists yet — that is
 what the exactness buys, and it is why a relation pinning only the root would not
-have been enough.
+have been enough. Three do not, and they are listed after the six that do.
 
 * `rootUnique` — there is one live instance, so two roots are in one slot.
 * `parentageValid` — nothing has a parent, so no recorded parenthood is invalid.
@@ -277,6 +279,11 @@ have been enough.
 * `identitiesDistinct` — every ledger is empty, so no two entries share a nominal.
 * `lifecyclesWitnessed` — the only instance is `running`, and the clause
   constrains `terminated` endings.
+
+`sharedInvariantHolds` is the exception to both halves: it comes from neither
+emptiness nor the root, but from `ExactInitialNetwork.sharedInvariantAtStart`,
+which is a field an author supplies. §10.128 added the clause and this
+enumeration did not move, which is §10.142.
 
 The other two come from the root's own record: `nominalsAllocated` from
 `rootAllocated`, and `slotsAgree` from `rootSlotAgrees` together with
@@ -378,9 +385,9 @@ A slot holds an instance that records no current parent and is not dead.
 
 The invariant `execution_holds_an_unkilled_root` carries. Three conjuncts, and
 each does work: the slot is *occupied*, by an instance with *no current parent*,
-which is *not dead*. Four of the five refusals in
-`Tests/Process/PreservationFixtures.lean` falsify the first and one falsifies the
-third. A detached child satisfies the second and can fail the third —
+which is *not dead*. `Tests/Process/PreservationFixtures.lean` falsifies the
+first at several worlds and the third at `sentWithDeadSender`. A detached child
+satisfies the second and can fail the third —
 `Tests/Process/PreservationFixtures.lean`'s `a_corpse_may_be_orphaned` — so this
 is deliberately not "parentless" alone.
 

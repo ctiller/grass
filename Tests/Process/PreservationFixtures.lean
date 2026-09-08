@@ -456,9 +456,10 @@ theorem afterRequesting_is_wellFormed : afterRequesting.WellFormed :=
 /-! ### The four whose before-world is not `sent`
 
 The two endpoint deaths and the two instance endings start from worlds built by
-hand rather than reached by a step — a world holding a *dead* sender, or an
-instance mid-countdown — so there is no chain from `quiet` to carry
-well-formedness along. What §10.89's check asks for is still the step, and these
+hand — a world holding a *dead* sender, or an instance mid-countdown — so there
+is no chain from `quiet` to carry well-formedness along. Each now has a step into
+it, built below, and that turns out to settle nothing, which is the point of the
+section after this one. What §10.89's check asks for is still the step, and these
 are it: each transition is one an execution can contain, which is the claim a
 transition alone does not make.
 
@@ -478,14 +479,16 @@ What closes it is an invariant over executions rather than steps.
 holds, in the root's slot, an instance with no current parent that has not died —
 unless a `restart` at that slot took it away, which
 `no_restart_at_the_root_slot` shows is unconstructible here. So none of the seven
-worlds below is a world of any run. Three theorems name a world each and a
-fourth is quantified over every `holding` world; each has a `no_run_reaches_*`
-corollary stating the same thing about executions. §10.133.
+worlds below is a world of any run. Some are named individually and the
+`holding` ones are covered by a theorem quantified over every such world; each
+refusal has a `no_run_reaches_*` corollary stating the same thing about
+executions. §10.133.
 -/
 
 open Grass.Process.Tests.ChannelStep
   (sentWithDeadSender afterSenderDeath sentWithDeadReceiver afterReceiverDeath
-   the_sender_death the_receiver_death deadConnection sentWithDeadReceiver_slot)
+   the_sender_death the_receiver_death deadConnection sentWithDeadReceiver_slot
+   deadListener)
 open Grass.Process.Tests.Ending (holding settling waitingOnATick
   an_honest_termination an_honest_interruption)
 open Grass.Process.Tests.Instances (finished counting)
@@ -523,11 +526,17 @@ def theInterruptionStep (reason : Interrupt) :
 /-! ### And which of the four before-worlds a step can reach
 
 §10.129 left "reaching those before-worlds by steps is owed" and guessed the job
-was four `processStep`s. Three of the four before-worlds have a step into them —
-`theReceiverIsKilledStep` is a `childDied`, `theLogStep` and `theLastTickStep`
-are `processStep`s — and `sentWithDeadSender` has none, which is a theorem in the
-other direction. §10.132, and §10.133 for why a step into a world is not a run
-that reaches it.
+was four `processStep`s. Each before-world below has a step into it, and they are
+not all `processStep`s: `theReceiverIsKilledStep` is a `childDied` and
+`theJoinIntoTheDeadSender` is a `join`.
+
+**None of that is what §10.129 was asking for**, which is the whole of §10.133: a
+step *into* a world is not a run that *reaches* it. Every world in this file
+fails `ProcessPlan.UnkilledRootAt`, and `every_run_holds_an_unkilled_root` is why
+that settles it. An earlier version of this header said `sentWithDeadSender` had
+no step into it at all — a reviewer refuted that by building the `join` now
+recorded below, in the same breath as the header cited §10.133 for the
+distinction it was failing to draw. §10.142.
 -/
 
 /-- The wire's receiver before it died: the same incarnation, running. -/
@@ -619,6 +628,75 @@ def theReceiverIsKilledStep :
     serverPlan.NetworkStep sentWithLiveReceiver sentWithDeadReceiver where
   transition := .childDied .connection wire.receiver.instanceId .providerLost
     (fun _ _ _ => True) the_live_receiver_is_a_child the_receiver_is_killed
+  admissible := by intro _ nothing; cases nothing
+  historyExact := rfl
+
+/-! #### And a step into the fourth, which an earlier version said had none
+
+The claim §10.133 calls literally false, restated in a section header above and
+refuted by a reviewer who built the step. It is a fixture now, so restating it
+costs a build. §10.142.
+-/
+
+/-- `sentWithDeadSender`, with a terminated child still to be collected. -/
+noncomputable def deadSenderWithACorpseToCollect : ServerWorld :=
+  { sent with
+      instances := fun kind current =>
+        match kind, current with
+        | .listener, _ => some deadListener
+        | .connection, n => if n = 7 then some Instances.finished else none }
+
+theorem deadSenderWithACorpseToCollect_slot :
+    deadSenderWithACorpseToCollect.instances .connection wire.receiver.instanceId
+      = some Instances.finished := rfl
+
+/--
+**A `join` reaches `sentWithDeadSender`.**
+
+Its scope is the connection's slot and never names the listener's, so the dead
+root is simply carried across — which is why `dying_was_supervised` has nothing
+to say here. That theorem refuses a step that *kills* a parentless instance; this
+step kills nothing and collects a child that had already terminated.
+
+So "no step reaches this world" was never the claim, and
+`sentWithDeadSender_is_no_world_of_a_run` was always the one that mattered: the
+world fails `UnkilledRootAt` whatever reaches it, and no *run* is ever in it.
+-/
+theorem the_corpse_is_collected :
+    serverPlan.Joins deadSenderWithACorpseToCollect sentWithDeadSender .connection
+      wire.receiver.instanceId ⟨()⟩ where
+  wasTerminated := ⟨Instances.finished, deadSenderWithACorpseToCollect_slot, rfl, rfl⟩
+  wasChild := by
+    intro incarnation found
+    rw [deadSenderWithACorpseToCollect_slot] at found
+    injection found with same
+    rw [← same]
+    intro empty
+    cases empty
+  nowFree := rfl
+  scope := by
+    intro fragment outside
+    cases fragment with
+    | instanceState kind current =>
+      cases kind with
+      | listener =>
+        show deadSenderWithACorpseToCollect.instances .listener current
+          = sentWithDeadSender.instances .listener current
+        rfl
+      | connection =>
+        show deadSenderWithACorpseToCollect.instances .connection current
+          = sentWithDeadSender.instances .connection current
+        simp only [deadSenderWithACorpseToCollect, sentWithDeadSender]
+        split
+        · rename_i isSeven
+          exact absurd (by rw [isSeven]; rfl) outside
+        · rfl
+    | _ => rfl
+
+/-- And it is a step. -/
+def theJoinIntoTheDeadSender :
+    serverPlan.NetworkStep deadSenderWithACorpseToCollect sentWithDeadSender where
+  transition := .join .connection wire.receiver.instanceId ⟨()⟩ the_corpse_is_collected
   admissible := by intro _ nothing; cases nothing
   historyExact := rfl
 

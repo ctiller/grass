@@ -5592,8 +5592,14 @@ said "`WellFormed`'s eight clauses" in two places and
 `sharedInvariantHolds` and the prose count did not move — my own commit, and the
 same defect this branch has spent eight rounds on, sitting on `main` the whole
 time. `Tests/Process/PreservationFixtures.lean` had "all six clauses" for the
-same reason. All four are now phrased without a number, since the list is one
-that grows by design.
+same reason.
+
+**And that repair was half done**, which §10.142 records: deleting the word
+"eight" left "Six … The remaining two" standing in one passage and six bullets
+plus "The other two" in the other, so the arithmetic still partitioned nine
+clauses into eight — and `sharedInvariantHolds` fits neither of the two
+categories the prose offers, since it comes from an author-supplied field rather
+than from emptiness or from the root.
 
 **What the reviewer also confirmed, which is worth keeping.** `StepsTo` is the
 snoc-form reflexive-transitive closure of `NetworkStep`, so
@@ -5603,6 +5609,53 @@ over transitions and the inductive hypothesis lands on the prefix.
 and `InstanceId .listener` being `Unit` forces `start.rootSlot` to `()` for
 *every* start rather than only for `withRoot`. Both were things a reader could
 have doubted from the statements alone.
+
+### 10.142 The refuted claim came back in a section header, and a step now refuses it
+
+A ninth fresh reviewer, and the first to break something in the source rather
+than only in the prose about it. **No defect in a proof, for the ninth time**,
+but two findings that matter and one that costs a fixture.
+
+**The claim §10.133 calls literally false was restated in a section header, and
+the reviewer built the counterexample.** The header over the step fixtures said
+`sentWithDeadSender` "has none" — no step into it at all. §10.133 records that
+"'There is no chain' into `sentWithDeadSender` was literally false — a `join` at
+a connection slot reaches it from a world already holding the dead root, since
+its scope never names the listener." The reviewer wrote that `join` and checked
+it. Worse, the header cited §10.133 in the same sentence, for exactly the
+step-versus-run distinction it was failing to draw, and offered
+`dying_was_supervised` as its justification — a theorem about steps that *kill*,
+which a `join` does not.
+
+`the_corpse_is_collected` and `theJoinIntoTheDeadSender` are now fixtures, so
+restating the claim costs a build rather than a reviewer. That is the pattern
+worth generalising from this whole sequence: a sentence that a reviewer had to
+refute by writing Lean should become the Lean.
+
+**And §10.139's own repair was half done.** It reported that four "eight clauses"
+miscounts were "now phrased without a number". Deleting the word left "Six … The
+remaining two" standing in one passage and six bullets plus "The other two" in
+the other, so the arithmetic still partitioned nine clauses into eight — and the
+ninth, `sharedInvariantHolds`, fits neither of the two categories the prose
+offers, since it comes from `ExactInitialNetwork.sharedInvariantAtStart`, an
+author-supplied field, rather than from emptiness or from the root. The
+enumeration was not merely stale; it had no place to put the clause §10.128
+added. Both passages now name it, and
+`Grass/Process/Network/WellFormedness.lean`'s "the sixth clause" is gone too.
+
+**Two smaller ones, both counts in the wrong place.** `UnkilledRootAt`'s
+docstring — in `Grass/` — counted refusal theorems in `Tests/`, so adding a sixth
+fixture would silently falsify a core-library docstring. And the sentence opening
+the step section still said the four before-worlds are "built by hand rather than
+reached by a step" while the section under it gives each one a step. That
+correction had been appended below the sentence rather than replacing it, which
+is §10.134's title for the third time.
+
+**A note on the tooling, since it bit twice in one commit.** Writing the literal
+token that opens a section comment inside a doc comment does not escape it: Lean
+nests doc comments, so the file stopped parsing. c-x86's stricter gate parses doc
+blocks with nesting for the same reason. The sentence describing the defect could
+not name the syntax it was about.
 
 ## 11. The authoring facade
 

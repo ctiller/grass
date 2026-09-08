@@ -48,7 +48,7 @@ incarnation` at all. Local adversarial review caught the miscount.
 the bridge it needs is `ProcessParentage.isRoot_of_knownParent_none`: root-ness
 is visible in `knownParent`, which is what a carried incarnation agrees on.
 
-The sixth clause, `ReroutesLand`, is about ledgers rather than instances and is
+`ReroutesLand` is about ledgers rather than instances and is
 proved separately, from two facts. `ledgers_extend` is the easy one: every
 constructor that touches an escrow ledger carries `LedgerExtends`, so `created`
 only grows and an arrival that had landed stays landed.
