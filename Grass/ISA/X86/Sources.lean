@@ -25,10 +25,19 @@ than by HTTP status, for the reasons in `Grass.Cite.RetrievalStatus`.
   paragraph said it "renders a 404", which is what a browser shows and not what
   the server says.
 
-  The distinction is the whole trap. Any liveness check keyed on status codes
-  reports this URL healthy, so the document could be recorded as retrievable
-  by a probe that never rendered the page. Re-checking it means fetching the
-  body and reading it, not asking whether the request succeeded.
+  The distinction is the whole trap, and this corpus is already built against
+  it. A liveness check keyed on status codes reports this URL healthy; the
+  `livenessProbe` field exists so that it is not. `amd64Apm409` carries
+  `"AMD64 Architecture Programmer"`, which does not appear anywhere in the 2575
+  bytes, so the probe correctly reports the document absent while the request
+  succeeds. That was verified rather than assumed: the body was fetched and
+  searched.
+
+  The same check was run on the other side on the same day. `intelSdm092`'s
+  probe, `"IA-32 Architectures Software Developer"`, is present in a 153 KB page
+  titled "Manuals for Intel® 64 and IA-32 Architectures". Intel is live, and it
+  is live by the same test that shows AMD is not -- which is the only way the
+  two results are comparable.
 
   Retried today across every location this corpus knows of. The `/v/u/en-US/`
   scheme is dead for individual volumes too -- `24594_3.37`, which search
@@ -67,7 +76,7 @@ namespace Grass.ISA.X86
 open Grass.Core Grass.Cite
 
 /-- The date the sources below were checked. -/
-def sourceCheckDate : Date := ⟨2026, 9, 2⟩
+def sourceCheckDate : Date := ⟨2026, 9, 7⟩
 
 /-- The date the Intel anchors were followed inside the manual.
 
