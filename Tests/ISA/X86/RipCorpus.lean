@@ -5,10 +5,10 @@ import Tests.ISA.X86.CorpusCommon
 
 The RIP-relative form is the one this profile cannot check against an
 assembler, and it is the form Spike 1 depends on most: every import call and the
-payload address go through `mod=00, rm=101`. `Tools/x86-nasm-differential.py`
-skips it because NASM computes a RIP displacement from a target address and an
-instruction length, so a source line asserting a literal displacement would test
-NASM's arithmetic rather than Grass's encoding.
+payload address go through `mod=00, rm=101`. `tools/grass-tools`'s
+`x86-nasm-differential` skips it because NASM computes a RIP displacement from a
+target address and an instruction length, so a source line asserting a literal
+displacement would test NASM's arithmetic rather than Grass's encoding.
 
 A disassembler does not have that problem, and it checks something an assembler
 could not: **NDISASM prints the absolute target it computed**, so comparing
@@ -33,7 +33,8 @@ worth more than a byte comparison here:
 - getting the displacement's byte order backwards, which moves the target by a
   large and obvious amount.
 
-`Tools/x86-ndisasm-differential.py` consumes this and checks each row.
+`tools/grass-tools`'s `x86-ndisasm-differential` consumes this and checks each
+row.
 -/
 
 namespace Grass.Tests.ISA.X86.Rip

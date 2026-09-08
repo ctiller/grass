@@ -23,6 +23,10 @@ Desktop.ini
 # Native helper build products
 target/
 
-# Python bytecode from the tools under Tools/
+# Python bytecode. No Python is checked in any more -- the validation tools that
+# used to be scripts are Rust binaries in tools/grass-tools -- but these rules
+# stay so that a throwaway script in someone's working tree cannot leave
+# committable droppings, and so an old checkout's __pycache__ does not surface as
+# untracked noise after the port.
 __pycache__/
 *.pyc

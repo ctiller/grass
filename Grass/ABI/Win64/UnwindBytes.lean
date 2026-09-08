@@ -21,9 +21,9 @@ registered.
 
 What this module has instead is stronger than a citation and weaker than a
 proof: some of the layouts are confirmed against bytes emitted by Microsoft's
-own toolchain. `Tools/win64-unwind-differential.py` assembles MASM `PROC FRAME`
-prologues with `ml64.exe`, reads the `.xdata` section straight out of the COFF
-object, and compares it byte for byte against `UnwindInfo.toBytes`.
+own toolchain. `tools/grass-tools`'s `win64-unwind-differential` assembles MASM
+`PROC FRAME` prologues with `ml64.exe`, reads the `.xdata` section straight out
+of the COFF object, and compares it byte for byte against `UnwindInfo.toBytes`.
 
 An earlier version of this paragraph described a different tool -- one that
 compiled C with `cl.exe`, extracted `.pdata` as well, and decoded each
@@ -1038,9 +1038,9 @@ with `OpInfo = 3` for 32 bytes (`32`), then the three pushes ending at 6, 4 and
 2 carrying register numbers 14, 13 and 12 in `OpInfo` (`E0`, `D0`, `C0`) -- the
 four-bit numbers, so the `REX.B` bit is part of them.
 
-`Tools/win64-unwind-differential.py` checks this shape against `.xdata` that
-Microsoft's own assembler generates from the same prologue written with MASM's
-`.pushreg`/`.allocstack` directives.
+`tools/grass-tools`'s `win64-unwind-differential` checks this shape against
+`.xdata` that Microsoft's own assembler generates from the same prologue written
+with MASM's `.pushreg`/`.allocstack` directives.
 -/
 theorem spike1UnwindInfo_toBytes :
     spike1UnwindInfo.toBytes =

@@ -171,8 +171,8 @@ function whose frame is established by `lea rbp, [rsp+96]` gets frame register
 differ, so the byte cannot be the register.
 
 `opInfo` below writes the register, so it reproduces one generator and not the
-other. That is the honest scope of
-`Tools/win64-unwind-differential.py`'s exactness, and the earlier claim that
+other. That is the honest scope of what `tools/grass-tools`'s
+`win64-unwind-differential` establishes, and the earlier claim that
 "matching the vendor's generator makes the differential exact" was true only
 against the generator this corpus happens to use. `docs/VALIDATION.md` section 2
 asks for the disagreement to be preserved rather than smoothed over; preserving

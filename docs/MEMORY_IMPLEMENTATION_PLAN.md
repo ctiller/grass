@@ -102,7 +102,7 @@ addresses would alias, so the bound is not decoration.
 The build must also gate on what it claims to check. `warningAsError` is set in
 `lakefile.toml`, because without it a declaration using `sorry` is a warning and
 `lake build` exits zero; and `.github/workflows/library.yml` runs both the build
-and `Tools/AxiomAudit.lean`, which implements the transitive audit
+and `tools/grass-tools`'s `axiom-audit`, which implements the transitive audit
 [FOUNDATION.md](FOUNDATION.md) §3 demands over every `Grass` declaration. Before
 these, a green build carried no information.
 

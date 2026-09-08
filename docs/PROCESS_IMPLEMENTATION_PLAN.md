@@ -4528,17 +4528,23 @@ requirements, and it may not be consumed as a complete `ProcessPlan` by
 `e-reviewer:45`, finding `tools-audit-coverage-gaps`, and the second-largest
 claims defect this milestone has recorded after §10.105's twenty.
 
-Main's `c-x86:4` added a coverage guard to `Tools/AxiomAudit.lean` and
-`Tools/DeclNames.lean`: both walk `Grass/` on disk and fail if a module exists
-that they do not import. This branch introduces fifty modules under
-`Grass/Process/` and `Grass/Specification/`, none of them imported by either
-tool, so after the merge both audits failed on coverage rather than on content.
-Adding the fifty imports is mechanical.
+Main's `c-x86:4` added a coverage guard to the two Lean audit tools then living
+under `Tools/`, the axiom audit and the declaration-name dump: both walked
+`Grass/` on disk and failed if a module existed that they did not import. This
+branch introduces fifty modules under `Grass/Process/` and
+`Grass/Specification/`, none of them imported by either tool, so after the merge
+both audits failed on coverage rather than on content. Adding the fifty imports
+is mechanical. (Both are now `tools/grass-tools` binaries — `axiom-audit`, and
+the same walk folded into `docstring-audit` — and each generates its import list
+from the disk walk, so a hand-written list can no longer fall behind at all.
+That is a stronger fix than the guard described here, which only reported the
+drift.)
 
 **What the coverage gap was hiding is the entry.** With the fifty modules
-finally in scope, `Tools/DocstringAudit.py` reported **104 unbacked claims**,
-every one of them in a module this milestone wrote. The rule is
-`docs/MEMORY_IMPLEMENTATION_PLAN.md` §3.10: a comment using "ensures",
+finally in scope, the docstring audit — now `tools/grass-tools`'s
+`docstring-audit` — reported **104 unbacked claims**, every one of them in a
+module this milestone wrote. The rule is `docs/MEMORY_IMPLEMENTATION_PLAN.md`
+§3.10: a comment using "ensures",
 "prevents", "cannot", "only", or "preserves" must name the enforcing type or
 theorem, or be rewritten as an intended invariant or an open obligation. The
 tool checks names against the build, so a fabricated theorem name fails.

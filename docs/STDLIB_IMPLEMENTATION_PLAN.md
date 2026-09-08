@@ -513,9 +513,9 @@ named `String.toByteArray` as a "model" beneath the extern; in fact
 `String.toByteArray` carries the same `@[extern "lean_string_to_utf8"]`, and
 `Vec.toHostBytes`/`ofHostBytes` add `lean_array_mk` and `lean_array_to_list`, so
 at least three externs sit between these theorems and running bytes.
-`Tools/AxiomAudit.lean` cannot see any of them, since an `@[extern]` is not an
-axiom — so a green audit is not evidence about this boundary, and §3.11's
-criterion 2 must not be read as if it were. Open item 12 raises the missing TCB
+`tools/grass-tools`'s `axiom-audit` cannot see any of them, since an `@[extern]`
+is not an axiom — so a green audit is not evidence about this boundary, and
+§3.11's criterion 2 must not be read as if it were. Open item 12 raises the missing TCB
 ledger that [FOUNDATION.md](FOUNDATION.md) §3 actually asks for.
 
 **And none of those externs is the assumption the spikes actually rest on.** They
@@ -608,13 +608,17 @@ S1 is complete when all of the following hold. The first four hold today.
 
 1. `lake build` is green with `warningAsError = true`, so no declaration uses
    `sorry`.
-2. `lake env lean Tools/AxiomAudit.lean` reports no axiom outside the
+2. `tools/grass-tools`'s `axiom-audit` reports no axiom outside the
    [FOUNDATION.md](FOUNDATION.md) §3 allowlist, with **every** module this plan
-   owns in its coverage set — `Vec`, `HostBytes`, `Text`, and `Order`. The
-   criterion previously named only `Vec` and stopped tracking the library as it
-   grew. It is also not evidence about the `@[extern]` boundary of §3.9, because
-   an `@[extern]` is not an axiom.
-3. `python Tools/DocstringAudit.py` reports no unbacked claim.
+   owns in its coverage set — `Vec`, `HostBytes`, `Text`, and `Order`. Run it as
+   `cargo run --release --locked --manifest-path tools/grass-tools/Cargo.toml --bin axiom-audit`;
+   `.github/workflows/library.yml` runs the same binary from a release build, so
+   a local run and the gate are the same program. The criterion previously named
+   only `Vec` and stopped tracking the library as it grew. It is also not
+   evidence about the `@[extern]` boundary of §3.9, because an `@[extern]` is not
+   an axiom.
+3. `tools/grass-tools`'s `docstring-audit`, invoked the same way with
+   `--bin docstring-audit`, reports no unbacked claim.
 4. **Every** fixture under `Tests/Std/` elaborates, including all `#guard_msgs`
    rejection cases. This criterion previously named one of eight.
 5. A reviewer distinct from this agent has merged it, per
@@ -845,12 +849,12 @@ reader will want a reason for:
    plan's, and it is adopted because it survives the attack that killed the
    previous two.
 
-   **And it is now checked by a program.** `Tools/CoverageAudit.lean` walks the
-   environment for every `def` in `Grass.Std.Logical.Vec` returning a `Vec` and
-   reports any without both laws; it runs in CI beside the axiom and docstring
-   audits. That is the response to the deepest point review made about the rule:
-   it had been rewritten three times, and each version was violated in the very
-   commit that stated it — the coverage rule itself shipped alongside `Vec.sum`
+   **And it is now checked by a program.** `tools/grass-tools`'s
+   `coverage-audit` walks the environment for every `def` in
+   `Grass.Std.Logical.Vec` returning a `Vec` and reports any without both laws;
+   it runs in CI beside the axiom and docstring audits. That is the response to
+   the deepest point review made about the rule: it had been rewritten three
+   times, and each version was violated in the very commit that stated it — the coverage rule itself shipped alongside `Vec.sum`
    and `Vec.count`, both lawless, with `sum` on the right-hand side of
    `Vec.length_flatten` where every consumer of that law would meet it. Three
    times is not carelessness; it is what an unenforced rule does at this rate of
@@ -900,13 +904,20 @@ reader will want a reason for:
    rather than left implicit. §3.9.
 
 Found in a shared tool rather than in this library, and reported rather than
-changed: `Tools/DocstringAudit.py` defines `SELF_NAMING` to exempt a theorem's
-own docstring — its module comment says "a theorem's own docstring is exempt,
-because the theorem beneath it *is* the enforcement" — but the constant is never
-used, so that exemption is not implemented and the gate is stricter than it
-documents. This plan did not change it. Loosening a gate every agent depends on
+changed: the docstring audit documented an exemption for a theorem's own
+docstring — "a theorem's own docstring is exempt, because the theorem beneath it
+*is* the enforcement" — while the `SELF_NAMING` pattern that would have
+implemented it was defined and never used, so the gate was stricter than it
+documented. This plan did not change it. Loosening a gate every agent depends on
 is not a unilateral edit, and the workaround is cheap: name the theorem in its
 own docstring, which reads better anyway.
+
+The port to `tools/grass-tools`'s `docstring-audit` settled it in that same
+direction rather than the other one: the dead constant is gone and the header
+now states that the exemption is deliberately not reinstated, because a
+theorem's docstring routinely claims more than its statement proves. So the
+discrepancy is closed, and the behaviour this section worked around is the
+documented behaviour.
 
 Open, with the owner each is with:
 
@@ -1005,9 +1016,10 @@ Open, with the owner each is with:
    external-reality assumptions to be "recorded in the TCB ledger"; no such file
    exists in the repository. This library's `@[extern]` dependencies — at least
    `lean_string_to_utf8`, `lean_array_mk`, and `lean_array_to_list` — are
-   recorded in a module comment as a placeholder. `Tools/AxiomAudit.lean` cannot
-   see them, since an `@[extern]` is not an axiom, so a green audit is not
-   evidence about that boundary. Raised with the coordinator. §3.9.
+   recorded in a module comment as a placeholder. `tools/grass-tools`'s
+   `axiom-audit` cannot see them, since an `@[extern]` is not an axiom, so a
+   green audit is not evidence about that boundary. Raised with the coordinator.
+   §3.9.
 13. **The `ByteSeq` retirement**, which is an edit to `Grass/Memory/**` and
    therefore `c-mem`'s to make. §4.1.
 

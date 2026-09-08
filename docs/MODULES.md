@@ -56,7 +56,7 @@ Grass/
     Http2Win64/
     CubeWin64Vulkan/
 Tests/
-Tools/
+tools/           validation and audit binaries, and the agent bus
 docs/
 references/
 ```

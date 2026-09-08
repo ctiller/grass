@@ -930,6 +930,15 @@ fn build_report(
 /// CPython's Windows release tables, so that the identification line reads the
 /// same as the Python original's on the same machine. The lookup takes the
 /// first entry whose version is at most the running one.
+///
+/// Only `os_line` reads these, and only its `#[cfg(windows)]` arm, so a
+/// non-Windows build has nothing to name a build number with. They are compiled
+/// under `test` as well so the boundary cases stay checked on every platform the
+/// suite runs on: the lookup is ordinary portable arithmetic, and the reason it
+/// is worth testing -- an off-by-one at 22000 renames Windows 10 to 11 in a
+/// record `docs/VALIDATION.md` section 3 requires -- has nothing to do with the
+/// host.
+#[cfg(any(windows, test))]
 const CLIENT_RELEASES: [((u32, u32, u32), &str); 11] = [
     ((10, 1, 0), "post11"),
     ((10, 0, 22000), "11"),
@@ -944,6 +953,8 @@ const CLIENT_RELEASES: [((u32, u32, u32), &str); 11] = [
     ((5, 0, 0), "2000"),
 ];
 
+/// The server half of the same tables, on the same terms as [`CLIENT_RELEASES`].
+#[cfg(any(windows, test))]
 const SERVER_RELEASES: [((u32, u32, u32), &str); 11] = [
     ((10, 1, 0), "post2025Server"),
     ((10, 0, 26100), "2025Server"),
@@ -958,6 +969,9 @@ const SERVER_RELEASES: [((u32, u32, u32), &str); 11] = [
     ((5, 0, 0), "2000Server"),
 ];
 
+/// The release name for a build number, on the same terms as
+/// [`CLIENT_RELEASES`].
+#[cfg(any(windows, test))]
 fn release_for(version: (u32, u32, u32), is_client: bool) -> &'static str {
     let table: &[((u32, u32, u32), &str)] = if is_client {
         &CLIENT_RELEASES

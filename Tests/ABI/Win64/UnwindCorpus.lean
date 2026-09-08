@@ -19,9 +19,10 @@ Grass defect than an oracle defect. It is still not authority --
 ## What a row checks
 
 Each row carries a MASM prologue and the bytes this model says its `.xdata`
-should be. `Tools/win64-unwind-differential.py` assembles the prologue and
-compares. That catches more than the byte layout, because the model's
-`PlacedOp.codeOffset` values are computed here from instruction *lengths*:
+should be. `tools/grass-tools`'s `win64-unwind-differential` assembles the
+prologue and compares. That catches more than the byte layout, because the
+model's `PlacedOp.codeOffset` values are computed here from instruction
+*lengths*:
 
 * a `push` of `r12`-`r15` needs `REX.B` and is two bytes, while a push of
   `rbx`, `rbp`, `rsi` or `rdi` is one;

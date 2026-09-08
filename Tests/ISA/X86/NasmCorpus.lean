@@ -5,7 +5,8 @@ import Tests.ISA.X86.CorpusCommon
 
 Emits, for every addressing form this profile can encode, the bytes Grass
 produces and the NASM source line that should assemble to them.
-`Tools/x86-nasm-differential.py` feeds the source to NASM and compares.
+`tools/grass-tools`'s `x86-nasm-differential` feeds the source to NASM and
+compares.
 
 This is `docs/VALIDATION.md` §2 layer 2 — "compare encoders, decoders,
 assemblers, disassemblers, loaders, emulators, and API observations where
@@ -28,7 +29,7 @@ With a displacement NASM cannot shorten, the two agree exactly and a byte
 comparison is meaningful. A displacement of `8` would make NASM choose `disp8`
 and produce a legitimately different, shorter encoding; that is a real
 difference in policy, not a defect, and it is excluded here rather than papered
-over. `Tools/x86-nasm-differential.py` documents the same choice.
+over. `tools/grass-tools`'s `x86-nasm-differential` documents the same choice.
 
 ## Coverage
 
