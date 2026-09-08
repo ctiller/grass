@@ -87,12 +87,14 @@ theorem takeExactSized_realizes (count : Nat) :
       simp [fixedBytesSemantics, short, eq_comm]
     · have enough : count ≤ input.length := Nat.le_of_not_gt short
       simp [takeExactSized, enough, fixedBytesSemantics, short]
-  · intro input error
+  · intro input error parsed
     by_cases short : input.length < count
-    · rw [takeExactSized_short short]
-      simp [fixedBytesSemantics]
+    · rw [takeExactSized_short short] at parsed
+      contradiction
     · have enough : count ≤ input.length := Nat.le_of_not_gt short
-      simp [takeExactSized, enough, fixedBytesSemantics]
+      simp [takeExactSized, enough] at parsed
+  · intro input errorClass invalid
+    simp [fixedBytesSemantics] at invalid
   · intro input value rest success
     by_cases short : input.length < count
     · rw [takeExactSized_short short] at success

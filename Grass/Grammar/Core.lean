@@ -173,7 +173,38 @@ theorem consumesPrefix {α : Type} {format : Format α}
       rcases tailPrefix with ⟨tailBytes, rfl⟩
       exact ⟨headBytes ++ tailBytes, by simp [Vec.append_assoc]⟩
   | refine derivation accepted refinedPrefix => exact refinedPrefix
+  | lift derivation liftedPrefix => exact liftedPrefix
   | iso derivation mappedPrefix => exact mappedPrefix
+
+/-- The outer repeat constructor exposes its exact fixed-item consumption law
+without requiring unsafe inversion of `Format`'s result-type index. -/
+theorem repeatConsumedLengthShape {α : Type} {format : Format α}
+    {input : Std.Logical.ByteArray} {value : α} {rest : Std.Logical.ByteArray}
+    (derivation : Derives format input value rest) :
+    match format with
+    | .repeat count item => ∀ itemWidth,
+        (∀ {itemInput itemValue itemRest},
+          Derives item itemInput itemValue itemRest →
+            itemInput.length = itemWidth + itemRest.length) →
+        input.length = count * itemWidth + rest.length
+    | _ => True := by
+  induction derivation with
+  | pure => trivial
+  | byte => trivial
+  | seq => trivial
+  | choiceLeft => trivial
+  | choiceRight => trivial
+  | repeatZero => simp
+  | repeatSucc head tail _ tailLength =>
+      simp only
+      intro itemWidth itemLength
+      have headLength := itemLength head
+      have remainingLength := tailLength itemWidth itemLength
+      rw [Nat.succ_mul]
+      omega
+  | refine => trivial
+  | lift => trivial
+  | iso => trivial
 
 /-- Prefix-format derivations are stable under an arbitrary appended suffix.
 The parsed value is unchanged and the exact residual bytes gain that suffix.
@@ -228,6 +259,15 @@ theorem Derives.lift_inner {α β : Type} {inner : Format α}
     Derives inner input (forget value) rest := by
   cases derivation with
   | lift innerDerivation => exact innerDerivation
+
+/-- Eliminate an isomorphism derivation back to its underlying value. -/
+theorem Derives.iso_inner {α β : Type} {inner : Format α}
+    {isomorphism : Isomorphism α β} {input rest : Std.Logical.ByteArray}
+    {value : β} (derivation : Derives (.iso inner isomorphism) input value rest) :
+    Derives inner input (isomorphism.backward value) rest := by
+  cases derivation with
+  | iso innerDerivation =>
+      simpa only [isomorphism.backward_forward] using innerDerivation
 
 /-- Promote a value invariant into the public result type of a format. This is
 distinct from `Format.refine`, which filters while retaining the same value
