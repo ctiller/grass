@@ -54,6 +54,19 @@ def good : Graph Nat Terminal where
 
 example : good.WellFormed := by decide
 
+example : good.WellFormed ↔
+    ((good.blockIds.Nodup ∧
+      (good.findBlock? good.entry).isSome = true) ∧
+      (∀ block ∈ good.blocks, Graph.BlockStructurallyClosed block)) ∧
+      good.TargetsResolved :=
+  good.wellFormed_iff
+
+example : Graph.BlockStructurallyClosed entryBlock :=
+  good.blockClosed_of_wellFormed (by decide) entryBlock (by simp [good])
+
+example : good.TargetsResolved :=
+  good.targetsResolved_of_wellFormed (by decide)
+
 example : good.findBlock? (blockId "entry") = some entryBlock := by rfl
 
 example (block : Block Nat Terminal)

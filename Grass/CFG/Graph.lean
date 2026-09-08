@@ -173,6 +173,20 @@ def targetsResolved (graph : Graph State Terminal) : Bool :=
       | .block id => (graph.findBlock? id).isSome
       | .terminal _ => true
 
+/-- Proposition-level structural conditions checked locally for one block. -/
+def BlockStructurallyClosed (block : Block State Terminal) : Prop :=
+  ((block.contract.WellFormed ∧
+    (outgoingTags block).Nodup) ∧
+    (∀ edge ∈ block.outgoing, edge.exit ∈ block.contract.exitTags)) ∧
+    (∀ exit ∈ block.contract.exits, exit.tag ∈ outgoingTags block)
+
+/-- Proposition-level direct-target closure for every structural edge. -/
+def TargetsResolved (graph : Graph State Terminal) : Prop :=
+  ∀ block ∈ graph.blocks, ∀ edge ∈ block.outgoing,
+    (match edge.target with
+    | .block id => (graph.findBlock? id).isSome
+    | .terminal _ => true) = true
+
 /-- Executable structural closure check.
 
 This checks exactly the information available before symbolic execution:
@@ -195,19 +209,44 @@ def WellFormed (graph : Graph State Terminal) : Prop := graph.wellFormed = true
 instance (graph : Graph State Terminal) : Decidable graph.WellFormed :=
   inferInstanceAs (Decidable (graph.wellFormed = true))
 
-/-- Public decomposition of structural graph closure.  Certificate consumers
-use these four facts rather than unfolding the checker implementation. -/
+/-- Public proposition-level decomposition of structural graph closure. -/
 @[simp] theorem wellFormed_iff (graph : Graph State Terminal) :
     graph.WellFormed ↔
       ((graph.blockIds.Nodup ∧
         (graph.findBlock? graph.entry).isSome = true) ∧
-        (graph.blocks.all fun block =>
-          block.contract.wellFormed &&
-          outgoingUnique block &&
-          edgesDeclared block &&
-          exitsCovered block) = true) ∧
-        graph.targetsResolved = true := by
-  simp [WellFormed, wellFormed]
+        (∀ block ∈ graph.blocks, BlockStructurallyClosed block)) ∧
+        graph.TargetsResolved := by
+  simp [WellFormed, wellFormed, BlockStructurallyClosed, TargetsResolved,
+    BlockContract.WellFormed, BlockContract.wellFormed, outgoingUnique,
+    edgesDeclared, exitsCovered, targetsResolved, BlockContract.declaresExit,
+    BlockContract.exitTags]
+
+/-- `Graph.blockIdsNodup_of_wellFormed` projects unique structural identities. -/
+theorem blockIdsNodup_of_wellFormed
+    (graph : Graph State Terminal) (closed : graph.WellFormed) :
+    graph.blockIds.Nodup :=
+  (graph.wellFormed_iff.mp closed).1.1.1
+
+/-- `Graph.entryResolved_of_wellFormed` projects entry lookup success. -/
+theorem entryResolved_of_wellFormed
+    (graph : Graph State Terminal) (closed : graph.WellFormed) :
+    (graph.findBlock? graph.entry).isSome = true :=
+  (graph.wellFormed_iff.mp closed).1.1.2
+
+/-- `Graph.blockClosed_of_wellFormed` projects the proposition-level local
+conditions for any structural block. -/
+theorem blockClosed_of_wellFormed
+    (graph : Graph State Terminal) (closed : graph.WellFormed)
+    (block : Block State Terminal) (member : block ∈ graph.blocks) :
+    BlockStructurallyClosed block :=
+  (graph.wellFormed_iff.mp closed).1.2 block member
+
+/-- `Graph.targetsResolved_of_wellFormed` projects proposition-level target
+closure for every structural edge. -/
+theorem targetsResolved_of_wellFormed
+    (graph : Graph State Terminal) (closed : graph.WellFormed) :
+    graph.TargetsResolved :=
+  (graph.wellFormed_iff.mp closed).2
 
 end Graph
 

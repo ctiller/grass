@@ -127,6 +127,11 @@ Exit criteria:
 `Graph.hasDirectEdgeTo_eq_true_iff` and `Graph.mem_predecessors_iff` expose the
 structural witnesses behind executable predecessor discovery: a reported source
 is an actual graph block carrying an actual direct edge to the requested target.
+`Graph.wellFormed_iff` eliminates the aggregate block and target Booleans into
+`BlockStructurallyClosed` and `TargetsResolved`, both quantified over the exact
+structural lists. Its four named projection theorems let certificate consumers
+recover identity uniqueness, entry resolution, local closure, and target closure
+without unfolding the executable checker.
 
 ### C1 — Joins, loops, calls, and stack shapes
 
