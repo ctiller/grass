@@ -469,7 +469,7 @@ mod tests {
             object_format: "sha1".to_string(),
             product_review_from: oid(root),
             merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: "1.2.3-no-build-ever-pinned-this".to_string(),
         }
     }
 
@@ -554,9 +554,9 @@ mod tests {
             accepted_nominations: BTreeSet::from([nomination.clone()]),
             decline_or_withdraw_or_reassign_status: ItemStatus::Open,
             findings: BTreeMap::new(),
-            authorizations: vec![],
-            merged: vec![],
-            reconciled: vec![],
+            authorizations: Default::default(),
+            merged: Default::default(),
+            reconciled: Default::default(),
         };
         state.reviews.insert(nomination.clone(), chain);
         state
@@ -608,7 +608,7 @@ mod tests {
             .get_mut(&root)
             .unwrap()
             .authorizations
-            .push(id.clone());
+            .insert(id.clone());
         id
     }
 
@@ -646,7 +646,7 @@ mod tests {
             .get_mut(&root)
             .unwrap()
             .merged
-            .push(id.clone());
+            .insert(id.clone());
         id
     }
 
@@ -687,7 +687,7 @@ mod tests {
             .get_mut(&root)
             .unwrap()
             .reconciled
-            .push(id.clone());
+            .insert(id.clone());
         id
     }
 

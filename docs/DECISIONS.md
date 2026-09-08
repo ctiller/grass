@@ -578,14 +578,25 @@ to imitate compiler-selected storage or CFG structure.
     requiring a different reviewer to accept. Only that reviewer may clear or
     explicitly supersede inherited findings. A published merge
     authorization remains an immutable candidate-specific verdict and can only
-    win or lose its pinned product compare-and-swap. If a reviewer disappears
+    win or lose its ordinary non-force push. If a reviewer disappears
     after winning but before its receipt, a bootstrap-authorized coordinator may
     reconcile only the already-demonstrable product-history fact.
-111. Product merge review is two-phase. `review.merge_authorized` pins the bus
-    state, previous `main`, reviewed commit, exact conflict-free merge commit,
-    passed checks, and reviewer before a non-force push. `review.merged` is the
-    post-push audit receipt, not retroactive authority. Main always receives a
-    reviewer-trailed merge commit, even where Git could fast-forward.
+111. Product merge review is two-phase. Active version two uses a combined
+    `review.merge_authorized` that pins the bus state, previous `main`, reviewed
+    commit, exact merge candidate, passed checks, and reviewer before a
+    non-force push; `review.merged` is the post-push audit receipt. The successor
+    schema splits immutable source approval from bounded candidate landing so
+    unrelated `main` advancement preserves substantive review. Every candidate
+    is still an exact two-parent reviewer-trailed object. Its tree is checked by
+    a host-independent parent-entry relation with exhaustive overlap disclosure,
+    not by cross-host reconstruction. Reviewers never edit candidate trees.
+    Losing a normal push reruns only landing checks; broader post-merge failures
+    receive a forward repair or reviewed revert. Protected landing checks are
+    selected only from the reviewed registry in `previous_main`. A dedicated
+    auditor records each post-merge run in a separate non-authoritative,
+    machine-readable observation; this cannot grant review or merge authority.
+    Active version two retains its combined full-rerun behavior until the
+    successor events and fixtures are reviewed and activated.
 112. Agent-bus V1 has complete bounded schemas in `AGENT_BUS_SCHEMA.md`, a
     65,536-byte event-line limit, causal same-agent offline references, explicit
     work reassignment, deterministic scope-race defaults, validation CI, and
@@ -596,10 +607,12 @@ to imitate compiler-selected storage or CFG structure.
     distinct. Missing/unreachable remote objects make linked claims
     `unverifiable`, not malformed; authority-bearing operations still fail
     closed until fetch and verification succeed. Present mismatches are invalid.
-114. Merge determinism is pinned by an explicit engine epoch. Reviewed
-    `merge_engine.activated` events upgrade the fleet without rewriting bootstrap
-    or historical authorizations. Each candidate names its epoch and uses fully
-    deterministic commit metadata, with cross-platform object-ID fixtures.
+114. Exact Git-version pinning and cross-host candidate reconstruction are
+    rejected. Historical version-two engine epochs remain readable diagnostics,
+    but successor authority binds the exact fetched candidate plus the
+    host-independent tree relation in Decision 111. A host needs ordinary Git
+    fetch/pull and non-force push; Git version cannot block bus reduction,
+    coordination, custody transfer, review, or landing.
 115. `agent.resumed` may transfer exclusive custody from the identity's latest
     own lifecycle event of any status or a coordinator retirement targeting it,
     so silent death while `active` does not strand the identity or its role.
@@ -823,11 +836,17 @@ to imitate compiler-selected storage or CFG structure.
     Facades re-export logical/signature modules only and never implementation,
     certificate, or aggregate bodies; their measured dependency cones are the
     deliberate public-re-export exception to the no-umbrella rule.
+    `Grass.Spec.*` is a distinct shallow authoring namespace, not an alias for
+    all of `Grass.Specification/**`. Its initial closed facade inventory is
+    `Console`, `Grammar`, `Graphics`, and `Resource`, corresponding exactly to
+    the spike imports. The specification/foundation workstream owns those
+    facade files while underlying domain signatures and implementations retain
+    their existing owners. A new facade requires demonstrated author demand and
+    dependency-cone review; the family is not an import-all surface.
     `Grass.Process` is specifically a bounded authoring facade, not an aggregate
     of every `Grass/Process/**` module. This resolves the three-way
     spike/foundation/module mismatch raised by `c-spike` while retaining the
     process layer's no-import-all invariant.
-
 ## Explicitly rejected shortcuts
 
 - bolting memory safety on after an instruction library exists;

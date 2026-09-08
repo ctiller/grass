@@ -335,7 +335,7 @@ lake env lean Tools/AxiomAudit.lean
 pwsh -NoProfile -File ./audit-trust.ps1
 pwsh -NoProfile -File ./check-doc-links.ps1
 pwsh -NoProfile -File ./check-spike-sources.ps1
-python Tools/DocstringAudit.py
+cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin docstring-audit
 git diff --check
 ```
 
