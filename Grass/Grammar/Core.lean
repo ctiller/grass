@@ -173,6 +173,7 @@ theorem consumesPrefix {α : Type} {format : Format α}
       rcases tailPrefix with ⟨tailBytes, rfl⟩
       exact ⟨headBytes ++ tailBytes, by simp [Vec.append_assoc]⟩
   | refine derivation accepted refinedPrefix => exact refinedPrefix
+  | lift derivation liftedPrefix => exact liftedPrefix
   | iso derivation mappedPrefix => exact mappedPrefix
 
 /-- Prefix-format derivations are stable under an arbitrary appended suffix.

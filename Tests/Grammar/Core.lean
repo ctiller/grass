@@ -45,4 +45,13 @@ example (first second : Byte) (suffix : Std.Logical.ByteArray) :
     (Derives.byte (fun _ => True) first Vec.empty trivial)
     (Derives.byte (fun _ => True) second suffix trivial)
 
+example (value : { _ : Byte // True }) (suffix : Std.Logical.ByteArray) :
+    ∃ consumed,
+      Vec.singleton value.1 ++ suffix = consumed ++ suffix := by
+  have derivation :
+      Derives (.lift (.byte fun _ => True) Subtype.val)
+        (Vec.singleton value.1 ++ suffix) value suffix :=
+    Derives.lift (Derives.byte (fun _ => True) value.1 suffix trivial)
+  exact derivation.consumesPrefix
+
 end Grass.Tests.Grammar
