@@ -1345,11 +1345,29 @@ end Vec
 ## Bytes
 
 `docs/STDLIB.md` §1 fixes `ByteArray := Vec Byte`. `Byte` itself is defined in
-`Grass/Std/Logical/Byte.lean`, and §1 groups the two; the name is sited here
-rather than there only because that module is still under `c-mem`'s declared
-temporary custody (`c-mem:1`), and this module's owner does not edit it before
-the handoff lands. Merging the two declarations is part of accepting that
-handoff and is tracked in `docs/STDLIB_IMPLEMENTATION_PLAN.md`.
+`Grass/Std/Logical/Byte.lean`, and §1 groups the two, so siting the name here
+splits a pair the specification writes together.
+
+**The reason this section used to give for that split is spent, and it was never
+the binding one.** It said the name is sited here because `Byte.lean` was under
+`c-mem`'s declared temporary custody (`c-mem:1`) and that this module's owner
+would not edit it before the handoff landed, so merging the two declarations was
+"part of accepting that handoff". The handoff landed on 2026-09-07 — offered as
+`c-mem:47`, accepted as `c-stdlib:19` — both modules have had one owner since,
+and the merge did not happen.
+
+What actually stands in the way is the import direction, which no handoff
+changes.
+`Vec.lean` imports `Byte.lean`, so declaring `ByteArray` beside `Byte` would
+need `Byte.lean` to import `Vec` — a cycle. Breaking the cycle means this module
+dropping its `Byte` import, which is defensible on its own terms, since `Vec α`
+is generic and uses nothing from `Byte` except to state this one abbreviation.
+The cost is that every module reaching `Byte` only through `Vec` then needs its
+own import, and those modules are not all this owner's: `g-build:83` already
+authorized the one in `Grass/Build/Cache/Key.lean` when this was last attempted.
+
+So it is a cross-owner change with no consumer asking for it, which is why it is
+an open item in `docs/STDLIB_IMPLEMENTATION_PLAN.md` rather than a pending edit.
 -/
 
 /--
