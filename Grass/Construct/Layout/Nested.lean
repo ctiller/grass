@@ -48,6 +48,26 @@ theorem contained (base parentSize : Nat) (range : ByteRange)
   · simp [translateRange, ByteRange.stop] at h ⊢
     omega
 
+/-- Translation by a common base preserves containment exactly. -/
+theorem contains (base : Nat) {outer inner : ByteRange}
+    (h : outer.Contains inner) :
+    (translateRange base outer).Contains (translateRange base inner) := by
+  constructor
+  · exact Nat.add_le_add_left h.1 base
+  · simpa only [stop] using Nat.add_le_add_left h.2 base
+
+/-- Translation by a common base preserves separation of sibling ranges. -/
+theorem disjoint (base : Nat) {left right : ByteRange}
+    (h : left.Disjoint right) :
+    (translateRange base left).Disjoint (translateRange base right) := by
+  rcases h with h | h | h | h
+  · exact Or.inl h
+  · exact Or.inr (Or.inl h)
+  · exact Or.inr (Or.inr (Or.inl (by
+      simpa only [stop, start] using Nat.add_le_add_left h base)))
+  · exact Or.inr (Or.inr (Or.inr (by
+      simpa only [stop, start] using Nat.add_le_add_left h base)))
+
 /-- `translateRange.aligned` preserves local alignment when the base is aligned too. -/
 theorem aligned {base : Nat} {range : ByteRange} {alignment : Nat}
     (baseAligned : IsAligned base alignment)
@@ -84,6 +104,10 @@ def byteRange (nested : NestedPlacement outer inner) : ByteRange :=
 @[simp] theorem byteRange_size (nested : NestedPlacement outer inner) :
     nested.byteRange.size = nested.child.field.repr.size := rfl
 
+@[simp] theorem byteRange_stop (nested : NestedPlacement outer inner) :
+    nested.byteRange.stop = nested.parent.offset + nested.child.byteRange.stop :=
+  translateRange.stop nested.parent.offset nested.child.byteRange
+
 /-- Inner well-formedness places the translated child inside its selected parent. -/
 theorem containedInParent (nested : NestedPlacement outer inner)
     (innerWellFormed : inner.WellFormed) :
@@ -114,6 +138,17 @@ theorem disjointOfParentDisjoint (nested : NestedPlacement outer inner)
     (h : other.Disjoint nested.parent.byteRange) :
     other.Disjoint nested.byteRange :=
   h.of_contains (nested.containedInParent innerWellFormed)
+
+/-- Two children translated through the same parent remain disjoint whenever
+their inner byte ranges are disjoint. -/
+theorem disjointOfChildDisjoint
+    (left right : NestedPlacement outer inner)
+    (sameParent : left.parent = right.parent)
+    (h : left.child.byteRange.Disjoint right.child.byteRange) :
+    left.byteRange.Disjoint right.byteRange := by
+  unfold byteRange
+  rw [sameParent]
+  exact translateRange.disjoint right.parent.offset h
 
 /-- Exact representation agreement composes the child's local alignment into an absolute one. -/
 theorem aligned (nested : NestedPlacement outer inner)
