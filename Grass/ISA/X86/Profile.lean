@@ -43,12 +43,18 @@ ledger reports it rather than implying otherwise:
 - `Ledger.releaseBlockers` is non-empty, because the AMD APM's recorded
   retrieval location is dead and the manual is `referenceOnly`. See
   `Grass/ISA/X86/Sources.lean`.
-- `Ledger.unconfirmedAnchors` is every anchor here, because none has been
-  followed inside the manual from this working copy. The Intel anchors are
-  section-level and written against the SDM's stable structure; the AMD anchors
-  are coarser where the subsection numbering was not verifiable, and each
-  locator names the heading text to search for rather than a table number,
-  because captions survive revisions and numbers do not.
+- `Ledger.unconfirmedAnchors` is the nine AMD anchors, not all eighteen. This
+  said every anchor was unconfirmed "because none has been followed inside the
+  manual from this working copy", which stopped being true once the Intel side
+  was followed: all nine Intel citations carry a confirmation date, and no AMD
+  citation does. The audit reports the same split -- nine of eighteen
+  unconfirmed -- so the header was contradicting the number printed beside it.
+  The AMD anchors cannot be followed at all while that manual's recorded
+  retrieval location is dead.
+  The Intel anchors are section-level and written against the SDM's stable
+  structure; the AMD anchors are coarser where the subsection numbering was not
+  verifiable, and each locator names the heading text to search for rather than
+  a table number, because captions survive revisions and numbers do not.
 
 What *is* proved here is what should hold regardless: the ledger is coherent,
 and it accounts for every rule this profile models. Confirming the anchors moves
