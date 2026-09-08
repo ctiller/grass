@@ -110,6 +110,20 @@ def importOne (input : ByteSeq) (targets : TargetEvidence) :
             targets := targets }
       else .error (.invalidTargets targets)
 
+/-- `importOne_of_decode` proves valid evidence preserves every decoder output exactly. -/
+theorem importOne_of_decode {input : ByteSeq} {targets : TargetEvidence}
+    {encoding : InsnEncoding} {rest : ByteSeq}
+    (hdecode : decodeInsn input = .ok (encoding, rest))
+    (hvalid : targets.WellFormed) :
+    importOne input targets = .ok
+      { input := input
+        instruction := Unsafe.Construct.x86Instruction encoding importedTaint.primary
+          importedTaint.additional
+        rest := rest
+        targets := targets } := by
+  have checked := (TargetEvidence.wellFormed_eq_true_iff targets).mpr hvalid
+  simp [importOne, hdecode, checked]
+
 /-- `importOne_decode` exposes the exact decoder result behind a successful import. -/
 theorem importOne_decode {input : ByteSeq} {targets : TargetEvidence}
     {imported : ImportedInstruction}

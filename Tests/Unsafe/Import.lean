@@ -27,6 +27,16 @@ example : succeeds [0xFF, 0x10]
 example : succeeds [0x00] .fallthrough = false := by native_decide
 example : succeeds [] .fallthrough = false := by native_decide
 
+example {operand : MemOperand} {encoding : InsnEncoding} {rest : ByteSeq}
+    (henc : callMem64 operand = some encoding) :
+    importOne (encoding.toBytes ++ rest) indirect = .ok
+      { input := encoding.toBytes ++ rest
+        instruction := Grass.Unsafe.Construct.x86Instruction encoding
+          importedTaint.primary importedTaint.additional
+        rest := rest
+        targets := indirect } :=
+  importOne_of_decode (callMem64_decodes henc rest) (by native_decide)
+
 example {imported : ImportedInstruction}
     (h : importOne [0xFF, 0x10, 0x90] indirect = .ok imported) :
     imported.rest = [0x90] := by
