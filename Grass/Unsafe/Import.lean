@@ -89,6 +89,16 @@ theorem resolution?_isSome_eq_resolves
       by_cases selected : (policy.indirectEvidence? site).isSome = true <;>
         simp [resolution?, resolves, selected]
 
+/-- Turn a successful policy decision into its proof-bearing resolution value. -/
+def resolutionOf
+    {State : Type u} {Terminal : Type v}
+    (policy : TargetPolicy State Terminal) (target : ControlTarget)
+    (resolved : policy.resolves target = true) :
+    ResolvedControlTarget policy target :=
+  (policy.resolution? target).get (by
+    rw [policy.resolution?_isSome_eq_resolves target]
+    exact resolved)
+
 /-- Direct resolution evidence exposes graph-block membership. -/
 theorem block_mem_of_resolution
     {State : Type u} {Terminal : Type v}
@@ -393,6 +403,18 @@ theorem controlTargetResolution
   apply Option.isSome_iff_exists.mp
   rw [program.policy.resolution?_isSome_eq_resolves target]
   exact program.controlTargetResolved instruction hinstruction target htarget
+
+/-- Recover the proof-bearing resolution value for an accepted reported target. -/
+def controlTargetEvidence
+    {State : Type u} {Terminal : Type v} {Byte : Type w}
+    {Instruction : Type x}
+    (program : ImportedProgram State Terminal Byte Instruction)
+    (instruction : ImportedInstruction Byte Instruction)
+    (hinstruction : instruction ∈ program.instructions)
+    (target : ControlTarget) (htarget : target ∈ instruction.controlTargets) :
+    TargetPolicy.ResolvedControlTarget program.policy target :=
+  program.policy.resolutionOf target
+    (program.controlTargetResolved instruction hinstruction target htarget)
 
 /-- Every accepted imported instruction owns a nonempty source-byte slice. -/
 theorem instructionBytesNonempty

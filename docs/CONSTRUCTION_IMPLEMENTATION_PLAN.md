@@ -442,6 +442,12 @@ decoder or policy search.
 `TargetPolicy.indirectEvidence?` exposes the exact finite evidence behind an
 accepted indirect site; its lookup theorems retain requested-site identity and
 prove every enumerated target belongs to the selected CFG.
+`TargetPolicy.resolution?` converts target admission into a proof-bearing
+`ResolvedControlTarget`: direct evidence exposes graph-block membership and
+indirect evidence exposes the exact selected finite target set. Its success is
+proved equivalent to `TargetPolicy.resolves`; `resolutionOf` and
+`ImportedProgram.controlTargetEvidence` recover the checked evidence value
+without repeating decoder or policy validation.
 
 `Grass.Unsafe.Step` maps imported instructions to the existing open
 `Grass.Op.SomeOperation` package plus explicit context, cause, and fault-plan

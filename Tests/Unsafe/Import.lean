@@ -87,6 +87,9 @@ example : (policy.resolution? (.indirect indirectSite)).isSome = true := by deci
 example (reported : ControlTarget) :
     (policy.resolution? reported).isSome = policy.resolves reported :=
   policy.resolution?_isSome_eq_resolves reported
+example (reported : ControlTarget) (resolved : policy.resolves reported = true) :
+    TargetPolicy.ResolvedControlTarget policy reported :=
+  policy.resolutionOf reported resolved
 example (resolution : TargetPolicy.ResolvedControlTarget policy (.direct target)) :
     target ∈ policy.graph.blockIds :=
   TargetPolicy.block_mem_of_resolution resolution
@@ -162,6 +165,12 @@ example (imported : ImportedProgram Nat String Nat Instruction)
     (reported : ControlTarget) (hreported : reported ∈ instruction.controlTargets) :
     ∃ resolution, imported.policy.resolution? reported = some resolution :=
   imported.controlTargetResolution instruction hinstruction reported hreported
+example (imported : ImportedProgram Nat String Nat Instruction)
+    (instruction : ImportedInstruction Nat Instruction)
+    (hinstruction : instruction ∈ imported.instructions)
+    (reported : ControlTarget) (hreported : reported ∈ instruction.controlTargets) :
+    TargetPolicy.ResolvedControlTarget imported.policy reported :=
+  imported.controlTargetEvidence instruction hinstruction reported hreported
 
 example : (importBytes decoder policy [1, 1]).map (fun _ => ()) =
     .error (.unresolvedControlTarget 0 (.direct missing)) := by rfl
