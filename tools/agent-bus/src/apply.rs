@@ -688,13 +688,29 @@ fn apply_schema_activated(
 ) -> AbResult<()> {
     require_bootstrap_coordinator(state, &env.agent)?;
     require_complete_frontier(state, env)?;
-    if d.version <= state.activated_schema_version {
-        return Err(invalid(format!(
-            "{}: schema version {} is not greater than the currently activated {}",
-            env.id, d.version, state.activated_schema_version
-        )));
-    }
-    state.activated_schema_version = d.version;
+    // Deliberately the maximum, and deliberately not an error.
+    //
+    // `SchemaActivated::referenced_ids` is empty -- a `schema.activated`
+    // references no predecessor at all -- so two activations from different
+    // coordinators get no edge between them, and `topological_order` (which
+    // builds edges from `refs` and each stream's own predecessor, never from
+    // `observed`) is free to replay the higher version first. This handler
+    // then found the lower one "not greater" and returned `Err`, which
+    // `reduce` propagates with `?`: the whole bus becomes unreducible, on
+    // every host that fetched in that order, permanently, because the log is
+    // append-only. Two coordinators activating the *same* version was fatal
+    // in both orders.
+    //
+    // Taking the maximum is total and confluent -- max is commutative and
+    // associative, so every host reaches the same activated version whatever
+    // order it replays in.
+    //
+    // `coordinator::verify_schema_activation_advances` asks the advancement
+    // question at publication instead, against the publishing host's
+    // fully-reduced view, where there is no replay order to be at the mercy
+    // of. The two halves are a pair: reduction records what happened, and
+    // policy is enforced where it can be answered honestly.
+    state.activated_schema_version = state.activated_schema_version.max(d.version);
     Ok(())
 }
 
@@ -2617,6 +2633,28 @@ pub fn resolve_audience(
 /// containing each named identity." Two independent triggers, either one
 /// requiring completeness: the selector is `AllActive`, or it's a derived
 /// (non-explicit-list) selector on a required-ack broadcast.
+/// True when the selector resolves against state any agent may change at
+/// any time -- `subscribed_topics` (via `subscription.set`) or `scope` (via
+/// `scope.set`).
+///
+/// `Agents`, `Roles` and `AllActive` read only the pinned `audience_epoch`,
+/// which is immutable once known, so resolving them against a cached cut
+/// gives the same answer as resolving them against a fresh one. The other
+/// two do not, and gate 12's exactness is checked at publication
+/// (`coordinator::verify_broadcast_published`) because reduction has no
+/// sound way to ask it. That makes such a broadcast currency-sensitive:
+/// verified against a stale cut, the gate can accept a snapshot that omits a
+/// subscriber who has already published remotely, or refuse a correct one
+/// that includes them -- and since reduction now deliberately trusts the
+/// published snapshot, no later synchronization repairs a wrong verdict.
+pub fn broadcast_audience_reads_mutable_state(d: &BroadcastPublished) -> bool {
+    use crate::common::AudienceSelector as Sel;
+    matches!(
+        &d.audience_selector,
+        Sel::TopicSubscribers(_) | Sel::InterfaceDependents(_)
+    )
+}
+
 pub fn broadcast_requires_complete_frontier(d: &BroadcastPublished) -> bool {
     use crate::common::AudienceSelector as Sel;
     match &d.audience_selector {
@@ -6930,8 +6968,28 @@ mod tests {
         assert_eq!(state.activated_schema_version, 2);
     }
 
+    /// Reduction records the highest activated schema version and never
+    /// refuses one, in any order, from any coordinator.
+    ///
+    /// This test used to assert the opposite -- that a version which does not
+    /// strictly increase is an `Err`. That is a reduction handler failing on a
+    /// well-formed event, and `reduce` propagates with `?`, so it made the
+    /// whole bus unreducible on every host, permanently, the log being
+    /// append-only.
+    ///
+    /// It is reachable two ways. `SchemaActivated::referenced_ids` is empty,
+    /// so activations from *different* coordinators get no edge between them
+    /// and `topological_order` -- edges come from `refs` and each stream's own
+    /// predecessor, never from `observed` -- may legitimately replay the
+    /// higher one first. And a single coordinator activating the same version
+    /// twice was fatal outright.
+    ///
+    /// The advancement rule itself is not abandoned: it moved to
+    /// `coordinator::verify_schema_activation_advances`, which asks it at
+    /// publication against the publishing host's fully-reduced view, where
+    /// there is one answer and no replay order to be at the mercy of.
     #[test]
-    fn schema_activated_requires_a_strictly_increasing_version() {
+    fn schema_activation_records_the_maximum_and_never_refuses_a_version() {
         let mut state = empty_state(&[("coord1", Role::Coordinator)]);
         let coord1 = a("coord1");
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
@@ -6944,19 +7002,74 @@ mod tests {
                 helper_commit: hash(2),
             })
         };
-        let first_env = Envelope::new(&coord1, 1, complete_frontier(&epoch), &activate(2), []);
-        apply_ok(&mut state, &first_env);
+
+        apply_ok(
+            &mut state,
+            &Envelope::new(&coord1, 1, complete_frontier(&epoch), &activate(2), []),
+        );
         assert_eq!(state.activated_schema_version, 2);
 
-        let same_version_env =
-            Envelope::new(&coord1, 2, complete_frontier(&epoch), &activate(2), []);
-        let err = apply_event(&mut state, &same_version_env).unwrap_err();
-        assert!(err.to_string().contains("is not greater than"), "{err}");
+        // Same version again: recorded, not fatal.
+        apply_ok(
+            &mut state,
+            &Envelope::new(&coord1, 2, complete_frontier(&epoch), &activate(2), []),
+        );
+        assert_eq!(state.activated_schema_version, 2);
 
-        let lower_version_env =
-            Envelope::new(&coord1, 2, complete_frontier(&epoch), &activate(1), []);
-        let err = apply_event(&mut state, &lower_version_env).unwrap_err();
-        assert!(err.to_string().contains("is not greater than"), "{err}");
+        // A lower version arriving after a higher one: recorded, not fatal,
+        // and it does not drag the activated version back down.
+        apply_ok(
+            &mut state,
+            &Envelope::new(&coord1, 3, complete_frontier(&epoch), &activate(1), []),
+        );
+        assert_eq!(
+            state.activated_schema_version, 2,
+            "a late lower activation must not retract a higher one"
+        );
+    }
+
+    /// Two coordinators, two orders, one answer.
+    ///
+    /// The assertion is that both orders agree, not merely that neither
+    /// fails. Taking the maximum is chosen because it is commutative; a fix
+    /// that merely stopped erroring while still depending on arrival order
+    /// would trade a wedged bus for hosts that silently disagree about the
+    /// activated version, which is the worse failure of the two.
+    #[test]
+    fn concurrent_schema_activations_reduce_the_same_in_either_order() {
+        let reduce_in = |higher_first: bool| {
+            let mut state =
+                empty_state(&[("coord1", Role::Coordinator), ("coord2", Role::Coordinator)]);
+            let coord1 = a("coord1");
+            let coord2 = a("coord2");
+            apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+            apply_ok(&mut state, &register(&coord2, Role::Coordinator));
+            let epoch = state.roster_epoch.as_ref().unwrap().clone();
+            let activate = |version: u32| {
+                EventData::SchemaActivated(SchemaActivated {
+                    version,
+                    design_commit: hash(1),
+                    helper_commit: hash(2),
+                })
+            };
+            let lower = Envelope::new(&coord1, 1, complete_frontier(&epoch), &activate(2), []);
+            let higher = Envelope::new(&coord2, 1, complete_frontier(&epoch), &activate(3), []);
+            if higher_first {
+                apply_ok(&mut state, &higher);
+                apply_ok(&mut state, &lower);
+            } else {
+                apply_ok(&mut state, &lower);
+                apply_ok(&mut state, &higher);
+            }
+            state.activated_schema_version
+        };
+
+        assert_eq!(reduce_in(false), 3);
+        assert_eq!(
+            reduce_in(true),
+            reduce_in(false),
+            "both replay orders must agree, or hosts silently diverge"
+        );
     }
 
     #[test]

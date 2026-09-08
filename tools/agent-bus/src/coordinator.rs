@@ -252,6 +252,15 @@ pub fn drain_outbox(
                 continue;
             }
         }
+        if let Err(e) = verify_schema_activation_advances(&state, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
         if let Err(e) = verify_author_active(&state, agent, &data) {
             let reason = e.to_string();
             reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
@@ -984,6 +993,39 @@ fn verify_predecessor_not_contested(
 /// `base_code_commit`/`code_commit` are lower-stakes (correctable by a
 /// follow-up `scope.set`, or merely evidence rather than a binding field
 /// respectively) but the same silent-typo failure mode applies to both.
+/// AGENT_BUS_SCHEMA.md section 4: a `schema.activated`'s "`version` is
+/// greater than all previously activated versions."
+///
+/// `apply` cannot ask this. `schema.activated` references no predecessor at
+/// all (`SchemaActivated::referenced_ids` is empty), so two activations from
+/// different coordinators get no edge between them and `apply::
+/// topological_order` is free to replay a higher version first -- which made
+/// the lower one fatal on hosts that happened to fetch in that order, and
+/// made two coordinators activating the *same* version fatal in both. See
+/// `apply::apply_schema_activated`, which now takes the maximum, for the
+/// full argument.
+///
+/// Here `state` is the publishing host's own fully-reduced view, so the
+/// question has one answer. A coordinator that genuinely cannot see a
+/// concurrent activation yet is not stopped, and should not be: it has
+/// committed no error, and the two activations reconcile to the higher
+/// version on every host either way.
+fn verify_schema_activation_advances(
+    state: &crate::state::BusState,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    let crate::events::EventData::SchemaActivated(d) = data else {
+        return Ok(());
+    };
+    if d.version <= state.activated_schema_version {
+        return Err(invalid(format!(
+            "schema version {} is not greater than the currently activated {}",
+            d.version, state.activated_schema_version
+        )));
+    }
+    Ok(())
+}
+
 /// AGENT_BUS_SCHEMA.md section 8: a `review.reassigned` must inherit every
 /// finding still open on the chain, exactly once.
 ///
@@ -1146,6 +1188,20 @@ fn requires_complete_frontier(data: &crate::events::EventData) -> bool {
 /// on a different validation path.
 fn requires_synced_snapshot(data: &crate::events::EventData) -> bool {
     use crate::events::EventData;
+    // A broadcast whose audience resolves against `subscribed_topics` or
+    // `scope` is currency-sensitive whatever its acknowledgement setting.
+    // `verify_broadcast_published` is the *only* place gate 12's exactness
+    // is now checked -- reduction has no sound way to ask it -- and
+    // resolving a mutable selector against a stale cached cut lets that
+    // single check accept a snapshot omitting a subscriber who has already
+    // published remotely. Reduction then records the wrong audience, and no
+    // later synchronization repairs it. An informational broadcast needs no
+    // complete frontier, so `requires_complete_frontier` does not cover it.
+    if let EventData::BroadcastPublished(d) = data {
+        if crate::apply::broadcast_audience_reads_mutable_state(d) {
+            return true;
+        }
+    }
     requires_complete_frontier(data)
         || matches!(
             data,
@@ -3834,6 +3890,101 @@ mod tests {
         }
     }
 
+    /// Gate 17 for a broadcast whose audience resolves against mutable
+    /// state, and the reason the predicate cannot simply defer to
+    /// `requires_complete_frontier`.
+    ///
+    /// An informational `TopicSubscribers` broadcast needs no complete
+    /// frontier, so before this it was validated against whatever cached cut
+    /// `drain_outbox` happened to hold. `verify_broadcast_published` is now
+    /// the *only* place gate 12's exactness is checked -- reduction has no
+    /// sound way to ask it -- so a stale cut there means the single check
+    /// can accept a snapshot that omits a subscriber who has already
+    /// published remotely, and reduction then records the wrong audience
+    /// with no later synchronization able to repair it.
+    #[test]
+    fn a_mutable_selector_broadcast_requires_a_synced_snapshot_without_a_complete_frontier() {
+        let (_state, epoch) = state_with_subscribers(&[("alice", Role::Implementor, &[])]);
+        let informational =
+            EventData::BroadcastPublished(broadcast_to_subscribers(&epoch, &["alice"]));
+        assert!(
+            requires_synced_snapshot(&informational),
+            "a mutable-selector broadcast must demand a fresh cut"
+        );
+        assert!(
+            !requires_complete_frontier(&informational),
+            "fixture: if this ever needs a complete frontier the first clause would satisfy the assertion above and it would stop testing anything"
+        );
+
+        // And the narrowing is real: a selector that reads only the pinned
+        // epoch is not made currency-sensitive by this rule.
+        let mut immutable = broadcast_to_subscribers(&epoch, &["alice"]);
+        immutable.audience_selector = crate::common::AudienceSelector::Agents(
+            crate::scalars::StringSet::from_iter([a("alice")]),
+        );
+        let immutable = EventData::BroadcastPublished(immutable);
+        assert!(
+            !requires_synced_snapshot(&immutable),
+            "an explicit-list selector resolves from the pinned epoch and needs no fresh cut"
+        );
+    }
+
+    /// The predicate above is only worth anything if `drain_outbox` actually
+    /// calls `verify_broadcast_published`. This drives the whole path and
+    /// fails if that call site is deleted.
+    ///
+    /// A subscription is published to the remote *after* this checkout's
+    /// cached snapshot was taken, so a snapshot that names only the
+    /// previously-known subscriber is stale-correct and fresh-wrong. Gate 17
+    /// forces the fresh cut; gate 12 then rejects it.
+    #[test]
+    fn drain_outbox_rejects_a_broadcast_whose_audience_went_stale_on_the_remote() {
+        let f = build_two_host_broadcast_fixture();
+
+        // alice publishes to release.main subscribers, naming only bob --
+        // true when alice last synced, false now that carol has subscribed
+        // on the other host.
+        crate::outbox::submit(f.alice_repo.path(), "bcast", &f.broadcast_naming(&["bob"])).unwrap();
+        let drained = drain_outbox(
+            f.alice_repo.path(),
+            f.alice_repo.path(),
+            &a("alice"),
+            &short("host-a"),
+            0,
+            &f.remote,
+        )
+        .expect("draining must not error, it must reject the candidate");
+        assert!(drained.published.is_empty(), "{drained:?}");
+        assert_eq!(drained.rejected.len(), 1, "{drained:?}");
+        let reason = &drained.rejected[0].reason;
+        assert!(
+            reason.contains("audience_snapshot does not match") && reason.contains("carol"),
+            "the stale snapshot must be refused, naming who was missed: {reason}"
+        );
+
+        // The exact current audience is accepted.
+        crate::outbox::submit(
+            f.alice_repo.path(),
+            "bcast2",
+            &f.broadcast_naming(&["bob", "carol"]),
+        )
+        .unwrap();
+        let drained = drain_outbox(
+            f.alice_repo.path(),
+            f.alice_repo.path(),
+            &a("alice"),
+            &short("host-a"),
+            0,
+            &f.remote,
+        )
+        .expect("the current snapshot publishes");
+        assert!(
+            drained.rejected.is_empty(),
+            "the exact current audience must publish: {drained:?}"
+        );
+        assert!(!drained.published.is_empty(), "{drained:?}");
+    }
+
     /// A `review.merge_authorized` naming an unknown nomination must not be
     /// rejected by this gate's own text -- `apply::dry_run` reports that
     /// moments later with a clearer, nomination-specific message (see
@@ -3953,6 +4104,187 @@ mod tests {
         let push = crate::gitrepo::run(dir, &["push", &remote, "refs/heads/main"]).unwrap();
         assert!(push.success, "{push:?}");
         (origin, remote)
+    }
+
+    /// Two checkouts sharing one origin: alice publishes from `alice_repo`,
+    /// and carol's `subscription.set` reaches the origin from a *second*
+    /// clone that alice has never fetched.
+    ///
+    /// Deliberately two real repositories. Several critical defects in this
+    /// crate were invisible to single-repository tests, and "alice's cached
+    /// view is behind the remote" is precisely the condition that cannot be
+    /// simulated inside one clone.
+    struct TwoHostBroadcast {
+        alice_repo: tempfile::TempDir,
+        #[allow(dead_code)]
+        other_repo: tempfile::TempDir,
+        #[allow(dead_code)]
+        origin: tempfile::TempDir,
+        remote: String,
+        epoch_id: ObjectId,
+    }
+
+    impl TwoHostBroadcast {
+        fn broadcast_naming(&self, snapshot: &[&str]) -> Candidate {
+            let mut d = broadcast_to_subscribers_with_epoch(&self.epoch_id, snapshot);
+            d.summary = short("release cut");
+            Candidate::new(&a("alice"), &EventData::BroadcastPublished(d), vec![])
+        }
+    }
+
+    fn broadcast_to_subscribers_with_epoch(
+        epoch_id: &ObjectId,
+        snapshot: &[&str],
+    ) -> crate::events::BroadcastPublished {
+        crate::events::BroadcastPublished {
+            topics: crate::scalars::StringSet::from_iter([
+                crate::scalars::CoordinationTopic::parse("release.main".into()).unwrap(),
+            ]),
+            importance: crate::common::Importance::Informational,
+            summary: short("s"),
+            detail: text("d"),
+            affected_paths: crate::scalars::StringSet::default(),
+            affected_interfaces: crate::scalars::StringSet::default(),
+            product_commits: crate::scalars::StringSet::default(),
+            audience_selector: crate::common::AudienceSelector::TopicSubscribers(
+                crate::scalars::CoordinationTopic::parse("release.main".into()).unwrap(),
+            ),
+            audience_epoch: epoch_id.clone(),
+            audience_snapshot: crate::scalars::StringSet::from_iter(snapshot.iter().map(|n| a(n))),
+            acknowledgement: crate::common::AckRequirement::None,
+            deadline: None,
+            supersedes: crate::scalars::StringSet::default(),
+            workaround: None,
+            expiry_condition: None,
+        }
+    }
+
+    fn build_two_host_broadcast_fixture() -> TwoHostBroadcast {
+        use crate::events::AgentRegistered;
+        use crate::registry::MemberBinding;
+
+        let repo = init_repo();
+        let origin = init_bare_origin();
+        let remote = origin.path().to_string_lossy().to_string();
+        let coord1 = a("coord1");
+
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let (_config, epoch, _commit) = crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host-a"),
+        )
+        .unwrap();
+
+        let mut members = epoch.active_members.clone();
+        for name in ["alice", "bob", "carol"] {
+            members.insert(
+                a(name),
+                MemberBinding {
+                    role: Role::Implementor,
+                    host: short("host-a"),
+                    coordinator_custody_epoch: 0,
+                    standby: None,
+                },
+            );
+        }
+        let epoch = crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
+
+        for name in ["alice", "bob", "carol"] {
+            let ag = a(name);
+            crate::outbox::submit(
+                repo.path(),
+                &format!("{ag}-reg"),
+                &Candidate::new(
+                    &ag,
+                    &EventData::AgentRegistered(AgentRegistered {
+                        display_name: short(name),
+                        primary_role: Role::Implementor,
+                        purpose: text("x"),
+                        product_base: None,
+                        product_branch: None,
+                        provider: None,
+                        model: None,
+                    }),
+                    vec![],
+                ),
+            )
+            .unwrap();
+            // `drain_outbox` alone only writes local refs; the origin is
+            // what the second checkout clones from.
+            let (drained, receipt) =
+                drain_and_publish(repo.path(), repo.path(), &ag, &short("host-a"), 0, &remote)
+                    .unwrap();
+            assert!(drained.rejected.is_empty(), "{drained:?}");
+            assert!(receipt.rejected.is_empty(), "{receipt:?}");
+        }
+
+        // bob subscribes, and alice sees it.
+        let subscribe = |repo: &Path, who: &Agent, host: &str| {
+            crate::outbox::submit(
+                repo,
+                &format!("{who}-sub"),
+                &Candidate::new(
+                    who,
+                    &EventData::SubscriptionSet(crate::events::SubscriptionSet {
+                        topics: crate::scalars::StringSet::from_iter([
+                            crate::scalars::CoordinationTopic::parse("release.main".into())
+                                .unwrap(),
+                        ]),
+                    }),
+                    vec![],
+                ),
+            )
+            .unwrap();
+            let (drained, receipt) =
+                drain_and_publish(repo, repo, who, &short(host), 0, &remote).unwrap();
+            assert!(drained.rejected.is_empty(), "{drained:?}");
+            assert!(receipt.rejected.is_empty(), "{receipt:?}");
+        };
+        subscribe(repo.path(), &a("bob"), "host-a");
+
+        // The registry has to reach the origin before a second checkout can
+        // read it; publishing a stream only pushes that stream's own ref.
+        let push = crate::gitrepo::run(
+            repo.path(),
+            &[
+                "push",
+                &remote,
+                "+refs/heads/agent-registry:refs/heads/agent-registry",
+            ],
+        )
+        .unwrap();
+        assert!(push.success, "{push:?}");
+
+        // A second checkout of the same origin. carol subscribes from there,
+        // so the subscription exists on the remote and nowhere in `repo` --
+        // which is the condition a single-repository test cannot create, and
+        // exactly the one this whole fix is about.
+        let other = tempfile::tempdir().unwrap();
+        let clone = std::process::Command::new("git")
+            .args(["clone", "--quiet", &remote])
+            .arg(other.path().join("wc"))
+            .status()
+            .unwrap();
+        assert!(clone.success());
+        let other_wc = other.path().join("wc");
+        let fetch =
+            crate::gitrepo::run(&other_wc, &["fetch", &remote, "+refs/heads/*:refs/heads/*"])
+                .unwrap();
+        assert!(fetch.success, "{fetch:?}");
+        subscribe(&other_wc, &a("carol"), "host-a");
+
+        TwoHostBroadcast {
+            alice_repo: repo,
+            other_repo: other,
+            origin,
+            remote,
+            epoch_id: epoch.id.clone(),
+        }
     }
 
     /// AGENT_COORDINATION_EVOLUTION.md's currency rule (gate 17): a
