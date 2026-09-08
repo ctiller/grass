@@ -2276,9 +2276,9 @@ branch is `touchesOnly` handing back `not_dead_where_nothing_moved`.
 **Three things this does not say, each of which an earlier version of this
 docstring did.** Two of them have a machine-checked witness — the first and the
 third — and they are recorded here rather than in the ledger alone because the
-wrong reading is the natural one. The second has none and can have none: the
-claim it warns against is *true* at `serverPlan`, so what is wrong with it is its
-scope rather than its truth.
+wrong reading is the natural one. The second has none: what is wrong with it is that this
+theorem is about one step, and a claim about runs needs the induction
+`ProcessPlan.execution_holds_an_unkilled_root` carries.
 
 *It is not "a dead instance has a current parent".* `Detaches` has no liveness
 requirement and copies the lifecycle across, so a dead child detaches into a dead
@@ -2526,7 +2526,7 @@ does not have to reason about which constructor was used.
 `LogicalProcessNetworkCore.RootUnique` does not notice, being
 uniqueness rather than existence.
 
-That is `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.133's open question, and
+That is `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.132's last section, and
 stating the theorem this way is what turns it from a suspicion into a fact:
 restart is not *a* way to lose the root, it is the *only* way. A plan whose root
 role no permitted parent can spawn therefore holds its root along every

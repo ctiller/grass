@@ -4919,19 +4919,13 @@ before-worlds by steps is owed, and is a bigger job: it wants a `processStep`
 that puts an instance in each state, which is `Tests/Process/ProcessStepFixtures.lean`'s
 territory rather than this file's.
 
-**Ran down** in §10.132, whose answer was then refuted in §10.133 and §10.134.
-The guess above was that four `processStep`s would settle it. Two of the four
-before-worlds are indeed reached by literal `processStep`s — `theLogStep` and
-`theLastTickStep` — so the guess was right about the shape and wrong about what
-it would buy, which is the part that mattered. Three of the
-four before-worlds have a step into them and none of the six worlds involved is a
-world of a run; the fourth holds a dead *root*, and what refuses it is not a
-step-local theorem but `ProcessPlan.execution_holds_an_unkilled_root`, an
-invariant over whole executions. §10.133 is where that lands, and the entries after
-it are the further rounds of adversarial review it took; §10.137 is where that
-sequence is summed up. Deliberately not enumerated: this sentence has now gone
-stale twice by naming the entries that existed when it was written, which is the
-failure §10.135 records about this very paragraph.
+**Ran down** in §10.132, and the answer differs from the guess in a way worth
+stating here. Each of the four before-worlds turns out to have a step into it,
+and not one of them is a world of a run. The two facts are independent, and
+reading the first as the second is what made the first attempt at this wrong;
+what refuses the worlds is not a step-local theorem but
+`ProcessPlan.execution_holds_an_unkilled_root`, an invariant over whole
+executions.
 
 ### 10.130 The fixture that proved the generalisation had content could not be satisfied
 
@@ -5078,16 +5072,17 @@ have a step into them — `theReceiverIsKilledStep` is a `childDied`,
 `theJoinIntoTheDeadSender` a `join` at a *connection* slot whose scope never names
 the listener, and `theLogStep` and `theLastTickStep` are `processStep`s — and none
 of the worlds in that section is a world of any run. Both facts are true at once
-and neither implies the other. It was first recorded here as "three of the four
-are reachable; the fourth cannot be"; both halves were false.
+and neither implies the other. It was first recorded here as three of the four being reachable and the fourth
+not; both halves were false.
 
 **What settles it is an invariant over executions.**
 `ProcessPlan.UnkilledRootAt` says a slot holds an instance with no current parent
 that has not died. `start_holds_an_unkilled_root` gets it from
 `ExactInitialNetwork`; `execution_holds_an_unkilled_root` carries it across a
 whole `StepsTo`, taking `WellFormed` alongside because `slotsAgree` is what
-supplies the kind agreement `died_cast` needs. Each fixture world is then refused
-by name, with a `no_run_reaches_*` corollary stating the same thing about
+supplies the kind agreement `died_cast` needs. Each fixture world is then refused —
+some individually and the `holding` ones by a theorem quantified over every such
+world — with a `no_run_reaches_*` corollary stating the same thing about
 executions rather than leaving the inference to a reader.
 
 **And the carrying step turned a suspicion into a theorem.**
@@ -5106,9 +5101,9 @@ for the root's role — so it is a gap in the family rather than an attack here.
 
 ### 10.133 What the corpse questions leave open
 
-Two questions about who may die, both found by proving something rather than by
-reading, and both `g-design`'s rather than mine to answer. `agent-bus`
-`c-process:103` asks them, correcting `c-process:80`, which asked the wrong one.
+Two things left open here. `agent-bus` `c-process:103` asks the first of them
+and corrects `c-process:80`, which had asked a question whose premise was false;
+the second is recorded here and asked of nobody yet.
 
 **May a supervisor detach a corpse?** `Detaches.wasAttached` asks only for a
 current parent and `identityPreserved` pins the lifecycle across the step, so a
@@ -5156,9 +5151,12 @@ consumer, and was cited as load-bearing by a theorem that did not use it. It was
 carrying the same `WellFormed` hypothesis the working theorem already has, that
 still nobody calls.
 
-**Four rules, in final form.** Eleven adversarial rounds over this work found
-zero defects in a proof and a defect in prose every time, which measures which
-artefacts have a gate rather than which are sound.
+**The rules that came out of it, in final form.** Adversarial review of this
+work has found a defect in the prose every time it has run, and almost never in a
+proof — which measures which artefacts have a gate rather than which are sound.
+The exception is the finding this entry opens with, where a *definition* was
+vacuous and a *lemma* was deleted; the gate could not see those either, because
+what was wrong with them was expressible in Lean and still true.
 
 * A count is safe only where it describes something **closed** — a structure's
   fields, a fixed inductive's constructors. Beside a block of theorems or a list
@@ -5176,13 +5174,15 @@ artefacts have a gate rather than which are sound.
   only inside sentences carrying a strong-claim word, which `agent-bus`
   `c-process:106` reports to the gate's owner.
 
-None of the four catches the **scope word** — "every world in this file" where
+None of them catches the **scope word** — "every world in this file" where
 "this section" was true. Nothing mechanical has caught one yet.
 
 ### 10.135 A role that may write no region owes nothing
 
-*(A sibling branch, `agent/c-process/docstring-claims-for-the-strict-gate`, adds
-entries numbered from §10.140; the gap is deliberate and closes when it lands.)*
+*(The sibling branch `agent/c-process/docstring-claims-for-the-strict-gate`
+continues this numbering, and declares
+`ProcessPlan.sharedWritesAdmitted_of_no_writes` as this entry does; whichever
+lands second drops its copy.)*
 
 `sharedWritesAdmitted_of_no_writes` was cited by `StepsLocally.sharedWritesAdmitted`'s
 own docstring under the bare name and by `Grass/Process/Network/Plan.lean`'s note
@@ -5198,9 +5198,11 @@ from it.
 
 Declaring it is half the repair — a lemma with no consumer and an unsatisfiable
 hypothesis is §10.130's shape. `the_connection_writes_nothing` inhabits the
-hypothesis at a real role, and `theConnectionOwesNoValueBound` consumes it. What
-that does *not* yet show is an author relieved of anything: no `StepsLocally` at
-`.connection` exists in this corpus.
+hypothesis at a real role and `theConnectionOwesNoValueBound` consumes it, and
+`the_log_is_answered` and `the_last_tick_is_abandoned` now *spend* it: both are
+local steps of the connection, which may write no region, and both get
+`sharedWritesAdmitted` from `writesPermitted` instead of discharging it by hand.
+That is `g-design:84`'s "add no author burden" exhibited rather than asserted.
 
 ## 11. The authoring facade
 

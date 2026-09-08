@@ -403,10 +403,11 @@ one of them is non-allocating, so `admissible` is vacuous and `historyExact` is
 `rfl`. The check is cheap and it had simply not been run to the end.
 
 Each step is paired with the well-formedness of the world it reaches, by the
-capstone rather than by hand. That is the part that was actually missing: before
-these, `afterClosing`, `afterDying`, `afterSenderDeath`, `afterReceiverDeath`,
-`afterDropping`, `afterRequesting` and the two ending worlds were worlds no
-theorem said anything about.
+capstone rather than by hand. That is the part that was actually missing:
+`afterClosing`, `afterDying`, `afterDropping` and `afterRequesting` were worlds
+no theorem said anything about, and each is now well formed by the capstone. The
+endpoint deaths and the two ending worlds are not, and the section below says
+why — there is no chain from `quiet` to carry well-formedness along.
 -/
 
 open Grass.Process.Tests.ChannelStep
@@ -623,7 +624,7 @@ theorem the_live_receiver_is_a_child : ∀ incarnation,
 
 Not a run: `no_run_reaches_sentWithDeadReceiver` below. A third reviewer found
 this sentence still claiming the opposite after the commit that reported fixing
-it had fixed its two neighbours and missed this one — which is §10.134. -/
+it had fixed its two neighbours and missed this one. -/
 def theReceiverIsKilledStep :
     serverPlan.NetworkStep sentWithLiveReceiver sentWithDeadReceiver where
   transition := .childDied .connection wire.receiver.instanceId .providerLost
@@ -695,9 +696,8 @@ theorem the_corpse_is_collected :
     | _ => rfl
 
 /-- **And the world it starts from is a world of no run either**, for the same
-reason as the world it reaches: the listener slot holds a dead root. Written
-because its four siblings have this pair and it did not, which is the asymmetry
-§10.134 found once already. -/
+reason as the world it reaches: the listener slot holds a dead root. Written because
+every other refused world in this file has the pair and this one did not. -/
 theorem deadSenderWithACorpseToCollect_is_no_world_of_a_run :
     ¬ serverPlan.UnkilledRootAt deadSenderWithACorpseToCollect .listener () := by
   rintro ⟨root, found, _, unkilled⟩
@@ -1004,10 +1004,10 @@ without a declaration behind it.
 
 Read what it proves and not more. `deadOrphanWorld`'s *listener* slot is empty,
 and that is the whole proof; nothing here says a run cannot reach some other
-world holding a dead orphan at a connection slot with the root intact. Nor is
-"a world of no run" this file's norm — `World.withRoot` is a start,
-`theSendStep` reaches `sent` from it, and `sent_holds_an_unkilled_root` is above.
-§10.135. -/
+world holding a dead orphan at a connection slot with the root intact — §10.133
+records that as open. Nor is "a world of no run" this file's norm:
+`World.withRoot` is a start, `theSendStep` reaches `sent` from it, and
+`sent_holds_an_unkilled_root` says so. -/
 theorem no_run_reaches_deadOrphanWorld
     {request : (serverTopology.protocol serverTopology.root).Request} {start : ServerWorld}
     (isStart : serverPlan.ExactInitialNetwork request start)
@@ -1050,9 +1050,11 @@ theorem the_log_is_answered (answer : countdownVocabulary.Result .log) :
   writesPermitted := by
     intro region moved
     exact absurd rfl moved
-  sharedWritesAdmitted := by
-    intro region moved
-    exact absurd rfl moved
+  -- Spent rather than paid: the connection role may write no region, so the
+  -- value bound follows from the capability bound. §10.135.
+  sharedWritesAdmitted :=
+    ProcessPlan.sharedWritesAdmitted_of_no_writes (plan := serverPlan)
+      the_connection_writes_nothing (fun _ moved => absurd rfl moved)
   scope := by
     intro fragment outside
     cases fragment with
@@ -1108,9 +1110,11 @@ theorem the_last_tick_is_abandoned (reason : Interrupt) :
   writesPermitted := by
     intro region moved
     exact absurd rfl moved
-  sharedWritesAdmitted := by
-    intro region moved
-    exact absurd rfl moved
+  -- Spent rather than paid: the connection role may write no region, so the
+  -- value bound follows from the capability bound. §10.135.
+  sharedWritesAdmitted :=
+    ProcessPlan.sharedWritesAdmitted_of_no_writes (plan := serverPlan)
+      the_connection_writes_nothing (fun _ moved => absurd rfl moved)
   scope := by
     intro fragment outside
     cases fragment with
