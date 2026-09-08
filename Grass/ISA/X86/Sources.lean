@@ -39,12 +39,54 @@ than by HTTP status, for the reasons in `Grass.Cite.RetrievalStatus`.
   is live by the same test that shows AMD is not -- which is the only way the
   two results are comparable.
 
-  Retried today across every location this corpus knows of. The `/v/u/en-US/`
-  scheme is dead for individual volumes too -- `24594_3.37`, which search
-  engines still index, is a genuine HTTP 404. Both
-  `www.amd.com/content/dam/.../programmer-references/40332.pdf` and
-  `www.amd.com/system/files/TechDocs/40332.pdf` fail to connect at all rather
-  than returning an error.
+  **Retested 2026-09-08, and two things above are now out of date.**
+
+  First, the pinned URL no longer answers 200. It is a genuine HTTP 404. The
+  JavaScript-shell trap described above is therefore history rather than
+  current behaviour: a liveness check keyed on status codes would today
+  report this URL dead and be right. `livenessProbe` is still the correct
+  mechanism -- it is what caught the shell when the shell existed -- but the
+  evidence for it is no longer this URL.
+
+  Second, and this is the part that matters to whoever looks next: **the
+  `/v/u/en-US/` scheme is not dead.** This paragraph said it was. Volume 2 of
+  the APM resolves right now at
+  `https://docs.amd.com/v/u/en-US/24593_3.45_APM_Vol2_PUB`, a viewer page
+  titled "AMD64 Architecture Programmer's Manual Volume 2: System Programming
+  (PUB)" at revision 3.45 dated 2026-07-29, which exposes the PDF itself
+  through a content API at `docs.amd.com/api/khub/documents/<id>/content`.
+  Fetching that returned a document over 10 MB -- a real manual, not a shell.
+
+  So AMD's portal is serving APM volumes today. What could not be found is
+  the one this corpus cites. Volume 3 is `24594`, and every form tried is a
+  404: bare `24594_3.37`, `24594_3.37_APM_Vol3_PUB` by analogy with the
+  Volume 2 identifier that works, and the combined `40332_4.09_APM_PUB`.
+  `26568_3.26_APM_Vol4` is a 404 as well despite being indexed, so the
+  identifier scheme is not simply a suffix rule to be derived.
+
+  One lead is left open rather than closed, and it is open in a specific
+  way. `www.amd.com/content/dam/amd/en/documents/**processor-tech-docs**/
+  programmer-references/24594.pdf` is a different path from the two this
+  paragraph already refused: it names the volume rather than the combined
+  publication, and its middle segment is `processor-tech-docs`. Fetched
+  through a proxy it timed out after 60 seconds rather than 404ing, which is
+  what a large PDF and a hang look like alike. Fetched with `curl` from the
+  build host it returns status 000: `www.amd.com` does not answer this host
+  at all, which is consistent with the two refusals above and means the
+  question cannot be settled from here.
+
+  So it is recorded as untested rather than as dead. Whoever has network
+  reach to `www.amd.com` should try it first; it is the only candidate found
+  that is AMD-hosted, names publication 24594, and has not returned an
+  error. `www.amd.com/system/files/TechDocs/40332.pdf` still fails to
+  connect entirely.
+
+  The disposition is unchanged and the reason for it is not. This is no
+  longer "AMD's hosting is dead"; it is "the pinned identifiers are retired
+  and Volume 3's current identifier was not found, while a sibling volume
+  resolves". That is a better brief for the next attempt, which should be a
+  search for the right identifier on a working portal rather than a search
+  for a mirror.
 
   A third-party mirror does serve an 18.7 MB PDF of publication 40332 at
   revision **4.07**. It is not cited and does not lift the blocker: it is not
