@@ -5,7 +5,8 @@ import Grass.Artifact.Binary.Gobj.Symbol
 
 `GobjRelocation` realizes the target-independent relocation container. Its
 `kind` is an opaque tag whose machine-specific meaning remains owned by the
-target ISA layer. `GobjRelocation.ValidFor` separately checks table references.
+target ISA layer. This module owns only the generic algebra that consumes a
+target-supplied positive patch width.
 -/
 
 namespace Grass.Artifact.Binary.Gobj
@@ -21,16 +22,67 @@ structure GobjRelocation where
   addend : BitVec 64
 deriving DecidableEq, Repr
 
-/-- Reference validity against decoded section and symbol table sizes. -/
-def GobjRelocation.ValidFor (entry : GobjRelocation)
+/-- Reference validity against decoded section and symbol table sizes.
+
+This predicate is deliberately only a syntactic/container check. It is not the
+complete resolved-relocation boundary; use `GobjRelocation.ValidFor` for that. -/
+def GobjRelocation.IndicesValid (entry : GobjRelocation)
     (sectionCount symbolCount : Nat) : Prop :=
   entry.sectionIndex.toNat < sectionCount ∧
     entry.targetSymbolIndex.toNat < symbolCount
 
 instance (entry : GobjRelocation) (sectionCount symbolCount : Nat) :
-    Decidable (entry.ValidFor sectionCount symbolCount) := by
-  unfold GobjRelocation.ValidFor
+    Decidable (entry.IndicesValid sectionCount symbolCount) := by
+  unfold GobjRelocation.IndicesValid
   infer_instance
+
+/-- Target-owned interpretation of opaque relocation kinds.
+
+The target ISA layer supplies the facts; the artifact layer consumes only a
+positive byte width. Returning `none` rejects an unknown kind. -/
+structure RelocationKindInterpretation where
+  patchWidth : BitVec 32 → Option Nat
+  patchWidth_positive : ∀ {kind width}, patchWidth kind = some width → 0 < width
+
+/-- An interpretation assigning the same positive width to every kind. -/
+def RelocationKindInterpretation.constant (width : Nat) (positive : 0 < width) :
+    RelocationKindInterpretation where
+  patchWidth _ := some width
+  patchWidth_positive := by
+    intro kind observed h
+    simp only [Option.some.injEq] at h
+    subst observed
+    exact positive
+
+/-- Complete generic validity of a resolved relocation.
+
+The selected section and symbol must exist, the target must recognize the kind,
+and the positive-width patch must fit entirely in the selected section. The
+addition is performed in `Nat`, so it cannot wrap like fixed-width arithmetic. -/
+def GobjRelocation.ValidFor (entry : GobjRelocation)
+    (interpretation : RelocationKindInterpretation)
+    (sections : GobjSectionTable) (symbols : GobjSymbolTable) : Prop :=
+  entry.IndicesValid sections.entries.length symbols.entries.length ∧
+    match interpretation.patchWidth entry.kind with
+    | none => False
+    | some width =>
+      match sections.entries.get? entry.sectionIndex.toNat with
+      | none => False
+      | some target =>
+        entry.offset.toNat < target.contents.bytes.length ∧
+          entry.offset.toNat + width ≤ target.contents.bytes.length
+
+instance (entry : GobjRelocation)
+    (interpretation : RelocationKindInterpretation)
+    (sections : GobjSectionTable) (symbols : GobjSymbolTable) :
+    Decidable (entry.ValidFor interpretation sections symbols) := by
+  unfold GobjRelocation.ValidFor
+  cases hwidth : interpretation.patchWidth entry.kind with
+  | none => infer_instance
+  | some width =>
+      cases hsection : sections.entries.get? entry.sectionIndex.toNat with
+      | none => infer_instance
+      | some target => infer_instance
 
 /-- Serialize one fixed-width target-independent relocation entry. -/
 def writeGobjRelocation (entry : GobjRelocation) : Std.Logical.ByteArray :=
@@ -147,16 +199,50 @@ structure GobjRelocationTable where
 deriving DecidableEq, Repr
 
 /-- Every relocation in a table refers to an existing section and symbol. -/
-def GobjRelocationTable.ValidFor (table : GobjRelocationTable)
+def GobjRelocationTable.IndicesValid (table : GobjRelocationTable)
     (sections : GobjSectionTable) (symbols : GobjSymbolTable) : Prop :=
   ∀ entry ∈ table.entries.toList,
-    entry.ValidFor sections.entries.length symbols.entries.length
+    entry.IndicesValid sections.entries.length symbols.entries.length
 
 instance (table : GobjRelocationTable) (sections : GobjSectionTable)
-    (symbols : GobjSymbolTable) : Decidable (table.ValidFor sections symbols) :=
+    (symbols : GobjSymbolTable) :
+    Decidable (table.IndicesValid sections symbols) :=
   by
+    unfold GobjRelocationTable.IndicesValid
+    infer_instance
+
+/-- Every relocation in a table is completely valid under one target profile. -/
+def GobjRelocationTable.ValidFor (table : GobjRelocationTable)
+    (interpretation : RelocationKindInterpretation)
+    (sections : GobjSectionTable) (symbols : GobjSymbolTable) : Prop :=
+  ∀ entry ∈ table.entries.toList,
+    entry.ValidFor interpretation sections symbols
+
+instance (table : GobjRelocationTable)
+    (interpretation : RelocationKindInterpretation)
+    (sections : GobjSectionTable) (symbols : GobjSymbolTable) :
+    Decidable (table.ValidFor interpretation sections symbols) := by
     unfold GobjRelocationTable.ValidFor
     infer_instance
+
+/-- A relocation table admitted across the target-aware resolved boundary. -/
+structure ResolvedGobjRelocationTable
+    (interpretation : RelocationKindInterpretation)
+    (sections : GobjSectionTable) (symbols : GobjSymbolTable) where
+  table : GobjRelocationTable
+  valid : table.ValidFor interpretation sections symbols
+
+/-- Check all target-aware patch bounds and retain their proof on success. -/
+def resolveGobjRelocationTable
+    (interpretation : RelocationKindInterpretation)
+    (sections : GobjSectionTable) (symbols : GobjSymbolTable)
+    (table : GobjRelocationTable) :
+    Except ParseError
+      (ResolvedGobjRelocationTable interpretation sections symbols) :=
+  if valid : table.ValidFor interpretation sections symbols then
+    .ok { table := table, valid := valid }
+  else
+    .error (.malformed ".gobj relocation patch is out of bounds or unknown")
 
 /-- Serialize a relocation count and all fixed-width entries. -/
 def writeGobjRelocationTable (table : GobjRelocationTable) :

@@ -1,4 +1,4 @@
-import Grass.Artifact.Binary.Gobj.ValidatedPayload
+import Grass.Artifact.Binary.Gobj.Payload
 
 /-!
 # Exact `.gobj` payload resolution
