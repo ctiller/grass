@@ -120,4 +120,101 @@ worth pinning, because the two ceilings are easy to conflate. -/
 theorem largeAlloc_above_scaledMax_still_imm32 :
     (Layout.mk [⟨.allocLarge 524288, 7⟩] 7).Realizes := by decide
 
+/-! ### The six operations with no encoding
+
+`UnwindOp.prologueInsns` covers three of the nine operations and returns `none`
+for the rest, and the header claims it "refuses rather than guesses". Nothing
+tested that claim until these, which is worth saying plainly: the positive
+theorems above would all still hold if the refusal were broken.
+
+They are stated over arbitrary registers, offsets and `SizeOfProlog` values,
+because the claim is that no choice of those makes such a layout realizable.
+A fixture would only show that one particular choice fails. -/
+
+/-- `setFramePointer` is a `LEA` or a `MOV` whose form depends on the frame
+offset, and this module does not choose between them. -/
+theorem setFramePointer_never_realizes (r : Gpr) (off : Nat) (codeOff szp : BitVec 8) :
+    ¬ (Layout.mk [⟨.setFramePointer r off, codeOff⟩] szp).Realizes :=
+  Layout.not_realizes_of_unencodable (op := .setFramePointer r off)
+    (by simp [Layout.prologue]) rfl
+
+/-- `saveNonvolatile` is a `MOV` to a stack slot whose `ModR/M` form depends on
+the offset's magnitude. -/
+theorem saveNonvolatile_never_realizes (r : Gpr) (off : Nat) (codeOff szp : BitVec 8) :
+    ¬ (Layout.mk [⟨.saveNonvolatile r off, codeOff⟩] szp).Realizes :=
+  Layout.not_realizes_of_unencodable (op := .saveNonvolatile r off)
+    (by simp [Layout.prologue]) rfl
+
+/-- The far form, same reason. -/
+theorem saveNonvolatileFar_never_realizes (r : Gpr) (off : Nat)
+    (codeOff szp : BitVec 8) :
+    ¬ (Layout.mk [⟨.saveNonvolatileFar r off, codeOff⟩] szp).Realizes :=
+  Layout.not_realizes_of_unencodable (op := .saveNonvolatileFar r off)
+    (by simp [Layout.prologue]) rfl
+
+/-- `saveXmm128` needs an XMM register operand, which
+`Grass.ISA.X86.encodeMemInsn` does not take. -/
+theorem saveXmm128_never_realizes (r : Xmm) (off : Nat) (codeOff szp : BitVec 8) :
+    ¬ (Layout.mk [⟨.saveXmm128 r off, codeOff⟩] szp).Realizes :=
+  Layout.not_realizes_of_unencodable (op := .saveXmm128 r off)
+    (by simp [Layout.prologue]) rfl
+
+/-- The far form of the same. -/
+theorem saveXmm128Far_never_realizes (r : Xmm) (off : Nat) (codeOff szp : BitVec 8) :
+    ¬ (Layout.mk [⟨.saveXmm128Far r off, codeOff⟩] szp).Realizes :=
+  Layout.not_realizes_of_unencodable (op := .saveXmm128Far r off)
+    (by simp [Layout.prologue]) rfl
+
+/-- `pushMachineFrame` has no instruction at all: the processor pushed the trap
+frame before the function's first byte ran. Refusing it is the honest answer
+rather than a limitation -- there is nothing to encode. -/
+theorem pushMachineFrame_never_realizes (withCode : Bool) (codeOff szp : BitVec 8) :
+    ¬ (Layout.mk [⟨.pushMachineFrame withCode, codeOff⟩] szp).Realizes :=
+  Layout.not_realizes_of_unencodable (op := .pushMachineFrame withCode)
+    (by simp [Layout.prologue]) rfl
+
+/-- One unencodable operation refuses a layout whose other operations encode.
+
+The `push` and the `sub` here carry exactly the offsets the encoder produces for
+them, and only the middle operation is unknown. That is enough: no amount of
+correctness elsewhere rescues a layout containing an operation this module
+cannot encode.
+
+An earlier version of this comment claimed that substituting `some []` for
+`none` would make *this* layout be accepted. That is false, and measuring it is
+what showed so: under the substitution the fold computes offsets `1, 1, 5`
+against the declared `1, 5, 9` and refuses on the mismatch. The theorem does go
+red under that substitution, but only because its own proof term stops
+typechecking -- which is not the same thing and does not test the layout at all.
+`zeroByteReading_accepts_this` below is the fixture that actually distinguishes
+the two readings. -/
+theorem mixed_with_unencodable_not_realizes :
+    ¬ (Layout.mk [ ⟨.pushNonvolatile .rbx, 1⟩
+                 , ⟨.setFramePointer .rbp 0, 5⟩
+                 , ⟨.allocSmall 32, 9⟩ ] 9).Realizes :=
+  Layout.not_realizes_of_unencodable (op := .setFramePointer .rbp 0)
+    (by simp [Layout.prologue]) rfl
+
+
+/-- The fixture that separates `none` from `some []`.
+
+Refused today. Under the `some []` reading it is *accepted*, because the
+declared offsets are exactly the ones a zero-byte `setFramePointer` produces.
+Proved by `decide` rather than through `Layout.not_realizes_of_unencodable`, so
+what it tests is the computation and not whether a lemma application still
+elaborates.
+
+It is deliberately not `WellFormed` -- two operations share the offset 1, so
+`Ascends` fails. That is unavoidable and is itself the point: any layout the
+zero-byte reading accepts must have an operation ending where the previous one
+did. `Realizes` has to refuse it on its own rather than leaning on `WellFormed`
+to catch it, because the two predicates are checked independently. -/
+theorem zeroByteReading_accepts_this :
+    ¬ (Layout.mk [ ⟨.pushNonvolatile .rbx, 1⟩
+                 , ⟨.setFramePointer .rbp 0, 1⟩ ] 1).Realizes := by decide
+
+/-- The single-operation version of the same witness. -/
+theorem zeroByteReading_accepts_this_singleton :
+    ¬ (Layout.mk [⟨.setFramePointer .rbp 0, 0⟩] 0).Realizes := by decide
+
 end Tests.ABI.Win64.PrologueRealization

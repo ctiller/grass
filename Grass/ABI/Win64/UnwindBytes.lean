@@ -1329,6 +1329,60 @@ def Realizes (l : Layout) : Prop :=
 instance (l : Layout) : Decidable l.Realizes :=
   inferInstanceAs (Decidable (_ ∧ _))
 
+/--
+An operation with no encoding makes the whole layout unrealizable.
+
+`Realizes` is an under-approximation, and this is the statement that it
+under-approximates *structurally* rather than by accident. One operation this
+module cannot encode is enough: the fold stops at it and the layout is refused
+however its offsets are chosen.
+
+Worth proving rather than assuming, because the alternative failure is silent.
+Had `prologueInsns` returned `some []` for an operation instead of `none` -- a
+plausible reading of "no instruction to describe" -- the fold would have
+continued and that operation would have contributed zero bytes. Some layouts
+would then be *accepted*, wrongly: measured under exactly that substitution,
+`⟨[⟨.setFramePointer .rbp 0, 0⟩], 0⟩` and
+`⟨[⟨.pushNonvolatile .rbx, 1⟩, ⟨.setFramePointer .rbp 0, 1⟩], 1⟩` both flip from
+refused to realizable. `none` and `some []` are one keystroke apart and mean
+opposite things here.
+
+Not *every* layout flips, which is why the witness is named rather than left
+to the reader. A layout whose declared offsets assume the operation takes
+bytes still fails, on the mismatch instead of on the refusal -- so a fixture
+chosen at random tends to stay green under the substitution and prove nothing
+about it.
+-/
+theorem endOffsetsFrom_eq_none :
+    ∀ (ops : List UnwindOp) (start : Nat),
+      (∃ op ∈ ops, op.prologueSize = Option.none) →
+      endOffsetsFrom start ops = Option.none
+  | [], _, h => by obtain ⟨_, hm, _⟩ := h; exact absurd hm (by simp)
+  | hd :: tl, start, h => by
+      simp only [endOffsetsFrom]
+      cases hs : hd.prologueSize with
+      | none => rfl
+      | some k =>
+          have htl : ∃ op ∈ tl, op.prologueSize = Option.none := by
+            obtain ⟨op, hm, hn⟩ := h
+            rcases List.mem_cons.mp hm with rfl | hm'
+            · rw [hs] at hn; exact absurd hn (by simp)
+            · exact ⟨op, hm', hn⟩
+          simp only [endOffsetsFrom_eq_none tl (start + k) htl,
+            Option.map_none]
+
+/-- So a layout containing an operation this module cannot encode is refused,
+whatever its offsets and whatever `SizeOfProlog` it declares. -/
+theorem not_realizes_of_unencodable {l : Layout} {op : UnwindOp}
+    (hmem : op ∈ l.prologue.ops) (h : op.prologueInsns = Option.none) :
+    ¬ l.Realizes := by
+  intro hr
+  have := endOffsetsFrom_eq_none l.prologue.ops 0
+    ⟨op, hmem, by simp [UnwindOp.prologueSize, h]⟩
+  have h1 := hr.1
+  rw [this] at h1
+  simp at h1
+
 end Layout
 
 end Grass.ABI.Win64
