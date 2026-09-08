@@ -56,6 +56,11 @@ def writeExact {count : Nat} (value : SizedByteArray count) :
     Std.Logical.ByteArray :=
   value.1
 
+/-- A sized-byte writer emits exactly its retained type-level width. -/
+@[simp] theorem length_writeExact {count : Nat} (value : SizedByteArray count) :
+    (writeExact value).length = count :=
+  value.2
+
 /-- A sized byte value written in front of any suffix is consumed exactly. -/
 @[simp] theorem takeExactSized_writeExact_append {count : Nat}
     (value : SizedByteArray count) (rest : Std.Logical.ByteArray) :
