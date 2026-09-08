@@ -333,12 +333,46 @@ count. It does not hide.
 exists and passes. Checked rather than assumed: all 123 fenced blocks across
 the five documents carry an immediate classification, block identities are
 unique, and all 20 authored blocks match their files byte for byte after
-newline normalization. The script needs PowerShell 7 and this machine has only
-5.1, so that was established by reimplementing its three tests and
-negative-testing the reimplementation -- changing one byte of
-`Spikes/1_Hello_World/Spec.lean` reports the mismatch, deleting one
+newline normalization.
+
+An earlier revision of this section said the script needs PowerShell 7, that
+this machine has only 5.1, and that the result had therefore been established
+by reimplementing the three tests rather than by running the script. The first
+clause was untested and is wrong; it is retracted at `c-spike:46` and amended
+at `c-spike:47`. Windows PowerShell 5.1 Desktop runs `check-spike-sources.ps1`
+directly and it exits 0, as do `check-doc-links.ps1` and g-foundation's
+`audit-trust.ps1`. c-spike runs its own gates and does not depend on a reviewer
+for them.
+
+The reimplementation was still worth having, for the reason that outlives the
+error: it was negative-tested, and the script was not. Changing one byte of
+`Spikes/1_Hello_World/Spec.lean` reports the mismatch; deleting one
 classification comment from `docs/SPIKE_2.md` reports the unclassified block.
-So the drift this plan guards against is drift from a known-good state.
+A gate that has only ever been seen to pass is not yet known to be able to
+fail. So the drift this plan guards against is drift from a known-good state,
+measured by an instrument that has been shown to move.
+
+**What can the corpus falsify?** Counted rather than assumed, because a library
+owner asking "will the spikes catch it if I get this wrong" deserves a number.
+Across the five spikes there are 3 success terminals and 15 non-success ones --
+3 in Spike 1, 6 in Spike 2, 6 in Spike 3, and none in Spikes 4 and 5, which are
+process-shaped and carry no `@terminal` labels at all. Of the 15, six are the
+partial-write case, `writeFailed` and `noProgress`, exactly one of each in all
+three assembly spikes; three are `stdoutUnavailable`, where nothing was ever
+offered, which is the cheap negative for any rule that demands a destination
+for an uncommitted suffix.
+
+The gap is the part worth publishing. **Not one of the 15 is `.cancelled`** --
+zero across all five spikes. Any obligation that splits failure from
+cancellation is exercised six times on one branch and never on the other, so a
+wrong cancellation rule passes the whole corpus. That is filed at `c-spike:50`
+against the first library change it actually bears on, c-process's repair of
+`closed_streams_committed_everything`, and it will recur for every later one:
+by `c-stdlib:29`'s bar a repair has to be shown both satisfiable and still
+refusing what it exists to refuse, and today the corpus can only do the first
+for cancellation. Closing it means an authored cancellation consumer, which is
+c-spike's to write once a library owner names the vocabulary -- not something
+to invent ahead of one.
 
 The inventory in section 2 is sizing evidence, not an instrument. It answered
 "how much work is there and who owns it" once, well enough to order this plan.
