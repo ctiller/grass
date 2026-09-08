@@ -1,6 +1,7 @@
 import Grass.Memory.Addressing
 import Grass.Memory.ByteStore
 import Grass.Memory.Audit
+import Grass.Memory.Backing
 import Grass.Memory.Authority
 import Grass.Memory.Event
 import Grass.Std.Logical.FiniteMap
@@ -165,12 +166,15 @@ structure AllocationRecord where
   /-- Whether it is live. A dead allocation authorizes nothing, whatever
   provenance is presented. -/
   live : Bool
-  /-- The allocation's bytes.
+  /-- Which bytes this allocation looks at, and where it starts in them.
 
-  Initialization is read off this rather than tracked beside it: a separate list
-  of initialized offsets was a second source of truth that could disagree with
-  the values, and `RangeInitialized` now cannot drift from what was written. -/
-  bytes : ByteStore
+  A `View`, not a `ByteStore`: bytes live once in `MemoryState.storage`, and an
+  allocation is a window onto them. `Grass/Memory/Backing.lean` carries the model and
+  the reason -- the previous shape gave every record its own store and declared
+  sharing separately, which `Tests/Op/StandardLoan.lean`'s
+  `the_alias_is_not_yet_a_byte_level_fact` proved the byte semantics did not
+  implement. -/
+  view : View
   /-- Where the allocation sits in its address space, if it sits anywhere.
 
   `Option`, and not because placement is optional bookkeeping. `docs/MEMORY_MODEL.md`
@@ -246,8 +250,12 @@ structure MemoryState where
   private mk ::
   /-- The live and dead allocations. -/
   allocations : FiniteMap AllocId AllocationRecord
-  /-- Pairs of allocations whose bytes are the same storage. -/
-  aliases : List (AllocId × AllocId)
+  /-- The bytes, one store per backing identity.
+
+  Replaces `aliases`. Sharing is no longer declared: two allocations share bytes when
+  their views name the same backing, which `MemoryState.SharesBytes` reads off rather
+  than asserting. -/
+  storage : Storage
   /-- The authority grants currently live. **Private**: see below.
 
 
@@ -262,7 +270,8 @@ structure MemoryState where
 namespace MemoryState
 
 /-- The state with nothing allocated. -/
-def empty : MemoryState := { allocations := .empty, aliases := [], grants := .empty }
+def empty : MemoryState :=
+  { allocations := .empty, storage := .empty, grants := .empty }
 
 /-! ## The grant map is sealed
 
@@ -361,154 +370,43 @@ def grantEntries (state : MemoryState) : List (GrantId × AuthorityGrant) :=
 def grantAt? (state : MemoryState) (id : GrantId) : Option AuthorityGrant :=
   state.grants.lookup id
 
-/-- One declared aliasing hop, in either direction. Aliasing is symmetric by
-convention and this is where the convention is discharged. -/
-def AliasHop (state : MemoryState) (a b : AllocId) : Prop :=
-  (a, b) ∈ state.aliases ∨ (b, a) ∈ state.aliases
-
-instance (state : MemoryState) (a b : AllocId) : Decidable (state.AliasHop a b) :=
-  inferInstanceAs (Decidable (_ ∨ _))
-
-/-- Every identity the alias list mentions, in either position.
-
-The vertices of the alias graph. `SharesAfter` quantifies its intermediate over this
-rather than over the allocation table, which is what makes the closure symmetric:
-review was asked for a symmetry theorem and found the definition did not admit one.
-
-`SharesAfter` used `state.allocations.domain`, so a one-hop path `a → b` required
-`b` to be *allocated* while the reversed path required `a` to be. Alias `(a, b)` with
-`a` allocated and `b` not, and `SharesBytes b a` held while `SharesBytes a b` did
-not — for a relation whose whole meaning is "these two name the same bytes".
-Unreachable through `step`, because `denialOf` refuses an unallocated root and
-`issue?` requires a live provenance, so both ends are allocated on every path an
-operation can take; but a relation that is asymmetric anywhere cannot have a symmetry
-theorem, and `conflicts_symm` wanted one.
-
-Quantifying over the graph's own vertices keeps the closure decidable — it is still a
-list — and makes it conservative in the safe direction: an alias naming an
-unallocated identity now propagates sharing rather than silently stopping, and more
-sharing means more freezing. -/
-def aliasIdentities (state : MemoryState) : List AllocId :=
-  state.aliases.flatMap (fun pair => [pair.1, pair.2])
-
-/-- `state.SharesAfter n a b` holds when `b` is reachable from `a` in at most `n`
-declared hops. The bounded form, so the closure below is decidable. -/
-def SharesAfter (state : MemoryState) : Nat → AllocId → AllocId → Prop
-  | 0, a, b => a = b
-  | n + 1, a, b =>
-      a = b ∨ ∃ mid ∈ state.aliasIdentities, state.AliasHop a mid ∧
-        state.SharesAfter n mid b
-
-instance decSharesAfter (state : MemoryState) : (n : Nat) → (a b : AllocId) →
-    Decidable (state.SharesAfter n a b)
-  | 0, _, _ => inferInstanceAs (Decidable (_ = _))
-  | n + 1, _, b =>
-      have : ∀ mid, Decidable (state.SharesAfter n mid b) := fun mid =>
-        decSharesAfter state n mid b
-      inferInstanceAs (Decidable (_ ∨ ∃ _ ∈ _, _))
-
 /--
-`state.SharesBytes a b` holds when two allocations name the same storage.
+`state.SharesBytes a b` holds when two allocations are views onto one backing store.
 
-**Transitively.** `docs/MEMORY_MODEL.md` §7.5 makes mapping, pinning and sharing
-typed transitions, and those compose: a profile that declares a file aliased to a
-view, and that view aliased to a second view, has said all three name the same
-bytes. This was a single hop, so the two ends of such a chain were declared
-non-conflicting and a cross-context write to the far end committed with no
-violation — the same defect `SharesBytes` was introduced to fix, one hop further
-out. Local adversarial review built the chain.
+**Read off, not declared.** This was a bounded transitive closure over a list of
+declared alias pairs -- `AliasHop`, `aliasIdentities`, `SharesAfter`, a fuel bound
+equal to the list's length, a symmetry repair, and six theorems holding it together.
+All of it is gone. `Grass/Memory/Backing.lean` stores bytes once per identity and an
+allocation names one, so sharing is `View.SharesBacking`, an equality.
 
-The bound is the number of declared aliases, which is the longest simple path any
-chain can have, so `SharesAfter` at that bound is the full closure and stays
-decidable.
+The relation it replaces could assert what the byte semantics did not implement, which
+`Tests/Op/StandardLoan.lean`'s `the_alias_is_not_yet_a_byte_level_fact` proved. This
+one cannot: `Storage.sharing_is_real` says a write through either view is visible
+through the other, because there is one copy of the bytes.
+
+Requires both allocations to exist, where the closure's base case was equality and so
+held for identities the table never had -- a relation asserting sharing about storage
+that was not there.
 -/
 def SharesBytes (state : MemoryState) (a b : AllocId) : Prop :=
-  state.SharesAfter state.aliases.length a b
+  ∃ ra ∈ state.allocations.lookup a, ∃ rb ∈ state.allocations.lookup b,
+    ra.view.SharesBacking rb.view
 
 instance (state : MemoryState) (a b : AllocId) : Decidable (state.SharesBytes a b) :=
-  inferInstanceAs (Decidable (state.SharesAfter _ a b))
+  inferInstanceAs (Decidable (∃ _ ∈ _, ∃ _ ∈ _, _))
 
-theorem sharesAfter_zero_of_eq {state : MemoryState} {n : Nat} {a b : AllocId}
-    (h : a = b) : state.SharesAfter n a b := by
-  cases n with
-  | zero => exact h
-  | succ m => exact .inl h
+/-- An allocation shares bytes with itself, provided it exists. -/
+theorem sharesBytes_refl_of_mem {state : MemoryState} {a : AllocId}
+    {record : AllocationRecord} (h : state.allocations.lookup a = some record) :
+    state.SharesBytes a a := ⟨record, h, record, h, rfl⟩
 
-theorem sharesBytes_refl (state : MemoryState) (a : AllocId) : state.SharesBytes a a :=
-  sharesAfter_zero_of_eq rfl
-
-/-- Aliasing is symmetric, which `AliasHop` gets by construction. -/
-theorem aliasHop_symm {state : MemoryState} {a b : AllocId} (h : state.AliasHop a b) :
-    state.AliasHop b a := h.symm
-
-/-- A declared hop's far end is one of the alias graph's own vertices. -/
-theorem mem_aliasIdentities_of_hop {state : MemoryState} {a b : AllocId}
-    (h : state.AliasHop a b) : b ∈ state.aliasIdentities := by
-  unfold aliasIdentities
-  rcases h with h | h
-  · exact List.mem_flatMap.mpr ⟨(a, b), h, by simp⟩
-  · exact List.mem_flatMap.mpr ⟨(b, a), h, by simp⟩
-
-/-- A hop may be appended to a path, which is the step the recursion does not give:
-`SharesAfter` peels from the front and a reversal needs to add at the back. -/
-theorem sharesAfter_snoc {state : MemoryState} : ∀ {n : Nat} {a b c : AllocId},
-    state.SharesAfter n a b → state.AliasHop b c → state.SharesAfter (n + 1) a c := by
-  intro n
-  induction n with
-  | zero =>
-    intro a b c hpath hhop
-    have hab : a = b := hpath
-    subst hab
-    exact .inr ⟨c, mem_aliasIdentities_of_hop hhop, hhop, sharesAfter_zero_of_eq rfl⟩
-  | succ m ih =>
-    intro a b c hpath hhop
-    rcases hpath with hab | ⟨mid, hmid, hop, hrest⟩
-    · subst hab
-      exact .inr ⟨c, mem_aliasIdentities_of_hop hhop, hhop, sharesAfter_zero_of_eq rfl⟩
-    · exact .inr ⟨mid, hmid, hop, ih hrest hhop⟩
-
-/--
-**Sharing bytes is symmetric.**
-
-The theorem `Grass/Op/Step.lean`'s `conflicts_symm` takes as a hypothesis, and the
-reason the definition above quantifies over the alias graph's vertices rather than the
-allocation table: with the old quantifier this was false, and review found it when
-asked for the proof.
-
-Reversing a path keeps its length, so the same bound works and no strengthening of
-`aliases.length` is needed — which is why the statement is over `SharesAfter n` for
-every `n` rather than only over the closure.
--/
-theorem sharesAfter_symm {state : MemoryState} : ∀ {n : Nat} {a b : AllocId},
-    state.SharesAfter n a b → state.SharesAfter n b a := by
-  intro n
-  induction n with
-  | zero => intro a b h; exact (h : a = b).symm
-  | succ m ih =>
-    intro a b h
-    rcases h with hab | ⟨mid, _, hop, hrest⟩
-    · exact .inl hab.symm
-    · exact sharesAfter_snoc (ih hrest) (aliasHop_symm hop)
-
-/-- The closure form. -/
+/-- Sharing is symmetric, from equality of backings. The old proof needed the closure
+to be symmetric, which needed `aliasIdentities` to exist. -/
 theorem sharesBytes_symm {state : MemoryState} {a b : AllocId}
-    (h : state.SharesBytes a b) : state.SharesBytes b a :=
-  sharesAfter_symm h
+    (h : state.SharesBytes a b) : state.SharesBytes b a := by
+  obtain ⟨ra, hra, rb, hrb, heq⟩ := h
+  exact ⟨rb, hrb, ra, hra, View.sharesBacking_symm heq⟩
 
-/-- One declared hop shares bytes.
-
-The allocation-table hypothesis is gone with the change above: a hop's far end is a
-vertex of the alias graph by construction, so `mem_aliasIdentities_of_hop` supplies
-what the existential needs and a caller no longer has to prove the far end is
-allocated. -/
-theorem sharesBytes_of_hop {state : MemoryState} {a b : AllocId}
-    (hhop : state.AliasHop a b)
-    (hpos : 0 < state.aliases.length) : state.SharesBytes a b := by
-  unfold SharesBytes
-  cases hn : state.aliases.length with
-  | zero => omega
-  | succ m =>
-    exact .inr ⟨b, mem_aliasIdentities_of_hop hhop, hhop, sharesAfter_zero_of_eq rfl⟩
 
 
 /--
@@ -2991,52 +2889,17 @@ theorem tearDown?_kills_every_name {state : MemoryState} :
             rfl
         · exact ih h id hcase
 
-/--
-Declare that two allocations name the same storage.
+/-! ## The alias door is gone
 
-**Deliberately not an `Option`-returning door**, unlike every other mutator here, and
-the reason is worth stating because review asked. Declaring an alias can put two
-grants into conflict that did not conflict when they were issued: nothing
-re-examines them, and `docs/MEMORY_MODEL.md` §7.5 makes the mapping a real
-transition. The tempting fix is to refuse such an alias. That would be a lie in the
-other direction — if the platform mapped two views of one file, the alias *exists*,
-and a `MemoryState` with no way to record it does not describe the machine.
+`MemoryState.alias` prepended a pair to a list and declared two allocations to be one
+storage. Under `Grass/Memory/Backing.lean` there is nothing for it to do: two
+allocations share bytes by naming the same backing, and the states this built --
+sharing asserted but not implemented -- are no longer expressible.
 
-What makes the unchecked form safe is that the question is asked at access time
-instead. `Grass/Op/Step.lean`'s `refusalOf` carries both halves of §3's rule, so in
-the conflicting state each holder is frozen by the other and neither may write:
-`Tests/Op/StandardLoan.lean`'s
-`an_alias_declared_after_issue_is_refused_without_a_provider` is that state, stepped
-with no providers listed. The state is stuck rather than unsound, which is the
-conservative answer §7.5's own wording asks for.
-
-`Tools/DoorAudit.py` still guards it, because a `Grass/` caller changing the alias
-set is changing authority whether or not the function refuses anything.
-
-**Unmapping has no representation at all.** §7.5's unmapping would remove a pair,
-and nothing here can; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it.
-
-**PROVISIONAL SCAFFOLDING, AND NOT CONSUMABLE.** `g-design:185` rules that this whole
-approach is replaced: one canonical `ByteStore` per backing storage identity, with
-allocation records as typed views naming a backing id, origin and extent, reads and
-writes translating into one checked backing span, and aliasing definitional where two
-views' translated spans overlap. Under that design a declared alias graph is not an
-authority source at all, and the offset relating two views is derived from their
-origins rather than declared anywhere.
-
-The ruling is right and `Tests/Op/StandardLoan.lean`'s
-`the_alias_is_not_yet_a_byte_level_fact` is c-mem's own proof of why: this door
-declares two allocations to be the same storage while `MemoryState.write` writes only
-the named one, so the claim has no byte-level counterpart. That theorem's docstring
-already named the replacement as the better shape before c-mem built this instead.
-
-Until the replacement lands, **no `MemoryProfile` or `VerifiedProgram`-facing
-transition may depend on this**, and it is unchecked besides: it prepends any pair
-of allocations with no proof that the mapping is real. Treat it as a placeholder
-that records an intent, not as an interface.
+`docs/MEMORY_MODEL.md` §7.5's mapping and unmapping are checked transitions that
+create and invalidate a second view onto one backing. They are not this door renamed.
 -/
-def alias (state : MemoryState) (a b : AllocId) : MemoryState :=
-  { state with aliases := (a, b) :: state.aliases }
+
 
 /--
 Write `bytes` at `start` in allocation `id`.
@@ -3052,9 +2915,11 @@ def write (state : MemoryState) (id : AllocId) (start : Nat) (bytes : ByteSeq)
   match state.allocations.lookup id with
   | Option.none => state
   | some record =>
+      -- Through the backing store the view looks at. Another view onto the
+      -- same bytes sees this without anything propagating it, which is
+      -- `Storage.sharing_is_real`.
       { state with
-        allocations := state.allocations.insert id
-          { record with bytes := record.bytes.write start bytes initializes } }
+        storage := state.storage.write record.view start bytes initializes }
 
 /-- **Writing bytes changes no authority.** Half of "authority is not data", from
 the other side: `cellAt?_applyAuthorityEffect?` says a declared authority change
@@ -3068,12 +2933,14 @@ moves no bytes, and this says a write grants nothing. Both are needed by
 
 /-- The byte allocation `id` holds at `offset`, if it holds one. -/
 def byteAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option Byte :=
-  (state.allocations.lookup id).bind (·.bytes.byteAt? offset)
+  (state.allocations.lookup id).bind fun record =>
+    state.storage.byteAt? record.view offset
 
 /-- What allocation `id` holds at `offset`: the byte and whether it counts as
 initialized. Both from one lookup, for the reason `ByteStore.cellAt?` gives. -/
 def cellAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option (Byte × Bool) :=
-  (state.allocations.lookup id).bind (·.bytes.cellAt? offset)
+  (state.allocations.lookup id).bind fun record =>
+    state.storage.cellAt? record.view offset
 
 /-- A cell is a function of the allocation table alone. -/
 theorem cellAt?_of_allocations_eq {a b : MemoryState} (h : a.allocations = b.allocations)
