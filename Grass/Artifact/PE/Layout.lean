@@ -16,6 +16,8 @@ Header (Object and Image)", "Optional Header (Image Only)", and "Section Table
 
 namespace Grass.Artifact.PE
 
+open Grass.Std.Logical
+
 /-- A half-open absolute byte span `[start, start + size)` in a complete file. -/
 structure FileSpan where
   start : Nat
@@ -77,5 +79,46 @@ theorem ntHeaders_end_le_firstRawOffset (peOffset sectionCount fileAlignment : N
     (ntHeadersSpan peOffset sectionCount).endOffset ≤
       firstRawOffset peOffset sectionCount fileAlignment :=
   le_alignUp _ _
+
+/-- One requested section paired with its absolute raw-data span. -/
+structure PlacedSection where
+  source : RawSection
+  rawSpan : FileSpan
+deriving DecidableEq
+
+/-- Place section payloads in request order, aligning each start and advancing
+by the unpadded payload length. -/
+def placeSectionsFrom (cursor fileAlignment : Nat) : List RawSection → List PlacedSection
+  | [] => []
+  | source :: tail =>
+      let start := alignUp cursor fileAlignment
+      let placed : PlacedSection :=
+        { source
+          rawSpan := ⟨start, source.contents.length⟩ }
+      placed :: placeSectionsFrom placed.rawSpan.endOffset fileAlignment tail
+
+@[simp] theorem placeSectionsFrom_length (cursor fileAlignment : Nat)
+    (sections : List RawSection) :
+    (placeSectionsFrom cursor fileAlignment sections).length = sections.length := by
+  induction sections generalizing cursor with
+  | nil => rfl
+  | cons source tail ih =>
+      simp only [placeSectionsFrom, List.length_cons]
+      exact congrArg Nat.succ (ih _)
+
+/-- Place all requested raw sections after the complete canonical NT-header
+region. This function consumes `ExecutableImageDescription` without learning
+how any section's bytes were encoded. -/
+def placeRawSections (description : ExecutableImageDescription)
+    (fileAlignment : Nat) : Vec PlacedSection :=
+  Vec.fromList <| placeSectionsFrom
+    (firstRawOffset canonicalPeOffset description.sections.length fileAlignment)
+    fileAlignment description.sections.toList
+
+/-- `placeRawSections` preserves the requested number of sections. -/
+@[simp] theorem placeRawSections_length (description : ExecutableImageDescription)
+    (fileAlignment : Nat) :
+    (placeRawSections description fileAlignment).length = description.sections.length := by
+  simp [placeRawSections, Vec.length]
 
 end Grass.Artifact.PE
