@@ -146,8 +146,18 @@ spikes, are one shape: `write_all_loop(payload)` in Spike 1,
 describes each as a *standard* partial-write induction or consumer, and that word
 is the demand: it expects one reusable theorem, not three authored proofs.
 
-There are eight fixtures. Per `Tests.lean` all of them establish expressibility
-rather than a theorem. `Tests/Std/VecVocabulary.lean` covers the type's own
+The fixtures under `Tests/Std/` all establish expressibility rather than a
+theorem, per `Tests.lean`. Their number is deliberately not stated: it was
+"eight" here and "nine" in §3.11's criterion 4, and both were false within
+hours of being written. A count of a set that grows is a stale claim with a fuse
+on it.
+
+For the same reason the descriptions below are *illustrative, not exhaustive*:
+`Tests/Std/` is the authoritative list, and this section explains only the
+fixtures whose purpose is not obvious from their name. Fixtures added since it
+was written — the representation probe, the collection-instance bridges, the fold
+recursors — are described where they were introduced, in §3.1 and §3.2, rather
+than by growing this paragraph every time. `Tests/Std/VecVocabulary.lean` covers the type's own
 claims: that a `List Byte` and a host `_root_.ByteArray` are each rejected where
 a Grass `ByteArray` is required, that extensionality is usable in the shape a
 consumer would use it, and that the update framing law composes the way the
@@ -604,24 +614,43 @@ qualified name will miss the idiomatic way the same function is called.
 
 ### 3.11 Exit criteria
 
-S1 is complete when all of the following hold. The first four hold today.
+S1 is complete when all of the following hold. **All five hold today.** The
+fifth was the outstanding one and closed when two reviewers distinct from this
+agent merged the S1 work; see below for what each criterion actually measured
+when it was checked, rather than that it passed.
 
 1. `lake build` is green with `warningAsError = true`, so no declaration uses
    `sorry`.
 2. `lake env lean Tools/AxiomAudit.lean` reports no axiom outside the
    [FOUNDATION.md](FOUNDATION.md) §3 allowlist, with **every** module this plan
-   owns in its coverage set — `Vec`, `HostBytes`, `Text`, and `Order`. The
-   criterion previously named only `Vec` and stopped tracking the library as it
-   grew. It is also not evidence about the `@[extern]` boundary of §3.9, because
-   an `@[extern]` is not an axiom.
+   owns in its coverage set — `Vec`, `Byte`, `Bag`, `FiniteMap`, `HostBytes`,
+   `Order`, and `Text`. The criterion has now been restated twice for the same
+   reason: it first named only `Vec`, then the four modules the plan owned at the
+   time, and each version stopped tracking the library as it grew. Checked
+   directly rather than assumed — all seven are imported by
+   `Tools/AxiomAudit.lean`. It is also not evidence about the `@[extern]`
+   boundary of §3.9, because an `@[extern]` is not an axiom.
 3. `cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin
    docstring-audit` reports no unbacked claim.
 4. **Every** fixture under `Tests/Std/` elaborates, including all `#guard_msgs`
-   rejection cases. This criterion previously named one of eight.
-5. A reviewer distinct from this agent has merged it, per
-   [AGENT_REVIEW.md](AGENT_REVIEW.md).
+   rejection cases. This criterion previously named one of eight. Checked by
+   confirming that *every* file under `Tests/Std/` produces an `olean`, not by
+   reading a green build line: `Tools/VecRepresentationProbe.lean` sat outside
+   the build for weeks while every gate passed, which is exactly the failure
+   this criterion exists to catch and did not.
 
-### 3.12 Open: the `ByteArray` name collides with Lean's
+   No count is given on purpose. An earlier draft of this line said "each of the
+   nine files", which was true when written and false two merges later; the
+   branch this plan replaced was withdrawn partly for saying "eight" in the same
+   place. A count of a set that grows is a stale claim with a fuse on it, and the
+   criterion does not need one — "every file" is both stronger and permanent.
+5. A reviewer distinct from this agent has merged it, per
+   [AGENT_REVIEW.md](AGENT_REVIEW.md). Closed: `e-reviewer` merged the notation
+   bridges and their fixture, and `g-reviewer` merged the specification-quote
+   repair and the representation probe. Two reviewers rather than one because
+   `coord1` alternates this plan's nominations between them.
+
+### 3.12 Settled: the `ByteArray` name collides with Lean's, and stays
 
 [STDLIB.md](STDLIB.md) §1 fixes the name `ByteArray` for `Vec Byte`. Lean's
 prelude already has `_root_.ByteArray`. A module that opens `Grass.Std.Logical`
@@ -636,12 +665,26 @@ every memory, artifact, decoder, and program module that touches bytes, and it
 is paid forever.
 
 The name is fixed by a normative document this plan does not own, so this plan
-implements §1 as written and has put the question to the owner of
-[STDLIB.md](STDLIB.md) rather than choosing a different name unilaterally. The
-options, for whoever rules: keep `ByteArray` and require qualification; rename
-Grass's to something with no prelude collision; or state that consumers open a
-narrower namespace. This plan has no preference strong enough to justify
-pre-empting the ruling, and will implement whichever is chosen.
+implemented §1 as written and put the question to the owner of
+[STDLIB.md](STDLIB.md) rather than choosing a different name unilaterally.
+
+**It has been ruled on.** Ruled at `g-design:49`, and recorded as
+[DECISIONS.md](DECISIONS.md) decision 133: Grass keeps
+`Grass.Std.Logical.ByteArray`, a module that can see both representations
+qualifies the Grass name or takes a narrow local alias, and host conversion APIs
+stay explicitly named and keep their order, length, and value connection
+theorems. The reasoning given is the one this section reached from the other
+direction — the ambiguity error is a useful guard against silently crossing a
+representation boundary — and renaming would abandon already-ratified
+vocabulary. The decision names this plan's question as the one it resolves.
+
+Nothing here needs implementing: the ruling is that the current behaviour is the
+intended behaviour. `Tests/Std/VecVocabulary.lean` already pins both halves, a
+`List Byte` and a host `_root_.ByteArray` each being rejected where a Grass
+`ByteArray` is required. This section is kept rather than deleted because the
+cost it describes is real and permanent, and a future reader meeting the
+ambiguity error deserves to find the reason rather than rediscover the
+argument.
 
 ## 4. S2 — Custody consolidation
 
