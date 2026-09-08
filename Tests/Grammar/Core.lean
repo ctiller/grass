@@ -45,7 +45,8 @@ example (first second : Byte) (suffix : Std.Logical.ByteArray) :
     (Derives.byte (fun _ => True) first Vec.empty trivial)
     (Derives.byte (fun _ => True) second suffix trivial)
 
-example (value : { _ : Byte // True }) (suffix : Std.Logical.ByteArray) :
+example (value : Subtype (fun _ : Byte => True))
+    (suffix : Std.Logical.ByteArray) :
     ∃ consumed,
       Vec.singleton value.1 ++ suffix = consumed ++ suffix := by
   have derivation :
