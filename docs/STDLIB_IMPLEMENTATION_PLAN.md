@@ -623,10 +623,16 @@ when it was checked, rather than that it passed.
 3. `python Tools/DocstringAudit.py` reports no unbacked claim.
 4. **Every** fixture under `Tests/Std/` elaborates, including all `#guard_msgs`
    rejection cases. This criterion previously named one of eight. Checked by
-   confirming each of the nine files under `Tests/Std/` produces an `olean`,
-   not by reading a green build line: `Tools/VecRepresentationProbe.lean` sat
-   outside the build for weeks while every gate passed, which is exactly the
-   failure this criterion exists to catch and did not.
+   confirming that *every* file under `Tests/Std/` produces an `olean`, not by
+   reading a green build line: `Tools/VecRepresentationProbe.lean` sat outside
+   the build for weeks while every gate passed, which is exactly the failure
+   this criterion exists to catch and did not.
+
+   No count is given on purpose. An earlier draft of this line said "each of the
+   nine files", which was true when written and false two merges later; the
+   branch this plan replaced was withdrawn partly for saying "eight" in the same
+   place. A count of a set that grows is a stale claim with a fuse on it, and the
+   criterion does not need one — "every file" is both stronger and permanent.
 5. A reviewer distinct from this agent has merged it, per
    [AGENT_REVIEW.md](AGENT_REVIEW.md). Closed: `e-reviewer` merged the notation
    bridges and their fixture, and `g-reviewer` merged the specification-quote
