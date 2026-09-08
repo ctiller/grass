@@ -56,6 +56,20 @@ example : intake.entryBlocks.Nodup := intake.entryBlocksNodup_of_wellFormed (by 
 example : intake.stepKeys.Nodup := intake.stepKeysNodup_of_wellFormed (by decide)
 example : intake.RootResolved := intake.rootResolved_of_wellFormed (by decide)
 
+example : intake.findEntry? .worker =
+    some ⟨.worker, blockId "worker"⟩ := by
+  apply intake.findEntry?_eq_some_of_mem .worker
+      ⟨.worker, blockId "worker"⟩ (by decide)
+  · simp [intake]
+  · rfl
+
+example : intake.findStep? .finish =
+    some ⟨.finish, ⟨blockId "worker", exitTag "finish"⟩⟩ := by
+  apply intake.findStep?_eq_some_of_mem .finish
+      ⟨.finish, ⟨blockId "worker", exitTag "finish"⟩⟩ (by decide)
+  · simp [intake]
+  · rfl
+
 example : ∃ binding block,
     intake.findEntry? .root = some binding ∧
     graph.findBlock? binding.block = some block :=

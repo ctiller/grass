@@ -188,6 +188,51 @@ theorem findStep?_sound
         simpa [findStep?] using hfind)
     exact LawfulBEq.eq_of_beq matched
 
+private theorem eq_of_mem_of_mem_of_map_nodup
+    {α : Type e} {β : Type s} (key : α → β)
+    {items : List α} {left right : α}
+    (unique : (items.map key).Nodup)
+    (leftMem : left ∈ items) (rightMem : right ∈ items)
+    (sameKey : key left = key right) : left = right := by
+  induction items with
+  | nil => simp at leftMem
+  | cons head tail ih =>
+      rw [List.map_cons, List.nodup_cons] at unique
+      rw [List.mem_cons] at leftMem rightMem
+      rcases leftMem with rfl | leftMem
+      · rcases rightMem with rfl | rightMem
+        · rfl
+        · exfalso
+          apply unique.1
+          rw [sameKey]
+          exact List.mem_map.mpr ⟨right, rightMem, rfl⟩
+      · rcases rightMem with rfl | rightMem
+        · exfalso
+          apply unique.1
+          rw [← sameKey]
+          exact List.mem_map.mpr ⟨left, leftMem, rfl⟩
+        · exact ih unique.2 leftMem rightMem
+
+/-- A valid intake has at most one authored entry binding for each upstream
+identity. -/
+theorem entry_eq_of_mem_of_mem_of_source_eq
+    (intake : AuthoredCFGIntake EntryId StepId graph)
+    (left right : IntakeEntry EntryId) (closed : intake.WellFormed)
+    (leftMem : left ∈ intake.entries) (rightMem : right ∈ intake.entries)
+    (sameSource : left.source = right.source) : left = right := by
+  exact eq_of_mem_of_mem_of_map_nodup IntakeEntry.source
+    (intake.entryIdsNodup_of_wellFormed closed) leftMem rightMem sameSource
+
+/-- A valid intake has at most one authored step binding for each upstream
+identity. -/
+theorem step_eq_of_mem_of_mem_of_source_eq
+    (intake : AuthoredCFGIntake EntryId StepId graph)
+    (left right : IntakeStep StepId) (closed : intake.WellFormed)
+    (leftMem : left ∈ intake.steps) (rightMem : right ∈ intake.steps)
+    (sameSource : left.source = right.source) : left = right := by
+  exact eq_of_mem_of_mem_of_map_nodup IntakeStep.source
+    (intake.stepIdsNodup_of_wellFormed closed) leftMem rightMem sameSource
+
 omit [DecidableEq StepId] in
 @[simp] theorem findEntry?_isSome_iff_mem_entryIds
     (intake : AuthoredCFGIntake EntryId StepId graph) (source : EntryId) :
@@ -199,6 +244,42 @@ omit [DecidableEq EntryId] in
     (intake : AuthoredCFGIntake EntryId StepId graph) (source : StepId) :
     (intake.findStep? source).isSome = true ↔ source ∈ intake.stepIds := by
   simp [findStep?, stepIds]
+
+/-- Under structural closure, entry lookup returns the exact authored binding
+already held by the caller. -/
+theorem findEntry?_eq_some_of_mem
+    (intake : AuthoredCFGIntake EntryId StepId graph) (source : EntryId)
+    (binding : IntakeEntry EntryId) (closed : intake.WellFormed)
+    (member : binding ∈ intake.entries) (hasSource : binding.source = source) :
+    intake.findEntry? source = some binding := by
+  have sourceMember : source ∈ intake.entryIds := by
+    simp [entryIds]
+    exact ⟨binding, member, hasSource⟩
+  obtain ⟨found, foundLookup⟩ := Option.isSome_iff_exists.mp
+    ((intake.findEntry?_isSome_iff_mem_entryIds source).2 sourceMember)
+  have foundFacts := intake.findEntry?_sound source found foundLookup
+  have foundEq : found = binding :=
+    intake.entry_eq_of_mem_of_mem_of_source_eq found binding closed
+      foundFacts.1 member (foundFacts.2.trans hasSource.symm)
+  simpa [foundEq] using foundLookup
+
+/-- Under structural closure, step lookup returns the exact authored binding
+already held by the caller. -/
+theorem findStep?_eq_some_of_mem
+    (intake : AuthoredCFGIntake EntryId StepId graph) (source : StepId)
+    (binding : IntakeStep StepId) (closed : intake.WellFormed)
+    (member : binding ∈ intake.steps) (hasSource : binding.source = source) :
+    intake.findStep? source = some binding := by
+  have sourceMember : source ∈ intake.stepIds := by
+    simp [stepIds]
+    exact ⟨binding, member, hasSource⟩
+  obtain ⟨found, foundLookup⟩ := Option.isSome_iff_exists.mp
+    ((intake.findStep?_isSome_iff_mem_stepIds source).2 sourceMember)
+  have foundFacts := intake.findStep?_sound source found foundLookup
+  have foundEq : found = binding :=
+    intake.step_eq_of_mem_of_mem_of_source_eq found binding closed
+      foundFacts.1 member (foundFacts.2.trans hasSource.symm)
+  simpa [foundEq] using foundLookup
 
 /-- `AuthoredCFGIntake.blockForEntry` returns both the adapter binding and the
 concrete graph block selected for a declared upstream entry. -/
