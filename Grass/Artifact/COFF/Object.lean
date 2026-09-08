@@ -184,6 +184,33 @@ def readSymbolTail (header : Header) (file : Std.Logical.ByteArray) :
       | .invalid error => .invalid error
     else .needMore (some (minimumEnd - file.length))
 
+/-- A zero pointer and zero count parse as the canonical absent symbol tail. -/
+@[simp] theorem readSymbolTail_absent (header : Header)
+    (file : Std.Logical.ByteArray)
+    (pointerZero : header.pointerToSymbolTable.toNat = 0)
+    (countZero : header.numberOfSymbols.toNat = 0) :
+    readSymbolTail header file =
+      .done (.absent pointerZero countZero) Vec.empty := by
+  simp [readSymbolTail, pointerZero, countZero]
+
+/-- An exact addressed symbol/string serialization composes into the canonical
+present tail while enforcing the reader's whole-tail EOF condition. -/
+theorem readSymbolTail_present_of_region (header : Header)
+    (file : Std.Logical.ByteArray)
+    (symbols : AuxValidatedSymbolTable header) (strings : StringTable)
+    (pointerNonzero : header.pointerToSymbolTable.toNat ≠ 0)
+    (namesValid : symbols.NamesValid strings)
+    (minimumFits : header.symbolTableSpan.endExclusive + 4 ≤ file.length)
+    (regionAt : file.drop header.pointerToSymbolTable.toNat =
+      writeAuxValidatedSymbolTable symbols ++ writeStringTable strings) :
+    readSymbolTail header file =
+      .done (.present pointerNonzero symbols strings namesValid) Vec.empty := by
+  simp only [readSymbolTail, pointerNonzero, dite_false, minimumFits, dite_true]
+  rw [regionAt, readAuxValidatedSymbolTable_write_append]
+  simp only
+  rw [readStringTable_writeStringTable]
+  simp [Vec.isEmpty, Vec.empty, namesValid]
+
 /-- Parse and validate one complete relocatable-object byte array. -/
 def readObject (file : Std.Logical.ByteArray) : ParseResult Object :=
   match readHeader file with

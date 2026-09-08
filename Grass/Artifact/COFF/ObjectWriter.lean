@@ -271,7 +271,7 @@ def SectionDescription.contentsAt (description : SectionDescription)
       lineCountFits).lineNumbers.lines = description.lineNumbers := rfl
 
 /-- Build canonically placed headers and the first offset following all sections. -/
-private def layoutSectionList :
+def layoutSectionList :
     Nat → List SectionDescription → List SectionHeader × Nat
   | offset, [] => ([], offset)
   | offset, description :: descriptions =>
@@ -597,7 +597,7 @@ theorem readSectionContents_writeSectionDescription_append
   · exact linesAt
 
 /-- Serialize all section descriptions in source order. -/
-private def writeSectionDescriptionList :
+def writeSectionDescriptionList :
     List SectionDescription → Std.Logical.ByteArray
   | [] => Vec.empty
   | description :: descriptions =>
@@ -605,7 +605,7 @@ private def writeSectionDescriptionList :
       writeSectionDescriptionList descriptions
 
 /-- Total serialized width of a list of section descriptions. -/
-private def sectionDescriptionListLength : List SectionDescription → Nat
+def sectionDescriptionListLength : List SectionDescription → Nat
   | [] => 0
   | description :: descriptions =>
     description.byteLength + sectionDescriptionListLength descriptions
@@ -616,7 +616,7 @@ def ObjectDescription.sectionsByteLength
   sectionDescriptionListLength description.sections.toList
 
 /-- The recursive section writer realizes `sectionDescriptionListLength`. -/
-private theorem length_writeSectionDescriptionList
+theorem length_writeSectionDescriptionList
     (descriptions : List SectionDescription) :
     (writeSectionDescriptionList descriptions).length =
       sectionDescriptionListLength descriptions := by
@@ -720,7 +720,7 @@ def SymbolDescription.byteLength : SymbolDescription → Nat
       simp [writeSymbolDescription, SymbolDescription.byteLength]
 
 /-- `layoutSectionList` emits one synthesized header per source section. -/
-private theorem length_layoutSectionList (offset : Nat)
+theorem length_layoutSectionList (offset : Nat)
     (descriptions : List SectionDescription) :
     (layoutSectionList offset descriptions).1.length = descriptions.length := by
   induction descriptions generalizing offset with
@@ -729,7 +729,7 @@ private theorem length_layoutSectionList (offset : Nat)
       simp [layoutSectionList, ih]
 
 /-- `layoutSectionList` advances by exactly the summed section byte widths. -/
-private theorem end_layoutSectionList (offset : Nat)
+theorem end_layoutSectionList (offset : Nat)
     (descriptions : List SectionDescription) :
     (layoutSectionList offset descriptions).2 =
       offset + sectionDescriptionListLength descriptions := by
@@ -754,6 +754,25 @@ theorem ObjectDescription.end_sectionLayout (description : ObjectDescription) :
   simp [ObjectDescription.sectionLayout, ObjectDescription.sectionsByteLength,
     end_layoutSectionList]
 
+/-- Count-coupled canonical file header and synthesized section headers. -/
+def ObjectDescription.sectionTable (description : ObjectDescription)
+    (sectionCountFits : description.sections.length < 2 ^ 16) : SectionTable where
+  header := description.header
+  sections := description.sectionLayout.1
+  sectionCount := by
+    rw [description.length_sectionLayout]
+    symm
+    exact description.header_numberOfSections sectionCountFits
+
+/-- The canonical section table serializes to the synthesized header followed
+by the synthesized section-header vector. -/
+theorem ObjectDescription.writeSectionTable_sectionTable
+    (description : ObjectDescription)
+    (sectionCountFits : description.sections.length < 2 ^ 16) :
+    writeSectionTable (description.sectionTable sectionCountFits) =
+      writeHeader description.header ++
+        writeSectionHeaders description.sectionLayout.1 := rfl
+
 /-- Closed-form length of the canonical object serialization. -/
 def ObjectDescription.byteLength (description : ObjectDescription) : Nat :=
   20 + 40 * description.sections.length +
@@ -766,6 +785,23 @@ def ObjectDescription.bytes (description : ObjectDescription) :
   writeHeader description.header ++ writeSectionHeaders layout.1 ++
     writeSectionDescriptionList description.sections.toList ++
     writeSymbolDescription description.symbols
+
+/-- Reading the canonical table prefix returns the exact synthesized table and
+leaves all section contents plus the symbol tail untouched. -/
+theorem ObjectDescription.readSectionTable_bytes
+    (description : ObjectDescription)
+    (sectionCountFits : description.sections.length < 2 ^ 16) :
+    readSectionTable description.bytes =
+      .done (description.sectionTable sectionCountFits)
+        (writeSectionDescriptionList description.sections.toList ++
+          writeSymbolDescription description.symbols) := by
+  have parsed := readSectionTable_writeSectionTable_append
+    (description.sectionTable sectionCountFits)
+    (writeSectionDescriptionList description.sections.toList ++
+      writeSymbolDescription description.symbols)
+  simpa only [ObjectDescription.bytes,
+    description.writeSectionTable_sectionTable sectionCountFits,
+    Vec.append_assoc] using parsed
 
 /-- `length_bytes` proves the canonical writer's closed-form total size. -/
 @[simp] theorem ObjectDescription.length_bytes (description : ObjectDescription) :
@@ -783,6 +819,15 @@ def ObjectDescription.widthsFit (description : ObjectDescription) : Bool :=
   description.symbols.cellCount < 2 ^ 32 &&
   layout.2 < 2 ^ 32 && totalLength < 2 ^ 32
 
+/-- Validate widths plus auxiliary and primary-name structure before writing. -/
+def ObjectDescription.Writable (description : ObjectDescription) : Bool :=
+  description.widthsFit &&
+  match description.symbols with
+  | .absent => true
+  | .present cells strings =>
+    validAuxLayoutScan cells.length cells.toList &&
+      validPrimaryNamesScan cells.length cells.toList strings
+
 /-- Whole-object width validity supplies every per-section field-width check. -/
 theorem ObjectDescription.widthsFit_sections
     (description : ObjectDescription)
@@ -795,6 +840,164 @@ theorem ObjectDescription.widthsFit_sections
       description.sections.toList.all SectionDescription.widthsFit = true :=
     widths.1.1.1.2
   simpa only [List.all_eq_true] using sectionWidths
+
+/-- Whole-object width validity supplies the section-count field bound. -/
+theorem ObjectDescription.widthsFit_sectionCount
+    (description : ObjectDescription)
+    (widths : description.widthsFit = true) :
+    description.sections.length < 2 ^ 16 := by
+  unfold ObjectDescription.widthsFit at widths
+  simp only [Bool.and_eq_true] at widths
+  exact of_decide_eq_true widths.1.1.1.1
+
+/-- Whole-object width validity supplies the symbol-count field bound. -/
+theorem ObjectDescription.widthsFit_symbolCount
+    (description : ObjectDescription)
+    (widths : description.widthsFit = true) :
+    description.symbols.cellCount < 2 ^ 32 := by
+  unfold ObjectDescription.widthsFit at widths
+  simp only [Bool.and_eq_true] at widths
+  exact of_decide_eq_true widths.1.1.2
+
+/-- Writable descriptions necessarily satisfy the complete width check. -/
+theorem ObjectDescription.Writable.widthsFit
+    (description : ObjectDescription)
+    (writable : description.Writable = true) :
+    description.widthsFit = true := by
+  unfold ObjectDescription.Writable at writable
+  simp only [Bool.and_eq_true] at writable
+  exact writable.1
+
+/-- Canonical optional symbol tail indexed by the synthesized file header. -/
+def ObjectDescription.symbolTail (description : ObjectDescription)
+    (writable : description.Writable = true) : SymbolTail description.header :=
+  let widths := ObjectDescription.Writable.widthsFit description writable
+  match symbolsEq : description.symbols with
+  | .absent =>
+    .absent (description.header_pointerToSymbolTable_absent symbolsEq)
+      (by
+        rw [description.header_numberOfSymbols
+          (description.widthsFit_symbolCount widths)]
+        simp [SymbolDescription.cellCount, symbolsEq])
+  | .present cells strings =>
+    have validations :
+        validAuxLayoutScan cells.length cells.toList = true ∧
+          validPrimaryNamesScan cells.length cells.toList strings = true := by
+      unfold ObjectDescription.Writable at writable
+      rw [widths, symbolsEq] at writable
+      simpa only [true_and, Bool.and_eq_true] using writable
+    have cellCount :
+        cells.length = description.header.numberOfSymbols.toNat := by
+      symm
+      rw [description.header_numberOfSymbols
+        (description.widthsFit_symbolCount widths)]
+      simp [SymbolDescription.cellCount, symbolsEq]
+    let table : SymbolTable description.header :=
+      { cells, cellCount }
+    let validated : AuxValidatedSymbolTable description.header :=
+      { table, auxLayoutValid := validations.1 }
+    have layoutFits : description.sectionLayout.2 < 2 ^ 32 := by
+      unfold ObjectDescription.widthsFit at widths
+      simp only [Bool.and_eq_true] at widths
+      exact of_decide_eq_true widths.1.2
+    have pointerNonzero :
+        description.header.pointerToSymbolTable.toNat ≠ 0 := by
+      rw [description.header_pointerToSymbolTable_present cells strings
+        symbolsEq layoutFits]
+      rw [description.end_sectionLayout]
+      omega
+    .present pointerNonzero validated strings validations.2
+
+/-- The canonical object bytes drive the symbol-tail reader to the exact
+proof-indexed optional tail constructed from a writable description. -/
+theorem ObjectDescription.readSymbolTail_bytes
+    (description : ObjectDescription)
+    (writable : description.Writable = true) :
+    readSymbolTail description.header description.bytes =
+      .done (description.symbolTail writable) Vec.empty := by
+  have widths := ObjectDescription.Writable.widthsFit description writable
+  cases symbolsEq : description.symbols with
+  | absent =>
+      have pointerZero :=
+        description.header_pointerToSymbolTable_absent symbolsEq
+      have countZero : description.header.numberOfSymbols.toNat = 0 := by
+        rw [description.header_numberOfSymbols
+          (description.widthsFit_symbolCount widths)]
+        simp [SymbolDescription.cellCount, symbolsEq]
+      have tailEq : description.symbolTail writable =
+          .absent pointerZero countZero := by
+        unfold ObjectDescription.symbolTail
+        split <;> simp_all <;> rfl
+      rw [tailEq]
+      exact readSymbolTail_absent description.header description.bytes
+        pointerZero countZero
+  | present cells strings =>
+      have validations :
+          validAuxLayoutScan cells.length cells.toList = true ∧
+            validPrimaryNamesScan cells.length cells.toList strings = true := by
+        unfold ObjectDescription.Writable at writable
+        rw [widths, symbolsEq] at writable
+        simpa only [true_and, Bool.and_eq_true] using writable
+      have cellCount :
+          cells.length = description.header.numberOfSymbols.toNat := by
+        symm
+        rw [description.header_numberOfSymbols
+          (description.widthsFit_symbolCount widths)]
+        simp [SymbolDescription.cellCount, symbolsEq]
+      let table : SymbolTable description.header := { cells, cellCount }
+      let validated : AuxValidatedSymbolTable description.header :=
+        { table, auxLayoutValid := validations.1 }
+      have layoutFits : description.sectionLayout.2 < 2 ^ 32 := by
+        unfold ObjectDescription.widthsFit at widths
+        simp only [Bool.and_eq_true] at widths
+        exact of_decide_eq_true widths.1.2
+      have pointerEq : description.header.pointerToSymbolTable.toNat =
+          description.sectionLayout.2 :=
+        description.header_pointerToSymbolTable_present cells strings symbolsEq
+          layoutFits
+      have pointerNonzero :
+          description.header.pointerToSymbolTable.toNat ≠ 0 := by
+        rw [pointerEq, description.end_sectionLayout]
+        omega
+      let contentPrefix :=
+        writeHeader description.header ++
+          writeSectionHeaders description.sectionLayout.1 ++
+          writeSectionDescriptionList description.sections.toList
+      have contentPrefixLength : contentPrefix.length =
+          description.sectionLayout.2 := by
+        rw [description.end_sectionLayout]
+        simp [contentPrefix, ObjectDescription.sectionsByteLength,
+          length_writeSectionDescriptionList]
+      have bytesEq : description.bytes =
+          contentPrefix ++
+            (writeSymbolCells cells ++ writeStringTable strings) := by
+        simp [ObjectDescription.bytes, contentPrefix, symbolsEq,
+          writeSymbolDescription, Vec.append_assoc]
+      have regionAt :
+          description.bytes.drop
+              description.header.pointerToSymbolTable.toNat =
+            writeAuxValidatedSymbolTable validated ++
+              writeStringTable strings := by
+        rw [bytesEq, pointerEq]
+        rw [Vec.drop_append_of_length_eq contentPrefixLength]
+        rfl
+      have minimumFits :
+          description.header.symbolTableSpan.endExclusive + 4 ≤
+            description.bytes.length := by
+        have minimumSize := strings.minimumSize
+        rw [bytesEq]
+        simp [Header.symbolTableSpan, ByteSpan.endExclusive, pointerEq,
+          contentPrefixLength, cellCount]
+        omega
+      have parsed := readSymbolTail_present_of_region description.header
+        description.bytes validated strings pointerNonzero validations.2
+        minimumFits regionAt
+      have tailEq : description.symbolTail writable =
+          .present pointerNonzero validated strings validations.2 := by
+        unfold ObjectDescription.symbolTail
+        split <;> simp_all <;> rfl
+      rw [tailEq]
+      exact parsed
 
 /-- Canonical dependent contents corresponding to an object description's
 synthesized section layout. -/
@@ -852,15 +1055,6 @@ theorem ObjectDescription.readSectionContentsList_bytes
   simpa only [ObjectDescription.sectionLayout, ObjectDescription.bytes,
     ObjectDescription.contents, Vec.toList_fromList, Vec.append_assoc] using
     parsed
-
-/-- Validate widths plus auxiliary and primary-name structure before writing. -/
-def ObjectDescription.Writable (description : ObjectDescription) : Bool :=
-  description.widthsFit &&
-  match description.symbols with
-  | .absent => true
-  | .present cells strings =>
-    validAuxLayoutScan cells.length cells.toList &&
-      validPrimaryNamesScan cells.length cells.toList strings
 
 /-- Emit canonical object bytes or reject an unrepresentable raw description. -/
 def writeObjectDescription (description : ObjectDescription) :

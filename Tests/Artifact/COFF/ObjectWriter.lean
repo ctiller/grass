@@ -119,6 +119,16 @@ example :
 
 example : objectDescription.Writable = true := by decide
 
+example : readSectionTable objectDescription.bytes =
+    .done (objectDescription.sectionTable (by decide))
+      (writeSectionDescriptionList objectDescription.sections.toList ++
+        writeSymbolDescription objectDescription.symbols) := by
+  exact objectDescription.readSectionTable_bytes (by decide)
+
+example : readSymbolTail objectDescription.header objectDescription.bytes =
+    .done (objectDescription.symbolTail (by decide)) Vec.empty := by
+  exact objectDescription.readSymbolTail_bytes (by decide)
+
 example : (objectDescription.contents (by decide)).map SectionContents.header =
     objectDescription.sectionLayout.1 := by
   exact objectDescription.contents_headers (by decide)
@@ -171,6 +181,10 @@ example : readObject objectDescription.bytes = .done expectedObject Vec.empty :=
 
 def absentDescription : ObjectDescription :=
   { objectDescription with symbols := .absent }
+
+example : readSymbolTail absentDescription.header absentDescription.bytes =
+    .done (absentDescription.symbolTail (by decide)) Vec.empty := by
+  exact absentDescription.readSymbolTail_bytes (by decide)
 
 example : writeObjectDescription absentDescription = .ok noSymbolsObject := by
   rfl
