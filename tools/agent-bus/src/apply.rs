@@ -1734,7 +1734,20 @@ fn apply_review_closing(
         .ok_or_else(|| invalid(format!("{}: unknown nomination {nomination}", env.id)))?;
     match label {
         "declined" => {
-            let reviewer = chain.nomination_reviewer.get(nomination).unwrap();
+            // `ok_or_else`, not `unwrap`. The invariant does hold -- every
+            // writer of `review_chain_by_nomination` writes
+            // `nomination_reviewer` for the same key on the same root, and
+            // both maps are append-only -- but a panic on the reduction path
+            // is strictly worse than an `Err` for the same defect: it takes
+            // the whole process down rather than the one command, so a host
+            // cannot even report what it choked on. The message names the
+            // pair whose disagreement would be the bug.
+            let reviewer = chain.nomination_reviewer.get(nomination).ok_or_else(|| {
+                invalid(format!(
+                    "{}: nomination {nomination} is in review_chain_by_nomination but has no nomination_reviewer entry",
+                    env.id
+                ))
+            })?;
             if reviewer != &env.agent {
                 return Err(invalid(format!(
                     "{}: only the named reviewer may decline this nomination",
@@ -2298,7 +2311,15 @@ fn apply_review_merge_authorized(
         // not fleet-wide-fatal.
         return Ok(());
     }
-    let reviewer = chain.nomination_reviewer.get(&d.nomination).unwrap();
+    // See the note at the sibling site: `ok_or_else` rather than `unwrap`,
+    // because a panic on the reduction path takes the process rather than
+    // the command.
+    let reviewer = chain.nomination_reviewer.get(&d.nomination).ok_or_else(|| {
+        invalid(format!(
+            "{}: nomination {} is in review_chain_by_nomination but has no nomination_reviewer entry",
+            env.id, d.nomination
+        ))
+    })?;
     if reviewer != &env.agent {
         return Err(invalid(format!(
             "{}: only the accepting reviewer may authorize a merge",
