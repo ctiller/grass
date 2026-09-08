@@ -598,8 +598,11 @@ layer where the `Layout` it judges lives.
 This paragraph used to quote that module's wording directly. It stopped being
 a quotation the moment the obligation was closed and the sentence rewritten,
 so it says what happened instead of putting words in another file's mouth.
-See `Grass/ABI/Win64/UnwindBytes.lean` for what remains open, which is the
-six operations with no unambiguous instruction.
+See `Grass/ABI/Win64/UnwindBytes.lean` for what remains open: the six operations
+`Layout.Realizes` does not cover. Not because their instructions are unknown --
+that reason was retracted there, since the corpus measures what `ml64` emits for
+every one -- but because nothing in this repository emits a prologue, so
+choosing among their legal encodings would fix a policy no caller wants.
 -/
 
 /--

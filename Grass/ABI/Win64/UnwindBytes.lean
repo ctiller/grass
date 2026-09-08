@@ -1252,16 +1252,14 @@ theorem spike1UnwindInfo_length : spike1UnwindInfo.toBytes.length = 12 := by dec
 /-!
 ## Relating code offsets to encoded instructions
 
-`Layout.WellFormed` records an open obligation above: its three conditions are
-internal, so a layout claiming three two-byte pushes end at 1, 2 and 3, or
-claiming `SizeOfProlog = 255` for a ten-byte prologue, satisfies it. Both
-mis-unwind.
+`Realizes` encodes a layout's operations, lays them end to end from the
+function's first byte, and requires every `CodeOffset` to be where the encoding
+actually puts its operation.
 
-`Grass.ISA.X86.pushR64` and `Grass.ISA.X86.subR64Imm8`/`subR64Imm32` now exist,
-so the comparison the obligation asked for can be made. `Realizes` makes it:
-it encodes the operations, lays them end to end from the function's first byte,
-and requires every `CodeOffset` to be the offset the encoding actually puts the
-operation at.
+Why that is worth having, which layouts it refuses and what remains open are
+all under `Layout.WellFormed` above rather than repeated here. That section
+and this one described the same thing twice for three commits, which is how
+the retracted claim below survived being retracted.
 -/
 
 namespace UnwindOp
@@ -1270,14 +1268,25 @@ namespace UnwindOp
 The instructions that perform a prologue operation, when this library can
 encode them.
 
-`Option`, and deliberately partial. Three operations have an unambiguous
-instruction: a nonvolatile push is `PUSH r64`, and both allocation forms are
-`SUB RSP, imm`. The rest do not, and inventing one would be worse than
-returning `none` here -- `setFramePointer` is a `LEA` or a `MOV` whose operands
-depend on the frame offset, `saveNonvolatile` is a `MOV` to a stack slot whose
-`ModR/M` form depends on the offset's magnitude, and `pushMachineFrame`
-describes what the processor pushed before the function existed, so there is no
-instruction at all.
+`Option`, and deliberately partial. Three operations have one candidate and no
+choice to make: a nonvolatile push is `PUSH r64`, and both allocation forms are
+`SUB RSP, imm`.
+
+This used to say the rest have no unambiguous instruction. That is wrong and is
+retracted in the section above: `Tests/ABI/Win64/UnwindCorpus.lean`'s
+`Step.length` names exactly what `ml64` emits for all six, measured by the
+differential. The candidates are known.
+
+What stops them is that choosing between them would fix an emission policy no
+caller exists to want. `setFramePointer` is a `LEA` at any offset or the
+`MOV r64, rsp` that `ml64` writes at offset zero, which this library cannot
+build at all; `saveNonvolatile` is a `MOV` to a stack slot with a displacement
+width to pick. Nothing in this repository emits a prologue, so either choice
+would be invention.
+
+`pushMachineFrame` is the one whose `none` is categorical rather than deferred.
+The processor pushed that frame before the function's first instruction ran, so
+there is no instruction to name and no policy that could supply one.
 
 Which of the two `SUB` forms an allocation uses is the interesting part, because
 it is where the byte count stops being a fixed stride. The `imm8` form is
