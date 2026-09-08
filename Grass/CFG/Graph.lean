@@ -51,6 +51,35 @@ def findBlock? (graph : Graph State Terminal) (id : BlockId) :
     Option (Block State Terminal) :=
   graph.blocks.find? (fun block => block.id == id)
 
+/-- A successful block lookup returns a structural member with the requested
+identity. -/
+theorem findBlock?_sound
+    (graph : Graph State Terminal) (id : BlockId)
+    (block : Block State Terminal)
+    (hfind : graph.findBlock? id = some block) :
+    block ∈ graph.blocks ∧ block.id = id := by
+  constructor
+  · exact List.mem_of_find?_eq_some (by
+      simpa [findBlock?] using hfind)
+  · have matched : block.id == id := List.find?_some
+      (p := fun candidate : Block State Terminal => candidate.id == id) (by
+        simpa [findBlock?] using hfind)
+    exact LawfulBEq.eq_of_beq matched
+
+/-- Block lookup succeeds exactly for identities present in structural source. -/
+theorem findBlock?_isSome_iff_mem_blockIds
+    (graph : Graph State Terminal) (id : BlockId) :
+    (graph.findBlock? id).isSome = true ↔ id ∈ graph.blockIds := by
+  simp [findBlock?, blockIds]
+
+/-- Every structural block identity has a concrete lookup result. -/
+theorem blockForId
+    (graph : Graph State Terminal) (id : BlockId)
+    (member : id ∈ graph.blockIds) :
+    ∃ block, graph.findBlock? id = some block := by
+  apply Option.isSome_iff_exists.mp
+  exact (graph.findBlock?_isSome_iff_mem_blockIds id).2 member
+
 /-- Direct block targets, retaining source and edge order. -/
 def directTargets (graph : Graph State Terminal) : List BlockId :=
   graph.blocks.flatMap fun block =>
