@@ -1284,6 +1284,13 @@ private theorem sharesBytes_grants (state : MemoryState)
     SharesBytes { state with grants := g } a b ↔ state.SharesBytes a b :=
   sharesAfter_grants state g _ a b
 
+/-- Liveness is a fact about the allocation table, so replacing the grant map leaves
+it alone. The twin of `currentEpoch_grants`, needed now that `AuthorizedAt` consults
+`Live` rather than only the epoch. -/
+private theorem live_grants (state : MemoryState)
+    (g : FiniteMap GrantId AuthorityGrant) (provenance : Provenance) :
+    Live { state with grants := g } provenance ↔ state.Live provenance := Iff.rfl
+
 private theorem currentEpoch_grants (state : MemoryState)
     (g : FiniteMap GrantId AuthorityGrant) (provenance : Provenance) :
     CurrentEpoch { state with grants := g } provenance ↔ state.CurrentEpoch provenance :=
@@ -2189,7 +2196,7 @@ def AuthorizedAt (state : MemoryState) (grant : AuthorityGrant) (context : Conte
   grant.holder = context ∧
   state.SharesBytes grant.provenance.root provenance.root ∧
   state.CurrentEpoch grant.provenance ∧
-  state.CurrentEpoch provenance ∧
+  state.Live provenance ∧
   grant.range.Covers offset ∧
   grant.rights.Permits intent
 
@@ -2214,6 +2221,25 @@ theorem not_authorizedAt_of_other_storage {state : MemoryState} {grant : Authori
     (h : ¬ state.SharesBytes grant.provenance.root provenance.root) :
     ¬ state.AuthorizedAt grant context provenance offset intent := fun ha => h ha.2.1
 
+/-- **Authority over torn-down storage is none, not weak.**
+
+`AuthorizedAt` consulted `CurrentEpoch`, which asks only whether the allocation's
+epoch matches the provenance's. `MemoryState.tearDown?` sets `live := false` and
+leaves the epoch alone, so a grant over torn-down storage satisfied the authority
+predicate. Found by elaborating a probe while answering `g-construct:76`, which needs
+a law of this shape for `withStack`'s exit teardown.
+
+It was not reachable through the doors -- `issue?` refuses unless the provenance is
+live, and `tearDown?` refuses while any grant is outstanding over the storage -- so
+the two guards between them kept the bad state out. **That is an emergent property of
+two guards and not a stated law**, and it is the kind that stops holding when a third
+door is added. `Live` is `CurrentEpoch` and more, so this is a strict narrowing:
+nothing authorized before is refused now. -/
+theorem not_authorizedAt_of_dead {state : MemoryState} {grant : AuthorityGrant}
+    {context : ContextId} {provenance : Provenance} {offset : Nat}
+    {intent : AccessIntent} (h : ¬ state.Live provenance) :
+    ¬ state.AuthorizedAt grant context provenance offset intent := fun ha => h ha.2.2.2.1
+
 /-- A read-only grant does not authorize a write. -/
 theorem not_authorizedAt_of_insufficient_rights {state : MemoryState}
     {grant : AuthorityGrant} {context : ContextId} {provenance : Provenance}
@@ -2226,7 +2252,8 @@ stale pointer. §2's reuse rule, at the authority gate. -/
 theorem not_authorizedAt_of_stale_epoch {state : MemoryState} {grant : AuthorityGrant}
     {context : ContextId} {provenance : Provenance} {offset : Nat}
     {intent : AccessIntent} (h : ¬ state.CurrentEpoch provenance) :
-    ¬ state.AuthorizedAt grant context provenance offset intent := fun ha => h ha.2.2.2.1
+    ¬ state.AuthorizedAt grant context provenance offset intent :=
+  fun ha => h (currentEpoch_of_live ha.2.2.2.1)
 
 /-- A grant whose range covers a whole access covers each of its bytes. The bridge a
 caller with one covering grant uses to reach `Granted`. -/
@@ -2237,7 +2264,7 @@ theorem authorizedAt_of_covering {state : MemoryState} {grant : AuthorityGrant}
     (hholder : grant.holder = context)
     (hshares : state.SharesBytes grant.provenance.root provenance.root)
     (hgrant : state.CurrentEpoch grant.provenance)
-    (haccess : state.CurrentEpoch provenance)
+    (haccess : state.Live provenance)
     (hrights : grant.rights.Permits intent) :
     state.AuthorizedAt grant context provenance (range.start + i) intent := by
   refine ⟨hholder, hshares, hgrant, haccess, ?_, hrights⟩
@@ -2272,7 +2299,7 @@ theorem granted_of_covering {state : MemoryState} {context : ContextId}
     (hholder : entry.2.holder = context)
     (hshares : state.SharesBytes entry.2.provenance.root provenance.root)
     (hgrant : state.CurrentEpoch entry.2.provenance)
-    (haccess : state.CurrentEpoch provenance)
+    (haccess : state.Live provenance)
     (hrights : entry.2.rights.Permits intent) :
     state.Granted context provenance range intent :=
   fun _ hi => ⟨entry, hmem,
@@ -2295,7 +2322,7 @@ theorem granted_of_grantAt {state : MemoryState} {context : ContextId}
     (hholder : grant.holder = context)
     (hshares : state.SharesBytes grant.provenance.root provenance.root)
     (hgrant : state.CurrentEpoch grant.provenance)
-    (haccess : state.CurrentEpoch provenance)
+    (haccess : state.Live provenance)
     (hrights : grant.rights.Permits intent) :
     state.Granted context provenance range intent :=
   granted_of_covering (entry := (id, grant))
@@ -2343,7 +2370,7 @@ theorem splitGrant?_preserves_authority {state next : MemoryState} {id low high 
     (hholder : grant.holder = context)
     (hshares : state.SharesBytes grant.provenance.root provenance.root)
     (hgrant : state.CurrentEpoch grant.provenance)
-    (haccess : state.CurrentEpoch provenance) (hrights : grant.rights.Permits intent) :
+    (haccess : state.Live provenance) (hrights : grant.rights.Permits intent) :
     next.Granted context provenance range intent := by
   obtain ⟨hlowat, hhighat, _⟩ := splitGrant?_yields_the_parts h hat
   obtain ⟨hnext, _, _, _, _, _⟩ := splitGrant?_eq h hat
@@ -2360,9 +2387,9 @@ theorem splitGrant?_preserves_authority {state next : MemoryState} {id low high 
   have hgrant' : next.CurrentEpoch grant.provenance := by
     subst hnext
     exact (currentEpoch_grants state _ _).mpr hgrant
-  have haccess' : next.CurrentEpoch provenance := by
+  have haccess' : next.Live provenance := by
     subst hnext
-    exact (currentEpoch_grants state _ _).mpr haccess
+    exact (live_grants state _ _).mpr haccess
   rcases AuthorityGrant.covered_by_part (boundary := boundary) hcovers with hpart | hpart
   · exact ⟨(low, grant.lowPart boundary),
       mem_entries_of_lookup hlowat,
@@ -2411,9 +2438,9 @@ theorem splitGrant?_creates_no_authority {state next : MemoryState}
   have hgrantepoch' : state.CurrentEpoch entry.2.provenance := by
     subst hnext
     exact (currentEpoch_grants state _ _).mp hgrantepoch
-  have haccess' : state.CurrentEpoch provenance := by
+  have haccess' : state.Live provenance := by
     subst hnext
-    exact (currentEpoch_grants state _ _).mp haccess
+    exact (live_grants state _ _).mp haccess
   have hstop' : boundary < grant.range.start + grant.range.size := hstop
   rcases hmem' with hcase | hcase | hcase
   · subst hcase
@@ -2451,7 +2478,7 @@ theorem joinGrants?_preserves_low_authority {state next : MemoryState}
     (hholder : lowGrant.holder = context)
     (hshares : state.SharesBytes lowGrant.provenance.root provenance.root)
     (hgrant : state.CurrentEpoch lowGrant.provenance)
-    (haccess : state.CurrentEpoch provenance) (hrights : lowGrant.rights.Permits intent) :
+    (haccess : state.Live provenance) (hrights : lowGrant.rights.Permits intent) :
     next.Granted context provenance range intent := by
   obtain ⟨hintoat, _, _⟩ := joinGrants?_yields_the_join h hlow hhigh
   obtain ⟨hnext, _, _, _, _⟩ := joinGrants?_eq h hlow hhigh
@@ -2464,9 +2491,9 @@ theorem joinGrants?_preserves_low_authority {state next : MemoryState}
   have hgrant' : next.CurrentEpoch lowGrant.provenance := by
     subst hnext
     exact (currentEpoch_grants state _ _).mpr hgrant
-  have haccess' : next.CurrentEpoch provenance := by
+  have haccess' : next.Live provenance := by
     subst hnext
-    exact (currentEpoch_grants state _ _).mpr haccess
+    exact (live_grants state _ _).mpr haccess
   refine ⟨(into, lowGrant.joined highGrant),
     mem_entries_of_lookup hintoat,
     hholder, hshares', hgrant', haccess', ⟨?_, ?_⟩, hrights⟩
@@ -2487,7 +2514,7 @@ theorem joinGrants?_preserves_high_authority {state next : MemoryState}
     (hholder : highGrant.holder = context)
     (hshares : state.SharesBytes highGrant.provenance.root provenance.root)
     (hgrant : state.CurrentEpoch highGrant.provenance)
-    (haccess : state.CurrentEpoch provenance) (hrights : highGrant.rights.Permits intent) :
+    (haccess : state.Live provenance) (hrights : highGrant.rights.Permits intent) :
     next.Granted context provenance range intent := by
   obtain ⟨hintoat, _, _⟩ := joinGrants?_yields_the_join h hlow hhigh
   obtain ⟨hnext, _, _, hmatch, hadjacent⟩ := joinGrants?_eq h hlow hhigh
@@ -2518,9 +2545,9 @@ theorem joinGrants?_preserves_high_authority {state next : MemoryState}
     show state.CurrentEpoch lowGrant.provenance
     rw [hprov]
     exact hgrant
-  have haccess' : next.CurrentEpoch provenance := by
+  have haccess' : next.Live provenance := by
     subst hnext
-    exact (currentEpoch_grants state _ _).mpr haccess
+    exact (live_grants state _ _).mpr haccess
   refine ⟨(into, lowGrant.joined highGrant),
     mem_entries_of_lookup hintoat,
     hholder', hshares', hgrant', haccess', ⟨?_, ?_⟩, hrights'⟩
@@ -2566,9 +2593,9 @@ theorem joinGrants?_creates_no_authority {state next : MemoryState}
   have hgrantepoch' : state.CurrentEpoch entry.2.provenance := by
     subst hnext
     exact (currentEpoch_grants state _ _).mp hgrantepoch
-  have haccess' : state.CurrentEpoch provenance := by
+  have haccess' : state.Live provenance := by
     subst hnext
-    exact (currentEpoch_grants state _ _).mp haccess
+    exact (live_grants state _ _).mp haccess
   have hstop : lowGrant.range.start + lowGrant.range.size = highGrant.range.start :=
     hadjacent
   rcases hmem' with hcase | hcase
@@ -2625,7 +2652,7 @@ theorem transferGrant?_grants_the_recipient {state next : MemoryState} {actor : 
     (hcover : grant.range.Contains range)
     (hshares : state.SharesBytes grant.provenance.root provenance.root)
     (hgrant : state.CurrentEpoch grant.provenance)
-    (haccess : state.CurrentEpoch provenance) (hrights : grant.rights.Permits intent) :
+    (haccess : state.Live provenance) (hrights : grant.rights.Permits intent) :
     next.Granted recipient provenance range intent := by
   have hmoved := transferGrant?_yields_the_transfer h hat
   obtain ⟨hnext, _, _, _⟩ := transferGrant?_eq h hat
@@ -2635,9 +2662,9 @@ theorem transferGrant?_grants_the_recipient {state next : MemoryState} {actor : 
   have hgrant' : next.CurrentEpoch grant.provenance := by
     subst hnext
     exact (currentEpoch_grants state _ _).mpr hgrant
-  have haccess' : next.CurrentEpoch provenance := by
+  have haccess' : next.Live provenance := by
     subst hnext
-    exact (currentEpoch_grants state _ _).mpr haccess
+    exact (live_grants state _ _).mpr haccess
   exact granted_of_grantAt hmoved hcover rfl hshares' hgrant' haccess' hrights
 
 /--
@@ -2672,9 +2699,9 @@ theorem transferGrant?_creates_no_authority {state next : MemoryState} {actor : 
   have hgrantepoch' : state.CurrentEpoch entry.2.provenance := by
     subst hnext
     exact (currentEpoch_grants state _ _).mp hgrantepoch
-  have haccess' : state.CurrentEpoch provenance := by
+  have haccess' : state.Live provenance := by
     subst hnext
-    exact (currentEpoch_grants state _ _).mp haccess
+    exact (live_grants state _ _).mp haccess
   rcases hmem' with hcase | hcase
   · subst hcase
     exact absurd (show recipient = context from hholder) (Ne.symm hne)
@@ -2990,6 +3017,49 @@ theorem tearDown?_kills_every_name {state : MemoryState} :
             rw [hkept, allocate?_lookup_self hstep]
             rfl
         · exact ih h id hcase
+
+/-- A torn-down allocation is not live, whatever epoch its provenance names.
+
+`tearDown?_kills_every_name` gives not-live; `Live` wants live *and* a matching epoch,
+so the first conjunct settles it and the epoch never enters. That asymmetry is why
+`AuthorizedAt` had to move off `CurrentEpoch`: teardown does not advance the epoch, so
+an epoch check alone sees nothing. -/
+theorem not_live_of_tearDown? {state next : MemoryState} {ids : List AllocId}
+    {provenance : Provenance} (h : state.tearDown? ids = some next)
+    (hmem : provenance.root ∈ ids) : ¬ next.Live provenance := by
+  have hkill := tearDown?_kills_every_name h provenance.root hmem
+  unfold Live
+  cases hlook : next.allocations.lookup provenance.root with
+  | none => simp
+  | some record =>
+      rw [hlook] at hkill
+      simp only [Option.any_some, Bool.not_eq_true'] at hkill
+      simp [hkill]
+
+/--
+**After a teardown, nothing authorizes the torn-down storage.**
+
+The law `g-construct:76` asked for: `withStack` closes every declared exit by tearing
+the scope down, and needs the returned outer contract to be unable to authorize what
+the scope held. Stated over `Granted` rather than a particular grant, because that is
+what an outer contract asks -- is anything in the table authority over these bytes.
+
+It does not lean on the teardown having removed the grants. `tearDown?` refuses while
+any is outstanding, so in practice there are none; this says the stronger thing, that
+a grant which somehow survived would authorize nothing. Before `AuthorizedAt` consulted
+liveness that was false, and two door guards stood in for it -- an emergent property
+rather than a law, which is what g-construct could not build on.
+
+The non-empty hypothesis is `Granted`'s: it is vacuously true on an empty range in
+every state.
+-/
+theorem not_granted_of_tearDown? {state next : MemoryState} {ids : List AllocId}
+    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+    {intent : AccessIntent}
+    (h : state.tearDown? ids = some next) (hmem : provenance.root ∈ ids)
+    (hne : ¬ range.IsEmpty) : ¬ next.Granted context provenance range intent :=
+  not_granted_of_no_authorizing_entry hne
+    (fun _ _ _ => not_authorizedAt_of_dead (not_live_of_tearDown? h hmem))
 
 /--
 Declare that two allocations name the same storage.
@@ -3767,7 +3837,9 @@ def LoanMapLaws : Prop :=
       grant.range.Contains range →
       state.SharesBytes grant.provenance.root provenance.root →
       state.CurrentEpoch grant.provenance →
-      state.CurrentEpoch provenance →
+      -- Liveness, not merely a matching epoch: `AuthorizedAt` consults `Live`,
+      -- so authority over torn-down storage is none rather than weak.
+      state.Live provenance →
       grant.rights.Permits intent →
       next.Granted recipient provenance range intent) ∧
   (∀ (state returned : MemoryState) (context : ContextId) (id : GrantId),
