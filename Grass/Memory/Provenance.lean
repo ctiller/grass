@@ -34,12 +34,39 @@ inductive AllocTag : Type
 /-- Phantom tag for epoch identities. -/
 inductive EpochTag : Type
 
+/-- Phantom tag for backing-storage identities. -/
+inductive StorageTag : Type
+
 /--
 The generative identity of an allocation.
 
 Independent of address by construction: nothing in this type mentions one.
 -/
 abbrev AllocId := Core.Uid AllocTag
+
+/--
+The identity of a **backing store**: the bytes themselves, as opposed to a view onto
+them.
+
+`g-design:185` replaces the authority-only alias graph with one canonical `ByteStore`
+per backing identity, and allocation records become typed views naming a backing
+identity, a nonnegative origin into it, and their own local extent. Two views alias
+exactly where their translated spans overlap, which makes byte coherence definitional
+rather than something a separate relation asserts and the byte semantics does not
+implement -- the defect `Tests/Op/StandardLoan.lean`'s
+`the_alias_is_not_yet_a_byte_level_fact` proves against the old shape.
+
+**Distinct from `AllocId` on purpose.** An allocation identity names a view; a storage
+identity names bytes. One backing store may carry several views -- a buffer and a
+mapping of part of it -- and `docs/MEMORY_MODEL.md` §7.5's mapping and unmapping are
+transitions between those, not between allocations. Collapsing the two is what made
+the old `aliases` list necessary.
+
+Sited here beside `AllocId` rather than in `Grass/Core`, per `g-design:257`: the other
+identity types this layer mints live in `Grass.Core.Identifiers`, which is
+g-foundation's, and a storage identity is memory's vocabulary rather than the fleet's.
+-/
+abbrev StorageId := Core.Uid StorageTag
 
 /--
 The reuse generation of an allocation's storage.
