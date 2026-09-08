@@ -204,7 +204,7 @@ cannot conceal a policy change.
 
 The docstring-audit move has one closed-world migration exception to this rule.
 It applies only to nominations present in the complete causal frontier observed
-by `c-agent:63`, and only to their version-one Python docstring-audit identity.
+by `g-reviewer:96`, and only to their version-one Python docstring-audit identity.
 For those nominations, the canonical invocation is `cargo run --quiet
 --manifest-path tools/grass-tools/Cargo.toml --bin docstring-audit`; the reviewer
 records that actual invocation and the independently reviewed parity evidence in
