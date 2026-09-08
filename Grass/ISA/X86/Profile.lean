@@ -437,7 +437,25 @@ retrieval status for. Without it, `FullyChecked` is satisfiable by inventing a
 
 It is a check rather than a construction: `CommonRule` does not carry
 `Registered` as a field, so an unregistered rule is writable and merely fails
-this theorem. Making it a field is the stronger form and is an open obligation.
+this theorem. Making it a field is the stronger form and remains an open
+obligation -- but the reason it has not been done is a layering constraint
+rather than inattention, and recording it saves the next attempt.
+
+`CommonRule` is declared in `Grass/ISA/X86/DualCitation.lean`, and
+`Vendor.document` is declared in `Grass/ISA/X86/Sources.lean`, which imports
+it. A `registered` field would have to name the documents a citation must
+match, so it cannot be written where `CommonRule` lives: the values it would
+compare against are one layer up. `CommonRule` already carries a proof field --
+`agreedIsConfirmed` -- so the pattern itself is available; only these
+particular constants are out of reach.
+
+Two ways out, neither free. `Vendor.document` could move down into
+`DualCitation.lean`, which drags the `SourceDocument` values for both manuals
+with it and puts retrieval status in a module about citation shape. Or
+`CommonRule` could be indexed by the two expected documents, which makes the
+field expressible and changes every construction site. The second is the
+better shape and the larger edit; whoever takes it should know that
+`all_registered` is what it replaces, not something it joins.
 -/
 theorem all_registered : ∀ r ∈ all, Registered r := by
   intro r hr
