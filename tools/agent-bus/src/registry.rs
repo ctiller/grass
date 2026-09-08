@@ -245,6 +245,23 @@ pub fn propose_transition(
 /// "Resuming the preserved outbox" needs no separate mechanism: `proposer`'s
 /// very next `drain_outbox` call for `target` simply reads whatever is
 /// already sitting in `target`'s local outbox directory, unconditionally.
+///
+/// Note what this covers besides an unavailable custodian. Section 2.1
+/// lists four epoch transitions -- registration, retirement, reassignment,
+/// and coordinator succession -- and this is the only one that touches
+/// `(host, coordinator_custody_epoch)`. So a *planned* relocation ("this
+/// agent now runs over there") and the repair of a binding that names the
+/// wrong host are the same operation, under the same authorization rule,
+/// and neither needs a separate command. That matters concretely: the live
+/// fleet's migrated members carry the placeholder host `migration`, and
+/// until this moves them, the only host name that can publish for them is
+/// the one that does not exist.
+///
+/// It also means the *superseded* custodian must be a host that is willing
+/// to stop. `authorize_stream_write` only refuses it once that host has
+/// fetched the new epoch; until then, section 2.1's non-fast-forward
+/// rejection is what stops it ("The loser stops and resolves custody; it
+/// must not renumber an already published event or force-push").
 pub fn propose_custody_succession(
     repo: &Path,
     expected_parent: &RosterEpoch,
@@ -292,6 +309,17 @@ pub fn propose_custody_succession(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemberBinding {
     pub role: Role,
+    /// The host whose coordinator may advance this identity's stream.
+    ///
+    /// Section 2.1's "an agent may move between hosts without changing its
+    /// stream identity; the registry determines which host custody epoch
+    /// may advance that ref" -- so this is a *binding*, correctable, not an
+    /// identity. [`propose_custody_succession`] is the only thing that
+    /// changes it, and it is also the repair path for a binding that names
+    /// the wrong host: the live fleet's migrated members carry the
+    /// placeholder `migration`, which names no host that exists, so until
+    /// custody is moved they can only be published for by asserting that
+    /// placeholder.
     pub host: Short,
     pub coordinator_custody_epoch: u64,
     /// A pre-authorized standby for this binding's stream custody (section

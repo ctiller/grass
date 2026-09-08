@@ -60,6 +60,74 @@ fn path_str(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
+// ------------------------------------------------- the pinned merge engine
+
+/// The merge engine version this build pins
+/// (`bootstrap::SUPPORTED_MERGE_ENGINE_VERSION`).
+///
+/// Spelled as a literal because these tests drive the compiled binary as a
+/// black box: the crate has no library target, so there is nothing to read
+/// the constant from. `activate_merge_engine` below must put the same value
+/// into an event payload regardless -- `apply` rejects a
+/// `merge_engine.activated` naming any other version -- so one named constant
+/// here is better than the two bare literals this file used to carry.
+const PINNED_MERGE_ENGINE_VERSION: &str = "2.53.0";
+
+/// This host's `git` version, normalized the way `gitrepo::version` does it
+/// ("git version 2.53.0.windows.1" -> "2.53.0").
+fn installed_git_version() -> String {
+    let out = StdCommand::new("git")
+        .arg("--version")
+        .output()
+        .expect("git must be on PATH");
+    let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let digits: String = raw
+        .strip_prefix("git version ")
+        .unwrap_or(&raw)
+        .split(|c: char| !c.is_ascii_digit() && c != '.')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    let parts: Vec<&str> = digits.split('.').collect();
+    if parts.len() >= 3 {
+        format!("{}.{}.{}", parts[0], parts[1], parts[2])
+    } else {
+        digits
+    }
+}
+
+/// Reports whether this host cannot run the tests that need a *real* merge
+/// candidate, printing why.
+///
+/// Constructing a candidate is refused outright on a host whose git is not
+/// the version the bus pins (AGENT_BUS_SCHEMA.md section 2: the helper
+/// "refuses to run on a different version"; AGENT_REVIEW.md section 7). That
+/// is a genuine property of such a host, not a defect, so every test here
+/// that drives `prepare-merge` through to a candidate -- and everything
+/// downstream of one: `merge-ready`, `audit-main`'s correlation of a real
+/// merge, reconciliation -- cannot reach what it asserts there. On Ubuntu's
+/// git 2.51.0 against the pinned 2.53.0 all fourteen of them failed with an
+/// engine complaint instead.
+///
+/// They say so out loud and return. Failing would report a correctly
+/// configured helper as broken; passing silently would report an unexercised
+/// path as exercised, which this suite treats as the worse of the two. The
+/// other fifty-four tests in this file run on any git: genesis, registration,
+/// publication, sync, tail, status, succession, the outbox and the registry
+/// no longer consult the engine version at all.
+fn requires_the_pinned_engine(what: &str) -> bool {
+    let installed = installed_git_version();
+    if installed == PINNED_MERGE_ENGINE_VERSION {
+        return false;
+    }
+    eprintln!(
+        "SKIPPED {what}: this host runs git {installed}, not the pinned merge engine version \
+         {PINNED_MERGE_ENGINE_VERSION}. Constructing a candidate is refused on such a host by \
+         design, so this test cannot reach what it asserts. Install the pinned git to exercise it."
+    );
+    true
+}
+
 /// A bare "origin" remote, empty until something is genesis'd and pushed to
 /// it.
 fn init_bare_origin() -> TempDir {
@@ -284,7 +352,7 @@ fn activate_merge_engine(repo: &Path, coordinator: &str) -> String {
     let data = serde_json::json!({
         "previous_epoch": format!("{coordinator}:0"),
         "merge_engine": "git-ort",
-        "merge_engine_version": "2.53.0",
+        "merge_engine_version": PINNED_MERGE_ENGINE_VERSION,
         "design_commit": "0".repeat(40),
         "helper_commit": "0".repeat(40),
     });
@@ -1219,6 +1287,237 @@ fn succeed_surfaces_a_rejected_candidate_from_the_resumed_outbox() {
     assert_eq!(succeeded["stream_not_attempted"], serde_json::json!([]));
 }
 
+// ----------------------------------------------------------- adding a host
+//
+// The two operations an operator actually performs to bring a host into the
+// fleet, driven end to end through the compiled binary from *two* checkouts
+// of one origin -- the only arrangement in which a host can be seen
+// reasoning about facts it did not itself create.
+
+/// The whole recipe: stand a coordinator up on the new host, then move an
+/// existing agent's stream custody to it.
+///
+/// Both halves are registry epoch transitions (section 2.1: "Registration,
+/// retirement, reassignment, and coordinator succession create a new
+/// epoch"), and each is proposed from the host that will hold the result --
+/// section 2.4 gives custody to the *taker*, so `succeed` runs on host2,
+/// never on host1's behalf.
+///
+/// This is also the recipe for the thirteen live bindings still carrying
+/// the `migration` placeholder: `succeed` is the operation that moves a
+/// binding from a wrong host to a right one, and nothing else is needed.
+#[test]
+fn a_new_host_takes_over_an_agents_custody_end_to_end() {
+    let origin = init_bare_origin();
+    let host1 = init_repo(origin.path());
+    genesis(host1.path(), "coord1", "host1");
+    register(host1.path(), "alice", "implementor", "host1");
+
+    // The new host, a checkout that has never run an agent-bus command.
+    let host2 = init_repo(origin.path());
+    status(host2.path(), true);
+    register(host2.path(), "coord2", "coordinator", "host2");
+
+    // host1 learns of the new host only by fetching.
+    let seen = status(host1.path(), true);
+    assert_eq!(status_agent(&seen, "coord2")["role"], "coordinator");
+    assert_eq!(status_agent(&seen, "coord2")["host"], "host2");
+
+    // host2's own coordinator takes custody of alice.
+    let succeeded = succeed(host2.path(), "coord2", "alice", "host2");
+    assert_eq!(succeeded["new_custody_epoch"], 1);
+    assert_eq!(succeeded["registry_rejected"], serde_json::json!([]));
+
+    // The new custodian publishes for alice.
+    submit(
+        host2.path(),
+        "alice",
+        "agent.status",
+        r#"{"status":"active","note":"running on host2 now"}"#,
+        "moved-1",
+    );
+    let out = coordinate(host2.path(), "alice", "host2", 1);
+    assert_eq!(out["published_events"], serde_json::json!(["alice:1"]));
+
+    // host1 reads the move back, and is then locked out by gate 7 -- under
+    // its own old host name and under the new host's name at a custody
+    // epoch it does not hold.
+    //
+    // The sync is load-bearing, not tidiness: `coordinate` authorizes
+    // custody against the *local* registry ref (`coordinator::drain_outbox`
+    // deliberately does not probe the remote for an ordinary candidate), so
+    // a host1 that had not yet fetched would still believe it held alice.
+    // See `a_stale_custodian_is_stopped_by_the_remote_not_by_its_own_check`
+    // for what happens in that window.
+    let after = status(host1.path(), true);
+    assert_eq!(status_agent(&after, "alice")["host"], "host2");
+    assert_eq!(
+        status_agent(&after, "alice")["coordinator_custody_epoch"],
+        1
+    );
+    assert_eq!(status_agent(&after, "alice")["next_seq"], 2);
+
+    for (host, custody) in [("host1", "0"), ("host1", "1"), ("host2", "0")] {
+        bin()
+            .current_dir(host1.path())
+            .args([
+                "coordinate",
+                "--agent",
+                "alice",
+                "--host",
+                host,
+                "--custody-epoch",
+                custody,
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("belongs to host"));
+    }
+}
+
+/// What actually stops a superseded custodian that has not yet fetched the
+/// registry: the remote, by refusing a non-fast-forward push.
+///
+/// `drain_outbox` checks custody against the local registry ref and never
+/// probes the remote for an ordinary candidate -- a deliberate choice
+/// (section 2.4 keeps local submission and publication working while
+/// disconnected), but it means the local check cannot see a succession this
+/// host has not fetched. Section 2.1 states the remaining mechanism
+/// exactly: "A non-fast-forward update of its stream therefore indicates
+/// stale or duplicate custody, not routine cross-agent contention. The
+/// loser stops and resolves custody; it must not renumber an already
+/// published event or force-push."
+///
+/// This pins that this is what happens -- the loser's events stay local,
+/// the remote keeps the real custodian's history, and nothing is
+/// force-pushed -- and it is deliberately a *two-checkout* test: with one
+/// repository the two custodians share a registry ref and the window does
+/// not exist at all, which is why the single-repository sibling
+/// `register_standby_then_succeed_moves_custody_and_locks_out_the_old_custodian`
+/// cannot show it.
+#[test]
+fn a_stale_custodian_is_stopped_by_the_remote_not_by_its_own_check() {
+    let origin = init_bare_origin();
+    let host1 = init_repo(origin.path());
+    genesis(host1.path(), "coord1", "host1");
+    register(host1.path(), "alice", "implementor", "host1");
+
+    let host2 = init_repo(origin.path());
+    status(host2.path(), true);
+    register(host2.path(), "coord2", "coordinator", "host2");
+    let succeeded = succeed(host2.path(), "coord2", "alice", "host2");
+    assert_eq!(succeeded["new_custody_epoch"], 1);
+
+    submit(
+        host2.path(),
+        "alice",
+        "agent.status",
+        r#"{"status":"active","note":"from the real custodian"}"#,
+        "real-1",
+    );
+    coordinate(host2.path(), "alice", "host2", 1);
+
+    // host1 has not fetched since the succession, so its own custody check
+    // still passes -- and it goes on to commit alice:1 locally.
+    submit(
+        host1.path(),
+        "alice",
+        "agent.status",
+        r#"{"status":"active","note":"from the superseded custodian"}"#,
+        "stale-1",
+    );
+    let stale = coordinate(host1.path(), "alice", "host1", 0);
+    assert_eq!(stale["published_events"], serde_json::json!(["alice:1"]));
+    // ...but the push is refused, so it never became a fact anyone else can
+    // see. `publish` never force-pushes, so this is the whole outcome.
+    assert_eq!(
+        stale["rejected"],
+        serde_json::json!(["refs/heads/agent-events/alice"]),
+        "{stale}"
+    );
+
+    // The remote still holds the real custodian's event, not the stale
+    // host's same-numbered one.
+    let remote_tip = git_out(
+        origin.path(),
+        &["rev-parse", "refs/heads/agent-events/alice"],
+    );
+    let host2_tip = git_out(
+        host2.path(),
+        &["rev-parse", "refs/heads/agent-events/alice"],
+    );
+    assert_eq!(remote_tip, host2_tip);
+
+    // And a fresh reader -- one that never took part -- reduces exactly one
+    // alice:1, the real custodian's.
+    let fresh = init_repo(origin.path());
+    let synced = status(fresh.path(), true);
+    assert_eq!(status_agent(&synced, "alice")["next_seq"], 2);
+    let events = tail(fresh.path(), "alice");
+    let last = events["events"].as_array().unwrap().last().unwrap();
+    assert_eq!(last["data"]["note"], "from the real custodian");
+}
+
+/// `register` must fail closed when its registry push is refused, rather
+/// than printing the rejection and exiting zero.
+///
+/// Two checkouts read the same registry epoch and both register; the
+/// registry is the fleet's one compare-and-swap point (section 2.1), so
+/// exactly one can win. The loser has already advanced its *local*
+/// `agent-registry` ref and committed the new agent's stream root, and a
+/// diverged local copy of a ref whose whole protection is "never
+/// force-pushed" is precisely the state an operator must be told about
+/// immediately -- otherwise the next `status --sync` fails its non-force
+/// fetch with no explanation, and the obvious-looking remedy is the one
+/// thing that is prohibited.
+///
+/// Falsification: dropping the receipt check at the end of `cli::register`
+/// makes this exit zero with `"rejected"` non-empty in its JSON.
+#[test]
+fn register_fails_closed_when_another_host_won_the_registry_transition() {
+    let origin = init_bare_origin();
+    let host1 = init_repo(origin.path());
+    genesis(host1.path(), "coord1", "host1");
+
+    let host2 = init_repo(origin.path());
+    status(host2.path(), true);
+
+    // host1 wins the epoch transition.
+    register(host1.path(), "alice", "implementor", "host1");
+
+    // host2, still holding the pre-transition epoch, loses.
+    bin()
+        .current_dir(host2.path())
+        .args([
+            "register",
+            "--agent",
+            "bob",
+            "--display-name",
+            "Bob",
+            "--role",
+            "reviewer",
+            "--purpose",
+            "reviews things",
+            "--host",
+            "host2",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("did not reach"))
+        .stderr(predicate::str::contains("do not force-push"));
+
+    // The remote is untouched by the loser: only host1's agent is there.
+    let remote_refs = git_out(origin.path(), &["for-each-ref", "--format=%(refname)"]);
+    assert!(
+        remote_refs.contains("refs/heads/agent-events/alice"),
+        "{remote_refs}"
+    );
+    assert!(
+        !remote_refs.contains("refs/heads/agent-events/bob"),
+        "the loser must not have published a stream root: {remote_refs}"
+    );
+}
+
 // ------------------------------------------------- freshness envelope tests
 //
 // docs/AGENT_COORDINATION_EVOLUTION.md section 2.4: "Every human and
@@ -1667,6 +1966,9 @@ fn tail_of_an_unregistered_agent_fails_cleanly() {
 /// the push would still be caught even if the printed JSON looked right.
 #[test]
 fn prepare_merge_constructs_and_pushes_the_candidate_tag() {
+    if requires_the_pinned_engine("prepare_merge_constructs_and_pushes_the_candidate_tag") {
+        return;
+    }
     let (origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -1923,6 +2225,9 @@ fn prepare_merge_rejects_an_unknown_nomination() {
 /// reports it ready and names the exact same candidate.
 #[test]
 fn merge_ready_reports_ready_for_a_genuinely_valid_authorization() {
+    if requires_the_pinned_engine("merge_ready_reports_ready_for_a_genuinely_valid_authorization") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -1976,6 +2281,9 @@ fn merge_ready_rejects_unknown_authorization() {
 /// asking `merge-ready` about the same authorization id must be refused.
 #[test]
 fn merge_ready_rejects_wrong_authorizer() {
+    if requires_the_pinned_engine("merge_ready_rejects_wrong_authorizer") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2017,6 +2325,9 @@ fn merge_ready_rejects_wrong_authorizer() {
 /// this, since both run before `main` has had the chance to move.
 #[test]
 fn merge_ready_rejects_main_advanced() {
+    if requires_the_pinned_engine("merge_ready_rejects_main_advanced") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2067,6 +2378,9 @@ fn merge_ready_rejects_main_advanced() {
 /// ever looks at the actual diff content).
 #[test]
 fn merge_ready_rejects_a_changed_path_outside_reviewed_scope() {
+    if requires_the_pinned_engine("merge_ready_rejects_a_changed_path_outside_reviewed_scope") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     register(repo.path(), "aiden", "reviewer", "host2");
@@ -2209,6 +2523,9 @@ fn audit_main_json_states_its_own_freshness() {
 /// publish `review.merged`, and `audit-main` reports it clean.
 #[test]
 fn audit_main_reports_clean_when_fully_correlated() {
+    if requires_the_pinned_engine("audit_main_reports_clean_when_fully_correlated") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2255,6 +2572,9 @@ fn audit_main_reports_clean_when_fully_correlated() {
 /// missing or mismatched receipt is detected by `audit-main`").
 #[test]
 fn audit_main_flags_missing_receipt() {
+    if requires_the_pinned_engine("audit_main_flags_missing_receipt") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2299,6 +2619,9 @@ fn audit_main_flags_missing_receipt() {
 /// commit, `audit-main` reports it clean again.
 #[test]
 fn audit_main_reports_clean_after_review_merge_reconciled() {
+    if requires_the_pinned_engine("audit_main_reports_clean_after_review_merge_reconciled") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2357,6 +2680,10 @@ fn audit_main_reports_clean_after_review_merge_reconciled() {
 /// was never published. A bootstrap coordinator's reconciliation succeeds.
 #[test]
 fn reconcile_via_submit_succeeds_when_main_was_genuinely_advanced() {
+    if requires_the_pinned_engine("reconcile_via_submit_succeeds_when_main_was_genuinely_advanced")
+    {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2411,6 +2738,9 @@ fn reconcile_via_submit_succeeds_when_main_was_genuinely_advanced() {
 /// reconciled`'s live `git rev-list --first-parent` check can.
 #[test]
 fn reconcile_via_submit_rejects_when_main_was_never_advanced() {
+    if requires_the_pinned_engine("reconcile_via_submit_rejects_when_main_was_never_advanced") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2463,6 +2793,9 @@ fn reconcile_via_submit_rejects_when_main_was_never_advanced() {
 /// covered by `apply.rs`'s own unit tests).
 #[test]
 fn reconcile_via_submit_rejects_a_non_coordinator_agent() {
+    if requires_the_pinned_engine("reconcile_via_submit_rejects_a_non_coordinator_agent") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2657,6 +2990,9 @@ fn golden_succeed_output() {
 
 #[test]
 fn golden_prepare_merge_output() {
+    if requires_the_pinned_engine("golden_prepare_merge_output") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, _previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2672,6 +3008,9 @@ fn golden_prepare_merge_output() {
 
 #[test]
 fn golden_merge_ready_output() {
+    if requires_the_pinned_engine("golden_merge_ready_output") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2711,6 +3050,9 @@ fn golden_merge_ready_output() {
 /// has no hash to redact at all.
 #[test]
 fn golden_audit_main_output() {
+    if requires_the_pinned_engine("golden_audit_main_output") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
