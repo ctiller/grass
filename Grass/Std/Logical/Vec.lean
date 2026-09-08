@@ -197,7 +197,7 @@ def get (v : Vec α) (i : Nat) (h : i < v.length) : α := v.toList[i]'h
 @[simp] theorem length_replicate (n : Nat) (a : α) : (replicate n a).length = n := by
   simp [length, replicate]
 
-theorem get?_replicate (n : Nat) (a : α) (i : Nat) :
+@[simp] theorem get?_replicate (n : Nat) (a : α) (i : Nat) :
     (replicate n a).get? i = if i < n then some a else none := by
   simp [get?, replicate, List.getElem?_replicate]
 
@@ -244,7 +244,7 @@ theorem get?_eq_none (v : Vec α) {i : Nat} (h : v.length ≤ i) : v.get? i = no
 /-- Both directions. A consumer review needed the converse twice while writing a
 byte cursor and had to derive it each time; a read failing is exactly a read past
 the end. -/
-theorem get?_eq_none_iff (v : Vec α) (i : Nat) : v.get? i = none ↔ v.length ≤ i := by
+@[simp] theorem get?_eq_none_iff (v : Vec α) (i : Nat) : v.get? i = none ↔ v.length ≤ i := by
   simp [get?, length]
 
 /--
@@ -265,6 +265,21 @@ theorem get?_eq_some_iff {v : Vec α} {i : Nat} {a : α} :
     · rw [get?_eq_none v hge] at h; exact absurd h (by simp)
   · rintro ⟨hlt, rfl⟩
     exact get?_eq_some_get v i hlt
+
+/--
+Readability as a `Bool`, which is the half `Vec.get?_eq_none_iff` leaves behind.
+
+With that law `@[simp]`, a goal of the form `v.get? i = none` normalises to an
+arithmetic one and a goal of the form `(v.get? i).isSome` does not, which is an
+asymmetry in the predicate rather than in the sequence. `Vec.pop?_isSome_iff` is
+the same statement about the other accessor and was added for the same reason: an
+operation a consumer can call and cannot reason about gets reasoned about through
+`Vec.toList` instead.
+-/
+@[simp] theorem get?_isSome_iff (v : Vec α) (i : Nat) :
+    (v.get? i).isSome = true ↔ i < v.length := by
+  rw [Option.isSome_iff_ne_none, ne_eq, get?_eq_none_iff]
+  omega
 
 /-- A successful read is in range. -/
 theorem lt_of_get?_eq_some {v : Vec α} {i : Nat} {a : α} (h : v.get? i = some a) :

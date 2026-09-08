@@ -242,4 +242,79 @@ conditional `Vec.get?_push_lt` supplied by hand. -/
 example (v : Vec Nat) (a : Nat) (i : Nat) (h : i < v.length) :
     (v.push a).get? i = v.get? i := by simp [h]
 
+/-! ## Reading with a bound, in the shapes a migrating consumer writes
+
+`c-mem:51` measured what it would cost to retype the memory layer's byte
+sequences from `List Byte` to `Vec Byte` and reported twenty-five errors, all in
+the proof layer rather than in the declarations: `Grass/Memory/ByteStore.lean`
+and `Event.lean` discharge goals with `List.getElem?_eq_none`,
+`List.getElem?_eq_some_iff`, `List.getElem?_eq_getElem` and `List.length_take`
+directly rather than through any interface. After a migration each of those is a
+goal about a `Vec`, and the question this section asks is whether `simp` closes
+it without the consumer reaching back for `Vec.toList`.
+
+That is a *named* consumer with a *named* use, which is band 2 in
+`docs/STDLIB_IMPLEMENTATION_PLAN.md` §1 — the case the band rule exists to
+serve, and the reason these goals were written before the migration rather than
+after it.
+
+Three of the nine below did not close when they were first written. Two were
+laws that already existed and were not in the `simp` set — `Vec.get?_replicate`
+and `Vec.get?_eq_none_iff` — and one, `Vec.get?_isSome_iff`, did not exist.
+-/
+
+section ReadingWithABound
+
+variable {α : Type}
+
+/-! ### Out of range reads nothing
+
+`Vec.get?_eq_none_iff` states this and was not `@[simp]`, so the goal a consumer
+writes stopped on a law the module already had. -/
+
+example (v : Vec α) (i : Nat) (h : v.length ≤ i) : v.get? i = none := by simp [h]
+
+/-- The same through the bracket notation, which is how a field read spells it.
+This one closed before the attribute changed, through
+`Vec.getElem?_eq_get?`. -/
+example (v : Vec α) (i : Nat) (h : v.length ≤ i) : v[i]? = none := by simp [h]
+
+/-! ### In range reads something
+
+`Vec.get?_isSome_iff` is the half `Vec.get?_eq_none_iff` leaves behind: with the
+`none` case normalising to arithmetic and the `isSome` case not, the asymmetry is
+in the predicate rather than in the sequence. -/
+
+example (v : Vec α) (i : Nat) (h : i < v.length) : (v.get? i).isSome := by simp [h]
+
+/-! ### Bounds arithmetic over a prefix, which is where `c-mem`'s `omega` calls sit -/
+
+example (v : Vec α) (n : Nat) : (v.take n).length = min n v.length := by simp
+
+example (v : Vec α) (n i : Nat) (h : i < n) (hn : n ≤ v.length) :
+    i < (v.take n).length := by
+  simp; omega
+
+/-! ### Reading back what a constructor built
+
+`Vec.ofFn` is the counterpart of `Grass/Memory/Apply.lean`'s `observedBytes`,
+which builds its result as `(List.range n).map`. `Vec.replicate` is one of the
+four operations `c-mem:50` reports the layer using. `Vec.get?_replicate` existed
+and was not `@[simp]`, which is the same shape `Vec.get?_push` was in before it
+was written: a conditional read-back stated but unreachable. -/
+
+example (n : Nat) (f : Nat → α) (i : Nat) (h : i < n) :
+    (Vec.ofFn n f).get? i = some (f i) := by simp [h]
+
+example (n : Nat) (f : Nat → α) (i : Nat) (h : i < n) :
+    (Vec.ofFn n f)[i]? = some (f i) := by simp [h]
+
+example (n : Nat) (a : α) (i : Nat) (h : i < n) :
+    (Vec.replicate n a).get? i = some a := by simp [h]
+
+example (n : Nat) (a : α) (i : Nat) (h : n ≤ i) :
+    (Vec.replicate n a).get? i = none := by simp [h]
+
+end ReadingWithABound
+
 end Grass.Tests.Std.Instances
