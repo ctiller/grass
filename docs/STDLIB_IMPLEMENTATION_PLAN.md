@@ -304,7 +304,7 @@ absence is a band-3 item under §1 with a named blocker, not an oversight:
 | lexicographic comparison | an ordering vocabulary, likewise undemanded. |
 | indexing laws for `insertAt`/`eraseAt` | a consumer that indexes across an insertion. The operations and their length laws are present; the index-shifting laws are large and are better written against a real proof than guessed at. |
 | ~~`Vec.filter`~~ | **Withdrawn by the consumer who asked for it.** A review called its absence "startling" in round 1, then wrote six client modules and never once needed it. Recorded because a retracted demand is as useful as a demand, and because band 3 was right. |
-| ~~`reverse`, `takeWhile`, `extract`, `foldlM`, `head?`, `tail`, a `Sorted`/sort~~ | Same review, same verdict: never reached for. `Pairwise` plus decidability covered every ordering need including `insertSorted`; `Spikes/2_Sort` specifies sortedness and does not ask this library to perform one. `head?`/`tail` were subsumed by `Vec.recOnCons` — what was wanted was the induction principle, not the accessors. |
+| ~~`reverse`, `takeWhile`, `extract`, `foldlM`, `head?`, `tail`, a `Sorted`/sort~~ | Same review, same verdict: never reached for. `Pairwise` plus decidability covered every ordering need including `insertSorted`; `Spikes/2_Sort` specifies sortedness and does not ask this library to perform one. `head?`/`tail` were subsumed by `Vec.recOnCons` — what was wanted was the induction principle, not the accessors. **That last clause holds only while `ByteSeq` is a `List`:** §4.0 records that `Grass/ISA/X86/Decode.lean` consumes a byte sequence with cons patterns, which `recOnCons` does not replace, because a recursor proves and does not compute. The verdict stands today and would not survive the `ByteSeq` migration. |
 | ~~`Vec` iterators~~ | **Supplied.** §3 lists iteration among the observations and this library had none; adversarial review found that neither the absence list nor the instances fixture had caught it. `Vec` now has `ForIn`, so `for x in v do …` works. |
 | fold/map/traverse *fusion* laws beyond `map_map` | a consumer. §5 asks for fusion "where their premises hold"; only `map` fusion exists, and there is no `foldl_map`, `foldr_map`, `foldl_append`, or `foldr_append`. Found by adversarial review; this row is the correction. |
 | pure immutable views/subsequences | a consumer. §3 lists them; `take`/`drop` copy instead. Also found by review, also previously unlisted. |
@@ -764,8 +764,20 @@ concretely.
 - **Cons patterns as `ByteSeq` consumers.** `Grass/ISA/X86/Decode.lean` reads
   with `| b :: rest =>` and, in `takeLe64`, an eight-deep
   `| a :: b :: c :: d :: e :: f :: g :: h :: rest =>`. `Vec` is a structure, so
-  no cons pattern applies to it at all. These become `Vec.pop?` chains or
-  `Vec.recOnCons`, and the eight-deep one has no direct spelling.
+  no cons pattern applies to it at all — **and this library has nothing to offer
+  in their place.** `Vec.pop?` is the wrong end: it inverts `push` and returns
+  the *last* element. `head?` and `tail` are struck out in §3.4 as "never reached
+  for", subsumed by `Vec.recOnCons` — which is true for *proving* by induction
+  and false for *writing* a function that consumes a prefix. So the decoder
+  becomes `v.get? 0` paired with `v.drop 1`, and `takeLe64` becomes a length
+  check plus eight indexed reads related back to the suffix by hand.
+
+  That makes the decoder the strongest band-2 case this plan has seen: a named
+  consumer, a named use, and an operation §3.4 retired on the ground that no such
+  consumer existed. It is not scheduled, because `c-x86` has not asked and the
+  migration that would force it is not scheduled either. If `c-x86` does, the
+  front-uncons operation and its laws are written before the rewrite rather than
+  after.
 
 Both are in `c-x86`'s exclusive scope. Reproduce with
 `git grep -n ByteSeq -- Grass/ISA Grass/ABI` and read the bodies rather than the
