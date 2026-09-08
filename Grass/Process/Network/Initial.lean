@@ -28,7 +28,7 @@ program never starts in.
 ## The payoff
 
 `initial_is_wellformed` is why the exactness is worth the fields. Six of
-`WellFormed`'s eight clauses are discharged *because* nothing else exists yet:
+`WellFormed`'s clauses are discharged *because* nothing else exists yet:
 there is no second instance to violate root uniqueness, no recorded parent to
 be invalid, and no escrow to hold a reroute that never lands, an occurrence on
 the wrong session, or two entries sharing a nominal. The remaining two come from
@@ -265,9 +265,9 @@ theorem nothing_has_a_parent {kind : plan.topology.ProcessKind}
 /--
 **An exact initial network is well formed.**
 
-Six of `WellFormed`'s eight clauses hold *because* nothing else exists yet — that
-is what the exactness buys, and it is why a relation pinning only the root would
-not have been enough.
+Most of `WellFormed`'s clauses hold *because* nothing else exists yet — that is
+what the exactness buys, and it is why a relation pinning only the root would not
+have been enough.
 
 * `rootUnique` — there is one live instance, so two roots are in one slot.
 * `parentageValid` — nothing has a parent, so no recorded parenthood is invalid.
@@ -428,7 +428,8 @@ bridged by `WellFormed.slotsAgree` and `ProcessLifecycle.died_cast` — the brid
 is why the well-formedness hypothesis is here rather than a convenience. The
 disjunct is the one `parentless_slot_survives` concludes with:
 `Restarts.restartsAChild` constrains only the new incarnation, so a restart at
-the root's slot is the single way an execution can end without a root. A plan at which that restart is unconstructible —
+the root's slot is the single way an execution can end
+without a root. A plan at which that restart is unconstructible —
 `ProcessGraph.maySpawn` permitting no parent for the root's role is the ordinary
 reason — therefore holds its root along every run, which is what
 `Tests/Process/PreservationFixtures.lean` discharges at `serverPlan`.

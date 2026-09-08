@@ -5541,17 +5541,68 @@ write a count you have not measured — turns out to be too weak. The stronger f
 is: do not write a count beside something that will grow. Measuring it correctly
 only sets the fuse accurately.
 
-**And the shape of the whole sequence is now clear enough to state.** Seven
-rounds. Zero defects in Lean. The defect population moved steadily inward: rounds
-one and two found claims about the *code* that the code refuted; rounds three
-through five found claims about *earlier corrections* that the diffs refuted;
-rounds six and seven found claims the ledger made *about itself* that the ledger
-refuted. That is what convergence looks like when the artefact under review is
+**And the shape of the whole sequence is now clear enough to state.** Zero
+defects in Lean, in every round. The defect population moved inward: the earliest
+rounds found claims about the *code* that the code refuted; the middle ones found
+claims about *earlier corrections* that the diffs refuted; the later ones found
+mostly claims the ledger made *about itself*. "Mostly" is doing real work there —
+an eighth round found a count in a `/-!` header in Lean source that had gone
+stale in exactly the way §10.136 declared fixed, so the inward movement is a
+tendency and not a completed migration. That is what convergence looks like when the artefact under review is
 prose and the reviewer is the only gate it has. It is also the argument for
 `agent-bus` `c-process:106`: two of the three checks these rounds ran — resolve
 every backticked name including its prefix, and measure every count — are
 mechanical, and a gate that ran them would have caught most of this without
 seven reviewers.
+
+### 10.139 A count in a section header, and a miscount that predates the branch
+
+An eighth fresh reviewer, with a declaration environment built from `Grass/**`
+plus all fifty-two `Tests/Process` modules. It re-derived every constructor
+count, rebuilt the §10.134 vacuity attack from scratch — constructing the
+wrong-kind world and machine-checking four separate facts about it, including
+that `SlotsAgree` is what refuses that world — fired the invariant on runs of
+zero, one and two steps, and checked every quotation and every claim this ledger
+makes about the branch's git history. **No defect in a proof, for the eighth
+time.**
+
+**It found the fuse still burning, in Lean source.** A `/-!` section header read
+"And the same three, as statements about runs rather than about worlds" over a
+block that now holds four, because a later commit added one and did not touch the
+header — while a note two hundred lines above, in the same file, says each
+refusal has a corollary. So §10.138's headline, that every remaining defect was
+the ledger describing itself, was false when written: this one is the ledger's
+subject rather than its object, and it is the exact pattern §10.136 declared
+durably fixed by removing counts from the docstrings that carried them. The
+removal had covered the docstrings and not the section headers.
+
+The rule that comes out of it is narrower and more useful than the one it
+replaces: **a count is safe only where it describes something closed.** "Three
+conjuncts" is safe because `UnkilledRootAt` has three and gaining a fourth would
+be a design change. "The same three" over a block of theorems is not, because a
+block of theorems is a place things get added. §10.136's "do not write a count
+you have not measured" and §10.138's "do not write a count beside something that
+will grow" were both aimed at this and both missed the header, because a header
+does not look like a claim.
+
+**And a miscount older than the branch.** `Grass/Process/Network/Initial.lean`
+said "`WellFormed`'s eight clauses" in two places and
+`Grass/Process/Network/WellFormedness.lean` said "four of the eight";
+`LogicalProcessNetworkCore.WellFormed` has nine, because §10.128 added
+`sharedInvariantHolds` and the prose count did not move — my own commit, and the
+same defect this branch has spent eight rounds on, sitting on `main` the whole
+time. `Tests/Process/PreservationFixtures.lean` had "all six clauses" for the
+same reason. All four are now phrased without a number, since the list is one
+that grows by design.
+
+**What the reviewer also confirmed, which is worth keeping.** `StepsTo` is the
+snoc-form reflexive-transitive closure of `NetworkStep`, so
+`execution_holds_an_unkilled_root`'s induction really is over runs rather than
+over transitions and the inductive hypothesis lands on the prefix.
+`no_restart_at_the_root_slot`'s implicit arguments all unify with `noRestart`'s,
+and `InstanceId .listener` being `Unit` forces `start.rootSlot` to `()` for
+*every* start rather than only for `withRoot`. Both were things a reader could
+have doubted from the statements alone.
 
 ## 11. The authoring facade
 

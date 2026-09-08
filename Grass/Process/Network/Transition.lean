@@ -2274,9 +2274,11 @@ split is on the transition's own `scope` at that fragment, and the negative
 branch is `touchesOnly` handing back `not_dead_where_nothing_moved`.
 
 **Three things this does not say, each of which an earlier version of this
-docstring did.** They were found by a fresh adversarial reviewer who built a
-machine-checked witness for the first two, and they are recorded here rather than
-in the ledger alone because the wrong reading is the natural one.
+docstring did.** Two of them have a machine-checked witness — the first and the
+third — and they are recorded here rather than in the ledger alone because the
+wrong reading is the natural one. The second has none and can have none: the
+claim it warns against is *true* at `serverPlan`, so what is wrong with it is its
+scope rather than its truth.
 
 *It is not "a dead instance has a current parent".* `Detaches` has no liveness
 requirement and copies the lifecycle across, so a dead child detaches into a dead
@@ -2519,7 +2521,8 @@ parentless slot replaces a root with a child and the network afterwards has one
 fewer root. The disjunct says the two worlds stand in the `Restarts` *relation*
 at that slot rather than naming the constructor taken, which is the conservative
 side: a consumer refutes the relation, as `no_restart_at_the_root_slot` does, and
-does not have to reason about which constructor was used. `LogicalProcessNetworkCore.RootUnique` does not notice, being
+does not have to reason about which constructor was used.
+`LogicalProcessNetworkCore.RootUnique` does not notice, being
 uniqueness rather than existence.
 
 That is `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.133's open question, and

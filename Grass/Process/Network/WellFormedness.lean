@@ -34,9 +34,9 @@ reading had.
 
 Every constructor declares at most one `.instanceState` fragment, and
 `NetworkTransition.touchesOnly` says a step changes nothing outside its scope. So
-**four** of the eight clauses — `SlotsAgree`, `LifecyclesWitnessed`,
-`ParentageValid` and `NominalsAllocated`, each a property of *one* incarnation in
-*one* slot — reduce to a single question per constructor: *at the slot you
+`SlotsAgree`, `LifecyclesWitnessed`, `ParentageValid` and `NominalsAllocated` —
+each a property of *one* incarnation in *one* slot — reduce to a single question
+per constructor: *at the slot you
 declared, does the property still hold?* `instanceProperty_preserved` is that
 reduction, and it is the only place the scope discipline is spent.
 

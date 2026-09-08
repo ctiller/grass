@@ -12,8 +12,8 @@ well-formed one. This file applies it, and the application is worth having for a
 reason beyond coverage: it turns a **vacuous** certificate into a **non-vacuous**
 one.
 
-`Tests/Process/WorldFixtures.lean`'s `quiet_is_wellFormed` discharges all six
-clauses from "the network holds nothing" — every one is `absurd found`. That is
+`Tests/Process/WorldFixtures.lean`'s `quiet_is_wellFormed` discharges every
+clause from "the network holds nothing" — each one is `absurd found`. That is
 honest and it certifies nothing about any instance, because there are none.
 `spawned_is_wellFormed` is the same certificate carried across one spawn, and the
 network it certifies holds a child: `the_newborn_has_a_permitted_parent` and
@@ -265,7 +265,6 @@ def withRoot_is_a_start :
 instance rather than about an empty world. -/
 theorem withRoot_is_wellFormed : World.withRoot.WellFormed :=
   withRoot_is_a_start.initial_is_wellformed
-
 
 /-- The send is a step. -/
 def theSendStep : serverPlan.NetworkStep World.withRoot sent where
@@ -521,14 +520,14 @@ def theInterruptionStep (reason : Interrupt) :
   admissible := by intro _ nothing; cases nothing
   historyExact := rfl
 
-
 /-! ### And which of the four before-worlds a step can reach
 
 §10.129 left "reaching those before-worlds by steps is owed" and guessed the job
-was four `processStep`s. Two of the three steps below are `processStep`s and the
-third is a `childDied`; the fourth world has no step into it at all, and that is
-a theorem in the other direction. §10.132, and §10.133 for why a step into a
-world is not a run that reaches it.
+was four `processStep`s. Three of the four before-worlds have a step into them —
+`theReceiverIsKilledStep` is a `childDied`, `theLogStep` and `theLastTickStep`
+are `processStep`s — and `sentWithDeadSender` has none, which is a theorem in the
+other direction. §10.132, and §10.133 for why a step into a world is not a run
+that reaches it.
 -/
 
 /-- The wire's receiver before it died: the same incarnation, running. -/
@@ -578,7 +577,8 @@ theorem the_receiver_is_killed :
     · intro demand reason isInterrupted
       exact absurd isInterrupted (by intro equal; cases equal)
   custodyDeclared :=
-    ⟨liveConnection, sentWithLiveReceiver_slot, rfl, trivial, fun other _ => by cases other; rfl⟩
+    ⟨liveConnection, sentWithLiveReceiver_slot, rfl, trivial,
+      fun other _ => by cases other; rfl⟩
   scope := by
     intro fragment outside
     cases fragment with
@@ -681,9 +681,11 @@ theorem every_run_holds_an_unkilled_root
 
 It holds `World.rootListener` — parentage `.root`, so no current parent — in the
 `.died` state, and `UnkilledRootAt`'s death clause is exactly what that fails —
-its first two, an instance in the slot with no current parent, both hold. `theSenderDeathStep` is a real step and it is a step of no run. That is
-§10.88's inhabited-versus-exercised distinction, and unlike the first version of
-this section it is now proved rather than asserted.
+its first two, an instance in the slot and no current parent, both hold.
+
+`theSenderDeathStep` is a real step and it is a step of no run. That is §10.88's
+inhabited-versus-exercised distinction, and unlike the first version of this
+section it is now proved rather than asserted.
 -/
 theorem sentWithDeadSender_is_no_world_of_a_run :
     ¬ serverPlan.UnkilledRootAt sentWithDeadSender .listener () := by
@@ -712,7 +714,7 @@ theorem holding_is_no_world_of_a_run (incarnation : ProcessInstance serverTopolo
   rintro ⟨_, found, _⟩
   exact absurd found (by intro equal; cases equal)
 
-/-! ##### And the same three, as statements about runs rather than about worlds
+/-! ##### And the same refusals, as statements about runs rather than about worlds
 
 Local adversarial review's second round pointed out that `¬ UnkilledRootAt w` is
 one inference away from "no run reaches `w`" and that leaving the inference to
@@ -752,8 +754,6 @@ theorem no_run_reaches_a_holding_world (incarnation : ProcessInstance serverTopo
 the invariant above is not vacuous. -/
 theorem sent_holds_an_unkilled_root : serverPlan.UnkilledRootAt sent .listener () :=
   ⟨World.rootListener, rfl, rfl, fun _ dead => by cases dead⟩
-
-
 
 /-! #### And a role that may write nothing owes nothing
 
@@ -918,7 +918,8 @@ theorem the_log_is_answered (answer : countdownVocabulary.Result .log) :
   stillLive := ⟨waitingOnATick, holding_slot waitingOnATick, trivial⟩
   protocolStep :=
     ⟨countingOnALog, waitingOnATick, rfl, rfl, holding_slot countingOnALog,
-      holding_slot waitingOnATick, ⟨by decide, rfl, rfl, rfl⟩, ⟨0, rfl, rfl⟩, rfl, rfl, rfl⟩
+      holding_slot waitingOnATick, ⟨by decide, rfl, rfl, rfl⟩, ⟨0, rfl, rfl⟩,
+      rfl, rfl, rfl⟩
   emittedIsProjected := rfl
   producesPending := rfl
   writesPermitted := by
