@@ -63,7 +63,8 @@ def expectedObject : Grass.Artifact.COFF.Object where
 
 example : encodedObject.length = 113 := by decide
 
-example : readObject encodedObject = .done expectedObject Vec.empty := by
+theorem readObject_encodedObject :
+    readObject encodedObject = .done expectedObject Vec.empty := by
   rfl
 
 def noSymbolsHeader : Header :=
