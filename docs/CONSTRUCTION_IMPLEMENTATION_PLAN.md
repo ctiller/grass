@@ -147,6 +147,13 @@ Exit criteria include rejection fixtures for an uncovered back edge, a call
 made with an incompatible stack shape, a missing non-normal return, and an edge
 that bypasses stack-scope elimination.
 
+`Grass.CFG.Stack` supplies the ISA-neutral boundary vocabulary used by later
+call and composition checks. `StackShape` records depth plus exact lexical scope
+order, `StackDelta.apply?` rejects underflow without changing that scope order,
+and successful enter, leave, and delta operations preserve
+`StackShape.WellFormed`. ABI alignment and prologue selection remain parameters
+consumed by later layers rather than choices made by this module.
+
 ### C2 — Logical placement and static layouts
 
 Build layout and placement values under `Grass/Construct/`:
