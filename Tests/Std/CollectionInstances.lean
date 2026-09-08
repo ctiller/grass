@@ -21,8 +21,11 @@ notation as the cause.
 Every instance-provided notation across all seven modules of `Grass/Std/Logical`
 was probed by asking `simp` for a law through it. The complete result:
 
-* `Vec` — `EmptyCollection`, `Inhabited` and `ForIn` were orphaned; fixed on
-  `agent/c-stdlib/empty-notation` and pinned by `Tests/Std/VecInstances.lean`.
+* `Vec` — `EmptyCollection`, `Inhabited` and `ForIn` were orphaned; fixed by
+  `Vec.emptyCollection_eq_empty`, `Vec.default_eq_empty` and
+  `Vec.forIn_eq_forIn_toList`, and pinned by `Tests/Std/VecInstances.lean`. Named
+  rather than pointed at a branch, because a branch name stops resolving the
+  moment it merges and a declaration name does not.
   `Append` and `Membership` reach their laws already. There is deliberately no
   bridge from `a ∈ v` to `a ∈ v.toList`: that is the representation seam, and
   dissolving it is the leak the private structure exists to prevent.
