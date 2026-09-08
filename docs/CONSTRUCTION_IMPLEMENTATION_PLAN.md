@@ -436,6 +436,9 @@ certificate.
 `ImportedProgram.instructionAtByte?` exposes exact byte-to-instruction lookup;
 its success and failure theorems identify membership plus containment and the
 precise out-of-bounds boundary.
+`ImportTargetsResolved` retains the importer's all-instruction target check, and
+`ImportedProgram.controlTargetResolved` exposes it without re-running the
+decoder or policy search.
 
 `Grass.Unsafe.Step` maps imported instructions to the existing open
 `Grass.Op.SomeOperation` package plus explicit context, cause, and fault-plan

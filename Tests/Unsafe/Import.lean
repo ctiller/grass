@@ -124,6 +124,12 @@ example (imported : ImportedProgram Nat String Nat Instruction)
     imported.instructionAtByte? offset = none ↔
       imported.sourceBytes.length ≤ offset :=
   imported.instructionAtByte?_eq_none_iff offset
+example (imported : ImportedProgram Nat String Nat Instruction)
+    (instruction : ImportedInstruction Nat Instruction)
+    (hinstruction : instruction ∈ imported.instructions)
+    (reported : ControlTarget) (hreported : reported ∈ instruction.controlTargets) :
+    imported.policy.resolves reported = true :=
+  imported.controlTargetResolved instruction hinstruction reported hreported
 
 example : (importBytes decoder policy [1, 1]).map (fun _ => ()) =
     .error (.unresolvedControlTarget 0 (.direct missing)) := by rfl

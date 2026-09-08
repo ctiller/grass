@@ -41,6 +41,7 @@ private def program : ImportedProgram Nat String Nat SomeOperation where
   bytesExact := rfl
   ready := by decide
   policy := targetPolicy
+  targetsResolved := by simp [ImportTargetsResolved]
   taint := ⟨.importedBytes, "step fixture"⟩
 
 private def adapter : StepAdapter SomeOperation where

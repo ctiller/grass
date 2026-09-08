@@ -78,6 +78,15 @@ def ImportReadyFrom {Byte : Type w} {Instruction : Type x} :
       instruction.offset = expected ∧ instruction.bytes ≠ [] ∧
         ImportReadyFrom instruction.endOffset rest
 
+/-- Every decoder-reported control target resolves through the selected policy. -/
+def ImportTargetsResolved {Byte : Type w} {Instruction : Type x}
+    (resolves : ControlTarget → Bool) :
+    List (ImportedInstruction Byte Instruction) → Prop
+  | [] => True
+  | instruction :: rest =>
+      (∀ target ∈ instruction.controlTargets, resolves target = true) ∧
+        ImportTargetsResolved resolves rest
+
 private def importReadyFromDecidable
     {Byte : Type w} {Instruction : Type x} [DecidableEq Byte] :
     (expected : Nat) →
@@ -119,6 +128,7 @@ structure ImportedProgram (State : Type u) (Terminal : Type v)
   bytesExact : instructions.flatMap ImportedInstruction.bytes = sourceBytes
   ready : ImportReadyFrom 0 instructions
   policy : TargetPolicy State Terminal
+  targetsResolved : ImportTargetsResolved policy.resolves instructions
   taint : Taint
 
 private theorem importReady_bytesNonempty
@@ -228,6 +238,23 @@ private theorem importReady_uniqueContaining
           omega
         · exact ih head.endOffset restReady leftMem rightMem
 
+private theorem importTargetsResolved_elim
+    {Byte : Type w} {Instruction : Type x}
+    (resolves : ControlTarget → Bool)
+    (instructions : List (ImportedInstruction Byte Instruction))
+    (resolved : ImportTargetsResolved resolves instructions) :
+    ∀ instruction ∈ instructions, ∀ target ∈ instruction.controlTargets,
+      resolves target = true := by
+  induction instructions with
+  | nil => simp
+  | cons head rest ih =>
+      rcases resolved with ⟨headResolved, restResolved⟩
+      intro instruction hinstruction target htarget
+      simp only [List.mem_cons] at hinstruction
+      rcases hinstruction with rfl | hinstruction
+      · exact headResolved target htarget
+      · exact ih restResolved instruction hinstruction target htarget
+
 namespace ImportedProgram
 
 /-- Find the imported instruction whose exact byte slice contains an offset. -/
@@ -238,6 +265,19 @@ def instructionAtByte?
     (offset : Nat) : Option (ImportedInstruction Byte Instruction) :=
   program.instructions.find? fun instruction =>
     decide (instruction.offset ≤ offset ∧ offset < instruction.endOffset)
+
+/-- Every reported target of every accepted instruction resolves under the
+exact policy retained by the imported program. -/
+theorem controlTargetResolved
+    {State : Type u} {Terminal : Type v} {Byte : Type w}
+    {Instruction : Type x}
+    (program : ImportedProgram State Terminal Byte Instruction)
+    (instruction : ImportedInstruction Byte Instruction)
+    (hinstruction : instruction ∈ program.instructions)
+    (target : ControlTarget) (htarget : target ∈ instruction.controlTargets) :
+    program.policy.resolves target = true :=
+  importTargetsResolved_elim program.policy.resolves program.instructions
+    program.targetsResolved instruction hinstruction target htarget
 
 /-- Every accepted imported instruction owns a nonempty source-byte slice. -/
 theorem instructionBytesNonempty
@@ -360,10 +400,11 @@ theorem instructionAtByte?_eq_none_iff
 end ImportedProgram
 
 private structure DecodedAt (Byte : Type w) (Instruction : Type x)
-    (offset : Nat) (bytes : List Byte) where
+    (resolves : ControlTarget → Bool) (offset : Nat) (bytes : List Byte) where
   instructions : List (ImportedInstruction Byte Instruction)
   bytesExact : instructions.flatMap ImportedInstruction.bytes = bytes
   ready : ImportReadyFrom offset instructions
+  targetsResolved : ImportTargetsResolved resolves instructions
 
 private def decodeFuel {State : Type u} {Terminal : Type v}
     {Byte : Type w} {Instruction : Type x} {DecodeError : Type y}
@@ -372,8 +413,8 @@ private def decodeFuel {State : Type u} {Terminal : Type v}
     (policy : TargetPolicy State Terminal) :
     Nat → (offset : Nat) → (bytes : List Byte) →
       Except (ImportError DecodeError)
-        (DecodedAt Byte Instruction offset bytes)
-  | _, _, [] => .ok ⟨[], rfl, trivial⟩
+        (DecodedAt Byte Instruction policy.resolves offset bytes)
+  | _, _, [] => .ok ⟨[], rfl, trivial, trivial⟩
   | 0, offset, _ :: _ => .error (.fuelExhausted offset)
   | fuel + 1, offset, head :: tail =>
       let bytes := head :: tail
@@ -384,7 +425,8 @@ private def decodeFuel {State : Type u} {Terminal : Type v}
             let consumed := bytes.take (bytes.length - rest.length)
             if exactRemainder : consumed ++ rest = bytes then
               let targets := decoder.controlTargets instruction
-              match targets.find? fun target => !policy.resolves target with
+              match unresolved :
+                  targets.find? fun target => !policy.resolves target with
               | some target => .error (.unresolvedControlTarget offset target)
               | none =>
                   match decodeFuel decoder policy fuel (offset + consumed.length) rest with
@@ -403,7 +445,13 @@ private def decodeFuel {State : Type u} {Terminal : Type v}
                           simp only [List.flatMap_cons]
                           rw [tail.bytesExact]
                           simpa [bytes] using exactRemainder,
-                        ⟨rfl, consumedNonempty, tail.ready⟩⟩
+                        ⟨rfl, consumedNonempty, tail.ready⟩,
+                        ⟨by
+                          intro target htarget
+                          have targetResolved :=
+                            (List.find?_eq_none.mp unresolved) target htarget
+                          simpa using targetResolved,
+                          tail.targetsResolved⟩⟩
             else .error (.invalidRemainder offset)
           else .error (.stalledDecoder offset)
 
@@ -422,6 +470,7 @@ def importBytes {State : Type u} {Terminal : Type v}
   match decodeFuel decoder policy bytes.length 0 bytes with
   | .error error => .error error
   | .ok decoded => .ok ⟨bytes, decoded.instructions, decoded.bytesExact,
-      decoded.ready, policy, ⟨.importedBytes, detail⟩⟩
+      decoded.ready, policy, decoded.targetsResolved,
+      ⟨.importedBytes, detail⟩⟩
 
 end Grass.Unsafe
