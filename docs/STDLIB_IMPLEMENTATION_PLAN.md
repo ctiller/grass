@@ -880,9 +880,12 @@ after the first meaningless.
 
 #### The tip, and the per-law manifest
 
-Everything above was measured on `38a75bba`. The manifest below names every law
-on both sides of the line, so a rerun can be diffed against it rather than
-compared against a total.
+Everything above was measured on `38a75bba`. The commits that carry this section
+change no `.lean` file, so the manifest holds at the branch tip as well —
+`git diff 38a75bba HEAD -- 'Grass/**' 'Tests/**'` is empty, which is the check
+rather than the assurance. The manifest below names every law on both sides of
+the line, so a rerun can be diffed against it rather than compared against a
+total.
 
 An earlier version of this section reported the `Vec` row from one tip and
 everything else from another, with five spot checks and a prediction covering the
