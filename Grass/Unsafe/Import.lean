@@ -158,7 +158,86 @@ private theorem importReady_bounded
           ImportedInstruction.endOffset] at bound ⊢
         omega
 
+private theorem importReady_coversByte
+    {Byte : Type w} {Instruction : Type x}
+    (expected : Nat) (instructions : List (ImportedInstruction Byte Instruction))
+    (ready : ImportReadyFrom expected instructions)
+    (offset : Nat) (offsetLower : expected ≤ offset)
+    (offsetUpper : offset < expected +
+      (instructions.flatMap ImportedInstruction.bytes).length) :
+    ∃ instruction ∈ instructions,
+      instruction.offset ≤ offset ∧ offset < instruction.endOffset := by
+  induction instructions generalizing expected with
+  | nil =>
+      simp only [List.flatMap_nil, List.length_nil, Nat.add_zero] at offsetUpper
+      omega
+  | cons head rest ih =>
+      rcases ready with ⟨offsetExact, bytesNonempty, restReady⟩
+      by_cases inHead : offset < head.endOffset
+      · exact ⟨head, by simp, by omega, inHead⟩
+      · have restUpper : offset < head.endOffset +
+            (rest.flatMap ImportedInstruction.bytes).length := by
+          simp only [List.flatMap_cons, List.length_append] at offsetUpper
+          simp only [ImportedInstruction.endOffset]
+          omega
+        obtain ⟨instruction, hinstruction, lower, upper⟩ :=
+          ih head.endOffset restReady (by omega) restUpper
+        exact ⟨instruction, by simp [hinstruction], lower, upper⟩
+
+private theorem importReady_offsetsAtLeast
+    {Byte : Type w} {Instruction : Type x}
+    (expected : Nat) (instructions : List (ImportedInstruction Byte Instruction))
+    (ready : ImportReadyFrom expected instructions) :
+    ∀ instruction ∈ instructions, expected ≤ instruction.offset := by
+  induction instructions generalizing expected with
+  | nil => simp
+  | cons head rest ih =>
+      rcases ready with ⟨offsetExact, bytesNonempty, restReady⟩
+      intro instruction hinstruction
+      simp only [List.mem_cons] at hinstruction
+      rcases hinstruction with rfl | hinstruction
+      · omega
+      · have later := ih head.endOffset restReady instruction hinstruction
+        simp only [ImportedInstruction.endOffset] at later
+        omega
+
+private theorem importReady_uniqueContaining
+    {Byte : Type w} {Instruction : Type x}
+    (expected offset : Nat)
+    (instructions : List (ImportedInstruction Byte Instruction))
+    (ready : ImportReadyFrom expected instructions)
+    (left right : ImportedInstruction Byte Instruction)
+    (leftMem : left ∈ instructions) (rightMem : right ∈ instructions)
+    (leftLower : left.offset ≤ offset) (leftUpper : offset < left.endOffset)
+    (rightLower : right.offset ≤ offset) (rightUpper : offset < right.endOffset) :
+    left = right := by
+  induction instructions generalizing expected with
+  | nil => simp at leftMem
+  | cons head rest ih =>
+      rcases ready with ⟨_, _, restReady⟩
+      simp only [List.mem_cons] at leftMem rightMem
+      rcases leftMem with rfl | leftMem
+      · rcases rightMem with rfl | rightMem
+        · rfl
+        · have rightLater := importReady_offsetsAtLeast left.endOffset rest
+            restReady right rightMem
+          omega
+      · rcases rightMem with rfl | rightMem
+        · have leftLater := importReady_offsetsAtLeast right.endOffset rest
+            restReady left leftMem
+          omega
+        · exact ih head.endOffset restReady leftMem rightMem
+
 namespace ImportedProgram
+
+/-- Find the imported instruction whose exact byte slice contains an offset. -/
+def instructionAtByte?
+    {State : Type u} {Terminal : Type v} {Byte : Type w}
+    {Instruction : Type x}
+    (program : ImportedProgram State Terminal Byte Instruction)
+    (offset : Nat) : Option (ImportedInstruction Byte Instruction) :=
+  program.instructions.find? fun instruction =>
+    decide (instruction.offset ≤ offset ∧ offset < instruction.endOffset)
 
 /-- Every accepted imported instruction owns a nonempty source-byte slice. -/
 theorem instructionBytesNonempty
@@ -183,6 +262,100 @@ theorem instructionBounded
   simpa using
     importReady_bounded 0 program.instructions program.ready instruction
       hinstruction
+
+/-- A successful imported-byte lookup returns a member whose slice contains
+the queried offset. -/
+theorem instructionAtByte?_sound
+    {State : Type u} {Terminal : Type v} {Byte : Type w}
+    {Instruction : Type x}
+    (program : ImportedProgram State Terminal Byte Instruction)
+    (offset : Nat) (instruction : ImportedInstruction Byte Instruction)
+    (hfind : program.instructionAtByte? offset = some instruction) :
+    instruction ∈ program.instructions ∧ instruction.offset ≤ offset ∧
+      offset < instruction.endOffset := by
+  constructor
+  · exact List.mem_of_find?_eq_some hfind
+  · have contains := List.find?_some hfind
+    simpa [instructionAtByte?] using contains
+
+/-- Every source-byte offset belongs to one imported instruction slice. -/
+theorem instructionForByte
+    {State : Type u} {Terminal : Type v} {Byte : Type w}
+    {Instruction : Type x}
+    (program : ImportedProgram State Terminal Byte Instruction)
+    (offset : Nat) (hbound : offset < program.sourceBytes.length) :
+    ∃ instruction ∈ program.instructions,
+      instruction.offset ≤ offset ∧ offset < instruction.endOffset := by
+  have upper : offset < 0 +
+      (program.instructions.flatMap ImportedInstruction.bytes).length := by
+    simpa [program.bytesExact] using hbound
+  exact importReady_coversByte 0 program.instructions program.ready offset
+    (Nat.zero_le offset) upper
+
+/-- Two imported instruction slices containing one byte are the same slice. -/
+theorem instructionContainingByteUnique
+    {State : Type u} {Terminal : Type v} {Byte : Type w}
+    {Instruction : Type x}
+    (program : ImportedProgram State Terminal Byte Instruction)
+    (offset : Nat) (left right : ImportedInstruction Byte Instruction)
+    (leftMem : left ∈ program.instructions)
+    (rightMem : right ∈ program.instructions)
+    (leftLower : left.offset ≤ offset) (leftUpper : offset < left.endOffset)
+    (rightLower : right.offset ≤ offset) (rightUpper : offset < right.endOffset) :
+    left = right :=
+  importReady_uniqueContaining 0 offset program.instructions program.ready
+    left right leftMem rightMem leftLower leftUpper rightLower rightUpper
+
+/-- Imported-byte lookup succeeds exactly for the member containing the offset. -/
+theorem instructionAtByte?_eq_some_iff
+    {State : Type u} {Terminal : Type v} {Byte : Type w}
+    {Instruction : Type x}
+    (program : ImportedProgram State Terminal Byte Instruction)
+    (offset : Nat) (instruction : ImportedInstruction Byte Instruction) :
+    program.instructionAtByte? offset = some instruction ↔
+      instruction ∈ program.instructions ∧ instruction.offset ≤ offset ∧
+        offset < instruction.endOffset := by
+  constructor
+  · exact program.instructionAtByte?_sound offset instruction
+  · intro contains
+    have foundSome : (program.instructionAtByte? offset).isSome := by
+      simp only [instructionAtByte?, List.find?_isSome]
+      exact ⟨instruction, contains.1,
+        by simp [contains.2.1, contains.2.2]⟩
+    cases hfind : program.instructionAtByte? offset with
+    | none => simp [hfind] at foundSome
+    | some found =>
+        have foundContains := program.instructionAtByte?_sound offset found hfind
+        have foundExact := program.instructionContainingByteUnique offset
+          found instruction foundContains.1 contains.1 foundContains.2.1
+            foundContains.2.2 contains.2.1 contains.2.2
+        exact congrArg some foundExact
+
+/-- Imported-byte lookup fails exactly outside the source byte list. -/
+theorem instructionAtByte?_eq_none_iff
+    {State : Type u} {Terminal : Type v} {Byte : Type w}
+    {Instruction : Type x}
+    (program : ImportedProgram State Terminal Byte Instruction)
+    (offset : Nat) :
+    program.instructionAtByte? offset = none ↔
+      program.sourceBytes.length ≤ offset := by
+  constructor
+  · intro notFound
+    by_cases bound : offset < program.sourceBytes.length
+    · obtain ⟨instruction, instructionMem, lower, upper⟩ :=
+        program.instructionForByte offset bound
+      have found := (program.instructionAtByte?_eq_some_iff offset instruction).mpr
+        ⟨instructionMem, lower, upper⟩
+      rw [notFound] at found
+      contradiction
+    · omega
+  · intro outOfBounds
+    cases hfind : program.instructionAtByte? offset with
+    | none => rfl
+    | some instruction =>
+        have contains := program.instructionAtByte?_sound offset instruction hfind
+        have bounded := program.instructionBounded instruction contains.1
+        omega
 
 end ImportedProgram
 

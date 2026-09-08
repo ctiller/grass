@@ -433,6 +433,9 @@ retains the exact policy used for acceptance. `ImportReadyFrom` additionally
 retains the decoder-enforced consecutive offsets and nonempty slice for every
 accepted instruction. Those byte-coverage facts are not an instruction-semantics
 certificate.
+`ImportedProgram.instructionAtByte?` exposes exact byte-to-instruction lookup;
+its success and failure theorems identify membership plus containment and the
+precise out-of-bounds boundary.
 
 `Grass.Unsafe.Step` maps imported instructions to the existing open
 `Grass.Op.SomeOperation` package plus explicit context, cause, and fault-plan

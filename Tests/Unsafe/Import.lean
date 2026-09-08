@@ -89,6 +89,17 @@ example : (importBytes decoder policy [0, 1, 0, 2]).map
     (fun imported => decide (ImportReadyFrom 0 imported.instructions)) =
     .ok true := by rfl
 
+private def accepted : ImportedProgram Nat String Nat Instruction :=
+  (importBytes decoder policy [0, 1, 0, 2]).toOption.get (by decide)
+
+example : accepted.instructionAtByte? 0 =
+    some ⟨0, [0], .plain, []⟩ := rfl
+example : accepted.instructionAtByte? 2 =
+    some ⟨1, [1, 0], .jump target, [.direct target]⟩ := rfl
+example : accepted.instructionAtByte? 3 =
+    some ⟨3, [2], .computed indirectSite, [.indirect indirectSite]⟩ := rfl
+example : accepted.instructionAtByte? 4 = none := rfl
+
 example (imported : ImportedProgram Nat String Nat Instruction) :
     ImportReadyFrom 0 imported.instructions := by
   exact imported.ready
@@ -102,6 +113,17 @@ example (imported : ImportedProgram Nat String Nat Instruction)
     (hinstruction : instruction ∈ imported.instructions) :
     instruction.endOffset ≤ imported.sourceBytes.length :=
   imported.instructionBounded instruction hinstruction
+example (imported : ImportedProgram Nat String Nat Instruction)
+    (offset : Nat) (instruction : ImportedInstruction Nat Instruction) :
+    imported.instructionAtByte? offset = some instruction ↔
+      instruction ∈ imported.instructions ∧ instruction.offset ≤ offset ∧
+        offset < instruction.endOffset :=
+  imported.instructionAtByte?_eq_some_iff offset instruction
+example (imported : ImportedProgram Nat String Nat Instruction)
+    (offset : Nat) :
+    imported.instructionAtByte? offset = none ↔
+      imported.sourceBytes.length ≤ offset :=
+  imported.instructionAtByte?_eq_none_iff offset
 
 example : (importBytes decoder policy [1, 1]).map (fun _ => ()) =
     .error (.unresolvedControlTarget 0 (.direct missing)) := by rfl
