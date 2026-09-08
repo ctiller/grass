@@ -123,6 +123,38 @@ operation, get-after-construction and get-after-update laws, order preservation
 for `append` and `map`, and `map` fusion. `abbrev ByteArray := Vec Byte`
 realizes the §1 name.
 
+#### What has landed since, with the merge that carried it
+
+Kept as a list of merges rather than folded into the paragraph above, because
+that paragraph describes the module's shape and this records its history. Each
+entry is a reviewed merge on `main`.
+
+- **The notation bridges.** `Vec.emptyCollection_eq_empty`,
+  `Vec.default_eq_empty`, `Vec.get_eq_iff_get?_eq`, `Vec.forIn_eq_forIn_toList`
+  and `Vec.toList_empty`, with `Tests/Std/VecInstances.lean` proving each
+  load-bearing. An instance makes a notation typecheck without making `simp` see
+  through the instance projection, so a goal written with `∅`, `default`, `v[i]`
+  or `for` reached none of the laws stated about the underlying accessor.
+- **The cons fold laws** (`40c7c248`). `Vec.foldr_cons` and `Vec.foldl_cons`,
+  with `Tests/Std/FoldInduction.lean`. `Vec.recOnCons` had no fold law shaped
+  like the case it hands you, so cons-inducting a `foldr` goal reduced to a raw
+  `List.foldr` and the proof continued in `List` — the seam this module exists
+  to keep narrow, reached by a consumer doing everything right.
+- **The representation probe, moved into the build.** It was
+  `Tools/VecRepresentationProbe.lean`, which `lake` did not build, recording
+  measurements from harnesses that existed only in a scratch directory. It is
+  `Tests/Std/VecRepresentation.lean` now, with the harnesses compiled beside the
+  numbers. Re-running them falsified both tables; §3.2 carries the corrected
+  figures.
+- **Two repairs to what this library said about the spike corpus.**
+  `Grass/Std/Logical/Order.lean` quoted a `stableSorted` that `47da3f8`
+  superseded, and described two defects in it that the same commit had fixed. A
+  later paragraph in the same module kept the superseded spelling in the present
+  tense and was caught by `g-reviewer:75` after the first repair merged.
+
+None of this changes §3.11's exit criteria, which the S1 section reports against
+directly.
+
 Every operation carries laws that determine it up to extensional equality —
 decision 6, arrived at after the weaker rule this paragraph used to state ("every
 operation carries at least one law") was broken twice by adversarial review. The
