@@ -133,6 +133,24 @@
 //!    [`the_smallest_schedule_that_reaches_the_review_reassignment_race`],
 //!    which pins the smallest such schedule deterministically.
 //!
+//! It has also found two nobody had, which is the better evidence, because
+//! reintroducing a known bug only proves the harness still sees what someone
+//! already knew to look for:
+//!
+//!  - `apply_finding_disposition` silently dropped a disposal whenever a
+//!    concurrent reassignment had moved the chain past the link it named --
+//!    no error, and a different answer on hosts that replayed the two in
+//!    different orders. Caught by the confluence sweep on its first broad
+//!    run.
+//!  - The same handler then answered a *second* disposal of one finding with
+//!    a hard `Err`, which after a reassignment two legitimate reviewers can
+//!    reach without either erring. Caught by
+//!    [`the_smallest_schedule_that_reaches_the_double_disposal_race`], and
+//!    only after the generator stopped filtering already-disposed findings
+//!    out -- a filter that had made the shape unreachable for exactly as
+//!    long as the defect survived. Worth remembering: a generator's
+//!    convenience filters are where coverage quietly goes to die.
+//!
 //! Bugs 1 and 2 are pinned by
 //! [`the_smallest_schedule_that_a_stale_cache_or_a_double_prefixed_ref_falls_to`],
 //! so those classes stay guarded regardless of what any given run draws.
@@ -646,7 +664,9 @@ struct IssueModel {
 /// payload, not a re-implementation of `state::ReviewChain`.
 #[derive(Debug, Clone)]
 struct ReviewModel {
-    root: EventId,
+    /// The chain root's own event key, used as the fallback position when
+    /// a finding cannot be traced to the `review.changes_requested` that
+    /// filed it.
     root_key: EventKey,
     seed: ReviewSeed,
     /// Every nomination link ever published on this chain, oldest first:
@@ -982,7 +1002,6 @@ impl Model {
         }
         if let Some(seed) = &record.new_review {
             self.reviews.push(ReviewModel {
-                root: id.clone(),
                 root_key: key,
                 seed: seed.clone(),
                 links: vec![(id.clone(), key, seed.reviewer)],
@@ -1772,6 +1791,35 @@ fn build_act(
         "scope.set" => {
             let impls = model.live_agents_with_role(Role::Implementor);
             let a = pick(&impls, s0)?;
+            // A cross-agent import, which an earlier version of this arm
+            // left empty for fear of an implicit dependency: `ScopeSet::
+            // referenced_ids` is empty, so nothing orders a scope against
+            // the exporter's own `scope.set`, and a reduction rule that
+            // consulted the exporter would be the wedge class again.
+            //
+            // Checked, and it is not: `apply_scope_set` reads `depends_on`
+            // only to require it sorted by `(agent, interface)` and free of
+            // duplicates, both pure functions of this payload alone. It
+            // never looks the named agent up, never reads their `exports`
+            // (which no production code reads at all), and records the
+            // scope verbatim. The one other reader is `resolve_audience`'s
+            // `InterfaceDependents`, and `apply_broadcast_published`
+            // deliberately does not check audience exactness during replay
+            // for exactly this reason -- `coordinator::
+            // verify_broadcast_published` asks it at publication instead.
+            // So a generated import is inert at reduction time and safe to
+            // produce, and producing it exercises the sortedness and
+            // duplicate branches that emptiness left dead.
+            let imports: Vec<crate::common::DependencyImport> = model
+                .live_agents()
+                .into_iter()
+                .filter(|&i| i != a)
+                .take(if flag { 1 } else { 0 })
+                .map(|i| crate::common::DependencyImport {
+                    agent: model.agents[i].name.clone(),
+                    interface: short("iface"),
+                })
+                .collect();
             Some(Act {
                 agent: a,
                 data: EventData::ScopeSet(ScopeSet {
@@ -1783,11 +1831,7 @@ fn build_act(
                     })]),
                     shared: StringSet::default(),
                     exports: StringSet::from_iter([short("iface")]),
-                    // Deliberately empty: a cross-agent import is not
-                    // reachable from `ScopeSet::referenced_ids` (which is
-                    // empty), so a generated one would be an implicit
-                    // dependency no valid replay order is obliged to honour.
-                    depends_on: vec![],
+                    depends_on: imports,
                     note: text_of("proptest scope"),
                 }),
                 record: Record::default(),
@@ -2231,27 +2275,32 @@ fn build_act(
         "review.findings_cleared" | "review.findings_superseded" => {
             let r = pick(&open_reviews(model), s0)?;
             let review = &model.reviews[r];
-            let open: Vec<usize> = (0..review.findings.len())
+            // Deliberately *not* filtered by whether this finding has
+            // already been disposed, and that is the whole point of this
+            // arm. After a `review.reassigned` the outgoing reviewer and the
+            // incoming one are each, at the moment they publish, the
+            // legitimate reviewer of a link they name -- so each can
+            // honestly dispose the same finding, neither referencing the
+            // other. Filtering the already-disposed out made that shape
+            // unreachable, and the reachable-but-ungenerated wedge sat in
+            // `apply_finding_disposition` for exactly as long.
+            let fi = s1.try_pick(review.findings.len())?;
+            let (changes, changes_key, finding_id) = review.findings[fi].clone();
+            // Any nomination link whose own named reviewer has accepted it
+            // and can see the finding -- *including* a link a later
+            // reassignment has since superseded, which is the stale-but-
+            // honest half of the race.
+            let links: Vec<usize> = (0..review.links.len())
                 .filter(|&i| {
-                    let (ce, _, fid) = &review.findings[i];
-                    !review
-                        .disposed
-                        .contains(&(ce.clone(), fid.as_str().to_string()))
+                    let (id, key, rv) = &review.links[i];
+                    review.accepted.contains(id)
+                        && !model.agents[*rv].retired
+                        && model.host_knows(model.agents[*rv].host, key)
+                        && model.host_knows(model.agents[*rv].host, &changes_key)
                 })
                 .collect();
-            let fi = pick(&open, s1)?;
-            let (changes, changes_key, finding_id) = review.findings[fi].clone();
-            // Only the reviewer of the link the finding was filed against
-            // may dispose of it.
-            let (nom_id, _, rv) = review
-                .links
-                .iter()
-                .find(|(id, _, _)| *id == nomination_of(model, r, &changes))
-                .cloned()
-                .or_else(|| review.links.last().cloned())?;
-            if model.agents[rv].retired || !model.host_knows(model.agents[rv].host, &changes_key) {
-                return None;
-            }
+            let li = pick(&links, s2)?;
+            let (nom_id, _, rv) = review.links[li].clone();
             let data = if kind == "review.findings_cleared" {
                 EventData::ReviewFindingsCleared(ReviewFindingsCleared {
                     nomination: nom_id,
@@ -2578,19 +2627,6 @@ fn open_reviews(model: &Model) -> Vec<usize> {
         .filter(|&i| !model.reviews[i].closed)
         .collect()
 }
-
-/// Which nomination link a `review.changes_requested` was filed against, as
-/// far as the model recorded it. Falls back to the chain's newest link,
-/// which is what a real reviewer would name.
-fn nomination_of(model: &Model, review: usize, changes: &EventId) -> EventId {
-    let r = &model.reviews[review];
-    let _ = changes;
-    r.links
-        .last()
-        .map(|(id, _, _)| id.clone())
-        .unwrap_or_else(|| r.root.clone())
-}
-
 /// The [`EventKey`] of a `review.changes_requested` the model recorded.
 fn find_key(review: &ReviewModel, changes: &EventId) -> EventKey {
     review
@@ -4311,8 +4347,13 @@ fn broad_world() -> World {
     steps.push(act("review.changes_requested", 0, 0, 0, true));
     steps.push(act("review.changes_requested", 0, 0, 0, false));
     steps.push(act("review.changes_requested", 0, 0, 0, true));
+    // `b` selects *which* finding, and the two dispositions must name
+    // different ones: a finding is disposed once, and
+    // `coordinator::verify_finding_is_still_open` now refuses the second
+    // disposal of one finding at publication rather than letting reduction
+    // wedge on it.
     steps.push(act("review.findings_cleared", 0, 0, 0, false));
-    steps.push(act("review.findings_superseded", 0, 0, 0, false));
+    steps.push(act("review.findings_superseded", 0, 1, 0, false));
     steps.push(Step::Sync { host: Sel(1) });
     // The race the whole module was extended for: both authors replace the
     // *same* nomination link, and `flag` makes each of them reach for the
@@ -4482,6 +4523,78 @@ fn the_smallest_schedule_that_reaches_the_review_reassignment_race() {
         orders: vec![1, 2, 3],
     };
     run_world(&world).expect("the reassignment race must reduce, in every valid order");
+}
+
+/// The smallest schedule that reaches the *double disposal* race, pinned for
+/// the same reason as the one above: it is reachable without anyone erring,
+/// and the harness that could not express it is exactly why it survived.
+///
+/// One reviewer files a finding; an author then reassigns the review to a
+/// second reviewer, who accepts. Both reviewers are now, at the moment each
+/// publishes, the legitimate reviewer of a nomination link they name -- so
+/// each can honestly dispose of that same finding. Neither event references
+/// the other, so `topological_order` gives them no edge and ties break on
+/// agent name.
+///
+/// Before the fix this failed with
+///
+/// ```text
+/// frank:2: finding is not open
+/// ```
+///
+/// surfacing as `cached_snapshot` returning `Err` -- a checkout that cannot
+/// read the bus at all, for every host that fetched both streams,
+/// permanently, the log being append-only and force-push prohibited.
+/// Reduction now records both disposals and derives the finding's effective
+/// state as the smallest disposing `EventId`, which is a pure function of
+/// the recorded set rather than of arrival order, so the two orders agree
+/// instead of one of them being fatal.
+#[test]
+fn the_smallest_schedule_that_reaches_the_double_disposal_race() {
+    let world = World {
+        genesis_name: Sel(0),
+        // The two reviewers have to be custodied separately, or the second
+        // one reads the first one's disposal out of its own repository and
+        // there is no race to have.
+        joins: vec![Sel(0)],
+        steps: vec![
+            // One implementor to author the review, and two reviewers to
+            // reassign between.
+            Step::Register {
+                host: Sel(0),
+                name: Sel(0),
+                role: Sel(0),
+            },
+            Step::Register {
+                host: Sel(0),
+                name: Sel(0),
+                role: Sel(2),
+            },
+            Step::Register {
+                host: Sel(1),
+                name: Sel(0),
+                role: Sel(3),
+            },
+            Step::Sync { host: Sel(0) },
+            Step::Sync { host: Sel(1) },
+            act("review.nominated", 0, 0, 0, false),
+            act("review.nomination_accepted", 0, 0, 0, false),
+            act("review.changes_requested", 0, 0, 0, true),
+            // The author moves the review to the second reviewer, who then
+            // has to be able to see both the new link and the finding.
+            act("review.reassigned", 0, 0, 0, true),
+            Step::Sync { host: Sel(1) },
+            act("review.nomination_accepted", 0, 0, 0, false),
+            // The race. `c` selects which accepted nomination link the
+            // disposal names: 0 is the superseded first link (the outgoing
+            // reviewer), 1 is the current one. The first is deferred, so the
+            // second reviewer's checkout genuinely has not seen it.
+            act_deferred("review.findings_cleared", 0, 0, 0, false),
+            act("review.findings_superseded", 0, 0, 1, false),
+        ],
+        orders: vec![1, 2, 3],
+    };
+    run_world(&world).expect("the double-disposal race must reduce, in every valid order");
 }
 
 /// One fixed schedule, run deterministically: activate the bus, publish
