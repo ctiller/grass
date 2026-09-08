@@ -24,8 +24,10 @@ without running `git merge-base` myself.
 
 `Grass.Platform.Win32.Profile` is where they went, and its own header is candid
 about how little is enforced there: the only mechanism is that
-`TargetAbi.handleBits` and `TargetAbi.pointerBits` are total. Nothing consumes
-the profile yet.
+`TargetAbi.handleBits` and `TargetAbi.pointerBits` are total.
+`Grass.Platform.Win32.Console` now takes its `Handle` width from the first of
+them, so the profile has one consumer; that header is candid about how much
+that does and does not establish.
 
 This module declares nothing; it is the import list and this note.
 

@@ -36,16 +36,34 @@ running the mutations:
   reworded: an equation that holds by `rfl` under every extension is not a
   safeguard.
 * the widths were said to be "a consequence of the selection" for
-  `Grass.Platform.Win32.Console`. Nothing consumes this module.
-  `Console.lean` writes `BitVec 64` literally and does not import it, so the
-  width is a constant that happens to be right -- the exact hazard `Console`
-  itself records for `StdHandleId.value`.
+  `Grass.Platform.Win32.Console`, which at the time consumed nothing here:
+  `Console.lean` wrote `BitVec 64` literally and did not import this module,
+  so the width was a constant that happened to be right -- the exact hazard
+  `Console` itself records for `StdHandleId.value`. That one has since been
+  closed rather than merely corrected; see below.
 
 `docs/DECISIONS.md` 16 fixes x64 but says nothing about how wide a `HANDLE` is,
 so `handleBits` and `pointerBits` are uncited external ABI facts and are carried
-as debt in `Tests/ISA/X86/LedgerAudit.lean`'s `owed` list. Wiring `Console` to
-this module, so the width follows the selection rather than agreeing with it by
-coincidence, is an open obligation and not something this file has done.
+as debt in `Tests/ISA/X86/LedgerAudit.lean`'s `owed` list.
+
+Wiring `Console` to this module was recorded here as an open obligation. It is
+done: `Console.Handle` is `BitVec decision16.abi.handleBits`, and the eight
+places that wrote `BitVec 64` now name that type.
+
+What it bought is one declaration to answer for instead of two agreeing by
+inspection. What it did not buy is a test that fires, and that has to be said
+plainly here because this header's whole subject is claims of enforcement that
+were not. Narrowing `handleBits` to 32 left `Console` building green:
+`invalidHandleValue` is the literal `0xFFFFFFFFFFFFFFFF`, `BitVec`'s `OfNat`
+truncates rather than refusing, and all-ones at a narrower width is still
+`(HANDLE)-1` -- so every theorem there survived. The model is
+width-polymorphic, and no equation over one `TargetAbi` can distinguish a
+wired width from a coincident one.
+
+`Tests/Platform/Win32/ProfileWidths.lean` is what makes the numbers
+mutation-detectable at all, and it pins the values rather than the wiring.
+The wiring's guarantee stays the structural one: `handleBits` is total, so a
+second ABI cannot be added without answering for it.
 
 `CallDiscipline` is the one axis that is not degenerate as *vocabulary*:
 `docs/DECISIONS.md` 16 chooses documented APIs *rather than* direct syscalls, so
@@ -82,10 +100,11 @@ inductive TargetAbi where
 `TargetAbi.handleBits` is total, so a second ABI cannot be added without
 answering this.
 
-That exhaustiveness is the only guarantee here. `Grass.Platform.Win32.Console`
-states handles as `BitVec 64` independently and does not import this module, so
-the two agree by inspection rather than by construction. An external ABI fact
-with no citation: carried in `owed` by `Tests/ISA/X86/LedgerAudit.lean`. -/
+That exhaustiveness is the only guarantee here, and it is now the only place
+the number is written: `Grass.Platform.Win32.Console.Handle` is
+`BitVec decision16.abi.handleBits`, so the two agree by construction rather
+than by inspection. An external ABI fact with no citation: carried in `owed`
+by `Tests/ISA/X86/LedgerAudit.lean`. -/
 def TargetAbi.handleBits : TargetAbi → Nat
   | .x64 => 64
 

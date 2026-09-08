@@ -1,4 +1,5 @@
 import Grass.ISA.X86.Citation
+import Grass.Platform.Win32.Profile
 
 /-!
 # Win32 standard-output API contracts
@@ -58,6 +59,21 @@ too-narrow error above.
 namespace Grass.Platform.Win32
 
 open Grass.Core Grass.Cite
+
+/-- A Win32 `HANDLE`.
+
+The width follows `decision16` rather than being written here.
+`Grass/Platform/Win32/Profile.lean` recorded the alternative as owed: this
+module used to state `BitVec 64` independently of the profile that selects the
+ABI, so the two agreed by inspection, and its header names that as "the exact
+hazard `Console` itself records for `StdHandleId.value`" -- a constant that
+happens to be right.
+
+Now it is a consequence. A second `TargetAbi` with a different `handleBits`
+changes this type, and every declaration below with it, rather than leaving a
+64 here that nothing rechecks. `TargetAbi.handleBits` is total, so such an ABI
+cannot be added without answering the question. -/
+abbrev Handle : Type := BitVec decision16.abi.handleBits
 
 /-! ## Handles -/
 
@@ -140,7 +156,7 @@ handle and pass it to `WriteFile`.
 inductive GetStdHandleResult where
   /-- A usable handle. The value is opaque; nothing may be inferred from it
   beyond that it is neither null nor `INVALID_HANDLE_VALUE`. -/
-  | handle (value : BitVec 64)
+  | handle (value : Handle)
   /-- `INVALID_HANDLE_VALUE`, `(HANDLE)-1`: the call failed. -/
   | invalid
   /-- `NULL`: the process has no such standard device. Not an error. -/
@@ -150,10 +166,10 @@ deriving DecidableEq, Repr, Inhabited
 namespace GetStdHandleResult
 
 /-- `INVALID_HANDLE_VALUE` as a 64-bit pattern. -/
-def invalidHandleValue : BitVec 64 := 0xFFFFFFFFFFFFFFFF
+def invalidHandleValue : Handle := 0xFFFFFFFFFFFFFFFF
 
 /-- The `RAX` value the ABI returns for this result. -/
-def returnValue : GetStdHandleResult → BitVec 64
+def returnValue : GetStdHandleResult → Handle
   | .handle v => v
   | .invalid => invalidHandleValue
   | .null => 0
@@ -176,7 +192,7 @@ instance (r : GetStdHandleResult) : Decidable r.WellFormed := by
 
 /-- A well-formed usable handle is distinguishable from both sentinels by its
 return value alone, which is all the assembly can test. -/
-theorem handle_distinguishable {v : BitVec 64} (h : (handle v).WellFormed) :
+theorem handle_distinguishable {v : Handle} (h : (handle v).WellFormed) :
     (handle v).returnValue ≠ (null : GetStdHandleResult).returnValue ∧
       (handle v).returnValue ≠ (invalid : GetStdHandleResult).returnValue :=
   ⟨h.1, h.2⟩
@@ -276,11 +292,11 @@ structure UsableHandle where
 namespace UsableHandle
 
 /-- Build a usable handle from a returned value, or refuse. -/
-def mk? (v : BitVec 64) : Option UsableHandle :=
+def mk? (v : Handle) : Option UsableHandle :=
   if h : (GetStdHandleResult.handle v).WellFormed then some ⟨_, h⟩ else none
 
 /-- `mk?` succeeds exactly on values distinguishable from both sentinels. -/
-theorem mk?_isSome_iff (v : BitVec 64) :
+theorem mk?_isSome_iff (v : Handle) :
     (mk? v).isSome ↔ (GetStdHandleResult.handle v).WellFormed := by
   unfold mk?
   by_cases h : (GetStdHandleResult.handle v).WellFormed
@@ -349,7 +365,7 @@ by construction here rather than being a modeled field.
 -/
 structure WriteRequest where
   /-- The handle written to. -/
-  handle : BitVec 64
+  handle : Handle
   /-- `nNumberOfBytesToWrite`. -/
   requested : BitVec 32
 deriving DecidableEq, Repr, Inhabited

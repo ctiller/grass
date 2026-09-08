@@ -157,8 +157,13 @@ than `owed` does, not less.
 
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
+
+Raised from 96 to 97 for `Grass.Platform.Win32.Handle`, a type alias standing
+for `TargetAbi.handleBits`. That is the one shape where this list is the right
+answer rather than the convenient one: the external fact is real but is
+already carried, once, by the declaration this one delegates to.
 -/
-def notBehaviourBaseline : Nat := 96
+def notBehaviourBaseline : Nat := 97
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -300,6 +305,14 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- A type alias whose entire content is `TargetAbi.handleBits`, which is
+    -- itself in `owed`. `Console` used to write `BitVec 64` independently of
+    -- the profile that selects the ABI, which `Platform/Win32/Profile.lean`
+    -- recorded as owed; wiring it through is what closed that. The width is
+    -- now stated in exactly one place, and this alias asserts nothing a
+    -- citation could be attached to -- putting it in `owed` would count one
+    -- external fact twice and give it a second debt it can never discharge.
+    `Grass.Platform.Win32.Handle,
     -- `Xmm.all` is a list of Grass constructors, exactly as `Gpr.all` is; the
     -- architectural fact is the numbering, which `Xmm.index` carries in
     -- `owed`. It was put in `owed` alongside `index` when the XMM file
