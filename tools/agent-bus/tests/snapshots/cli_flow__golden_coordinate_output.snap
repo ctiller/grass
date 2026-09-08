@@ -9,6 +9,7 @@ expression: out
   "freshness": "cached",
   "last_synced": null,
   "not_attempted": [],
+  "outbox_held": [],
   "outbox_rejected": [],
   "published": {
     "refs/heads/agent-events/coord1": "[hash]"

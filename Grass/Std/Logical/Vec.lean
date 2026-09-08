@@ -403,6 +403,42 @@ theorem get?_push_lt (v : Vec α) (a : α) {i : Nat} (h : i < v.length) :
 @[simp] theorem get?_push_self (v : Vec α) (a : α) : (v.push a).get? v.length = some a := by
   simp [get?, push, length]
 
+/--
+Reading *any* index of a pushed sequence.
+
+`Vec.get?_push_self` reads the top and `Vec.get?_push_lt` reads below it, and
+between them they cover the cases — but neither is usable on a sequence pushed
+more than once, which is the shape a consumer that *builds* a sequence actually
+has.
+
+The reason is the interaction of two `simp` laws rather than a missing case.
+`Vec.length_push` normalises `(v.push a).length` to `v.length + 1`, so a goal
+about `((v.push a).push b).get? i` arrives with `i` as `v.length + 1`, while
+`get?_push_self`'s left side wants the unnormalised `(v.push a).length`. `simp`
+will never produce that shape, so the law cannot fire. Measured before this was
+written: of six read-after-push goals, `simp` closed only the single-push read at
+the top. Two pushes reading the top, two pushes reading below it, and both
+concrete indices into a two-element sequence built from `Vec.empty` all reported
+no progress.
+
+This states the case split instead, so the index never has to match a
+denormalised form. `Tests/Std/VecInstances.lean` pins all six.
+
+`get?_push_self` is kept rather than removed. It is subsumed — dropping its
+`@[simp]` breaks no fixture once this exists — but it is the cleaner one-step
+rewrite for the goal it names, the two agree wherever both apply, and removing a
+public `simp` law is a change for consumers this module cannot see.
+-/
+@[simp] theorem get?_push (v : Vec α) (a : α) (i : Nat) :
+    (v.push a).get? i =
+      if i < v.length then v.get? i else if i = v.length then some a else none := by
+  rcases Nat.lt_trichotomy i v.length with h | h | h
+  · rw [get?_push_lt v a h, if_pos h]
+  · subst h; rw [get?_push_self, if_neg (Nat.lt_irrefl _), if_pos rfl]
+  · rw [if_neg (Nat.not_lt.mpr (Nat.le_of_lt h)), if_neg (Nat.ne_of_gt h)]
+    simp only [get?, push, toList_fromList, length] at *
+    exact List.getElem?_eq_none (by simp; omega)
+
 @[simp] theorem pop?_empty : (empty : Vec α).pop? = none := rfl
 
 /-- `pop?` inverts `push`. -/
@@ -874,6 +910,34 @@ theorem get?_zipWith (f : α → β → γ) (v : Vec α) (w : Vec β) (i : Nat) 
     foldr f init (v.push a) = foldr f (f a init) v := by
   simp [foldr, push]
 
+/--
+The cons law for `foldr`: the first element is folded last.
+
+`Vec.recOnCons` was added because a consumer review found `recOnPush` hands an
+induction hypothesis about the wrong end of a stream that is read from the head.
+The recursor landed and this did not, so `induction v using Vec.recOnCons`
+produced a `singleton a ++ w` goal that `Vec.foldr_push` could not touch — the
+same shape as the gap `recOnCons` itself was added to close, one level up.
+`Grass/Build/Cache/Key.lean` is the module that hits it: its
+`importedSummariesTree` is a `Vec.foldr` and its docstring claims the tree
+retains import order, which is a statement about this law.
+-/
+@[simp] theorem foldr_cons (f : α → β → β) (init : β) (a : α) (w : Vec α) :
+    foldr f init (singleton a ++ w) = f a (foldr f init w) := rfl
+
+/--
+The cons law for `foldl`: the first element is folded first, into the
+accumulator.
+
+Stated alongside `Vec.foldr_cons` rather than because a consumer asked. A
+recursor with a law for one fold and not the other is the asymmetry this section
+exists to remove, and leaving `foldl` out would reproduce it for the next reader
+who happens to accumulate leftwards.
+-/
+@[simp] theorem foldl_cons (f : β → α → β) (init : β) (a : α) (w : Vec α) :
+    foldl f init (singleton a ++ w) = foldl f (f init a) w := rfl
+
+
 /-!
 ## Predicates and search
 -/
@@ -1281,11 +1345,29 @@ end Vec
 ## Bytes
 
 `docs/STDLIB.md` §1 fixes `ByteArray := Vec Byte`. `Byte` itself is defined in
-`Grass/Std/Logical/Byte.lean`, and §1 groups the two; the name is sited here
-rather than there only because that module is still under `c-mem`'s declared
-temporary custody (`c-mem:1`), and this module's owner does not edit it before
-the handoff lands. Merging the two declarations is part of accepting that
-handoff and is tracked in `docs/STDLIB_IMPLEMENTATION_PLAN.md`.
+`Grass/Std/Logical/Byte.lean`, and §1 groups the two, so siting the name here
+splits a pair the specification writes together.
+
+**The reason this section used to give for that split is spent, and it was never
+the binding one.** It said the name is sited here because `Byte.lean` was under
+`c-mem`'s declared temporary custody (`c-mem:1`) and that this module's owner
+would not edit it before the handoff landed, so merging the two declarations was
+"part of accepting that handoff". The handoff landed on 2026-09-07 — offered as
+`c-mem:47`, accepted as `c-stdlib:19` — both modules have had one owner since,
+and the merge did not happen.
+
+What actually stands in the way is the import direction, which no handoff
+changes.
+`Vec.lean` imports `Byte.lean`, so declaring `ByteArray` beside `Byte` would
+need `Byte.lean` to import `Vec` — a cycle. Breaking the cycle means this module
+dropping its `Byte` import, which is defensible on its own terms, since `Vec α`
+is generic and uses nothing from `Byte` except to state this one abbreviation.
+The cost is that every module reaching `Byte` only through `Vec` then needs its
+own import, and those modules are not all this owner's: `g-build:83` already
+authorized the one in `Grass/Build/Cache/Key.lean` when this was last attempted.
+
+So it is a cross-owner change with no consumer asking for it, which is why it is
+an open item in `docs/STDLIB_IMPLEMENTATION_PLAN.md` rather than a pending edit.
 -/
 
 /--
