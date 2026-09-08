@@ -123,6 +123,7 @@ structure RetainedBuildRun where
   envelope : EvidenceEnvelope
   report : BuildRunReport
   inputs : Vec ScopeInputTransition
+  manifestIdentities : Vec ManifestIdentity
 
 /-- Scopes visited by the build report, in manifest traversal order. -/
 def BuildRunReport.visitedScopes (report : BuildRunReport) : Vec ScopeId :=
@@ -136,6 +137,10 @@ def BuildRunReport.reElaboratedScopes (report : BuildRunReport) : Vec ScopeId :=
 /-- Scope order retained by one observation record. -/
 def RetainedBuildRun.inputScopes (run : RetainedBuildRun) : Vec ScopeId :=
   run.inputs.map ScopeInputTransition.scope
+
+/-- Scope order of the exact manifest identities named by one report. -/
+def RetainedBuildRun.manifestScopes (run : RetainedBuildRun) : Vec ScopeId :=
+  run.manifestIdentities.map ManifestIdentity.scope
 
 /-- Change lookup derived from the retained exact input transition. Missing
 scopes are not treated as changed; exact structural admission separately
@@ -169,7 +174,7 @@ does not claim that the envelope or numeric measurements came from execution. -/
 def RetainedBuildRun.StructurallyExactFor {fanout : Nat}
     (run : RetainedBuildRun) (dag : ManifestDag fanout) : Prop :=
   run.envelope.StructurallyValid ∧ run.inputScopes = dag.scopes ∧
-    run.report.ExactFor dag run.changed
+    run.manifestScopes = dag.scopes ∧ run.report.ExactFor dag run.changed
 
 instance RetainedBuildRun.instDecidableStructurallyExactFor {fanout : Nat}
     (run : RetainedBuildRun) (dag : ManifestDag fanout) :

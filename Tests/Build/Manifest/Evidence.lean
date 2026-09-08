@@ -9,15 +9,15 @@ namespace Grass.Tests.Build.Manifest
 open Grass.Build.Manifest Grass.Specification Grass.Std.Logical
 
 example :
-    (checkManifestStructure fixtureDag completeCampaign).isSome =
+    (checkDagCampaignStructure fixtureDag completeCampaign).isSome =
       true := by decide
 
 example :
-    checkManifestStructure fixtureDag incompleteCampaign = none :=
+    checkDagCampaignStructure fixtureDag incompleteCampaign = none :=
   by decide
 
 example :
-    checkManifestStructure fixtureDag overRebuildCampaign = none :=
+    checkDagCampaignStructure fixtureDag overRebuildCampaign = none :=
   by decide
 
 def scrubMeasurement : BuildMeasurement where
@@ -47,7 +47,7 @@ def fabricatedZeroCampaign : StructuralCampaign where
 
 example : fabricatedZeroCampaign.Complete := by decide
 example : fabricatedZeroCampaign.ExactFor fixtureDag := by decide
-example : (checkManifestStructure fixtureDag fabricatedZeroCampaign).isSome = true :=
+example : (checkDagCampaignStructure fixtureDag fabricatedZeroCampaign).isSome = true :=
   by decide
 
 def missingRawLogEnvelope : EvidenceEnvelope :=
@@ -59,7 +59,7 @@ def missingRawLogCampaign : StructuralCampaign where
 
 /-- Even structural admission requires every normative provenance identity. -/
 example : ¬missingRawLogCampaign.ExactFor fixtureDag := by decide
-example : checkManifestStructure fixtureDag missingRawLogCampaign = none := by decide
+example : checkDagCampaignStructure fixtureDag missingRawLogCampaign = none := by decide
 
 /-- A complete, cone-exact campaign cannot admit a cyclic manifest graph. -/
 def cyclicNode : DependencyNode 1 where
@@ -97,6 +97,7 @@ def retainCyclicReport (report : BuildRunReport) : RetainedBuildRun where
   envelope := fixtureEnvelope
   report := report
   inputs := cyclicDag.scopes.map (inputTransition noScenarioChanges)
+  manifestIdentities := fixtureManifestIdentities.take 1
 
 def cyclicCampaign : StructuralCampaign where
   runs := (requiredBuildScenarios.map cyclicReport).map retainCyclicReport
@@ -105,7 +106,7 @@ example : cyclicCampaign.Complete := by decide
 example : cyclicCampaign.ExactFor cyclicDag := by decide
 example : ¬cyclicDag.WellFormed := by decide
 
-example : checkManifestStructure cyclicDag cyclicCampaign = none :=
+example : checkDagCampaignStructure cyclicDag cyclicCampaign = none :=
   by decide
 
 def disconnectedReport (scenario : BuildScenario) : BuildRunReport where
@@ -119,6 +120,7 @@ def retainDisconnectedReport (report : BuildRunReport) : RetainedBuildRun where
   envelope := fixtureEnvelope
   report := report
   inputs := disconnectedDag.scopes.map (inputTransition noScenarioChanges)
+  manifestIdentities := fixtureManifestIdentities.take 2
 
 def disconnectedCampaign : StructuralCampaign where
   runs := (requiredBuildScenarios.map disconnectedReport).map
@@ -130,10 +132,10 @@ example : disconnectedDag.WellFormed := by decide
 example : ¬disconnectedDag.Rooted := by decide
 
 example :
-    checkManifestStructure disconnectedDag disconnectedCampaign = none :=
+    checkDagCampaignStructure disconnectedDag disconnectedCampaign = none :=
   by decide
 
-example (checked : CheckedManifestStructure 4) :
+example (checked : CheckedDagCampaignStructure 4) :
     checked.dag.graph.Rooted ∧
       checked.campaign.campaign.Complete ∧
       checked.campaign.campaign.ExactFor checked.dag.graph := by

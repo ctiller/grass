@@ -34,6 +34,7 @@ def aggregate : AggregateManifest 2 where
   nonempty := by simp [twoChildren]
   bounded := by simp [twoChildren]
   manifestRoot := emptyDigest
+  publicSummary := emptyDigest
   measurement := measurement
 
 example : aggregate.children.length ≤ 2 := aggregate.children_bounded

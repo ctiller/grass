@@ -13,6 +13,7 @@ def hierarchy : ManifestHierarchy hasher 2 where
   dag := ⟨fixtureDag, by decide⟩
   manifests := manifests
   nodesExact := by decide
+  childrenExact := by decide
 
 def LeafCertificate (_ : LeafManifest hasher) := Unit
 

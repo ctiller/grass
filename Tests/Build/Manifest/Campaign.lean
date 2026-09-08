@@ -26,6 +26,56 @@ def scenarioChanges : ScenarioChangePlan where
   processSubsystemLowering := interfaceChanged
 
 def observationDigest : Digest := ⟨Vec.singleton 1⟩
+def manifestDigest : Digest := ⟨Vec.empty⟩
+
+def fixtureManifestEnvironment : SemanticEnvironment where
+  source := manifestDigest
+  importedSummaries := Vec.empty
+  semanticProfile := manifestDigest
+  verifier := manifestDigest
+  toolchain := manifestDigest
+  generator := manifestDigest
+  options := manifestDigest
+  auditPolicy := manifestDigest
+
+def fixtureManifestMeasurement : BuildMeasurement where
+  elapsedNanoseconds := 1
+  peakResidentBytes := 2
+  oleanBytes := 3
+  proofBytes := 4
+  artifactBytes := 5
+
+def fixtureChildSummary (scope : ScopeId) : ChildSummary where
+  scope := scope
+  manifestRoot := manifestDigest
+  publicSummary := manifestDigest
+
+def fixtureLeafIdentity (scope : ScopeId) : ManifestIdentity :=
+  .leaf {
+    scope := scope
+    environment := fixtureManifestEnvironment
+    cacheKey := manifestDigest
+    manifestRoot := manifestDigest
+    publicSummary := manifestDigest
+    artifact := manifestDigest
+    measurement := fixtureManifestMeasurement
+    disposition := .cacheHit }
+
+def fixtureAggregateIdentity (scope : ScopeId) (children : Vec ChildSummary) :
+    ManifestIdentity :=
+  .aggregate {
+    scope := scope
+    children := children
+    manifestRoot := manifestDigest
+    publicSummary := manifestDigest
+    measurement := fixtureManifestMeasurement }
+
+def fixtureManifestIdentities : Vec ManifestIdentity := Vec.fromList
+  [ fixtureLeafIdentity leafA
+  , fixtureLeafIdentity leafB
+  , fixtureAggregateIdentity component
+      (Vec.fromList [fixtureChildSummary leafA, fixtureChildSummary leafB])
+  , fixtureAggregateIdentity product (Vec.singleton (fixtureChildSummary component)) ]
 
 /-- Fixture provenance is deliberately only retained metadata. The structural
 checker below does not claim that these fields authenticate an external run. -/
@@ -60,6 +110,7 @@ def retainReport (report : BuildRunReport) : RetainedBuildRun where
   report := report
   inputs := fixtureDag.scopes.map <| inputTransition
     (scenarioChanges.forScenario report.scenario)
+  manifestIdentities := fixtureManifestIdentities
 
 def coldReport : BuildRunReport where
   scenario := .cold
