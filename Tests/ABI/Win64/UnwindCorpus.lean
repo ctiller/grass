@@ -268,6 +268,19 @@ covers all six step kinds and `prologueSize` refuses four of them. The corpus
 stays the wider model, and this makes it the authority over the overlap rather
 than a second opinion beside it.
 
+Why the overlap is exactly these two is worth stating, because it looks like
+luck and is not. `Grass.ISA.X86.encodeMem` is canonical rather than minimal --
+every memory form it builds carries a `disp32` -- so the two models agree on
+precisely the operations whose instructions have no displacement to shorten.
+`push` has none, and `sub rsp, imm` chooses its immediate width from the
+value rather than from an addressing mode. The four operations this theorem
+does not reach are the four that address memory, and the section above
+measures what that costs.
+
+So the theorem cannot be extended by adding cases. It would have to wait on
+displacement minimisation, which `Grass/ABI/Win64/UnwindBytes.lean` explains
+is neither required for correctness nor free.
+
 Finding the disagreement is what prompted the theorem. `prologueSize` gave
 `allocLarge` the `imm32` form unconditionally, which is right for every
 allocation `ml64` describes that way but wrong for the operation, since

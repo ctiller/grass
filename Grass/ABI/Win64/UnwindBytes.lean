@@ -352,31 +352,40 @@ forms and a nonvolatile push. `UnwindOp.prologueInsns` returns `none` for the
 rest and `Realizes` refuses rather than guesses, so a layout using
 `setFramePointer` is no better checked than before.
 
-The reason is not that those operations are ambiguous. It was recorded that
-way, and `Tests/ABI/Win64/UnwindCorpus.lean` shows otherwise: `Step.length`
-names what `ml64` emits for every one of them, measured by the differential.
-The blocker is that this library cannot produce those encodings.
+Two reasons have been recorded here and both were wrong, so this states the
+third carefully.
 
-`Grass.ISA.X86.encodeMem` is a canonical encoder, not a minimal one: every
-memory form it builds carries `mod=10` and a `disp32`, with no shorter
-displacement ever chosen. Measured against the corpus, that costs three bytes
-or five on each of the operations in question -- `lea rbp, [rsp+32]` encodes
-to 8 bytes here where `ml64` writes 5, and `mov [rsp+8], rbx` likewise 8
-against 5. A `prologueInsns` extended to `saveNonvolatile` today would
-therefore report lengths no assembler produces, which is worse than refusing:
-`Realizes` would accept layouts that mis-unwind and reject ones that do not.
+It is not that those operations are ambiguous. That was the first answer, and
+`Tests/ABI/Win64/UnwindCorpus.lean` disproves it: `Step.length` names exactly
+what `ml64` emits for all six, measured by the differential.
 
-`setFramePointer` carries a second, independent blocker. At offset zero `ml64`
-writes `mov r, rsp` and not a `lea` at all -- 3 bytes against the 8 this
-library would build -- so covering it needs a register-direct `MOV r64, r64`
-encoder as well as the displacement work.
+Nor is it that this library's encodings are too long to be right. That was the
+second answer -- `Grass.ISA.X86.encodeMem` is canonical rather than minimal, so
+`mov [rsp+8], rbx` is eight bytes here against `ml64`'s five -- and the
+conclusion drawn from it, that extending `prologueInsns` would report "lengths
+no assembler produces", does not follow. `docs/INSTRUCTIONS.md` section 3 asks
+for semantic agreement between emitted bytes and the raw program, not for
+byte-identity with a vendor assembler, so the eight-byte form is a legal thing
+for Grass to emit. A `Layout` whose offsets matched it would unwind correctly,
+because Grass is the assembler for Grass's output. The lengths are ones *ml64*
+does not produce, which is a different and much weaker statement.
 
-So the order is: displacement minimisation in `Grass.ISA.X86.encodeMem`
-first, since nothing else can be attempted before it, and that is a change to
-every memory encoding in the library rather than an addition beside them.
-`Tests/ISA/X86/NasmCorpus.lean` pins the current forms, so it is the thing
-that decides whether canonical or minimal is what Grass emits -- a question
-for whoever takes it, not one this module settles.
+What actually blocks it is that nothing emits a prologue yet. `prologueInsns`
+describes the instruction this library emits for an operation. For the three it
+covers there is one candidate and no choice to make. `setFramePointer` has two
+legal ones -- a `LEA` at any offset, or the `MOV r64, rsp` this library cannot
+currently build at all -- and `saveNonvolatile` has a displacement width to
+pick. Choosing would fix an emission policy that no caller exists to want,
+which is inventing rather than modelling. There is no `Grass/Emit` tree; the
+only consumers of these encoders are in `Grass/ABI/Win64` and `Grass/ISA/X86`.
+
+One consequence is worth recording for whoever takes it. Whichever choice is
+made, `Tests/ABI/Win64/UnwindCorpus.lean` cannot check it: `Step.length`
+predicts `ml64`, the canonical forms diverge from it by three to five bytes,
+and `prologueSize_agrees_with_length` would stop holding -- correctly, because
+the two models would then genuinely disagree. Extending `Realizes` and keeping
+that differential are not the same project, and the second is the one with an
+oracle.
 
 Second, `WellFormed` does not require `Realizes`, and should not. `Realizes`
 assumes the prologue is exactly its unwind-relevant instructions laid
