@@ -462,6 +462,8 @@ format-neutral section with exact bytes and source ranges. It proves the generic
 `RelocatableFragment.WellFormed` contract while leaving definitions,
 relocations, externals, entry selection, serialization, and placement to their
 independent producers and artifact-layer checks.
+`fragmentSourceMapLengthExact` and `sourceEntryForInitializedByte` carry the
+source-map completeness result through that format-neutral section projection.
 Its `RelocatableEmissionPlan` overlay accepts those four symbolic metadata
 tables independently, retains the exact checked bytes and source map, and
 delegates their section bounds, symbol closure, and entry closure to

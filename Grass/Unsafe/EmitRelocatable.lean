@@ -92,6 +92,34 @@ def fragment
     checked.contribution.content.initialized.toList =
       emission.bytes.map Byte.ofUInt8 := rfl
 
+/-- The checked source ranges account for exactly the initialized section. -/
+theorem fragmentSourceMapLengthExact
+    {emission : RawProgramEmission State Terminal Instruction}
+    {config : RelocatableEmissionConfig}
+    (checked : CheckedRelocatableEmission emission config) :
+    ((checked.fragment (RelocKind := RelocKind)
+      (ImportIdentity := ImportIdentity)).sourceMap.map
+        SourceMapEntry.length).sum =
+      checked.contribution.content.initializedSize := by
+  simpa [fragment, contribution, SectionContent.initializedSize, Vec.length,
+    RawProgramEmission.byteLength, List.length_map] using
+    checked.sourceMap.entriesLengthSumExact
+
+/-- Every initialized section byte belongs to a checked construction source
+range in the projected relocatable fragment. -/
+theorem sourceEntryForInitializedByte
+    {emission : RawProgramEmission State Terminal Instruction}
+    {config : RelocatableEmissionConfig}
+    (checked : CheckedRelocatableEmission emission config)
+    (offset : Nat)
+    (hbound : offset < checked.contribution.content.initializedSize) :
+    ∃ entry ∈ (checked.fragment (RelocKind := RelocKind)
+        (ImportIdentity := ImportIdentity)).sourceMap,
+      entry.offset ≤ offset ∧ offset < entry.offset + entry.length := by
+  apply checked.sourceMap.entryForByte offset
+  simpa [contribution, SectionContent.initializedSize, Vec.length,
+    RawProgramEmission.byteLength, List.length_map] using hbound
+
 /-- `verifiedConstructionSectionBytesExact` relates the initialized logical
 section directly to the original pre-alpha authored instruction list. -/
 theorem verifiedConstructionSectionBytesExact

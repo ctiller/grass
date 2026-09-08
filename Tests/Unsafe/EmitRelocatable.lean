@@ -69,6 +69,16 @@ example : (checked.fragment (RelocKind := Unit)
     (ImportIdentity := Unit)).sourceMap = [
       ⟨sectionId, 0, 2, blockId, ⟨[], [], 0⟩⟩,
       ⟨sectionId, 2, 1, blockId, ⟨[], [], 1⟩⟩] := rfl
+example : ((checked.fragment (RelocKind := Unit)
+    (ImportIdentity := Unit)).sourceMap.map SourceMapEntry.length).sum =
+    checked.contribution.content.initializedSize :=
+  checked.fragmentSourceMapLengthExact
+example (offset : Nat)
+    (hbound : offset < checked.contribution.content.initializedSize) :
+    ∃ entry ∈ (checked.fragment (RelocKind := Unit)
+        (ImportIdentity := Unit)).sourceMap,
+      entry.offset ≤ offset ∧ offset < entry.offset + entry.length :=
+  checked.sourceEntryForInitializedByte offset hbound
 example : (checked.fragment (RelocKind := Unit)
     (ImportIdentity := Unit)).definitions = [] := rfl
 example : (checked.fragment (RelocKind := Unit)
