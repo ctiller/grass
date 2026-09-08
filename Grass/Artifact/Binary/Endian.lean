@@ -21,6 +21,12 @@ def takeBigEndian (count : Nat) :
 def writeBigEndian {count : Nat} : BitVec (8 * count) → Std.Logical.ByteArray :=
   isoWriter (bigEndianIsomorphism count) (@writeExact count)
 
+/-- A fixed-width big-endian writer emits exactly its type-level byte count. -/
+@[simp] theorem length_writeBigEndian {count : Nat}
+    (value : BitVec (8 * count)) : (writeBigEndian value).length = count := by
+  unfold writeBigEndian isoWriter writeExact
+  exact (bigEndianIsomorphism count).backward value |>.2
+
 /-- The concrete big-endian reader realizes the transported selected semantics. -/
 theorem takeBigEndian_realizes (count : Nat) :
     ParserRealizes (bigEndianSemantics count) (takeBigEndian count) :=
@@ -46,6 +52,12 @@ def takeLittleEndian (count : Nat) :
 /-- Write a fixed-width integer in least-significant-byte-first order. -/
 def writeLittleEndian {count : Nat} : BitVec (8 * count) → Std.Logical.ByteArray :=
   isoWriter (littleEndianIsomorphism count) (@writeExact count)
+
+/-- A fixed-width little-endian writer emits exactly its type-level byte count. -/
+@[simp] theorem length_writeLittleEndian {count : Nat}
+    (value : BitVec (8 * count)) : (writeLittleEndian value).length = count := by
+  unfold writeLittleEndian isoWriter writeExact
+  exact (littleEndianIsomorphism count).backward value |>.2
 
 /-- A little-endian value written before any suffix is consumed exactly,
 leaving that suffix unchanged. -/
