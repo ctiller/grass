@@ -233,16 +233,24 @@ theorem Pairwise.drop {R : α → α → Prop} {v : Vec α} (h : Pairwise R v) (
 Two operations, distinguished by what they take, and the history of that is worth
 recording because it is a band-3 judgement got wrong.
 
-`Spikes/2_Sort/Spec.lean` writes `output.findIdx? input[i]` and passes an
-*element* where a predicate would go, so the operation its specification means is
-`idxOf?`. On that basis a previous version of this module withdrew the
-predicate-taking `findIdx?` under band 3 — "nothing demands the predicate
-version" — and that was false. The consumer review that had built five client
+Until `47da3f8`, `Spikes/2_Sort/Spec.lean` wrote `output.findIdx? input[i]`,
+passing an *element* where a predicate goes, so the operation that specification
+meant was `idxOf?`. It says `output.idxOf?` today; the spelling below is the one
+that was there when this section was written, and it is kept because the mistake
+it describes was made against it. On that basis a previous version of this module
+withdrew the predicate-taking `findIdx?` under band 3 — "nothing demands the
+predicate version" — and that was false. The consumer review that had built five client
 modules against this library then reported that its `insertSorted` needed exactly
 it: "the index of the first identifier greater than `a`" is a predicate search
 and `idxOf?` cannot express it. It was demanded, by the only consumer this
 library had, and the withdrawal read the spike corpus as if it were the whole
 population of consumers.
+
+Two of those sentences were in the present tense until `g-reviewer:75` pointed it
+out after the merge that fixed the same drift twice elsewhere in this file. A
+paragraph whose whole subject is a superseded spelling is exactly where the tense
+matters, and it is the third instance in this module: the fenced quote, the two
+diagnoses attached to it, and now this.
 
 Both are supplied, under accurate names.
 -/

@@ -75,6 +75,24 @@ def discoverJoins (graph : Graph State Terminal) : List JoinDemand :=
 def discoveredJoinIds (graph : Graph State Terminal) : List BlockId :=
   graph.discoverJoins.map JoinDemand.id
 
+/-- `Graph.mem_blockIds_of_mem_discoveredJoinIds` states that every discovered
+join identity names a block structurally present in the authored CFG, even
+before graph well-formedness is established. -/
+theorem mem_blockIds_of_mem_discoveredJoinIds
+    (graph : Graph State Terminal) (id : BlockId)
+    (member : id ∈ graph.discoveredJoinIds) :
+    id ∈ graph.blockIds := by
+  rcases List.mem_map.mp member with ⟨demand, demandMember, rfl⟩
+  rw [discoverJoins, List.mem_filterMap] at demandMember
+  rcases demandMember with ⟨block, blockMember, selected⟩
+  apply List.mem_map.mpr
+  refine ⟨block, blockMember, ?_⟩
+  dsimp only at selected
+  split at selected
+  · cases selected
+    rfl
+  · contradiction
+
 end Graph
 
 /-- Join-contract selection by identity.  Each identity denotes the contract
@@ -110,6 +128,27 @@ instance (selection : JoinSelection State Terminal) : Decidable selection.WellFo
       selection.graph.WellFormed ∧
         selection.selectedIds = selection.graph.discoveredJoinIds := by
   simp [WellFormed, wellFormed, Graph.WellFormed]
+
+/-- A valid join selection carries a structurally well-formed source graph. -/
+theorem graphWellFormed_of_wellFormed
+    (selection : JoinSelection State Terminal) (closed : selection.WellFormed) :
+    selection.graph.WellFormed :=
+  (selection.wellFormed_iff.mp closed).1
+
+/-- A valid join selection is exactly structural discovery, including its
+canonical block order. -/
+theorem selectedIds_eq_discoveredJoinIds_of_wellFormed
+    (selection : JoinSelection State Terminal) (closed : selection.WellFormed) :
+    selection.selectedIds = selection.graph.discoveredJoinIds :=
+  (selection.wellFormed_iff.mp closed).2
+
+/-- Every identity accepted by a valid join selection names an authored block. -/
+theorem mem_blockIds_of_mem_selected
+    (selection : JoinSelection State Terminal) (closed : selection.WellFormed)
+    (id : BlockId) (member : id ∈ selection.selectedIds) :
+    id ∈ selection.graph.blockIds := by
+  rw [selection.selectedIds_eq_discoveredJoinIds_of_wellFormed closed] at member
+  exact selection.graph.mem_blockIds_of_mem_discoveredJoinIds id member
 
 end JoinSelection
 

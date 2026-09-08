@@ -614,7 +614,8 @@ S1 is complete when all of the following hold. The first four hold today.
    criterion previously named only `Vec` and stopped tracking the library as it
    grew. It is also not evidence about the `@[extern]` boundary of §3.9, because
    an `@[extern]` is not an axiom.
-3. `python Tools/DocstringAudit.py` reports no unbacked claim.
+3. `cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin
+   docstring-audit` reports no unbacked claim.
 4. **Every** fixture under `Tests/Std/` elaborates, including all `#guard_msgs`
    rejection cases. This criterion previously named one of eight.
 5. A reviewer distinct from this agent has merged it, per
@@ -900,7 +901,7 @@ reader will want a reason for:
    rather than left implicit. §3.9.
 
 Found in a shared tool rather than in this library, and reported rather than
-changed: `Tools/DocstringAudit.py` defines `SELF_NAMING` to exempt a theorem's
+changed: the docstring audit defined `SELF_NAMING` to exempt a theorem's
 own docstring — its module comment says "a theorem's own docstring is exempt,
 because the theorem beneath it *is* the enforcement" — but the constant is never
 used, so that exemption is not implemented and the gate is stricter than it
