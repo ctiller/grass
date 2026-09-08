@@ -1,4 +1,6 @@
 import Grass.Platform.Win32.Coff
+import Grass.Platform.Win32.CoffSymbol
+import Grass.Platform.Win32.CoffStrings
 
 /-!
 # COFF object layout
@@ -48,21 +50,30 @@ small examples.
 
 ## The shape of an object file
 
-Twenty bytes of file header, then forty bytes per section header, then each
-section's raw data in order, then each section's relocation directory in order.
-Data before relocations, all sections' data first, is a choice: the format
-permits any arrangement the pointers describe, and `ml64` interleaves them per
-section. Nothing here depends on matching that, and
-`Tests/Platform/Win32/CoffFixture.lean` checks records rather than arrangement,
-so this is a layout that is *a* valid COFF file, not a reproduction of a
-particular assembler's.
+Twenty bytes of file header, then forty bytes per section header, then every
+section's raw data, then every section's relocation directory, then the symbol
+table, then the string table.
+
+That order is a choice and not a requirement. The format locates each part by a
+pointer -- `pointerToRawData`, `pointerToRelocations`, `pointerToSymbolTable`,
+and the string table by following the symbol table -- so any arrangement the
+headers describe is legal, and `ml64` interleaves data and relocations per
+section instead. Nothing here depends on matching it, and
+`Tests/Platform/Win32/CoffFixture.lean` checks records rather than arrangement.
+This is *a* valid COFF file, not a reproduction of a particular assembler's.
 
 ## Not modelled
 
-No symbol table, so `pointerToSymbolTable` is zero and the object cannot be
-linked. That is the next piece of work, and until it exists this writes a file
-that is structurally valid and semantically incomplete -- which is why nothing
-here claims to emit a linkable object.
+Auxiliary symbol records. Five of the fifteen symbols in the measured object
+declare `numberOfAuxSymbols = 1` and are followed by a record this profile does
+not emit, so an object written here with such a count would mis-index every
+symbol after it. `Symbol.toBytes` writes the field; nothing writes the record.
+
+Alignment. Sections are laid end to end with no padding, which
+`Object.length_toBytes` states exactly. Real toolchains align section data, and
+a version that does will have to add the padding to `toBytes` and to that
+theorem together -- which is what makes it the theorem that fails first if only
+one of them is changed.
 -/
 
 namespace Grass.Platform.Win32.Coff
@@ -108,12 +119,18 @@ No separators, which is what makes `pointerToRelocations` plus
     s.relocationBytes.length = s.relocationSize :=
   length_flatten_relocations s.relocations
 
-/-- An object file: a machine and its sections. -/
+/-- An object file: a machine, its sections, and its two tables. -/
 structure Object where
   /-- Target machine. -/
   machine : Machine
   /-- The sections, in file order. -/
   sections : List Section
+  /-- The symbol table, in index order. A relocation's `symbolIndex` is an
+  index into this list. -/
+  symbols : List Symbol
+  /-- The string table's names, in order, each without its terminator. A
+  `SymbolName.long` offset addresses one of these. -/
+  strings : List ByteSeq
 
 /-- Bytes before the first section's data: the file header and the table. -/
 def Object.headerSize (o : Object) : Nat := 20 + 40 * o.sections.length
@@ -175,13 +192,17 @@ theorem dataOffsets_ge (start : Nat) (ss : List Section) :
 def Object.relocSize (o : Object) : Nat :=
   (o.sections.map Section.relocationSize).sum
 
-/-- The file header. No symbol table, so those two fields are zero. -/
+/-- Where the symbol table starts: after every section's data and relocations. -/
+def Object.symbolTableOffset (o : Object) : Nat :=
+  o.headerSize + o.dataSize + o.relocSize
+
+/-- The file header, with both symbol-table fields derived from the layout. -/
 def Object.fileHeader (o : Object) : FileHeader where
   machine := o.machine
   numberOfSections := BitVec.ofNat 16 o.sections.length
   timeDateStamp := 0
-  pointerToSymbolTable := 0
-  numberOfSymbols := 0
+  pointerToSymbolTable := BitVec.ofNat 32 o.symbolTableOffset
+  numberOfSymbols := BitVec.ofNat 32 o.symbols.length
   sizeOfOptionalHeader := 0
   characteristics := 0
 
@@ -206,15 +227,24 @@ def Object.sectionHeaders (o : Object) : List SectionHeader :=
         numberOfLinenumbers := 0
         characteristics := s.characteristics }
 
+/-- Everything after the section data: relocations, symbols, strings. -/
+def Object.tailBytes (o : Object) : ByteSeq :=
+  (o.sections.map Section.relocationBytes).flatten
+    ++ (o.symbols.map Symbol.toBytes).flatten
+    ++ stringTableBytes o.strings
+
 /--
 The object file.
 
-File header, section table, all raw data, all relocation directories. -/
+Grouped as `(header ++ table) ++ (data ++ tail)` rather than left to
+`++`'s associativity, and that is deliberate. Every offset theorem below reads
+at some point past the first group and inside the second, so this grouping is
+the shape those proofs need. Written flat, adding anything to the tail --
+which is exactly what the symbol and string tables were -- reassociates the
+whole expression and breaks proofs that have nothing to do with the change. -/
 def Object.toBytes (o : Object) : ByteSeq :=
-  o.fileHeader.toBytes
-    ++ (o.sectionHeaders.map SectionHeader.toBytes).flatten
-    ++ (o.sections.map Section.data).flatten
-    ++ (o.sections.map Section.relocationBytes).flatten
+  (o.fileHeader.toBytes ++ (o.sectionHeaders.map SectionHeader.toBytes).flatten)
+    ++ ((o.sections.map Section.data).flatten ++ o.tailBytes)
 
 /-- **Flattened section headers are forty bytes each.** -/
 theorem length_flatten_sectionHeaders (hs : List SectionHeader) :
@@ -236,6 +266,13 @@ theorem length_flatten_data (ss : List Section) :
   | nil => rfl
   | cons s rest ih => simp [ih]
 
+/-- **Flattened symbol records are eighteen bytes each.** -/
+theorem length_flatten_symbols (ss : List Symbol) :
+    ((ss.map Symbol.toBytes).flatten).length = 18 * ss.length := by
+  induction ss with
+  | nil => rfl
+  | cons x rest ih => simp [ih]; omega
+
 /-- **Flattened relocation directories are `relocSize` bytes.** -/
 theorem length_flatten_relocBytes (ss : List Section) :
     ((ss.map Section.relocationBytes).flatten).length
@@ -251,12 +288,16 @@ No padding and no slack. This is what makes the offsets in the section table
 mean what a reader assumes, and it is the theorem that fails first if a future
 alignment requirement is added to `toBytes` without being added here. -/
 theorem Object.length_toBytes (o : Object) :
-    o.toBytes.length = o.headerSize + o.dataSize + o.relocSize := by
+    o.toBytes.length
+      = o.headerSize + o.dataSize + o.relocSize
+        + 18 * o.symbols.length + (4 + stringEntriesSize o.strings) := by
   rw [toBytes, List.length_append, List.length_append, List.length_append,
       FileHeader.length_toBytes, length_flatten_sectionHeaders,
-      length_flatten_data, length_flatten_relocBytes,
-      Object.length_sectionHeaders]
+      length_flatten_data, Object.length_sectionHeaders, tailBytes,
+      List.length_append, List.length_append, length_flatten_relocBytes,
+      length_flatten_symbols, length_stringTableBytes]
   simp [headerSize, dataSize, relocSize]
+  omega
 
 /-! ## The pointers point at the data -/
 
@@ -271,17 +312,6 @@ theorem Object.length_prefix (o : Object) :
   rw [List.length_append, FileHeader.length_toBytes,
       length_flatten_sectionHeaders, Object.length_sectionHeaders]
   simp [headerSize]
-
-/-- Dropping a known-length prefix and `k` more leaves the rest dropped by `k`. -/
-theorem drop_length_append (a b : ByteSeq) (k : Nat) :
-    (a ++ b).drop (a.length + k) = b.drop k := by
-  induction a with
-  | nil => simp
-  | cons x rest ih =>
-      simp only [List.length_cons, List.cons_append]
-      rw [show rest.length + 1 + k = (rest.length + k) + 1 by omega,
-          List.drop_succ_cons]
-      exact ih
 
 /--
 **Reading a section's length at the offset the layout assigns it returns that
@@ -309,7 +339,7 @@ theorem Object.data_at_layout_offset (o : Object) (pre : List Section)
     rw [h]; simp
   have hk : ((pre.map Section.data).flatten).length
       = (pre.map (fun x => x.data.length)).sum := length_flatten_data pre
-  rw [toBytes, List.append_assoc, ← hpre, drop_length_append, hdata,
+  rw [toBytes, ← hpre, drop_length_append, hdata,
       List.append_assoc, ← hk, List.drop_left, List.append_assoc,
       List.take_left]
 
@@ -393,6 +423,96 @@ theorem Object.header_points_at_data (o : Object) (pre : List Section)
     simp [dataOffsets, relocOffsets]
   · simp only [BitVec.toNat_ofNat, Nat.mod_eq_of_lt hoff, Nat.mod_eq_of_lt hlen]
     exact o.data_at_layout_offset pre sec post h
+
+/-! ## The symbol table is where the file header says it is -/
+
+/--
+**Reading at the layout's symbol-table offset returns the symbol records.**
+
+The layout half, the same shape as `data_at_layout_offset`: stated over the
+computed offset rather than over `FileHeader.pointerToSymbolTable`, and not
+sufficient on its own for the same reason. -/
+theorem Object.symbols_at_layout_offset (o : Object) :
+    ((o.toBytes.drop o.symbolTableOffset).take (18 * o.symbols.length))
+      = (o.symbols.map Symbol.toBytes).flatten := by
+  have hpre := o.length_prefix
+  have hdata : ((o.sections.map Section.data).flatten).length = o.dataSize :=
+    length_flatten_data o.sections
+  have hrel : ((o.sections.map Section.relocationBytes).flatten).length
+      = o.relocSize := length_flatten_relocBytes o.sections
+  have hsym : ((o.symbols.map Symbol.toBytes).flatten).length
+      = 18 * o.symbols.length := length_flatten_symbols o.symbols
+  rw [toBytes, symbolTableOffset, ← hpre, ← hdata, ← hrel, Nat.add_assoc,
+      drop_length_append, drop_length_append, tailBytes, List.append_assoc,
+      List.drop_left, ← hsym, List.take_left]
+
+/--
+**The symbol table is at `pointerToSymbolTable`, and there are
+`numberOfSymbols` of them.**
+
+The field half. The offset is read out of the emitted file header rather than
+recomputed, so a header field that disagreed with the layout falsifies it --
+which is the distinction `data_at_layout_offset` could not make and
+`header_points_at_data` had to be written to close.
+
+This is the third time the pattern has come up: a definition assigns an offset,
+a theorem reads at one, and nothing connects them until something says so. The
+bound is the wrap condition, and `numberOfSymbols` needs its own because it is a
+separate field with a separate width. -/
+theorem Object.symbol_table_at_header_pointer (o : Object)
+    (hoff : o.symbolTableOffset < 2 ^ 32)
+    (hcount : o.symbols.length < 2 ^ 32) :
+    ((o.toBytes.drop o.fileHeader.pointerToSymbolTable.toNat).take
+        (18 * o.fileHeader.numberOfSymbols.toNat))
+      = (o.symbols.map Symbol.toBytes).flatten := by
+  show ((o.toBytes.drop (BitVec.ofNat 32 o.symbolTableOffset).toNat).take
+      (18 * (BitVec.ofNat 32 o.symbols.length).toNat)) = _
+  simp only [BitVec.toNat_ofNat, Nat.mod_eq_of_lt hoff, Nat.mod_eq_of_lt hcount]
+  exact o.symbols_at_layout_offset
+
+/-! ## The header's counts describe the file -/
+
+/--
+**`numberOfSections` is the number of section headers actually written.**
+
+A reader takes this field and reads that many forty-byte records; the field is
+how it knows where the table ends and the data begins. Nothing else here
+constrained it -- setting it to zero left every other theorem in this module
+provable, which a mutation demonstrated, and would produce a file whose sections
+a reader simply never finds.
+
+The bound is the field's width. More than 65535 sections cannot be counted, and
+a writer past that limit would report the count modulo 2^16. -/
+theorem Object.numberOfSections_correct (o : Object)
+    (h : o.sections.length < 2 ^ 16) :
+    o.fileHeader.numberOfSections.toNat = o.sectionHeaders.length := by
+  show (BitVec.ofNat 16 o.sections.length).toNat = _
+  rw [Object.length_sectionHeaders]
+  simp [BitVec.toNat_ofNat, Nat.mod_eq_of_lt h]
+
+/--
+**The section table really is at `sectionTableOffset`.**
+
+`FileHeader.sectionTableOffset` is twenty plus whatever `sizeOfOptionalHeader`
+claims, and a reader trusts it to find the first section header. This says the
+headers are there.
+
+It also ties the optional-header field to the layout: `toBytes` writes no
+optional header, so a nonzero `sizeOfOptionalHeader` would move the computed
+offset past the table's real start and this would fail. -/
+theorem Object.section_table_at_offset (o : Object) :
+    ((o.toBytes.drop o.fileHeader.sectionTableOffset).take
+        (40 * o.sections.length))
+      = (o.sectionHeaders.map SectionHeader.toBytes).flatten := by
+  have hfh : o.fileHeader.toBytes.length = 20 := FileHeader.length_toBytes _
+  have hsh : ((o.sectionHeaders.map SectionHeader.toBytes).flatten).length
+      = 40 * o.sections.length := by
+    rw [length_flatten_sectionHeaders, Object.length_sectionHeaders]
+  rw [toBytes,
+      show o.fileHeader.sectionTableOffset = o.fileHeader.toBytes.length + 0
+        from by simp [FileHeader.sectionTableOffset, Object.fileHeader],
+      List.append_assoc, drop_length_append, List.drop_zero, ← hsh,
+      List.take_left]
 
 end Grass.Platform.Win32.Coff
 

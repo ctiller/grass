@@ -133,7 +133,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 65
+def notBehaviourBaseline : Nat := 67
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -359,7 +359,14 @@ def notBehaviour : List Name :=
     -- it.
     `Grass.Platform.Win32.Coff.stringEntries,
     `Grass.Platform.Win32.Coff.stringEntriesSize,
-    `Grass.Platform.Win32.Coff.stringOffsets ]
+    `Grass.Platform.Win32.Coff.stringOffsets,
+    -- Where this profile puts the two tables, which the format does not
+    -- decide. COFF locates the symbol table by `pointerToSymbolTable` and the
+    -- string table by following it, so any arrangement the header describes is
+    -- legal; `tailBytes` and `symbolTableOffset` record the one chosen here.
+    -- A vendor document would not contradict a different choice.
+    `Grass.Platform.Win32.Coff.Object.tailBytes,
+    `Grass.Platform.Win32.Coff.Object.symbolTableOffset ]
 
 /--
 Declarations that genuinely model external behaviour and have no citation yet.

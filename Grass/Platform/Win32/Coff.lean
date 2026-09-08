@@ -292,4 +292,23 @@ theorem FileHeader.sectionTableOffset_of_obj {h : FileHeader}
     (hz : h.sizeOfOptionalHeader = 0) : h.sectionTableOffset = 20 := by
   simp [sectionTableOffset, hz]
 
+/-! ## A list lemma the layout proofs rest on -/
+
+/--
+Dropping a known-length prefix and `k` more leaves the rest dropped by `k`.
+
+Generic, and here rather than beside its first user because both the section
+layout and the string table need it: each reads at an offset measured past a
+prefix whose length it knows. Keeping it in one place is also what lets those
+two modules stay independent of each other. -/
+theorem drop_length_append (a b : ByteSeq) (k : Nat) :
+    (a ++ b).drop (a.length + k) = b.drop k := by
+  induction a with
+  | nil => simp
+  | cons x rest ih =>
+      simp only [List.length_cons, List.cons_append]
+      rw [show rest.length + 1 + k = (rest.length + k) + 1 by omega,
+          List.drop_succ_cons]
+      exact ih
+
 end Grass.Platform.Win32.Coff

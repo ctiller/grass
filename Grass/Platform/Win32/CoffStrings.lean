@@ -1,4 +1,3 @@
-import Grass.Platform.Win32.CoffLayout
 import Grass.Platform.Win32.CoffSymbol
 
 /-!
