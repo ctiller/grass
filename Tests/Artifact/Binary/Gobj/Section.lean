@@ -32,7 +32,22 @@ def entry : GobjSection where
 
 def suffix : Std.Logical.ByteArray := Vec.fromList [0xaa, 0xbb]
 
-example : (writeGobjSection entry).length = 19 := by
+def profileId : GobjRelocationProfileId where
+  owner := name
+  name := contents
+  version := 7
+
+def relocatableProfile : GobjSectionProfile := .relocatable profileId
+
+example : readGobjSectionProfile
+    (writeGobjSectionProfile relocatableProfile ++ suffix) =
+      .done relocatableProfile suffix := by
+  exact readGobjSectionProfile_write_append relocatableProfile suffix
+
+example : readGobjSectionProfile (Vec.singleton 2) =
+    .invalid (.malformed "unknown .gobj section profile tag") := by rfl
+
+example : (writeGobjSection entry).length = 20 := by
   rw [length_writeGobjSection]
   decide
 
@@ -55,7 +70,7 @@ theorem singleton_countFits : (Vec.singleton entry).length < 2 ^ 32 := by decide
 
 def table : GobjSectionTable := ⟨Vec.singleton entry, singleton_countFits⟩
 
-example : (writeGobjSectionTable table).length = 23 := by
+example : (writeGobjSectionTable table).length = 24 := by
   rw [length_writeGobjSectionTable]
   decide
 
@@ -64,7 +79,7 @@ example : readGobjSectionTable (writeGobjSectionTable table ++ suffix) =
   exact readGobjSectionTable_write_append table suffix
 
 example : readGobjSectionTable (Vec.fromList [2, 0, 0, 0]) =
-    .needMore (some 24) := by rfl
+    .needMore (some 26) := by rfl
 
 theorem table_lengthFits : (writeGobjSectionTable table).length < 2 ^ 32 := by
   rw [length_writeGobjSectionTable]

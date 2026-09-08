@@ -12,10 +12,16 @@ def sectionName : U32LengthPrefixedBytes :=
 def sectionContents : U32LengthPrefixedBytes :=
   ⟨Vec.fromList [0x90, 0xc3], by decide⟩
 
+def profileId : GobjRelocationProfileId where
+  owner := sectionName
+  name := sectionName
+  version := 1
+
 def sectionEntry : GobjSection where
   name := sectionName
   alignment := ⟨0, by decide⟩
   permissions := ⟨5, by decide⟩
+  profile := .relocatable profileId
   contents := sectionContents
 
 def sections : GobjSectionTable := ⟨Vec.singleton sectionEntry, by decide⟩
