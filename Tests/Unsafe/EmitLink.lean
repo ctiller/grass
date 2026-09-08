@@ -70,6 +70,24 @@ example (offset : Nat) (hbound : offset < accepted.byteLength) :
     ∃ entry ∈ checked.entries,
       entry.offset ≤ offset ∧ offset < entry.offset + entry.length :=
   checked.entryForByte offset hbound
+example (offset : Nat) (hbound : offset < accepted.byteLength) :
+    ∃ entry : SourceMapEntry,
+      (entry ∈ checked.entries ∧ entry.offset ≤ offset ∧
+        offset < entry.offset + entry.length) ∧
+      ∀ other : SourceMapEntry,
+        other ∈ checked.entries ∧ other.offset ≤ offset ∧
+          offset < other.offset + other.length → other = entry :=
+  checked.uniqueEntryForByte offset hbound
+example (offset : Nat) (left right : SourceMapEntry)
+    (leftMem : left ∈ checked.entries)
+    (rightMem : right ∈ checked.entries)
+    (leftLower : left.offset ≤ offset)
+    (leftUpper : offset < left.offset + left.length)
+    (rightLower : right.offset ≤ offset)
+    (rightUpper : offset < right.offset + right.length) :
+    left = right :=
+  checked.entryContainingByteUnique offset left right leftMem rightMem
+    leftLower leftUpper rightLower rightUpper
 
 private def zeroWidth : RawProgramEmission Unit Unit Instruction :=
   emitRawProgram (program [first, empty]) encoder taint

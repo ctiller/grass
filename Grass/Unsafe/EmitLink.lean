@@ -171,6 +171,36 @@ private theorem sourceMapConsecutive_offsetsAtLeast
       · have later := ih (head.offset + head.length) restReady entry hentry
         omega
 
+private theorem sourceMapConsecutive_uniqueContaining
+    (sectionId : SectionId) (expected offset : Nat)
+    (entries : List SourceMapEntry)
+    (ready : SourceMapConsecutiveFrom sectionId expected entries)
+    (left right : SourceMapEntry)
+    (leftMem : left ∈ entries) (rightMem : right ∈ entries)
+    (leftLower : left.offset ≤ offset)
+    (leftUpper : offset < left.offset + left.length)
+    (rightLower : right.offset ≤ offset)
+    (rightUpper : offset < right.offset + right.length) :
+    left = right := by
+  induction entries generalizing expected with
+  | nil => simp at leftMem
+  | cons head rest ih =>
+      rcases ready with ⟨_, _, _, restReady⟩
+      simp only [List.mem_cons] at leftMem rightMem
+      rcases leftMem with rfl | leftMem
+      · rcases rightMem with rfl | rightMem
+        · rfl
+        · have rightLater :=
+            sourceMapConsecutive_offsetsAtLeast sectionId
+              (left.offset + left.length) rest restReady right rightMem
+          omega
+      · rcases rightMem with rfl | rightMem
+        · have leftLater :=
+            sourceMapConsecutive_offsetsAtLeast sectionId
+              (right.offset + right.length) rest restReady left leftMem
+          omega
+        · exact ih (head.offset + head.length) restReady leftMem rightMem
+
 private theorem sourceMapConsecutive_pairwise
     (sectionId : SectionId) (expected : Nat) (entries : List SourceMapEntry)
     (ready : SourceMapConsecutiveFrom sectionId expected entries) :
@@ -300,6 +330,42 @@ theorem entryForByte
   refine ⟨⟨sectionId, item.offset, item.bytes.length,
     item.lowered.block, item.lowered.origin⟩, ?_, lower, upper⟩
   exact List.mem_map.mpr ⟨item, hitem, rfl⟩
+
+/-- Two checked source ranges containing the same byte are the same entry. -/
+theorem entryContainingByteUnique
+    {emission : RawProgramEmission State Terminal Instruction}
+    {sectionId : SectionId}
+    (checked : CheckedLinkSourceMap emission sectionId)
+    (offset : Nat) (left right : SourceMapEntry)
+    (leftMem : left ∈ checked.entries)
+    (rightMem : right ∈ checked.entries)
+    (leftLower : left.offset ≤ offset)
+    (leftUpper : offset < left.offset + left.length)
+    (rightLower : right.offset ≤ offset)
+    (rightUpper : offset < right.offset + right.length) :
+    left = right :=
+  sourceMapConsecutive_uniqueContaining sectionId 0 offset checked.entries
+    checked.entriesConsecutive left right leftMem rightMem leftLower leftUpper
+      rightLower rightUpper
+
+/-- Every emitted byte offset belongs to exactly one checked source range. -/
+theorem uniqueEntryForByte
+    {emission : RawProgramEmission State Terminal Instruction}
+    {sectionId : SectionId}
+    (checked : CheckedLinkSourceMap emission sectionId)
+    (offset : Nat) (hbound : offset < emission.byteLength) :
+    ∃ entry : SourceMapEntry,
+      (entry ∈ checked.entries ∧ entry.offset ≤ offset ∧
+        offset < entry.offset + entry.length) ∧
+      ∀ other : SourceMapEntry,
+        other ∈ checked.entries ∧ other.offset ≤ offset ∧
+          offset < other.offset + other.length → other = entry := by
+  obtain ⟨entry, entryMem, lower, upper⟩ :=
+    checked.entryForByte offset hbound
+  refine ⟨entry, ⟨entryMem, lower, upper⟩, ?_⟩
+  intro other hother
+  exact checked.entryContainingByteUnique offset other entry
+    hother.1 entryMem hother.2.1 hother.2.2 lower upper
 
 end CheckedLinkSourceMap
 

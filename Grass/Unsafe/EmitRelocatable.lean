@@ -120,6 +120,27 @@ theorem sourceEntryForInitializedByte
   simpa [contribution, SectionContent.initializedSize, Vec.length,
     RawProgramEmission.byteLength, List.length_map] using hbound
 
+/-- Every initialized section byte belongs to exactly one checked construction
+source range in the projected relocatable fragment. -/
+theorem uniqueSourceEntryForInitializedByte
+    {emission : RawProgramEmission State Terminal Instruction}
+    {config : RelocatableEmissionConfig}
+    (checked : CheckedRelocatableEmission emission config)
+    (offset : Nat)
+    (hbound : offset < checked.contribution.content.initializedSize) :
+    ∃ entry : SourceMapEntry,
+      (entry ∈ (checked.fragment (RelocKind := RelocKind)
+          (ImportIdentity := ImportIdentity)).sourceMap ∧
+        entry.offset ≤ offset ∧ offset < entry.offset + entry.length) ∧
+      ∀ other : SourceMapEntry,
+        other ∈ (checked.fragment (RelocKind := RelocKind)
+            (ImportIdentity := ImportIdentity)).sourceMap ∧
+          other.offset ≤ offset ∧ offset < other.offset + other.length →
+        other = entry := by
+  apply checked.sourceMap.uniqueEntryForByte offset
+  simpa [contribution, SectionContent.initializedSize, Vec.length,
+    RawProgramEmission.byteLength, List.length_map] using hbound
+
 /-- `verifiedConstructionSectionBytesExact` relates the initialized logical
 section directly to the original pre-alpha authored instruction list. -/
 theorem verifiedConstructionSectionBytesExact

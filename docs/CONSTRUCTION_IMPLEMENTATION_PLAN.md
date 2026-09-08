@@ -455,15 +455,17 @@ Accepted ranges retain exact block/origin data and carry reusable positive-lengt
 and emitted-byte-bound theorems. `entriesConsecutive` and
 `entriesOrderedNonoverlap` additionally expose exact section order and
 pairwise non-overlap. `entriesLengthSumExact` and `entryForByte` prove that
-those ranges account for every emitted byte exactly; artifact placement remains
-downstream.
+those ranges account for every emitted byte. `uniqueEntryForByte` combines
+coverage with non-overlap to give each emitted byte exactly one source entry;
+artifact placement remains downstream.
 `Grass.Unsafe.EmitRelocatable` packages that checked stream as one initialized
 format-neutral section with exact bytes and source ranges. It proves the generic
 `RelocatableFragment.WellFormed` contract while leaving definitions,
 relocations, externals, entry selection, serialization, and placement to their
 independent producers and artifact-layer checks.
 `fragmentSourceMapLengthExact` and `sourceEntryForInitializedByte` carry the
-source-map completeness result through that format-neutral section projection.
+source-map completeness result through that format-neutral section projection;
+`uniqueSourceEntryForInitializedByte` retains exact byte ownership there.
 Its `RelocatableEmissionPlan` overlay accepts those four symbolic metadata
 tables independently, retains the exact checked bytes and source map, and
 delegates their section bounds, symbol closure, and entry closure to

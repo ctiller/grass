@@ -79,6 +79,18 @@ example (offset : Nat)
         (ImportIdentity := Unit)).sourceMap,
       entry.offset ≤ offset ∧ offset < entry.offset + entry.length :=
   checked.sourceEntryForInitializedByte offset hbound
+example (offset : Nat)
+    (hbound : offset < checked.contribution.content.initializedSize) :
+    ∃ entry : SourceMapEntry,
+      (entry ∈ (checked.fragment (RelocKind := Unit)
+          (ImportIdentity := Unit)).sourceMap ∧
+        entry.offset ≤ offset ∧ offset < entry.offset + entry.length) ∧
+      ∀ other : SourceMapEntry,
+        other ∈ (checked.fragment (RelocKind := Unit)
+            (ImportIdentity := Unit)).sourceMap ∧
+          other.offset ≤ offset ∧ offset < other.offset + other.length →
+        other = entry :=
+  checked.uniqueSourceEntryForInitializedByte offset hbound
 example : (checked.fragment (RelocKind := Unit)
     (ImportIdentity := Unit)).definitions = [] := rfl
 example : (checked.fragment (RelocKind := Unit)
