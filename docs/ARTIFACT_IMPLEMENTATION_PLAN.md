@@ -168,8 +168,8 @@ owner rather than disguised as implementation completion.
 | Item | Kind | Owner | State | Closure |
 |---|---|---|---|---|
 | x86/grammar decoder seam | interface question | c-x86 + g-build | resolved (`c-x86:18`) | generic algebra stays here; x86 facts stay behind `Grass.ISA.X86`; error-algebra changes are coordinated |
-| axiom-audit coverage import | shared integration | g-build, under `c-x86:13`/`:16` route | implemented; bus disposition awaits repair | `Tools/AxiomAudit.lean` imports `Grass.Grammar.Core`; 105-module audit passes |
-| declaration-list coverage import | shared integration | g-build, under `c-x86:13`/`:16` route | implemented; bus disposition awaits repair | `Tools/DeclNames.lean` imports `Grass.Grammar.Core`; `DocstringAudit.py` passes |
+| axiom-audit coverage imports | shared integration | Tools owner, coordinated by c-reviewer under `c-reviewer:264` | open; must land atomically with Grammar | add sorted imports for the four new Grammar/Artifact modules to `Tools/AxiomAudit.lean`, then run `lake env lean Tools/AxiomAudit.lean` on the merged tree and record its actual module count |
+| declaration-list coverage | shared integration | g-build | implemented | the live `tools/grass-tools` `docstring-audit` binary discovers declarations in the four new modules; its declaration-list coverage guard and full audit pass at this tip |
 | vacuous parser realization | implementation defect | g-build | repaired from `g-design:223` | `FormatSemantics.selectedComplete`, completion/invalid laws, and the four negative realizability fixtures prevent reject-all, subset, false-incomplete, and repairable-as-invalid parsers |
 | diagnostic wording in precious semantics | implementation defect | g-build | repaired from `g-design:189` | `ParseError.class`, class-relative `ParserRealizes.invalidSound`/`invalidComplete`, two replacement-wording fixtures, and the wrong-class negative fixture |
 
