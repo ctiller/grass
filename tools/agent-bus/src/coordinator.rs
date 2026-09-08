@@ -169,7 +169,34 @@ pub fn drain_outbox(
     let mut envelopes = Vec::with_capacity(pending.len());
     let mut rejected = Vec::new();
     for (path, candidate) in &pending {
-        let data = candidate.typed_data()?;
+        // A candidate whose payload will not parse is rejected with a durable
+        // receipt, exactly like every other bad candidate in this loop --
+        // never propagated with `?`.
+        //
+        // It used to abort the whole drain. `g-design` submitted an
+        // `issue.opened` whose `evidence` array held a prose sentence where
+        // an event id belongs; that one typo held **77** urgent candidates
+        // behind it, none of which had anything wrong with them, and no
+        // receipt was written for any of them -- so from the author's side
+        // `submit` had returned success 77 times and the queue simply stopped
+        // moving with nothing to say why.
+        //
+        // The whole point of per-candidate receipts is that one bad event
+        // costs its author a retry rather than costing the fleet its queue.
+        // Parsing is the first thing this loop does, so the one failure that
+        // was not isolated was the one guaranteed to hit first.
+        let data = match candidate.typed_data() {
+            Ok(d) => d,
+            Err(e) => {
+                let reason = format!("candidate payload does not parse: {e}");
+                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+                rejected.push(RejectedCandidate {
+                    kind: candidate.kind.clone(),
+                    reason,
+                });
+                continue;
+            }
+        };
         // Gate 17: fail closed rather than validate a currency-sensitive
         // candidate against a stale cached cut just because the fresh probe
         // above failed -- reject it outright, with the fetch's own error,
@@ -1142,6 +1169,110 @@ mod tests {
 
         let (_header, log) = crate::stream::read_stream(repo.path(), &coord1).unwrap();
         assert_eq!(log.len(), 3); // genesis registration + the two status events
+    }
+
+    /// A candidate whose payload does not parse is rejected on its own and
+    /// does not take the rest of the outbox down with it.
+    ///
+    /// This is the live g-design outage. An `issue.opened` was submitted with
+    /// a prose sentence sitting in `evidence`, where an event id belongs.
+    /// `typed_data()` was called with `?` before any per-candidate rejection
+    /// path could run, so the parse error propagated out of `drain_outbox`
+    /// and aborted the whole drain. **77** urgent candidates queued behind
+    /// that one typo stopped moving, none of them defective, and because the
+    /// abort happened before any receipt was written, the author's `submit`
+    /// had returned success for every one of them and nothing said why the
+    /// queue had stalled.
+    ///
+    /// The malformed candidate is built field-by-field rather than through
+    /// `Candidate::new`, because `Candidate::new` takes an already-parsed
+    /// `EventData` and so cannot express the thing being tested: a payload
+    /// that got as far as the outbox and only fails when the coordinator
+    /// reads it back. That is exactly how the real one arrived.
+    ///
+    /// The ordinary candidates are submitted on either side of the bad one so
+    /// the assertion is about isolation and not merely about surviving a
+    /// trailing failure -- `after` is the one that used to be lost.
+    #[test]
+    fn drain_outbox_rejects_an_unparseable_candidate_without_dropping_the_rest() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        crate::outbox::submit(
+            repo.path(),
+            "client-1",
+            &status_candidate(&coord1, "before"),
+        )
+        .unwrap();
+
+        let malformed = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.opened".to_string(),
+            data: serde_json::json!({
+                "target": "coord1",
+                "issue_kind": "correctness",
+                "severity": "critical",
+                "summary": "an issue whose evidence is prose",
+                "locations": [],
+                "reproduction": [],
+                "blocks": [],
+                "evidence": ["Lean probe compiled successfully against exact branch tip"],
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-2", &malformed).unwrap();
+
+        crate::outbox::submit(repo.path(), "client-3", &status_candidate(&coord1, "after"))
+            .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+
+        // Both well-formed candidates published, including the one queued
+        // behind the failure.
+        assert_eq!(
+            drained.published,
+            vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]
+        );
+
+        // The bad one is accounted for, by kind and with a reason that names
+        // what the author has to fix. A silent drop would be its own outage:
+        // the author would again be told nothing.
+        assert_eq!(drained.rejected.len(), 1);
+        assert_eq!(drained.rejected[0].kind, "issue.opened");
+        assert!(
+            drained.rejected[0].reason.contains("does not parse")
+                && drained.rejected[0].reason.contains("malformed event id"),
+            "rejection reason should name the parse failure and the bad field, got: {}",
+            drained.rejected[0].reason
+        );
+
+        // The outbox is drained: nothing is left stuck behind the failure.
+        assert!(crate::outbox::list_pending(repo.path(), &coord1)
+            .unwrap()
+            .is_empty());
+
+        let (_header, log) = crate::stream::read_stream(repo.path(), &coord1).unwrap();
+        assert_eq!(log.len(), 3); // genesis registration + the two good events
     }
 
     /// Gate 18, end to end through the real coordinator path: an urgent
