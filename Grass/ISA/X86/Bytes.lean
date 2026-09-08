@@ -567,4 +567,106 @@ def movMem32Imm32 (m : MemOperand) (v : BitVec 32) : Option InsnEncoding :=
 def movMem64Imm32 (m : MemOperand) (v : BitVec 32) : Option InsnEncoding :=
   encodeMemInsn false 0xC7 true (.ext 0) m (.i32 v)
 
+/-!
+## Prologue instructions
+
+The two instruction forms a Win64 prologue is built from. They exist because
+`Grass/ABI/Win64/UnwindBytes.lean` records an open obligation it cannot close
+on its own: `Layout.WellFormed` constrains code offsets against each other and
+against `SizeOfProlog`, but nothing relates them to the bytes an assembler
+would emit, "because this module models unwind data and not instructions --
+there is no encoder for `push` or `sub rsp` to compare against". These are that
+encoder. The recogniser that consumes them stays in the ABI layer, where the
+`Layout` it judges lives.
+-/
+
+/--
+`PUSH r64` — `50+rd`.
+
+Operand size is 64 bits with no `REX.W`: push and pop default to the stack
+width in 64-bit mode, and the 32-bit forms are not encodable. A `REX` prefix
+appears only to reach `r8`-`r15`, and carries `B` rather than `R` because the
+register rides in the opcode, not in a `ModR/M` `reg` field.
+
+This is one byte for the eight legacy registers and two for the extended ones,
+which is the whole reason `UNWIND_CODE` offsets are not a fixed stride: a
+prologue saving `rbx` then `r12` places its second code at 1, not 2.
+-/
+def pushR64 (r : Gpr) : InsnEncoding :=
+  { rex := if r.rexBit then some (Rex.of false false false true) else Option.none
+    escape := false
+    opcode := 0x50 + BitVec.setWidth 8 r.encodingBits
+    modrm := Option.none
+    sib := Option.none
+    disp := .none
+    imm := .none }
+
+/-- Like `movRegImm32_wellFormed`: an opcode-embedded register needs no
+`ModR/M` byte, so there is nothing to serialise into a position that is not
+there. -/
+theorem pushR64_wellFormed (r : Gpr) : (pushR64 r).WellFormed := by
+  refine ⟨?_, ?_, ?_⟩
+  · intro h; exact absurd h (by simp [pushR64])
+  · intro m hm; exact absurd hm (by simp [pushR64])
+  · intro h; exact absurd rfl h
+
+/--
+`SUB r64, imm8` — `REX.W + 83 /5 ib`, the sign-extended form.
+
+`mod = 11` makes the r/m operand the register itself. That is what keeps `rsp`
+encodable here without a SIB byte: `rsp`'s low three bits are `100`, which
+selects a SIB byte in every *memory* form -- see `ModRm.rmSelectsSib` -- but
+means `rsp` when `mod = 11`. `InsnEncoding.WellFormed` states the SIB condition
+with exactly that `mod ≠ 11` guard, so this encoding satisfies it rather than
+being an exception to it.
+
+The immediate is sign-extended to 64 bits, so this reaches allocations of 1 to
+127 bytes; `subR64Imm32` covers the rest. Which of the two an assembler picks
+is what makes a `sub rsp` either 4 or 7 bytes long.
+-/
+def subR64Imm8 (r : Gpr) (v : BitVec 8) : InsnEncoding :=
+  { rex := some (Rex.of true false false r.rexBit)
+    escape := false
+    opcode := 0x83
+    modrm := some ⟨ModRm.modRegisterDirect, 5, r.encodingBits⟩
+    sib := Option.none
+    disp := .none
+    imm := .i8 v }
+
+/-- `SUB r64, imm32` — `REX.W + 81 /5 id`. The same `/5` extension and the same
+register-direct `ModR/M` byte as `subR64Imm8`; only the opcode and the
+immediate width differ. -/
+def subR64Imm32 (r : Gpr) (v : BitVec 32) : InsnEncoding :=
+  { rex := some (Rex.of true false false r.rexBit)
+    escape := false
+    opcode := 0x81
+    modrm := some ⟨ModRm.modRegisterDirect, 5, r.encodingBits⟩
+    sib := Option.none
+    disp := .none
+    imm := .i32 v }
+
+/-- Register-direct with no displacement: the `ModR/M` byte promises no
+displacement bytes and none are emitted, and the SIB condition does not fire
+because `mod = 11`. -/
+theorem subR64Imm8_wellFormed (r : Gpr) (v : BitVec 8) :
+    (subR64Imm8 r v).WellFormed := by
+  refine ⟨?_, ?_, ?_⟩
+  · intro h; exact absurd h (by simp [subR64Imm8])
+  · intro m hm
+    simp only [subR64Imm8, Option.some.injEq] at hm
+    subst hm
+    exact ⟨fun h => absurd rfl h.2, rfl⟩
+  · intro h; exact absurd rfl h
+
+/-- The `imm32` form, well-formed for the same reasons. -/
+theorem subR64Imm32_wellFormed (r : Gpr) (v : BitVec 32) :
+    (subR64Imm32 r v).WellFormed := by
+  refine ⟨?_, ?_, ?_⟩
+  · intro h; exact absurd h (by simp [subR64Imm32])
+  · intro m hm
+    simp only [subR64Imm32, Option.some.injEq] at hm
+    subst hm
+    exact ⟨fun h => absurd rfl h.2, rfl⟩
+  · intro h; exact absurd rfl h
+
 end Grass.ISA.X86

@@ -330,22 +330,43 @@ Three conditions, each of which a plausible generator gets wrong:
   the open obligation below: it needs no instruction encoder, only the
   observation that offsets count bytes already executed.
 
-## Open obligation: the offsets are not checked against any instruction
+## The offsets, checked against instructions
 
-These three conditions are internal. Nothing here relates `codeOffset` or
-`SizeOfProlog` to the bytes an assembler would actually emit, because this
-module models unwind data and not instructions -- there is no encoder for `push`
-or `sub rsp` to compare against. So a layout claiming three two-byte pushes end
-at 1, 2 and 3, or one claiming `SizeOfProlog = 255` for a ten-byte prologue,
-satisfies `WellFormed`. Both mis-unwind: the second has Windows treat every
-address below 255 as mid-prologue and restore nothing.
+These three conditions are internal. Nothing *here* relates `codeOffset` or
+`SizeOfProlog` to the bytes an assembler would emit, so a layout claiming three
+two-byte pushes end at 1, 2 and 3, or one claiming `SizeOfProlog = 255` for a
+ten-byte prologue, satisfies `WellFormed`. Both mis-unwind: the second has
+Windows treat every address below 255 as mid-prologue and restore nothing.
 
-`Tests/ABI/Win64/UnwindCorpus.lean` closes this for the prologues it builds,
-because it derives the offsets from a length model that `ml64` then checks. It
-closes nothing for a `Layout` a caller writes directly. Closing it properly
-needs `push`/`sub` in `Grass.ISA.X86.Bytes` and a recogniser relating an encoded
-prologue to a `Layout`, which is what `docs/PLATFORM_ABI.md` section 3 asks for
-and is owed rather than done.
+This was recorded as an open obligation, on the grounds that there was no
+encoder for `push` or `sub rsp` to compare against. There is now:
+`Grass.ISA.X86.pushR64` and `Grass.ISA.X86.subR64Imm8`/`subR64Imm32`, checked
+byte-for-byte against the vendor encodings in
+`Tests/ISA/X86/PrologueInsns.lean`. `Layout.Realizes` below is the recogniser,
+and `Tests/ABI/Win64/PrologueRealization.lean` refutes both layouts above.
+
+Three things are still true and worth stating plainly.
+
+First, `Realizes` covers three of the nine operations -- the two allocation
+forms and a nonvolatile push. The rest have no unambiguous instruction,
+`UnwindOp.prologueInsns` returns `none` for them, and `Realizes` refuses rather
+than guesses. A layout using `setFramePointer` is no better checked than
+before.
+
+Second, `WellFormed` does not require `Realizes`, and should not. `Realizes`
+assumes the prologue is exactly its unwind-relevant instructions laid
+contiguously from the function's first byte; a prologue that also moves an
+argument into a saved register is well-formed and not realizable. The two are
+separate predicates and a caller who wants both must ask for both.
+
+Third, `Tests/ABI/Win64/UnwindCorpus.lean` still closes a different and
+stronger thing for the prologues it builds: its offsets come from a length
+model that `ml64` itself checks, so it is answerable to an assembler rather
+than to this library's encoder. `Realizes` closes the case that corpus cannot
+reach -- a `Layout` a caller writes directly -- and does not replace it.
+
+What `docs/PLATFORM_ABI.md` section 3 asks for is the general recogniser over
+all nine operations. That remains owed.
 -/
 def WellFormed (l : Layout) : Prop :=
   l.prologue.Encodable ∧ Ascends l.offsets ∧
@@ -1192,5 +1213,122 @@ theorem spike1UnwindInfo_toBytes :
 
 /-- Twelve bytes, which is a multiple of four. -/
 theorem spike1UnwindInfo_length : spike1UnwindInfo.toBytes.length = 12 := by decide
+
+
+/-!
+## Relating code offsets to encoded instructions
+
+`Layout.WellFormed` records an open obligation above: its three conditions are
+internal, so a layout claiming three two-byte pushes end at 1, 2 and 3, or
+claiming `SizeOfProlog = 255` for a ten-byte prologue, satisfies it. Both
+mis-unwind.
+
+`Grass.ISA.X86.pushR64` and `Grass.ISA.X86.subR64Imm8`/`subR64Imm32` now exist,
+so the comparison the obligation asked for can be made. `Realizes` makes it:
+it encodes the operations, lays them end to end from the function's first byte,
+and requires every `CodeOffset` to be the offset the encoding actually puts the
+operation at.
+-/
+
+namespace UnwindOp
+
+/--
+The instructions that perform a prologue operation, when this library can
+encode them.
+
+`Option`, and deliberately partial. Three operations have an unambiguous
+instruction: a nonvolatile push is `PUSH r64`, and both allocation forms are
+`SUB RSP, imm`. The rest do not, and inventing one would be worse than
+returning `none` here -- `setFramePointer` is a `LEA` or a `MOV` whose operands
+depend on the frame offset, `saveNonvolatile` is a `MOV` to a stack slot whose
+`ModR/M` form depends on the offset's magnitude, and `pushMachineFrame`
+describes what the processor pushed before the function existed, so there is no
+instruction at all.
+
+Which of the two `SUB` forms an allocation uses is the interesting part, because
+it is where the byte count stops being a fixed stride. The `imm8` form is
+sign-extended, so it reaches 127; `allocSmall 128` is legal as an unwind
+operation and needs the seven-byte `imm32` form.
+-/
+def prologueInsns : UnwindOp → Option (List InsnEncoding)
+  | .pushNonvolatile r => some [pushR64 r]
+  | .allocSmall n =>
+      if n ≤ 127 then some [subR64Imm8 .rsp (BitVec.ofNat 8 n)]
+      else some [subR64Imm32 .rsp (BitVec.ofNat 32 n)]
+  | .allocLarge n => some [subR64Imm32 .rsp (BitVec.ofNat 32 n)]
+  | _ => Option.none
+
+/-- Bytes those instructions occupy. -/
+def prologueSize (op : UnwindOp) : Option Nat :=
+  op.prologueInsns.map fun is => (is.map InsnEncoding.size).sum
+
+/--
+An operation this module can encode occupies at least one byte.
+
+This is the byte-level reason `PlacedOp.OffsetPlaced` refuses offset zero for an
+instruction. That condition was justified above by an observation about
+`RtlVirtualUnwind` plus the remark that "the first instruction ends at 1 or
+later"; with an encoder present, the remark is a consequence of
+`InsnEncoding.size_pos` rather than a claim about assemblers.
+-/
+theorem prologueSize_pos {op : UnwindOp} {k : Nat}
+    (h : op.prologueSize = some k) : 0 < k := by
+  have one : ∀ i : InsnEncoding,
+      0 < (([i] : List InsnEncoding).map InsnEncoding.size).sum := by
+    intro i; simpa using InsnEncoding.size_pos i
+  cases op
+  case pushNonvolatile r =>
+    simp only [prologueSize, prologueInsns] at h
+    first | (have hk := Option.some.inj h; subst hk; exact one _) | (subst h; exact one _)
+  case allocSmall n =>
+    simp only [prologueSize, prologueInsns] at h
+    split at h <;> (first | (have hk := Option.some.inj h; subst hk; exact one _) | (subst h; exact one _))
+  case allocLarge n =>
+    simp only [prologueSize, prologueInsns] at h
+    first | (have hk := Option.some.inj h; subst hk; exact one _) | (subst h; exact one _)
+  all_goals simp [prologueSize, prologueInsns] at h
+
+end UnwindOp
+
+namespace Layout
+
+/--
+Where each operation ends, laying the encodings end to end from `start`.
+
+`none` as soon as any operation has no encoding, so a layout using
+`setFramePointer` is not judged rather than being judged wrongly.
+-/
+def endOffsetsFrom : Nat → List UnwindOp → Option (List Nat)
+  | _, [] => some []
+  | start, op :: rest =>
+      match op.prologueSize with
+      | Option.none => Option.none
+      | some k => (endOffsetsFrom (start + k) rest).map fun tl => (start + k) :: tl
+
+/--
+Every code offset is the offset the encoded prologue actually puts it at, and
+`SizeOfProlog` is the encoded length.
+
+This is what `WellFormed` could not say. `WellFormed` relates the offsets to
+each other; this relates them to bytes. The two are independent: a layout can
+satisfy either without the other, and the theorems below are the docstring's own
+counterexamples, now refuted.
+
+The prologue is taken to consist of exactly these instructions, contiguously,
+from the function's first byte. That is what `ml64` emits for a prologue built
+only from unwind-relevant instructions, and it is the case the corpus covers. A
+prologue interleaving instructions that generate no unwind code -- a `mov` of an
+argument into a saved register, say -- has a larger `SizeOfProlog` than this
+computes, and `Realizes` will refuse it. Refusing is the right failure: this
+predicate under-approximates, and nothing depends on it holding.
+-/
+def Realizes (l : Layout) : Prop :=
+  endOffsetsFrom 0 l.prologue.ops = some (l.offsets.map BitVec.toNat) ∧
+    l.sizeOfProlog.toNat = ((l.offsets.map BitVec.toNat).getLast?).getD 0
+
+instance (l : Layout) : Decidable l.Realizes :=
+  inferInstanceAs (Decidable (_ ∧ _))
+
+end Layout
 
 end Grass.ABI.Win64

@@ -122,8 +122,14 @@ ledger objected to the new declaration, the reviewer added the one line the
 ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
+
+Raised from 144 to 151 for the seven declarations that close the encoder
+obligation in `Grass/ABI/Win64/UnwindBytes.lean`: the three instruction
+encoders and the four declarations relating unwind code offsets to them. The
+gate's own message prescribes this path, and the alternative was worse --
+`notBehaviour` is a permanent claim and these model the ISA squarely.
 -/
-def owedBaseline : Nat := 144
+def owedBaseline : Nat := 151
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -459,6 +465,21 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    -- The two prologue instruction forms, and the recogniser built on them.
+    -- `50+rd`, `REX.W + 83 /5 ib` and `REX.W + 81 /5 id` are vendor encodings
+    -- like every other in this ledger, and they owe citations for the same
+    -- reason `Grass.ISA.X86.InsnEncoding.escapeByte` does.
+    `Grass.ISA.X86.pushR64,
+    `Grass.ISA.X86.subR64Imm8, `Grass.ISA.X86.subR64Imm32,
+    -- Which instruction performs a prologue operation, and how long it is.
+    -- External on both sides: the unwind operation is Microsoft's and the
+    -- instruction is the vendors'. `Realizes` is where the two meet, and it
+    -- is the statement `Layout.WellFormed` could not make -- so it carries
+    -- the most external behaviour of the four, not the least.
+    `Grass.ABI.Win64.UnwindOp.prologueInsns,
+    `Grass.ABI.Win64.UnwindOp.prologueSize,
+    `Grass.ABI.Win64.Layout.endOffsetsFrom,
+    `Grass.ABI.Win64.Layout.Realizes,
     -- The XMM register file's numbering, added for UWOP_SAVE_XMM128. Which
     -- register is number six is an architectural fact like any other in this
     -- ledger, and it carries no citation yet: DECISIONS 15 wants the
