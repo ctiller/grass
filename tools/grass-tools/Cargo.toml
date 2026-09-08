@@ -2,7 +2,7 @@
 name = "grass-tools"
 version = "0.1.0"
 edition = "2021"
-description = "Grass validation and audit tools: source and docstring audits over the Lean tree"
+description = "Grass validation and audit tools: the docstring, trust, documentation-link, spike-source and source-liveness audits, and the Win64 unwind differential"
 
 # Each tool is a self-contained binary with no shared library. The scripts these
 # replace were self-contained too, and each is invoked independently by
@@ -29,9 +29,25 @@ description = "Grass validation and audit tools: source and docstring audits ove
 # own work before nominating it.
 #
 # This crate is where the remaining validation tools land as they are ported and
-# their equivalence against the originals is demonstrated. It carries four
-# binaries rather than a placeholder for ten, because a `[[bin]]` entry for a
+# their equivalence against the originals is demonstrated. It carries six
+# binaries rather than a placeholder for nine, because a `[[bin]]` entry for a
 # tool nobody has verified is a claim this file cannot back.
+#
+# The four x86 tools that shell out to NASM, NDISASM, or a wrapper NASM
+# assembles are deliberately not among them and are not going to be ported
+# here. Neither assembler is installed on the development host, so no
+# differential against the Python original could be run, and a port nobody can
+# validate is worse than none. They are being deleted instead, and restoring
+# that verification in a supportable form is tracked against `c-x86`, which owns
+# the domain. That is a real loss and is recorded as one: the x86 differentials
+# check something no Lean theorem can, because every theorem in
+# `Grass/ISA/X86/**` relates Grass's own definitions to each other, so an
+# encoder and decoder wrong in the same way satisfy all of them.
+#
+# `win64-unwind-differential` and `source-liveness` are the two whose oracles
+# could be run: `ml64.exe` ships with the MSVC build tools, and a probe against
+# an HTTP server is a probe whether the server is a publisher or a loopback
+# socket.
 
 [[bin]]
 name = "docstring-audit"
@@ -48,6 +64,14 @@ path = "src/bin/doc_links.rs"
 [[bin]]
 name = "spike-sources"
 path = "src/bin/spike_sources.rs"
+
+[[bin]]
+name = "source-liveness"
+path = "src/bin/source_liveness.rs"
+
+[[bin]]
+name = "win64-unwind-differential"
+path = "src/bin/win64_unwind_differential.rs"
 
 [dependencies]
 regex = "1"

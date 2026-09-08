@@ -20,5 +20,6 @@ expression: out
   "roster_epoch": "[hash]",
   "snapshot_receipt": {
     "coord1": "[hash]"
-  }
+  },
+  "unreadable": []
 }
