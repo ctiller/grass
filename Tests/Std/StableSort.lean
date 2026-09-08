@@ -3,7 +3,21 @@ import Grass.Std.Logical.Order
 /-!
 # Spike 2's `stableSorted`, written against this library
 
-`Spikes/2_Sort/Spec.lean` defines what the sort milestone means:
+`Spikes/2_Sort/Spec.lean` defines what the sort milestone means. It reads, today:
+
+```text
+def stableSorted (input output : Vec Occurrence) : Prop :=
+  output.Permutation input ∧
+  output.Pairwise Occurrence.le ∧
+  ∀ (i j : Nat) (hi : i < input.length) (hj : j < input.length),
+    (input.get i hi).value = (input.get j hj).value ->
+    (input.get i hi).ordinal < (input.get j hj).ordinal ->
+    ∀ p q, output.idxOf? (input.get i hi) = some p ->
+           output.idxOf? (input.get j hj) = some q ->
+           p < q
+```
+
+It did not read that until `47da3f8`. This fixture was written against the earlier version, which is the one the sections below are about:
 
 ```text
 def stableSorted (input output : Vec Occurrence) : Prop :=
@@ -13,13 +27,17 @@ def stableSorted (input output : Vec Occurrence) : Prop :=
     (output.findIdx? input[i]).get! < (output.findIdx? input[j]).get!
 ```
 
+Both blocks are kept because the fixture's own `StableSorted` mirrors the second one, deliberately, as a guard against that shape returning. Reading only the first would make the restatement below look like a transcription error.
+
 `Grass/Std/Logical/Order.lean` exists to supply that vocabulary. This fixture is
 the check that it actually does: the specification is restated here over a
 stand-in `Occurrence` using only `Vec.Permutation`, `Vec.Pairwise`, and
 `Vec.idxOf?`, and then discharged against a concrete sort.
 
-Restating it is also where the two problems with the authored version show, which
-is why the fixture is worth more than a claim that the vocabulary is sufficient.
+Restating it is also where the two problems with the authored version showed --
+both fixed by `47da3f8`, and described in the past tense for that reason. They are
+kept because they are the argument for the operations `Order.lean` supplies, and
+because the fixture still pins the shape they were fixed away from.
 
 **`input[i]` has no bound.** The binder is `∀ i j, i < j → …`, which bounds `i`
 below `j` and nothing above, so there is no proof that `i` indexes `input` at
