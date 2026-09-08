@@ -69,6 +69,40 @@ namespace ByteRange
 /-- The offset one past the last byte covered. -/
 def stop (r : ByteRange) : Nat := r.start + r.size
 
+/--
+`r` seen from the backing store a view at `origin` looks into.
+
+A view names a backing identity, a nonnegative origin into it, and its own extent;
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2.2 is the shape and `g-design:185` the
+ruling. An allocation-local offset `i` is backing offset `origin + i`, so a local
+range moves by `origin` and keeps its size.
+
+**This is what makes aliasing definitional.** Under the old design two allocations
+were declared aliased in a list and `MemoryState.SharesBytes` walked it, while
+`MemoryState.write` wrote only the named allocation -- an authority-level claim with
+no byte-level counterpart, which `Tests/Op/StandardLoan.lean`'s
+`the_alias_is_not_yet_a_byte_level_fact` proves. Two views into one backing store
+share bytes exactly where their translated spans overlap, which is arithmetic rather
+than a declaration, and nothing can assert it falsely.
+
+Total, and deliberately so: a local range always has a backing image. Whether that
+image lies inside the *backing store* is a separate question the view's extent and
+the store's bounds answer, and conflating the two is how the old `shiftBy` came to
+return `none` for a range that partly landed -- which was not monotone and would have
+let a split create authority.
+-/
+def translate (origin : Nat) (r : ByteRange) : ByteRange := ⟨origin + r.start, r.size⟩
+
+/-- Translation moves a range without resizing it. -/
+@[simp] theorem translate_size (origin : Nat) (r : ByteRange) :
+    (translate origin r).size = r.size := rfl
+
+/-- At origin zero a view is its backing store. The initial view an allocation mints
+is this one, which is why the ordinary unmapped case needs no arithmetic. -/
+@[simp] theorem translate_zero (r : ByteRange) : translate 0 r = r := by
+  unfold translate
+  simp
+
 /-- The empty range at `start`. -/
 def empty (start : Nat) : ByteRange := ⟨start, 0⟩
 
@@ -155,6 +189,23 @@ theorem disjoint_def (r s : ByteRange) :
     r.Disjoint s ↔
       r.size = 0 ∨ s.size = 0 ∨
         r.start + r.size ≤ s.start ∨ s.start + s.size ≤ r.start := Iff.rfl
+
+/-- Translation is monotone in containment: a view's whole extent contains a local
+range exactly when its image contains the image. The direction the authority
+theorems need, and unlike the offset design's `shiftBy` it needs no side condition,
+because an origin is a `Nat` and nothing can fall below zero. -/
+@[simp] theorem translate_contains (origin : Nat) (r s : ByteRange) :
+    (translate origin r).Contains (translate origin s) ↔ r.Contains s := by
+  unfold translate Contains stop
+  simp only []
+  omega
+
+/-- **Two views into one backing store share bytes exactly where their images
+overlap.** The definitional replacement for the declared alias relation. -/
+@[simp] theorem translate_disjoint (o p : Nat) (r s : ByteRange) :
+    (translate o r).Disjoint (translate p s) ↔
+      (ByteRange.mk (o + r.start) r.size).Disjoint (ByteRange.mk (p + s.start) s.size) := by
+  rfl
 
 theorem contains_def (r s : ByteRange) :
     r.Contains s ↔ r.start ≤ s.start ∧ s.start + s.size ≤ r.start + r.size := Iff.rfl
