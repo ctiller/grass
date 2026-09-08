@@ -108,10 +108,38 @@ pub fn submit(git_common_dir: &Path, client_id: &str, candidate: &Candidate) -> 
 /// each tier) -- the order the coordinator should offer them to the batch
 /// builder in, though the coordinator remains free to reorder for
 /// dependency closure.
-pub fn list_pending(git_common_dir: &Path, agent: &Agent) -> AbResult<Vec<(PathBuf, Candidate)>> {
+/// One outbox entry this host could not read as `agent`'s candidate, and
+/// why. It is reported and left on disk exactly as found: this host cannot
+/// tell the difference between a file some broken writer produced and a
+/// well-formed candidate from a *newer* binary than its own, and deleting
+/// the second kind loses an event no receipt records.
+#[derive(Debug, Clone)]
+pub struct UnreadableEntry {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+/// What `list_pending` found: the candidates it could read, and the entries
+/// it could not.
+///
+/// Two vectors rather than a `Result` because an outbox with one bad file
+/// in it is not an unreadable outbox. It used to be: a single entry that
+/// failed to deserialize, or that named another agent, returned `Err` for
+/// the whole listing, which stopped the coordinator from draining *any* of
+/// that agent's queue and stopped `agent-bus outbox` from showing an
+/// operator what was in it. That is the same shape as the payload-parse
+/// abort in `coordinator::drain_outbox`, one layer earlier and reached
+/// first, so fixing only the later one left the outage intact.
+#[derive(Debug, Clone, Default)]
+pub struct PendingOutbox {
+    pub pending: Vec<(PathBuf, Candidate)>,
+    pub unreadable: Vec<UnreadableEntry>,
+}
+
+pub fn list_pending(git_common_dir: &Path, agent: &Agent) -> AbResult<PendingOutbox> {
     let dir = outbox_dir(git_common_dir, agent);
     if !dir.exists() {
-        return Ok(Vec::new());
+        return Ok(PendingOutbox::default());
     }
     let mut entries: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
     for entry in std::fs::read_dir(&dir).map_err(|e| AbError::Io {
@@ -134,18 +162,42 @@ pub fn list_pending(git_common_dir: &Path, agent: &Agent) -> AbResult<Vec<(PathB
     }
     entries.sort_by_key(|(_, m)| *m);
     let mut out = Vec::new();
+    let mut unreadable = Vec::new();
     for (path, _) in entries {
-        let bytes = std::fs::read(&path).map_err(|e| AbError::Io {
-            path: path.display().to_string(),
-            source: e,
-        })?;
-        let candidate: Candidate = serde_json::from_slice(&bytes)?;
+        // Every failure below is per-entry. The directory listing above can
+        // still fail the call -- an outbox whose directory cannot be read is
+        // genuinely unreadable -- but one bad file in it is not.
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                unreadable.push(UnreadableEntry {
+                    path: path.clone(),
+                    reason: format!("could not be read: {e}"),
+                });
+                continue;
+            }
+        };
+        let candidate: Candidate = match serde_json::from_slice(&bytes) {
+            Ok(c) => c,
+            Err(e) => {
+                unreadable.push(UnreadableEntry {
+                    path: path.clone(),
+                    reason: format!("is not a readable candidate: {e}"),
+                });
+                continue;
+            }
+        };
         if candidate.agent != *agent {
-            return Err(invalid(format!(
-                "outbox entry {} claims agent {} but lives under {agent}'s outbox",
-                path.display(),
-                candidate.agent
-            )));
+            // Held, not discarded: publishing it here would forge another
+            // agent's event, but it is equally not this host's to delete.
+            unreadable.push(UnreadableEntry {
+                path: path.clone(),
+                reason: format!(
+                    "claims agent {} but lives under {agent}'s outbox",
+                    candidate.agent
+                ),
+            });
+            continue;
         }
         out.push((path, candidate));
     }
@@ -153,7 +205,10 @@ pub fn list_pending(git_common_dir: &Path, agent: &Agent) -> AbResult<Vec<(PathB
     // candidates move to the front without disturbing relative order among
     // candidates of the same urgency.
     out.sort_by_key(|(_, c)| !c.urgent);
-    Ok(out)
+    Ok(PendingOutbox {
+        pending: out,
+        unreadable,
+    })
 }
 
 /// Removes a candidate once the coordinator has durably accepted or
@@ -199,7 +254,7 @@ mod tests {
     /// Only reachable by writing the file directly -- `submit` derives the
     /// directory from the candidate, so it cannot produce the mismatch.
     #[test]
-    fn list_pending_refuses_an_entry_that_names_a_different_agent() {
+    fn list_pending_reports_an_entry_that_names_a_different_agent() {
         let dir = tempfile::tempdir().unwrap();
         let (alice, bob) = (a("alice"), a("bob"));
 
@@ -212,11 +267,52 @@ mod tests {
         )
         .unwrap();
 
-        let err = list_pending(dir.path(), &bob).unwrap_err().to_string();
+        // Reported as unreadable, not returned as an error for the whole
+        // listing: it is not Bob's to publish, and equally not Bob's to
+        // delete. A `return Err` here used to stop every one of Bob's own
+        // candidates from being drained because someone else's file was
+        // sitting in his directory.
+        let listing = list_pending(dir.path(), &bob).unwrap();
+        assert!(listing.pending.is_empty());
+        assert_eq!(listing.unreadable.len(), 1);
         assert!(
-            err.contains("claims agent alice") && err.contains("bob"),
-            "the error must name both the claimed and the owning agent: {err}"
+            listing.unreadable[0].reason.contains("claims agent alice"),
+            "the reason must name the claimed agent: {}",
+            listing.unreadable[0].reason
         );
+        // Still on disk, untouched.
+        assert!(bob_dir.join("client-1.json").exists());
+    }
+
+    /// One unreadable file does not hide the readable candidates beside it.
+    ///
+    /// This is the outage `coordinator::drain_outbox` was fixed for, one
+    /// layer earlier: `list_pending` runs before the drain loop, so while it
+    /// answered a single bad file with `Err` the per-candidate rejection
+    /// below it could never be reached at all.
+    #[test]
+    fn list_pending_reports_an_unreadable_entry_without_hiding_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let alice = a("alice");
+        submit(dir.path(), "client-1", &status_candidate(&alice)).unwrap();
+        std::fs::write(
+            outbox_dir(dir.path(), &alice).join("client-2.json"),
+            b"{ this is not a candidate",
+        )
+        .unwrap();
+        submit(dir.path(), "client-3", &status_candidate(&alice)).unwrap();
+
+        let listing = list_pending(dir.path(), &alice).unwrap();
+        assert_eq!(
+            listing.pending.len(),
+            2,
+            "both readable candidates must survive a bad file between them"
+        );
+        assert_eq!(listing.unreadable.len(), 1);
+        assert!(listing.unreadable[0]
+            .reason
+            .contains("is not a readable candidate"));
+        assert!(listing.unreadable[0].path.ends_with("client-2.json"));
     }
 
     #[test]
@@ -224,7 +320,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let alice = a("alice");
         submit(dir.path(), "client-1", &status_candidate(&alice)).unwrap();
-        let pending = list_pending(dir.path(), &alice).unwrap();
+        let pending = list_pending(dir.path(), &alice).unwrap().pending;
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].1, status_candidate(&alice));
     }
@@ -232,7 +328,10 @@ mod tests {
     #[test]
     fn list_pending_is_empty_before_any_submission() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(list_pending(dir.path(), &a("alice")).unwrap().is_empty());
+        assert!(list_pending(dir.path(), &a("alice"))
+            .unwrap()
+            .pending
+            .is_empty());
     }
 
     /// Retrying the same `client_id` after a (simulated) crash overwrites
@@ -244,7 +343,7 @@ mod tests {
         let alice = a("alice");
         submit(dir.path(), "client-1", &status_candidate(&alice)).unwrap();
         submit(dir.path(), "client-1", &status_candidate(&alice)).unwrap();
-        assert_eq!(list_pending(dir.path(), &alice).unwrap().len(), 1);
+        assert_eq!(list_pending(dir.path(), &alice).unwrap().pending.len(), 1);
     }
 
     #[test]
@@ -253,7 +352,7 @@ mod tests {
         let alice = a("alice");
         submit(dir.path(), "client-1", &status_candidate(&alice)).unwrap();
         submit(dir.path(), "client-2", &status_candidate(&alice)).unwrap();
-        assert_eq!(list_pending(dir.path(), &alice).unwrap().len(), 2);
+        assert_eq!(list_pending(dir.path(), &alice).unwrap().pending.len(), 2);
     }
 
     #[test]
@@ -273,7 +372,7 @@ mod tests {
         submit(dir.path(), "first", &status_candidate(&alice)).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
         submit(dir.path(), "second", &status_candidate(&alice)).unwrap();
-        let pending = list_pending(dir.path(), &alice).unwrap();
+        let pending = list_pending(dir.path(), &alice).unwrap().pending;
         assert_eq!(pending.len(), 2);
         assert!(pending[0].0.ends_with("first.json"));
         assert!(pending[1].0.ends_with("second.json"));
@@ -285,7 +384,7 @@ mod tests {
         let alice = a("alice");
         let path = submit(dir.path(), "client-1", &status_candidate(&alice)).unwrap();
         remove(&path).unwrap();
-        assert!(list_pending(dir.path(), &alice).unwrap().is_empty());
+        assert!(list_pending(dir.path(), &alice).unwrap().pending.is_empty());
     }
 
     /// Removing an already-gone file is not an error -- a retried cleanup
@@ -327,7 +426,7 @@ mod tests {
         )
         .unwrap();
 
-        let pending = list_pending(dir.path(), &alice).unwrap();
+        let pending = list_pending(dir.path(), &alice).unwrap().pending;
         assert_eq!(pending.len(), 3);
         assert!(
             pending[0].0.ends_with("third-urgent.json"),
@@ -353,7 +452,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         submit(dir.path(), "urgent-b", &status_candidate(&alice).urgent()).unwrap();
 
-        let pending = list_pending(dir.path(), &alice).unwrap();
+        let pending = list_pending(dir.path(), &alice).unwrap().pending;
         let kinds: Vec<&str> = pending
             .iter()
             .map(|(p, _)| p.file_stem().unwrap().to_str().unwrap())

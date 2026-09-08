@@ -554,9 +554,9 @@ mod tests {
             accepted_nominations: BTreeSet::from([nomination.clone()]),
             decline_or_withdraw_or_reassign_status: ItemStatus::Open,
             findings: BTreeMap::new(),
-            authorizations: vec![],
-            merged: vec![],
-            reconciled: vec![],
+            authorizations: Default::default(),
+            merged: Default::default(),
+            reconciled: Default::default(),
         };
         state.reviews.insert(nomination.clone(), chain);
         state
@@ -608,7 +608,7 @@ mod tests {
             .get_mut(&root)
             .unwrap()
             .authorizations
-            .push(id.clone());
+            .insert(id.clone());
         id
     }
 
@@ -646,7 +646,7 @@ mod tests {
             .get_mut(&root)
             .unwrap()
             .merged
-            .push(id.clone());
+            .insert(id.clone());
         id
     }
 
@@ -687,7 +687,7 @@ mod tests {
             .get_mut(&root)
             .unwrap()
             .reconciled
-            .push(id.clone());
+            .insert(id.clone());
         id
     }
 
