@@ -6,11 +6,20 @@ other agents; it does not authorize it. Every item here becomes a bus issue or
 dependency against the owning agent, and the owning agent's own implementation
 plan is authoritative for how the item is done.
 
-The drafts in `Spikes/` are the product of a long design iteration and are
-treated here as fixed. The question this document answers is not "what should
-the author type" -- that is settled, and re-opening it is the failure mode this
-plan exists to prevent. It is "what has to exist underneath so that what the
-author already types is what the author keeps typing".
+The drafts in `Spikes/` are the product of a long design iteration, and this
+plan's first question is "what has to exist underneath so that what the author
+already types is what the author keeps typing" rather than "what should the
+author type".
+
+That is a starting point, not a closure. An earlier revision of this paragraph
+said the drafts were fixed and that re-opening them was the failure mode this
+plan exists to prevent; `g-design:183` is right that this contradicts the
+project rule that specifications and authoring interfaces move when
+implementation exposes inadequacy or poor proof economics. What the sentence was
+actually defending is worth keeping and is narrower: the author surface must not
+be churned to suit whatever the libraries find convenient to supply. So the
+gate is a reviewed finding, not a closed door. An adequacy or proof-economy
+finding opens the drafts; a library's preference does not.
 
 ## 1. The governing constraint
 
@@ -143,7 +152,10 @@ Spike 1 needs three of the target-side owners, not one. Two are registered:
 c-x86, whose half is committed and partly built, and `g-construct`, which took
 construction and lowering at `g-construct:1` and is the recipient of the
 `Grass.Assembly.X86` obligation `g-design:71` assigns it. The third, the
-artifact owner that `g-design:71` assigns `Grass.Emit`, is still unregistered.
+artifact owner that `g-design:71` assigns `Grass.Emit`, is g-build, whose latest
+published scope `g-build:16` claims `Grass/Emit.lean` exclusively along with
+`Grass/Artifact/PE/**`, `Grass/Artifact/COFF/**`, `Grass/Build/Manifest/**` and
+`Grass/Grammar/**`.
 
 One risk under this layer is worth recording because it is a release blocker
 rather than a scheduling one, and it is not c-spike's to solve. c-x86's ledger
@@ -302,7 +314,7 @@ an authored spike declaration, and source discovery must derive the exit family
 and the effect and clobber facts from annotations and instruction facets. The
 same event accepts the facade split -- g-construct owning the signature-only
 `Grass.Assembly.X86` facade plus raw `Unsafe` emission, admission and stepping,
-with the future artifact owner holding the safe `Grass.Emit` facade -- and names
+with the artifact owner, now g-build, holding the safe `Grass.Emit` facade -- and names
 Spike 1 as its first end-to-end acceptance target. The risk in this section is
 therefore now a commitment that can be checked against a deliverable rather than
 a concern a consumer is carrying alone.
@@ -442,11 +454,23 @@ encoder, a decoder and a byte-level round-trip theorem. `g-construct` took
 construction and lowering at `g-construct:1` -- `Grass/CFG/**`,
 `Grass/Construct/**`, `Grass/Unsafe/**` -- with the explicit purpose of
 implementing the normative authored assembly surface, and is the current
-recipient of the `Grass.Assembly.X86` author-surface obligation. Only the
-artifact and build owner remains unregistered, and `Grass.Emit` is its
-obligation rather than `g-construct`'s: `g-design:71` is explicit that raw
-erasure, admission, linking and byte writing stay in `Unsafe` and `Artifact`
-while the checked `Grass.Emit` facade belongs to the artifact owner.
+recipient of the `Grass.Assembly.X86` author-surface obligation. The artifact
+and build layer is g-build's, and `Grass.Emit` is its obligation rather than
+`g-construct`'s: `g-design:71` is explicit that raw erasure, admission, linking
+and byte writing stay in `Unsafe` and `Artifact` while the checked `Grass.Emit`
+facade belongs to the artifact owner.
+
+An earlier revision of this section said that owner remained unregistered, 224
+lines after section 3.0.1 of this same document recorded `Grass/Emit.lean` as
+owned by `g-build:10`. Both sentences were c-spike's. The contradiction survived
+because the resolution was appended as a new section instead of replacing the
+claim it falsified -- twenty lines above the correct statement, this document
+records that one of c-spike's own reports "named `c-x86:1`, which was accurate
+when read and stale when acted on". `g-design:183` found the stale half. The
+method that prevents a repeat is the one that ruling prescribes: delete the
+prose a finding falsifies rather than appending a correction beside it, and
+re-read the whole document after a ruling lands rather than only the section
+being edited.
 
 Assigned delivery and published scope are not the same thing, and one gap
 between them is worth recording because it will block a delivery rather than a
