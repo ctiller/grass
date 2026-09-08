@@ -40,4 +40,15 @@ example (tag : ExitTag) :
 example : ∃ exit, contract.findExit? (exitTag "failed") = some exit :=
   contract.exitForTag (exitTag "failed") (by decide)
 
+example (exit : ExitContract Nat) (member : exit ∈ contract.exits)
+    (hasTag : exit.tag = exitTag "failed") :
+    contract.findExit? (exitTag "failed") = some exit :=
+  contract.findExit?_eq_some_of_mem (exitTag "failed") exit (by decide) member hasTag
+
+example (left right : ExitContract Nat)
+    (leftMem : left ∈ contract.exits) (rightMem : right ∈ contract.exits)
+    (sameTag : left.tag = right.tag) : left = right :=
+  contract.exit_eq_of_mem_of_mem_of_tag_eq left right (by decide)
+    leftMem rightMem sameTag
+
 end Grass.Tests.CFG.Contract

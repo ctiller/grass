@@ -117,6 +117,60 @@ unfold the checker to recover exit-identity uniqueness. -/
     contract.WellFormed ↔ contract.exitTags.Nodup := by
   simp [WellFormed, wellFormed]
 
+private theorem exit_eq_of_mem_of_mem_of_tags_nodup
+    {exits : List (ExitContract State)} {left right : ExitContract State}
+    (unique : (exits.map ExitContract.tag).Nodup)
+    (leftMem : left ∈ exits) (rightMem : right ∈ exits)
+    (sameTag : left.tag = right.tag) : left = right := by
+  induction exits with
+  | nil => simp at leftMem
+  | cons head tail ih =>
+      rw [List.map_cons, List.nodup_cons] at unique
+      rw [List.mem_cons] at leftMem rightMem
+      rcases leftMem with rfl | leftMem
+      · rcases rightMem with rfl | rightMem
+        · rfl
+        · exfalso
+          apply unique.1
+          rw [sameTag]
+          exact List.mem_map.mpr ⟨right, rightMem, rfl⟩
+      · rcases rightMem with rfl | rightMem
+        · exfalso
+          apply unique.1
+          rw [← sameTag]
+          exact List.mem_map.mpr ⟨left, leftMem, rfl⟩
+        · exact ih unique.2 leftMem rightMem
+
+/-- `BlockContract.exit_eq_of_mem_of_mem_of_tag_eq` proves that two declared
+exits of a well-formed contract with the same tag are the same exit. -/
+theorem exit_eq_of_mem_of_mem_of_tag_eq
+    (contract : BlockContract State) (left right : ExitContract State)
+    (closed : contract.WellFormed)
+    (leftMem : left ∈ contract.exits) (rightMem : right ∈ contract.exits)
+    (sameTag : left.tag = right.tag) : left = right := by
+  apply exit_eq_of_mem_of_mem_of_tags_nodup
+  · exact (wellFormed_iff contract).mp closed
+  · exact leftMem
+  · exact rightMem
+  · exact sameTag
+
+/-- Under `BlockContract.WellFormed`, lookup of a declared exit is canonical:
+`BlockContract.findExit?_eq_some_of_mem` returns that exact member. -/
+theorem findExit?_eq_some_of_mem
+    (contract : BlockContract State) (tag : ExitTag)
+    (exit : ExitContract State) (closed : contract.WellFormed)
+    (member : exit ∈ contract.exits) (hasTag : exit.tag = tag) :
+    contract.findExit? tag = some exit := by
+  have declared : contract.declaresExit tag = true := by
+    simp [declaresExit, exitTags]
+    exact ⟨exit, member, hasTag⟩
+  obtain ⟨found, foundLookup⟩ := contract.exitForTag tag declared
+  have foundFacts := contract.findExit?_sound tag found foundLookup
+  have foundEq : found = exit :=
+    contract.exit_eq_of_mem_of_mem_of_tag_eq found exit closed
+      foundFacts.1 member (foundFacts.2.trans hasTag.symm)
+  simpa [foundEq] using foundLookup
+
 end BlockContract
 
 end Grass.CFG
