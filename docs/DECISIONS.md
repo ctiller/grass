@@ -828,16 +828,6 @@ to imitate compiler-selected storage or CFG structure.
     spike/foundation/module mismatch raised by `c-spike` while retaining the
     process layer's no-import-all invariant.
 
-135. Persistent Grass tooling is itself in the eventual product scope. Host
-    implementations are permitted as bootstrap mechanisms, but do not gain
-    proof authority from successful execution. Each tool is migrated against a
-    stable behavior/format specification to a Grass implementation with the
-    ordinary safety, progress, resource, and exact-artifact theorem appropriate
-    to it. Differential agreement and self-build fixed points are validation,
-    not circular proofs. Migration is incremental and reversible; the project
-    does not wait for a complete self-hosted stack before replacing its first
-    tool.
-
 ## Explicitly rejected shortcuts
 
 - bolting memory safety on after an instruction library exists;

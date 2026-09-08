@@ -196,6 +196,18 @@ profile, toolchain, verifier, option, and axiom-audit roots. Shard size is an
 empirical build choice: one declaration per module is not a mandate, and a
 custom sub-declaration kernel cache is not assumed.
 
+Grass is also the eventual implementation language for its correctness-critical
+repository tools and compiler. This is a staged bootstrap objective, not a
+claim about the initial implementation: a small native tool may establish the
+first working path, but its behavior is specified independently so a verified
+Grass program can replace it. Self-hosting narrows and continuously exercises
+the bootstrap trust root; it does not prove the seed compiler, Lean kernel,
+operating system, Git implementation, or hardware correct by circular appeal to
+an executable they helped produce. [VALIDATION.md](VALIDATION.md) owns the
+replacement and differential-validation gates. Tool reliability cannot wait
+for that replacement: bootstrap tools receive assurance proportional to the
+authority they exercise from their first deployment.
+
 ## 4. First-class specification, models, and assembly
 
 These artifacts have different jobs:
