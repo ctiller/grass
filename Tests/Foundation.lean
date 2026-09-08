@@ -66,6 +66,7 @@ def system : RelationalSystem spec.AuditEvent where
   extendsRefl := Nat.le_refl
   extendsTrans := Nat.le_trans
   stepExtends := fun transition => False.elim transition
+  terminalNoStep _ := fun {_ _ _ _} transition => False.elim transition
 
 def behavior : ProgramBehavior spec where
   system := system
@@ -216,6 +217,7 @@ def system : RelationalSystem Bool where
   extendsRefl := fun _ => trivial
   extendsTrans := fun _ _ => trivial
   stepExtends := fun _ => trivial
+  terminalNoStep terminal := False.elim terminal
 
 def emptyPrefix : system.ExecutionPrefix :=
   RelationalSystem.ExecutionPrefix.initial (system := system)
@@ -252,6 +254,7 @@ abbrev abstractSystem : RelationalSystem Bool where
   extendsRefl := fun _ => trivial
   extendsTrans := fun _ _ => trivial
   stepExtends := fun _ => trivial
+  terminalNoStep terminal := False.elim terminal
 
 abbrev abstractBehavior : ProgramBehavior spec where
   system := abstractSystem
@@ -279,6 +282,7 @@ abbrev highestSystem : RelationalSystem Bool where
   extendsRefl := fun _ => trivial
   extendsTrans := fun _ _ => trivial
   stepExtends := fun _ => trivial
+  terminalNoStep terminal := False.elim terminal
 
 abbrev highestBehavior : ProgramBehavior spec where
   system := highestSystem
@@ -373,6 +377,7 @@ abbrev indexedSystem : RelationalSystem Bool where
   extendsRefl := Nat.le_refl
   extendsTrans := Nat.le_trans
   stepExtends := fun transition => transition.2.1 ▸ Nat.le_succ _
+  terminalNoStep terminal := False.elim terminal
 
 abbrev indexedContinuation : indexedSystem.InfiniteContinuation 0 0 [] where
   stateAt := fun index => index
