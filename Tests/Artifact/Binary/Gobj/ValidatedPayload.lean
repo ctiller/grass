@@ -29,13 +29,17 @@ def sections : GobjSectionTable := ⟨Vec.singleton sectionEntry, by decide⟩
 def symbolName : U32LengthPrefixedBytes :=
   ⟨Vec.fromList [0x66], by decide⟩
 
+def symbolNominalName : GobjNominalId :=
+  ⟨⟨Vec.empty, by decide⟩, symbolName⟩
+
 def symbolEntry : GobjSymbol where
-  name := symbolName
-  binding := .exported
-  sectionIndex := 0
-  offset := 0
-  size := 2
-  extentFits := by decide
+  name := symbolNominalName
+  body := .defined {
+    binding := .exported
+    sectionIndex := 0
+    offset := 0
+    size := 2
+    extentFits := by decide }
 
 def symbols : GobjSymbolTable where
   entries := Vec.singleton symbolEntry
@@ -52,11 +56,20 @@ def relocationEntry : GobjRelocation where
 def relocations : GobjRelocationTable :=
   ⟨Vec.singleton relocationEntry, by decide⟩
 
+def imports : GobjImportManifest where
+  entries := Vec.empty
+  countFits := by decide
+  localTargetsUnique := by decide
+  canonicallyOrdered := by decide
+
 def tables : GobjLinkedTables where
   sections := sections
   symbols := symbols
   relocations := relocations
+  imports := imports
   symbolExtentsValid := by decide
+  symbolImportsValid := by decide
+  allImportsUsed := by decide
   relocationIndicesValid := by decide
   relocationLocationsValid := by decide
 
@@ -85,13 +98,17 @@ theorem relocationsFit :
   rw [length_writeGobjRelocationTable]
   decide
 
+theorem importsFit : (writeGobjImportManifest imports).length < 2 ^ 32 := by
+  decide
+
 def validated : StructurallyValidGobj :=
   tables.toStructurallyValid payload sectionsFit symbolsFit relocationsFit
+    importsFit
 
 example : parseStructurallyValidGobj (writeGobj validated.payload) =
     .ok validated := by
   exact parseStructurallyValidGobj_write tables payload sectionsFit symbolsFit
-    relocationsFit
+    relocationsFit importsFit
 
 example : parseStructurallyValidGobj (writeGobj validated.payload ++
     Vec.singleton 0xff) = .error .trailingInput := by

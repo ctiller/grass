@@ -57,12 +57,14 @@ def GobjLinkedTables.toStructurallyValid
     (sectionsFit : (writeGobjSectionTable tables.sections).length < 2 ^ 32)
     (symbolsFit : (writeGobjSymbolTable tables.symbols).length < 2 ^ 32)
     (relocationsFit :
-      (writeGobjRelocationTable tables.relocations).length < 2 ^ 32) :
+      (writeGobjRelocationTable tables.relocations).length < 2 ^ 32)
+    (importsFit : (writeGobjImportManifest tables.imports).length < 2 ^ 32) :
     StructurallyValidGobj where
   payload := payload.withLinkedTables tables sectionsFit symbolsFit relocationsFit
+    importsFit
   linkedTables := tables
   linkedExact := parseGobjLinkedTables_withLinkedTables payload tables
-    sectionsFit symbolsFit relocationsFit
+    sectionsFit symbolsFit relocationsFit importsFit
 
 /-- `parseStructurallyValidGobj_write` recovers the exact canonical witness. -/
 @[simp] theorem parseStructurallyValidGobj_write
@@ -70,15 +72,17 @@ def GobjLinkedTables.toStructurallyValid
     (sectionsFit : (writeGobjSectionTable tables.sections).length < 2 ^ 32)
     (symbolsFit : (writeGobjSymbolTable tables.symbols).length < 2 ^ 32)
     (relocationsFit :
-      (writeGobjRelocationTable tables.relocations).length < 2 ^ 32) :
+      (writeGobjRelocationTable tables.relocations).length < 2 ^ 32)
+    (importsFit : (writeGobjImportManifest tables.imports).length < 2 ^ 32) :
     parseStructurallyValidGobj
         (writeGobj
-          (payload.withLinkedTables tables sectionsFit symbolsFit relocationsFit)) =
+          (payload.withLinkedTables tables sectionsFit symbolsFit relocationsFit
+            importsFit)) =
       .ok (tables.toStructurallyValid payload sectionsFit symbolsFit
-        relocationsFit) := by
+        relocationsFit importsFit) := by
   exact parseStructurallyValidGobj_of (parseGobj_write _)
     (parseGobjLinkedTables_withLinkedTables payload tables sectionsFit
-      symbolsFit relocationsFit)
+      symbolsFit relocationsFit importsFit)
 
 /-- Successful structural parsing retains exactly the whole-input payload parse. -/
 theorem parseStructurallyValidGobj_payloadExact
