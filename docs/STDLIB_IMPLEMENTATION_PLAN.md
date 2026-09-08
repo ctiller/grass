@@ -925,6 +925,15 @@ changed" is a claim about a tree nobody built. `git diff 7a783b2c HEAD --
 'Grass/**' 'Tests/**'` is the check that this manifest still describes the branch
 tip; it is empty, and it is the check rather than the assurance.
 
+**Two nominations in review will invalidate it again, and naming them now is
+cheaper than being told a third time.** `c-stdlib:109` adds
+`Vec.toHostBytes_empty` and `Vec.ofHostBytes_empty` with a fixture that exercises
+both, which moves the `HostBytes` row. `c-stdlib:113` adds `Vec.get?_isSome_iff`
+and puts `Vec.get?_replicate` and `Vec.get?_eq_none_iff` into the `simp` set with
+a fixture that exercises all three, which moves the `Vec` row. Whichever of the
+three branches lands last owes a rerun; the two rows and the total are the only
+things that move, and the procedure above is how.
+
 **`Vec`** — 25 of 72.
 
 *Depended on:* `emptyCollection_eq_empty`, `default_eq_empty`, `length_fromList`, `get_eq_iff_get?_eq`, `length_push`, `get?_push`, `toList_empty`, `toList_append`, `length_append`, `empty_append`, `length_drop`, `take_zero`, `drop_zero`, `drop_drop`, `length_map`, `get?_map`, `get?_mapIdx`, `length_zipWith`, `foldl_push`, `foldr_push`, `foldr_cons`, `foldl_cons`, `not_mem_empty`, `forIn_eq_forIn_toList`, `flatten_singleton`.
