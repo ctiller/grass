@@ -312,7 +312,15 @@ def prologue (l : Layout) : Prologue := ⟨l.placed.map PlacedOp.op⟩
 def offsets (l : Layout) : List Byte := l.placed.map PlacedOp.codeOffset
 
 /--
-A layout the unwinder will read correctly.
+A layout whose three conditions hold among themselves.
+
+This said "a layout the unwinder will read correctly", which is the claim
+`g-design:179` refuted one level up, and this is where that claim came from.
+The conditions are internal: they relate the offsets to each other and to
+`SizeOfProlog`, and none of them relates any of it to an instruction. The
+section below says so at length and the counterexamples in
+`Tests/ABI/Win64/PrologueRealization.lean` exhibit layouts satisfying all three
+and mis-unwinding.
 
 Three conditions, each of which a plausible generator gets wrong:
 
@@ -637,11 +645,34 @@ instance (f : FrameSpec) : Decidable f.declared :=
   inferInstanceAs (Decidable (_ ≠ _))
 
 /--
-An `UNWIND_INFO` that the Windows unwinder will read as intended.
+An `UNWIND_INFO` whose fields are coherent with each other.
 
-The proof fields are the point. Each rules out a state that is
+**Not a claim that it describes any particular function.** This said "that the
+Windows unwinder will read as intended", which `g-design:179` refuted using
+this file's own contents: the strongest source-related field here is
+`layout.WellFormed`, and `Layout.WellFormed` accepts code offsets and a
+`SizeOfProlog` unrelated to any emitted instruction --
+`Tests/ABI/Win64/PrologueRealization.lean` exhibits two such layouts. So
+`toBytes` can serialise internally coherent metadata that is incompatible with
+the function it is attached to.
+
+`Layout.Realizes` is the closest thing to the missing check and is not a field
+of this structure, deliberately: it covers three of nine operations, assumes
+the prologue is exactly its unwind-relevant instructions laid contiguously,
+and is indexed by a reconstructed `UnwindOp` list rather than by the authored
+function. Promoting it to a field would make this type refuse most real
+prologues while still not relating them to their machine source.
+
+What would close it is a dependent certificate indexed by the authored
+function and its exact `.pdata`/`.xdata` records, proving the declared offsets,
+`SizeOfProlog`, frame establishment, function range and relocation targets
+follow from that function's instructions. That needs an emit layer, which does
+not exist; see `g-design:179` for the shape asked for.
+
+The proof fields below are still the point, and each rules out a state that is
 representable in the C struct, produces no error from any tool, and unwinds
-wrongly:
+wrongly. They are conditions among the metadata's own fields, not conditions
+relating it to code:
 
 * `layoutWellFormed` -- the offsets ascend and stay inside the prologue.
 * `framePointerAgrees` -- *every* `UWOP_SET_FPREG` in the prologue matches
@@ -676,7 +707,9 @@ structure UnwindInfo where
   frame : FrameSpec
   /-- What follows the code array. -/
   tail : UnwindTail
-  /-- The layout is one the unwinder will read correctly. -/
+  /-- The offsets ascend, stay inside `SizeOfProlog`, and avoid the placements
+  `PlacedOp.OffsetPlaced` refuses. Internal coherence only: it does not relate
+  them to any instruction. See this structure's docstring. -/
   layoutWellFormed : layout.WellFormed
   /-- Every establishing operation matches both of the header's frame nibbles. -/
   framePointerAgrees :
