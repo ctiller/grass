@@ -5047,682 +5047,160 @@ the first's carrier, is a chain and is not forbidden. That is a genuine coalesce
 chain rather than a half-done merge — `EscrowLedger.no_cycle` is what keeps it
 finite — and §3 appears to permit it. Recorded rather than ruled on.
 
-### 10.132 Three of the four were reachable; the fourth cannot be
+### 10.132 A root cannot die, and a step into a world is not a run that reaches it
 
-**Superseded by §10.133, which refutes this entry's headline and one of its two
-open questions.** Left standing rather than edited, because what it got wrong is
-the point of the next entry: it is another entry in which the fixture, not the
-prose, was right.
+§10.129 left one thing owed: four transitions whose before-world no step reaches,
+and a guess that four `processStep`s would settle it. The guess was wrong about
+what it would buy, and running it down took the whole of this entry.
 
-§10.129 closed §10.89's check and left one thing owed: the two endpoint deaths
-and the two instance endings are steps *from worlds no step reaches*, and
-"reaching those before-worlds by steps is owed, and is a bigger job: it wants a
-`processStep` that puts an instance in each state". That guessed the shape of the
-answer. Three of the four are that; the fourth is a theorem in the other
-direction, and finding out which was which is the entry.
+**A root cannot die.** `ProcessLifecycle.died` is written by exactly one of the
+24 constructors — `childDied` — and that one carries `wasChild`, which asks the
+instance to record a current parent. `NetworkTransition.dying_was_supervised` is
+that over the family: a step that *kills* an instance found it recording a
+current parent. The proof splits on the transition's own `scope` at
+`.instanceState kind slot`, discharges the negative branch with `touchesOnly`,
+and gives eleven separate reasons in the positive one.
 
-**The three.** `Tests/Process/PreservationFixtures.lean` now has a step into each.
-`sentWithDeadReceiver` is one `childDied` from `sentWithLiveReceiver`.
-`holding waitingOnATick` is one `processStep` from `holding countingOnALog` —
-`countdown`'s `log` case is the one that consumes one occurrence and issues
-another, so the `tick` in the bag afterwards is one the instance issued.
-`holding settling` is one `processStep` from `holding oneToGo`, by an
-*interruption* rather than a settled tick: both reach state zero, but a settled
-tick emits a `beep`, so its after-world is `holding settling` with a pending
-trace and not `holding settling`. Reaching a hand-built world *on the nose* is a
-tighter constraint than reaching one like it, and it is the one that picks the
-event.
+Note what it does not say, because each reading was believed and refuted:
 
-**The fourth is unreachable, and the reason is a law.** `sentWithDeadSender`
-holds `World.rootListener` — parentage `.root` — in the `.died` state. `.died` is
-written by exactly one constructor of the 24: `childDied`. And `childDied`
-carries `wasChild`, which asks for a *current* parent. So no step of any plan
-puts a root in that state.
+* Not "a dead instance has a current parent". `Detaches` has no liveness
+  requirement and pins the lifecycle, so a dead child detaches into a dead
+  parentless one — `a_corpse_may_be_orphaned`. Nothing is killed by that step.
+* Not "no run reaches a dead root". That needs an induction from
+  `ExactInitialNetwork`, below.
+* And `wasChild` says the instance *records* a parent, not that the parent
+  exists: `the_live_receiver_is_a_child` discharges it in a world holding no
+  listener at all. `ParentageValid` is what checks the record.
 
-`NetworkTransition.dying_was_supervised` is that, stated over the family:
-a step that leaves a live instance dead found it with a current parent. It is
-`moving_the_ledger_ends_an_instance`'s sibling and shares its shape — but where
-that one splits on a fragment no constructor but an ending names, this splits on
-`.instanceState kind slot`, which eleven constructors can name, so the split is
-on the transition's own `scope` at that fragment and the negative branch is
-`touchesOnly`. The eleven positive branches are eleven different reasons: a
-`processStep` leaves it live, a `spawn` found the slot empty, a `restart` found
-it already ended — the landed proof closes that branch on `nowLive` instead,
-per §10.133 — a `join` leaves it gone, a `detach` copies the lifecycle
-across, five endings write an ending that is not `.died`, and `childDied` hands
-back its own `wasChild`.
+**A step into a world is not a run that reaches it**, and conflating the two is
+what made the first version of this entry wrong twice. All four before-worlds now
+have a step into them — `theReceiverIsKilledStep` is a `childDied`,
+`theJoinIntoTheDeadSender` a `join` at a *connection* slot whose scope never names
+the listener, and `theLogStep` and `theLastTickStep` are `processStep`s — and none
+of the worlds in that section is a world of any run. Both facts are true at once
+and neither implies the other. It was first recorded here as "three of the four
+are reachable; the fourth cannot be"; both halves were false.
 
-**What this does to §10.88's distinction.** §10.129 said a step from an
-unreachable world is not a step of any run — `Tests/Process/PreservationFixtures.lean`
-puts it as "a step from an unreachable world is a real step, and it is not a step
-of any run" — and left it implicit that the unreachability was a fact about the
-corpus. For three of the
-four it was. For the fourth it is a fact about the family, and
-`sentWithDeadSender_is_no_world_of_a_run` says so with the theorem rather than
-by not having built the chain. `theSenderDeathStep` satisfies §10.89's check and is a
-step of no run, both at once; this is where the two come apart.
-
-**Two things it opens.**
-
-*An orphan cannot die either.* `ProcessParentage.currentParent` is `none` for
-`.root` **and** for `.detached`, so `dying_was_supervised` says a detached child
-is as unkillable as a root. That is not an artefact of the proof —
-`childDied.wasChild` asks for a current parent and `Detaches` removes exactly
-that — and it may well be wrong: §3 records the incarnation a process was detached from "without granting that
-incarnation any continuing parent authority", which is an argument that nobody
-may *cancel* it, not that nothing may kill it. A process whose supervisor let it go and which then dies of
-its own accord has no constructor. Whether that is intended is §3's question and
-is recorded here unruled.
-
-> **False, and refuted in §10.133.** A dead orphan is one `detach` away from a
-> dead child, because `Detaches` has no liveness requirement. The real question
-> is whether a supervisor may let go of a corpse, which is `agent-bus`
-> `c-process:103`.
-
-*A restart can delete the root.* `Restarts.restartsAChild` requires the *new*
-incarnation to have a current parent, and nothing requires the *old* one to have
-had one — so a restart at the root's slot replaces the root with a child, and
-`LogicalProcessNetworkCore.RootUnique` does not notice, being uniqueness and not
-existence: a network with no root passes it. `Spawns.spawnsAChild` was added to
-stop a spawn *installing* a root; nothing stops a restart *removing* one. It does
-not land at `serverPlan` — `serverTopology.maySpawn` permits only
-listener-spawns-connection, so no permitted parent exists for the root's role and
-`ParentageValid` refuses the world — so this is a gap in the family rather than a
-constructible attack in this corpus, and it wants the same kind of ruling §10.104
-got rather than a unilateral field.
-
-### 10.133 A step into a world is not a run that reaches it
-
-§10.132 is refuted in its headline and in one of its two open questions, by a
-fresh no-context adversarial reviewer who built machine-checked witnesses for
-both rather than arguing. Three entries out of the last four — §10.130, §10.131 and this — where what was
-wrong was the prose and what caught it was a fixture. The
-pattern is worth naming: each time, the sentence that failed was the one
-generalising from what had just been built to what it meant.
-
-**The headline was wrong.** §10.132's heading called three of the four reachable
-and its body said "Three of the four are that", on the strength of having built a
-step into each of three before-worlds.
-Every one of those three *predecessor* worlds has an empty root slot.
-`Ending.holding` maps the listener to `none` by construction, and
-`sentWithLiveReceiver` — which I wrote — is `sent` with the root deleted by hand,
-while `sent_holds_an_unkilled_root` in the same commit proved `sent` has one. So none
-of the six worlds is a world of a run, and the gap had moved back exactly one
-step rather than closing. §10.129 had said precisely this failure out loud, in the fixture file's words:
-"a step from an unreachable world is a real step, and it is not a step of any
-run". The entry that quoted it committed it.
-
-**What closes it is an invariant over executions.**
+**What settles it is an invariant over executions.**
 `ProcessPlan.UnkilledRootAt` says a slot holds an instance with no current parent
-that has not died; `start_holds_an_unkilled_root` gets it from
-`ExactInitialNetwork.rootParentage` and `rootRunning`; and
-`execution_holds_an_unkilled_root` carries it across a whole `StepsTo`. The seven
-worlds are then refused by name rather than by not having a chain built to them,
-`sentWithDeadSender` included — it holds a parentless instance, and fails the
-*other* conjunct.
+that has not died. `start_holds_an_unkilled_root` gets it from
+`ExactInitialNetwork`; `execution_holds_an_unkilled_root` carries it across a
+whole `StepsTo`, taking `WellFormed` alongside because `slotsAgree` is what
+supplies the kind agreement `died_cast` needs. Each fixture world is then refused
+by name, with a `no_run_reaches_*` corollary stating the same thing about
+executions rather than leaving the inference to a reader.
 
-**And the carrying step is where §10.132's second open question became a
-theorem.** `NetworkTransition.parentless_slot_survives` concludes a disjunction:
-either the slot still holds a parentless instance, or the step was a
-`restart` *at that slot*. So restart is not one way to lose the root, it is the
-only way — which is a considerably stronger statement than §10.132's suspicion,
-and it is what makes `no_restart_at_the_root_slot` sufficient at `serverPlan`.
-Stating the exception as a disjunct rather than as a hypothesis is what turned it
-from a caveat into content.
+**And the carrying step turned a suspicion into a theorem.**
+`parentless_slot_survives` concludes a *disjunction*: the slot still holds a
+parentless instance, or the two worlds stand in `Restarts` at that slot. So
+restart is not *a* way to lose the root, it is the *only* way — which is why
+`no_restart_at_the_root_slot`, discharged from `serverTopology.maySpawn`
+permitting no parent for the listener's role, is enough here.
 
-**The orphan question was wrong too, and the corrected one is sharper.** §10.132
-said a detached child is "as unkillable as a root". The reviewer built the
-counterexample: `Detaches` has *no liveness requirement* — `wasAttached` asks
-only for a current parent — and `identityPreserved` pins the lifecycle across the
-step, so a `.died .attached` child detaches into a `.died .detached` one.
-`Tests/Process/PreservationFixtures.lean`'s `a_corpse_may_be_orphaned` is that
-step, two steps from a world holding a live child.
+**What the family still permits, unruled.** `Restarts.restartsAChild` constrains
+only the *new* incarnation, so a restart at the root's slot replaces the root
+with a child and the network afterwards has no root;
+`LogicalProcessNetworkCore.RootUnique` does not notice, being uniqueness and not
+existence. It is not constructible at `serverPlan` — no permitted parent exists
+for the root's role — so it is a gap in the family rather than an attack here.
 
-`dying_was_supervised` is untouched by this: a detach kills nothing. What the
-witness kills is the *reading* — "a dead instance has a current parent" is false
-of the network even though "a step that kills found a current parent" is true of
-every step. That distinction is the whole of the finding, and the docstring now
-carries it. The live question for §3 is whether a supervisor may let go of a
-corpse at all: `Joins` collects a *terminated* child and nothing collects a
-*died* one, so detach may be the intended disposal route, in which case only the
-prose was wrong. `agent-bus` `c-process:103` asks it, correcting `c-process:80`,
-which had asked the wrong question on the record.
+### 10.133 What the corpse questions leave open
 
-**Two smaller corrections from the same review.** "There is no chain" into
-`sentWithDeadSender` was literally false — a `join` at a *connection* slot
-reaches it from a world already holding the dead root, since its scope never
-names the listener. And `childDied.wasChild` says the instance *records* a
-current parent, not that the parent exists: the same commit's
-`the_live_receiver_is_a_child` discharges it in a world holding no listener at
-all. `ParentageValid` is what checks a recorded parent against the topology; the
-field checks only that one is recorded.
+Two questions about who may die, both found by proving something rather than by
+reading, and both `g-design`'s rather than mine to answer. `agent-bus`
+`c-process:103` asks them, correcting `c-process:80`, which asked the wrong one.
 
-**What the theorem's hypothesis cost.** `dying_was_supervised` originally assumed
-the before-instance was `Live`. That excluded by assumption the case where a
-terminated instance is later killed, which is exactly the kind of hypothesis this
-ledger keeps finding does the work a proof should. It now assumes only that the
-instance was not *already* dead, every branch still goes through — `restart` now
-closes on `nowLive` rather than `wasEnded`, and `detach` carries the death
-backwards rather than liveness forwards — and the weaker form is what
-`parentless_slot_is_unkilled` needs — a lemma §10.135 later deleted, so the name
-is here as history rather than as a citation.
+**May a supervisor detach a corpse?** `Detaches.wasAttached` asks only for a
+current parent and `identityPreserved` pins the lifecycle across the step, so a
+dead child detaches into a dead instance with no current parent.
+`a_corpse_may_be_orphaned` is that step. §3 records the incarnation a process was
+detached from "without granting that incarnation any continuing parent
+authority", which is an argument that nobody may *cancel* it, not that nothing
+may kill it. `Joins` collects a *terminated* child and nothing collects a *died*
+one, so detach may be the intended disposal route — in which case the family is
+right and only the prose was wrong. `c-process:80` claimed the state was
+unreachable, which is false, and that claim is what `c-process:103` retracts.
 
-### 10.134 The correction left the sentences it corrected in place
+**And can a run hold a dead orphan?** Nothing here rules it out.
+`no_run_reaches_deadOrphanWorld` refuses one hand-built world, and it refuses it
+because that world's *root slot is empty* rather than because of anything about
+the corpse — `UnkilledRootAt` constrains only the slot it is applied at. A run
+reaching a world that holds a dead orphan at a connection slot with the root
+intact is not excluded by anything in this corpus.
 
-A second fresh reviewer, no context and no sight of the first, went over §10.133's
-own commit. It could not break the Lean — it tried, and reports so — and found
-eight things, every one of them prose outrunning its theorem. Four of those are
-*contradicted by theorems in the same commit*, which is a worse failure than the
-one §10.133 was correcting, because this time the refutation was already in the
-file.
+### 10.134 A clause guarded by an equation nothing inhabits
 
-**The commit fixed the section headers and not the declarations.**
-`theReceiverIsKilledStep`'s docstring still said "which is what makes
-`sentWithDeadReceiver` a world of a run"; `theLogStep`'s and `theLastTickStep`'s
-still said their before-worlds were worlds of a run. Further down the same file,
-`sentWithDeadReceiver_is_no_world_of_a_run` and `holding_is_no_world_of_a_run`
-say the opposite, added by the same commit.
+The most transferable finding of this milestone, and it arrived inside the entry
+written to refuse two others.
 
-> **And the commit that reported fixing these fixed two of the three.**
-> `theReceiverIsKilledStep`'s survived another round. §10.135. The ledger entry
-knew and the source did not, which is the exact shape §10.131 recorded — a
-docstring contradicting a recorded fact without noticing — and it recurred inside
-the entry written to fix it.
+`UnkilledRootAt`'s death clause was first written as
+`∀ (reason) (sameKind : incarnation.kind = kind), (sameKind ▸ incarnation.lifecycle) ≠ .died reason`.
+`LogicalProcessNetworkCore.instances` returns a `ProcessInstance` whose `kind`
+field is tied to the slot by nothing short of `WellFormed.slotsAgree`, so at a
+world storing an incarnation of the wrong kind the guard is uninhabited and the
+clause says nothing. Local adversarial review built that world and proved
+`UnkilledRootAt` held at one whose root slot contained a corpse.
 
-The reviewer also wrote the missing inference as Lean, which is the right answer
-to "why did the reader have to make it": `no_run_reaches_sentWithDeadSender`,
-`no_run_reaches_sentWithDeadReceiver` and `no_run_reaches_a_holding_world` are
-now declarations rather than steps a reader takes. A `¬ UnkilledRootAt w` is one
-application away from "no run reaches `w`", and leaving that one application to
-prose is how both rounds went wrong.
-
-**And `UnkilledRootAt`'s third clause was vacuous.** This is the substantive one.
-It was written as
-
-> `∀ (reason) (sameKind : incarnation.kind = kind), (sameKind ▸ incarnation.lifecycle) ≠ .died reason`
-
-and `LogicalProcessNetworkCore.instances` returns a `ProcessInstance topology`
-whose `kind` field is *not* tied to the slot's index by anything short of
-`WellFormed.slotsAgree`. So at a world storing an incarnation of the wrong kind,
-the guard is uninhabited and the clause says nothing — the reviewer built the
-world and proved `UnkilledRootAt` holds at one whose root slot contains a corpse,
-using this branch's own `orphanedDeadConnection`.
-
-A clause guarded by an equation that may be uninhabited is a clause nothing
-enforces, which is §10.105's generality-by-vacuity in its smallest form, and it
-was introduced by the entry that had just refused two others. The fix is not to
-add the guard as a conjunct but to *drop the transport*:
+**The fix is to drop the transport, not to add the guard as a conjunct.**
 `ProcessInstance.lifecycle` is already indexed by the incarnation's own kind, so
-`incarnation.lifecycle ≠ .died reason` is well-typed with no equation at all.
-`ProcessLifecycle.died_cast` bridges it to
-`NetworkTransition.dying_was_supervised`, which is stated at the slot's kind, and
-`execution_holds_an_unkilled_root` now carries `WellFormed` alongside — through
-`wellFormed_preserved` — so that `slotsAgree` supplies the bridge where the proof
-needs it. `parentless_slot_is_unkilled`, which combined the two halves in the
-transported form, was deleted in §10.135 rather than repaired: nothing consumed
-it, and the repair would have been to give it the same `WellFormed` hypothesis
-the theorem that does the work already has. Well-formedness is where the kind agreement belongs; the invariant
-should not have been asserting it by accident.
+`incarnation.lifecycle ≠ .died reason` is well-typed with no equation at all;
+`ProcessLifecycle.died_cast` bridges it to `dying_was_supervised`, which is
+stated at the slot's kind, and `execution_holds_an_unkilled_root` carries
+`WellFormed` so `slotsAgree` supplies the bridge where the proof needs it. Kind
+agreement belongs to well-formedness; the invariant should not have been
+asserting it by accident.
 
-**Three dangling declaration names, and a gate that cannot see them.**
-`every_run_holds_the_root`, `a_dead_root_is_reached_by_no_step` and
-`sent_holds_a_live_root` were all cited and none exists — two of them were names
-the same commit *renamed*. `Tools/DocstringAudit.py` exits zero on all three,
-because its identifier check fires only inside a sentence carrying a strong-claim
-word. This is the third time a citation of a nonexistent declaration has reached
-a branch here — §10.105 found five, §10.122's audit pass found nine after fifty
-missing imports were added to `Tools/DeclNames.lean` so the gate could see the
-subtree, and this is three — and the pattern is
-specific enough to be worth a gate: a backticked lower-camel name in a docstring
-is either a declaration or a typo, whatever sentence it sits in. That is
-`Tools/`'s owner's call and is reported rather than assumed.
+A companion, `parentless_slot_is_unkilled`, kept the transported form, had no
+consumer, and was cited as load-bearing by a theorem that did not use it. It was
+**deleted rather than repaired**: repairing it would have produced a lemma
+carrying the same `WellFormed` hypothesis the working theorem already has, that
+still nobody calls.
 
-**And two miscounts.** "Eleven times" for seven uses of `parentless_transported`,
-and "nine constructors pin the parentage" for seven — the second contradicting
-`dying_was_supervised`'s own correct count of eleven constructors that can name
-`.instanceState`. Both were numbers written from memory of the shape rather than
-from the file.
+**Four rules, in final form.** Eleven adversarial rounds over this work found
+zero defects in a proof and a defect in prose every time, which measures which
+artefacts have a gate rather than which are sound.
 
-**What the round did not break**, recorded because a clean result is evidence
-too: `no_restart_at_the_root_slot` survived an independent reconstruction from four of
-`Restarts`' ten fields and `serverTopology.maySpawn`; the invariant is
-non-vacuous, since `withRoot_is_a_start` inhabits `ExactInitialNetwork` and
-`serverTopology.InstanceId .listener` is `Unit` so `start.rootSlot` really is
-`()`; `noRestart`'s quantifiers are correctly scoped; the weakened
-`notAlreadyDead` hypothesis is strictly implied by `Live`, so the theorem did get
-stronger; and `a_corpse_may_be_orphaned` is a genuine `Detaches` with all three
-fields checked against the structure.
+* A count is safe only where it describes something **closed** — a structure's
+  fields, a fixed inductive's constructors. Beside a block of theorems or a list
+  of entries it is a defect with a delay fuse, and measuring it correctly only
+  sets the fuse accurately. Section headers are counts too.
+* After a fix falsifies a claim, `git grep` the **claim's wording**, not the
+  declaration's name — the paraphrases do not share the name. And that does not
+  find the **premise**: the broader, differently-worded sentence the refuted one
+  was derived from, which survives every search for the refutation.
+* A sentence a reviewer had to refute by writing Lean **should become the Lean**.
+  `a_corpse_may_be_orphaned`, `theJoinIntoTheDeadSender` and
+  `Tests/Process/AssertionFixtures.lean`'s `leakyAgreement` are all that.
+* Resolve every backticked Lean-style name, **prefix included**, against the
+  declaration set before committing. `Tools/DocstringAudit.py` checks identifiers
+  only inside sentences carrying a strong-claim word, which `agent-bus`
+  `c-process:106` reports to the gate's owner.
 
-### 10.135 The entry reporting corrections that did not land reported one that did not land
+None of the four catches the **scope word** — "every world in this file" where
+"this section" was true. Nothing mechanical has caught one yet.
 
-Third fresh reviewer, third round, no sight of the other two. The Lean survived
-again — it verified the cluster is non-vacuous end to end, building a real run
-`.more .still theSendStep` from `withRoot_is_a_start` and firing the invariant on
-it, and confirmed every one of §10.134's counts. What it found was nine more
-things, and the first is the worst thing in this whole sequence.
+### 10.135 A role that may write no region owes nothing
 
-**§10.134 reported a fix that did not land, in the entry whose subject is fixes
-that did not land.** §10.134 named three docstrings claiming a world was a world
-of a run, and the commit message said "Corrected". Two of the three were.
-`theReceiverIsKilledStep`'s was not: the commit rewrote the docstring on the
-*neighbouring* declaration and left this one saying "which is what makes
-`sentWithDeadReceiver` a world of a run", eighty-three lines above the theorem
-refuting it. So the ledger asserted a correction the diff does not contain, which
-is the same failure one level up, and it is the fourth consecutive round in which
-the prose was wrong and the Lean was not.
+*(A sibling branch, `agent/c-process/docstring-claims-for-the-strict-gate`, adds
+entries numbered from §10.140; the gap is deliberate and closes when it lands.)*
 
-The lesson is mechanical rather than moral. Three of these four rounds found a
-stale sentence that a *targeted* re-read would have caught and a from-memory edit
-did not, and the fix each time was two words. §10.129 recorded the same thing
-about a check that is four lines per case: the cost of running it is not the
-problem, remembering to is. So the discipline this adopts is `git grep` for the
-claim rather than for the declaration — searching for "world of a run" would have
-found all three in one pass, and searching for the declaration names found two.
+`sharedWritesAdmitted_of_no_writes` was cited by `StepsLocally.sharedWritesAdmitted`'s
+own docstring under the bare name and by `Grass/Process/Network/Plan.lean`'s note
+on `sharedUpdate` under a `StepsLocally.` prefix that resolves to nothing, and
+declared under neither — my own commit `c373340`, alongside the field
+`agent-bus` ruling `g-design:84` asked for.
 
-**And the vacuous form survived in the lemma nothing consumed.** §10.134 removed
-the uninhabited-guard shape from `UnkilledRootAt` and left it standing in
-`parentless_slot_is_unkilled`, whose conclusion still transported the lifecycle
-across `now.kind = kind` and which therefore said nothing at exactly the worlds
-the fix was made for. The reviewer machine-checked both halves: the transport-free
-form is *false* of the branch's own `orphanedDeadConnection`, and the transported
-form is *true* of it.
+It is declared rather than the citations deleted, because `g-design:84` asked for
+it in the same breath as the field: "For a kind with no writable shared region,
+derive the stuttering contract automatically; add no author burden." A role that
+may write nothing supplies `writesPermitted` and gets `sharedWritesAdmitted`
+from it.
 
-It is deleted rather than repaired, and the reason is the finding next to it:
-`execution_holds_an_unkilled_root`'s docstring cited it as the lemma applied at
-every step, and the proof does not use it at all — it spends
-`parentless_slot_survives` and `dying_was_supervised` separately, bridged by
-`slotsAgree` and `died_cast`. A declaration with no consumers, in the vacuous
-form the previous entry says it removed, cited as load-bearing by a theorem that
-does not consume it, is three defects in one place. Repairing it would have meant
-giving it the `WellFormed` hypothesis the working theorem already carries, to
-produce a lemma still nobody calls.
-
-**One more inference written down instead of asserted.**
-`dying_was_supervised`'s docstring said of the dead-orphan world "at `serverPlan`
-it does not [reach one]", with nothing proving it —
-`no_run_reaches_deadOrphanWorld` is now that, one line, and the sentence points
-at it. The same remedy §10.134 adopted for the other worlds, applied to the one
-it missed. The reviewer also noted the sentence contradicted itself: "this corpus
-does not answer it", immediately followed by an answer.
-
-**And four smaller ones, all counts or attributions.** §10.129's forward
-reference still restated §10.132's refuted headline unmarked and repeated the
-"no step of any plan reaches it" claim that §10.133 itself calls literally false —
-the banner went on §10.132 and not on the sentence a reader meets first.
-`not_dead_where_nothing_moved`'s docstring still described the `Live` hypothesis
-and the `live_cast` it stopped using. "The seven refusals below are read off"
-this theorem — four of them are not, and would stand if it were deleted. And
-§10.134 said `Restarts` has four fields; it has ten, four of which the proof
-uses. That is a miscount inside the entry reporting two miscounts, which is
-becoming the shape of this sequence rather than a coincidence.
-
-**What survived, again.** Non-vacuity end to end, with an inhabited start and a
-real execution; all three `UnkilledRootAt` conjuncts individually falsifiable at
-fixture worlds; `Restarts` inhabited at `Tests/Process/RestartFixtures.lean`, so
-`no_restart_at_the_root_slot` refuses something the corpus can build and
-`parentless_slot_survives`' right disjunct is not a dead branch; the `WellFormed`
-threading genuinely derived rather than assumed at each world; all 109 backticked
-identifiers in the new docstrings resolving; and `c-process:103` resolving to the
-event §10.133 says it is.
-
-### 10.136 Four rounds, no Lean defect, and every count written from memory was wrong
-
-Fourth fresh reviewer. The Lean survived a fourth time — it re-derived the
-constructor arithmetic, confirmed every hypothesis of every new theorem is
-jointly satisfiable, and verified §10.135's claims about this branch's own git
-history with `git show`. (An earlier version of this sentence also claimed the
-round had checked every new declaration for a consumer. A sixth round found that
-false of the branch: most of the unreferenced ones are fixtures whose existence
-is the deliverable, but `sentWithLiveReceiver_is_no_world_of_a_run` had no
-`no_run_reaches_*` sibling while its three peers did, and now has one.)
-More defects, all prose, and two of them say the same thing about how this went
-wrong. (This entry originally opened with a number. A fifth round found the
-number wrong — it had dropped the one item the commit fixed in `UnkilledRootAt`'s
-own docstring, the "two claims" correction below. The entry claiming every number
-in it was measured got its own headline count wrong, so the number is gone rather
-than corrected, which is what the rule below actually prescribes.)
-
-**The commit that fixed a miscount introduced two more, in the sentence it was
-rewriting.** §10.135 corrected "the seven refusals below are read off this
-theorem" to "the three `no_run_reaches_*` … the four `*_is_no_world_of_a_run`".
-Both new numbers were wrong on arrival, because the same commit added
-`deadOrphanWorld_is_no_world_of_a_run` and `no_run_reaches_deadOrphanWorld`
-further down the same file, and a later one added
-`no_run_reaches_sentWithLiveReceiver`. The docstring that carried them states no
-number at all now, which is the only durable fix: a count in prose beside a
-growing list is a defect with a delay fuse, and a seventh round found this very
-sentence had acquired one.
-
-That is the third round in a row containing a miscount, and the second in which
-the miscount is *inside the correction of a miscount*. The pattern is specific
-enough to be a rule now, and it is not "be careful": **do not write a count you
-have not just measured, and prefer a sentence with no count in it.** Every number
-about the *files* in this entry was produced by `grep -c` immediately before
-writing it. The one number that was not — how many findings the round itself had
-— is the one the next round found wrong, which is the rule proving itself the
-hard way.
-
-**And "like every other world in this file" was false of the file.** The docstring
-on `no_run_reaches_deadOrphanWorld` — a declaration added *because* the previous
-round objected to an unproved reachability aside — closed with a reachability
-claim of its own, and the reviewer refuted it in two lines using this file's own
-`withRoot_is_a_start` and `theSendStep`. §10.135 boasts of that exact run one
-page earlier. So the remedy for an over-general sentence was a declaration whose
-docstring over-generalised.
-
-**The related finding is sharper and is the one worth keeping.**
-`dying_was_supervised`'s docstring said "whether any run reaches such a world …
-at `serverPlan` the answer is no", pointing at `no_run_reaches_deadOrphanWorld`.
-But that theorem refuses one hand-built world *because its listener slot is
-empty*, and says nothing whatever about the corpse: `UnkilledRootAt` constrains
-only the slot it is applied at. **Nothing in this corpus rules out a run reaching
-a world that holds a dead orphan at a connection slot with the root intact**, and
-the sentence now says so. That is a real open question about the family rather
-than a wording fix, and it is the substance behind `agent-bus` `c-process:103`'s
-request for a ruling on detaching a corpse.
-
-**Four smaller ones.** §10.135's own edit left a duplicated paragraph on
-`not_dead_where_nothing_moved` — the previous paragraph rewritten and the old one
-not removed, which is §10.134's title recurring inside the commit reporting that
-class. The surviving text also said the lemma is used by "every constructor whose
-scope does not name this slot"; it has one call site, in the single branch taken
-before the constructor split. §10.133 still cited
-`parentless_slot_is_unkilled` in the present tense two entries after the branch
-deleted it, without the marker this ledger puts on every other superseded claim.
-And `UnkilledRootAt`'s own docstring called it "two claims" when it has three
-conjuncts, in the one place where the third does the work.
-
-**One dangling citation of my own, from before this branch.** The mechanical
-sweep this entry's rule prescribes — every backticked Lean-style name in every
-file the branch touches, resolved against the declaration set — turned up
-`sharedWritesAdmitted_of_no_writes`, cited by `StepsLocally.sharedWritesAdmitted`'s
-own docstring and by `Grass/Process/Network/Plan.lean`'s note on `sharedUpdate`,
-declared by neither, and landed in that state by my own commit `c373340`. A fifth
-round then found that declaring it had fixed only one of the two citations: the
-other named it under the `StepsLocally` prefix, which resolves to nothing. A
-sixth round found the repair of *that* half-reported, since one of the two sites
-had been left with the bare name — harmless, because the bare name resolves, but
-a claim about the source that one `grep` refutes. Both now carry the
-`ProcessPlan.` prefix. It is declared
-here rather than the citations deleted, because the content is real: a role that
-may write no region discharges `sharedWritesAdmitted` from `writesPermitted`
-alone, which is what `g-design:84`
-asked for in the same breath as the field itself: "For a kind with no writable
-shared region, derive the stuttering contract automatically; add no author
-burden". An earlier version of this sentence attributed that constraint to
-decision 134, which is about the public `SpecProcess` surface and the module
-facade and carries nothing of the kind; a sixth round found the correction had
-been appended to the misattribution rather than replacing it, which is §10.134's
-title recurring inside this entry.
-`Tools/DocstringAudit.py` cannot see citations like this and that gap is reported
-to the gate's owner.
-
-Declaring it is only half the repair, and the other half is the check this
-sequence keeps failing: a lemma with no consumer and an unsatisfiable hypothesis
-would be exactly the shape §10.105 refuses.
-`Tests/Process/PreservationFixtures.lean`'s `the_connection_writes_nothing`
-inhabits the hypothesis at a real role — `serverTopology`'s connection may write
-neither region — and `theConnectionOwesNoValueBound` is the consumer. Both were
-written because the earlier rounds would have asked, which is the point of
-running them.
-
-**What the rounds up to this one had established, which is worth stating
-plainly.** No round
-found a defect in a proof. Every defect was a sentence asserting more than the
-declaration under it, a count written from memory, or a clause nothing could
-fail. Three of them were sentences invalidated by a *later commit on the same
-branch* — the fix landed and the prose describing the old state did not move. The
-working rule that comes out of it is to `git grep` the **claim's wording** after a
-fix, not the declaration's name: searching "world of a run" finds every
-paraphrase in one pass, and searching the renamed declaration is what missed
-`theReceiverIsKilledStep` in §10.135.
-
-### 10.137 Six rounds, and what the sequence is actually measuring
-
-A sixth fresh reviewer. It resolved every backticked identifier in the new
-docstrings and in §10.132 onward against the declaration set, prefixes included,
-and found none dangling; re-derived every constructor count and found none wrong;
-re-ran the §10.134 vacuity attack and confirmed the transport-drop is a real fix
-rather than a cosmetic one; and fired the invariant on a real run again. **No
-defect in a proof, for the sixth time.**
-
-What it did find was prose, again, and this time almost all of it was prose
-*about the earlier prose*: a misattribution whose correction had been appended
-rather than substituted, a "both now name" that was true of one of the two, a
-quotation §10.132 does not contain, a sentence attributed to §10.129 that is
-verbatim from a fixture file, a cross-reference to an entry below when this is
-the last entry, and a claim that a round had checked every declaration for a
-consumer when one refusal theorem lacked the sibling its three peers have. Each
-is folded into the entry it belongs to rather than reported here, and the missing
-sibling — `no_run_reaches_sentWithLiveReceiver` — is now written.
-
-**The thing worth extracting.** Every round has found defects and none has found
-one in Lean. That is not luck and it is not modesty about the proofs: the proofs
-are checked by a machine on every commit and the prose is checked by nothing. The
-docstring gate reads only sentences carrying a strong-claim word; nothing at all
-reads the ledger. So the defect rate in this branch is a measurement of *which
-artefacts have a gate*, and the six rounds are standing in for the gate the prose
-does not have.
-
-Two of those checks are now mechanical and cheap enough to run before every
-commit rather than to discover in review — resolve every backticked Lean-style
-name, prefix included, against the declaration set; and `grep -c` every number
-before writing it. The third is not mechanisable and is the one that keeps
-biting: after a fix falsifies a claim, search for the **claim's wording** rather
-than the declaration's name. `agent-bus` `c-process:106` reports the first of
-these to the gate's owner as a proposed rule for `Tools/DocstringAudit.py`.
-
-### 10.138 Every remaining defect was the ledger describing itself
-
-A seventh fresh reviewer. It rebuilt, re-derived every constructor count,
-resolved every backticked identifier in the new docstrings and in §10.132 onward
-against a declaration set dumped from an environment importing both `Grass.Process`
-and the fixture modules, and re-derived the §10.134 vacuity attack from scratch —
-building the wrong-kind world itself and machine-checking that the landed
-`UnkilledRootAt` refuses it while a locally re-declared transported form accepts
-it. **No defect in a proof, for the seventh time**, and no dangling citation, no
-duplicated prose, and no false claim about this branch's git history.
-
-What it found was three defects and two notes, and every one of them is the
-ledger describing itself wrongly rather than the ledger describing the code
-wrongly. §10.134 attributed the nine-dangling-names audit pass to §10.131; it is
-§10.122's, reached by adding fifty missing imports to `Tools/DeclNames.lean`.
-§10.129's forward reference named the entries that existed when it was written
-and had gone stale twice by the same mechanism §10.135 records about that very
-paragraph. And §10.136's "there are four and five" was correct when written and
-falsified by the commit that wrote it, which added a fifth refusal corollary and
-edited that same entry to announce it.
-
-**The fix for two of those is to stop writing the thing.** The forward reference
-no longer enumerates entries and the count is gone from the entry entirely; the
-docstring the count was correcting states no number at all. A count in prose
-beside a growing list is a defect with a delay fuse, and §10.136's rule — do not
-write a count you have not measured — turns out to be too weak. The stronger form
-is: do not write a count beside something that will grow. Measuring it correctly
-only sets the fuse accurately.
-
-**And the shape of the whole sequence is now clear enough to state.** Zero
-defects in Lean, in every round. The defect population moved inward: the earliest
-rounds found claims about the *code* that the code refuted; the middle ones found
-claims about *earlier corrections* that the diffs refuted; the later ones found
-mostly claims the ledger made *about itself*. "Mostly" is doing real work there —
-an eighth round found a count in a `/-!` header in Lean source that had gone
-stale in exactly the way §10.136 declared fixed, so the inward movement is a
-tendency and not a completed migration. That is what convergence looks like when the artefact under review is
-prose and the reviewer is the only gate it has. It is also the argument for
-`agent-bus` `c-process:106`: two of the three checks these rounds ran — resolve
-every backticked name including its prefix, and measure every count — are
-mechanical, and a gate that ran them would have caught most of this without
-seven reviewers.
-
-### 10.139 A count in a section header, and a miscount that predates the branch
-
-An eighth fresh reviewer, with a declaration environment built from `Grass/**`
-plus all fifty-two `Tests/Process` modules. It re-derived every constructor
-count, rebuilt the §10.134 vacuity attack from scratch — constructing the
-wrong-kind world and machine-checking four separate facts about it, including
-that `SlotsAgree` is what refuses that world — fired the invariant on runs of
-zero, one and two steps, and checked every quotation and every claim this ledger
-makes about the branch's git history. **No defect in a proof, for the eighth
-time.**
-
-**It found the fuse still burning, in Lean source.** A `/-!` section header read
-"And the same three, as statements about runs rather than about worlds" over a
-block that now holds four, because a later commit added one and did not touch the
-header — while a note two hundred lines above, in the same file, says each
-refusal has a corollary. So §10.138's headline, that every remaining defect was
-the ledger describing itself, was false when written: this one is the ledger's
-subject rather than its object, and it is the exact pattern §10.136 declared
-durably fixed by removing counts from the docstrings that carried them. The
-removal had covered the docstrings and not the section headers.
-
-The rule that comes out of it is narrower and more useful than the one it
-replaces: **a count is safe only where it describes something closed.** "Three
-conjuncts" is safe because `UnkilledRootAt` has three and gaining a fourth would
-be a design change. "The same three" over a block of theorems is not, because a
-block of theorems is a place things get added. §10.136's "do not write a count
-you have not measured" and §10.138's "do not write a count beside something that
-will grow" were both aimed at this and both missed the header, because a header
-does not look like a claim.
-
-**And a miscount older than the branch.** `Grass/Process/Network/Initial.lean`
-said "`WellFormed`'s eight clauses" in two places and
-`Grass/Process/Network/WellFormedness.lean` said "four of the eight";
-`LogicalProcessNetworkCore.WellFormed` has nine, because §10.128 added
-`sharedInvariantHolds` and the prose count did not move — my own commit, and the
-same defect this branch has spent eight rounds on, sitting on `main` the whole
-time. `Tests/Process/PreservationFixtures.lean` had "all six clauses" for the
-same reason.
-
-**And that repair was half done**, which §10.142 records: deleting the word
-"eight" left "Six … The remaining two" standing in one passage and six bullets
-plus "The other two" in the other, so the arithmetic still partitioned nine
-clauses into eight — and `sharedInvariantHolds` fits neither of the two
-categories the prose offers, since it comes from an author-supplied field rather
-than from emptiness or from the root.
-
-**What the reviewer also confirmed, which is worth keeping.** `StepsTo` is the
-snoc-form reflexive-transitive closure of `NetworkStep`, so
-`execution_holds_an_unkilled_root`'s induction really is over runs rather than
-over transitions and the inductive hypothesis lands on the prefix.
-`no_restart_at_the_root_slot`'s implicit arguments all unify with `noRestart`'s,
-and `InstanceId .listener` being `Unit` forces `start.rootSlot` to `()` for
-*every* start rather than only for `withRoot`. Both were things a reader could
-have doubted from the statements alone.
-
-### 10.142 The refuted claim came back in a section header, and a step now refuses it
-
-A ninth fresh reviewer. Like several before it — §10.134's corpse-of-the-wrong-kind
-world, §10.135's refutation of the transported form, §10.139's stale section
-header — it broke something in the source and not only in the prose about it; an
-earlier version of this sentence called it the first, which §10.143 corrects. **No defect in a proof, for the ninth time**,
-but two findings that matter and one that costs a fixture.
-
-**The claim §10.133 calls literally false was restated in a section header, and
-the reviewer built the counterexample.** The header over the step fixtures said
-`sentWithDeadSender` "has none" — no step into it at all. §10.133 records that
-"'There is no chain' into `sentWithDeadSender` was literally false — a `join` at
-a connection slot reaches it from a world already holding the dead root, since
-its scope never names the listener." The reviewer wrote that `join` and checked
-it. Worse, the header cited §10.133 in its next sentence, for exactly the
-step-versus-run distinction it was failing to draw, and called the refusal "a
-theorem in the other direction" — which is either
-`sentWithDeadSender_is_no_world_of_a_run`, about *runs*, or
-`dying_was_supervised`, about steps that *kill*. Neither says no step reaches the
-world, and a `join` kills nothing.
-
-`the_corpse_is_collected` and `theJoinIntoTheDeadSender` are now fixtures, so
-refuting the claim again costs a build rather than a reviewer — no gate reads a
-section header, and §10.137 already says the prose is checked by nothing, so what
-changed is that the counterexample is now in the tree rather than in a review. That is the pattern
-worth generalising from this whole sequence: a sentence that a reviewer had to
-refute by writing Lean should become the Lean.
-
-**And §10.139's own repair was half done.** Its commit message reported that four
-"eight clauses" miscounts now said it without a number — the phrase is the
-commit's, not §10.139's, which records only the miscount; an earlier version of
-this sentence put it in quotation marks and attributed it to the entry.
-Deleting the word left "Six … The
-remaining two" standing in one passage and six bullets plus "The other two" in
-the other, so the arithmetic still partitioned nine clauses into eight — and the
-ninth, `sharedInvariantHolds`, fits neither of the two categories the prose
-offers, since it comes from `ExactInitialNetwork.sharedInvariantAtStart`, an
-author-supplied field, rather than from emptiness or from the root. The
-enumeration was not merely stale; it had no place to put the clause §10.128
-added. Both passages now name it, and
-`Grass/Process/Network/WellFormedness.lean`'s "the sixth clause" is gone too.
-
-**Two smaller ones, both counts in the wrong place.** `UnkilledRootAt`'s
-docstring — in `Grass/` — counted refusal theorems in `Tests/`, so adding a sixth
-fixture would silently falsify a core-library docstring. And the sentence opening
-the step section still said the four before-worlds are "built by hand rather than
-reached by a step" while the section under it gives each one a step. That
-correction had been appended below the sentence rather than replacing it, which
-is §10.134's title for the third time.
-
-**A note on the tooling, since it bit twice in one commit.** Writing the literal
-token that opens a section comment inside a doc comment does not escape it: Lean
-nests doc comments, so the file stopped parsing. c-x86's stricter gate parses doc
-blocks with nesting for the same reason. The sentence describing the defect could
-not name the syntax it was about.
-
-### 10.143 The rule was ratified and broken in the same commit
-
-A tenth fresh reviewer. **No defect in a proof, for the tenth time.** Six
-findings, and the first is the sharpest thing this sequence has produced about
-itself.
-
-**§10.142 ratified a rule and its own commit broke it.** The header it rewrote
-now said "Every world in this file fails `ProcessPlan.UnkilledRootAt`". The file
-contains `sent_holds_an_unkilled_root`, and a docstring a hundred lines below
-says so in as many words — *"Nor is 'a world of no run' this file's norm —
-`World.withRoot` is a start, `theSendStep` reaches `sent` from it, and
-`sent_holds_an_unkilled_root` is above"*. That docstring exists because §10.136
-caught the identical over-reach ("like every other world in this file") and
-required it to be written. So the correction of an over-general sentence was an
-over-general sentence, twice, about the same file, with the remedy for the first
-sitting in view of the second.
-
-The scope word is what does it. "This section" is true and "this file" is false,
-and nothing about writing the sentence makes the difference salient. That is not
-a rule anyone can follow by resolving to be careful; it is why the fixtures
-matter and the prose does not carry weight on its own.
-
-**And the same commit lit the fuse §10.139 wrote the rule for.** Adding
-`deadSenderWithACorpseToCollect` made "none of the seven worlds below" an
-undercount and made the coverage sentence after it false, since the new world is
-neither named individually nor a `holding` world. It also arrived without the
-`*_is_no_world_of_a_run` and `no_run_reaches_*` pair its five siblings have —
-which is exactly the asymmetry §10.136 found for `sentWithLiveReceiver` and
-§10.137 fixed. Both are now written, and the sentence counts nothing.
-
-**Three claims about earlier rounds that the earlier entries refute.** §10.142
-called the ninth reviewer "the first to break something in the source"; §10.134's
-round built a wrong-kind world that made `UnkilledRootAt` vacuous, §10.135's
-machine-checked a Lean statement false and got a lemma deleted, and §10.139's
-found a stale header in Lean source — §10.139 says so in those words. §10.142
-also quoted §10.139 as reporting the miscounts "now phrased without a number";
-that phrase is a commit message's, and §10.139 reports no repair at all. And it
-said the header cited §10.133 "in the same sentence" and offered
-`dying_was_supervised`; it was the next sentence, and what it offered was "a
-theorem in the other direction", which names neither.
-
-**Two miscounts that predate the branch, in files it edits.**
-`instanceProperty_preserved`'s docstring said "the five clauses" and "five
-times"; there are four, and the module note forty lines above it *records that
-correction being made* — applied to the note and not to the declaration the note
-is about. And §10.142's repair of `Initial.lean` still partitioned nine clauses
-into eight: "Six … save `sharedInvariantHolds` … The remaining two" carves the
-ninth out of the six rather than adding it, and disagrees with the theorem
-docstring two hundred lines below, which gets it right.
-
-**What ten rounds have settled.** No round has found a defect in a proof. Every
-round has found a defect in prose, including every round whose subject was the
-previous round's prose. The three checks that are mechanical — resolve every
-backticked name with its prefix, measure every count, and search the claim's
-wording after a fix — catch most of it and are now run before each commit. What
-they do not catch is the scope word, and nothing except a reader has caught one
-yet.
+Declaring it is half the repair — a lemma with no consumer and an unsatisfiable
+hypothesis is §10.130's shape. `the_connection_writes_nothing` inhabits the
+hypothesis at a real role, and `theConnectionOwesNoValueBound` consumes it. What
+that does *not* yet show is an author relieved of anything: no `StepsLocally` at
+`.connection` exists in this corpus.
 
 ## 11. The authoring facade
 

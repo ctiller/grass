@@ -84,9 +84,10 @@ fragment, so a slot the step did not declare holds exactly what it held.
 Stated over an arbitrary `Property` because `SlotsAgree`, `LifecyclesWitnessed`,
 `ParentageValid` and `NominalsAllocated` differ only in what they ask of the
 incarnation, and proving the framing once per clause would be that many chances
-to get it wrong in a different way. The note above records why `RootUnique` is
-not among them; an earlier version of *this* docstring said five and was the
-miscount that note describes, left standing when the note was fixed.
+to get it wrong in a different way. The note above records why `RootUnique` is not among
+them. An earlier version of this docstring also said five — a second instance of
+the same error, not the one the note describes, and left standing when that one
+was fixed.
 -/
 theorem instanceProperty_preserved
     {Property : ∀ kind : plan.topology.ProcessKind, plan.topology.InstanceId kind →

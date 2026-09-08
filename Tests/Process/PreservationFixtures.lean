@@ -481,7 +481,7 @@ unless a `restart` at that slot took it away, which
 `no_restart_at_the_root_slot` shows is unconstructible here. So no world in this section is a
 world of any run. Some are named individually and the `holding` ones are covered
 by a theorem quantified over every such world; each refusal has a
-`no_run_reaches_*` corollary stating the same thing about executions. §10.133.
+`no_run_reaches_*` corollary stating the same thing about executions. §10.132.
 -/
 
 open Grass.Process.Tests.ChannelStep
@@ -529,16 +529,14 @@ was four `processStep`s. Each before-world below has a step into it, and they ar
 not all `processStep`s: `theReceiverIsKilledStep` is a `childDied` and
 `theJoinIntoTheDeadSender` is a `join`.
 
-**None of that is what §10.129 was asking for**, which is the whole of §10.133: a
+**None of that is what §10.129 was asking for**, which is the whole of §10.132: a
 step *into* a world is not a run that *reaches* it. The worlds in *this section*
 each fail `ProcessPlan.UnkilledRootAt`, and `every_run_holds_an_unkilled_root` is
 why that settles them — the file as a whole is not like that, and
 `sent_holds_an_unkilled_root` below is the world a run really does reach.
 
 An earlier version of this header said `sentWithDeadSender` had no step into it
-at all; a reviewer refuted it by building the `join` now recorded below. §10.142,
-and §10.143 for the version of this paragraph that over-reached in the other
-direction.
+at all; a reviewer refuted it by building the `join` now recorded below. §10.132.
 -/
 
 /-- The wire's receiver before it died: the same incarnation, running. -/
@@ -567,7 +565,7 @@ before-world is one the *family* admits a step into.
 what separates this case from the sender's below, where no constructor can write
 the death at all.
 
-**It is not a world of a run**, and the distinction is the whole of §10.133:
+**It is not a world of a run**, and the distinction is the whole of §10.132:
 `sentWithDeadReceiver_is_no_world_of_a_run` and
 `no_run_reaches_sentWithDeadReceiver` below say so, and `sentWithLiveReceiver`
 is no better — both have an empty root slot.
@@ -625,7 +623,7 @@ theorem the_live_receiver_is_a_child : ∀ incarnation,
 
 Not a run: `no_run_reaches_sentWithDeadReceiver` below. A third reviewer found
 this sentence still claiming the opposite after the commit that reported fixing
-it had fixed its two neighbours and missed this one — which is §10.135. -/
+it had fixed its two neighbours and missed this one — which is §10.134. -/
 def theReceiverIsKilledStep :
     serverPlan.NetworkStep sentWithLiveReceiver sentWithDeadReceiver where
   transition := .childDied .connection wire.receiver.instanceId .providerLost
@@ -635,10 +633,10 @@ def theReceiverIsKilledStep :
 
 /-! #### And a step into the fourth, which an earlier version said had none
 
-The claim §10.133 calls literally false, restated in a section header above and
+The claim §10.132 calls literally false, restated in a section header above and
 refuted by a reviewer who built the step. The counterexample is in the tree now
 rather than in a review, which is the most a header can be held to: nothing in
-the build reads one. §10.142.
+the build reads one. §10.132.
 -/
 
 /-- `sentWithDeadSender`, with a terminated child still to be collected. -/
@@ -699,7 +697,7 @@ theorem the_corpse_is_collected :
 /-- **And the world it starts from is a world of no run either**, for the same
 reason as the world it reaches: the listener slot holds a dead root. Written
 because its four siblings have this pair and it did not, which is the asymmetry
-§10.136 found once already. §10.143. -/
+§10.134 found once already. -/
 theorem deadSenderWithACorpseToCollect_is_no_world_of_a_run :
     ¬ serverPlan.UnkilledRootAt deadSenderWithACorpseToCollect .listener () := by
   rintro ⟨root, found, _, unkilled⟩
@@ -716,7 +714,7 @@ def theJoinIntoTheDeadSender :
 
 /-! #### And none of these worlds is a world of a run
 
-The correction §10.133 records. A step into a world says the transition is one an
+The correction §10.132 records. A step into a world says the transition is one an
 execution can *contain*; it does not say the execution reaches the world, and the
 first version of this section conflated the two.
 -/
@@ -729,7 +727,7 @@ first version of this section conflated the two.
 and `Restarts.authorized` requires that parent to be one
 `ProcessGraph.maySpawn` permits. `serverTopology.maySpawn` is
 `fun parent child => parent = .listener ∧ child = .connection`, so no parent may
-spawn a listener and the two fields cannot both hold. §10.133's second half — the
+spawn a listener and the two fields cannot both hold. §10.132's last section — the
 gap where a restart deletes the root — is real at the family and unreachable
 here, and this is the proof of the second clause rather than an assumption of it.
 -/
@@ -842,6 +840,34 @@ theorem no_run_reaches_deadSenderWithACorpseToCollect
   deadSenderWithACorpseToCollect_is_no_world_of_a_run
     (every_run_holds_an_unkilled_root isStart execution)
 
+/-- **And the two worlds the endpoint deaths reach**, which the coverage sentence
+above claimed and nothing refused until a reviewer wrote these. §10.132. -/
+theorem afterSenderDeath_is_no_world_of_a_run :
+    ¬ serverPlan.UnkilledRootAt afterSenderDeath .listener () := by
+  rintro ⟨root, found, _, unkilled⟩
+  injection found with same
+  subst same
+  exact unkilled .supervised rfl
+
+theorem afterReceiverDeath_is_no_world_of_a_run :
+    ¬ serverPlan.UnkilledRootAt afterReceiverDeath .listener () := by
+  rintro ⟨_, found, _⟩
+  exact absurd found (by intro equal; cases equal)
+
+theorem no_run_reaches_afterSenderDeath
+    {request : (serverTopology.protocol serverTopology.root).Request} {start : ServerWorld}
+    (isStart : serverPlan.ExactInitialNetwork request start)
+    (execution : serverPlan.StepsTo start afterSenderDeath) : False :=
+  afterSenderDeath_is_no_world_of_a_run
+    (every_run_holds_an_unkilled_root isStart execution)
+
+theorem no_run_reaches_afterReceiverDeath
+    {request : (serverTopology.protocol serverTopology.root).Request} {start : ServerWorld}
+    (isStart : serverPlan.ExactInitialNetwork request start)
+    (execution : serverPlan.StepsTo start afterReceiverDeath) : False :=
+  afterReceiverDeath_is_no_world_of_a_run
+    (every_run_holds_an_unkilled_root isStart execution)
+
 theorem no_run_reaches_a_holding_world (incarnation : ProcessInstance serverTopology)
     {request : (serverTopology.protocol serverTopology.root).Request} {start : ServerWorld}
     (isStart : serverPlan.ExactInitialNetwork request start)
@@ -857,7 +883,7 @@ theorem sent_holds_an_unkilled_root : serverPlan.UnkilledRootAt sent .listener (
 /-! #### And a role that may write nothing owes nothing
 
 `ProcessPlan.sharedWritesAdmitted_of_no_writes` was cited by two docstrings
-and declared by neither until §10.136. Declaring it is only half the repair: a
+and declared by neither until §10.135. Declaring it is only half the repair: a
 lemma with no consumer and an unsatisfiable hypothesis would be the shape this
 ledger refuses. Both halves are here.
 -/
@@ -981,7 +1007,7 @@ and that is the whole proof; nothing here says a run cannot reach some other
 world holding a dead orphan at a connection slot with the root intact. Nor is
 "a world of no run" this file's norm — `World.withRoot` is a start,
 `theSendStep` reaches `sent` from it, and `sent_holds_an_unkilled_root` is above.
-§10.136. -/
+§10.135. -/
 theorem no_run_reaches_deadOrphanWorld
     {request : (serverTopology.protocol serverTopology.root).Request} {start : ServerWorld}
     (isStart : serverPlan.ExactInitialNetwork request start)

@@ -284,7 +284,7 @@ have been enough. Three do not, and they are listed after the six that do.
 `sharedInvariantHolds` is the exception to both halves: it comes from neither
 emptiness nor the root, but from `ExactInitialNetwork.sharedInvariantAtStart`,
 which is a field an author supplies. §10.128 added the clause and this
-enumeration did not move, which is §10.142.
+enumeration did not move.
 
 The other two come from the root's own record: `nominalsAllocated` from
 `rootAllocated`, and `slotsAgree` from `rootSlotAgrees` together with
@@ -439,10 +439,13 @@ disjunct is the one `parentless_slot_survives` concludes with:
 the root's slot is the single way an execution can end
 without a root. A plan at which that restart is unconstructible —
 `ProcessGraph.maySpawn` permitting no parent for the root's role is the ordinary
-reason — therefore holds its root along every run, which is what
-`Tests/Process/PreservationFixtures.lean` discharges at `serverPlan`.
+reason — therefore holds a parentless undead instance in that slot along every
+run, which is what `Tests/Process/PreservationFixtures.lean` discharges at
+`serverPlan`. Whether that instance is the *root* is a further step: `.detached`
+is parentless too, and at `serverPlan` nothing can put a detached incarnation in
+the listener slot, but the predicate does not say so.
 
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.132 and §10.133. The invariant is
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.132. The invariant is
 stated over an execution rather than over one step because a step-local fact
 about the root is not what "no run reaches a dead root" needs, and local
 adversarial review found exactly that gap in the first version of this argument:

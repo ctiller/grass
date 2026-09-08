@@ -1024,7 +1024,7 @@ Cited by `StepsLocally.sharedWritesAdmitted`'s own docstring and by
 neither until now — a dangling citation of mine, found by a mechanical sweep over
 every backticked name in the files this branch touches rather than by the
 docstring gate, which checks identifiers only inside sentences carrying a
-strong-claim word. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.136.
+strong-claim word. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.135.
 
 The content is small and worth having anyway: `writesPermitted` says a region
 that moved is one this role may write, so at a role that may write nothing, no
@@ -2511,8 +2511,9 @@ step's two worlds stand in `Restarts` at that slot.**
 start. A run begins at an `ExactInitialNetwork` whose root has `.root`
 parentage, and this is what carries that forward: seven constructors pin the
 parentage across the slot, `spawn` found the slot empty, `join` and `detach` both
-ask for a current parent that a parentless instance does not have, and the
-remaining thirteen never name this fragment at all.
+ask for a current parent that a parentless instance does not have, thirteen never
+name this fragment at all, and the twenty-fourth is `restart`, which is the
+disjunct below.
 
 **`restart` is the exception and it is the whole content of the disjunction.**
 `Restarts.restartsAChild` constrains only the *new* incarnation, requiring it to
