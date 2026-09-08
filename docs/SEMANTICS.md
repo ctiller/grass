@@ -135,11 +135,16 @@ Grass gives three independently reviewable owners to the product boundary:
 class ResourceModel (R : Type u) where
   algebra : ResourceAlgebra R
 
-class HasResourceAxis (R : Type u) [ResourceModel R] (axis : ResourceAxisName) where
+class HasResourceAxis (R : Type u) [ResourceModel R]
+    (axis : ResourceAxisName) where
   Value : Type
+  compatible : Value -> Value -> Prop
   combine : Value -> Value -> Value
+  alternative : Value -> Value -> Value
+  zero : Value
   le : Value -> Value -> Prop
-  laws : OrderedPartialCommutativeResourceLaws combine le
+  laws : OrderedPartialCommutativeResourceLaws
+    compatible combine alternative zero le
 
 class HasResourceLimit (R : Type u) [ResourceModel R]
     (axis : ResourceAxisName) extends HasResourceAxis R axis where
@@ -147,11 +152,24 @@ class HasResourceLimit (R : Type u) [ResourceModel R]
   exhaustion : R -> ResourceExhaustionPolicy axis
   lifecycle : R -> ResourceLifecyclePolicy axis
 
-class WebServerResources (R : Type u) [ResourceModel R]
-    extends HasResourceLimit R .residentBytes,
-            HasResourceLimit R .connections,
-            HasResourceLimit R .sockets,
-            HasResourceLimit R .requestWork where
+structure ResourceLimit (R : Type u) (axis : ResourceAxisName) where
+  Value : Type
+  compatible : Value -> Value -> Prop
+  combine : Value -> Value -> Value
+  alternative : Value -> Value -> Value
+  zero : Value
+  le : Value -> Value -> Prop
+  laws : OrderedPartialCommutativeResourceLaws
+    compatible combine alternative zero le
+  limit : R -> Value
+  exhaustion : R -> ResourceExhaustionPolicy axis
+  lifecycle : R -> ResourceLifecyclePolicy axis
+
+class WebServerResources (R : Type u) [ResourceModel R] where
+  residentBytes : ResourceLimit R .residentBytes
+  connections : ResourceLimit R .connections
+  sockets : ResourceLimit R .sockets
+  requestWork : ResourceLimit R .requestWork
   requestDeadline : R -> Duration
   responseDeadline : R -> Duration
   fixedAfterReady : R -> Prop
@@ -318,6 +336,13 @@ structure TargetProjection
   faithful : ProjectionPreservesConfiguredClaims
     resources spec project outcome capabilities
 ```
+
+Multi-axis capability bundles store axis-indexed `ResourceLimit` values in
+named fields. They must not repeatedly extend `HasResourceLimit`: Lean
+deduplicates parent structures by head constant, so repeated parents would
+erase every axis after the first (and are rejected under this repository's
+warning policy). `HasResourceLimit` remains the convenient instance form for a
+single-axis consumer.
 
 There is one captured resource-semantics value. Axis keys are derived from the
 dependent map's finite key type, and selected semantics are obtained only by

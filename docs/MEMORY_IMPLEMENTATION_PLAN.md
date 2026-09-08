@@ -4505,8 +4505,6 @@ carries a consequence for another agent:
 
 One item remains open, and it is the one worth the most care:
 
-- the resource-class defect filed against the Semantics owner in
-  [DEFECT_SEMANTICS_RESOURCE_CLASSES.md](DEFECT_SEMANTICS_RESOURCE_CLASSES.md);
 - the reviewer identity that will take the M1 freeze under
   [AGENT_REVIEW.md](AGENT_REVIEW.md). The freeze is the highest-cost irreversible
   step in this plan, and §9 risk 1 makes its sufficiency a claim about
