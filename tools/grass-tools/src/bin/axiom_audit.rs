@@ -38,9 +38,27 @@
 //! One judgement stays on the Lean side, deliberately: the `Grass`-namespace filter.
 //! `collectAxioms` is the expensive part of the run, and applying it to core Lean's
 //! declarations before discarding them here would multiply a 22-second audit by the
-//! size of the toolchain. [`is_audited`] reimplements the predicate anyway and
-//! [`judge`] applies it to every record the snippet sends, so the snippet narrowing
-//! the set wrongly is a loud failure rather than a quiet under-report.
+//! size of the toolchain.
+//!
+//! That split has to be checked in both directions, and the first version of this
+//! file only checked one. [`is_audited`] was applied to the records the snippet sent,
+//! which catches the snippet emitting something outside the namespace -- and catches
+//! nothing at all when the snippet emits too little, because a declaration the filter
+//! skips produces no record to judge. A narrowing that dropped every `private`
+//! declaration, or every declaration, would have left the counts self-consistent and
+//! the audit reporting clean over a smaller set. That is fail-open at exactly the
+//! boundary this file claims to cross-check, and it is the same shape as the
+//! empty-tree hole described below, one level down: modules were guarded, the
+//! declarations inside them were not.
+//!
+//! The fix is a denominator that does not come from the filter being checked. The
+//! snippet makes a separate pass over `env.constants` that applies no predicate at
+//! all and reports every constant in the environment as a census record. [`judge`]
+//! applies [`is_audited`] to that census and requires the result to equal the audited
+//! set **exactly**, so a filter that drops declarations is a mismatch rather than a
+//! smaller report. Under-inclusion and over-inclusion are now the two sides of one
+//! equality, and the terminator counts both passes so neither can be truncated into
+//! agreement.
 //!
 //! # Where the import list comes from
 //!
@@ -145,6 +163,27 @@ const AUDITED_NAMESPACE: &str = "Grass";
 /// The directory walked to produce the import list, relative to the repository root.
 const LIBRARY_ROOT: &str = "Grass";
 
+/// The smallest number of *out-of-scope* constants a real environment census carries.
+///
+/// The census is the denominator the audited set is checked against, so what matters
+/// is that it is a census and not a second copy of the numerator: an empty one agrees
+/// with every filter, and one narrowed to the audited namespace agrees with the very
+/// filter it is supposed to validate. Both are caught by requiring the census to
+/// contain constants this audit does *not* select.
+///
+/// A Lean environment with this library imported reports upwards of two hundred
+/// thousand constants, around fourteen thousand of them in scope; core `Init` alone is
+/// far past this number before any `Grass` module is read. The bar is set low
+/// deliberately -- it exists to catch a census that did not happen or was filtered,
+/// not to pin a count that legitimately moves.
+const MINIMUM_PLAUSIBLE_CENSUS: usize = 10_000;
+
+/// How many names of each kind a selection mismatch prints before summarising.
+///
+/// A filter that drops every `private` declaration produces thousands of entries, and
+/// a failure that scrolls a terminal for a minute is one people learn to skim.
+const SELECTION_MISMATCH_SAMPLE: usize = 20;
+
 /// The name a declaration is written under, with any `private` mangling removed.
 ///
 /// A `private` declaration is stored as `_private.<module>.<n>.<real name>`, whose
@@ -232,6 +271,19 @@ fn lean_string_literal(text: &str) -> String {
 /// It fires at elaboration time if the namespace filter ever stops seeing an authored
 /// declaration whose name begins with an underscore -- the shape that `isInternal`,
 /// the obvious way to write this filter, would silently drop.
+///
+/// # The two passes are deliberately two passes
+///
+/// The census loop applies no predicate and shares no decision with the audit loop
+/// below it. That is the whole point of it: a census derived from the same filter
+/// evaluation it is meant to validate would agree with that filter by construction
+/// and prove nothing. It costs one extra traversal of `env.constants` -- no
+/// `collectAxioms` calls, which is where the run's time actually goes.
+///
+/// Records are streamed to a handle rather than accumulated. The census is every
+/// constant the environment knows, upwards of two hundred thousand entries against
+/// this library, and building that as one `String` in the elaborator is a needless
+/// spike.
 fn audit_lean_source(modules: &[String], out: &Path) -> String {
     let imports = modules
         .iter()
@@ -250,28 +302,36 @@ run_cmd do
 
 run_cmd do
   let env ← Elab.Command.liftCoreM getEnv
-  let mut lines : Array String := #[]
+  let h ← IO.FS.Handle.mk {out_literal} IO.FS.Mode.write
   for m in env.header.moduleNames do
-    lines := lines.push ("M\t" ++ toString m)
+    h.putStr ("M\t" ++ toString m ++ "\n")
+  -- Census pass. No predicate is applied here, and nothing this loop decides is
+  -- reused below: it reports what the environment contains so the caller can
+  -- derive the audited set independently of the filter that produced it.
+  let mut census : Nat := 0
+  for (name, _) in env.constants.toList do
+    census := census + 1
+    h.putStr ("E\t" ++ toString name ++ "\n")
+  -- Audit pass, filtered for cost. `collectAxioms` over the whole toolchain is
+  -- what this narrowing avoids.
   let mut decls : Nat := 0
   let mut deps : Nat := 0
   for (name, info) in env.constants.toList do
     let user := (privateToUserName? name).getD name
     unless (`Grass).isPrefixOf user do continue
     decls := decls + 1
-    lines := lines.push ("C\t" ++ toString name)
+    h.putStr ("C\t" ++ toString name ++ "\n")
     if info.isUnsafe then
-      lines := lines.push ("U\t" ++ toString name)
+      h.putStr ("U\t" ++ toString name ++ "\n")
     if (Lean.Compiler.getImplementedBy? env name).isSome then
-      lines := lines.push ("O\t@[implemented_by]\t" ++ toString user)
+      h.putStr ("O\t@[implemented_by]\t" ++ toString user ++ "\n")
     else if Lean.isExtern env name then
-      lines := lines.push ("O\t@[extern]\t" ++ toString user)
+      h.putStr ("O\t@[extern]\t" ++ toString user ++ "\n")
     let axioms ← Elab.Command.liftCoreM (collectAxioms name)
     for used in axioms do
       deps := deps + 1
-      lines := lines.push ("A\t" ++ toString used ++ "\t" ++ toString name)
-  lines := lines.push ("Z\t" ++ toString decls ++ "\t" ++ toString deps)
-  IO.FS.writeFile {out_literal} (String.intercalate "\n" lines.toList ++ "\n")
+      h.putStr ("A\t" ++ toString used ++ "\t" ++ toString name ++ "\n")
+  h.putStr ("Z\t" ++ toString decls ++ "\t" ++ toString deps ++ "\t" ++ toString census ++ "\n")
 "#
     )
 }
@@ -281,6 +341,11 @@ run_cmd do
 struct Facts {
     /// Every module the elaborated environment imported, transitively.
     imported: BTreeSet<String>,
+    /// Every constant in the environment, as reported by the snippet's unfiltered
+    /// census pass. This is the denominator [`judge`] checks the audited set
+    /// against, and its value is that it was produced without consulting the filter
+    /// it is used to validate.
+    census: BTreeSet<String>,
     /// Every declaration the snippet audited, by its stored name.
     declarations: BTreeSet<String>,
     /// The audited declarations that are `unsafe`, by stored name.
@@ -293,10 +358,11 @@ struct Facts {
 
 /// Parse the tab-separated record set the generated snippet writes.
 ///
-/// Six record kinds, one per line: `M` an imported module, `C` an audited
-/// declaration, `U` an audited `unsafe` declaration, `O` a compiled override and the
-/// attribute spelling, `A` a declaration's dependency on one axiom, and `Z` the
-/// terminator carrying the `C` and `A` counts.
+/// Seven record kinds, one per line: `M` an imported module, `E` one constant from
+/// the unfiltered census pass, `C` an audited declaration, `U` an audited `unsafe`
+/// declaration, `O` a compiled override and the attribute spelling, `A` a
+/// declaration's dependency on one axiom, and `Z` the terminator carrying the `C`,
+/// `A` and `E` counts.
 ///
 /// The terminator is the point of the format. A Lean process killed part-way through,
 /// or a disk that filled, would otherwise hand back a shorter record set that parses
@@ -309,8 +375,9 @@ struct Facts {
 /// shifting the meaning of a column.
 fn parse_audit_records(text: &str) -> Result<Facts, String> {
     let mut facts = Facts::default();
-    let mut terminator: Option<(usize, usize)> = None;
+    let mut terminator: Option<(usize, usize, usize)> = None;
     let mut dependency_records = 0usize;
+    let mut census_records = 0usize;
 
     for (index, line) in text.lines().enumerate() {
         let line = line.strip_suffix('\r').unwrap_or(line);
@@ -327,6 +394,10 @@ fn parse_audit_records(text: &str) -> Result<Facts, String> {
         match fields.as_slice() {
             ["M", module] => {
                 facts.imported.insert((*module).to_string());
+            }
+            ["E", name] => {
+                census_records += 1;
+                facts.census.insert((*name).to_string());
             }
             ["C", name] => {
                 facts.declarations.insert((*name).to_string());
@@ -347,14 +418,15 @@ fn parse_audit_records(text: &str) -> Result<Facts, String> {
                     .or_default()
                     .insert((*used).to_string());
             }
-            ["Z", decls, deps] => {
-                let decls = decls.parse::<usize>().map_err(|err| {
-                    format!("axiom audit records: record {number} has an unreadable count: {err}")
-                })?;
-                let deps = deps.parse::<usize>().map_err(|err| {
-                    format!("axiom audit records: record {number} has an unreadable count: {err}")
-                })?;
-                terminator = Some((decls, deps));
+            ["Z", decls, deps, census] => {
+                let count = |raw: &str| -> Result<usize, String> {
+                    raw.parse::<usize>().map_err(|err| {
+                        format!(
+                            "axiom audit records: record {number} has an unreadable count: {err}"
+                        )
+                    })
+                };
+                terminator = Some((count(decls)?, count(deps)?, count(census)?));
             }
             _ => {
                 return Err(format!(
@@ -364,7 +436,7 @@ fn parse_audit_records(text: &str) -> Result<Facts, String> {
         }
     }
 
-    let Some((decls, deps)) = terminator else {
+    let Some((decls, deps, census)) = terminator else {
         return Err(
             "axiom audit records: the record set has no terminator, so it describes some \
                     of the audited declarations rather than all of them. Refusing to report a \
@@ -383,6 +455,16 @@ fn parse_audit_records(text: &str) -> Result<Facts, String> {
         return Err(format!(
             "axiom audit records: the record set claims {deps} axiom dependencies and carries \
              {dependency_records}, so it was truncated in transit."
+        ));
+    }
+    // The census is the denominator the audited set is checked against, so a truncated
+    // census is a *smaller* denominator, and a smaller denominator is one an
+    // under-inclusive filter agrees with. Counting this pass is what stops truncation
+    // from healing the very mismatch the census exists to expose.
+    if census != census_records {
+        return Err(format!(
+            "axiom audit records: the record set claims {census} environment constants and \
+             carries {census_records}, so it was truncated in transit."
         ));
     }
     Ok(facts)
@@ -497,15 +579,81 @@ fn judge(facts: &Facts, walked: &[String]) -> Result<Report, String> {
     }
 
     // The snippet narrows to the `Grass` namespace for speed; this is the check that
-    // it narrowed to the right set. A stray declaration here means the filter in the
-    // generated source and `is_audited` disagree, and the audit's scope is not what
-    // this file says it is.
-    if let Some(stray) = facts.declarations.iter().find(|name| !is_audited(name)) {
+    // it narrowed to the *right* set, in both directions at once.
+    //
+    // Applying `is_audited` only to what the snippet sent would catch a filter that
+    // sends too much and nothing at all from a filter that sends too little, because
+    // a skipped declaration leaves no record behind to judge. Deriving the expected
+    // set from the census instead gives a denominator the filter did not produce, so
+    // "the filter dropped every private declaration" is a mismatch here rather than a
+    // smaller report that adds up.
+    let expected: BTreeSet<&String> = facts.census.iter().filter(|n| is_audited(n)).collect();
+    let audited: BTreeSet<&String> = facts.declarations.iter().collect();
+
+    // The denominator is only worth comparing against if it is a census rather than a
+    // second copy of the numerator. A census that was itself narrowed to the audited
+    // namespace -- by someone "optimising" that pass, say -- would equal the audited
+    // set by construction and make everything below vacuous, which is the exact
+    // failure this check was added to prevent, one level up.
+    //
+    // So the test is on the part of the census that is *not* in scope. A Lean
+    // environment with this library imported reports upwards of two hundred thousand
+    // constants, of which this namespace is around fourteen thousand; core `Init`
+    // alone puts far more than the bar below outside it. An empty census fails here
+    // too, for the same reason: it agrees with every filter, including one that
+    // selected nothing.
+    let out_of_scope = facts.census.len() - expected.len();
+    if out_of_scope < MINIMUM_PLAUSIBLE_CENSUS {
         return Err(format!(
-            "axiom audit: the environment reported {stray}, which is not in the {AUDITED_NAMESPACE} \
-             namespace. The generated filter and `is_audited` disagree about what is audited; \
-             refusing to report against a scope this tool cannot describe."
+            "axiom audit: the environment census reports {} constants, only {out_of_scope} of \
+             them outside the {AUDITED_NAMESPACE} namespace. A real environment carries the whole \
+             toolchain, so this census was filtered rather than taken, and checking the audited \
+             set against it would compare that set with itself. Refusing to report against it.",
+            facts.census.len()
         ));
+    }
+    if expected != audited {
+        let missing: Vec<&&String> = expected.difference(&audited).collect();
+        let stray: Vec<&&String> = audited.difference(&expected).collect();
+        let mut message = if audited.is_empty() {
+            format!(
+                "axiom audit: the audit pass reported no declarations at all, while the \
+                 environment census contains {} in the {AUDITED_NAMESPACE} namespace. The \
+                 namespace filter in the generated source selected nothing; an audit of nothing \
+                 is not a clean audit.\n",
+                expected.len()
+            )
+        } else {
+            format!(
+                "axiom audit: the audited set and the environment census disagree about what is \
+                 in the {AUDITED_NAMESPACE} namespace, so the audit's scope is not what this tool \
+                 describes. {} declaration(s) the census puts in scope were never audited, and {} \
+                 audited declaration(s) are not in scope.\n",
+                missing.len(),
+                stray.len()
+            )
+        };
+        for name in missing.iter().take(SELECTION_MISMATCH_SAMPLE) {
+            let _ = writeln!(message, "  never audited: {name}");
+        }
+        if missing.len() > SELECTION_MISMATCH_SAMPLE {
+            let _ = writeln!(
+                message,
+                "  ... and {} more never audited",
+                missing.len() - SELECTION_MISMATCH_SAMPLE
+            );
+        }
+        for name in stray.iter().take(SELECTION_MISMATCH_SAMPLE) {
+            let _ = writeln!(message, "  audited but out of scope: {name}");
+        }
+        if stray.len() > SELECTION_MISMATCH_SAMPLE {
+            let _ = writeln!(
+                message,
+                "  ... and {} more audited but out of scope",
+                stray.len() - SELECTION_MISMATCH_SAMPLE
+            );
+        }
+        return Err(message.trim_end().to_string());
     }
 
     if !facts.overrides.is_empty() {
@@ -641,16 +789,122 @@ mod tests {
         parse_audit_records(text).expect("records should parse")
     }
 
-    /// The record set a clean single-declaration tree produces.
-    fn clean_records() -> String {
-        "M\tGrass.Core.Name\nC\tGrass.Core.Name.foo\nA\tpropext\tGrass.Core.Name.foo\nZ\t1\t1\n"
-            .to_string()
+    /// A record set under construction.
+    ///
+    /// Tests build one of these and then break exactly the thing under test, so a
+    /// negative test differs from its positive twin by one line. Hand-written record
+    /// strings could not express the case that matters most here -- a census that
+    /// contains a declaration the audit pass never reported -- without the census and
+    /// the audited set silently being written from the same list.
+    #[derive(Default)]
+    struct RecordSet {
+        modules: Vec<String>,
+        /// The unfiltered environment census: what the snippet's first pass saw.
+        census: Vec<String>,
+        /// What the snippet's filtered second pass reported. Deliberately separate
+        /// from `census`, because their disagreement is the thing being tested.
+        audited: Vec<String>,
+        unsafe_declarations: Vec<String>,
+        overrides: Vec<(String, String)>,
+        axioms: Vec<(String, String)>,
+        /// Overrides the computed `Z` counts, for truncation tests.
+        forced_counts: Option<(usize, usize, usize)>,
+    }
+
+    impl RecordSet {
+        /// A census padded past [`MINIMUM_PLAUSIBLE_CENSUS`] with constants outside
+        /// the audited namespace, standing in for the core-Lean bulk of a real one.
+        fn padded() -> Self {
+            let mut set = Self {
+                modules: vec!["Grass.A".to_string()],
+                ..Self::default()
+            };
+            for i in 0..MINIMUM_PLAUSIBLE_CENSUS {
+                set.census.push(format!("Init.Pad.c{i:06}"));
+            }
+            set
+        }
+
+        /// Add `name` to both the census and the audited set: a declaration the
+        /// filter saw and reported, which is the agreeing case.
+        fn audited(mut self, name: &str) -> Self {
+            self.census.push(name.to_string());
+            self.audited.push(name.to_string());
+            self
+        }
+
+        /// Add `name` to the census only: a declaration the environment contains and
+        /// the filter did not report. This is under-inclusion.
+        fn census_only(mut self, name: &str) -> Self {
+            self.census.push(name.to_string());
+            self
+        }
+
+        fn unsafe_declaration(mut self, name: &str) -> Self {
+            self.unsafe_declarations.push(name.to_string());
+            self
+        }
+
+        fn compiled_override(mut self, attr: &str, name: &str) -> Self {
+            self.overrides.push((attr.to_string(), name.to_string()));
+            self
+        }
+
+        fn axiom(mut self, axiom: &str, name: &str) -> Self {
+            self.axioms.push((axiom.to_string(), name.to_string()));
+            self
+        }
+
+        fn forced_counts(mut self, decls: usize, deps: usize, census: usize) -> Self {
+            self.forced_counts = Some((decls, deps, census));
+            self
+        }
+
+        fn render(&self) -> String {
+            let mut text = String::new();
+            for m in &self.modules {
+                let _ = writeln!(text, "M\t{m}");
+            }
+            for name in &self.census {
+                let _ = writeln!(text, "E\t{name}");
+            }
+            for name in &self.audited {
+                let _ = writeln!(text, "C\t{name}");
+            }
+            for name in &self.unsafe_declarations {
+                let _ = writeln!(text, "U\t{name}");
+            }
+            for (attr, name) in &self.overrides {
+                let _ = writeln!(text, "O\t{attr}\t{name}");
+            }
+            for (axiom, name) in &self.axioms {
+                let _ = writeln!(text, "A\t{axiom}\t{name}");
+            }
+            let (decls, deps, census) = self.forced_counts.unwrap_or((
+                self.audited.len(),
+                self.axioms.len(),
+                self.census.len(),
+            ));
+            let _ = writeln!(text, "Z\t{decls}\t{deps}\t{census}");
+            text
+        }
+
+        fn facts(&self) -> Facts {
+            facts_from(&self.render())
+        }
+
+        fn judge(&self) -> Result<Report, String> {
+            judge(&self.facts(), &self.modules.clone())
+        }
     }
 
     #[test]
     fn a_clean_record_set_reports_the_counts_and_succeeds() {
-        let facts = facts_from(&clean_records());
-        let report = judge(&facts, &["Grass.Core.Name".to_string()]).unwrap();
+        let report = RecordSet::padded()
+            .audited("Grass.A.foo")
+            .axiom("propext", "Grass.A.foo")
+            .judge()
+            .unwrap();
         assert!(!report.failed);
         assert_eq!(
             report.lines,
@@ -663,21 +917,21 @@ mod tests {
 
     #[test]
     fn every_allowlisted_axiom_is_accepted() {
-        let mut text = String::from("M\tGrass.A\nC\tGrass.A.t\n");
+        let mut set = RecordSet::padded().audited("Grass.A.t");
         for axiom in ALLOWED_AXIOMS {
-            let _ = writeln!(text, "A\t{axiom}\tGrass.A.t");
+            set = set.axiom(axiom, "Grass.A.t");
         }
-        let _ = writeln!(text, "Z\t1\t{}", ALLOWED_AXIOMS.len());
-        let facts = facts_from(&text);
-        assert!(!judge(&facts, &["Grass.A".to_string()]).unwrap().failed);
+        assert!(!set.judge().unwrap().failed);
     }
 
     #[test]
     fn sorry_is_a_finding() {
-        let facts = facts_from(
-            "M\tGrass.A\nC\tGrass.A.t\nA\tsorryAx\tGrass.A.t\nA\tpropext\tGrass.A.t\nZ\t1\t2\n",
-        );
-        let report = judge(&facts, &["Grass.A".to_string()]).unwrap();
+        let report = RecordSet::padded()
+            .audited("Grass.A.t")
+            .axiom("sorryAx", "Grass.A.t")
+            .axiom("propext", "Grass.A.t")
+            .judge()
+            .unwrap();
         assert!(report.failed);
         assert_eq!(
             report.lines,
@@ -691,20 +945,24 @@ mod tests {
 
     #[test]
     fn a_dependency_declared_axiom_is_a_finding() {
-        let facts =
-            facts_from("M\tGrass.A\nC\tGrass.A.t\nA\tMathlib.someAxiom\tGrass.A.t\nZ\t1\t1\n");
-        let report = judge(&facts, &["Grass.A".to_string()]).unwrap();
+        let report = RecordSet::padded()
+            .audited("Grass.A.t")
+            .axiom("Mathlib.someAxiom", "Grass.A.t")
+            .judge()
+            .unwrap();
         assert!(report.failed);
         assert!(report.lines[1].ends_with("depends on Mathlib.someAxiom"));
     }
 
     #[test]
     fn findings_are_sorted_so_two_runs_produce_the_same_report() {
-        let facts = facts_from(
-            "M\tGrass.A\nC\tGrass.A.z\nC\tGrass.A.a\nA\tsorryAx\tGrass.A.z\n\
-             A\tsorryAx\tGrass.A.a\nZ\t2\t2\n",
-        );
-        let report = judge(&facts, &["Grass.A".to_string()]).unwrap();
+        let report = RecordSet::padded()
+            .audited("Grass.A.z")
+            .audited("Grass.A.a")
+            .axiom("sorryAx", "Grass.A.z")
+            .axiom("sorryAx", "Grass.A.a")
+            .judge()
+            .unwrap();
         assert_eq!(
             &report.lines[1..],
             [
@@ -723,30 +981,30 @@ mod tests {
     /// distinguish an ordered container from an unordered one; sixty do.
     #[test]
     fn report_is_ordered_by_declaration_then_axiom() {
-        let mut text = String::from("M\tGrass.A\n");
+        let mut set = RecordSet::padded();
         let mut expected: Vec<String> = Vec::new();
         // Fed in descending order, so insertion order is the reverse of the answer.
         for i in (0..30).rev() {
             let name = format!("Grass.A.d{i:02}");
-            let _ = writeln!(text, "C\t{name}");
+            set = set.audited(&name);
             for axiom in ["zzzAxiom", "aaaAxiom"] {
-                let _ = writeln!(text, "A\t{axiom}\t{name}");
+                set = set.axiom(axiom, &name);
                 expected.push(format!("  {name} depends on {axiom}"));
             }
         }
-        let _ = writeln!(text, "Z\t30\t60");
         expected.sort();
-
-        let facts = facts_from(&text);
-        let report = judge(&facts, &["Grass.A".to_string()]).unwrap();
+        let report = set.judge().unwrap();
         assert!(report.failed);
         assert_eq!(&report.lines[1..], expected.as_slice());
     }
 
     #[test]
     fn an_unsafe_declaration_is_a_finding() {
-        let facts = facts_from("M\tGrass.A\nC\tGrass.A.t\nU\tGrass.A.t\nZ\t1\t0\n");
-        let report = judge(&facts, &["Grass.A".to_string()]).unwrap();
+        let report = RecordSet::padded()
+            .audited("Grass.A.t")
+            .unsafe_declaration("Grass.A.t")
+            .judge()
+            .unwrap();
         assert!(report.failed);
         assert_eq!(
             report.lines,
@@ -762,11 +1020,13 @@ mod tests {
     fn a_compiled_override_is_a_finding_and_outranks_the_others() {
         // Both an override and a forbidden axiom are present. The override is the
         // whole report: the axioms of a declaration nothing executes are noise.
-        let facts = facts_from(
-            "M\tGrass.A\nC\tGrass.A.t\nU\tGrass.A.t\nO\t@[implemented_by]\tGrass.A.t\n\
-             A\tsorryAx\tGrass.A.t\nZ\t1\t1\n",
-        );
-        let report = judge(&facts, &["Grass.A".to_string()]).unwrap();
+        let report = RecordSet::padded()
+            .audited("Grass.A.t")
+            .unsafe_declaration("Grass.A.t")
+            .compiled_override("@[implemented_by]", "Grass.A.t")
+            .axiom("sorryAx", "Grass.A.t")
+            .judge()
+            .unwrap();
         assert!(report.failed);
         assert_eq!(report.lines.len(), 2);
         assert_eq!(report.lines[1], "  Grass.A.t carries @[implemented_by]");
@@ -774,70 +1034,200 @@ mod tests {
 
     #[test]
     fn an_extern_override_is_reported_by_its_own_spelling() {
-        let facts = facts_from("M\tGrass.A\nC\tGrass.A.t\nO\t@[extern]\tGrass.A.t\nZ\t1\t0\n");
-        let report = judge(&facts, &["Grass.A".to_string()]).unwrap();
+        let report = RecordSet::padded()
+            .audited("Grass.A.t")
+            .compiled_override("@[extern]", "Grass.A.t")
+            .judge()
+            .unwrap();
         assert_eq!(report.lines[1], "  Grass.A.t carries @[extern]");
     }
 
     #[test]
     fn an_unsafe_declaration_outranks_an_axiom_finding() {
-        let facts =
-            facts_from("M\tGrass.A\nC\tGrass.A.t\nU\tGrass.A.t\nA\tsorryAx\tGrass.A.t\nZ\t1\t1\n");
-        let report = judge(&facts, &["Grass.A".to_string()]).unwrap();
+        let report = RecordSet::padded()
+            .audited("Grass.A.t")
+            .unsafe_declaration("Grass.A.t")
+            .axiom("sorryAx", "Grass.A.t")
+            .judge()
+            .unwrap();
         assert_eq!(report.lines.len(), 2);
         assert_eq!(report.lines[1], "  Grass.A.t");
     }
 
     #[test]
     fn a_module_on_disk_that_the_environment_never_imported_is_a_coverage_gap() {
-        let facts = facts_from(&clean_records());
+        let set = RecordSet::padded().audited("Grass.A.foo");
         let err = judge(
-            &facts,
-            &["Grass.Core.Name".to_string(), "Grass.Core.Uid".to_string()],
+            &set.facts(),
+            &["Grass.A".to_string(), "Grass.Core.Uid".to_string()],
         )
         .unwrap_err();
         assert!(err.contains("coverage gap"), "{err}");
         assert!(err.contains("Grass.Core.Uid"), "{err}");
-        assert!(!err.contains("Grass.Core.Name"), "{err}");
     }
+
+    // -----------------------------------------------------------------------
+    // The selection cross-check, in both directions.
+    //
+    // Over-inclusion was always caught: the snippet sends something and
+    // `is_audited` rejects it. Under-inclusion was invisible, because a
+    // declaration the filter skips leaves no record to judge, and the counts
+    // still add up over the smaller set. These are the tests for that hole.
+    // -----------------------------------------------------------------------
 
     #[test]
     fn a_declaration_outside_the_namespace_is_refused_rather_than_audited() {
-        let facts = facts_from("M\tGrass.A\nC\tList.map\nZ\t1\t0\n");
-        let err = judge(&facts, &["Grass.A".to_string()]).unwrap_err();
+        // Over-inclusion: audited but absent from the census's in-scope set.
+        let set = RecordSet::padded().audited("List.map");
+        let err = set.judge().unwrap_err();
         assert!(err.contains("List.map"), "{err}");
-        assert!(err.contains("disagree"), "{err}");
+        assert!(err.contains("audited but out of scope"), "{err}");
+    }
+
+    /// Under-inclusion: the environment contains a `Grass` declaration and the audit
+    /// pass never reported it. Counts stay self-consistent over the smaller set, so
+    /// nothing but the census can notice.
+    #[test]
+    fn a_grass_declaration_the_filter_skipped_is_refused() {
+        let set = RecordSet::padded()
+            .audited("Grass.A.reported")
+            .census_only("Grass.A.skipped");
+        let err = set.judge().unwrap_err();
+        assert!(err.contains("never audited: Grass.A.skipped"), "{err}");
+        assert!(!err.contains("Grass.A.reported"), "{err}");
+    }
+
+    /// The same hole with a `private` declaration, which is where a namespace filter
+    /// silently drops things: the stored name begins `_private`, not `Grass`, so a
+    /// filter that forgets to demangle skips every one of them and reports a clean
+    /// audit of what is left.
+    #[test]
+    fn a_private_grass_declaration_the_filter_skipped_is_refused() {
+        let mangled = "_private.Grass.ISA.X86.Decode.0.Grass.ISA.X86.decode_sound";
+        let set = RecordSet::padded()
+            .audited("Grass.A.reported")
+            .census_only(mangled);
+        let err = set.judge().unwrap_err();
+        assert!(err.contains(&format!("never audited: {mangled}")), "{err}");
+    }
+
+    /// The whole-filter failure: every `Grass` declaration skipped. The record set is
+    /// internally consistent and describes an audit of nothing.
+    #[test]
+    fn auditing_nothing_against_a_populated_census_is_refused_loudly() {
+        let set = RecordSet::padded()
+            .census_only("Grass.A.one")
+            .census_only("Grass.A.two")
+            .census_only("_private.Grass.A.0.Grass.A.three");
+        let err = set.judge().unwrap_err();
+        assert!(err.contains("no declarations at all"), "{err}");
+        // It must name what it found, not merely report a difference.
+        assert!(err.contains("census contains 3"), "{err}");
+        assert!(err.contains("never audited: Grass.A.one"), "{err}");
+        assert!(err.contains("selected nothing"), "{err}");
+    }
+
+    #[test]
+    fn a_mismatch_summarises_rather_than_scrolling_the_terminal() {
+        let mut set = RecordSet::padded().audited("Grass.A.reported");
+        for i in 0..(SELECTION_MISMATCH_SAMPLE + 7) {
+            set = set.census_only(&format!("Grass.A.skipped{i:03}"));
+        }
+        let err = set.judge().unwrap_err();
+        assert!(err.contains("... and 7 more never audited"), "{err}");
+    }
+
+    /// An empty census agrees with every filter, including one that selected
+    /// nothing, so it is refused before it is used as a denominator.
+    #[test]
+    fn a_census_too_small_to_be_real_is_refused_before_it_is_trusted() {
+        let set = RecordSet {
+            modules: vec!["Grass.A".to_string()],
+            ..RecordSet::default()
+        };
+        let err = set.judge().unwrap_err();
+        assert!(err.contains("0 of them outside"), "{err}");
+        assert!(err.contains("Refusing"), "{err}");
+    }
+
+    /// A census narrowed to the audited namespace equals the audited set by
+    /// construction, so every check below it would pass while proving nothing. That
+    /// is the same fail-open shape one level up, and it is refused on the size of the
+    /// part of the census this audit does *not* select.
+    #[test]
+    fn a_census_filtered_to_the_audited_namespace_is_refused_as_no_census_at_all() {
+        let mut set = RecordSet {
+            modules: vec!["Grass.A".to_string()],
+            ..RecordSet::default()
+        };
+        // Large enough to pass any bare size bar, and entirely in scope.
+        for i in 0..(MINIMUM_PLAUSIBLE_CENSUS * 2) {
+            set = set.audited(&format!("Grass.A.d{i:06}"));
+        }
+        let err = set.judge().unwrap_err();
+        assert!(err.contains("0 of them outside"), "{err}");
+        assert!(err.contains("filtered rather than taken"), "{err}");
+        assert!(err.contains("compare that set with itself"), "{err}");
     }
 
     #[test]
     fn a_truncated_record_set_is_refused_rather_than_reported_clean() {
         // Every finding needs a record, so a truncated set is a *clean* audit.
-        let err = parse_audit_records("M\tGrass.A\nC\tGrass.A.t\nZ\t2\t0\n").unwrap_err();
+        let set = RecordSet::padded().audited("Grass.A.t").forced_counts(
+            2,
+            0,
+            MINIMUM_PLAUSIBLE_CENSUS + 1,
+        );
+        let err = parse_audit_records(&set.render()).unwrap_err();
+        assert!(err.contains("audited declarations"), "{err}");
         assert!(err.contains("truncated"), "{err}");
     }
 
     #[test]
     fn a_record_set_with_a_short_dependency_count_is_refused() {
-        let err = parse_audit_records("M\tGrass.A\nC\tGrass.A.t\nA\tpropext\tGrass.A.t\nZ\t1\t9\n")
-            .unwrap_err();
+        let set = RecordSet::padded()
+            .audited("Grass.A.t")
+            .axiom("propext", "Grass.A.t")
+            .forced_counts(1, 9, MINIMUM_PLAUSIBLE_CENSUS + 1);
+        let err = parse_audit_records(&set.render()).unwrap_err();
         assert!(err.contains("axiom dependencies"), "{err}");
+    }
+
+    /// A truncated census is a smaller denominator, and a smaller denominator is one
+    /// an under-inclusive filter agrees with -- so the census gets a count too.
+    #[test]
+    fn a_record_set_with_a_short_census_count_is_refused() {
+        let set = RecordSet::padded()
+            .audited("Grass.A.t")
+            .forced_counts(1, 0, 3);
+        let err = parse_audit_records(&set.render()).unwrap_err();
+        assert!(err.contains("environment constants"), "{err}");
+        assert!(err.contains("truncated"), "{err}");
     }
 
     #[test]
     fn a_record_set_with_no_terminator_is_refused() {
-        let err = parse_audit_records("M\tGrass.A\nC\tGrass.A.t\n").unwrap_err();
+        let err = parse_audit_records("M\tGrass.A\nE\tGrass.A.t\nC\tGrass.A.t\n").unwrap_err();
         assert!(err.contains("no terminator"), "{err}");
     }
 
     #[test]
     fn a_record_after_the_terminator_is_refused() {
-        let err = parse_audit_records("C\tGrass.A.t\nZ\t1\t0\nC\tGrass.A.u\n").unwrap_err();
+        let err = parse_audit_records("C\tGrass.A.t\nZ\t1\t0\t0\nC\tGrass.A.u\n").unwrap_err();
         assert!(err.contains("follows the terminator"), "{err}");
     }
 
     #[test]
     fn an_unrecognised_record_is_refused() {
-        let err = parse_audit_records("X\tsomething\nZ\t0\t0\n").unwrap_err();
+        let err = parse_audit_records("X\tsomething\nZ\t0\t0\t0\n").unwrap_err();
+        assert!(err.contains("not a record this tool wrote"), "{err}");
+    }
+
+    #[test]
+    fn a_two_field_terminator_from_an_older_snippet_is_refused() {
+        // The terminator grew a third count. A record set without it is not an
+        // older-but-fine format; it is one whose census went uncounted.
+        let err = parse_audit_records("C\tGrass.A.t\nZ\t1\t0\n").unwrap_err();
         assert!(err.contains("not a record this tool wrote"), "{err}");
     }
 
@@ -845,7 +1235,7 @@ mod tests {
     fn a_name_carrying_a_tab_is_refused_rather_than_shifting_a_column() {
         // `A` takes exactly three fields; a fourth means a name contained a tab and
         // the axiom column would otherwise have silently become part of a name.
-        let err = parse_audit_records("A\tpropext\tGrass.A\tt\nZ\t0\t1\n").unwrap_err();
+        let err = parse_audit_records("A\tpropext\tGrass.A\tt\nZ\t0\t1\t0\n").unwrap_err();
         assert!(err.contains("not a record this tool wrote"), "{err}");
     }
 
@@ -962,7 +1352,7 @@ mod tests {
     fn the_snippet_writes_its_records_to_the_path_it_was_given() {
         let source = audit_lean_source(&["Grass.A".to_string()], Path::new(r"C:\Temp\r.tsv"));
         assert!(
-            source.contains(r#"IO.FS.writeFile "C:\\Temp\\r.tsv""#),
+            source.contains(r#"IO.FS.Handle.mk "C:\\Temp\\r.tsv""#),
             "{source}"
         );
     }
