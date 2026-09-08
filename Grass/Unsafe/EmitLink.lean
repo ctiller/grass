@@ -7,9 +7,9 @@ import Grass.Unsafe.EmitProgram
 `checkLinkSourceMap` validates consecutive offsets and positive byte lengths
 before projecting a `RawProgramEmission` into construction-owned
 `Link.SourceMapEntry` values. Accepted entries retain exact block and
-`SourceOrigin` data, and `CheckedLinkSourceMap.entryBounded` proves every range
-fits inside the emitted byte stream. No artifact layout or byte-semantics
-certificate is created.
+`SourceOrigin` data. Checked theorems prove every range fits inside the emitted
+byte stream and every emitted byte belongs to one range. No artifact layout or
+byte-semantics certificate is created.
 -/
 
 namespace Grass.Unsafe
@@ -110,6 +110,35 @@ private theorem linkMapReady_bounded
         simp only [List.flatMap_cons, List.length_append]
         unfold RawProgramEncodedInstruction.endOffset at bound
         omega
+
+private theorem linkMapReady_coversByte
+    (expected : Nat) (items : List (RawProgramEncodedInstruction Instruction))
+    (ready : LinkMapReadyFrom expected items)
+    (offset : Nat) (offsetLower : expected ≤ offset)
+    (offsetUpper :
+      offset < expected +
+        (items.flatMap RawProgramEncodedInstruction.bytes).length) :
+    ∃ item ∈ items,
+      item.offset ≤ offset ∧ offset < item.offset + item.bytes.length := by
+  induction items generalizing expected with
+  | nil =>
+      simp only [List.flatMap_nil, List.length_nil, Nat.add_zero] at offsetUpper
+      omega
+  | cons head rest ih =>
+      rcases ready with ⟨offsetExact, positive, restReady⟩
+      by_cases inHead : offset < head.offset + head.bytes.length
+      · exact ⟨head, by simp, by omega, inHead⟩
+      · have restUpper :
+            offset < head.endOffset +
+              (rest.flatMap RawProgramEncodedInstruction.bytes).length := by
+          simp only [List.flatMap_cons, List.length_append] at offsetUpper
+          simp only [RawProgramEncodedInstruction.endOffset]
+          omega
+        obtain ⟨item, hitem, lower, upper⟩ :=
+          ih head.endOffset restReady (by
+            simp only [RawProgramEncodedInstruction.endOffset]
+            omega) restUpper
+        exact ⟨item, by simp [hitem], lower, upper⟩
 
 private theorem linkMapReady_sourceMapConsecutive
     (sectionId : SectionId) (expected : Nat)
@@ -235,6 +264,42 @@ theorem entryBounded
   obtain ⟨item, hitem, rfl⟩ := hentry
   simpa [RawProgramEmission.byteLength, RawProgramEmission.bytes] using
     linkMapReady_bounded 0 emission.items checked.ready item hitem
+
+/-- The checked source ranges account for exactly the emitted byte length. -/
+theorem entriesLengthSumExact
+    {emission : RawProgramEmission State Terminal Instruction}
+    {sectionId : SectionId}
+    (checked : CheckedLinkSourceMap emission sectionId) :
+    (checked.entries.map SourceMapEntry.length).sum = emission.byteLength := by
+  simp only [entries, RawProgramEmission.linkSourceMap,
+    RawProgramEmission.byteLength, RawProgramEmission.bytes, List.map_map]
+  change (emission.items.map fun item => item.bytes.length).sum =
+    (emission.items.flatMap RawProgramEncodedInstruction.bytes).length
+  induction emission.items with
+  | nil => rfl
+  | cons head rest ih =>
+      simp only [List.map_cons, List.sum_cons, List.flatMap_cons,
+        List.length_append]
+      omega
+
+/-- Every emitted byte offset belongs to a checked source-map range. -/
+theorem entryForByte
+    {emission : RawProgramEmission State Terminal Instruction}
+    {sectionId : SectionId}
+    (checked : CheckedLinkSourceMap emission sectionId)
+    (offset : Nat) (hbound : offset < emission.byteLength) :
+    ∃ entry ∈ checked.entries,
+      entry.offset ≤ offset ∧ offset < entry.offset + entry.length := by
+  have upper :
+      offset < 0 +
+        (emission.items.flatMap RawProgramEncodedInstruction.bytes).length := by
+    simpa [RawProgramEmission.byteLength, RawProgramEmission.bytes] using hbound
+  obtain ⟨item, hitem, lower, upper⟩ :=
+    linkMapReady_coversByte 0 emission.items checked.ready offset
+      (Nat.zero_le offset) upper
+  refine ⟨⟨sectionId, item.offset, item.bytes.length,
+    item.lowered.block, item.lowered.origin⟩, ?_, lower, upper⟩
+  exact List.mem_map.mpr ⟨item, hitem, rfl⟩
 
 end CheckedLinkSourceMap
 

@@ -63,6 +63,13 @@ example (entry : SourceMapEntry) (hentry : entry ∈ checked.entries) :
 example (entry : SourceMapEntry) (hentry : entry ∈ checked.entries) :
     entry.offset + entry.length ≤ accepted.byteLength :=
   checked.entryBounded entry hentry
+example : (checked.entries.map SourceMapEntry.length).sum =
+    accepted.byteLength :=
+  checked.entriesLengthSumExact
+example (offset : Nat) (hbound : offset < accepted.byteLength) :
+    ∃ entry ∈ checked.entries,
+      entry.offset ≤ offset ∧ offset < entry.offset + entry.length :=
+  checked.entryForByte offset hbound
 
 private def zeroWidth : RawProgramEmission Unit Unit Instruction :=
   emitRawProgram (program [first, empty]) encoder taint
