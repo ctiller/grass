@@ -37,6 +37,25 @@ pub struct RejectedCandidate {
 pub struct DrainResult {
     pub published: Vec<EventId>,
     pub rejected: Vec<RejectedCandidate>,
+    /// Candidates this drain neither published nor rejected, and left in the
+    /// outbox exactly as it found them.
+    ///
+    /// A rejection is a claim this host is entitled to make: the candidate
+    /// was understood and found wanting, and the receipt says so durably. A
+    /// hold is the opposite -- this host could not understand the candidate
+    /// well enough to judge it, or could not write down its judgement, so it
+    /// declines to be the one that destroys it. Both are reported; neither
+    /// stops the rest of the queue.
+    pub held: Vec<HeldCandidate>,
+}
+
+/// One candidate left in the outbox untouched, and why. Held candidates are
+/// offered again on the next drain, so a newer binary -- or the same one on
+/// a filesystem that will accept a write -- can still publish them.
+#[derive(Debug, Clone)]
+pub struct HeldCandidate {
+    pub path: String,
+    pub reason: String,
 }
 
 /// Drains every pending candidate in `agent`'s local outbox, in submission
@@ -102,9 +121,23 @@ pub fn drain_outbox(
     let epoch = crate::registry::read_epoch(repo, &registry_tip)?;
     crate::registry::authorize_stream_write(&epoch, agent, host, coordinator_custody_epoch)?;
 
-    let pending = crate::outbox::list_pending(git_common_dir, agent)?;
+    let listing = crate::outbox::list_pending(git_common_dir, agent)?;
+    // Entries this host could not read at all are reported and left where
+    // they are; they must not stop the readable ones from being drained.
+    let mut held: Vec<HeldCandidate> = listing
+        .unreadable
+        .iter()
+        .map(|u| HeldCandidate {
+            path: u.path.display().to_string(),
+            reason: u.reason.clone(),
+        })
+        .collect();
+    let pending = listing.pending;
     if pending.is_empty() {
-        return Ok(DrainResult::default());
+        return Ok(DrainResult {
+            held,
+            ..DrainResult::default()
+        });
     }
 
     // Fetch first, before reading anything else, when the batch needs it --
@@ -169,7 +202,56 @@ pub fn drain_outbox(
     let mut envelopes = Vec::with_capacity(pending.len());
     let mut rejected = Vec::new();
     for (path, candidate) in &pending {
-        let data = candidate.typed_data()?;
+        // A candidate whose payload will not parse is rejected with a durable
+        // receipt, exactly like every other bad candidate in this loop --
+        // never propagated with `?`.
+        //
+        // It used to abort the whole drain. `g-design` submitted an
+        // `issue.opened` whose `evidence` array held a prose sentence where
+        // an event id belongs; that one typo held **77** urgent candidates
+        // behind it, none of which had anything wrong with them, and no
+        // receipt was written for any of them -- so from the author's side
+        // `submit` had returned success 77 times and the queue simply stopped
+        // moving with nothing to say why.
+        //
+        // The whole point of per-candidate receipts is that one bad event
+        // costs its author a retry rather than costing the fleet its queue.
+        // Parsing is the first thing this loop does, so the one failure that
+        // was not isolated was the one guaranteed to hit first.
+        //
+        // A kind this binary has never heard of is held, not rejected. That
+        // is the one parse failure that says nothing about the candidate:
+        // the author may be running a newer binary that knows the kind
+        // perfectly well, and rejecting it here would delete a valid event
+        // and hand its author a receipt blaming them for a typo they did not
+        // make. Holding costs a line of output per drain and keeps the event
+        // publishable by whichever coordinator can understand it.
+        if !crate::events::EventData::all_kinds().contains(&candidate.kind.as_str()) {
+            held.push(HeldCandidate {
+                path: path.display().to_string(),
+                reason: format!(
+                    "kind {:?} is unknown to this binary, so it is held for a coordinator                      that knows it rather than rejected as malformed",
+                    candidate.kind
+                ),
+            });
+            continue;
+        }
+        let data = match candidate.typed_data() {
+            Ok(d) => d,
+            Err(e) => {
+                let reason = format!("candidate payload does not parse: {e}");
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
+                    reason,
+                    &mut rejected,
+                    &mut held,
+                );
+                continue;
+            }
+        };
         // Gate 17: fail closed rather than validate a currency-sensitive
         // candidate against a stale cached cut just because the fresh probe
         // above failed -- reject it outright, with the fetch's own error,
@@ -181,11 +263,15 @@ pub fn drain_outbox(
                     "requires a current-as-of-remote-probe view (gate 17) but the fetch failed: \
                      {fetch_err}"
                 );
-                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
                     reason,
-                });
+                    &mut rejected,
+                    &mut held,
+                );
                 continue;
             }
         }
@@ -204,11 +290,15 @@ pub fn drain_outbox(
         if let crate::events::EventData::ReviewMergeAuthorized(d) = &data {
             if let Err(e) = verify_review_merge_authorized(repo, remote, &state, agent, d) {
                 let reason = e.to_string();
-                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
                     reason,
-                });
+                    &mut rejected,
+                    &mut held,
+                );
                 continue;
             }
         }
@@ -226,11 +316,15 @@ pub fn drain_outbox(
         if let crate::events::EventData::ReviewMergeReconciled(d) = &data {
             if let Err(e) = verify_review_merge_reconciled(repo, remote, &state, d) {
                 let reason = e.to_string();
-                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
                     reason,
-                });
+                    &mut rejected,
+                    &mut held,
+                );
                 continue;
             }
         }
@@ -307,20 +401,28 @@ pub fn drain_outbox(
         // from exactly this view moments ago.
         if let Err(e) = verify_review_reassignment_inherits_open_findings(&state, &data) {
             let reason = e.to_string();
-            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-            rejected.push(RejectedCandidate {
-                kind: candidate.kind.clone(),
+            record_rejection(
+                git_common_dir,
+                agent,
+                path,
+                candidate,
                 reason,
-            });
+                &mut rejected,
+                &mut held,
+            );
             continue;
         }
         if let Err(e) = verify_object_ids_resolve(repo, &data) {
             let reason = e.to_string();
-            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-            rejected.push(RejectedCandidate {
-                kind: candidate.kind.clone(),
+            record_rejection(
+                git_common_dir,
+                agent,
+                path,
+                candidate,
                 reason,
-            });
+                &mut rejected,
+                &mut held,
+            );
             continue;
         }
         // A frontier this host cannot build rejects *this* candidate, with a
@@ -341,11 +443,15 @@ pub fn drain_outbox(
             Ok(observed) => observed,
             Err(e) => {
                 let reason = e.to_string();
-                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
                     reason,
-                });
+                    &mut rejected,
+                    &mut held,
+                );
                 continue;
             }
         };
@@ -363,11 +469,25 @@ pub fn drain_outbox(
                 next_seq += 1;
             }
             Err(e) => {
-                reject_candidate(git_common_dir, agent, path, candidate, &e.to_string())?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
-                    reason: e.to_string(),
-                });
+                // This arm is the last one, and it was the one left behind.
+                //
+                // The other eight rejection paths were routed through
+                // `record_rejection`, but `dry_run`'s -- the final semantic
+                // rejection, and the one every well-formed-but-invalid
+                // candidate actually reaches -- still propagated a receipt
+                // write failure with `?`, aborting the whole drain and
+                // leaving every later valid candidate unpublished. Exactly
+                // the outage the rest of the change exists to remove, still
+                // reachable through the busiest door.
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
+                    e.to_string(),
+                    &mut rejected,
+                    &mut held,
+                );
             }
         }
     }
@@ -409,6 +529,7 @@ pub fn drain_outbox(
     Ok(DrainResult {
         published,
         rejected,
+        held,
     })
 }
 
@@ -416,6 +537,43 @@ pub fn drain_outbox(
 /// alongside the reason, to a `rejected/` receipt in the same outbox
 /// directory -- durable local evidence the author (or a human) can inspect,
 /// without it blocking any later candidate's contiguous sequence.
+/// Rejects `candidate` and records the outcome, without ever failing the
+/// drain.
+///
+/// `reject_candidate` writes to the filesystem, and every call site used to
+/// propagate that write's failure with `?`. That made the whole
+/// per-candidate rejection design conditional on a write succeeding: a
+/// read-only outbox directory, a full disk, or a lock on the receipt path
+/// turned *every* rejection arm back into the whole-drain abort this loop
+/// exists to avoid.
+///
+/// When the receipt cannot be written the candidate is held rather than
+/// removed. Removing it is only safe because the receipt preserves it; with
+/// no receipt, removal would be the silent discard the module contract
+/// forbids.
+fn record_rejection(
+    git_common_dir: &Path,
+    agent: &Agent,
+    path: &Path,
+    candidate: &crate::outbox::Candidate,
+    reason: String,
+    rejected: &mut Vec<RejectedCandidate>,
+    held: &mut Vec<HeldCandidate>,
+) {
+    match reject_candidate(git_common_dir, agent, path, candidate, &reason) {
+        Ok(()) => rejected.push(RejectedCandidate {
+            kind: candidate.kind.clone(),
+            reason,
+        }),
+        Err(e) => held.push(HeldCandidate {
+            path: path.display().to_string(),
+            reason: format!(
+                "would be rejected ({reason}), but the receipt could not be written, so the candidate is held rather than discarded: {e}"
+            ),
+        }),
+    }
+}
+
 fn reject_candidate(
     git_common_dir: &Path,
     agent: &Agent,
@@ -1424,6 +1582,7 @@ mod tests {
         assert!(
             crate::outbox::list_pending(repo.path(), &coord1)
                 .unwrap()
+                .pending
                 .is_empty(),
             "fixture must have an empty outbox, or it tests the wrong path"
         );
@@ -1549,6 +1708,7 @@ mod tests {
             .is_some());
         assert!(crate::outbox::list_pending(repo.path(), &alice)
             .unwrap()
+            .pending
             .is_empty());
     }
 
@@ -1594,6 +1754,494 @@ mod tests {
 
         let (_header, log) = crate::stream::read_stream(repo.path(), &coord1).unwrap();
         assert_eq!(log.len(), 3); // genesis registration + the two status events
+    }
+
+    /// A candidate whose payload does not parse is rejected on its own and
+    /// does not take the rest of the outbox down with it.
+    ///
+    /// This is the live g-design outage. An `issue.opened` was submitted with
+    /// a prose sentence sitting in `evidence`, where an event id belongs.
+    /// `typed_data()` was called with `?` before any per-candidate rejection
+    /// path could run, so the parse error propagated out of `drain_outbox`
+    /// and aborted the whole drain. **77** urgent candidates queued behind
+    /// that one typo stopped moving, none of them defective, and because the
+    /// abort happened before any receipt was written, the author's `submit`
+    /// had returned success for every one of them and nothing said why the
+    /// queue had stalled.
+    ///
+    /// The malformed candidate is built field-by-field rather than through
+    /// `Candidate::new`, because `Candidate::new` takes an already-parsed
+    /// `EventData` and so cannot express the thing being tested: a payload
+    /// that got as far as the outbox and only fails when the coordinator
+    /// reads it back. That is exactly how the real one arrived.
+    ///
+    /// The ordinary candidates are submitted on either side of the bad one so
+    /// the assertion is about isolation and not merely about surviving a
+    /// trailing failure -- `after` is the one that used to be lost.
+    #[test]
+    fn drain_outbox_rejects_an_unparseable_candidate_without_dropping_the_rest() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        crate::outbox::submit(
+            repo.path(),
+            "client-1",
+            &status_candidate(&coord1, "before"),
+        )
+        .unwrap();
+
+        let malformed = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.opened".to_string(),
+            data: serde_json::json!({
+                "target": "coord1",
+                "issue_kind": "correctness",
+                "severity": "critical",
+                "summary": "an issue whose evidence is prose",
+                "locations": [],
+                "reproduction": [],
+                "blocks": [],
+                "evidence": ["Lean probe compiled successfully against exact branch tip"],
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-2", &malformed).unwrap();
+
+        crate::outbox::submit(repo.path(), "client-3", &status_candidate(&coord1, "after"))
+            .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+
+        // Both well-formed candidates published, including the one queued
+        // behind the failure.
+        assert_eq!(
+            drained.published,
+            vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]
+        );
+
+        // The bad one is accounted for, by kind and with a reason that names
+        // what the author has to fix. A silent drop would be its own outage:
+        // the author would again be told nothing.
+        assert_eq!(drained.rejected.len(), 1);
+        assert_eq!(drained.rejected[0].kind, "issue.opened");
+        assert!(
+            drained.rejected[0].reason.contains("does not parse")
+                && drained.rejected[0].reason.contains("malformed event id"),
+            "rejection reason should name the parse failure and the bad field, got: {}",
+            drained.rejected[0].reason
+        );
+
+        // The outbox is drained: nothing is left stuck behind the failure.
+        assert!(crate::outbox::list_pending(repo.path(), &coord1)
+            .unwrap()
+            .pending
+            .is_empty());
+
+        let (_header, log) = crate::stream::read_stream(repo.path(), &coord1).unwrap();
+        assert_eq!(log.len(), 3); // genesis registration + the two good events
+    }
+
+    /// The receipt is the whole point of a rejection, so the test reads it
+    /// off disk.
+    ///
+    /// Asserting only on the returned `rejected` vector was not enough: an
+    /// implementation that deleted the candidate and wrote no receipt at all
+    /// passed the earlier version of this test, which is precisely the silent
+    /// discard the module contract forbids. Removing a candidate is only safe
+    /// *because* the receipt preserves it, so the receipt -- and the fact that
+    /// it round-trips the original payload -- is what has to be pinned.
+    #[test]
+    fn a_rejected_candidate_leaves_a_receipt_that_round_trips_its_payload() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        let malformed = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.opened".to_string(),
+            data: serde_json::json!({
+                "target": "coord1",
+                "issue_kind": "correctness",
+                "severity": "critical",
+                "summary": "an issue whose evidence is prose",
+                "locations": [],
+                "reproduction": [],
+                "blocks": [],
+                "evidence": ["Lean probe compiled successfully against exact branch tip"],
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-1", &malformed).unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+        assert_eq!(drained.rejected.len(), 1);
+
+        let rejected_dir = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
+        let receipts: Vec<_> = std::fs::read_dir(&rejected_dir)
+            .expect("a rejection must create the receipt directory")
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert_eq!(
+            receipts.len(),
+            1,
+            "exactly one receipt, for the one rejection"
+        );
+
+        let receipt: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&receipts[0]).unwrap()).unwrap();
+        assert!(receipt["reason"]
+            .as_str()
+            .unwrap()
+            .contains("does not parse"));
+        // The payload survives verbatim. Without this the receipt would record
+        // that something was thrown away without recording what, and the
+        // author could not reconstruct the event to resubmit it.
+        let recorded: Candidate = serde_json::from_value(receipt["candidate"].clone())
+            .expect("the receipt must hold a candidate");
+        assert_eq!(recorded, malformed);
+    }
+
+    /// An outbox file that is not a candidate at all does not stop the
+    /// candidates beside it, and is held rather than destroyed.
+    ///
+    /// The payload-parse fix alone did not achieve this: `list_pending` runs
+    /// before the drain loop, so a file that failed to deserialize as a
+    /// `Candidate` aborted the drain without ever reaching the per-candidate
+    /// rejection. Same outage, one layer earlier, and reached first.
+    #[test]
+    fn drain_outbox_holds_an_unreadable_file_without_dropping_the_rest() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        crate::outbox::submit(
+            repo.path(),
+            "client-1",
+            &status_candidate(&coord1, "before"),
+        )
+        .unwrap();
+        let junk = crate::outbox::outbox_dir(repo.path(), &coord1).join("client-2.json");
+        std::fs::write(&junk, br#"{"not": "a candidate"}"#).unwrap();
+        crate::outbox::submit(repo.path(), "client-3", &status_candidate(&coord1, "after"))
+            .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+
+        assert_eq!(
+            drained.published,
+            vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]
+        );
+        assert_eq!(drained.held.len(), 1);
+        assert!(drained.held[0]
+            .reason
+            .contains("is not a readable candidate"));
+        // Held means held: this host could not tell a broken writer from a
+        // newer binary's envelope, so it must not be the one to delete it.
+        assert!(junk.exists(), "a held file stays on disk");
+    }
+
+    /// A candidate whose *kind* this binary does not know is held, not
+    /// rejected.
+    ///
+    /// This is the one case where treating every parse failure as an author
+    /// defect is worse than the abort it replaced. Every agent on a host
+    /// shares one `git_common_dir`, and the fleet demonstrably runs more than
+    /// one build at a time, so an unknown kind is far more likely to mean
+    /// "the author is ahead of this coordinator" than "the author made a
+    /// typo". Rejecting it would delete a valid event and hand its author a
+    /// receipt blaming them for it.
+    #[test]
+    fn drain_outbox_holds_a_kind_this_binary_does_not_know() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        let from_the_future = Candidate {
+            agent: coord1.clone(),
+            kind: "review.merge_superseded".to_string(),
+            data: serde_json::json!({ "whatever": "a later schema knows this" }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-1", &from_the_future).unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "client-2",
+            &status_candidate(&coord1, "ordinary"),
+        )
+        .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1)]);
+        assert!(
+            drained.rejected.is_empty(),
+            "an unknown kind is not the author's fault: {:?}",
+            drained.rejected
+        );
+        assert_eq!(drained.held.len(), 1);
+        assert!(drained.held[0].reason.contains("unknown to this binary"));
+
+        // Still pending, so a coordinator that knows the kind can publish it.
+        let still = crate::outbox::list_pending(repo.path(), &coord1).unwrap();
+        assert_eq!(still.pending.len(), 1);
+        assert_eq!(still.pending[0].1.kind, "review.merge_superseded");
+        assert!(
+            std::fs::read_dir(crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected"))
+                .map(|d| d.count())
+                .unwrap_or(0)
+                == 0,
+            "a held candidate must not get a rejection receipt"
+        );
+    }
+
+    /// The semantic rejection path -- `apply::dry_run`'s -- also holds
+    /// instead of aborting when its receipt cannot be written.
+    ///
+    /// The sibling test covers the *parse* arm, and covering only that is
+    /// what let this survive: the parse arm is reached by a payload that
+    /// will not deserialize at all, while `dry_run`'s arm is reached by
+    /// every candidate that is well-formed but invalid, which is the common
+    /// case by a wide margin. It was the last of the nine rejection paths
+    /// still propagating a receipt-write failure with `?`, so a read-only or
+    /// blocked `rejected/` directory still aborted the whole drain through
+    /// the busiest door in the loop.
+    ///
+    /// The candidate here parses cleanly and is refused on its content -- an
+    /// `issue.acknowledged` naming an issue that does not exist -- so it
+    /// reaches `dry_run` rather than the parse arm, which is the whole point.
+    #[test]
+    fn an_unwritable_receipt_on_the_semantic_path_holds_and_still_publishes_the_rest() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        // Parses fine; refused by `dry_run` because the issue it names was
+        // never opened.
+        let semantically_invalid = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.acknowledged".to_string(),
+            data: serde_json::json!({
+                "issue": "coord1:9000",
+                "assignment": "coord1:9001",
+                "note": "acknowledging an issue that does not exist",
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-1", &semantically_invalid).unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "client-2",
+            &status_candidate(&coord1, "queued behind the unwritable rejection"),
+        )
+        .unwrap();
+
+        // A *file* where the receipt directory must go, so `create_dir_all`
+        // can never succeed. `list_pending` only considers `.json` files, so
+        // the blocker is invisible to the listing.
+        let blocker = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .expect("an unwritable receipt must not fail the drain");
+
+        // The later valid candidate published.
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1)]);
+        assert!(drained.rejected.is_empty());
+        assert_eq!(drained.held.len(), 1);
+        assert!(
+            drained.held[0]
+                .reason
+                .contains("receipt could not be written"),
+            "the hold must say why it could not reject: {}",
+            drained.held[0].reason
+        );
+
+        // Held on disk, not destroyed: the receipt is what makes removal
+        // safe, and there is no receipt.
+        let still = crate::outbox::list_pending(repo.path(), &coord1).unwrap();
+        assert_eq!(still.pending.len(), 1);
+        assert_eq!(still.pending[0].1.kind, "issue.acknowledged");
+    }
+
+    /// A receipt that cannot be written holds the candidate instead of
+    /// aborting the drain -- and does not destroy it.
+    ///
+    /// Every rejection arm in the loop called `reject_candidate(...)?`, so
+    /// the entire per-candidate rejection design was conditional on a
+    /// filesystem write succeeding. If it failed, all eight arms turned back
+    /// into the whole-drain abort the loop exists to prevent, including the
+    /// two arms added for earlier outages.
+    ///
+    /// A plain file where the `rejected/` directory needs to be reproduces it
+    /// portably: `list_pending` only considers `.json` files, so the blocker
+    /// is invisible to the listing, and `create_dir_all` can never succeed.
+    /// The candidate must survive, because with no receipt there is nothing
+    /// else recording it.
+    #[test]
+    fn a_receipt_that_cannot_be_written_holds_the_candidate_and_spares_the_drain() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        let malformed = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.opened".to_string(),
+            data: serde_json::json!({
+                "target": "coord1",
+                "issue_kind": "correctness",
+                "severity": "critical",
+                "summary": "prose where an event id belongs",
+                "locations": [],
+                "reproduction": [],
+                "blocks": [],
+                "evidence": ["not an event id"],
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-1", &malformed).unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "client-2",
+            &status_candidate(&coord1, "behind the unwritable rejection"),
+        )
+        .unwrap();
+
+        // A *file* named `rejected`, so the receipt directory cannot be made.
+        let blocker = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .expect("an unwritable receipt must not fail the drain");
+
+        // The candidate behind it still published.
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1)]);
+        assert!(drained.rejected.is_empty());
+        assert_eq!(drained.held.len(), 1);
+        assert!(
+            drained.held[0]
+                .reason
+                .contains("receipt could not be written"),
+            "the hold must say why it could not reject: {}",
+            drained.held[0].reason
+        );
+
+        // Not destroyed: the receipt is what makes removal safe, and there is
+        // no receipt.
+        let still = crate::outbox::list_pending(repo.path(), &coord1).unwrap();
+        assert_eq!(still.pending.len(), 1);
+        assert_eq!(still.pending[0].1.kind, "issue.opened");
     }
 
     /// Gate 18, end to end through the real coordinator path: an urgent
@@ -1725,6 +2373,7 @@ mod tests {
         // entry is gone (not stuck retrying forever) but durably recorded.
         assert!(crate::outbox::list_pending(repo.path(), &coord1)
             .unwrap()
+            .pending
             .is_empty());
         let rejected_dir = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
         let entries: Vec<_> = std::fs::read_dir(&rejected_dir).unwrap().collect();
