@@ -648,4 +648,15 @@ not about some other defect in the grant. -/
 theorem the_same_grant_authorizes_before_teardown :
     state.AuthorizedAt ghostGrant someContext placedProv 0 .read := by decide
 
+/-- **And nothing in the table authorizes it either**, which is the law
+`g-construct:76` asked c-mem to export for `withStack`'s exit teardown.
+
+`MemoryState.not_granted_of_tearDown?` states it in general: after a teardown, no
+grant authorizes a provenance rooted at one of the torn-down allocations, whatever
+the table holds. This is that law at a concrete state, so the general statement has a
+witness rather than only a proof. -/
+theorem nothing_is_granted_over_torn_down_storage :
+    ∀ s ∈ afterTeardown,
+      ¬ s.Granted someContext placedProv ⟨0, 4⟩ .read := by decide
+
 end Tests.Memory.Placement

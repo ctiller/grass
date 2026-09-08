@@ -2697,6 +2697,8 @@ theorem not_granted_of_no_authorizing_entry {state : MemoryState} {context : Con
   obtain ⟨entry, hmem, hauth⟩ := hgranted 0 hsize
   exact h entry hmem (range.start + 0) hauth
 
+
+
 /--
 **A split preserves the source's authority.**
 
@@ -3425,6 +3427,52 @@ theorem tearDown?_kills_every_name {state : MemoryState} :
             rw [hkept, allocate?_lookup_self hstep]
             rfl
         · exact ih h id hcase
+
+/-- A torn-down allocation is not live, whatever epoch its provenance names.
+
+`tearDown?_kills_every_name` says the record is not live; `Live` wants live *and* a
+matching epoch, so the first conjunct is enough and the epoch never enters. That
+asymmetry is the whole reason `AuthorizedAt` had to move off `CurrentEpoch`: teardown
+does not advance the epoch, so an epoch check alone sees nothing. -/
+theorem not_live_of_tearDown? {state next : MemoryState} {ids : List AllocId}
+    {provenance : Provenance} (h : state.tearDown? ids = some next)
+    (hmem : provenance.root ∈ ids) : ¬ next.Live provenance := by
+  have hkill := tearDown?_kills_every_name h provenance.root hmem
+  unfold Live
+  cases hlook : next.allocations.lookup provenance.root with
+  | none => simp
+  | some record =>
+      rw [hlook] at hkill
+      simp only [Option.any_some, Bool.not_eq_true'] at hkill
+      simp [hkill]
+
+/--
+**After a teardown, nothing authorizes the torn-down storage.**
+
+The law `g-construct:76` asked for: `withStack` closes every declared exit by tearing
+the scope down, and needs the returned outer contract to be unable to authorize what
+the scope held. Stated over `Granted` rather than over a particular grant, because
+that is the question an outer contract asks -- is *anything* in the table authority
+over these bytes -- and the answer has to be no regardless of what the table holds.
+
+It does not depend on the teardown having removed the grants. `tearDown?` refuses
+while any grant is outstanding, so in practice there are none; this says the stronger
+thing, that even a grant that somehow survived would authorize nothing, because
+authority over storage that is gone is none rather than weak. Before `AuthorizedAt`
+consulted liveness this was false, and the two door guards were all that stood in
+for it -- an emergent property rather than a law, which is exactly what g-construct
+could not build on.
+
+The non-empty hypothesis is `Granted`'s: it is vacuously true on an empty range in
+every state, which is why `AccessDescriptor.WellFormedIn.rangeNonEmpty` exists.
+-/
+theorem not_granted_of_tearDown? {state next : MemoryState} {ids : List AllocId}
+    {context : ContextId} {provenance : Provenance} {range : ByteRange}
+    {intent : AccessIntent}
+    (h : state.tearDown? ids = some next) (hmem : provenance.root ∈ ids)
+    (hne : ¬ range.IsEmpty) : ¬ next.Granted context provenance range intent :=
+  not_granted_of_no_authorizing_entry hne
+    (fun _ _ _ => not_authorizedAt_of_dead (not_live_of_tearDown? h hmem))
 
 /--
 Declare that two allocations name the same storage.
