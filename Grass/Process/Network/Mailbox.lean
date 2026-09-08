@@ -40,8 +40,16 @@ is free to change.
 `docs/PROCESS.md` §3: "Neither mechanism is free: unbounded mailboxes or
 postponed sets fail resource/progress gates." A selective receive that walked a
 million-entry mailbox and reported no cost would let a process do unbounded work
-inside one transition, which is exactly what the progress argument in
-`Grass/Process/Progress.lean` assumes cannot happen.
+inside one transition.
+
+Where that is refused is worth stating exactly, because an earlier version of
+this sentence said `Grass/Process/Progress.lean`'s argument assumes it away and
+that module says the opposite: "the internal work §7 refers to happens *inside*
+one transition, in a serial call or in the machine realization, and the
+finite-internal-work clause is discharged there". `MeetsProcessProgress` is about
+which events arrive, not about the cost of handling one. So the bound belongs to
+whatever realizes the mailbox, and this layer records the obligation rather than
+discharging it.
 -/
 
 namespace Grass.Process

@@ -76,9 +76,10 @@ nothing else.
 
 Causality is the opposite case. `docs/PROCESS.md` §4 requires the emitting
 segment of each observation to be *retained* through "later weaving, flattening,
-serialization, machine simulation, and projection", so it cannot be discarded.
-Carrying it as an index of `Reachable` gives `Reachable.observationCausality`
-without letting it reach an acceptance relation.
+serialization, machine simulation, and projection". Carrying it as an index of
+`Reachable` is what keeps it: `Reachable.observationCausality` reads it, and
+because it is an index rather than a field of the state, it cannot reach an
+acceptance relation.
 
 An earlier draft put `Segmented` inside `ProcessRunState`, which failed the
 first test, and then deleted it from the run entirely, which failed the second.
