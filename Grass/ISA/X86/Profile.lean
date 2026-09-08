@@ -19,9 +19,11 @@ names anchored to the declaration they constrain — `decodeMem.ripRelative`,
 
 ## State of these citations
 
-Every rule below is dual-cited. Nine of the eighteen anchors are confirmed, all
-of them Intel; the nine AMD anchors are not, because the AMD manual is
-unretrievable.
+Every rule below is dual-cited, and the split is by vendor rather than by
+rule: every Intel anchor is confirmed and no AMD anchor is, because the AMD
+manual's recorded retrieval location is dead. The audit prints the current
+counts on each build; they are not restated here, because adding a rule
+changes them and a number copied into prose only agrees until it does.
 
 None claims `CommonBasis.agreed`, and none can while that is true:
 `CommonRule.agreedIsConfirmed` requires both citations to be
@@ -43,12 +45,13 @@ ledger reports it rather than implying otherwise:
 - `Ledger.releaseBlockers` is non-empty, because the AMD APM's recorded
   retrieval location is dead and the manual is `referenceOnly`. See
   `Grass/ISA/X86/Sources.lean`.
-- `Ledger.unconfirmedAnchors` is the nine AMD anchors, not all eighteen. This
-  said every anchor was unconfirmed "because none has been followed inside the
-  manual from this working copy", which stopped being true once the Intel side
-  was followed: all nine Intel citations carry a confirmation date, and no AMD
-  citation does. The audit reports the same split -- nine of eighteen
-  unconfirmed -- so the header was contradicting the number printed beside it.
+- `Ledger.unconfirmedAnchors` is the AMD anchors, not all of them. This once
+  said every anchor was unconfirmed "because none has been followed inside
+  the manual from this working copy", which stopped being true once the
+  Intel side was followed. It then said nine of eighteen, which stopped
+  being true when a tenth rule was added -- the same mistake with a
+  fresher number, which is why the statement is now structural: every
+  Intel citation carries a confirmation date and no AMD citation does.
   The AMD anchors cannot be followed at all while that manual's recorded
   retrieval location is dead.
   The Intel anchors are section-level and written against the SDM's stable
@@ -81,6 +84,8 @@ def rexByteRegisters : Name := ⟨"Grass.ISA.X86.ByteReg.Encodable"⟩
 def modRmLayout : Name := ⟨"Grass.ISA.X86.ModRm.toByte"⟩
 /-- The SIB byte layout. -/
 def sibLayout : Name := ⟨"Grass.ISA.X86.Sib.toByte"⟩
+/-- `0F` escapes into the two-byte opcode map. -/
+def opcodeMapEscape : Name := ⟨"Grass.ISA.X86.InsnEncoding.escapeByte"⟩
 /-- `mod=00, rm=101` is RIP-relative in 64-bit mode. -/
 def ripRelative : Name := ⟨"Grass.ISA.X86.decodeMem.ripRelative"⟩
 /-- `rm=100` selects a SIB byte rather than naming a register. -/
@@ -438,11 +443,41 @@ def Registered (r : CommonRule) : Prop :=
 instance (r : CommonRule) : Decidable (Registered r) :=
   inferInstanceAs (Decidable (_ ∧ _))
 
+/-- The escape byte that opens the two-byte opcode map. -/
+def twoByteOpcodeEscape : CommonRule :=
+  { subject := opcodeMapEscape
+    statement :=
+      "A two-byte opcode is written as the escape byte 0FH in the primary " ++
+      "opcode position followed by a second opcode byte. A mandatory prefix " ++
+      "may precede the escape byte, in which case the escape still immediately " ++
+      "precedes the second opcode byte. 0FH in the primary position therefore " ++
+      "never denotes a one-byte instruction: a decoder reading it must consume " ++
+      "a further opcode byte before any ModRM, displacement or immediate."
+    basis := .assertedPendingConfirmation
+    citation := dual opcodeMapEscape
+      (cite .intel Volume.intelInstructionFormat "2.1.2"
+        "Opcodes" [opcodeMapEscape]
+        ("Confirmed. On the page numbered 2-3, the section lists the two-byte " ++
+         "opcode formats for general-purpose and SIMD instructions as an " ++
+         "escape opcode byte 0FH as the primary opcode and a second opcode " ++
+         "byte, or a mandatory prefix followed by the same. The three-byte " ++
+         "forms in the same list add a further byte after the escape and are " ++
+         "outside this profile. Read the bulleted list; the surrounding prose " ++
+         "is about opcode field encoding generally.")
+        (confirmed := some intelAnchorCheckDate))
+      (cite .amd Volume.amdInstructions "1.3"
+        "Opcode" [opcodeMapEscape]
+        ("In the Instruction Formats chapter of Volume 3, find the Opcode " ++
+         "section and its account of the two-byte and three-byte opcode maps. " ++
+         "Confirm that 0FH in the primary opcode position selects the two-byte " ++
+         "map. The subsection number was not confirmed from this working copy; " ++
+         "locate by heading.")) }
+
 /-- Every rule stated above. -/
 def all : List CommonRule :=
   [registerWriteExtension, rexPrefixLayout, byteRegisterRexInteraction,
    modRmByteLayout, sibByteLayout, ripRelativeForm, sibEscapeForm,
-   noIndexForm, noBaseForm]
+   noIndexForm, noBaseForm, twoByteOpcodeEscape]
 
 /--
 **Every rule cites a registered document.**
@@ -477,7 +512,7 @@ better shape and the larger edit; whoever takes it should know that
 theorem all_registered : ∀ r ∈ all, Registered r := by
   intro r hr
   simp only [all, List.mem_cons, List.not_mem_nil, or_false] at hr
-  rcases hr with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
+  rcases hr with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
     exact ⟨rfl, rfl⟩
 
 end Rules

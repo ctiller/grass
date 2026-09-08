@@ -135,8 +135,14 @@ and `ModeRule.ofVolatility`, which close the half of `Convention.lean`'s
 obligation the register table could not express. Each raise is one reviewed
 edit that closes a stated obligation, which is the trade this ratchet is meant
 to make visible rather than to forbid.
+
+Then down to 153, which is the direction the ratchet exists to allow.
+`InsnEncoding.escapeByte` left `owed` by acquiring a citation rather than by
+being reclassified: `Grass.ISA.X86.Rules.twoByteOpcodeEscape` cites Intel SDM
+Vol. 2A section 2.1.2 for the two-byte opcode map, confirmed against the
+manual. That is the only way a declaration is supposed to leave either list.
 -/
-def owedBaseline : Nat := 154
+def owedBaseline : Nat := 153
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -550,7 +556,6 @@ def owed : List Name :=
     `Grass.ISA.X86.ByteReg.encodingNumber,
     `Grass.ISA.X86.Rex.promotesTo64, `Grass.ISA.X86.Rex.extendsReg,
     `Grass.ISA.X86.Rex.extendsIndex, `Grass.ISA.X86.Rex.extendsBase,
-    `Grass.ISA.X86.InsnEncoding.escapeByte,
     -- Win64 ABI. `docs/DECISIONS.md` 16 fixes the baseline at Win32 x64 and
     -- `docs/VALIDATION.md` section 1 names "API, ABI rule, binary structure"
     -- explicitly, so these owe citations exactly as the instruction encodings
