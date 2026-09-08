@@ -1992,6 +1992,26 @@ semantics.
 Before flattening, the graph supplies a stronger partial-order theorem:
 
 ```lean
+def BoundaryObservationState (world : LogicalProcessNetwork plan) :=
+  (world.pending, world.observations)
+
+/- A swap witness carries both two-step executions and proves that they execute
+   the same two transition occurrences, including selected environment/API
+   results, lifecycle choices, obligation transfers, and nominal identities.
+   It is stronger than equality of constructor names or write scopes. -/
+structure ExactOccurrenceSwap
+    (left right : EnabledTransition plan world) where
+  leftThenRight : TwoStepExecution plan world
+  rightThenLeft : TwoStepExecution plan world
+  sameOccurrences : SameSelectedTransitionOccurrences
+    left right leftThenRight rightThenLeft
+
+def BoundaryObservationsCommute
+    (left right : EnabledTransition plan world) : Prop :=
+  forall swap : ExactOccurrenceSwap left right,
+    BoundaryObservationState swap.leftThenRight.final =
+      BoundaryObservationState swap.rightThenLeft.final
+
 def Independent (world : LogicalProcessNetwork plan)
     (left right : EnabledTransition plan world) : Prop :=
   DisjointLocalInstances left right ∧
@@ -2014,6 +2034,26 @@ theorem syscall_linearizations_equivalent
     (sameOrder : LinearizeSameProcessPartialOrder a.syscalls b.syscalls) :
   StrongObservedExecutionEquivalence a b
 ```
+
+`BoundaryObservationsCommute` is the exact pending-plus-committed observation
+claim demanded of a swap; it is not shorthand for write-scope disjointness. The
+swap first proves that both orders execute the same selected occurrences, so the
+predicate cannot compare unrelated silent transitions or silently choose new
+API results. The default implementation proves the predicate from the current
+stronger restriction that two independent transitions cannot both change the
+boundary observation state. A later plan may admit two non-silent transitions
+only after supplying a reviewed exact commutation argument; this interface does
+not prescribe how that argument is represented.
+
+The narrow proof uses the existing stronger restriction: derive that one side is
+boundary-silent, preserve that fact under exact-occurrence transport, and reuse
+the selected non-silent occurrence's existing append or commit equation in both
+orders. This requires no equality, serialization, or byte-size operation on
+observations. The transition-occurrence transport and the full operational
+diamond remain separate proof obligations; this definition does not pretend to
+construct them. If a future plan admits two non-silent independent effects, it
+may introduce a normalized effect algebra then, after separately reviewing its
+author and proof burden.
 
 `ProviderEffectsCommute` is proved from the exact provider operation footprints,
 handles/session identities, result dependencies, interruption laws, and

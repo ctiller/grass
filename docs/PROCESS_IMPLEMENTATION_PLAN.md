@@ -1933,11 +1933,44 @@ true, of a different fragment. The narrowing is unchanged and this entry stays
 open. What the split *did* change is that a commit now has provenance, which is
 §10.60's story and not this one.
 
-Needs a ruling on whether the corpus intends one global observation trace. If it
-does, §7's observation-reordering congruence is trivial and should be recorded
-as such rather than sought. If it does not, `LogicalProcessNetworkCore` needs a
-per-origin trace and `docs/PROCESS.md` §3's "observation origin" becomes a field
-rather than a word.
+**Ruled; implementation open.** The portable state retains one pending and one
+committed global trace. Section 7 now defines `BoundaryObservationsCommute`
+directly over an `ExactOccurrenceSwap`: both orders must contain the same two
+selected transition occurrences, including environment results, obligation
+movement, lifecycle choices, and nominals, and their final pending-plus-committed
+states must be equal. It is therefore neither contentless nor derivable from
+write-scope disjointness alone.
+
+The initial implementation remains intentionally narrow. The existing
+`independent_steps_do_not_both_emit` supplies a boundary-silent side. Exact
+occurrence transport preserves that silence and fixes the selected non-silent
+occurrence, whose existing append or commit equation is reused in both orders.
+The current independence relation therefore closes the boundary field without
+an application-authored proof or a new generalized effect framework. A future
+widening to two non-silent independent effects may add a normalized effect
+algebra and reusable commutation laws, but only after separate design and burden
+review.
+
+This ruling does **not** claim the operational diamond, exact occurrence
+transport, causal compression, or a generic manifest verifier. Those remain
+separate dependencies and must be designed and implemented against the actual
+transition family before `independent_diamond` can land. The focused acceptance
+fixtures are: two silent transitions; one append and one silent transition in
+both orders; one commit and one silent transition in both orders; rejection of
+two ordered appends; and rejection of a purported swap that changes an API
+result or nominal occurrence. The transition family must retain an exhaustive
+proof that the admitted independence cases satisfy these fixtures; no
+particular effect-projection representation is required.
+
+The live `SwapsWith` in `Grass/Process/Trace/Independence.lean` preserves only
+the two reordered steps and equivalence of their write scopes. That is
+insufficient: equal scopes do not preserve constructor payload, environment/API
+result, lifecycle choice, obligation transfer, or nominal identity. It must be
+replaced or strengthened before it can construct `ExactOccurrenceSwap`.
+`EnabledTransition`, `TwoStepExecution`,
+`SameSelectedTransitionOccurrences`, and `ExactOccurrenceSwap` are all target
+vocabulary, not current Lean declarations. Constructing the last of these is
+the replay/diamond work; `BoundaryObservationsCommute` only consumes it.
 
 ### 10.28 No transition can change the obligation ledger or any session
 
