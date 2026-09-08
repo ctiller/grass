@@ -15,11 +15,18 @@ imports this module and the reverse import would be a cycle. That siting splits
 a pair §1 writes together, and the "## Bytes" section of `Vec.lean` records what
 it would take to unsplit them and why nothing has.
 
-`ByteSeq` is the placeholder the memory layer uses meanwhile. It is a single
-`abbrev` so that the migration to `Vec Byte` is one edit in one place rather than
-a change to every field that holds bytes. It is listed as **provisional** in the
-M1 freeze note; consumers should write `ByteSeq` and never `List Byte`, so that
-the migration does not become a rewrite.
+`ByteSeq` is the placeholder the byte-handling layers use meanwhile, listed as
+**provisional** in the M1 freeze note. Consumers should write `ByteSeq` and never
+`List Byte`, so that the migration does not become a rewrite.
+
+**This paragraph used to promise that the migration is "one edit in one place",
+and that is refuted.** `c-mem:51` ran it rather than estimating it and reported
+back that the one edit cannot even be written: `abbrev ByteSeq := Vec Byte` here
+would need this module to name `Vec`, and `Vec.lean` imports this one. The
+convention held — no module under the memory layer writes `List Byte` — and it
+was necessary without being sufficient, because the proofs depend on `ByteSeq`
+being a `List` rather than on any sequence interface. See the `ByteSeq` docstring
+below and `docs/STDLIB_IMPLEMENTATION_PLAN.md` §4.0.
 
 **Custody, settled.** This module was written under `c-mem`'s temporary custody
 per `docs/MEMORY_IMPLEMENTATION_PLAN.md` §2. That custody ended on 2026-09-07:
