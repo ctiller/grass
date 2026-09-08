@@ -28,17 +28,21 @@ jobs:
       # This job is where cross-file references are kept honest, so the retired
       # tool paths belong here too.
       #
-      # Five entry points have been retired into `tools/grass-tools` binaries:
-      # the Python docstring auditor with the Lean declaration-name dump it
-      # shelled out to, the Lean axiom audit, the Python source-liveness probe,
-      # and the Python Win64 unwind differential. The pattern below is the only
-      # place their old paths are written, because this comment is in the gate's
-      # own scope. A leftover reference to any of them is worse than a broken
-      # link, which is why it gets a gate rather than a note:
-      # docs/STDLIB_IMPLEMENTATION_PLAN.md listed runs of those paths as exit
-      # criteria, so a stale path is a criterion nobody can run, and a docstring
-      # resting its claim on a deleted script is evidence nobody can chase. Both
-      # read as verification and neither is.
+      # Nine entry points have been retired. Five became `tools/grass-tools`
+      # binaries: the Python docstring auditor with the Lean declaration-name
+      # dump it shelled out to, the Lean observation-coverage audit, the Python
+      # source-liveness probe, and the Python Win64 unwind differential. The
+      # other four -- the Python x86 assembler, disassembler and decoder
+      # differentials, and the machine probe -- were deleted on 2026-09-08 with
+      # no replacement yet, pending Lean tests under `Tests/ISA/X86/**` owned by
+      # c-x86 (c-agent:78). The pattern below is the only place their old paths
+      # are written, because this comment is in the gate's own scope. A leftover
+      # reference to any of them is worse than a broken link, which is why it
+      # gets a gate rather than a note: docs/STDLIB_IMPLEMENTATION_PLAN.md
+      # listed a run of one old path as an exit criterion, so a stale path is a
+      # criterion nobody can run, and a docstring resting its claim on a deleted
+      # script is evidence nobody can chase. Both read as verification and
+      # neither is.
       #
       # What is matched is those paths, not the names. Prose saying a tool was
       # once called `DocstringAudit.py` is history and reads as history;
@@ -48,19 +52,32 @@ jobs:
       # otherwise. This comment is itself in the gate's scope, which is why it
       # quotes no dead path either.
       #
-      # `tools/grass-tools` is exempt: the port's source compares itself against
-      # the tools it replaces on purpose, and those sentences are about what the
-      # port changed rather than instructions to run anything.
+      # `tools/grass-tools` is exempt: the ports' sources compare themselves
+      # against the tools they replace on purpose, and those sentences are about
+      # what the ports changed rather than instructions to run anything.
       #
-      # The entry points still under `Tools/` have not been ported, so this gate
-      # names paths rather than the directory. It grows as they land; a gate over
-      # the whole directory today would fail on the tools that are still there
-      # and still correct to reference.
+      # `Tools/` is empty as of this change, and yet this gate still names
+      # paths rather than matching the directory. That is not caution left over
+      # from when it could not: a whole-directory gate was written, run, and
+      # withdrawn because it fires on 20 tracked files.
+      #
+      # Those files reference `Tools/DoorAudit.py`, `CitationAudit.py`,
+      # `ConsultedAudit.py`, `ReachabilityAudit.py`, `FixtureAudit.py`,
+      # `SourceLocationAudit.py` and others, across `Grass/Memory/**`,
+      # `Tests/Memory/**` and two `docs/` plans. None of them exist in the
+      # repository. They belong to other agents' workstreams and are theirs to
+      # reconcile, so a gate that fails their builds is not this branch's to
+      # impose -- but the references are dead either way, which is exactly what
+      # this gate exists to prevent, and it is filed rather than left silent.
+      #
+      # So the enumeration stays, and it grows by one line per retirement. That
+      # is a real cost -- it is the file every one of these scoped tool branches
+      # conflicts on -- and it is the cheaper of the two options today.
       - name: Check no reference to a retired tool entry point
         shell: bash
         run: |
-          if git grep -nEi 'Tools/(DocstringAudit\.py|DeclNames\.lean|AxiomAudit\.lean|source-liveness\.py|win64-unwind-differential\.py)' -- . ':(exclude)tools/grass-tools'; then
-            echo "::error::The lines above name a path under Tools/ that no longer exists. Those entry points are now binaries in tools/grass-tools. Name the binary the sentence depends on, or write the sentence as history without the dead path."
+          if git grep -nEi 'Tools/(DocstringAudit\.py|DeclNames\.lean|AxiomAudit\.lean|CoverageAudit\.lean|source-liveness\.py|win64-unwind-differential\.py|x86-nasm-differential\.py|x86-ndisasm-differential\.py|x86-decode-differential\.py|x86-machine-probe\.py)' -- . ':(exclude)tools/grass-tools'; then
+            echo "::error::The lines above name a path under Tools/, which no longer exists at all. Most of those entry points are now binaries in tools/grass-tools; the four x86 differentials were deleted with no replacement yet and are tracked against c-x86. Name the binary the sentence depends on, or write the sentence as history without the dead path -- and if the sentence claimed a check that no longer runs, say so rather than naming a script nobody can run."
             exit 1
           fi
 
