@@ -66,6 +66,23 @@ path first, then the name within that scope. -/
 def CanonicalBefore (left right : PlatformRequirementKey) : Prop :=
   compare (toRep left) (toRep right) = Ordering.lt
 
+/-- The canonical order is exactly scope-path order followed by name order
+inside one scope. -/
+theorem canonicalBefore_iff (left right : PlatformRequirementKey) :
+    CanonicalBefore left right ↔
+      compare left.scope.path right.scope.path = Ordering.lt ∨
+        (left.scope.path = right.scope.path ∧
+          compare left.name right.name = Ordering.lt) := by
+  change (compare left.scope.path right.scope.path).then
+      (compare left.name right.name) = Ordering.lt ↔ _
+  rw [Ordering.then_eq_lt]
+  simp
+
+/-- No requirement key canonically precedes itself. -/
+theorem not_canonicalBefore_self (key : PlatformRequirementKey) :
+    ¬ CanonicalBefore key key := by
+  simp [canonicalBefore_iff]
+
 end PlatformRequirementKey
 
 local instance : Ord (List String × String) := lexOrd
@@ -112,6 +129,14 @@ theorem toCanonicalList_ordered (requirements : RequirementSet) :
       rw [List.pairwise_map]
       simpa [PlatformRequirementKey.CanonicalBefore] using
         (Std.TreeSet.ordered_toList (t := tree))
+
+/-- Canonical serialization contains no duplicate requirement key. -/
+theorem toCanonicalList_nodup (requirements : RequirementSet) :
+    requirements.toCanonicalList.Nodup := by
+  apply (toCanonicalList_ordered requirements).imp
+  intro left right before equal
+  subst right
+  exact PlatformRequirementKey.not_canonicalBefore_self left before
 
 /-- `key` is demanded by this set. -/
 def Demands (requirements : RequirementSet) (key : PlatformRequirementKey) : Prop :=
@@ -221,6 +246,14 @@ theorem Covers.refl (requirements : RequirementSet) :
 theorem Covers.trans {a b c : RequirementSet}
     (outer : a.Covers b) (inner : b.Covers c) : a.Covers c :=
   fun key demanded => outer key (inner key demanded)
+
+/-- Mutual coverage is requirement-set equality. -/
+theorem Covers.antisymm {left right : RequirementSet}
+    (leftRight : left.Covers right) (rightLeft : right.Covers left) :
+    left = right := by
+  apply ext
+  intro key
+  exact ⟨rightLeft key, leftRight key⟩
 
 /-- A union covers its left input. -/
 theorem union_covers_left (left right : RequirementSet) :
@@ -384,6 +417,38 @@ def withRequirements (boundary : DriverBoundary.{u})
     (requirements : RequirementSet) :
     (boundary.withRequirements requirements).requirements = requirements := rfl
 
+@[simp] theorem withRequirements_ExternalEvent (boundary : DriverBoundary.{u})
+    (requirements : RequirementSet) :
+    (boundary.withRequirements requirements).ExternalEvent = boundary.ExternalEvent := rfl
+
+@[simp] theorem withRequirements_Demand (boundary : DriverBoundary.{u})
+    (requirements : RequirementSet) :
+    (boundary.withRequirements requirements).Demand = boundary.Demand := rfl
+
+@[simp] theorem withRequirements_Result (boundary : DriverBoundary.{u})
+    (requirements : RequirementSet) :
+    (boundary.withRequirements requirements).Result = boundary.Result := rfl
+
+@[simp] theorem withRequirements_Observation (boundary : DriverBoundary.{u})
+    (requirements : RequirementSet) :
+    (boundary.withRequirements requirements).Observation = boundary.Observation := rfl
+
+/-- Replacing a boundary's requirements by the requirements it already carries
+is the identity operation. -/
+@[simp] theorem withRequirements_self (boundary : DriverBoundary.{u}) :
+    boundary.withRequirements boundary.requirements = boundary := by
+  cases boundary
+  rfl
+
+/-- A later requirement replacement supersedes an earlier replacement without
+changing the interface. -/
+@[simp] theorem withRequirements_withRequirements (boundary : DriverBoundary.{u})
+    (first second : RequirementSet) :
+    (boundary.withRequirements first).withRequirements second =
+      boundary.withRequirements second := by
+  cases boundary
+  rfl
+
 /-- Demand one additional platform capability without exposing insertion order
 or duplicate insertion. -/
 def demandAlso (boundary : DriverBoundary.{u})
@@ -405,20 +470,15 @@ theorem demandAlso_demands (boundary : DriverBoundary.{u})
 @[simp] theorem demandAlso_idempotent (boundary : DriverBoundary.{u})
     (key : PlatformRequirementKey) :
     (boundary.demandAlso key).demandAlso key = boundary.demandAlso key := by
-  change {boundary with requirements :=
-      (boundary.requirements.insert key).insert key} =
-    {boundary with requirements := boundary.requirements.insert key}
-  rw [RequirementSet.insert_idempotent]
+  simp [demandAlso, RequirementSet.insert_idempotent]
 
 /-- The order in which independent keys are demanded is unobservable. -/
 theorem demandAlso_comm (boundary : DriverBoundary.{u})
     (left right : PlatformRequirementKey) :
     (boundary.demandAlso left).demandAlso right =
       (boundary.demandAlso right).demandAlso left := by
-  change {boundary with requirements :=
-      (boundary.requirements.insert left).insert right} =
-    {boundary with requirements :=
-      (boundary.requirements.insert right).insert left}
+  simp only [demandAlso, withRequirements_requirements,
+    withRequirements_withRequirements]
   rw [RequirementSet.insert_comm]
 
 end DriverBoundary

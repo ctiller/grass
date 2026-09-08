@@ -59,7 +59,11 @@ example :
 
 example :
     (RequirementSet.ofList [keyB, keyA, keyB]).toCanonicalList =
-      [keyA, keyB] := by native_decide
+      [keyA, keyB] := by rfl
+
+example (requirements : RequirementSet) :
+    requirements.toCanonicalList.Nodup :=
+  RequirementSet.toCanonicalList_nodup requirements
 
 example : requirementsA.Demands keyA := by simp [requirementsA]
 
@@ -90,6 +94,10 @@ example (requirements : RequirementSet) :
       requirements.Covers requirementsA ∧ requirements.Covers requirementsB := by
   simp
 
+example {left right : RequirementSet} (leftRight : left.Covers right)
+    (rightLeft : right.Covers left) : left = right :=
+  RequirementSet.Covers.antisymm leftRight rightLeft
+
 example : requirementsA.union requirementsB =
     RequirementSet.ofList [keyA, keyB] := by
   apply RequirementSet.ext
@@ -111,6 +119,12 @@ def boundary : DriverBoundary where
   Result := fun _ => Unit
   Observation := Unit
   requirements := RequirementSet.empty
+
+example : boundary.withRequirements boundary.requirements = boundary := by simp
+
+example (first second : RequirementSet) :
+    (boundary.withRequirements first).withRequirements second =
+      boundary.withRequirements second := by simp
 
 example : (boundary.demandAlso keyA).requirements.Demands keyA :=
   DriverBoundary.demandAlso_demands boundary keyA

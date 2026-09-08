@@ -14,6 +14,11 @@ param(
         "Grass.Specification.RequirementSet.union_covers_right",
         "Grass.Specification.RequirementSet.union_empty",
         "Grass.Specification.RequirementSet.union_idempotent",
+        "Grass.Specification.PlatformRequirementKey.canonicalBefore_iff",
+        "Grass.Specification.RequirementSet.toCanonicalList_nodup",
+        "Grass.Specification.RequirementSet.Covers.antisymm",
+        "Grass.Specification.DriverBoundary.withRequirements_self",
+        "Grass.Specification.DriverBoundary.withRequirements_withRequirements",
         "Grass.DemandCertificateFamily.get",
         "Grass.ObservationProjection.ext",
         "Grass.ObservationProjection.identity_project",
@@ -123,6 +128,29 @@ if ($Declaration.Count -eq 0) {
     throw "At least one declaration must be audited."
 }
 
+$nativeDecidePattern = '\bby\s+native_decide\b'
+if (-not ("example : True := by native_decide" -match $nativeDecidePattern) -or
+    -not ("example : True := by`n  native_decide" -match $nativeDecidePattern) -or
+    ("example : True := by decide" -match $nativeDecidePattern)) {
+    throw "The native_decide source guard does not discriminate its target syntax."
+}
+$leanSourcePaths = @(& git ls-files --cached --others --exclude-standard -- '*.lean')
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not enumerate Lean source files for the native_decide guard."
+}
+$nativeDecideUses = @()
+foreach ($leanSourcePath in $leanSourcePaths) {
+    $leanSource = Get-Content -LiteralPath $leanSourcePath -Raw
+    foreach ($match in [regex]::Matches($leanSource, $nativeDecidePattern)) {
+        $prefix = $leanSource.Substring(0, $match.Index)
+        $lineNumber = [regex]::Matches($prefix, "`r`n|`n|`r").Count + 1
+        $nativeDecideUses += "$leanSourcePath`:$lineNumber"
+    }
+}
+if ($nativeDecideUses.Count -ne 0) {
+    throw "Kernel-bypassing 'by native_decide' proof(s) are prohibited:`n$($nativeDecideUses -join "`n")"
+}
+
 $caseVariantProbe = @(Get-RejectedAxiom -Used @("Propext") -Allowed @("propext"))
 if ($caseVariantProbe.Count -ne 1 -or
     -not [String]::Equals($caseVariantProbe[0], "Propext", [StringComparison]::Ordinal)) {
@@ -215,8 +243,33 @@ try {
         throw "Lean did not execute the generated trust-audit driver."
     }
 
-    $reported = 0
+    # Lean wraps long `#print axioms` reports onto continuation lines. Fold only
+    # those bracketed reports before counting them so a long declaration name
+    # cannot silently look like a missing audit result.
+    $normalizedOutput = @()
+    $continuedAxiomReport = $null
     foreach ($line in $output) {
+        if ($null -ne $continuedAxiomReport) {
+            $continuedAxiomReport += " " + $line.Trim()
+            if ($line -match '\]\s*$') {
+                $normalizedOutput += $continuedAxiomReport
+                $continuedAxiomReport = $null
+            }
+            continue
+        }
+        if ($line -match "^'[^']+' depends on axioms: \[" -and
+            $line -notmatch '\]\s*$') {
+            $continuedAxiomReport = $line
+            continue
+        }
+        $normalizedOutput += $line
+    }
+    if ($null -ne $continuedAxiomReport) {
+        throw "Lean emitted an unterminated axiom report: $continuedAxiomReport"
+    }
+
+    $reported = 0
+    foreach ($line in $normalizedOutput) {
         if ($line -match "^'[^']+' does not depend on any axioms$") {
             $reported += 1
             continue

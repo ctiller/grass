@@ -49,10 +49,15 @@ theorem requirementKey_stable :
     (⟨⟨["Grass", "Platform", "Win32"]⟩, "GetStdHandle"⟩ : PlatformRequirementKey) =
       LayeringSpecificationOnly.win32Handle := rfl
 
-/-- And so is a requirement set, including its duplicate-freedom proof. -/
+/-- And so is a requirement set; duplicate freedom is the separate
+`RequirementSet.toCanonicalList_nodup` law. -/
 theorem requirementSet_stable :
     LayeringSpecificationOnly.oneRequirement.toCanonicalList =
       [LayeringSpecificationOnly.win32Handle] := rfl
+
+theorem requirementSet_stable_nodup :
+    LayeringSpecificationOnly.oneRequirement.toCanonicalList.Nodup :=
+  RequirementSet.toCanonicalList_nodup _
 
 /-- Requirement coverage is decided identically on both sides. -/
 theorem covers_stable :
