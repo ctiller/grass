@@ -12,7 +12,7 @@ name: Library build
 #
 # A third check is about prose. Four adversarial review rounds each found a
 # docstring asserting a property the code did not have, including one naming a
-# theorem that did not exist. Tools/DocstringAudit.py requires a strong claim in
+# theorem that did not exist. The docstring-audit tool requires a strong claim in
 # a definition or module comment to name the type or theorem enforcing it.
 #
 # A fourth check is about laws. docs/STDLIB_IMPLEMENTATION_PLAN.md decision 6
@@ -20,17 +20,16 @@ name: Library build
 # a law computing its get?. That rule was stated in prose three times and
 # violated in the same commit that stated it each time - most recently by
 # Vec.sum, on the right-hand side of a law consumers apply. lake build says
-# nothing about it: an operation with no law compiles. Tools/CoverageAudit.lean
+# nothing about it: an operation with no law compiles. The coverage-audit tool
 # is what says something.
 #
-# The x86 differentials check something no Lean theorem can. Every theorem in
-# Grass/ISA/X86/** relates Grass's own definitions to each other, so an encoder
-# and decoder that are wrong in the same way satisfy all of them while emitting
-# instructions no processor executes -- a reviewer demonstrated exactly that
-# with a consistent RIP-relative/absolute swap that closed every proof
-# unchanged. NASM and NDISASM are the only things in the repository that can
-# notice. They ran by hand until now, which meant the claim they support could
-# rot with nothing to say so.
+# The x86 differentials that ran here were removed on 2026-09-08. They checked
+# something no Lean theorem can: every theorem in Grass/ISA/X86/** relates
+# Grass's own definitions to each other, so an encoder and decoder wrong in the
+# same way satisfy all of them, and NASM and NDISASM were the only things that
+# noticed. That coverage is deliberately absent, pending a replacement of a
+# different shape -- Lean tests under Tests/ISA/X86/**, owned by c-x86. See
+# c-agent:78.
 #
 # The `unwind` job exists because that argument applies again, and the second
 # time it was not hypothetical. Win64 `.xdata` is a Microsoft format, and
@@ -64,6 +63,22 @@ jobs:
         with:
           persist-credentials: false
 
+      # The tool crate first: it needs no Lean toolchain, so a broken tool is
+      # reported in a minute rather than after a library build. The unit tests
+      # are the safety case for the ports from the originals -- a safety case
+      # nothing runs decays into a comment -- and `cargo build` exiting 0 says
+      # nothing about whether the empty-scan refusals, the record-set truncation
+      # checks, or the coverage audit's cross-check against its own census still
+      # work.
+      - name: Check the validation tools' formatting
+        run: cargo fmt --manifest-path tools/grass-tools/Cargo.toml --all -- --check
+
+      - name: Lint the validation tools
+        run: cargo clippy --locked --all-targets --manifest-path tools/grass-tools/Cargo.toml -- -D warnings
+
+      - name: Test the validation tools
+        run: cargo test --locked --manifest-path tools/grass-tools/Cargo.toml
+
       - name: Install the pinned toolchain
         run: |
           curl -sSfL https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-unknown-linux-gnu.tar.gz \
@@ -79,6 +94,12 @@ jobs:
       - name: Build the library
         run: lake build
 
+      # Built once here so the audit step runs a compiled binary, and so a tool
+      # that fails to compile fails the job before any audit has had a chance to
+      # report a misleading pass.
+      - name: Build the validation tools
+        run: cargo build --release --locked --manifest-path tools/grass-tools/Cargo.toml
+
       - name: Audit axioms
         run: lake env lean Tools/AxiomAudit.lean
 
@@ -87,31 +108,13 @@ jobs:
         run: ./audit-trust.ps1
 
       - name: Audit docstring claims
-        run: python3 Tools/DocstringAudit.py
+        run: ./tools/grass-tools/target/release/docstring-audit
 
       - name: Report ledger coverage
         run: lake env lean Tests/ISA/X86/LedgerAudit.lean
 
       - name: Audit observation coverage
-        run: lake env lean Tools/CoverageAudit.lean
-
-      - name: Install NASM
-        run: sudo apt-get update && sudo apt-get install -y nasm
-
-      - name: Differential against NASM
-        run: |
-          lake env lean --run Tests/ISA/X86/NasmCorpus.lean > "$RUNNER_TEMP/corpus.txt"
-          python3 Tools/x86-nasm-differential.py "$RUNNER_TEMP/corpus.txt"
-
-      - name: Differential against NDISASM
-        run: |
-          lake env lean --run Tests/ISA/X86/RipCorpus.lean > "$RUNNER_TEMP/rip.txt"
-          python3 Tools/x86-ndisasm-differential.py "$RUNNER_TEMP/rip.txt"
-
-      - name: Decoder differential against NDISASM
-        run: |
-          lake env lean --run Tests/ISA/X86/DecodeCorpus.lean > "$RUNNER_TEMP/decode.txt"
-          python3 Tools/x86-decode-differential.py "$RUNNER_TEMP/decode.txt"
+        run: ./tools/grass-tools/target/release/coverage-audit
   unwind:
     runs-on: windows-latest
     timeout-minutes: 30
@@ -126,7 +129,12 @@ jobs:
 
       - name: Install the pinned toolchain
         run: |
-          curl -sSfL -o elan-init.exe https://github.com/leanprover/elan/releases/download/v4.2.3/elan-init-x86_64-pc-windows-msvc.exe
+          # elan publishes one Windows asset and it is a zip containing
+          # `elan-init.exe`; there has never been a bare
+          # `elan-init-x86_64-pc-windows-msvc.exe` to download, so this step
+          # was a guaranteed 404 and this job has never run.
+          curl -sSfL -o elan-init.zip https://github.com/leanprover/elan/releases/download/v4.2.3/elan-x86_64-pc-windows-msvc.zip
+          unzip -q elan-init.zip
           ./elan-init.exe -y --default-toolchain none
           echo "$USERPROFILE/.elan/bin" >> "$GITHUB_PATH"
 
@@ -138,7 +146,13 @@ jobs:
       - name: Build the unwind corpus
         run: lake build Tests.ABI.Win64.UnwindCorpus
 
+      # Built before the corpus is consumed, and separately from running it, so
+      # a tool that no longer compiles fails the job on its own line rather than
+      # inside a step whose name promises a differential.
+      - name: Build the validation tools
+        run: cargo build --release --locked --manifest-path tools/grass-tools/Cargo.toml
+
       - name: Differential against ml64
         run: |
           lake env lean --run Tests/ABI/Win64/UnwindCorpus.lean > "$RUNNER_TEMP/unwind.txt"
-          python Tools/win64-unwind-differential.py "$RUNNER_TEMP/unwind.txt"
+          ./tools/grass-tools/target/release/win64-unwind-differential.exe "$RUNNER_TEMP/unwind.txt"

@@ -17,6 +17,44 @@ def noDemands : DemandFamily where
 theorem noDemandCertificates : DemandCertificateFamily noDemands where
   discharge := fun key => nomatch key
 
+namespace DemandIdentityFixture
+
+def prior : RequirementKey := ⟨⟨"foundation-fixture", "prior"⟩⟩
+
+def identity : Bool → RequirementKey
+  | false => ⟨⟨"foundation-fixture", "false"⟩⟩
+  | true => ⟨⟨"foundation-fixture", "true"⟩⟩
+
+def demands : DemandFamily where
+  Key := Bool
+  keys := [false, true]
+  complete := by intro key; cases key <;> simp
+  unique := by simp
+  identity := identity
+  identityInjective := by
+    intro left right equal
+    cases left <;> cases right <;> simp_all [identity]
+  kind := fun _ => .functional
+  statement := fun _ => True
+
+def stage : DerivedDemandFamily [prior] where
+  demands := demands
+  origin := fun _ => .external ⟨"foundation-fixture", "authority"⟩
+  fresh := by intro key; cases key <;> simp [demands, identity, prior]
+
+example (key : demands.Key) : demands.identity key ∈ demands.identities := by simp
+
+example : demands.identities.Nodup := demands.identities_nodup
+
+example : prior ∈ stage.allKeys := stage.prior_mem_allKeys (by simp)
+
+example (key : stage.demands.Key) :
+    stage.demands.identity key ∈ stage.allKeys := by simp
+
+example : stage.allKeys.Nodup := stage.allKeys_nodup (by simp)
+
+end DemandIdentityFixture
+
 def noDerivedDemands : DerivedDemandFamily noDemands.identities where
   demands := noDemands
   origin := fun key => nomatch key
@@ -357,6 +395,18 @@ def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.g
   graphZero := rfl
   step := fun _ => trivial
   consistent := ⟨rfl, rfl⟩
+
+example : (toAbstract.mapInfinite continuation).prefixEvents 2 =
+    continuation.prefixEvents 2 :=
+  toAbstract.mapInfinite_prefixEvents continuation 2
+
+example : abstractSystem.Steps
+    (toAbstract.mapState samplePrefix.state)
+    (toAbstract.mapGraph samplePrefix.graph)
+    (continuation.prefixEvents 2)
+    (toAbstract.mapState (continuation.stateAt 2))
+    (toAbstract.mapGraph (continuation.graphAt 2)) :=
+  toAbstract.mapInfinite_prefixSteps continuation 2
 
 /-- A non-vacuous indexed continuation: state and graph both advance at every
 step, while its observable events alternate. -/
