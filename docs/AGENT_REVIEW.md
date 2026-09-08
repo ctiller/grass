@@ -276,7 +276,8 @@ regression test.
   introduced.
 - Documentation and source mirrors remain consistent.
 - Public names, errors, and comments state the real contract.
-- Critical and high findings have explicit disposition before merge.
+- Every formal finding has an explicit disposition before merge. Priority ranks
+  urgency and impact; it does not make a finding advisory.
 
 The reviewer need not reconstruct every kernel proof by hand. They must verify
 that checked or generated evidence has the claimed shape and no unreviewed
@@ -401,6 +402,57 @@ follow-up references the original defect, the repaired artifact, the chosen
 ratchet, and any deliberately rejected layers. This is the operational form of
 FOUNDATION law 10, **No ratchet regression**.
 
+### 5.8 Review calibration and reusable evidence
+
+A `Finding` always blocks the nominated snapshot until the accepting reviewer
+clears or supersedes it. `critical`, `high`, `normal`, and `low` rank impact and
+remediation order, not authority. An observation that may safely remain is a
+recorded non-blocking limitation or ordinary issue, not a low-priority open
+finding disguised as advice.
+
+A missing identity, composition, naturality, antisymmetry, canonicity, or helper
+law is a defect when a claimed property of an exported boundary cannot be
+derived by a consumer from that boundary's public contract. It is a convenience
+request when the exported claim already follows and the proposed lemma merely
+shortens one realization's proof. Reviewers attack the claimed semantic
+contract, not the author's preferred internal lemma inventory.
+
+Displayed Lean marked schematic is reviewed for semantic possibility,
+non-vacuity, satisfiability, authority, and consistency with its surrounding
+claims. A carrier shape that cannot support a property the design relies on is
+a finding even when the final spelling may change. A reserved identifier,
+argument order, or other spelling-only elaboration defect is a finding only in
+an exact or implementation-ready block; otherwise it is editorial feedback.
+An unimplemented forward-looking name is not itself a defect. It becomes one
+when the document consumes a field the displayed or existing owner does not
+provide, or claims enforcement without declaring an owning type, theorem,
+constructor, or gate.
+
+Conflicts visible only across independently valid nominations are reported
+directly to the affected authors or normative owner as issues. They are not
+attributed as findings against both snapshots merely because one reviewer saw
+both, and no coordinator is required to discover or resolve them. A selected
+integration candidate that actually contains the collision is defective and
+must not merge. Duplicate nominations are likewise resolved by author
+withdrawal or reassignment, preserving any real findings once rather than
+duplicating review work.
+
+Review evidence may be reused across a recut only at the scope it actually
+established. Exact unchanged blobs, declarations, or source-check inputs need
+not be reread by the same reviewer when the earlier record names them and their
+semantic dependencies are unchanged. Whole-candidate, interaction, adequacy,
+and integration conclusions are rechecked whenever their inputs change. A new
+reviewer may cite prior evidence but owns an independent acceptance; vague
+statements such as “the substantive review is complete” never expand the paths
+or claims actually inspected.
+
+A stale nomination base is not a source finding by itself. Source review may
+continue while `main` advances. The reviewer evaluates the selected integration
+candidate against current `main`; conflicts, changed check inputs, or violated
+contracts found there block integration and are reported on their actual
+substance. Branch age alone is informational and must not cause ceremonial
+rebases or repeated source review.
+
 ## 6. Findings and continuing authoring
 
 The reviewer emits `review.changes_requested` with actionable locations,
@@ -408,6 +460,12 @@ priority, rationale, and closure conditions. Authors respond with product
 commits and bus references. The existing branch nomination remains active unless
 withdrawn, declined, reassigned, or merged; no repetitive re-nomination is
 required merely because the branch advanced.
+
+If an observation is intentionally advisory, the reviewer records it as a
+non-blocking limitation or opens an ordinary issue with no merge-blocking
+reference. Once emitted as a formal finding, even a low-priority item requires
+terminal disposition; the author and merge helper do not infer advisory status
+from priority.
 
 After inspecting the fixes, the reviewer emits `review.findings_cleared`
 for each corresponding finding ID. A reviewer may instead emit
