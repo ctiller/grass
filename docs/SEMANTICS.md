@@ -544,6 +544,19 @@ inductive RequirementAuthority
   | extension {registry : ExtensionAuthorityRegistry}
       (owner : RegisteredExtensionAuthority registry)
 
+-- Nominal identity and authority are one type-indexed choice.  There is no
+-- unindexed key plus a caller-written owner tag.
+opaque ProviderRequirementKey (authority : RequirementAuthority) : Type
+def ProviderRequirementKey.stableId :
+    ProviderRequirementKey authority -> StableId
+def ProviderRequirementKey.reindex
+    (embedding : ExtensionAuthorityEmbedding source target)
+    (authority : RegisteredExtensionAuthority source) :
+    ProviderRequirementKey (.extension authority) ->
+      ProviderRequirementKey (.extension (authority.reindex embedding))
+theorem ProviderRequirementKey.reindex_id ...
+theorem ProviderRequirementKey.reindex_comp ...
+
 structure ProviderBindingView where
   Entry : Type
   entries : List Entry
@@ -567,16 +580,17 @@ theorem slotKeyInjective (scope : RequirementOriginScope authority) :
   Function.Injective scope.slotKey
 end RequirementOriginScope
 
-structure ProviderDemandDescriptor where
-  capabilityKey : ProviderRequirementKey
+structure ProviderDemandDescriptor (authority : RequirementAuthority) where
+  capabilityKey : ProviderRequirementKey authority
   statement : ProviderBindingView -> Prop
 
 opaque ProviderDemand (authority : RequirementAuthority) : Type
 def ProviderDemand.introduce
     (scope : RequirementOriginScope authority) (slot : scope.Slot)
-    (descriptor : ProviderDemandDescriptor) : ProviderDemand authority
+    (descriptor : ProviderDemandDescriptor authority) : ProviderDemand authority
 def ProviderDemand.originId : ProviderDemand authority -> RequirementOriginId
-def ProviderDemand.descriptor : ProviderDemand authority -> ProviderDemandDescriptor
+def ProviderDemand.descriptor :
+    ProviderDemand authority -> ProviderDemandDescriptor authority
 theorem ProviderDemand.introduce_origin_exact ...
 theorem ProviderDemand.introduce_descriptor_exact ...
 
@@ -636,7 +650,8 @@ inductive RequirementAuthorityId
 structure ProviderDemandView where
   authority : RequirementAuthorityId
   originId : RequirementOriginId
-  descriptor : ProviderDemandDescriptor
+  capabilityKey : StableId
+  statement : ProviderBindingView -> Prop
 
 def ProviderDemand.view : ProviderDemand authority -> ProviderDemandView
 def SomeProviderDemand.view : SomeProviderDemand -> ProviderDemandView
