@@ -28,10 +28,10 @@ let B assume the work will appear. A answers directly by adding or reprioritizin
 the work, declining it, or naming another provider; B then updates its own plan.
 Those events converge through the ordinary agent-to-agent eventual-consistency
 model. No coordinator participates in dependency discovery, routing, agreement,
-or acknowledgement. A host coordinator may batch or relay replication as an
-optional transport optimization, but either agent can publish and later learn
-the other's event without it. Finding these mismatches early is one of the
-roadmap system's primary throughput benefits.
+acknowledgement, publication, subscription, or replication. Each agent publishes
+its own immutable events and directly fetches the peer streams it needs. Finding
+these mismatches early is one of the roadmap system's primary throughput
+benefits.
 
 The gap report is also durable throughput evidence. Resolution closes the live
 dependency but does not erase the fact that a consumer needed work which no
@@ -47,8 +47,11 @@ work. Replicas may learn those immutable events in different orders; reduction
 of the same event set must produce the same current plans and dependency state.
 Temporary disconnection delays knowledge but does not transfer authority,
 invalidate a plan, or prevent either peer from continuing local work. No
-coordinator lease, acknowledgement, routing decision, or availability premise
-appears in a roadmap or dependency correctness claim.
+coordinator lease, acknowledgement, routing decision, relay, availability
+premise, or replication step appears in a roadmap or dependency correctness
+claim. A coordinator may act on separate lifecycle or review-recovery events
+where the normative bus protocol explicitly grants that authority; those events
+are not part of roadmap dissemination or dependency convergence.
 
 As a non-binding operating convention, an active implementor should update that
 roadmap whenever the active milestone, dependency, risk, or delivery expectation
