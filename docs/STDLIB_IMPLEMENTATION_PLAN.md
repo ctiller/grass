@@ -146,8 +146,18 @@ spikes, are one shape: `write_all_loop(payload)` in Spike 1,
 describes each as a *standard* partial-write induction or consumer, and that word
 is the demand: it expects one reusable theorem, not three authored proofs.
 
-There are eight fixtures. Per `Tests.lean` all of them establish expressibility
-rather than a theorem. `Tests/Std/VecVocabulary.lean` covers the type's own
+The fixtures under `Tests/Std/` all establish expressibility rather than a
+theorem, per `Tests.lean`. Their number is deliberately not stated: it was
+"eight" here and "nine" in §3.11's criterion 4, and both were false within
+hours of being written. A count of a set that grows is a stale claim with a fuse
+on it.
+
+For the same reason the descriptions below are *illustrative, not exhaustive*:
+`Tests/Std/` is the authoritative list, and this section explains only the
+fixtures whose purpose is not obvious from their name. Fixtures added since it
+was written — the representation probe, the collection-instance bridges, the fold
+recursors — are described where they were introduced, in §3.1 and §3.2, rather
+than by growing this paragraph every time. `Tests/Std/VecVocabulary.lean` covers the type's own
 claims: that a `List Byte` and a host `_root_.ByteArray` are each rejected where
 a Grass `ByteArray` is required, that extensionality is usable in the shape a
 consumer would use it, and that the update framing law composes the way the
