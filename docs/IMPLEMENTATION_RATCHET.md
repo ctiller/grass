@@ -73,6 +73,10 @@ structure EvidenceEnvelope (payload : Type) where
   payloadDigest : Digest payload
 ```
 
+`semanticEnvironment` records the `SemanticEnvironmentRoot` locator used to
+select or conservatively reject evidence. It is never an exact theorem input
+and equality of it never authorizes dependent proof transport.
+
 Timestamps and durations are evidence metadata and never enter theorem types or
 cache applicability. Stable identities are nominal IDs plus exact checked
 content; hashes locate content but do not prove it.

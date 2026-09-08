@@ -130,6 +130,8 @@ still be rejected. The test fails if an alleged exact environment retains only
 those digests, because then the distinct values have already been erased before
 the replay predicate runs. Kernel-checked certificate indices or parsed exact
 artifact equality, never collision tests alone, provide reuse authority.
+`SemanticEnvironmentRoot` participates in this fixture only as a locator and
+conservative-rejection input; it is never the exact input compared by replay.
 
 Published-corpus lint also rejects audience/workstation idioms used as evidence,
 including “worked on my machine,” in addition to literal private topology.

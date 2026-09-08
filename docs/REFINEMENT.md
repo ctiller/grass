@@ -689,6 +689,9 @@ structure SemanticEnvironmentRoot where
   leanKernelOptions : LeanKernelAndOptionRoot
   axiomAuditPolicy : AxiomAuditAllowlistRoot
 
+-- Locator and conservative-rejection input only. This digest/root record is
+-- never an exact theorem input and never authorizes dependent proof transport.
+
 structure BlockCacheLocator where
   source : CanonicalSourceFacet
   consumedBoundary : CanonicalBoundaryFacet

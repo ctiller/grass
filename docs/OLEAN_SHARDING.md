@@ -37,8 +37,12 @@ and [Lake build-facet API](https://lean-lang.org/doc/api/Lake/Build/Facets.html)
 
 A shard is normally one function, assembly fragment, shader module, static-data
 unit, or bounded CFG region. Very small mutually dependent regions may share a
-shard; a shard has a configured upper bound so “one function” cannot become a
-million-instruction escape hatch.
+shard. `ShardSourceUnitLimit` is the configured maximum number of canonical
+source units in one leaf shard; the generator rejects an oversized leaf before
+emitting its Lean module or cache entry. `AggregateFanoutLimit` separately
+bounds the number of child summaries in one aggregate. Therefore “one
+function” cannot become a million-instruction escape hatch and aggregation
+cannot evade the leaf bound.
 
 ```text
 Foo/Sig.lean       stable public boundary
@@ -93,43 +97,74 @@ correctness. [VERIFIED_OBJECTS.md](VERIFIED_OBJECTS.md) owns this bridge.
 That rule applies recursively to cache inputs themselves. A record containing
 `source : Digest`, `profile : Digest`, and similar fields is a fingerprint, not
 an exact semantic environment. Structural equality of such a record is still
-only digest equality and cannot authorize dependent transport. The generic
-in-kernel replay shape is instead:
+only digest equality and cannot authorize dependent transport. In particular,
+`SemanticEnvironmentRoot` is a cache locator and conservative-rejection input;
+it is never an exact input and never authorizes certificate transport.
+
+The in-kernel replay shape is deliberately *not* generic in an arbitrary exact
+input or certificate family. Each certificate kind owns a theorem-index record,
+and the exact input to replay is that record itself:
 
 ```lean
-structure CachedCertificate
-    (ExactInput : Type) (Certificate : ExactInput -> Type) where
+structure ShardTheoremIndex where
+  source : BoundedShardSource ShardSourceUnitLimit
+  imports : ExactImportedPublicSummaries
+  semantics : ExactSemanticAndProfileValues
+
+structure ShardCertificate (index : ShardTheoremIndex) : Prop where
+  sourceExact : SourceRealizes index.source
+  importsExact : ImportsMatch index.source index.imports
+  semanticsExact : SemanticsApply index.source index.imports index.semantics
+
+structure CachedShardCertificate where
   lookupKey : Digest
-  exactInput : ExactInput
-  certificate : Certificate exactInput
+  theoremIndex : ShardTheoremIndex
+  certificate : ShardCertificate theoremIndex
 
 def replay?
-    {ExactInput : Type} {Certificate : ExactInput -> Type}
-    [DecidableEq ExactInput]
-    (requested : ExactInput)
-    (entry : CachedCertificate ExactInput Certificate) :
-    Option (Certificate requested) :=
-  if h : requested = entry.exactInput then
+    (requested : ShardTheoremIndex)
+    (entry : CachedShardCertificate) :
+    Option (ShardCertificate requested) :=
+  if h : requested = entry.theoremIndex then
     some (h.symm ▸ entry.certificate)
   else
     none
 ```
 
-`ExactInput` is the bounded shard-local source value, exact imported public
-summaries, and exact semantic/profile values which occur in the certificate's
-theorem index. Toolchain, generator, audit-policy, and option fingerprints may
+This is a schematic certificate kind, not an extension point accepting an
+arbitrary `ExactInput` or `Certificate`. A theorem index is **faithful** only
+when every field occurs in the exported certificate proposition, as the three
+fields do above. Generated certificate schemas are linted for that property;
+the generator rejects an index field absent from the generated theorem type.
+It also rejects an adapter that substitutes a locator type for the owned index.
+Thus a constant certificate family and an instantiation with
+`SemanticEnvironmentRoot` are structurally outside the replay interface.
+
+`ShardTheoremIndex` retains the shard-local source value and its referenced
+import summaries, both bounded by the `ShardSourceUnitLimit` leaf gate, plus
+the exact semantic/profile values used by the theorem. Aggregate certificate
+indices are separately bounded by `AggregateFanoutLimit`. Toolchain, generator,
+audit-policy, and option fingerprints may
 conservatively reject a cache candidate, but equality of those fingerprints
-cannot create `requested = entry.exactInput`. If an exact input has no suitable
-decidable equality, replay imports/re-elaborates the opaque declaration and lets
-the Lean kernel check its exact theorem type; it does not fall back to hash
-equality. Artifact caches separately parse bytes and prove equality to the
-payload owned by that already checked certificate.
+cannot create `requested = entry.theoremIndex`. If the theorem index has no
+suitable decidable equality, replay imports/re-elaborates the opaque declaration
+and lets the Lean kernel check its exact theorem type; it does not fall back to
+hash equality.
+
+Replay transports only `Prop`-valued proof certificates. Structural equality
+and its positive decision proof are therefore limited to one bounded shard
+index, and proof irrelevance prevents replay from accumulating data-bearing
+casts. A `Type`-valued object, payload, syntax tree, or other computational value
+must not use this transport. Artifact caches instead parse bytes and prove
+equality to the payload owned by the already checked certificate. This keeps
+exactness local without putting a flattened program in an equality proof or
+downstream theorem type.
 
 Collision testing has two independent levels. An outer-key collision must scan
 past an ineligible candidate. More importantly, a deliberately colliding
-*source or profile fingerprint* must leave two distinct `ExactInput` values and
-must not replay. A fixture which changes the bytes stored in a `Digest` tests
-ordinary record inequality, not this second requirement.
+*source or profile fingerprint* must leave two distinct `ShardTheoremIndex`
+values and must not replay. A fixture which changes the bytes stored in a
+`Digest` tests ordinary record inequality, not this second requirement.
 
 ## 2. Import discipline
 
