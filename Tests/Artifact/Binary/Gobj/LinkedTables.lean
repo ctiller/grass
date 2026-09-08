@@ -47,7 +47,7 @@ def relocations : GobjRelocationTable :=
   ⟨Vec.singleton relocationEntry, by decide⟩
 
 example : symbols.ValidForSections sections := by decide
-example : relocations.ValidFor sections symbols := by decide
+example : relocations.IndicesValid sections symbols := by decide
 example : relocations.LocationsValidFor sections := by decide
 
 def tables : GobjLinkedTables where
@@ -55,7 +55,7 @@ def tables : GobjLinkedTables where
   symbols := symbols
   relocations := relocations
   symbolExtentsValid := by decide
-  relocationReferencesValid := by decide
+  relocationIndicesValid := by decide
   relocationLocationsValid := by decide
 
 def scope : SizedByteArray 16 := ⟨Vec.replicate 16 0, by simp⟩
@@ -99,6 +99,16 @@ def badSymbols : GobjSymbolTable where
 
 example : ¬ badSymbols.ValidForSections sections := by decide
 
+def missingSectionSymbol : GobjSymbol :=
+  { symbolEntry with sectionIndex := 1 }
+
+def missingSectionSymbols : GobjSymbolTable where
+  entries := Vec.singleton missingSectionSymbol
+  countFits := by decide
+  namesUnique := by decide
+
+example : ¬ missingSectionSymbols.ValidForSections sections := by decide
+
 def badLocation : GobjRelocationTable :=
   ⟨Vec.singleton { relocationEntry with offset := 3 }, by decide⟩
 
@@ -107,6 +117,6 @@ example : ¬ badLocation.LocationsValidFor sections := by decide
 def badReference : GobjRelocationTable :=
   ⟨Vec.singleton { relocationEntry with targetSymbolIndex := 1 }, by decide⟩
 
-example : ¬ badReference.ValidFor sections symbols := by decide
+example : ¬ badReference.IndicesValid sections symbols := by decide
 
 end Grass.Tests.Artifact.Binary.Gobj.LinkedTables

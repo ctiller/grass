@@ -68,7 +68,7 @@ structure GobjLinkedTables where
   symbols : GobjSymbolTable
   relocations : GobjRelocationTable
   symbolExtentsValid : symbols.ValidForSections sections
-  relocationReferencesValid : relocations.ValidFor sections symbols
+  relocationIndicesValid : relocations.IndicesValid sections symbols
   relocationLocationsValid : relocations.LocationsValidFor sections
 deriving DecidableEq, Repr
 
@@ -85,7 +85,7 @@ def parseGobjLinkedTables (payload : GobjPayload) :
       | .error error => .error error
       | .ok relocations =>
         if symbolExtentsValid : symbols.ValidForSections sections then
-          if relocationReferencesValid : relocations.ValidFor sections symbols then
+          if relocationIndicesValid : relocations.IndicesValid sections symbols then
             if relocationLocationsValid :
                 relocations.LocationsValidFor sections then
               .ok {
@@ -93,7 +93,7 @@ def parseGobjLinkedTables (payload : GobjPayload) :
                 symbols := symbols
                 relocations := relocations
                 symbolExtentsValid := symbolExtentsValid
-                relocationReferencesValid := relocationReferencesValid
+                relocationIndicesValid := relocationIndicesValid
                 relocationLocationsValid := relocationLocationsValid }
             else
               .error (.malformed ".gobj relocation location is out of bounds")
@@ -146,7 +146,7 @@ def GobjPayload.withLinkedTables (payload : GobjPayload)
   rw [parsedSections, parsedSymbols, parsedRelocations]
   simp only
   rw [dif_pos tables.symbolExtentsValid]
-  rw [dif_pos tables.relocationReferencesValid]
+  rw [dif_pos tables.relocationIndicesValid]
   rw [dif_pos tables.relocationLocationsValid]
 
 end Grass.Artifact.Binary.Gobj

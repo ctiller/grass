@@ -22,9 +22,9 @@ example : readGobjRelocation (writeGobjRelocation entry ++ suffix) =
     .done entry suffix := by
   exact readGobjRelocation_write_append entry suffix
 
-example : entry.ValidFor 2 2 := by decide
-example : ¬ entry.ValidFor 1 2 := by decide
-example : ¬ entry.ValidFor 2 1 := by decide
+example : entry.IndicesValid 2 2 := by decide
+example : ¬ entry.IndicesValid 1 2 := by decide
+example : ¬ entry.IndicesValid 2 1 := by decide
 
 def table : GobjRelocationTable := ⟨Vec.singleton entry, by decide⟩
 
@@ -71,12 +71,57 @@ def symbols : GobjSymbolTable where
   countFits := by decide
   namesUnique := by decide
 
-example : table.ValidFor sections symbols := by decide
+example : table.IndicesValid sections symbols := by decide
 
 def badTable : GobjRelocationTable :=
   ⟨Vec.singleton { entry with targetSymbolIndex := 3 }, by decide⟩
 
-example : ¬ badTable.ValidFor sections symbols := by decide
+example : ¬ badTable.IndicesValid sections symbols := by decide
+
+def boundedContents : U32LengthPrefixedBytes :=
+  ⟨Vec.fromList [0x90, 0x90, 0xc3], by decide⟩
+
+def boundedSection : GobjSection :=
+  { sectionEntry with contents := boundedContents }
+
+def boundedSections : GobjSectionTable :=
+  ⟨Vec.singleton boundedSection, by decide⟩
+
+def emptySections : GobjSectionTable :=
+  ⟨Vec.singleton sectionEntry, by decide⟩
+
+def boundedEntry (offset : BitVec 64) : GobjRelocation :=
+  { entry with sectionIndex := 0, targetSymbolIndex := 0, offset := offset }
+
+def widthOne : RelocationKindInterpretation :=
+  .constant 1 (by decide)
+
+def widthTwo : RelocationKindInterpretation :=
+  .constant 2 (by decide)
+
+/-- An empty selected section has no valid relocation start. -/
+example : ¬ (boundedEntry 0).ValidFor widthOne emptySections symbols := by decide
+
+/-- The first byte beyond the section is not a relocation start. -/
+example : ¬ (boundedEntry 3).ValidFor widthOne boundedSections symbols := by decide
+
+/-- Conversion to `Nat` prevents a maximal fixed-width offset from wrapping. -/
+example : ¬ (boundedEntry 18446744073709551615).ValidFor
+    widthOne boundedSections symbols := by decide
+
+/-- A one-byte patch may start at the final byte. -/
+example : (boundedEntry 2).ValidFor widthOne boundedSections symbols := by decide
+
+/-- A multi-byte patch beginning at the final byte crosses the section end. -/
+example : ¬ (boundedEntry 2).ValidFor widthTwo boundedSections symbols := by decide
+
+example : (resolveGobjRelocationTable widthOne boundedSections symbols
+    ⟨Vec.singleton (boundedEntry 2), by decide⟩).isOk := by decide
+
+example : resolveGobjRelocationTable widthTwo boundedSections symbols
+    ⟨Vec.singleton (boundedEntry 2), by decide⟩ =
+      .error (.malformed
+        ".gobj relocation patch is out of bounds or unknown") := by rfl
 
 theorem table_lengthFits :
     (writeGobjRelocationTable table).length < 2 ^ 32 := by

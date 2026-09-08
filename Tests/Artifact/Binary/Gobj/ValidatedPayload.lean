@@ -51,7 +51,7 @@ def tables : GobjLinkedTables where
   symbols := symbols
   relocations := relocations
   symbolExtentsValid := by decide
-  relocationReferencesValid := by decide
+  relocationIndicesValid := by decide
   relocationLocationsValid := by decide
 
 def scope : SizedByteArray 16 := ⟨Vec.replicate 16 0, by simp⟩
