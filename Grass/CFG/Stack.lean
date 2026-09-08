@@ -166,6 +166,35 @@ def wellFormed (requirement : StackAlignment) : Bool :=
 def accepts (requirement : StackAlignment) (shape : StackShape) : Bool :=
   requirement.wellFormed && shape.depth % requirement.modulus == requirement.remainder
 
+/-- A well-formed alignment requirement has a positive modulus and a canonical
+remainder. -/
+@[simp] theorem wellFormed_iff (requirement : StackAlignment) :
+    requirement.wellFormed ↔
+      0 < requirement.modulus ∧ requirement.remainder < requirement.modulus := by
+  simp [wellFormed]
+
+/-- Alignment acceptance exposes both validity of the requirement and the
+exact depth congruence checked by `StackAlignment.accepts`. -/
+@[simp] theorem accepts_iff (requirement : StackAlignment) (shape : StackShape) :
+    requirement.accepts shape ↔
+      0 < requirement.modulus ∧
+      requirement.remainder < requirement.modulus ∧
+      shape.depth % requirement.modulus = requirement.remainder := by
+  simp [accepts, wellFormed, and_assoc]
+
+/-- `StackAlignment.wellFormed_of_accepts` proves that an accepted stack shape
+cannot witness a malformed alignment requirement. -/
+theorem wellFormed_of_accepts (requirement : StackAlignment) (shape : StackShape)
+    (h : requirement.accepts shape) : requirement.wellFormed := by
+  have accepted := (accepts_iff requirement shape).mp h
+  exact (wellFormed_iff requirement).mpr ⟨accepted.1, accepted.2.1⟩
+
+/-- An accepted stack shape has the exact requested depth remainder. -/
+theorem depth_mod_eq_of_accepts (requirement : StackAlignment) (shape : StackShape)
+    (h : requirement.accepts shape) :
+    shape.depth % requirement.modulus = requirement.remainder := by
+  exact (accepts_iff requirement shape).mp h |>.2.2
+
 end StackAlignment
 
 /-- Exact shape compatibility at a CFG edge.  `StackShape.compatible_iff`
