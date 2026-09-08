@@ -983,8 +983,8 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
   in `Grass/Process/Trace/Independence.lean`.
 
   A kind with no writable region owes nothing here — see
-  `sharedWritesAdmitted_of_no_writes`, which derives the whole field from
-  `writesPermitted`.
+  `ProcessPlan.sharedWritesAdmitted_of_no_writes`, which derives the whole field
+  from `writesPermitted`.
   -/
   sharedWritesAdmitted : ∀ region, before.shared region ≠ after.shared region →
     ∀ (fromInstance toInstance : ProcessInstance plan.topology)

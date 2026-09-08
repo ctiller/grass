@@ -479,8 +479,9 @@ What closes it is an invariant over executions rather than steps.
 holds, in the root's slot, an instance with no current parent that has not died —
 unless a `restart` at that slot took it away, which
 `no_restart_at_the_root_slot` shows is unconstructible here. So none of the seven
-worlds below is a world of any run. Four theorems cover them: three name a world
-each and the fourth is quantified over every `holding` world. §10.133.
+worlds below is a world of any run. Three theorems name a world each and a
+fourth is quantified over every `holding` world; each has a `no_run_reaches_*`
+corollary stating the same thing about executions. §10.133.
 -/
 
 open Grass.Process.Tests.ChannelStep
@@ -657,7 +658,7 @@ theorem no_restart_at_the_root_slot {before after : ServerWorld}
 **So every run of `serverPlan` ends holding an unkilled root.**
 
 `ProcessPlan.execution_holds_an_unkilled_root` with its restart escape closed.
-The four `no_run_reaches_*` corollaries below apply it. The five
+The `no_run_reaches_*` corollaries below apply it. The
 `*_is_no_world_of_a_run` theorems do not — they are read off `UnkilledRootAt`
 directly and would stand without this theorem; it is what turns them into
 statements about executions. That is §10.129's actual question: not a step into
@@ -722,6 +723,13 @@ theorem no_run_reaches_sentWithDeadSender
     (isStart : serverPlan.ExactInitialNetwork request start)
     (execution : serverPlan.StepsTo start sentWithDeadSender) : False :=
   sentWithDeadSender_is_no_world_of_a_run
+    (every_run_holds_an_unkilled_root isStart execution)
+
+theorem no_run_reaches_sentWithLiveReceiver
+    {request : (serverTopology.protocol serverTopology.root).Request} {start : ServerWorld}
+    (isStart : serverPlan.ExactInitialNetwork request start)
+    (execution : serverPlan.StepsTo start sentWithLiveReceiver) : False :=
+  sentWithLiveReceiver_is_no_world_of_a_run
     (every_run_holds_an_unkilled_root isStart execution)
 
 theorem no_run_reaches_sentWithDeadReceiver

@@ -5084,13 +5084,16 @@ that one splits on a fragment no constructor but an ending names, this splits on
 on the transition's own `scope` at that fragment and the negative branch is
 `touchesOnly`. The eleven positive branches are eleven different reasons: a
 `processStep` leaves it live, a `spawn` found the slot empty, a `restart` found
-it already ended, a `join` leaves it gone, a `detach` copies the lifecycle
+it already ended — the landed proof closes that branch on `nowLive` instead,
+per §10.133 — a `join` leaves it gone, a `detach` copies the lifecycle
 across, five endings write an ending that is not `.died`, and `childDied` hands
 back its own `wasChild`.
 
-**What this does to §10.88's distinction.** §10.129 said "a step from an
-unreachable world is a real step, and it is not a step of any run", and left it
-implicit that the unreachability was a fact about the corpus. For three of the
+**What this does to §10.88's distinction.** §10.129 said a step from an
+unreachable world is not a step of any run — `Tests/Process/PreservationFixtures.lean`
+puts it as "a step from an unreachable world is a real step, and it is not a step
+of any run" — and left it implicit that the unreachability was a fact about the
+corpus. For three of the
 four it was. For the fourth it is a fact about the family, and
 `sentWithDeadSender_is_no_world_of_a_run` says so with the theorem rather than
 by not having built the chain. `theSenderDeathStep` satisfies §10.89's check and is a
@@ -5102,9 +5105,9 @@ step of no run, both at once; this is where the two come apart.
 `.root` **and** for `.detached`, so `dying_was_supervised` says a detached child
 is as unkillable as a root. That is not an artefact of the proof —
 `childDied.wasChild` asks for a current parent and `Detaches` removes exactly
-that — and it may well be wrong: §3 says a detached child's parent "no longer
-holds any authority", which is an argument that nobody may *cancel* it, not that
-nothing may kill it. A process whose supervisor let it go and which then dies of
+that — and it may well be wrong: §3 records the incarnation a process was detached from "without granting that
+incarnation any continuing parent authority", which is an argument that nobody
+may *cancel* it, not that nothing may kill it. A process whose supervisor let it go and which then dies of
 its own accord has no constructor. Whether that is intended is §3's question and
 is recorded here unruled.
 
@@ -5134,16 +5137,17 @@ both rather than arguing. Three entries in a row now — §10.130, §10.131, and
 pattern is worth naming: each time, the sentence that failed was the one
 generalising from what had just been built to what it meant.
 
-**The headline was wrong.** §10.132 said "three of the four are reachable and now
-are", on the strength of having built a step into each of three before-worlds.
+**The headline was wrong.** §10.132's heading called three of the four reachable
+and its body said "Three of the four are that", on the strength of having built a
+step into each of three before-worlds.
 Every one of those three *predecessor* worlds has an empty root slot.
 `Ending.holding` maps the listener to `none` by construction, and
 `sentWithLiveReceiver` — which I wrote — is `sent` with the root deleted by hand,
 while `sent_holds_an_unkilled_root` in the same commit proved `sent` has one. So none
 of the six worlds is a world of a run, and the gap had moved back exactly one
-step rather than closing. §10.129 had said precisely this failure out loud — "a
-step from an unreachable world is a real step, and it is not a step of any run" —
-and the entry that quoted it committed it.
+step rather than closing. §10.129 had said precisely this failure out loud, in the fixture file's words:
+"a step from an unreachable world is a real step, and it is not a step of any
+run". The entry that quoted it committed it.
 
 **What closes it is an invariant over executions.**
 `ProcessPlan.UnkilledRootAt` says a slot holds an instance with no current parent
@@ -5360,8 +5364,12 @@ event §10.133 says it is.
 
 Fourth fresh reviewer. The Lean survived a fourth time — it re-derived the
 constructor arithmetic, confirmed every hypothesis of every new theorem is
-jointly satisfiable, checked that each new declaration has a consumer, and
-verified §10.135's claims about this branch's own git history with `git show`.
+jointly satisfiable, and verified §10.135's claims about this branch's own git
+history with `git show`. (An earlier version of this sentence also claimed the
+round had checked every new declaration for a consumer. A sixth round found that
+false of the branch: most of the unreferenced ones are fixtures whose existence
+is the deliverable, but `sentWithLiveReceiver_is_no_world_of_a_run` had no
+`no_run_reaches_*` sibling while its three peers did, and now has one.)
 More defects, all prose, and two of them say the same thing about how this went
 wrong. (This entry originally opened with a number. A fifth round found the
 number wrong — it had dropped the one item the commit fixed in `UnkilledRootAt`'s
@@ -5422,16 +5430,21 @@ file the branch touches, resolved against the declaration set — turned up
 own docstring and by `Grass/Process/Network/Plan.lean`'s note on `sharedUpdate`,
 declared by neither, and landed in that state by my own commit `c373340`. A fifth
 round then found that declaring it had fixed only one of the two citations: the
-other named it under the `StepsLocally` prefix, which resolves to nothing, so the
-entry below reported a repair that was half done. Both now name
-`ProcessPlan.sharedWritesAdmitted_of_no_writes`, which is where it is. It is declared
+other named it under the `StepsLocally` prefix, which resolves to nothing. A
+sixth round found the repair of *that* half-reported, since one of the two sites
+had been left with the bare name — harmless, because the bare name resolves, but
+a claim about the source that one `grep` refutes. Both now carry the
+`ProcessPlan.` prefix. It is declared
 here rather than the citations deleted, because the content is real: a role that
 may write no region discharges `sharedWritesAdmitted` from `writesPermitted`
-alone, which is decision 134's authoring-surface constraint applied to the field
-`g-design:84` added — and it is `g-design:84` that carries the
-no-author-burden constraint, not decision 134, which is about the public
-`SpecProcess` surface and the module facade. An earlier version of this paragraph
-cited the wrong ruling while the right one was already in the sentence.
+alone, which is what `g-design:84`
+asked for in the same breath as the field itself: "For a kind with no writable
+shared region, derive the stuttering contract automatically; add no author
+burden". An earlier version of this sentence attributed that constraint to
+decision 134, which is about the public `SpecProcess` surface and the module
+facade and carries nothing of the kind; a sixth round found the correction had
+been appended to the misattribution rather than replacing it, which is §10.134's
+title recurring inside this entry.
 `Tools/DocstringAudit.py` cannot see citations like this and that gap is reported
 to the gate's owner.
 
@@ -5441,10 +5454,11 @@ would be exactly the shape §10.105 refuses.
 `Tests/Process/PreservationFixtures.lean`'s `the_connection_writes_nothing`
 inhabits the hypothesis at a real role — `serverTopology`'s connection may write
 neither region — and `theConnectionOwesNoValueBound` is the consumer. Both were
-written because the previous four rounds would have asked, which is the point of
+written because the earlier rounds would have asked, which is the point of
 running them.
 
-**What four rounds have established, which is worth stating plainly.** No round
+**What the rounds up to this one had established, which is worth stating
+plainly.** No round
 found a defect in a proof. Every defect was a sentence asserting more than the
 declaration under it, a count written from memory, or a clause nothing could
 fail. Three of them were sentences invalidated by a *later commit on the same
@@ -5453,6 +5467,41 @@ working rule that comes out of it is to `git grep` the **claim's wording** after
 fix, not the declaration's name: searching "world of a run" finds every
 paraphrase in one pass, and searching the renamed declaration is what missed
 `theReceiverIsKilledStep` in §10.135.
+
+### 10.137 Six rounds, and what the sequence is actually measuring
+
+A sixth fresh reviewer. It resolved every backticked identifier in the new
+docstrings and in §10.132 onward against the declaration set, prefixes included,
+and found none dangling; re-derived every constructor count and found none wrong;
+re-ran the §10.134 vacuity attack and confirmed the transport-drop is a real fix
+rather than a cosmetic one; and fired the invariant on a real run again. **No
+defect in a proof, for the sixth time.**
+
+What it did find was prose, again, and this time almost all of it was prose
+*about the earlier prose*: a misattribution whose correction had been appended
+rather than substituted, a "both now name" that was true of one of the two, a
+quotation §10.132 does not contain, a sentence attributed to §10.129 that is
+verbatim from a fixture file, a cross-reference to an entry below when this is
+the last entry, and a claim that a round had checked every declaration for a
+consumer when one refusal theorem lacked the sibling its three peers have. Each
+is folded into the entry it belongs to rather than reported here, and the missing
+sibling — `no_run_reaches_sentWithLiveReceiver` — is now written.
+
+**The thing worth extracting.** Every round has found defects and none has found
+one in Lean. That is not luck and it is not modesty about the proofs: the proofs
+are checked by a machine on every commit and the prose is checked by nothing. The
+docstring gate reads only sentences carrying a strong-claim word; nothing at all
+reads the ledger. So the defect rate in this branch is a measurement of *which
+artefacts have a gate*, and the six rounds are standing in for the gate the prose
+does not have.
+
+Two of those checks are now mechanical and cheap enough to run before every
+commit rather than to discover in review — resolve every backticked Lean-style
+name, prefix included, against the declaration set; and `grep -c` every number
+before writing it. The third is not mechanisable and is the one that keeps
+biting: after a fix falsifies a claim, search for the **claim's wording** rather
+than the declaration's name. `agent-bus` `c-process:106` reports the first of
+these to the gate's owner as a proposed rule for `Tools/DocstringAudit.py`.
 
 ## 11. The authoring facade
 
