@@ -39,7 +39,7 @@ preserves it, with `performAccess_extends_violations` and
 `runStep_extends_violations` beneath it. This said M2 "owes a proof" long after M2
 supplied one -- four hundred lines below, `not_isEmpty_append` cites the same
 theorem as done, so the file contradicted itself about its own central guarantee.
-`Tools/DocstringAudit.py` cannot catch that: "owes" is in `HEDGES`, so a stale open
+The docstring audit cannot catch that: "owes" is in its hedge list, so a stale open
 obligation is exempt by construction and invisible to the gate built to police
 claims -- which is worth knowing about that gate, not only about this sentence.
 
