@@ -164,7 +164,13 @@ jobs:
       - name: Build the unwind corpus
         run: lake build Tests.ABI.Win64.UnwindCorpus
 
+      # Built before the corpus is consumed, and separately from running it, so
+      # a tool that no longer compiles fails the job on its own line rather than
+      # inside a step whose name promises a differential.
+      - name: Build the validation tools
+        run: cargo build --release --locked --manifest-path tools/grass-tools/Cargo.toml
+
       - name: Differential against ml64
         run: |
           lake env lean --run Tests/ABI/Win64/UnwindCorpus.lean > "$RUNNER_TEMP/unwind.txt"
-          python Tools/win64-unwind-differential.py "$RUNNER_TEMP/unwind.txt"
+          ./tools/grass-tools/target/release/win64-unwind-differential.exe "$RUNNER_TEMP/unwind.txt"

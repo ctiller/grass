@@ -2,7 +2,7 @@
 name = "grass-tools"
 version = "0.1.0"
 edition = "2021"
-description = "Grass validation and audit tools: differential checks against independent assemblers and disassemblers, machine probes, and docstring audits over the Lean tree"
+description = "Grass validation and audit tools: docstring and source audits, differential checks against independent assemblers and disassemblers, and machine probes"
 
 # Each tool is a self-contained binary with no shared library. The scripts these
 # replace were self-contained too, and each is invoked independently by
@@ -17,16 +17,39 @@ description = "Grass validation and audit tools: differential checks against ind
 # This crate is where the remaining validation tools land as they are ported and
 # their equivalence against the originals is demonstrated. A `[[bin]]` entry is
 # a claim that the equivalence has been shown, so an entry appears only once
-# something has shown it. For the four x86 tools below that something is
-# `equivalence/run.sh`, which runs the Python original and the binary here over
-# the same generated corpus and byte-compares stdout, stderr and the exit
-# status. It covers the real corpus, eight corpora carrying one injected defect
-# each -- so the comparison is known to be able to fail -- and the case where
-# the oracle is absent, which both must refuse rather than pass over.
+# something has shown it.
+#
+# For the four x86 tools that is `equivalence/run.sh`, which runs each Python
+# original and its port over identical argv and byte-compares stdout, stderr and
+# the exit status: over the real generated corpus, over eight corpora carrying
+# one injected defect each -- so the comparison is known to be able to fail --
+# and over the case where the oracle is absent, which both must refuse rather
+# than pass over.
+#
+# This paragraph previously said neither assembler could be run here, and that
+# the four were therefore ported and unlanded with no differential against the
+# original. That was wrong. NASM and NDISASM are installed on the authoring host
+# at `~/AppData/Local/bin/NASM`, which is one of the fixed fallback directories
+# all four of these tools search after PATH -- they are missing from PATH, not
+# from the machine, so `shutil.which` and `command -v` miss them while the
+# tools' own lookup finds them.
+#
+# `win64-unwind-differential` and `source-liveness` were the first two whose
+# oracles were run: `ml64.exe` ships with the MSVC build tools, and a probe
+# against an HTTP server is a probe whether the server is a publisher or a
+# loopback socket.
 
 [[bin]]
 name = "docstring-audit"
 path = "src/bin/docstring_audit.rs"
+
+[[bin]]
+name = "source-liveness"
+path = "src/bin/source_liveness.rs"
+
+[[bin]]
+name = "win64-unwind-differential"
+path = "src/bin/win64_unwind_differential.rs"
 
 [[bin]]
 name = "x86-nasm-differential"
