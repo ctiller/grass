@@ -11,6 +11,7 @@ import Grass.Platform.Win32.CoffSymbol
 import Grass.Platform.Win32.CoffStrings
 import Grass.Platform.Win32.CoffPdata
 import Grass.Platform.Win32.CoffXdata
+import Grass.Platform.Win32.CoffAux
 
 /-!
 # Ledger coverage gate
@@ -101,7 +102,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.CoffSymbol,
    `Grass.Platform.Win32.CoffStrings,
    `Grass.Platform.Win32.CoffPdata,
-   `Grass.Platform.Win32.CoffXdata]
+   `Grass.Platform.Win32.CoffXdata,
+   `Grass.Platform.Win32.CoffAux]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -115,7 +117,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 130
+def owedBaseline : Nat := 131
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -137,7 +139,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 74
+def notBehaviourBaseline : Nat := 76
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -388,7 +390,12 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.Coff.xdataBlock,
     `Grass.Platform.Win32.Coff.xdataBytes,
     `Grass.Platform.Win32.Coff.xdataOffsets,
-    `Grass.Platform.Win32.Coff.xdataSection ]
+    `Grass.Platform.Win32.Coff.xdataSection,
+    -- `plain` is this profile's choice of an all-zero COMDAT triple, which the
+    -- format neither requires nor forbids; `sectionSymbolBytes` concatenates a
+    -- symbol with its auxiliary record, and both halves are cited above.
+    `Grass.Platform.Win32.Coff.AuxSectionDefinition.plain,
+    `Grass.Platform.Win32.Coff.sectionSymbolBytes ]
 
 /--
 Declarations that genuinely model external behaviour and have no citation yet.
@@ -604,7 +611,12 @@ def owed : List Name :=
     -- against `ALIGN_8BYTES`. The model carried `.pdata`'s word in both places
     -- until an object was read for it.
     `Grass.Platform.Win32.Coff.alignPad,
-    `Grass.Platform.Win32.Coff.xdataCharacteristics ]
+    `Grass.Platform.Win32.Coff.xdataCharacteristics,
+    -- The auxiliary section-definition record: eighteen bytes, and which of
+    -- them hold the section's size and relocation count. The format states
+    -- both numbers twice, once in the section header and once here, and the
+    -- field order and the three unused tail bytes are its decision.
+    `Grass.Platform.Win32.Coff.AuxSectionDefinition.toBytes ]
 
 /-- The declarations this gate holds the ledger responsible for. -/
 def modeledDeclarations : MetaM (Array Name) := do

@@ -2,6 +2,7 @@ import Grass.Platform.Win32.Coff
 import Grass.Platform.Win32.CoffSymbol
 import Grass.Platform.Win32.CoffPdata
 import Grass.Platform.Win32.CoffXdata
+import Grass.Platform.Win32.CoffAux
 
 /-!
 # COFF records, against a real object file
@@ -537,6 +538,53 @@ on a concrete file rather than as a quantified statement. -/
 theorem demoObject_long_name_resolves :
     ((stringTableBytes demoObject.strings).drop 4).take 9
       = [0x62, 0x65, 0x74, 0x61, 0x5f, 0x6c, 0x6f, 0x6e, 0x67] := by
+  decide
+
+/-! ## Auxiliary section records
+
+Every section symbol in both measured objects declares one auxiliary record and
+is followed by it. The records are almost entirely zero: only the section's
+size and its relocation count are set, and both are copies of fields already in
+that section's header.
+-/
+
+/--
+**The auxiliary record `ml64` wrote for `.pdata`, in the two-function object.**
+
+Twenty-four bytes of data and six relocations -- the same two numbers as that
+section's header, which is the duplication `aux_agrees_with_object_header`
+exists to keep consistent. -/
+theorem measuredPdataAux_bytes :
+    AuxSectionDefinition.plain.toBytes
+        (pdataSection pdataName [alphaEntry, betaEntry]) =
+      [0x18, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
+       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] := by
+  decide
+
+/--
+**And for `.xdata`, which has no relocations at all.**
+
+Sixteen bytes, zero relocations. In the *other* measured object `.xdata` had one
+relocation, because that function carried a handler -- so this pair of fixtures
+covers both the presence and the absence. -/
+theorem measuredXdataAux_bytes :
+    AuxSectionDefinition.plain.toBytes
+        (xdataSection ⟨[0x2e, 0x78, 0x64, 0x61, 0x74, 0x61], by decide⟩
+          [alphaUnwind, betaUnwind] []) =
+      [0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00] := by
+  decide
+
+/--
+**A section symbol and its auxiliary record are two table entries.**
+
+Thirty-six bytes, which is what `numberOfAuxSymbols = 1` promises a reader.
+A symbol declaring an auxiliary record and emitting none leaves the table
+desynchronised from that point on, and that was the state of these modules
+before `CoffAux.lean`. -/
+theorem sectionSymbol_with_aux_is_two_entries :
+    (sectionSymbolBytes measuredPdataSymbol AuxSectionDefinition.plain
+        (pdataSection pdataName [alphaEntry, betaEntry])).length = 36 := by
   decide
 
 end Grass.Tests.Platform.Win32.Coff
