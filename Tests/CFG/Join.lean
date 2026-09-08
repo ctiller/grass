@@ -90,6 +90,15 @@ def selected : JoinSelection Nat Terminal where
 
 example : selected.WellFormed := by decide
 
+example : selected.graph.WellFormed :=
+  selected.graphWellFormed_of_wellFormed (by decide)
+
+example : selected.selectedIds = selected.graph.discoveredJoinIds :=
+  selected.selectedIds_eq_discoveredJoinIds_of_wellFormed (by decide)
+
+example : blockId "join" ∈ selected.graph.blockIds :=
+  selected.mem_blockIds_of_mem_selected (by decide) (blockId "join") (by decide)
+
 example : ({ graph := repeatedEdgeSource, selected := [] } :
     JoinSelection Nat Terminal).WellFormed := by decide
 
