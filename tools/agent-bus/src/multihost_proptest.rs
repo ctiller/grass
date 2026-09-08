@@ -1772,7 +1772,7 @@ fn build_act(
                 data: EventData::MergeEngineActivated(MergeEngineActivated {
                     previous_epoch: previous.clone(),
                     merge_engine: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                    merge_engine_version: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                    merge_engine_version: short(crate::bootstrap::UNPINNED_MERGE_ENGINE_VERSION),
                     design_commit: commit.clone(),
                     helper_commit: commit,
                 }),
