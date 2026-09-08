@@ -552,9 +552,8 @@ fragment, so a caller could supply equality, discharge every `framed` by `subst`
 at any footprint whatsoever, and reduce every framing obligation in the weave to
 "the worlds are identical". Nothing was unsound; everything was useless, and no
 theorem in the module noticed. The fix is `agreesGlue`: any two worlds can be
-mixed along any set of fragments, which is the statement that the fragments are
-a complete independent decomposition of the world, and which the equality
-agreement fails. Two further defects came from the same review: the frame rule
+mixed along any set of fragments, which the equality agreement fails. It does not
+say the fragments cover the world — §10.144 records the refutation. Two further defects came from the same review: the frame rule
 was not stated in the shape `docs/PROCESS.md` §8 asks for (scope-disjointness
 implies preservation, not agreement-implies-preservation), and `Separate` had no
 consumer anywhere, so the separating conjunction's formation gate gated nothing.

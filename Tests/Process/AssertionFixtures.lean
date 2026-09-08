@@ -31,9 +31,10 @@ rebuilt, so a change to the topology surface breaks this file too.
 
 `FixtureWorld` below is a product with exactly one field per `NetworkFragment`
 family, and the instance and channel fields are *functions of their index*. That
-is not incidental convenience: `agreesGlue` demands that the fragments be a
-complete independent decomposition of the world, so a world shaped any other way
-could not discharge it. An earlier draft of this fixture had a single
+is not incidental convenience: it is what makes `agreesGlue` easy to
+discharge here, since a product mixes componentwise. It is not what `agreesGlue`
+*demands* — `leakyAgreement` below satisfies the law over the same world without
+any such correspondence, which is §10.144. An earlier draft of this fixture had a single
 `listenerCursor : Nat` read by every `instanceState` fragment, which made two
 assertions about different slots `Separate` while reading the same field —
 exactly the aliasing `agreesGlue` now forbids.

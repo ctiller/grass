@@ -36,7 +36,7 @@ Their composition is sound because those fragments are disjoint, and
 `frame_of_disjoint_scope` below is the theorem that turns that into
 preservation.
 
-## `agreesGlue` is what makes a footprint a bound
+## `agreesGlue` is what stops the degenerate agreement
 
 `framed` alone does not make `footprint` mean anything, and an earlier revision
 of this module claimed it did. The counterexample is one line: supply
@@ -223,11 +223,17 @@ structure WorldAgreement {registry : ProtocolRegistry.{u, w, v}}
   agreesTrans : ∀ fragment a b c,
     Agrees fragment a b → Agrees fragment b c → Agrees fragment a c
   /--
-  **The fragments decompose the world.**
+  **Any two worlds can be mixed along any set of fragments.**
 
-  Any two worlds can be mixed along any set of fragments. This is what excludes
-  a degenerate agreement — equality, say — under which agreeing on a footprint
-  would force agreement everywhere and `footprint` would carry no information.
+  This is what excludes the *equality* agreement, under which agreeing on a
+  proper footprint would force agreement everywhere: gluing at that footprint
+  would have to produce a world agreeing with `left` inside and `right` outside,
+  and under equality no such world exists unless `left = right`.
+
+  It excludes that one and not the general shape. Mixability is not coverage,
+  and `Tests/Process/AssertionFixtures.lean`'s `leakyAgreement` satisfies this
+  law while one fragment's clause fixes the whole world — so a footprint can
+  still carry information about the rest. §10.144.
   -/
   agreesGlue : ∀ (inside : NetworkFragment topology → Prop) (left right : World),
     ∃ mixed,

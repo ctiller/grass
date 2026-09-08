@@ -527,7 +527,13 @@ theorem the_connection_writes_nothing (region : serverTopology.SharedRegion) :
   cases region <;> rfl
 
 /-- And the consumer: at that role, `sharedWritesAdmitted` follows from
-`writesPermitted` with no argument about values at all. -/
+`writesPermitted` with no argument about values at all.
+
+**What this does not do**, since §10.130's bar is a witness and not a statement:
+no `StepsLocally` at `.connection` exists in this corpus — every one is at
+`.listener`, which *does* write `.acceptCount` — so no author here is yet
+relieved of the field by this lemma. The affordance is exhibited at the level of
+the statement. §10.144. -/
 theorem theConnectionOwesNoValueBound {before after : ServerWorld}
     {slot : serverTopology.InstanceId Role.connection}
     {event : (serverTopology.protocol Role.connection).Event}

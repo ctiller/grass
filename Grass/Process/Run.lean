@@ -71,21 +71,24 @@ Splitting them this way is not arbitrary. An acceptance relation must survive
 refinement: when a role is replaced by a flattened subsystem, the *same*
 observations are produced by a different number of process transitions, so an
 acceptance stated over the segmentation would be broken by a replacement that
-changes nothing observable. Acceptance therefore sees `runState.history` and
-nothing else.
+changes nothing observable. So the segmentation must not be something acceptance
+can read — and it is not: `Grass/Process/Acceptance.lean` never mentions
+`ProcessRunState`, so no clause of `ProcessAcceptance` reaches into the run state
+for anything. What each clause is given, `ProcessCorrect` supplies at the call
+site.
 
 Causality is the opposite case. `docs/PROCESS.md` §4 requires the emitting
 segment of each observation to be *retained* through "later weaving, flattening,
 serialization, machine simulation, and projection". Carrying it as an index of
 `Reachable` is what keeps it, and `Reachable.observationCausality` reads it.
 
-What keeps it out of acceptance is the *types of `ProcessAcceptance`'s clauses*:
-`TerminalAccepts` takes a request and a result, `TraceAccepts` a
-`Trace p.Observation`, `DemandsWellFormed` a `Bag p.Demand`. None takes a
-`ProcessRunState`, so no acceptance relation can branch on the segmentation
-however it is carried. An earlier version of this paragraph offered the
-index-versus-field distinction instead, which does not entail it — a field over
-`segmented` would be no more visible to those three clauses than an index is.
+What keeps it out of acceptance is what `ProcessAcceptance`'s clauses are stated
+over. `Grass/Process/Acceptance.lean` never mentions `ProcessRunState`, so no
+clause of it can read one, and a field of the run state would be no more visible
+than an index is. An earlier version of this paragraph offered the
+index-versus-field distinction as the reason, which does not entail it, and a
+later one enumerated three of `ProcessAcceptance`'s clauses as though that were
+all of them. §10.144.
 
 **What index-versus-field does decide** is whether the segmentation is part of
 the state a refinement has to preserve. As a field of `ProcessRunState` it would
@@ -557,8 +560,8 @@ theorem observationCausality_unique {segmented : Segmented p.Observation}
 /--
 One segment per transition, including the silent ones.
 
-`segments.length` is the number of steps taken, which is exactly why it must not
-reach an acceptance relation, and exactly why it is available to a causality
+`segments.length` is the number of steps taken, which is exactly why acceptance
+must not be stated over it, and exactly why it is available to a causality
 argument that needs to name a transition.
 -/
 theorem segment_count {segmented : Segmented p.Observation}

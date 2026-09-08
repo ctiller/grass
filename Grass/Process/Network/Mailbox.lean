@@ -46,10 +46,10 @@ Where that is refused is worth stating exactly, because an earlier version of
 this sentence said `Grass/Process/Progress.lean`'s argument assumes it away.
 That module defers it instead: "the internal work §7 refers to happens *inside*
 one transition, in a serial call or in the machine realization, and the
-finite-internal-work clause is discharged there". None of
-`MeetsProcessProgress`'s clauses is that bound — `handlesEveryEvent` and
-`notStuck` are about a successor existing, and `ProcessMeasure.Decreases` ranks
-`(State, Bag Demand)` across transitions rather than costing one.
+finite-internal-work clause is discharged there". `MeetsProcessProgress` does not
+supply that bound: its clauses are about a successor transition existing and
+about a rank over `(State, Bag Demand)` decreasing across transitions, neither of
+which costs a single one.
 
 What this layer does instead is record the cost exactly and leave it unbounded:
 `SelectiveReceive.scanWork` with `scanWorkExact` pins it to the skipped prefix's
