@@ -23,6 +23,8 @@ deriving Repr, DecidableEq
 
 namespace PackedLayout
 
+universe u₁ u₂
+
 variable {profile : LayoutProfile}
 
 def fieldNames (layout : PackedLayout profile) : List Name :=
@@ -137,6 +139,23 @@ theorem fieldNamesNodup_of_wellFormed (layout : PackedLayout profile)
     (h : layout.WellFormed) : layout.fieldNames.Nodup :=
   (wellFormed_iff layout).mp h |>.1.1.1.1.1.2
 
+/-- A valid packed aggregate has a positive declared alignment. -/
+theorem aggregateAlignmentPositive_of_wellFormed
+    (layout : PackedLayout profile) (h : layout.WellFormed) :
+    0 < layout.alignment :=
+  (wellFormed_iff layout).mp h |>.1.1.1.1.2
+
+/-- A valid packed aggregate uses an alignment admitted by its profile. -/
+theorem profileAcceptsAlignment_of_wellFormed
+    (layout : PackedLayout profile) (h : layout.WellFormed) :
+    profile.acceptsAlignment layout.alignment = true :=
+  (wellFormed_iff layout).mp h |>.1.1.1.2
+
+/-- A valid packed aggregate's storage size respects its declared alignment. -/
+theorem sizeAligned_of_wellFormed (layout : PackedLayout profile)
+    (h : layout.WellFormed) : IsAligned layout.size layout.alignment :=
+  (wellFormed_iff layout).mp h |>.1.1.2
+
 /-- A valid packed layout makes every declared representation valid and contained. -/
 theorem fieldsWellFormed_of_wellFormed (layout : PackedLayout profile)
     (h : layout.WellFormed) : layout.FieldsWellFormed :=
@@ -153,6 +172,60 @@ theorem fieldWithinStorage_of_wellFormed (layout : PackedLayout profile)
     (member : placed ∈ layout.fields) :
     placed.byteRange.WithinBound layout.size :=
   (layout.fieldsWellFormed_of_wellFormed h placed member).2.2
+
+private theorem eq_of_mem_of_mem_of_map_nodup
+    {α : Type u₁} {β : Type u₂} (key : α → β)
+    {items : List α} {left right : α}
+    (unique : (items.map key).Nodup)
+    (leftMem : left ∈ items) (rightMem : right ∈ items)
+    (sameKey : key left = key right) : left = right := by
+  induction items with
+  | nil => simp at leftMem
+  | cons head tail ih =>
+      rw [List.map_cons, List.nodup_cons] at unique
+      rw [List.mem_cons] at leftMem rightMem
+      rcases leftMem with rfl | leftMem
+      · rcases rightMem with rfl | rightMem
+        · rfl
+        · exfalso
+          apply unique.1
+          rw [sameKey]
+          exact List.mem_map.mpr ⟨right, rightMem, rfl⟩
+      · rcases rightMem with rfl | rightMem
+        · exfalso
+          apply unique.1
+          rw [← sameKey]
+          exact List.mem_map.mpr ⟨left, leftMem, rfl⟩
+        · exact ih unique.2 leftMem rightMem
+
+/-- Two declared fields of a valid packed aggregate with the same name are the
+same authored placement. -/
+theorem field_eq_of_mem_of_mem_of_name_eq
+    (layout : PackedLayout profile) (left right : PlacedField profile)
+    (closed : layout.WellFormed)
+    (leftMem : left ∈ layout.fields) (rightMem : right ∈ layout.fields)
+    (sameName : left.field.name = right.field.name) : left = right := by
+  exact eq_of_mem_of_mem_of_map_nodup
+    (fun placed : PlacedField profile => placed.field.name)
+    (by simpa [fieldNames] using layout.fieldNamesNodup_of_wellFormed closed)
+    leftMem rightMem sameName
+
+/-- Under `PackedLayout.WellFormed`, nominal lookup returns the exact authored
+placement already held by the caller. -/
+theorem lookup?_eq_some_of_mem
+    (layout : PackedLayout profile) (name : Name)
+    (placed : PlacedField profile) (closed : layout.WellFormed)
+    (member : placed ∈ layout.fields) (hasName : placed.field.name = name) :
+    layout.lookup? name = some placed := by
+  have nameMember : name ∈ layout.fieldNames := by
+    simp [fieldNames]
+    exact ⟨placed, member, hasName⟩
+  obtain ⟨found, foundLookup⟩ := layout.fieldForName name nameMember
+  have foundFacts := layout.lookup?_sound name found foundLookup
+  have foundEq : found = placed :=
+    layout.field_eq_of_mem_of_mem_of_name_eq found placed closed
+      foundFacts.1 member (foundFacts.2.trans hasName.symm)
+  simpa [foundEq] using foundLookup
 
 end PackedLayout
 

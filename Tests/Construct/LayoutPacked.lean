@@ -27,8 +27,22 @@ example : ∃ placed, valid.lookup? ⟨"tag"⟩ = some placed :=
   valid.fieldForName ⟨"tag"⟩ (by native_decide)
 example : valid.FieldsWellFormed := valid.fieldsWellFormed_of_wellFormed (by native_decide)
 example : valid.FieldsDisjoint := valid.fieldsDisjoint_of_wellFormed (by native_decide)
+example : 0 < valid.alignment :=
+  valid.aggregateAlignmentPositive_of_wellFormed (by native_decide)
+example : profile.acceptsAlignment valid.alignment = true :=
+  valid.profileAcceptsAlignment_of_wellFormed (by native_decide)
+example : IsAligned valid.size valid.alignment :=
+  valid.sizeAligned_of_wellFormed (by native_decide)
 example : payload.byteRange.WithinBound valid.size :=
   valid.fieldWithinStorage_of_wellFormed (by native_decide) payload (by native_decide)
+example : valid.lookup? payload.field.name = some payload :=
+  valid.lookup?_eq_some_of_mem payload.field.name payload
+    (by native_decide) (by native_decide) rfl
+example (left right : PlacedField profile)
+    (leftMem : left ∈ valid.fields) (rightMem : right ∈ valid.fields)
+    (sameName : left.field.name = right.field.name) : left = right :=
+  valid.field_eq_of_mem_of_mem_of_name_eq left right
+    (by native_decide) leftMem rightMem sameName
 example : ¬IsAligned payload.offset payload.field.repr.alignment :=
   (PackedLayout.requiresUnalignedAccess_eq_true_iff payload).mp (by native_decide)
 
