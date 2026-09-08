@@ -621,6 +621,14 @@ to imitate compiler-selected storage or CFG structure.
     declared engine/version make the linked claim invalid. Changing engine
     family, including adopting the future certificate engine, requires a schema
     activation with dual-version readers.
+    The successor portable-path profile is likewise carried by versioned
+    nomination and authorization fields, not inferred from a checkout or an
+    undefined candidate manifest. Its valid authorization is the activation
+    carrier at the exact normalization commit; subsequent first-parent history
+    inherits it and independently reconstructed collision indexes check it.
+    Relocation of live `Tools/` content and all consumers is prerequisite work
+    under the affected owners, so activation changes policy over an already-clean
+    tree instead of combining unrelated cross-owner edits.
 115. `agent.resumed` may transfer exclusive custody from the identity's latest
     own lifecycle event of any status or a coordinator retirement targeting it,
     so silent death while `active` does not strand the identity or its role.

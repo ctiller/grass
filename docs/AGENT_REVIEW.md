@@ -484,20 +484,30 @@ their tree spines; it performs no publication, fetch, or whole-repository file
 checkout. Activation requires a schema readable alongside the version-two event
 schema, linked validators for both histories, negative fixtures for omitted,
 altered, and injected paths, and a reviewed helper migration.
+[VALIDATION.md](VALIDATION.md) section 8 classifies the helper as
+correctness-critical tooling and owns its assurance floor; this section owns the
+review and activation semantics the helper must implement.
 
 A successor portable-path profile is introduced only after its exact
-component-equivalence function is in the schema. The first profile at least
+component-equivalence function and the versioned review-event extension in
+[AGENT_BUS_SCHEMA.md](AGENT_BUS_SCHEMA.md) are live. The first profile at least
 folds ASCII `A` through `Z` to `a` through `z` independently in every
 slash-delimited component. The normalization merge itself is the activation
-boundary; there is no repair-then-activate interval. Its nomination,
-authorization, and candidate manifest name the exact profile, design/helper
-versions, previous `main`, complete collision-free candidate tree, and checked
-collision index. The candidate is the sole transition exception: it may begin
+boundary; there is no repair-then-activate interval. Its nomination and
+authorization carry the successor schema's `repository_profile` selection; the
+authorization additionally names previous `main`, the complete collision-free
+candidate tree, and its checked collision index. There is no separate implicit
+candidate-manifest object. The reducer retains the selected profile from the
+unique linked-valid authorization whose candidate is the first profile-bearing
+commit on `main`. The candidate is the sole transition exception: it may begin
 from pre-existing collisions but may not introduce a new one or leave any
 collision governed by the profile. The reviewer's existing non-force push of the
 reviewed, two-parent normalization candidate advances `main` to that exact tree
 and makes the profile effective for that commit and all descendants. A receipt
 reports this transition but does not activate it in a later race-prone step.
+`merge-ready` reads the profile and collision index from the authorization for
+its `previous_main`; `audit-main` walks first-parent ancestry to the activation
+authorization and reconstructs every subsequent index from complete Git trees.
 
 Subsequent candidates inherit the first parent's -- that is,
 `previous_main`'s -- checked collision index and update it along every path whose
@@ -507,9 +517,14 @@ Thus the semantic invariant covers the complete candidate tree while ordinary
 local work remains incremental. A host setting
 such as `core.ignorecase=false` cannot make an invalid tree valid. The
 normalization target for repository tooling is the single lowercase root
-`tools/`; `Tools/` must be removed by that candidate. A concurrent advance of
-`main` loses under the existing stale-`previous_main` rule and requires a newly
-prepared normalization candidate. Acceptance fixtures race an ordinary
+`tools/`. Moving live `Tools/` entries and updating CI, implementation plans,
+and other consumers are prerequisite changes landed under their owners'
+ordinary review nominations. They may be staged while the old profile governs
+`main`; the activation candidate is then a pure policy transition over a tree
+which already contains no `Tools/` entry. No candidate claims the new profile
+before that activation commit. A concurrent advance of `main` loses under the
+existing stale-`previous_main` rule and requires a newly prepared normalization
+candidate. Acceptance fixtures race an ordinary
 old-profile candidate against normalization in both publication orders and
 admit no descendant which reintroduces a governed collision.
 

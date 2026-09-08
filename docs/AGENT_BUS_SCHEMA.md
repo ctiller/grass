@@ -245,6 +245,47 @@ than unavailable. This separation is required for an older helper to read the
 very activation which tells the fleet to install its successor without allowing
 a present mismatch to masquerade as a local installation problem.
 
+### Successor repository-path profile carrier
+
+The portable-path profile is not inferred from a host checkout and is not an
+unrecorded property of a candidate. The successor schema adds this closed value:
+
+```text
+RepositoryProfileSelection = {
+  profile : Short,
+  design_commit : ObjectId,
+  helper_commit : ObjectId
+}
+```
+
+Its successor `ReviewRequest` adds
+`repository_profile : RepositoryProfileSelection`; the corresponding successor
+`review.merge_authorized` adds the identical selection plus
+`collision_index : ObjectId`. The latter names a canonical Git blob containing
+the complete sorted map from normalized path bytes to exact tree path bytes; it
+does not inline a repository-sized index into the bounded event. The first
+profile name is `ascii-component-fold-v1`, whose design commit defines its
+slash-component ASCII fold exactly. These are versioned schema fields: emitting
+them under the current version-two event shape remains invalid, and activation
+requires the dual-version reader and writer described in
+[AGENT_REVIEW.md](AGENT_REVIEW.md). The nomination and authorization selections
+must be byte-for-byte equal. Linked validation requires both commits reachable
+from product `main`, the helper to implement the named profile, the candidate
+tree to satisfy the index, and the candidate to obey the transition rule in
+`AGENT_REVIEW.md`.
+
+The reducer records a selected repository profile only from the unique
+linked-valid authorization whose candidate is the first profile-bearing commit
+on product `main`. A second incomparable selection is a lifecycle conflict and
+grants no authority. `merge-ready` obtains the governing selection and index
+from the authorization whose candidate equals its `previous_main`, or from the
+nearest profile-bearing first-parent ancestor when later authorizations inherit
+it. `audit-main` walks first-parent ancestry to that activation authorization
+and reconstructs the collision index from complete Git trees. A missing carrier,
+unreachable activation candidate, changed selection, or reconstructed-index
+mismatch fails authority closed; local filesystem case behavior supplies none
+of these facts.
+
 ## 5. Scope, plan, and progress
 
 ### `scope.set`
