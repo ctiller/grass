@@ -138,6 +138,17 @@ definition. Thus a bus reducer, review gate, linker, emitter, cache validator,
 compiler, or audit command can invalidate the evidence chain even when it is
 not shipped inside the user's program.
 
+This section governs tooling whose behavior Grass specifies and whose
+implementation Grass may replace. It does not claim a Grass behavioral contract
+for pinned external dependencies such as system Git, the Lean/Lake toolchain,
+PowerShell, Python, the operating system, or hardware. Those dependencies enter
+the per-profile trust ledger in section 6 at an exact selected revision, with
+their validation evidence and downstream dependence stated explicitly. If Grass
+later wraps or replaces one behind a specified public boundary, that wrapper or
+replacement becomes correctness-critical under the output-use rule below; the
+external implementation beneath the boundary remains a declared assumption
+until a separately reviewed trust transition removes it.
+
 The strongest downstream use fixes the assurance floor. Review or nomination
 evidence requires the language-independent contract, reproducible invocation,
 and positive and negative fixtures at the public boundary. Gate acceptance also
@@ -240,23 +251,28 @@ consumer genuinely observes them.
 A forward-compatibility rule is required for selected mutation capabilities: a
 reader which recognizes the base event must not make an append-only history
 unreadable merely because it cannot execute a newly selected mutation engine.
-It must preserve and reduce the recognized event, report the selection as an
-opaque unavailable capability, and make only the affected mutation command fail
-closed with an explicit unsupported-capability result. This is not a current
-V1 behavior. [AGENT_BUS_SCHEMA.md](AGENT_BUS_SCHEMA.md) deliberately rejects
-every unknown field and enum value and has no forward-compatible capability
-envelope.
+It preserves and reduces the recognized event, reports local execution as
+unavailable, and makes only the affected mutation command fail closed with an
+explicit unsupported-capability result.
 
-Therefore that rule has an open dependency on a separately reviewed bus-schema
-revision and its live reader, writer, reducer, and command implementation. The
-schema owner must introduce a bounded, length-delimited capability-selection
-envelope whose unknown optional capability identifiers and payloads can be
-preserved opaquely. The carve-out is limited to that envelope: unknown base
-event kinds, required semantic values, fields outside it, malformed payloads,
-and unsupported schema versions remain rejected. Until that schema and tooling
-revision is implemented and deployed, readers continue to obey the current V1
-strict-rejection rule; this document does not advertise the future rule as an
-existing bus capability.
+The merge-engine case needs no capability envelope. The companion revision to
+[AGENT_BUS_SCHEMA.md](AGENT_BUS_SCHEMA.md) under `merge_engine.activated` makes
+`merge_engine_version` a known field with an open value. Structural reduction
+then selects every structurally valid version independently of the reader's
+local execution capability; missing execution support affects candidate
+construction, authorization, and merge readiness, not history readability.
+That schema/review revision is a landing prerequisite for this paragraph, and
+until it lands the current strict bootstrap behavior remains authoritative. The
+protocol and activation semantics are owned by
+[AGENT_REVIEW.md](AGENT_REVIEW.md); this section owns the assurance floor of the
+helper that implements them.
+
+A genuinely unknown optional capability identifier would require a separately
+reviewed, bounded, length-delimited envelope plus dual-version reader, writer,
+reducer, and command support before it could be preserved opaquely. That remains
+an open extension point, not a prerequisite for merge-engine version selection.
+Unknown base event kinds, required semantic values, fields outside such an
+envelope, malformed payloads, and unsupported schema versions remain rejected.
 
 Porting proceeds from small pure boundaries outward:
 
