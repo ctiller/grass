@@ -8,6 +8,7 @@ import Grass.Platform.Win32.Profile
 import Grass.Platform.Win32.Coff
 import Grass.Platform.Win32.CoffLayout
 import Grass.Platform.Win32.CoffSymbol
+import Grass.Platform.Win32.CoffStrings
 
 /-!
 # Ledger coverage gate
@@ -95,7 +96,8 @@ def auditedModules : List Name :=
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
    `Grass.Platform.Win32.Profile, `Grass.Platform.Win32.Coff,
    `Grass.Platform.Win32.CoffLayout,
-   `Grass.Platform.Win32.CoffSymbol]
+   `Grass.Platform.Win32.CoffSymbol,
+   `Grass.Platform.Win32.CoffStrings]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -109,7 +111,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 123
+def owedBaseline : Nat := 125
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -131,7 +133,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 62
+def notBehaviourBaseline : Nat := 65
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -348,7 +350,16 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.Coff.Object.relocSize,
     `Grass.Platform.Win32.Coff.Section.relocationBytes,
     `Grass.Platform.Win32.Coff.dataOffsets,
-    `Grass.Platform.Win32.Coff.relocOffsets ]
+    `Grass.Platform.Win32.Coff.relocOffsets,
+    -- The string table's arithmetic, which asserts nothing the format decides.
+    -- `stringEntries` concatenates entries whose own shape is cited through
+    -- `stringEntry`; `stringEntriesSize` sums their lengths; `stringOffsets`
+    -- is a running total over that same sum. The `+ 1` in the last two is the
+    -- terminator `stringEntry` already accounts for, not a second claim about
+    -- it.
+    `Grass.Platform.Win32.Coff.stringEntries,
+    `Grass.Platform.Win32.Coff.stringEntriesSize,
+    `Grass.Platform.Win32.Coff.stringOffsets ]
 
 /--
 Declarations that genuinely model external behaviour and have no citation yet.
@@ -534,7 +545,14 @@ def owed : List Name :=
     `Grass.Platform.Win32.Coff.SectionNumber.code,
     `Grass.Platform.Win32.Coff.SymbolName.toBytes,
     `Grass.Platform.Win32.Coff.SymbolName.leadingZeros,
-    `Grass.Platform.Win32.Coff.SymbolName.short? ]
+    `Grass.Platform.Win32.Coff.SymbolName.short?,
+    -- The string table's two format facts. `stringEntry` appends the NUL that
+    -- terminates a name -- the format supplies no length, so the terminator is
+    -- the only thing that ends a string. `stringTableBytes` writes the
+    -- four-byte size that *includes itself*, which is the quirk a writer gets
+    -- wrong by four and which a reader uses to find the end of the object.
+    `Grass.Platform.Win32.Coff.stringEntry,
+    `Grass.Platform.Win32.Coff.stringTableBytes ]
 
 /-- The declarations this gate holds the ledger responsible for. -/
 def modeledDeclarations : MetaM (Array Name) := do
