@@ -64,11 +64,27 @@ through a multi-step instruction is exactly the kind of thing a permissive
 default would get wrong in the safe-looking direction.
 -/
 inductive FaultVisibility where
-  /-- Steps that completed before the failure remain visible. This is the default
-  *behavior* of most hardware, though not a default *value* here. -/
+  /-- Steps that completed before the failure remain visible, **and so does the
+  faulting step's own committed prefix**: a store that faults partway has written
+  the bytes it wrote. `faultingEffectVisible` is where the second half is
+  answered, and saying only the first half here is what let the transition commit
+  a `transactional` sequence's faulting prefix for as long as it did. This is the
+  default *behavior* of most hardware, though not a default *value* here. -/
   | priorEffectsVisible
-  /-- No step is visible unless all are. Requires a target theorem, named by
-  `justification`, per `docs/INSTRUCTIONS.md` §4. -/
+  /-- No step is visible unless all are, the faulting step's own prefix included;
+  `faultingEffectVisible` is the second half and `visibleEffects?` the first.
+
+  `justification` names the target theorem `docs/INSTRUCTIONS.md` §4 requires. The
+  name must be one the profile registered in
+  `AdmittedVocabulary.atomicityJustifications`, which `Grass/Op/Step.lean` checks
+  before running anything (`onFaultRuleNotRegistered`); until that registry existed
+  a sequence got all-or-nothing fault semantics by declaring a string.
+
+  **Registration is not discharge.** A registered name says the profile owns the
+  claim, not that it proved it; §10's package is where a claim is discharged, and
+  `RequiresJustification` and `SubstepSequence.ClaimsAtomicity` exist so such a
+  package can enumerate the outstanding ones. Nothing under `Grass/` enumerates
+  them yet, which `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records. -/
   | transactional (justification : Name)
   /-- A visibility rule owned by one profile. This module cannot answer questions
   about it, and `visibleEffects?` says so rather than guessing. -/
@@ -214,6 +230,83 @@ def visibleEffects? (seq : SubstepSequence) (failedAt : Nat) :
   | .transactional _ => some []
   | .profileSpecific _ => Option.none
 
+/--
+**Every surviving access is one of the sequence's own.**
+
+Obvious, and it was missing, which cost a law: `Grass/Op/Step.lean` could not state
+that a whole `runStep` leaves the authority map alone when no descriptor declares a
+change, because the faulting branches run this function and nothing related its
+answer to `accesses`. A hypothesis quantified over `seq.accesses` could not be
+discharged for the survivors.
+
+Both branches are `⊆`: `priorEffectsVisible` takes a prefix and `transactional`
+takes nothing. `profileSpecific` has no answer at all, and a caller reaching that
+case has already been rejected.
+-/
+theorem mem_accesses_of_mem_visibleEffects? {seq : SubstepSequence} {failedAt : Nat}
+    {survivors : List AccessDescriptor} (h : seq.visibleEffects? failedAt = some survivors)
+    {d : AccessDescriptor} (hmem : d ∈ survivors) : d ∈ seq.accesses := by
+  unfold visibleEffects? at h
+  split at h
+  · injection h with h
+    subst h
+    obtain ⟨substep, hsub, hd⟩ := List.mem_filterMap.mp hmem
+    exact List.mem_filterMap.mpr ⟨substep, List.mem_of_mem_take hsub, hd⟩
+  · injection h with h
+    subst h
+    exact absurd hmem (by simp)
+  · exact absurd h (by simp)
+
+/-- And the faulting substep's own descriptor is one of them, which the faulting
+branch of `Grass/Op/Step.lean`'s `runStep` needs for the same reason. -/
+theorem mem_accesses_of_substep {seq : SubstepSequence} {index : Nat}
+    {d : AccessDescriptor} (h : seq.substeps[index]? = some (.access d)) :
+    d ∈ seq.accesses :=
+  List.mem_filterMap.mpr ⟨.access d, List.mem_of_getElem? h, rfl⟩
+
+/-- The form a caller with a hypothesis over the whole sequence wants. -/
+theorem forall_visibleEffects?_of_forall_accesses {seq : SubstepSequence} {failedAt : Nat}
+    {survivors : List AccessDescriptor} (h : seq.visibleEffects? failedAt = some survivors)
+    {motive : AccessDescriptor → Prop} (hall : ∀ d ∈ seq.accesses, motive d) :
+    ∀ d ∈ survivors, motive d :=
+  fun d hmem => hall d (mem_accesses_of_mem_visibleEffects? h hmem)
+
+/--
+Whether the faulting substep's *own* committed prefix survives.
+
+`visibleEffects?` answers for the substeps before the failure. This answers for
+the failing one, and they are different questions: a store that faults partway
+through has written the bytes it wrote, which `priorEffectsVisible` admits and
+`transactional` does not.
+
+Not having asked the second question was a defect. `runStep` took
+`visibleEffects?`'s answer for the prefix and then committed the faulting
+substep unconditionally, so a `transactional` sequence discarded every completed
+substep and kept the faulting one's partial write — the exact reverse of "no step
+is visible unless all are". Local adversarial review built that case.
+
+`profileSpecific` answers `false` because this module cannot answer for it;
+`visibleEffects?` returns `none` there and `step` rejects, so the value is the
+conservative one for a branch that is not reached rather than a guess that is.
+-/
+def faultingEffectVisible (seq : SubstepSequence) : Bool :=
+  match seq.onFault with
+  | .priorEffectsVisible => true
+  | .transactional _ => false
+  | .profileSpecific _ => false
+
+@[simp] theorem faultingEffectVisible_priorEffectsVisible (substeps : List Substep) :
+    (SubstepSequence.mk substeps .priorEffectsVisible).faultingEffectVisible = true := rfl
+
+/-- **A transactional sequence exposes nothing when it faults**, its own faulting
+substep included. With `visibleEffects?_transactional`, this is the pair that makes
+`FaultVisibility.transactional`'s "no step is visible unless all are" true of the
+transition rather than only of the prefix. -/
+@[simp] theorem faultingEffectVisible_transactional (substeps : List Substep)
+    (justification : Name) :
+    (SubstepSequence.mk substeps (.transactional justification)).faultingEffectVisible =
+      false := rfl
+
 @[simp] theorem visibleEffects?_priorEffectsVisible (substeps : List Substep)
     (failedAt : Nat) :
     (SubstepSequence.mk substeps .priorEffectsVisible).visibleEffects? failedAt =
@@ -229,6 +322,28 @@ def visibleEffects? (seq : SubstepSequence) (failedAt : Nat) :
     (name : Name) (failedAt : Nat) :
     (SubstepSequence.mk substeps (.profileSpecific name)).visibleEffects? failedAt =
       Option.none := rfl
+
+/-- A substep's descriptor is one of the sequence's accesses. -/
+theorem mem_accesses_of_descriptor? {seq : SubstepSequence} {sub : Substep}
+    {d : AccessDescriptor} (hmem : sub ∈ seq.substeps) (hd : sub.descriptor? = some d) :
+    d ∈ seq.accesses :=
+  List.mem_filterMap.mpr ⟨sub, hmem, hd⟩
+
+/-- **Every surviving access is one of the sequence's own.** A framing argument
+about the whole sequence therefore covers the survivor list, whichever visibility
+rule produced it — which is what lets a `step`-level framing theorem be built from
+`runAccesses`, over a list `visibleEffects?` chose rather than one the caller
+supplied. -/
+theorem mem_accesses_of_visibleEffects? {seq : SubstepSequence} {failedAt : Nat}
+    {survivors : List AccessDescriptor} (h : seq.visibleEffects? failedAt = some survivors)
+    {d : AccessDescriptor} (hd : d ∈ survivors) : d ∈ seq.accesses := by
+  unfold visibleEffects? at h
+  split at h
+  · cases h
+    obtain ⟨sub, hsub, hdesc⟩ := List.mem_filterMap.mp hd
+    exact mem_accesses_of_descriptor? (List.mem_of_mem_take hsub) hdesc
+  · cases h; exact absurd hd (by simp)
+  · exact absurd h (by simp)
 
 /-- Failure at the first step exposes nothing, whatever the visibility rule
 answers. -/
@@ -284,22 +399,38 @@ instance (seq : SubstepSequence) (table : AddressSpaceTable) :
   inferInstanceAs (Decidable (∀ _ ∈ _, _))
 
 /--
-`seq.ClaimsAtomicity` holds when the sequence asserts more than one step happens
-indivisibly.
+`seq.ClaimsAtomicity` holds when the sequence's fault-visibility rule asserts
+something a profile must prove about the machine.
 
-A profile closing its §10 package must discharge every such claim. A sequence of
-length at most one claims nothing, because there is nothing for atomicity to
-relate.
+A profile closing its §10 package must discharge every such claim.
+
+**There was a `1 < substeps.length` conjunct and it was wrong.** A single-access
+sequence declaring `transactional` says its commit is all-or-nothing —
+`faultingEffectVisible` is false — which for a store crossing a page boundary is a
+substantive claim, and false by default on x86-64. Calling it claimless meant a §10
+package enumerating outstanding claims would not see it, while `Grass/Op/Step.lean`
+requires a registered justification for it regardless of length. Two mechanisms
+disagreeing about when a claim is made is the shape this layer keeps finding, and
+review found this one.
 -/
 def ClaimsAtomicity (seq : SubstepSequence) : Prop :=
-  seq.onFault.RequiresJustification ∧ 1 < seq.substeps.length
+  seq.onFault.RequiresJustification
 
 instance (seq : SubstepSequence) : Decidable seq.ClaimsAtomicity :=
-  inferInstanceAs (Decidable (_ ∧ _))
+  inferInstanceAs (Decidable seq.onFault.RequiresJustification)
 
+/-- A single access under the default visibility rule claims nothing, because
+`priorEffectsVisible` claims nothing. The length is not what makes it claimless. -/
 @[simp] theorem not_claimsAtomicity_single (d : AccessDescriptor) :
     ¬ (single d).ClaimsAtomicity := by
-  simp [ClaimsAtomicity, single]
+  simp [ClaimsAtomicity, single, FaultVisibility.RequiresJustification]
+
+/-- **A single access declared transactional does claim something.** The case the
+length conjunct used to call claimless. -/
+theorem claimsAtomicity_of_transactional_single (d : AccessDescriptor)
+    (justification : Name) :
+    ({ substeps := [.access d], onFault := .transactional justification } :
+      SubstepSequence).ClaimsAtomicity := trivial
 
 end SubstepSequence
 

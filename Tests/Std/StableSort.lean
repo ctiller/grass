@@ -3,7 +3,21 @@ import Grass.Std.Logical.Order
 /-!
 # Spike 2's `stableSorted`, written against this library
 
-`Spikes/2_Sort/Spec.lean` defines what the sort milestone means:
+`Spikes/2_Sort/Spec.lean` defines what the sort milestone means. It reads, today:
+
+```text
+def stableSorted (input output : Vec Occurrence) : Prop :=
+  output.Permutation input ∧
+  output.Pairwise Occurrence.le ∧
+  ∀ (i j : Nat) (hi : i < input.length) (hj : j < input.length),
+    (input.get i hi).value = (input.get j hj).value ->
+    (input.get i hi).ordinal < (input.get j hj).ordinal ->
+    ∀ p q, output.idxOf? (input.get i hi) = some p ->
+           output.idxOf? (input.get j hj) = some q ->
+           p < q
+```
+
+It did not read that until `47da3f8`. This fixture was written against the earlier version, which is the one the sections below are about:
 
 ```text
 def stableSorted (input output : Vec Occurrence) : Prop :=
@@ -13,13 +27,17 @@ def stableSorted (input output : Vec Occurrence) : Prop :=
     (output.findIdx? input[i]).get! < (output.findIdx? input[j]).get!
 ```
 
+Both blocks are kept because the fixture's own `StableSorted` mirrors the second one, deliberately, as a guard against that shape returning. Reading only the first would make the restatement below look like a transcription error.
+
 `Grass/Std/Logical/Order.lean` exists to supply that vocabulary. This fixture is
 the check that it actually does: the specification is restated here over a
 stand-in `Occurrence` using only `Vec.Permutation`, `Vec.Pairwise`, and
 `Vec.idxOf?`, and then discharged against a concrete sort.
 
-Restating it is also where the two problems with the authored version show, which
-is why the fixture is worth more than a claim that the vocabulary is sufficient.
+Restating it is also where the two problems with the authored version showed --
+both fixed by `47da3f8`, and described in the past tense for that reason. They are
+kept because they are the argument for the operations `Order.lean` supplies, and
+because the fixture still pins the shape they were fixed away from.
 
 **`input[i]` has no bound.** The binder is `∀ i j, i < j → …`, which bounds `i`
 below `j` and nothing above, so there is no proof that `i` indexes `input` at
@@ -111,8 +129,24 @@ whenever the input contains two identical occurrences**, and
 `p < p`. `no_sort_can_satisfy_repeated` proves it. The specification therefore
 needs a well-formedness hypothesis it does not state — occurrences carry an
 `ordinal` precisely so that a parser makes them distinct, and nothing says so —
-or it needs to index by position rather than by element. Raised as an open item
-against the spike surface rather than patched here.
+or it needs to index by position rather than by element. Raised with the corpus's
+owner as `c-stdlib:28` rather than patched here, because `Spikes/**` is authored
+surface and not this library's to edit.
+
+**That is settled, and `c-spike` fixed it.** `47da3f8` on `main` rewrote
+`stableSorted`, and took neither of the two repairs offered above: it keys the
+stability conjunct on `ordinal` rather than on input position. The reasoning was
+that `SPIKE_2.md`'s prose, immediately below the block, already stated the
+ordinal-indexed rule, so the code and its document had drifted apart and there was
+no specification decision left to take. It also found two further defects in the
+same three lines that this fixture had not: `findIdx?` took a predicate where a
+value was passed, so the line did not typecheck, and `.get!` panicked on exactly
+the `none` case a wrong sort produces.
+
+So `StableSorted` below deliberately mirrors the *pre-`47da3f8`* shape, keyed on
+`i < j`. It is a guard against that shape returning, not a model of what
+`Spikes/2_Sort/Spec.lean` says today. Anything reading this fixture for the
+current specification should read the spike.
 -/
 
 /-- Two occurrences identical in both fields: a degenerate input a real parser
@@ -194,5 +228,169 @@ example (i o : Vec Occurrence) (h : StableSorted i o)
     (a b : Nat) (ha : a < o.length) (hb : b < o.length) (hab : a < b) :
     Occurrence.le (o.get a ha) (o.get b hb) :=
   (Vec.pairwise_iff_get o).mp h.2.1 a b ha hb hab
+
+/-! ## An alternative that was considered and not taken
+
+This section was written while `c-stdlib:28` was open, to show that *some* repair
+works rather than to argue for one. The question has since closed the other way:
+`47da3f8` keys stability on `ordinal`, and that gets what position-indexing was
+wanted for without a new construction, because on the counterexample both
+occurrences carry ordinal `0`, so neither has the smaller one, the hypothesis is
+false, and the conjunct is vacuous rather than contradictory.
+
+It stays because the proofs below are about a shape nothing else in the tree
+states, and because a rejected alternative that was actually built is a more
+useful record than one that was only described. What follows is not a proposal.
+
+The difference is where the output position comes from. `StableSorted` asks
+`idxOf?` to find it *by element*, which collapses when two occurrences are equal.
+This asks for a witnessing map from input positions to output positions, so equal
+elements still have distinct positions and the order requirement is about those.
+-/
+
+/-- Stability over positions: an injection carrying elements, monotone on ties. -/
+def StableSortedByPos (input output : Vec Occurrence) : Prop :=
+  output.length = input.length ∧
+  output.Pairwise Occurrence.le ∧
+  ∃ σ : Nat → Nat,
+    (∀ i, i < input.length → σ i < output.length) ∧
+    (∀ i, i < input.length → output.get? (σ i) = input.get? i) ∧
+    (∀ i j, i < input.length → j < input.length → i ≠ j → σ i ≠ σ j) ∧
+    (∀ i j, i < input.length → j < input.length → i < j →
+      (input.get? i).map Occurrence.value = (input.get? j).map Occurrence.value →
+      σ i < σ j)
+
+/-- **Satisfiable exactly where the element-indexed version is not.** The identity
+witnesses it on the degenerate input `no_sort_can_satisfy_repeated` rules out. -/
+theorem pos_satisfiable_on_repeated : StableSortedByPos repeated repeated := by
+  refine ⟨rfl, by decide, id, ?_, ?_, ?_, ?_⟩
+  · intro i h; exact h
+  · intro i _; rfl
+  · intro i j _ _ h; exact h
+  · intro i j hi hj hlt _; exact hlt
+
+/-- **And still discriminating**, which is the half that matters more: a predicate
+satisfiable by weakening until everything passes would be worse than an
+unsatisfiable one. Carrying elements pins the witness, and the pinned witness
+contradicts the order requirement. -/
+theorem pos_rejects_unstable : ¬ StableSortedByPos input unstableOutput := by
+  rintro ⟨-, -, σ, hbound, hcarry, -, hstable⟩
+  have hb0 : σ 0 < 3 := by simpa [unstableOutput, Vec.length] using hbound 0 (by decide)
+  have hc0 := hcarry 0 (by decide)
+  have hb2 : σ 2 < 3 := by simpa [unstableOutput, Vec.length] using hbound 2 (by decide)
+  have hc2 := hcarry 2 (by decide)
+  have h0 : σ 0 = 2 := by
+    have hcase : σ 0 = 0 ∨ σ 0 = 1 ∨ σ 0 = 2 := by omega
+    rcases hcase with h | h | h
+    · rw [h] at hc0; simp [input, unstableOutput, Vec.get?] at hc0
+    · rw [h] at hc0; simp [input, unstableOutput, Vec.get?] at hc0
+    · exact h
+  have h2 : σ 2 = 1 := by
+    have hcase : σ 2 = 0 ∨ σ 2 = 1 ∨ σ 2 = 2 := by omega
+    rcases hcase with h | h | h
+    · rw [h] at hc2; simp [input, unstableOutput, Vec.get?] at hc2
+    · exact h
+    · rw [h] at hc2; simp [input, unstableOutput, Vec.get?] at hc2
+  have hlt := hstable 0 2 (by decide) (by decide) (by decide) (by decide)
+  omega
+
+/-! ## What a divide-and-conquer sort would ask for, and does not get
+
+Everything above works with concrete two- and three-element vectors, and that is
+why `docs/STDLIB_IMPLEMENTATION_PLAN.md` §3.13 measures every one of
+`Grass/Std/Logical/Order.lean`'s six `@[simp]` laws as load-bearing for nothing:
+`decide` and `rfl` reduce a literal without ever reaching a law. §3.13 offers
+that as the explanation and calls it mechanical. It is, and it is not the whole
+story.
+
+The goals below are the other half of the check. They are written over *general*
+vectors, in the shape a merge sort states its own correctness — the shape
+`Spikes/2_Sort` would reach for — and `simp` closes some of them and not others.
+What fails is not scattered: `Order.lean` has `empty` and `push` laws, and every
+divide-and-conquer algorithm is built from `append`, `singleton`, `take` and
+`drop`.
+
+**None of this is a defect and none of it is a request.** By decision 6 the
+operations are determined: every `Vec` is reached from `empty` by `push`, so
+`Vec.count_empty` with `Vec.count_push` pins `Vec.count` and `Vec.pairwise_empty`
+with `Vec.Pairwise.push` pins `Vec.Pairwise`. What is missing is convenience for
+one algorithm shape, which is band 3 under §1 until a consumer that compiles asks
+for it. This section exists so that the asking is cheap: the goals are written
+down, the failures are pinned, and whoever needs them can point here instead of
+describing them.
+-/
+
+section ConsumerShaped
+
+variable {α : Type} [BEq α]
+
+/-! ### What already works -/
+
+/-- The empty case reaches its law through the notation a consumer writes. -/
+example (R : α → α → Prop) : Vec.Pairwise R (∅ : Vec α) := by simp
+
+example (a : α) : Vec.count (∅ : Vec α) a = 0 := by simp
+
+example (p : α → Bool) : Vec.findIdx? p (∅ : Vec α) = none := by simp
+
+/-- Multiplicity under rearrangement, which is what `Vec.count` exists for. -/
+example (u v : Vec α) (h : u.Permutation v) (a : α) : Vec.count u a = Vec.count v a := by
+  simp [Vec.Permutation.count_eq h]
+
+/-! ### What does not
+
+Each is pinned rather than described, so a law that closes one of these later
+turns the pin red and this section gets rewritten instead of quietly rotting.
+
+**The pins were falsified rather than assumed to bite.** Adding
+
+```lean
+@[simp] theorem count_append [BEq α] (u v : Vec α) (a : α) :
+    count (u ++ v) a = count u a + count v a := by
+  simp [count, Vec.toList_append, List.count_append]
+```
+
+to `Grass/Std/Logical/Order.lean` and rebuilding turns the first pin below red —
+`#guard_msgs` reports the docstring no longer matching — and leaves the other
+three alone, the split one included, because `simp` rewrites a concatenation into
+a sum and not the reverse. The law was then removed again. Without that check
+these would be four `example`s that pass for whatever reason `simp` happens to
+have today.
+-/
+
+/-! Multiplicity across a concatenation: the merge step. There is no
+`Vec.count_append`. -/
+/-- error: `simp` made no progress -/
+#guard_msgs in
+example (u v : Vec α) (a : α) : Vec.count (u ++ v) a = Vec.count u a + Vec.count v a := by
+  simp
+
+/-! Multiplicity of a one-element vector: the base case. `Vec.singleton` is
+`⟨[a]⟩` rather than `Vec.push Vec.empty a`, so `Vec.count_push` does not reach
+it, and there is no `Vec.count_singleton`. -/
+/-- error: `simp` made no progress -/
+#guard_msgs in
+example (a b : α) : Vec.count (Vec.singleton b) a = (if b == a then 1 else 0) := by
+  simp
+
+/-! Multiplicity across the split, which follows from the two above plus
+`Vec.append_splitAt` and from nothing that exists now. -/
+/-- error: `simp` made no progress -/
+#guard_msgs in
+example (v : Vec α) (n : Nat) (a : α) :
+    Vec.count (v.take n) a + Vec.count (v.drop n) a = Vec.count v a := by
+  simp
+
+/-! Sortedness of a concatenation given the cross bound: the merge's
+postcondition. `Vec.Pairwise.take` and `Vec.Pairwise.drop` go one way and
+nothing comes back. -/
+/-- error: simp_all made no progress -/
+#guard_msgs in
+example (R : α → α → Prop) (u v : Vec α)
+    (hu : Vec.Pairwise R u) (hv : Vec.Pairwise R v)
+    (hcross : ∀ x ∈ u, ∀ y ∈ v, R x y) : Vec.Pairwise R (u ++ v) := by
+  simp_all
+
+end ConsumerShaped
 
 end Grass.Tests.Std.StableSort

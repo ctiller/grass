@@ -67,6 +67,18 @@ meaning.
 
 A consumer that accepts a non-portable order without knowing its profile is
 exactly the "permissive fallback" `docs/FOUNDATION.md` law 8 forbids.
+
+`AdmittedVocabulary.AdmitsOrder` is what rejects the unsupported case, and
+`admitsOrder_of_isPortable` is this predicate's link to it: a portable mode needs no
+registration, a profile-specific one must be a name the profile declared. Neither
+existed for several milestones — nothing under `Grass/` called this, the vocabulary
+had no ordering registry, and an access declaring `profileSpecific` with a name no
+profile ever registered stepped and minted an event carrying it. Review found the
+gap and found the sentence that had described a consumer that did not exist.
+
+What is still **not** here is §7.1's refinement theorem. Registration says the
+profile owns the name; it does not say the name has a proved target meaning. That
+is an ISA obligation and `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records it.
 -/
 def IsPortable : MemoryOrder → Prop
   | .profileSpecific _ => False
@@ -81,6 +93,23 @@ instance : (order : MemoryOrder) → Decidable order.IsPortable
 
 @[simp] theorem not_isPortable_profileSpecific (name : Name) :
     ¬ IsPortable (.profileSpecific name) := fun h => h
+
+/-- The profile's own name for this mode, when it has one.
+
+`Option`, so that "portable" and "profile-specific with a name" are one match
+rather than two predicates that could disagree. A consumer needing the name to
+check a registry gets it here, and gets `none` exactly when there is nothing to
+check. -/
+def profileName? : MemoryOrder → Option Name
+  | .profileSpecific name => some name
+  | _ => Option.none
+
+/-- **A mode has no profile name exactly when it is portable.** The two ways of
+asking are one question, which is what stops a registry check and `IsPortable`
+drifting apart. -/
+@[simp] theorem profileName?_eq_none_iff_isPortable {order : MemoryOrder} :
+    order.profileName? = Option.none ↔ order.IsPortable := by
+  cases order <;> simp [profileName?, IsPortable]
 
 end MemoryOrder
 
@@ -115,6 +144,18 @@ instance : (scope : MemoryScope) → Decidable scope.IsPortable
   | .thread | .process | .device | .system => .isTrue trivial
   | .profileSpecific _ => .isFalse (fun h => h)
 
+/-- The profile's own name for this scope, when it has one. As for
+`MemoryOrder.profileName?`: §7.1 allows profile-specific scopes, and a scope a
+profile never declared is as unsupported as a mode it never declared. -/
+def profileName? : MemoryScope → Option Name
+  | .profileSpecific name => some name
+  | _ => Option.none
+
+/-- A scope has no profile name exactly when it is portable. -/
+@[simp] theorem profileName?_eq_none_iff_isPortable {scope : MemoryScope} :
+    scope.profileName? = Option.none ↔ scope.IsPortable := by
+  cases scope <;> simp [profileName?, IsPortable]
+
 end MemoryScope
 
 /--
@@ -141,10 +182,15 @@ def plain : OrderingDemand := {}
 /--
 `demand.IsPlain` holds when the access is non-atomic and relaxed.
 
-The initial single-threaded profile admits only plain accesses
-(`docs/MEMORY_MODEL.md` §9). Milestone M8 relaxes this; until then a profile
-rejecting a non-plain demand is rejecting an unimplemented case rather than
-modelling it as harmless.
+The initial single-threaded profile is *intended* to admit only plain accesses
+(`docs/MEMORY_MODEL.md` §9), and nothing here enforces that: no gate anywhere
+consults `IsPlain`, and `Grass/Memory/Profile.lean` discloses the opposite --
+a profile that has proved nothing may still request `sequentiallyConsistent`.
+What a profile actually rejects is decided by `AdmittedVocabulary`, per demand
+axis. Milestone M8 owns the rest; until then a profile rejecting a non-plain
+demand is rejecting an unimplemented case rather than modelling it as harmless.
+This paragraph read as a closed guarantee and the gap is recorded in a sibling
+module, which is the worse of the two places to find it.
 -/
 def IsPlain (demand : OrderingDemand) : Prop :=
   demand.atomicity = .nonAtomic ∧ demand.order = .relaxed
@@ -154,8 +200,16 @@ instance (demand : OrderingDemand) : Decidable demand.IsPlain :=
 
 @[simp] theorem isPlain_plain : plain.IsPlain := ⟨rfl, rfl⟩
 
-/-- Every part of a plain demand is portable, so a plain access is always
-expressible against any profile. -/
+/-- A plain demand's **order** is portable.
+
+Not every part of it. `IsPlain` constrains `atomicity` and `order` and says nothing
+about `scope`, so a demand with `scope := .profileSpecific ⟨"gpuWorkgroup"⟩` is
+plain, is not portable, and is not expressible against a profile that has not
+registered the name. This docstring claimed both, and review elaborated the
+counterexample rather than arguing it.
+
+Nothing depends on the wider reading: `Grass/Op/Step.lean` checks `AdmitsOrder` and
+`AdmitsScope` separately and directly, and `IsPlain` has no caller under `Grass/`. -/
 theorem isPortable_of_isPlain {demand : OrderingDemand} (h : demand.IsPlain) :
     demand.order.IsPortable := by
   rw [h.2]
