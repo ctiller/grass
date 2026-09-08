@@ -110,7 +110,12 @@ identity is `(changes_event, finding_id)`. `superseded` requires a nonempty
 rationale and never means the finding was fixed.
 
 `CheckResult` occurs only inside merge authorization, so `passed` is its sole
-result. Failed runs are recorded in `progress.reported` and normally produce
+result. `command` is the stable required-check identity despite its historical
+field name. `evidence` records the invocation actually executed and any reviewed
+versioned identity-to-invocation binding, unless the identity itself was invoked
+exactly. Binding adequacy and the narrow legacy docstring-audit migration are
+specified by [AGENT_REVIEW.md](AGENT_REVIEW.md) section 4.1. Failed runs are
+recorded in `progress.reported` and normally produce
 `review.changes_requested`; they cannot appear as authorization evidence.
 
 ## 4. Bootstrap and lifecycle events

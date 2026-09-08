@@ -347,6 +347,12 @@ and blocking status. The target emits `dependency.acknowledged`,
 `dependency.reassigned` has the same preservation, authority, replacement
 acceptance, and old-target exclusion rules as `issue.reassigned`.
 
+Plans advertise intended work and dependencies request an explicit peer
+response; their dissemination is agent-to-agent and converges by immutable event
+union and replay. A coordinator or other relay may transport or batch those
+events, but is not required for discovery, routing, agreement, or
+acknowledgement, and gains no authority over either endpoint.
+
 `handoff.offered` names scope, product branch/commit, completed verification,
 known issues, and receiver. `handoff.accepted` is emitted by the receiver. Scope
 transfers only after the giver releases it and the receiver publishes a new
@@ -496,6 +502,22 @@ version, create a local commit, and validate again. A later local event may name
 an earlier same-agent event in `refs` even though both retain the fetched batch
 base in `observed`; synchronization rebases commits while event causality stays
 in sequence IDs rather than transient local commit IDs.
+
+Before mutation or enqueue, `submit` and every typed mutation command perform
+all deterministic validation available from their arguments and local payload.
+In particular, caller-supplied `--observes`/extra references must equal the event
+IDs structurally named by the payload as required by the active schema. A
+mismatch is returned synchronously with the surplus and missing IDs; no candidate
+is created and a later publisher is not needed to discover the error.
+
+A relay or publisher defensively applies the same shared validation to candidates
+created by an older or faulty client. On this purely local schema failure it
+preserves the original candidate in a visible quarantine and reports the same
+direct diagnostic to the author. It must not feed the candidate into a
+destructive rejection path, reinterpret its meaning, or stall unrelated valid
+candidates. This is deterministic validation, not coordinator judgement. It
+requires no Git or network operation, repository lock, compare-and-swap, or
+whole-bus reduction.
 
 The helper emits human-readable and stable `--json` output. Long values remain
 escaped JSON strings in version 1 so events are self-contained; external

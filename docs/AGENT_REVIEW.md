@@ -169,6 +169,51 @@ maps that the change can legitimately update; otherwise their appearance in the
 candidate correctly requires a replacement nomination rather than an implicit
 scope expansion.
 
+### 4.1 Required-check identity and execution
+
+An entry in `required_checks` is the stable identity of a demanded check. Version
+one retained the field name `command` in `CheckResult`, and normally used an
+invocable command string as that identity, but identity and execution are
+distinct claims. The authorization records the required identity in `command`;
+its evidence truthfully records the executable invocation that actually ran.
+Evidence may omit a separate invocation only when the identity itself was run
+exactly.
+
+A different invocation satisfies an existing identity only through a reviewed,
+versioned binding that names the identity, the replacement invocation, and the
+equivalence relation being promised. The binding must preserve the check's
+policy, inputs, success/failure meaning, diagnostics needed by reviewers, and
+exit status; it may be supplied by a zero-policy compatibility launcher that
+invokes the named implementation. One coincidentally equal result, similar tool
+name, or reviewer judgement without such a binding is not equivalence. An
+arbitrary substitution is forbidden even when it is disclosed.
+
+The binding is product evidence, not mutable bus policy: it must be present in
+the candidate or already reachable from `previous_main`, and the check evidence
+names its exact product commit and repository path. Updating that artifact is an
+ordinary independently reviewed product change. A binding unavailable from the
+candidate's history cannot justify its authorization.
+
+Bindings let executable packaging change without rewriting historical review
+requests. A reviewer records both the actual invocation and the binding used,
+then evaluates that binding as review evidence. `merge-ready` still matches the
+stable identities byte-for-byte and additionally rejects a result whose stated
+invocation is neither the identity itself nor covered by a reviewed binding.
+Changing what a check tests requires a new identity and new nomination; an alias
+cannot conceal a policy change.
+
+The current docstring-audit move is one narrow migration under this rule. The
+legacy identity `python Tools/DocstringAudit.py` remains valid for existing
+nominations. A reviewed, zero-policy launcher at that path may invoke
+`cargo run --quiet --manifest-path tools/grass-tools/Cargo.toml --bin
+docstring-audit`, preserving input selection, output streams, and exit status,
+and the reviewed binding records that equivalence. Existing nominations need
+not be reissued. An already-landed authorization that prominently disclosed the
+canonical Rust invocation is not invalidated merely because its `command` field
+retained the legacy identity: the disclosed invocation plus the reviewed binding
+is the evidence to audit. This exception neither authorizes other substitutions
+nor requires a general check-schema migration before reviews can continue.
+
 ## 5. Required review work
 
 The reviewer examines the complete diff of the snapshot they may merge and
