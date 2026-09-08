@@ -204,6 +204,19 @@ enum Step {
     /// The issue's target publishes `issue.resolved` from *its* checkout,
     /// which requires that checkout to have synchronized past the opening.
     ResolveIssue { issue: Sel },
+    /// The opener reassigns the issue to someone else. Deliberately does not
+    /// force anyone else to synchronize first: a target that has not observed
+    /// the reassignment is the whole point.
+    ReassignIssue { issue: Sel, new_target: Sel },
+    /// The issue's target acknowledges *the assignment its own checkout knows
+    /// about*, which is not necessarily the one that is current globally.
+    ///
+    /// This is the step the alphabet was missing, and its absence is why two
+    /// fleet-wide reduction outages reached production unseen. An
+    /// acknowledgement racing a reassignment is an ordinary, blameless
+    /// schedule -- the target answers the work it was given while the opener
+    /// concurrently moves it -- and both outages were exactly that shape.
+    AckIssue { issue: Sel },
 }
 
 fn step_strategy() -> impl Strategy<Value = Step> {
@@ -224,6 +237,9 @@ fn step_strategy() -> impl Strategy<Value = Step> {
         4 => (sel(), sel())
             .prop_map(|(opener, target)| Step::OpenIssue { opener, target }),
         3 => sel().prop_map(|issue| Step::ResolveIssue { issue }),
+        3 => (sel(), sel())
+            .prop_map(|(issue, new_target)| Step::ReassignIssue { issue, new_target }),
+        3 => sel().prop_map(|issue| Step::AckIssue { issue }),
     ]
 }
 
@@ -275,6 +291,16 @@ enum Op {
     ResolveIssue {
         issue: usize,
     },
+    ReassignIssue {
+        issue: usize,
+        new_target: usize,
+    },
+    /// `assignment` is an index into the issue's `assignments` chain -- which
+    /// entry the acknowledging checkout actually knows about.
+    AckIssue {
+        issue: usize,
+        assignment: usize,
+    },
 }
 
 // ------------------------------------------------------------- the oracle
@@ -304,6 +330,13 @@ struct IssueModel {
     opener: usize,
     target: usize,
     resolved: Option<EventKey>,
+    /// Every assignment this issue has had, oldest first: the opening event,
+    /// then one entry per reassignment. `(assignment id, event key, target)`.
+    ///
+    /// The whole chain is kept, not just the current entry, because a
+    /// checkout that has not synchronized still legitimately holds an older
+    /// one and will acknowledge *that*.
+    assignments: Vec<(EventId, EventKey, usize)>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -408,12 +441,14 @@ impl Model {
             Op::OpenIssue { opener, target } => {
                 let key = self.take_seq(*opener);
                 self.publish(self.agents[*opener].host, key);
+                let id = EventId::new(&self.agents[*opener].name, key.seq);
                 self.issues.push(IssueModel {
-                    id: EventId::new(&self.agents[*opener].name, key.seq),
+                    id: id.clone(),
                     opened: key,
                     opener: *opener,
                     target: *target,
                     resolved: None,
+                    assignments: vec![(id, key, *target)],
                 });
             }
             Op::ResolveIssue { issue } => {
@@ -421,6 +456,28 @@ impl Model {
                 let key = self.take_seq(target);
                 self.publish(self.agents[target].host, key);
                 self.issues[*issue].resolved = Some(key);
+            }
+            Op::ReassignIssue { issue, new_target } => {
+                let opener = self.issues[*issue].opener;
+                // `issue.reassigned` is currency-sensitive (gate 17), so
+                // `drain_outbox` probes the remote before publishing it and
+                // this checkout genuinely synchronizes as a side effect. It is
+                // the first such operation in this harness, and the oracle has
+                // to model it or it reports a fabricated `last_synced`.
+                let host = self.agents[opener].host;
+                self.hosts[host].epoch = self.latest_epoch();
+                self.hosts[host].known = self.origin.clone();
+                self.hosts[host].ever_synced = true;
+                let key = self.take_seq(opener);
+                self.publish(self.agents[opener].host, key);
+                let id = EventId::new(&self.agents[opener].name, key.seq);
+                self.issues[*issue].target = *new_target;
+                self.issues[*issue].assignments.push((id, key, *new_target));
+            }
+            Op::AckIssue { issue, assignment } => {
+                let acker = self.issues[*issue].assignments[*assignment].2;
+                let key = self.take_seq(acker);
+                self.publish(self.agents[acker].host, key);
             }
         }
     }
@@ -691,6 +748,69 @@ fn plan(world: &World) -> Vec<Op> {
                     emit(&mut ops, &mut model, Op::Sync { host: target_host });
                 }
                 emit(&mut ops, &mut model, Op::ResolveIssue { issue: i });
+            }
+            Step::ReassignIssue { issue, new_target } => {
+                let open: Vec<usize> = (0..model.issues.len())
+                    .filter(|&i| model.issues[i].resolved.is_none())
+                    .collect();
+                if open.is_empty() {
+                    continue;
+                }
+                let i = open[issue.pick(open.len())];
+                let current = model.issues[i].target;
+                let candidates: Vec<usize> =
+                    (0..model.agents.len()).filter(|&t| t != current).collect();
+                if candidates.is_empty() {
+                    continue;
+                }
+                let t = candidates[new_target.pick(candidates.len())];
+                // Deliberately no synchronization for anyone else. The opener
+                // authored the issue so its own checkout already knows it, and
+                // leaving every other checkout behind is precisely the state
+                // that makes the next acknowledgement race.
+                emit(
+                    &mut ops,
+                    &mut model,
+                    Op::ReassignIssue {
+                        issue: i,
+                        new_target: t,
+                    },
+                );
+            }
+            Step::AckIssue { issue } => {
+                let open: Vec<usize> = (0..model.issues.len())
+                    .filter(|&i| model.issues[i].resolved.is_none())
+                    .collect();
+                if open.is_empty() {
+                    continue;
+                }
+                let i = open[issue.pick(open.len())];
+                // Whichever assignment this issue's assignee actually knows
+                // about from its own checkout -- the newest such, since that
+                // is what a real agent would answer. When a reassignment has
+                // happened elsewhere and has not reached that checkout, this
+                // is an older entry than the current one, and the resulting
+                // acknowledgement is superseded by the time it is reduced.
+                let chosen = model.issues[i]
+                    .assignments
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find(|(_, (_, key, target))| {
+                        model.hosts[model.agents[*target].host].known.contains(key)
+                    })
+                    .map(|(idx, _)| idx);
+                let Some(idx) = chosen else {
+                    continue;
+                };
+                emit(
+                    &mut ops,
+                    &mut model,
+                    Op::AckIssue {
+                        issue: i,
+                        assignment: idx,
+                    },
+                );
             }
         }
     }
@@ -982,6 +1102,60 @@ fn materialize_op(
                 "issue.resolved",
             )?;
         }
+        Op::ReassignIssue { issue, new_target } => {
+            let issue = &model.issues[*issue];
+            let (prev_id, _, prev_target) = issue
+                .assignments
+                .last()
+                .expect("an issue always has at least its opening assignment")
+                .clone();
+            let name = model.agents[issue.opener].name.clone();
+            let host = model.agents[issue.opener].host;
+            let candidate = Candidate::new(
+                &name,
+                &EventData::IssueReassigned(crate::events::IssueReassigned {
+                    issue: issue.id.clone(),
+                    previous_assignment: prev_id.clone(),
+                    previous_target: model.agents[prev_target].name.clone(),
+                    new_target: model.agents[*new_target].name.clone(),
+                    reason: text("proptest reassignment"),
+                }),
+                vec![issue.id.clone(), prev_id],
+            );
+            drain_one(
+                fleet,
+                host,
+                &name,
+                &candidate,
+                model.next_seq(issue.opener),
+                step,
+                "issue.reassigned",
+            )?;
+        }
+        Op::AckIssue { issue, assignment } => {
+            let issue = &model.issues[*issue];
+            let (assignment_id, _, acker) = issue.assignments[*assignment].clone();
+            let name = model.agents[acker].name.clone();
+            let host = model.agents[acker].host;
+            let candidate = Candidate::new(
+                &name,
+                &EventData::IssueAcknowledged(crate::events::IssueAcknowledged {
+                    issue: issue.id.clone(),
+                    assignment: assignment_id.clone(),
+                    note: text("proptest acknowledgement"),
+                }),
+                vec![issue.id.clone(), assignment_id],
+            );
+            drain_one(
+                fleet,
+                host,
+                &name,
+                &candidate,
+                model.next_seq(acker),
+                step,
+                "issue.acknowledged",
+            )?;
+        }
     }
     Ok(())
 }
@@ -1255,6 +1429,10 @@ fn touched_host(model: &Model, op: &Op) -> usize {
         Op::Status { agent, .. } => model.agents[*agent].host,
         Op::OpenIssue { opener, .. } => model.agents[*opener].host,
         Op::ResolveIssue { issue } => model.agents[model.issues[*issue].target].host,
+        Op::ReassignIssue { issue, .. } => model.agents[model.issues[*issue].opener].host,
+        Op::AckIssue { issue, assignment } => {
+            model.agents[model.issues[*issue].assignments[*assignment].2].host
+        }
     }
 }
 
@@ -1400,6 +1578,23 @@ proptest! {
     /// Generate a fleet's whole life, lay it down across real checkouts of one
     /// shared origin, and check every read against a pure-Rust oracle after
     /// every single operation.
+    /// The default step budget is deliberately small, and that is a real
+    /// limitation worth knowing rather than a tuning detail.
+    ///
+    /// A race between an acknowledgement and a reassignment needs three
+    /// publishing steps on one issue -- open, reassign, acknowledge -- on top
+    /// of the registrations, so at four steps this harness *cannot express it
+    /// at all*. Two fleet-wide reduction outages shipped in exactly that
+    /// blind spot. Measured after the alphabet gained those operations:
+    /// restoring the first outage and running with
+    /// `AGENT_BUS_PROPTEST_STEPS=8` fails this test, so the coverage is real;
+    /// at the default of 4 it passes regardless, because the schedule that
+    /// would catch it is unreachable.
+    ///
+    /// The budget stays low here because 120 cases at eight steps takes about
+    /// nine minutes, which does not belong in the ordinary suite. A deeper
+    /// budget is worth running where wall clock is not the constraint --
+    /// nightly, or when touching lifecycle handling.
     #[test]
     fn a_multi_checkout_fleet_upholds_its_invariants_under_any_schedule(
         world in world_strategy(env_usize("AGENT_BUS_PROPTEST_STEPS", 4))
