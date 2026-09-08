@@ -40,6 +40,18 @@ example : (writeGobj payload).length = 45 := by
 example : readGobj (writeGobj payload ++ suffix) = .done payload suffix := by
   exact readGobj_write_append payload suffix
 
+example : parseGobj (writeGobj payload) = .ok payload := by
+  exact parseGobj_write payload
+
+example : parseGobj (writeGobj payload ++ suffix) =
+    .error .trailingInput := by
+  unfold parseGobj
+  rw [readGobj_write_append]
+  rfl
+
+example : parseGobj Vec.empty =
+    .error (.malformed "truncated .gobj payload") := by rfl
+
 example : readGobj (Vec.fromList [0x42, 0x4f, 0x42, 0x4a]) =
     .invalid (.malformed "invalid .gobj magic") := by rfl
 
