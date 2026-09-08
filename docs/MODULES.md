@@ -12,6 +12,11 @@ Grass/
   Specification/ neutral boundaries, demands/results, requirement keys and typed junctions
   Semantics/     precious SpecProcess behavior, traces, observations, oracle, progress
   Grammar/       typed text/binary formats, derivations, streaming parser and writer laws
+  Spec/
+    Console.lean  narrow portable console-contract authoring facade
+    Grammar.lean  narrow grammar/format-requirement authoring facade
+    Graphics.lean narrow portable graphics-contract authoring facade
+    Resource.lean narrow resource-parameter authoring facade
   Process/
     Protocol/    nominal registries, demands/results, optional view facets
     Network/     populations, lifecycle, Hoare channels, escrow, supervision
@@ -100,6 +105,19 @@ implementation hierarchy and not ownership of every module beneath a similarly
 named directory. Their purpose is to let an assembly author name the artifact
 being authored instead of manually reproducing the internal dependency graph.
 
+`Grass.Spec.*` is the portable specification-authoring facade family. It is a
+distinct, deliberately shallow namespace over the dependency-minimal
+`Specification`, precious `Semantics`, `Grammar`, and domain-contract signature
+leaves; it is not a shortened spelling for every module under
+`Grass.Specification`. The initial family is exactly `Grass.Spec.Console`,
+`Grass.Spec.Grammar`, `Grass.Spec.Graphics`, and `Grass.Spec.Resource`, matching
+the authored spike imports. The specification/foundation workstream owns these
+four facade files and may consume signature exports owned by other workstreams;
+that ownership does not transfer the underlying console, grammar, graphics, or
+resource implementation. Adding another `Grass.Spec.*` facade requires an
+observed author need and the same dependency-cone review, rather than turning
+the namespace into an aggregate.
+
 `Grass.Assembly.X86` is the first-class x86 assembly authoring facade. It may
 re-export the narrow instruction signatures from `Grass.ISA.X86` together with
 the architecture-independent `Construct` and `CFG` signatures needed by source
@@ -132,7 +150,7 @@ not make it an acceptable replacement for the verified author surface, and
 `Grass.Emit` must not expose a route from an unverified source directly to
 executable bytes.
 
-All four facades are signature-only and have measured dependency cones. They
+All facade modules named above are signature-only and have measured dependency cones. They
 may import reviewed logical or signature leaves, but never `Impl`, `Cert`, a
 whole-program aggregate, or a concrete program. Facade tests demonstrate both
 halves of the boundary: the intended spike vocabulary resolves through the
