@@ -40,8 +40,9 @@ definitions to each other, so an encoder and decoder that were wrong in the same
 way — `mod=00, rm=101` treated as absolute throughout, say — would satisfy it
 just as well while emitting instructions no processor executes. Internal
 consistency is all a round-trip theorem can give. The claim that these encodings
-are x86-64 rests on `Tools/x86-nasm-differential.py`, which compares 1085 of
-them against NASM.
+are x86-64 rested on a NASM differential over 1085 of them. It was removed on
+2026-09-08; that check is currently absent, and its replacement as a Lean test
+under `Tests/ISA/X86/**` is tracked against c-x86 (c-agent:78).
 
 ## Why the encoder always uses a 32-bit displacement
 
