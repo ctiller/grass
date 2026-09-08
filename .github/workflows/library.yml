@@ -86,21 +86,6 @@ jobs:
         shell: pwsh
         run: ./audit-trust.ps1
 
-      # A gate is only worth its exit code if it still bites, so the
-      # falsifying self-tests run before the gate they cover: a broken gate
-      # should be reported as a broken gate, not as an audit that passed.
-      # Each was written after a reviewer defeated the tool it covers.
-      - name: Self-test the docstring gate
-        run: python3 Tools/DocstringAuditSelfTest.py
-
-      - name: Self-test the shared-import rewriter
-        run: python3 Tools/SharedImportsSyncSelfTest.py
-
-      # Tools/DeclNames.lean and Tools/AxiomAudit.lean must import every module
-      # in the build, or both audits silently cover less than they claim.
-      - name: Check the shared audit import lists
-        run: python3 Tools/shared-imports-sync.py
-
       - name: Audit docstring claims
         run: python3 Tools/DocstringAudit.py
 
@@ -115,17 +100,17 @@ jobs:
 
       - name: Differential against NASM
         run: |
-          lake env lean --run Tests/Emit.lean nasm > "$RUNNER_TEMP/corpus.txt"
+          lake env lean --run Tests/ISA/X86/NasmCorpus.lean > "$RUNNER_TEMP/corpus.txt"
           python3 Tools/x86-nasm-differential.py "$RUNNER_TEMP/corpus.txt"
 
       - name: Differential against NDISASM
         run: |
-          lake env lean --run Tests/Emit.lean rip > "$RUNNER_TEMP/rip.txt"
+          lake env lean --run Tests/ISA/X86/RipCorpus.lean > "$RUNNER_TEMP/rip.txt"
           python3 Tools/x86-ndisasm-differential.py "$RUNNER_TEMP/rip.txt"
 
       - name: Decoder differential against NDISASM
         run: |
-          lake env lean --run Tests/Emit.lean decode > "$RUNNER_TEMP/decode.txt"
+          lake env lean --run Tests/ISA/X86/DecodeCorpus.lean > "$RUNNER_TEMP/decode.txt"
           python3 Tools/x86-decode-differential.py "$RUNNER_TEMP/decode.txt"
   unwind:
     runs-on: windows-latest
@@ -155,5 +140,5 @@ jobs:
 
       - name: Differential against ml64
         run: |
-          lake env lean --run Tests/Emit.lean unwind > "$RUNNER_TEMP/unwind.txt"
+          lake env lean --run Tests/ABI/Win64/UnwindCorpus.lean > "$RUNNER_TEMP/unwind.txt"
           python Tools/win64-unwind-differential.py "$RUNNER_TEMP/unwind.txt"

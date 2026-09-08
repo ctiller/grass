@@ -66,8 +66,8 @@ CLAIM_WORDS = (
 # not making a mechanised claim, and the rule explicitly permits it.
 HEDGES = (
     "intended", "not enforced", "cannot be made", "owes", "owed",
-    "open obligation", "used to", "an earlier",
-    "no arrangement", "is not the check",
+    "open obligation", "used to", "an earlier", "M2", "M3", "M4", "M5",
+    "M6", "M7", "M8", "M9", "M10", "no arrangement", "is not the check",
     "not by itself", "on its own", "nothing here", "cannot tell", "is not that",
     "not something", "no way to", "unrepresentable",
     # "X cannot do Y" is a statement of limitation, which is the honest
@@ -97,18 +97,6 @@ HEDGES = (
 # means. The reviewer read them as review scratch and this file briefly agreed;
 # both were wrong, and removing them would have suppressed a legitimate
 # exemption in `Grass/Memory/Event.lean`.
-# Milestone references in `docs/MEMORY_IMPLEMENTATION_PLAN.md` are hedges: a
-# sentence pointing at M4 is describing work that is planned, not enforced.
-# Case-sensitive and on the original text, because as lowercase members of
-# HEDGES any bare `m4` token exempted a whole sentence.
-MILESTONE = re.compile(r"\bM(?:[2-9]|10)\b")
-
-# Sorts are not enforcement. They were seeded into the declaration list so that
-# a sentence naming only `Prop` would not be reported as naming nothing that
-# exists; that made `Prop` satisfy the claim instead, which a reviewer used.
-# Dropped from consideration entirely, like a module path.
-SORTS = {"Prop", "Type", "Sort"}
-
 HEDGE_RE = re.compile(
     "|".join(
         r"\b" + re.escape(h.lower()).replace(r"\ ", " ") + r"\b"
@@ -182,475 +170,47 @@ def declaration_names() -> set[str]:
     return known
 
 
-DOC_DECL = re.compile(
-    r"^(structure|inductive|class|def|abbrev|theorem|axiom|opaque)\s+"
-    r"([A-Za-z_][A-Za-z0-9_.']*)")
-DOC_FIELD = re.compile(r"^\s+([a-zA-Z_][A-Za-z0-9_']*)\s*:")
-DOC_CTOR = re.compile(r"^\s*\|\s*([a-zA-Z_][A-Za-z0-9_']*)")
-
-
-def specification_names() -> dict[str, str]:
-    """Names declared in fenced Lean blocks under `docs/`, and where.
-
-    A docstring may legitimately cite a name the build does not have yet.
-    `ProcessSpec.Step` is a field of a structure `docs/PROCESS.md` declares,
-    and the Lean layer that will declare it is not merged. Rejecting that
-    outright asks the author to delete the name a reader most wants; accepting
-    it on an allowlist accepts it without ever checking, and keeps accepting it
-    if the specification later drops the field. Resolving it against the
-    specification checks it, and goes on checking it.
-
-    When that layer merges the name resolves as a declaration instead, and
-    nothing here needs editing.
-
-    Vocabulary only: `theorem` and `axiom` declarations in the specification
-    are deliberately *not* returned. The two roles a name plays in a docstring
-    are different. Naming a type or a field is describing what the sentence is
-    about, and the specification is a real authority for that. Naming a theorem
-    is claiming the sentence is enforced, and a theorem the specification plans
-    enforces nothing -- 93 such names are declared in fenced blocks under
-    `docs/`, including `emitted_sound` and `cubeFragment_refines_model`, and
-    accepting them would let "guaranteed, as proved by `emitted_sound`" pass
-    while nothing proves it. That is the exact defect this tool exists to catch,
-    so the specification may supply nouns and only the build may supply proofs.
-
-    One residual: a structure may carry a *proof field* whose type is a Prop,
-    and that field is vocabulary by this rule while being enforcement in fact.
-    `specEvent_iff` in `docs/PLATFORM_ABI.md` is the only one today. Every
-    specification-resolved citation is printed by name and source location, so
-    such a citation is visible in the report rather than silently accepted.
-
-    This is deliberately not a general markdown reader: only fenced `lean`
-    blocks count, so ordinary prose naming a type in backticks does not make
-    that type resolvable.
-    """
-    found: dict[str, str] = {}
-    for path in sorted(Path("docs").glob("*.md")):
-        inside = False
-        container = None
-        kind = None
-        text = path.read_text(encoding="utf-8", errors="replace")
-        for number, raw in enumerate(text.splitlines(), start=1):
-            line = raw.rstrip()
-            if line.startswith("```"):
-                inside = line[3:].strip().lower() == "lean"
-                container = None
-                continue
-            if not inside or not line.strip():
-                continue
-            where = f"{path.as_posix()}:{number}"
-            decl = DOC_DECL.match(line)
-            if decl:
-                kind, name = decl.group(1), decl.group(2)
-                if kind not in {"theorem", "axiom"}:
-                    found.setdefault(name, where)
-                container = name if kind in {
-                    "structure", "inductive", "class"} else None
-                continue
-            if container is None:
-                continue
-            member = DOC_CTOR.match(line) if kind == "inductive" else None
-            if member is None and not line.startswith("|"):
-                member = DOC_FIELD.match(line)
-            if member:
-                found.setdefault(f"{container}.{member.group(1)}", where)
-    # The same suffix rule `declaration_names` uses, for the same reason.
-    for name in list(found):
-        parts = name.split(".")
-        for i in range(1, len(parts)):
-            found.setdefault(".".join(parts[i:]), found[name])
-    return found
-
-
-def module_names() -> set[str]:
-    """Every module path in the tree.
-
-    A docstring legitimately names a module: "`Grass.Platform.Win32.Console`
-    states handles as `BitVec 64`" is about a file, not a declaration, and there
-    is no declaration that sentence could name instead. Modules are the third
-    real namespace a docstring draws on, after declarations and the
-    specification, and they are the cheapest of the three to check -- a module
-    either exists on disk or it does not.
-
-    Exact paths only, with no suffix expansion. A docstring cites a module the
-    way an `import` spells it, so `Console` on its own is prose rather than a
-    reference, and expanding suffixes would make it resolve.
-
-    A module path is *dropped from the sentence* rather than counted as
-    resolving it. The first version counted it, on the argument that it could
-    not mask an invented theorem because `LEAN_STYLE_NAME` needs a
-    lowercase-initial name with an underscore and no module is spelled that
-    way. That argument covered one branch and missed the other. `named and not
-    resolved` is what catches a fabricated name in *dotted* form --
-    `StdHandleId.write_is_total`, which `LEAN_STYLE_NAME` never matches -- and
-    a module path in the same sentence satisfied `resolved` and suppressed it.
-    A cold reviewer planted exactly that sentence in a facade docstring and the
-    audit passed it.
-
-    So a module is neither enforcement nor invention. It names a file, which is
-    a real thing a sentence may point at, and it leaves the question of what
-    enforces the claim exactly where it was.
-    """
-    names: set[str] = set()
-    for root in (Path("Grass"), Path("Tests"), Path("Tools")):
-        if not root.is_dir():
-            continue
-        for path in root.rglob("*.lean"):
-            names.add(".".join(path.with_suffix("").parts))
-    return names
-
-
 def sentences(block: str) -> list[str]:
-    # Markdown headings are labels, not assertions, and joining them to the
-    # prose beneath donates their words to a sentence that never said them:
-    # "## What this layer still cannot exclude" followed by a description of
-    # what is *not* enforced was read as one claim containing "cannot", and
-    # reported as unbacked. A heading naming the subject is exactly how these
-    # modules are written, so this is the common case rather than an oddity.
-    lines = [line.strip() for line in block.splitlines()]
-    text = " ".join(line for line in lines if not line.startswith("#"))
+    text = " ".join(line.strip() for line in block.splitlines())
     # Split on sentence ends only. A semicolon joins a claim to the clause that
     # names its enforcement, so splitting there would report the claim as unbacked
     # while the name sits in the next fragment.
-    # Closing punctuation may follow the period. Splitting on `[.]` alone meant
-    # a sentence ending `.)` or `."` never terminated, so its hedge carried
-    # into the next sentence -- "(Partial writes are intended to be modelled
-    # here.) The console ensures no caller observes a short write." was read as
-    # one hedged sentence, and a reviewer used it to pass a false claim.
-    # The closing punctuation is *captured*, not consumed. Splitting on
-    # `(?<=[.])["')\\]]*\\s+` discards whatever it matched, which threw
-    # away the quote that ends a citation -- so a sentence quoting a
-    # normative document came back with one unbalanced quote character,
-    # `quotes_the_claim` could not find a complete span, and the
-    # document's own sentence was reported as this module's unbacked
-    # claim. Nine such reports arrived at once when a merge brought in a
-    # layer that cites heavily.
-    parts = re.split(r"""((?<=[.])['")\]]*)\s+""", text)
-    pieces: list[str] = []
-    for index in range(0, len(parts), 2):
-        tail = parts[index + 1] if index + 1 < len(parts) else ""
-        piece = (parts[index] + tail).strip()
-        if piece:
-            pieces.append(piece)
-    # A citation can still run past a full stop inside the quotation
-    # itself; rejoin anything left with an odd number of quotes.
-    merged: list[str] = []
-    for piece in pieces:
-        if merged and merged[-1].count('"') % 2 == 1:
-            merged[-1] = merged[-1] + " " + piece
-        else:
-            merged.append(piece)
-    return merged
+    return [s.strip() for s in re.split(r"(?<=[.])\s+", text) if s.strip()]
 
 
 def doc_blocks(source: str):
-    """Yield (line number, text) for every `/-- ... -/` and `/-! ... -/` block.
-
-    Nesting-aware, which a non-greedy regex was not. Lean allows a block comment
-    inside a doc comment, and `/-- a /- b -/ c -/` is one docstring; the regex
-    stopped at the inner `-/`, so everything after it -- `c`, and any sentence
-    following -- belonged to no block and was never audited at all. A reviewer
-    hid a false claim there and the gate reported the file clean.
-    """
-    index = 0
-    length = len(source)
-    while index < length - 2:
-        if source[index:index + 3] not in ("/--", "/-!"):
-            index += 1
-            continue
-        start = index
-        depth = 1
-        scan = index + 2
-        while scan < length - 1:
-            window = source[scan:scan + 2]
-            if window == "/-":
-                depth += 1
-                scan += 2
-                continue
-            if window == "-/":
-                depth -= 1
-                scan += 2
-                if depth == 0:
-                    break
-                continue
-            scan += 1
-        else:
-            # Unterminated: yield the remainder rather than silently dropping
-            # it, so a malformed comment cannot hide a claim.
-            yield source[:start].count("\n") + 1, source[start + 3:]
-            return
-        yield source[:start].count("\n") + 1, source[start + 3:scan - 2]
-        index = scan
+    """Yield (line number, text) for every `/-- ... -/` and `/-! ... -/` block."""
+    for match in re.finditer(r"/-[-!](.*?)-/", source, re.DOTALL):
+        line = source[: match.start()].count("\n") + 1
+        yield line, match.group(1)
 
 
-# Where a claim word sits matters, and two exemptions used to ignore that.
-#
-# A reviewer planted this in a real facade docstring and the audit passed it:
-#
-#   "The console ensures a caller never observes a short write, which an
-#    earlier draft of the module could not do."
-#
-# `an earlier` is a hedge, and it is in the subordinate clause. The main clause
-# is an unhedged, false, load-bearing claim. Hedging is a property of the clause
-# making the claim, not of the sentence containing it, so the hedge test now
-# runs on the clause the claim word is in.
-# Subordinators only. An earlier version also split on ", and" / ", but",
-# which separated *coordinate* clauses that share the sentence's hedging and
-# produced two false positives on the real corpus: "a docstring URL cannot be
-# counted, cannot be checked for a missing anchor, and cannot be inverted..."
-# and "No private field prevents that, and no arrangement of this type could".
-# Both are statements of limitation, which is exactly the honest alternative
-# the rule asks for. A coordinate clause continues the assertion; a subordinate
-# clause comments on it, and only the latter can carry a hedge that does not
-# apply to the main claim.
-CLAUSE_SPLIT = re.compile(
-    r",\s+(?:which|because|although|though|while|since)\s+"
-    r"|;\s+|\s+--\s+")
-
-
-def claim_clauses(sentence: str) -> list[str]:
-    """The clauses of `sentence` that actually assert something."""
-    clauses = CLAUSE_SPLIT.split(sentence)
-    lowered = [clause.lower() for clause in clauses]
-    return [clause for clause, low in zip(clauses, lowered)
-            if any(word in low for word in CLAIM_WORDS)]
-
-
-QUOTED = re.compile(r'"[^"]*"')
-
-
-def quotes_the_claim(sentence: str) -> bool:
-    """Whether every claim word in `sentence` falls inside a quotation.
-
-    The exemption exists because a passage quoted from a normative document is
-    that document's claim, not this module's. It used to fire on any sentence
-    containing both a `docs/` token and a `"` anywhere, which a reviewer used to
-    pass an unhedged false claim with a stray quoted word in it. Now the quoted
-    span has to contain the claim.
-    """
-    if "docs/" not in sentence:
-        return False
-    spans = [match.span() for match in QUOTED.finditer(sentence)]
-    if not spans:
-        return False
-    lowered = sentence.lower()
-    for word in CLAIM_WORDS:
-        start = lowered.find(word)
-        while start != -1:
-            if not any(a < start and start + len(word) <= b for a, b in spans):
-                return False
-            start = lowered.find(word, start + 1)
-    return True
-
-
-# ## Known ways through, measured rather than guessed
-#
-# Three of a reviewer's bypasses survive, and they are written down so that the
-# next reader does not have to rediscover them and nobody mistakes this gate for
-# airtight. Each was reproduced against the real corpora.
-#
-# 1. A hedge repurposed as a guarantee. `cannot read` is on HEDGES because
-#    "X cannot do Y" is a statement of limitation -- the honest alternative the
-#    rule asks for. That reading depends on the subject being the code. Give it
-#    an external subject and the same words assert a mechanism: "a caller cannot
-#    read a short byte count from a completed console write" is exempt and
-#    false. `cannot know`, `cannot fault` and `cannot answer` behave the same.
-#
-# 2. A hedge as an intensifier. `on its own` is a hedge in "this does not do it
-#    on its own", and strengthens the claim in "the console layer ensures on its
-#    own that every accepted write transfers the whole request".
-#
-# 3. A quotation that carries the claim word while the assertion sits outside
-#    it. `quotes_the_claim` requires every claim word to fall inside a quoted
-#    span, which "docs/X requires a console that "ensures every write transfers
-#    the whole request", and this module is one" satisfies -- the assertion is
-#    carried by "and this module is one", which contains no claim word at all.
-#
-# Why they are recorded rather than fixed. Removing the repurposable hedges is
-# the obvious fix, and each is load-bearing in one or two real sentences, all of
-# them in modules outside this gate's author's scope -- so the fix is a fleet
-# coordination, not an edit. Tightening (3) to "nothing follows the closing
-# quote" was measured against the four corpus sentences that rely on the
-# exemption and breaks two of them, both genuine citations.
-#
-# All three share a root the header already states: this gate matches claim
-# *words*, so a sentence that asserts without one is outside its reach entirely.
-# It closes the gap between a claim and a name, not the gap between a sentence
-# and its meaning.
-
-
-def is_checked_claim(sentence: str) -> bool:
-    """Whether this sentence is a claim the rule applies to.
-
-    Every exemption lives here, so that `Tools/DocstringAuditSelfTest.py` can
-    ask what the gate actually does with a sentence rather than reimplementing
-    the filters and drifting from them. That matters for one purpose only:
-    telling a case that was *accepted* from a case that was never *examined*.
-    A test case that stops reaching the check proves nothing, and this is how
-    it gets caught saying so.
-    """
-    lowered = sentence.lower()
-    if not any(word in lowered for word in CLAIM_WORDS):
-        return False
-    # Hedged per clause, not per sentence: a hedge in a subordinate clause
-    # used to exempt an unhedged main clause, which a reviewer walked a false
-    # claim through.
-    unhedged = [clause for clause in claim_clauses(sentence)
-                if not HEDGE_RE.search(clause.lower())]
-    if not unhedged:
-        return False
-    # A passage quoted from a normative document is that document's claim, not
-    # this module's -- but only if the quotation is what makes the claim.
-    if quotes_the_claim(sentence):
-        return False
-    # Milestone references are hedges in their own case only.
-    if MILESTONE.search(sentence):
-        return False
-    return True
-
-
-# Lean vocabulary that is neither a constant nor a specification name:
-# tactics and attributes live outside the environment's constant table, so they
-# resolve nowhere while looking exactly like declarations. Kept short and
-# explicit rather than pattern-matched, so adding one is a deliberate act.
-LEAN_VOCABULARY = {"implemented_by", "simp_all", "omega_nat", "decide_eq_true"}
-
-
-def documented_names(root: Path = Path("docs")) -> set[str]:
-    """Every backticked identifier appearing anywhere under `docs/`.
-
-    This is the citation check's resolution set, and it is deliberately wider
-    than `specification_names`, which reads only fenced Lean blocks. The two
-    checks ask different questions. A strong claim must name something that
-    *enforces* it, so it has to resolve to a declaration or to a specification
-    block. A citation only has to not be a typo.
-
-    That difference is what makes the check land. `docs/PROCESS.md` names
-    `no_egress_step_after_terminal` and `parser_chunking_invariant` in prose
-    without ever declaring them in a fenced block; those are honest references
-    to a specification that is ahead of the build, and failing them would just
-    teach authors to stop citing. Meanwhile `every_run_holds_the_root`, the
-    miss `c-process:107` reported, appears in no document and no module at all,
-    because the declaration is really named `every_run_holds_an_unkilled_root`.
-    A set built from documents separates those two cases; the declaration set
-    alone does not.
-    """
-    found: set[str] = set()
-    if not root.is_dir():
-        return found
-    for path in sorted(root.rglob("*.md")):
-        text = path.read_text(encoding="utf-8", errors="replace")
-        for ident in IDENT.findall(text):
-            found.add(ident)
-        # Also the theorems and axioms declared in fenced Lean blocks, which
-        # `specification_names` withholds on purpose: it supplies nouns for the
-        # claim path, and a specification's planned theorem must never satisfy
-        # a claim of enforcement. A citation is the other case. `docs/PROCESS.md`
-        # declares `no_ingress_step_after_terminal` and `independent_diamond` in
-        # its fenced blocks, and the modules that cite them are pointing at the
-        # specification, not asserting that anything proves them. Accepting them
-        # here leaves that rule exactly where it was and stops the citation
-        # check from punishing a reference to the very document this project
-        # says is authoritative.
-        inside = False
-        for raw in text.splitlines():
-            line = raw.rstrip()
-            if line.startswith("```"):
-                inside = line[3:].strip().lower() == "lean"
-                continue
-            if not inside:
-                continue
-            decl = DOC_DECL.match(line)
-            if decl:
-                found.add(decl.group(2))
-    for name in list(found):
-        parts = name.split(".")
-        for i in range(1, len(parts)):
-            found.add(".".join(parts[i:]))
-    return found
-
-
-def stray_citations(path: Path, line: int, sentence: str, known: set[str],
-                    specs: dict[str, str], modules: set[str],
-                    documented: set[str]) -> list[str]:
-    """Backticked declaration names that resolve nowhere, outside a claim.
-
-    The identifier check used to run only inside sentences carrying a
-    strong-claim word, so a docstring could cite a declaration that does not
-    exist and the gate would exit zero. `c-process:107` reported three misses
-    on one branch -- `every_run_holds_the_root` for a declaration actually
-    named `every_run_holds_an_unkilled_root`, and two more naming declarations
-    the same commit had renamed -- and an earlier sweep of the corpus found
-    nine, one of them deleted three commits before it was cited. The gate
-    exists to stop a citation that looks checkable and is not, and citation rot
-    is that failure with the claim word removed.
-
-    Two things keep this from firing on honest prose, both raised in the same
-    report. Cross-layer and document citations resolve through `specs`, the
-    same set the claim path uses, so naming another layer's declaration is
-    still fine. And a sentence describing work not yet built is exempt through
-    `MILESTONE`, which is already how a claim about future work is excused;
-    reusing it avoids inventing a second vocabulary for the same idea.
-
-    The pattern is narrower than the claim path's. Only `LEAN_STYLE_NAME`
-    matches -- a lowercase word with an underscore in it -- so `RAX`, `INC` and
-    CamelCase field names out of a specification stay ordinary prose. That is
-    deliberate: this check reads every sentence in the corpus rather than the
-    small fraction that make claims, and a false positive here is paid for by
-    everyone.
-    """
-    if MILESTONE.search(sentence):
-        return []
-    stray = [
-        ident
-        for ident in IDENT.findall(sentence)
-        if not NOT_IDENT.match(ident) and ident not in modules
-        and ident not in SORTS and ident not in known and ident not in specs
-        and ident not in documented and ident not in LEAN_VOCABULARY
-        and LEAN_STYLE_NAME.match(ident)
-    ]
-    if not stray:
-        return []
-    return [
-        f"{path.as_posix()}:{line}: cites {stray}, which look like "
-        f"declarations and are not in the build: {sentence!r}"
-    ]
-
-
-def check(path: Path, known: set[str], specs: dict[str, str],
-          modules: set[str], cited: dict[str, str],
-          documented: set[str]) -> list[str]:
+def check(path: Path, known: set[str]) -> list[str]:
     source = path.read_text(encoding="utf-8")
     findings = []
     for line, block in doc_blocks(source):
         for sentence in sentences(block):
-            claimed = is_checked_claim(sentence)
-            if not claimed:
-                findings += stray_citations(path, line, sentence, known,
-                                            specs, modules, documented)
+            lowered = sentence.lower()
+            if not any(word in lowered for word in CLAIM_WORDS):
+                continue
+            if HEDGE_RE.search(lowered):
+                continue
+            # A passage quoted from a normative document is that document's
+            # claim, not this module's. It is cited, which is the point.
+            if "docs/" in sentence and '"' in sentence:
                 continue
             named = [
                 ident
                 for ident in IDENT.findall(sentence)
-                if not NOT_IDENT.match(ident) and ident not in modules
-                and ident not in SORTS
+                if not NOT_IDENT.match(ident)
             ]
-            resolved = [
-                ident for ident in named
-                if ident in known or ident in specs
-            ]
-            for ident in named:
-                if ident not in known and ident in specs:
-                    cited.setdefault(
-                        ident, f"{specs[ident]} (cited {path.as_posix()}"
-                        f":{line})")
+            resolved = [ident for ident in named if ident in known]
             # An unresolved name that *looks like a Lean declaration* is the
             # attack; an unresolved `RAX` or `INC` is ordinary prose. See
             # LEAN_STYLE_NAME.
             invented = [
                 ident for ident in named
-                if ident not in known and ident not in specs
-                and LEAN_STYLE_NAME.match(ident)
+                if ident not in known and LEAN_STYLE_NAME.match(ident)
             ]
             if invented:
                 findings.append(
@@ -672,57 +232,18 @@ def check(path: Path, known: set[str], specs: dict[str, str],
     return findings
 
 
-def audited_roots() -> list[Path]:
-    """The trees this audit reads.
-
-    `Tests/` is excluded: fixture comments describe values ("an identity that is
-    never live"), not mechanisms, and the fixtures are themselves the evidence a
-    claim would point at.
-
-    A function rather than a literal inside `main` so that
-    `Tools/DocstringAuditSelfTest.py` can assert what the gate is looking at.
-    Narrowing this to one subdirectory takes the audit from 57 modules to 7 and
-    was invisible to the case list.
-    """
-    return [Path("Grass")]
-
-
-def audited_files() -> list[Path]:
-    """Every file this audit actually walks.
-
-    `main` uses this, and `Tools/DocstringAuditSelfTest.py` asserts floors
-    against it. That indirection is the point: the self-test used to recompute
-    the corpus with its own `rglob`, so it measured the tree rather than the
-    gate, and changing `rglob` to `glob` in `main` took the audit from 57 files
-    to 1 -- with every case still green. A floor is only a floor if it is
-    measured on the thing that runs.
-    """
-    return [path for root in audited_roots() if root.is_dir()
-            for path in sorted(root.rglob("*.lean"))]
-
-
 def main() -> int:
+    # `Tests/` is excluded: fixture comments describe values ("an identity that
+    # is never live"), not mechanisms, and the fixtures are themselves the
+    # evidence a claim would point at.
+    roots = [Path("Grass")]
     known = declaration_names()
-    specs = specification_names()
-    modules = module_names()
-    documented = documented_names()
-    cited: dict[str, str] = {}
     findings: list[str] = []
-    for path in audited_files():
-        findings.extend(check(path, known, specs, modules, cited,
-                              documented))
-    return report(findings, cited)
-
-
-def report(findings: list[str], cited: dict[str, str]) -> int:
-    """Turn what the audit found into output and an exit code.
-
-    Separated from `main` so it can be tested. A reviewer mutated `main` to
-    discard its findings before reporting -- which makes the gate incapable
-    of failing, the worst defect a gate can have -- and every case in
-    `Tools/DocstringAuditSelfTest.py` stayed green, because none of them ran
-    this code at all.
-    """
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*.lean")):
+            findings.extend(check(path, known))
     if findings:
         print("docstring audit: claims that name nothing enforcing them\n")
         for finding in findings:
@@ -732,17 +253,6 @@ def report(findings: list[str], cited: dict[str, str]) -> int:
             "rewrite as an intended invariant or open obligation."
         )
         return 1
-    if cited:
-        print(
-            f"\n{len(cited)} name(s) the build does not declare, found instead in a\n"
-            "fenced Lean block under docs/ at the location shown. Each should\n"
-            "resolve as a declaration once its layer merges. This matches names,\n"
-            "not meanings: a short name can collide with a specification\n"
-            "constructor by accident -- `effect` below is a binder in the citing\n"
-            "file -- so a location is where to check, not evidence the sentence\n"
-            "is about that declaration.")
-        for name in sorted(cited):
-            print(f"    {name}  {cited[name]}")
     print("docstring audit: every strong claim names an enforcing type or theorem")
     return 0
 

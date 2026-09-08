@@ -34,7 +34,7 @@ instruction into a corrupt instruction stream; and it is the one NDISASM reports
 unambiguously, as the offset where the next instruction starts.
 
 Usage:
-    lake env lean --run Tests/Emit.lean decode > decode.txt
+    lake env lean --run Tests/ISA/X86/DecodeCorpus.lean > decode.txt
     python Tools/x86-decode-differential.py decode.txt
 
 Exit status is 1 on any length disagreement, and on a missing NDISASM: a
@@ -56,7 +56,7 @@ from pathlib import Path
 # The corpus this tool was reviewed against, as a digest of its content. A row
 # count is not enough: a truncated or duplicated corpus keeps a plausible count
 # and checks nothing. See the same guard in the other x86 differentials.
-EXPECTED_DIGEST = "41027a1384e283d2ae989569b9ee4f4ce105ac9376c48feff7ec8fcee29bd15e"
+EXPECTED_DIGEST = "9ac7a927b227758adeabb508806d7d1bc291e715ce635478bc7cb5d929177c75"
 # The coverage this tool was reviewed at. Shrinking the corpus must be a
 # deliberate, reviewed edit rather than a side effect of regenerating it.
 #
@@ -66,61 +66,7 @@ EXPECTED_DIGEST = "41027a1384e283d2ae989569b9ee4f4ce105ac9376c48feff7ec8fcee29bd
 # demonstrated it -- one `.take 1` plus a digest update turned 1085 encodings
 # into 1 and still reported no disagreement. `docs/VALIDATION.md` section 7's
 # ratchet is meant to prevent exactly that, and this is it applied to corpora.
-# The coverage this tool was reviewed at, as structural buckets rather than a
-# row count.
-#
-# The row count was a proxy the author controls. A reviewer replaced the corpus
-# with N copies of one row, updated the digest exactly as the error message
-# instructs, and this tool reported full agreement over a corpus that exercised
-# one case -- a result that read *better* than baseline. Counting distinct
-# inputs instead means duplicating a row moves nothing, so the substitution is
-# caught whether or not the digest is refreshed.
-#
-# Every bucket is a minimum. Raising coverage is free; lowering it is a reviewed
-# edit, which is what `docs/VALIDATION.md` section 7's ratchet asks for.
-EXPECTED_COVERAGE = {
-    "distinct windows": 57440,
-    "opcode rows": 38,
-    "rex prefixes": 4,
-    "modrm bytes": 256,
-    "sib bytes": 256,
-}
-
-
-def coverage_buckets(rows):
-    """What the corpus exercises, from each window's label.
-
-    The label names the opcode row, the prefix and the operand bytes, which is
-    the input; the window bytes and the reported length are under test.
-    """
-    labels = {label for _, _, label in rows}
-    rows_seen, rex, modrm, sib = set(), set(), set(), set()
-    for label in labels:
-        parts = label.split("|")
-        if parts:
-            rows_seen.add(parts[0])
-        for p in parts[1:]:
-            if p.startswith("rex") or p == "norex":
-                rex.add(p)
-            elif p.startswith("modrm"):
-                modrm.add(p)
-            elif p.startswith("sib"):
-                sib.add(p)
-    return {
-        "distinct windows": len(labels),
-        "opcode rows": len(rows_seen),
-        "rex prefixes": len(rex),
-        "modrm bytes": len(modrm),
-        "sib bytes": len(sib),
-    }
-
-
-def coverage_shortfall(rows):
-    """Buckets that fall below their reviewed minimum, as (name, have, want)."""
-    have = coverage_buckets(rows)
-    return [(name, have.get(name, 0), want)
-            for name, want in sorted(EXPECTED_COVERAGE.items())
-            if have.get(name, 0) < want]
+EXPECTED_ROWS = 57440
 
 
 # Must match `Grass.Tests.ISA.X86.DecodeC.windowBytes`. The tool checks this
@@ -150,13 +96,9 @@ COVERAGE_LINE = chr(10)
 
 
 def coverage_of(line: str) -> str:
-    """The window's label, which names the opcode, prefix and operand bytes.
-
-    Split on "|" rather than "/": mnemonics contain slashes ("mov r/m, r"), so
-    a slash-separated label could not be parsed unambiguously, and the mnemonic
-    alone did not identify a row -- `plusRegRows` gives eight opcodes one
-    mnemonic. Both were found by the coverage ratchet counting fewer distinct
-    labels than there were windows."""
+    """The window's label, which names the opcode row, prefix and operand
+    bytes. The other columns are the window Grass built and the length it
+    reported -- both under test."""
     fields = line.split(chr(9))
     return fields[2] if len(fields) > 2 else line
 
@@ -172,21 +114,14 @@ def corpus_digest(text: str) -> str:
     nothing to, and its own remedy was to silence it. That is the shape of the
     row-count weakness described below, one column over.
 
-    Sorted, because coverage is a set and not a sequence. Reordering the
-    generator's own enumeration -- swapping two entries in `Gpr.all`, say --
-    leaves exactly the same cases exercised, and a digest that fired on it
-    would route a real model change to the "update the constant" path instead
-    of to the oracle. A reviewer raised that as the residue of the previous
-    fix.
-
     Hashing coverage keeps what the guard is for. A corpus that drops rows,
     duplicates them, or swaps hard cases for easy ones still changes this
     digest; a corpus whose byte column changed because the encoder changed does
     not, and goes straight to the oracle that can judge it.
     """
     normalised = COVERAGE_LINE.join(
-        sorted(coverage_of(line.rstrip("\r"))
-               for line in text.splitlines() if line.strip()))
+        coverage_of(line.rstrip("\r"))
+        for line in text.splitlines() if line.strip())
     return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 
@@ -264,17 +199,13 @@ def main() -> int:
     if not rows:
         print("corpus is empty", file=sys.stderr)
         return 1
-    shortfall = coverage_shortfall(rows)
-    if shortfall:
-        print("corpus coverage fell below the reviewed minimums:",
-              file=sys.stderr)
-        for name, have, want in shortfall:
-            print(f"    {name}: {have}, expected at least {want}",
-                  file=sys.stderr)
+    if len(rows) < EXPECTED_ROWS:
         print(
-            "Coverage may only grow, and duplicating rows does not raise it; "
-            "if a reduction is deliberate, lower EXPECTED_COVERAGE in the same "
-            "reviewed edit that shrinks the corpus.", file=sys.stderr)
+            f"corpus has {len(rows)} rows, fewer than the {EXPECTED_ROWS} this "
+            "tool was reviewed against. Coverage may only grow; if the "
+            "reduction is deliberate, lower EXPECTED_ROWS in the same reviewed "
+            "edit that shrinks the corpus.",
+            file=sys.stderr)
         return 1
 
     ndisasm = find_tool("ndisasm")

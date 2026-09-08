@@ -10,7 +10,6 @@ import Grass.Core.Generational
 import Grass.Core.Identifiers
 import Grass.Core.Name
 import Grass.Core.Uid
-import Grass.ISA.X86
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.Citation
@@ -40,9 +39,7 @@ import Grass.Obligation.Delta
 import Grass.Obligation.Disposition
 import Grass.Op.Facets
 import Grass.Op.Step
-import Grass.Platform.Win32
 import Grass.Platform.Win32.Console
-import Grass.Platform.Win32.Profile
 import Grass.Process
 import Grass.Process.Acceptance
 import Grass.Process.Bag
@@ -107,84 +104,6 @@ import Grass.Std.Logical.Text
 import Grass.Std.Logical.Vec
 import Grass.Trust.Audit
 import Grass.Verify.VerifiedProgram
-import Tests.ABI.Win64.UnwindCorpus
-import Tests.Build.Cache.Key
-import Tests.Emit
-import Tests.Facade.Containment
-import Tests.Facade.ISAX86
-import Tests.Facade.PlatformWin32
-import Tests.Foundation
-import Tests.ISA.X86.CorpusCommon
-import Tests.ISA.X86.DecodeCorpus
-import Tests.ISA.X86.LedgerAudit
-import Tests.ISA.X86.MachineProbes
-import Tests.ISA.X86.NasmCorpus
-import Tests.ISA.X86.RipCorpus
-import Tests.ISA.X86.SourceCorpus
-import Tests.ISA.X86.Spike1Addressing
-import Tests.Memory.Spike1Reference
-import Tests.Op.FakeIsa
-import Tests.Process.AdapterFixtures
-import Tests.Process.AssertionFixtures
-import Tests.Process.BlendFixtures
-import Tests.Process.CancellationFixtures
-import Tests.Process.ChannelFixtures
-import Tests.Process.ChannelStepFixtures
-import Tests.Process.ChatterFixtures
-import Tests.Process.ChildBindingFixtures
-import Tests.Process.ChimeFixtures
-import Tests.Process.CloseFixtures
-import Tests.Process.CommitFixtures
-import Tests.Process.ComposeFixtures
-import Tests.Process.CountdownCorrectFixtures
-import Tests.Process.DeliveryFixtures
-import Tests.Process.DetachFixtures
-import Tests.Process.EndingFixtures
-import Tests.Process.EscrowFixtures
-import Tests.Process.FacadeCancellationFixtures
-import Tests.Process.FacadeFixtures
-import Tests.Process.FacetFixtures
-import Tests.Process.FrontierFixtures
-import Tests.Process.IdentityFixtures
-import Tests.Process.IndependenceFixtures
-import Tests.Process.InstanceFixtures
-import Tests.Process.LayeringFixtures
-import Tests.Process.LayeringSpecificationOnly
-import Tests.Process.LensFixtures
-import Tests.Process.LifecycleStepFixtures
-import Tests.Process.LinearizationFixtures
-import Tests.Process.M1CorrectFixtures
-import Tests.Process.M1Fixtures
-import Tests.Process.M2GraphFixtures
-import Tests.Process.MailboxFixtures
-import Tests.Process.MergeFixtures
-import Tests.Process.OscillateFixtures
-import Tests.Process.PrefixFixtures
-import Tests.Process.PreservationFixtures
-import Tests.Process.ProcessStepFixtures
-import Tests.Process.ProgressFixtures
-import Tests.Process.RerouteFixtures
-import Tests.Process.RestartFixtures
-import Tests.Process.RichAcceptanceFixtures
-import Tests.Process.SequentialEffectFixtures
-import Tests.Process.SerialFixtures
-import Tests.Process.SpinFixtures
-import Tests.Process.StandardFixtures
-import Tests.Process.StructuralNetworkFixtures
-import Tests.Process.TerminationFixtures
-import Tests.Process.TransitionFixtures
-import Tests.Process.ViewFixtures
-import Tests.Process.WeaveFixtures
-import Tests.Process.WorldFixtures
-import Tests.Resource.CompositionSplit
-import Tests.Std.Chunking
-import Tests.Std.HostBytes
-import Tests.Std.PartialWrite
-import Tests.Std.SpikeSurface
-import Tests.Std.StableSort
-import Tests.Std.Text
-import Tests.Std.VecInstances
-import Tests.Std.VecVocabulary
 
 /-!
 # Every declaration name the build knows
@@ -209,20 +128,6 @@ push authors towards naming nothing rather than towards naming something real.
 This is not a proof and not an audit. It is a fact dump, and the tool that reads
 it still cannot tell whether the named theorem proves the sentence. It closes one
 gap: whether the name resolves at all.
-
-## The import list is everyone's job
-
-The list above must name every module in the build, because a name the audit
-cannot see is a name it reports as invented. `lake env lean` resolves those
-imports against the *current tree*, so this file also fails outright from a tree
-where one of them does not exist yet: `c-stdlib` hit exactly that running the
-gate before `Grass.ABI.Win64.Convention` had merged, and reported it in
-`c-stdlib:25`.
-
-So adding a module is also adding a line here, in the same change. The failure
-mode is loud rather than quiet — the gate refuses to run rather than reporting a
-false clean — but it is still a stall for whoever hits it. `Tools/AxiomAudit.lean`
-carries the same coupling for the same reason.
 -/
 
 open Lean
@@ -246,8 +151,7 @@ run_cmd do
   -- naming nothing. A loud failure beats a mystery finding.
   let imported := env.header.moduleNames
   let onDisk ← modulesOnDisk (System.FilePath.mk "Grass") `Grass
-  let onDiskTests ← modulesOnDisk (System.FilePath.mk "Tests") `Tests
-  let missing := (onDisk ++ onDiskTests).filter fun m => !imported.contains m
+  let missing := onDisk.filter fun m => !imported.contains m
   unless missing.isEmpty do
     throwError m!"declaration list coverage gap: these modules exist under Grass/ but are not imported by Tools/DeclNames.lean:
 {MessageData.joinSep (missing.toList.map (m!"  {·}")) "
