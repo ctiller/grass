@@ -155,6 +155,11 @@ alignments from selected object representations and ordinary struct placement.
 separation, while lookup theorems recover concrete placements from nominal field
 membership. Empty, packed, overlay, bitfield, and flexible-tail representations
 remain separate constructors rather than exceptions to the ordinary checker.
+`Grass.Construct.Layout.Overlay` is the separate union-like constructor: every
+member begins at byte zero, while proposition-level member obligations require
+positive valid representations, aggregate containment, and compatible
+alignment. Exact nominal lookup and uniqueness remain available without
+weakening ordinary `StructLayout.FieldsDisjoint`.
 
 Build layout and placement values under `Grass/Construct/`:
 
