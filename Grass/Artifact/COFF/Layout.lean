@@ -71,6 +71,27 @@ def declaredFileSpans (header : Header) (sections : Vec SectionHeader)
   header.prefixSpan :: sectionDeclaredSpans sections ++
     [header.symbolTableSpan, header.stringTableSpan strings]
 
+/-- Spans for either an absent or a present symbol/string-table tail. -/
+def declaredObjectSpans (header : Header) (sections : Vec SectionHeader)
+    (strings : Option StringTable) : List ByteSpan :=
+  header.prefixSpan :: sectionDeclaredSpans sections ++
+    match strings with
+    | none => []
+    | some table => [header.symbolTableSpan, header.stringTableSpan table]
+
+/-- Header fields agree with whether the symbol/string-table tail is present. -/
+def SymbolTailLayoutCoherent (header : Header)
+    (strings : Option StringTable) : Prop :=
+  match strings with
+  | none => header.pointerToSymbolTable.toNat = 0 ∧
+      header.numberOfSymbols.toNat = 0
+  | some _ => header.pointerToSymbolTable.toNat ≠ 0
+
+instance (header : Header) (strings : Option StringTable) :
+    Decidable (SymbolTailLayoutCoherent header strings) := by
+  unfold SymbolTailLayoutCoherent
+  split <;> infer_instance
+
 /-- Structural validity of the pointer/count layout for a present string table.
 `DeclaredLayoutValid` checks section count, pointer coherence, container bounds,
 and pairwise non-overlap in unbounded arithmetic. -/
@@ -86,6 +107,23 @@ instance (header : Header) (sections : Vec SectionHeader)
     (strings : StringTable) (fileLength : Nat) :
     Decidable (DeclaredLayoutValid header sections strings fileLength) := by
   unfold DeclaredLayoutValid
+  infer_instance
+
+/-- Whole-object layout validity, including the optional symbol/string tail. -/
+def DeclaredObjectLayoutValid (header : Header)
+    (sections : Vec SectionHeader) (strings : Option StringTable)
+    (fileLength : Nat) : Prop :=
+  sections.length = header.numberOfSections.toNat ∧
+  SymbolTailLayoutCoherent header strings ∧
+  (∀ sectionHeader ∈ sections.toList, sectionHeader.PointersCoherent) ∧
+  (∀ span ∈ declaredObjectSpans header sections strings,
+    span.Fits fileLength) ∧
+  (declaredObjectSpans header sections strings).Pairwise ByteSpan.Disjoint
+
+instance (header : Header) (sections : Vec SectionHeader)
+    (strings : Option StringTable) (fileLength : Nat) :
+    Decidable (DeclaredObjectLayoutValid header sections strings fileLength) := by
+  unfold DeclaredObjectLayoutValid
   infer_instance
 
 end Grass.Artifact.COFF

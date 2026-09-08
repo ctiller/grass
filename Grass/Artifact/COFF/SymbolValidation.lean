@@ -221,4 +221,39 @@ theorem writeAuxValidatedSymbolTable_derives {header : Header}
   apply Derives.lift
   exact writeSymbolTable_derives value
 
+/-! ## Primary-name validation across auxiliary runs -/
+
+/-- Interpret one lossless primary cell only far enough to validate its name. -/
+def SymbolCell.NameValidIn (cell : SymbolCell) (strings : StringTable) : Prop :=
+  match readSymbol (writeSymbolCell cell) with
+  | .done symbol _ => symbol.name.ValidIn strings
+  | _ => False
+
+instance (cell : SymbolCell) (strings : StringTable) :
+    Decidable (cell.NameValidIn strings) := by
+  unfold SymbolCell.NameValidIn
+  split <;> infer_instance
+
+/-- Scan primary cells while skipping each declared auxiliary-cell run. -/
+def validPrimaryNamesScan : Nat → List SymbolCell → StringTable → Bool
+  | 0, cells, _ => cells.isEmpty
+  | _ + 1, [], _ => true
+  | fuel + 1, cell :: rest, strings =>
+    let auxiliaryCount := cell.numberOfAuxSymbols.toNat
+    if auxiliaryCount ≤ rest.length then
+      decide (cell.NameValidIn strings) &&
+        validPrimaryNamesScan fuel (rest.drop auxiliaryCount) strings
+    else false
+
+/-- Every primary cell in an auxiliary-partitioned table has a valid name. -/
+def AuxValidatedSymbolTable.NamesValid {header : Header}
+    (table : AuxValidatedSymbolTable header) (strings : StringTable) : Prop :=
+  validPrimaryNamesScan table.table.cells.length table.table.cells.toList
+    strings = true
+
+instance {header : Header} (table : AuxValidatedSymbolTable header)
+    (strings : StringTable) : Decidable (table.NamesValid strings) := by
+  unfold AuxValidatedSymbolTable.NamesValid
+  infer_instance
+
 end Grass.Artifact.COFF
