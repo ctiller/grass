@@ -534,8 +534,9 @@ not all `processStep`s: `theReceiverIsKilledStep` is a `childDied` and
 **None of that is what §10.129 was asking for**, which is the whole of §10.132: a
 step *into* a world is not a run that *reaches* it. The worlds in *this section*
 each fail `ProcessPlan.UnkilledRootAt`, and `every_run_holds_an_unkilled_root` is
-why that settles them — the file as a whole is not like that, and
-`sent_holds_an_unkilled_root` below is the world a run really does reach.
+why that settles them — the file as a whole is not like that, and `a_real_run`
+below builds an execution to `sent`, with
+`a_real_run_holds_an_unkilled_root` reading the invariant off it.
 
 An earlier version of this header said `sentWithDeadSender` had no step into it
 at all; a reviewer refuted it by building the `join` now recorded below. §10.132.
@@ -841,7 +842,14 @@ theorem no_run_reaches_deadSenderWithACorpseToCollect
     (every_run_holds_an_unkilled_root isStart execution)
 
 /-- **And the two worlds the endpoint deaths reach**, which the coverage sentence
-above claimed and nothing refused until a reviewer wrote these. §10.132. -/
+above claimed and nothing refused until a reviewer wrote these.
+
+They are refused for different reasons, which is worth saying because the rest of
+this file says it everywhere else. `afterSenderDeath` holds `deadListener`, so it
+is a real dead-root refusal. `afterReceiverDeath` inherits
+`Tests/Process/ChannelStepFixtures.lean`'s `sentWithDeadReceiver`, whose listener
+slot is `none`, so `absurd found` closes it and the death has nothing to do with
+it. §10.132. -/
 theorem afterSenderDeath_is_no_world_of_a_run :
     ¬ serverPlan.UnkilledRootAt afterSenderDeath .listener () := by
   rintro ⟨root, found, _, unkilled⟩
@@ -879,6 +887,26 @@ theorem no_run_reaches_a_holding_world (incarnation : ProcessInstance serverTopo
 the invariant above is not vacuous. -/
 theorem sent_holds_an_unkilled_root : serverPlan.UnkilledRootAt sent .listener () :=
   ⟨World.rootListener, rfl, rfl, fun _ dead => by cases dead⟩
+
+/-- **A run, built rather than assumed.**
+
+Every `StepsTo` in this corpus was a hypothesis until round fifteen of local
+adversarial review pointed out that nothing anywhere constructs one — so
+`every_run_holds_an_unkilled_root`'s inductive case had never fired, and two
+docstrings claiming a run "really does reach" a world were claiming it of a
+value that did not exist. §10.132's own headline defect, one docstring later. -/
+theorem a_real_run : serverPlan.StepsTo World.withRoot sent :=
+  .more .still theSendStep
+
+/-- **And the invariant, applied to it.**
+
+`sent_holds_an_unkilled_root` proves the predicate at `sent` directly. This
+derives the same conclusion through the theorem, from a start world and a run,
+which is what makes the induction a fact about executions rather than a shape
+nothing exercises. -/
+theorem a_real_run_holds_an_unkilled_root :
+    serverPlan.UnkilledRootAt sent .listener () :=
+  every_run_holds_an_unkilled_root withRoot_is_a_start a_real_run
 
 /-! #### And a role that may write nothing owes nothing
 

@@ -5219,6 +5219,26 @@ Whoever reviews this branch should know the stronger statement exists and
 compiles, so that "why is this not `IsRoot`" has an answer that is not "nobody
 noticed".
 
+**Round fifteen, and the corpus had never built a run.** Every `StepsTo` in
+`Tests/Process/PreservationFixtures.lean` was a hypothesis. No value of that type
+was constructed anywhere in the tree, so `every_run_holds_an_unkilled_root`'s
+inductive case had never once fired, and two docstrings saying a run "really does
+reach" `sent` were saying it of a value that did not exist.
+
+That is §10.132's own headline defect — a step into a world is not a run that
+reaches it — recurring in the sentence written to claim the invariant is not
+vacuous. `a_real_run` is the execution, three constructors long, and
+`a_real_run_holds_an_unkilled_root` reads the invariant off it rather than off
+the world. The entry's rule that a sentence a reviewer had to refute by writing
+Lean should become the Lean applies to sentences the *author* wrote as well.
+
+The same round found the conclusion weaker than the name: the theorem was called
+`dying_was_supervised_or_untouched` and this entry described it as concluding the
+step did not touch the slot, and it concluded only that the instance was already
+dead. Two tokens: the negative branch has `inScope` in hand and was throwing it
+away. The rule about hypotheses added to make a proof go through has a mirror —
+a conclusion narrowed to what one call site happened to need.
+
 ### 10.135 A role that may write no region owes nothing
 
 *(The sibling branch `agent/c-process/docstring-claims-swept` continues this

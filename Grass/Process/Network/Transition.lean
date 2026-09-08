@@ -2310,7 +2310,8 @@ theorem dying_was_supervised_or_untouched (transition : plan.NetworkTransition b
     (foundAfter : after.instances kind slot = some now)
     (dead : now.lifecycle = ProcessLifecycle.died reason) :
     was.parentage.currentParent ≠ none ∨
-      was.lifecycle = ProcessLifecycle.died reason := by
+      (was.lifecycle = ProcessLifecycle.died reason ∧
+        ¬ transition.scope (.instanceState kind slot)) := by
   by_cases inScope : transition.scope (.instanceState kind slot)
   case neg =>
     refine Or.inr ?_
@@ -2319,7 +2320,7 @@ theorem dying_was_supervised_or_untouched (transition : plan.NetworkTransition b
     rw [foundBefore, foundAfter] at agrees
     injection agrees with same
     subst same
-    exact dead
+    exact ⟨dead, inScope⟩
   case pos =>
     refine Or.inl ?_
     revert inScope
@@ -2493,7 +2494,7 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
     (dead : now.lifecycle = ProcessLifecycle.died reason) :
     was.parentage.currentParent ≠ none :=
   (transition.dying_was_supervised_or_untouched foundBefore foundAfter dead).resolve_right
-    (notAlreadyDead reason)
+    (fun both => notAlreadyDead reason both.1)
 
 /--
 Parentlessness carried across a step's identity clause is still parentlessness.
@@ -2540,9 +2541,14 @@ uniqueness rather than existence.
 That is `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.132's last section, and
 stating the theorem this way is what turns it from a suspicion into a fact:
 restart is not *a* way to lose the root, it is the *only* way. A plan whose root
-role no permitted parent can spawn therefore holds its root along every
-execution, which is `Tests/Process/PreservationFixtures.lean`'s
-`every_run_holds_an_unkilled_root`.
+role no permitted parent can spawn therefore holds a parentless undead instance
+in that slot along every execution, which is
+`Tests/Process/PreservationFixtures.lean`'s
+`every_run_holds_an_unkilled_root`. Whether that instance is the *root* is a
+further step, for the reason `Grass/Process/Network/Initial.lean` gives: a
+`.detached` incarnation is parentless too, and the predicate does not
+distinguish them. An earlier version of this sentence said "holds its root",
+which is the conclusion and not the theorem.
 -/
 theorem parentless_slot_survives (transition : plan.NetworkTransition before after)
     {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
