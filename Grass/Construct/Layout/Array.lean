@@ -84,6 +84,19 @@ theorem strideAligned_of_wellFormed (layout : ArrayLayout profile)
     (layout.elementRange? index).isSome = true ↔ index < layout.count := by
   simp [elementRange?]
 
+/-- `ArrayLayout.elementRange?_sound` recovers both the checked index bound and
+the exact selected element range from every successful lookup. -/
+theorem elementRange?_sound (layout : ArrayLayout profile) (index : Nat)
+    (range : ByteRange) (selected : layout.elementRange? index = some range) :
+    index < layout.count ∧
+      range = ⟨index * layout.stride, layout.element.size⟩ := by
+  simp only [elementRange?] at selected
+  split at selected
+  · rename_i inBounds
+    cases selected
+    exact ⟨inBounds, rfl⟩
+  · contradiction
+
 /-- Every in-bounds array index has one concrete selected byte range. -/
 theorem rangeForIndex (layout : ArrayLayout profile) (index : Nat)
     (inBounds : index < layout.count) :
@@ -101,6 +114,37 @@ theorem rangeForIndex (layout : ArrayLayout profile) (index : Nat)
     layout.elementRange? index =
       some ⟨index * layout.stride, layout.element.size⟩ := by
   simp [elementRange?, h]
+
+/-- `ArrayLayout.sizePositive_of_wellFormed` gives every valid fixed array a
+positive total byte extent. -/
+theorem sizePositive_of_wellFormed (layout : ArrayLayout profile)
+    (valid : layout.WellFormed) : 0 < layout.size := by
+  have stridePositive : 0 < layout.stride :=
+    Nat.lt_of_lt_of_le (layout.elementSizePositive_of_wellFormed valid)
+      (layout.elementFitsStride_of_wellFormed valid)
+  exact Nat.mul_pos (layout.countPositive_of_wellFormed valid) stridePositive
+
+/-- `ArrayLayout.sizeAligned_of_wellFormed` states that the total extent of a
+valid fixed array preserves its element alignment. -/
+theorem sizeAligned_of_wellFormed (layout : ArrayLayout profile)
+    (valid : layout.WellFormed) :
+    IsAligned layout.size layout.element.alignment := by
+  have strideAligned := layout.strideAligned_of_wellFormed valid
+  unfold IsAligned at strideAligned ⊢
+  rw [size, Nat.mul_mod, strideAligned]
+  simp
+
+/-- `ArrayLayout.elementRange?_start_aligned` states that every successfully
+selected element starts at the element representation's required alignment. -/
+theorem elementRange?_start_aligned {layout : ArrayLayout profile}
+    (valid : layout.WellFormed) {index : Nat} {range : ByteRange}
+    (selected : layout.elementRange? index = some range) :
+    IsAligned range.start layout.element.alignment := by
+  rcases layout.elementRange?_sound index range selected with ⟨_, rfl⟩
+  have strideAligned := layout.strideAligned_of_wellFormed valid
+  unfold IsAligned at strideAligned ⊢
+  rw [Nat.mul_mod, strideAligned]
+  simp
 
 /-- Every checked element range stays within the array's total extent. -/
 theorem elementRange?_withinBound {layout : ArrayLayout profile}

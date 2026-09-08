@@ -20,6 +20,9 @@ example : padded.WellFormed := by decide
 example : padded.size = 24 := rfl
 example : padded.elementRange? 2 = some ⟨16, 4⟩ := by decide
 example : padded.elementRange? 3 = none := by decide
+example : 2 < padded.count ∧
+    (ByteRange.mk 16 4) = ⟨2 * padded.stride, padded.element.size⟩ :=
+  padded.elementRange?_sound 2 ⟨16, 4⟩ (by decide)
 example : (padded.elementRange? 2).isSome = true ↔ 2 < padded.count :=
   padded.elementRange?_isSome_iff 2
 example : ∃ range, padded.elementRange? 2 = some range :=
@@ -28,6 +31,12 @@ example : padded.element.WellFormed :=
   padded.elementWellFormed_of_wellFormed (by decide)
 example : padded.element.size ≤ padded.stride :=
   padded.elementFitsStride_of_wellFormed (by decide)
+example : 0 < padded.size := padded.sizePositive_of_wellFormed (by decide)
+example : IsAligned padded.size padded.element.alignment :=
+  padded.sizeAligned_of_wellFormed (by decide)
+example : IsAligned (ByteRange.mk 16 4).start padded.element.alignment :=
+  padded.elementRange?_start_aligned (index := 2) (range := ⟨16, 4⟩)
+    (by decide) (by decide)
 
 example : (ByteRange.mk 16 4).WithinBound padded.size :=
   padded.elementRange?_withinBound (index := 2) (range := ⟨16, 4⟩)
