@@ -800,6 +800,16 @@ fn verify_author_active(
             | E::IssueReassigned(_)
             | E::DependencyReassigned(_)
             | E::ReviewReassigned(_)
+            // The four whose handlers ask `require_self_active_role`. That
+            // checks the publisher has not stood down, which is sound during
+            // replay because `agent.status` shares the publisher's stream;
+            // it deliberately does not read `retired`, which a coordinator
+            // sets from a different stream. This is where the `retired` half
+            // is asked instead.
+            | E::ScopeSet(_)
+            | E::AuditReported(_)
+            | E::HandoffOffered(_)
+            | E::ReviewNominated(_)
     );
     if !needs_live_author {
         return Ok(());
@@ -4301,5 +4311,61 @@ mod tests {
         let unknown = nomination("nobody");
         let err = verify_participants_active(&state, &unknown).expect_err("unknown agent");
         assert!(err.to_string().contains("not a registered agent"), "{err}");
+    }
+
+    /// The `retired` half of author liveness, in its new home.
+    ///
+    /// `require_self_active_role` deliberately does not read `retired`:
+    /// `apply_retired` requires a coordinator and forbids retiring yourself,
+    /// so the flag always arrives on somebody else's stream and reading it
+    /// during replay made a retired agent's own published history unreducible
+    /// (`apply::an_agent_retired_by_a_coordinator_can_still_have_its_own_history_reduced`).
+    ///
+    /// The rule is not dropped, it is asked here. Covering all four kinds
+    /// whose handlers gave it up, plus one that never asked it, because the
+    /// kind list is exactly where an addition gets forgotten and a forgotten
+    /// kind fails open.
+    #[test]
+    fn the_publication_gate_refuses_a_retired_author() {
+        let (mut state, _epoch) = state_with_subscribers(&[
+            ("alice", Role::Implementor, &[]),
+            ("aud", Role::Auditor, &[]),
+        ]);
+
+        let scope_set = EventData::ScopeSet(crate::events::ScopeSet {
+            base_code_commit: ObjectId::parse("2".repeat(40)).unwrap(),
+            exclusive: crate::scalars::StringSet::from_iter([crate::scalars::PathClaim::parse(
+                "Grass/**".into(),
+            )
+            .unwrap()]),
+            shared: crate::scalars::StringSet::default(),
+            exports: crate::scalars::StringSet::default(),
+            depends_on: vec![],
+            note: text("n"),
+        });
+
+        // Active: publishes.
+        verify_author_active(&state, &a("alice"), &scope_set)
+            .expect("an active author publishes normally");
+
+        state.agents.get_mut(&a("alice")).unwrap().retired = true;
+        let err = verify_author_active(&state, &a("alice"), &scope_set)
+            .expect_err("a retired author must not publish a scope claim");
+        assert!(
+            err.to_string().contains("retired or otherwise inactive"),
+            "{err}"
+        );
+
+        // A kind the gate deliberately does not cover is unaffected, so the
+        // list is doing real work rather than matching everything.
+        let status = EventData::AgentStatus(crate::events::AgentStatusEvent {
+            status: LifecycleStatus::Active,
+            note: text("back"),
+            product_branch: None,
+            product_commit: None,
+        });
+        verify_author_active(&state, &a("alice"), &status).expect(
+            "agent.status is how a retired identity would be resumed; it must not be gated here",
+        );
     }
 }

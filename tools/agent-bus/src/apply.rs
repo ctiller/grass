@@ -319,31 +319,17 @@ fn require_agent<'a>(state: &'a BusState, a: &Agent) -> AbResult<&'a AgentState>
         .ok_or_else(|| invalid(format!("unregistered agent: {a}")))
 }
 
-/// `a` is registered with `role` and is still active.
+/// `a` is registered with `role` and is still active, reading both halves
+/// of `active()`.
 ///
-/// **Known to be unsound even where `a` is the publisher itself, and left
-/// that way deliberately rather than fixed in passing.** The doc here used
-/// to say the publisher case was safe, reasoning that `active()` reads
-/// `status` and `retired`, and that `agent.status`/`agent.retired` are on
-/// the agent's own stream and therefore ordered ahead of its later events.
-/// That is true of `agent.status` and false of `agent.retired`: a
-/// *coordinator* retires someone else, from a different stream, causally
-/// unordered against anything the target published. So on a host that
-/// fetched the retirement, every one of the target's own already-published
-/// events that passes through here fails -- and `reduce` has no per-event
-/// isolation, so that is the whole bus, not one event.
+/// **Sound only outside reduction**, and it now has exactly one caller:
+/// `merge_ready::check_merge_ready`, which is a gate. A gate runs against a
+/// fully-reduced view at the moment of the push and *should* ask the live
+/// question, so reading `retired` there is right.
 ///
-/// `require_bootstrap_coordinator` no longer calls this, for exactly that
-/// reason (see its doc for the argument, and `coordinator::
-/// verify_author_active` for where the liveness question moved to). The
-/// remaining callers -- `scope.set`, `audit.reported`, `handoff.offered`,
-/// `review.nominated` -- carry the same defect and need the same treatment,
-/// each with its own publication-time counterpart and its own regression
-/// test. That is separate work, reported rather than done here.
-///
-/// For a subject named in someone else's event, this was never usable at
-/// all: use `require_role` and let
-/// `coordinator::verify_participants_active` ask about liveness.
+/// It is not right during replay, which is why no handler calls it any
+/// more. See `require_self_active_role` for the half that is safe there,
+/// and `coordinator::verify_author_active` for where the other half went.
 pub(crate) fn require_active_role<'a>(
     state: &'a BusState,
     a: &Agent,
@@ -352,6 +338,45 @@ pub(crate) fn require_active_role<'a>(
     let ag = require_role(state, a, role)?;
     if !ag.active() {
         return Err(invalid(format!("{a} is not active")));
+    }
+    Ok(ag)
+}
+
+/// `a` is registered with `role` and has not itself stood down -- the most
+/// a handler can soundly ask about its own publisher's liveness.
+///
+/// `active()` is two questions wearing one name, and only one of them is
+/// answerable during replay:
+///
+///  - `status.deactivates()` comes from the agent's own `agent.status`.
+///    Streams are single-writer and `topological_order` gives each one a
+///    predecessor edge, so an agent's status is ordered against its later
+///    events on every host. Safe, and checked here.
+///  - `retired` comes from `agent.retired`, which `apply_retired` requires
+///    a *coordinator* to publish, and which forbids retiring yourself. It
+///    therefore always lives on someone else's stream, causally unordered
+///    against anything the target published. Not safe, and not read here.
+///
+/// The old code read both. A coordinator retiring an agent then made every
+/// one of that agent's own already-published `scope.set`, `audit.reported`,
+/// `handoff.offered` and `review.nominated` events fail on any host that
+/// had fetched the retirement -- and `reduce` has no per-event isolation,
+/// so that is the entire bus, permanently, from an ordinary administrative
+/// action.
+///
+/// `coordinator::verify_author_active` asks the `retired` half at
+/// publication, against a fully-reduced view, where it has one answer.
+pub(crate) fn require_self_active_role<'a>(
+    state: &'a BusState,
+    a: &Agent,
+    role: Role,
+) -> AbResult<&'a AgentState> {
+    let ag = require_role(state, a, role)?;
+    if ag.status.deactivates() {
+        return Err(invalid(format!(
+            "{a} has stood down ({:?}) and cannot publish this",
+            ag.status
+        )));
     }
     Ok(ag)
 }
@@ -740,7 +765,7 @@ fn apply_merge_engine_activated(
 // ------------------------------------------------------------ scope/plan/progress
 
 fn apply_scope_set(state: &mut BusState, env: &Envelope, d: &ScopeSet) -> AbResult<()> {
-    require_active_role(state, &env.agent, Role::Implementor)?;
+    require_self_active_role(state, &env.agent, Role::Implementor)?;
     let mut seen: Vec<(Agent, crate::scalars::Short)> = Vec::new();
     for dep in &d.depends_on {
         seen.push((dep.agent.clone(), dep.interface.clone()));
@@ -840,7 +865,7 @@ fn apply_audit_reported(
     env: &Envelope,
     d: &crate::events::AuditReported,
 ) -> AbResult<()> {
-    require_active_role(state, &env.agent, Role::Auditor)?;
+    require_self_active_role(state, &env.agent, Role::Auditor)?;
     // The frontier is the only place the report records what it observed, so
     // it has to name every active member rather than only whoever it happened
     // to reference. See `coordinator::requires_complete_frontier`.
@@ -1373,7 +1398,7 @@ fn dependency_reassign_effect(state: &mut BusState, env_id: &EventId, d: &Depend
 }
 
 fn apply_handoff_offered(state: &mut BusState, env: &Envelope, d: &HandoffOffered) -> AbResult<()> {
-    require_active_role(state, &env.agent, Role::Implementor)?;
+    require_self_active_role(state, &env.agent, Role::Implementor)?;
     require_agent(state, &d.receiver)?;
     state.handoffs.insert(
         env.id.clone(),
@@ -1466,7 +1491,7 @@ fn apply_review_nominated(state: &mut BusState, env: &Envelope, d: &ReviewReques
     // liveness is sound to ask here: a stream is single-writer and
     // `topological_order` gives it a predecessor edge, so this agent's own
     // status events are ordered against this one on every host.
-    require_active_role(state, &env.agent, Role::Implementor)?;
+    require_self_active_role(state, &env.agent, Role::Implementor)?;
     for author in d.authors.iter() {
         // Every *other* author gets the role check only. Their
         // `agent.status`/`agent.retired` is on their own stream, which this
@@ -3712,13 +3737,20 @@ mod tests {
         apply_ok(&mut state, &register(&aud, Role::Auditor));
     }
 
-    /// The role check is `require_active_role`, not merely a role
-    /// comparison, and that distinction needs its own case: replacing it with
-    /// a bare `primary_role` check survived the entire suite. Same failure
-    /// mode `merge_ready` documents at length for reviewers -- an identity
-    /// the roster has declared unavailable going on working.
+    /// The check is `require_self_active_role`, not merely a role
+    /// comparison, and that distinction needs its own case: replacing it
+    /// with a bare `primary_role` check survived the entire suite. Same
+    /// failure mode `merge_ready` documents at length for reviewers -- an
+    /// identity that has declared itself unavailable going on working.
+    ///
+    /// Note which half this exercises. The auditor stands itself down with
+    /// its own `agent.status`, on its own stream, so `topological_order`'s
+    /// predecessor edge orders it ahead of the later report on every host
+    /// and reduction can refuse it. Being *retired* by a coordinator is the
+    /// other half and is deliberately not asked here -- see
+    /// `an_agent_retired_by_a_coordinator_can_still_have_its_own_history_reduced`.
     #[test]
-    fn an_auditor_the_roster_has_deactivated_may_not_publish_a_report() {
+    fn an_auditor_that_stood_itself_down_may_not_publish_a_report() {
         let mut state = empty_state(&[("aud", Role::Auditor)]);
         let aud = a("aud");
         apply_ok(&mut state, &register(&aud, Role::Auditor));
@@ -3744,8 +3776,70 @@ mod tests {
         let env = audit(&state, &aud, 3, &[]);
         let err = apply_event(&mut state, &env).unwrap_err();
         assert!(
-            err.to_string().contains("is not active"),
-            "a deactivated auditor must not publish, got: {err}"
+            err.to_string().contains("has stood down"),
+            "an auditor that stood itself down must not publish, got: {err}"
+        );
+    }
+
+    /// The other half: an agent a *coordinator* retired must still have its
+    /// own already-published history reduce.
+    ///
+    /// `apply_retired` requires a coordinator and forbids retiring yourself,
+    /// so `retired` always arrives on somebody else's stream, causally
+    /// unordered against anything the target published. Reading it during
+    /// replay meant a host that had fetched the retirement failed on every
+    /// one of the target's own `scope.set`, `audit.reported`,
+    /// `handoff.offered` and `review.nominated` events -- and with no
+    /// per-event isolation in `reduce`, that is the whole bus, permanently,
+    /// from an ordinary administrative action.
+    ///
+    /// Both orders are asserted, because the point is that the outcome must
+    /// not depend on which the host replayed first. The `retired` question
+    /// is asked at publication instead
+    /// (`coordinator::verify_author_active`), which
+    /// `the_publication_gate_refuses_a_retired_author` pins.
+    #[test]
+    fn an_agent_retired_by_a_coordinator_can_still_have_its_own_history_reduced() {
+        let build = |retire_first: bool| {
+            let mut state = empty_state(&[("aud", Role::Auditor), ("coord1", Role::Coordinator)]);
+            let (aud, coord1) = (a("aud"), a("coord1"));
+            apply_ok(&mut state, &register(&aud, Role::Auditor));
+            apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+
+            let report = audit(&state, &aud, 1, &[]);
+            let retire = Envelope::new(
+                &coord1,
+                1,
+                no_frontier(),
+                &EventData::AgentRetired(AgentRetired {
+                    target: aud.clone(),
+                    previous_lifecycle: EventId::new(&aud, 0),
+                    reason: text("engagement over"),
+                    user_authority: text("operator"),
+                }),
+                [],
+            );
+
+            let order: Vec<Envelope> = if retire_first {
+                vec![retire.clone(), report.clone()]
+            } else {
+                vec![report.clone(), retire.clone()]
+            };
+            reduce_onto(state, &order)
+                .unwrap_or_else(|e| panic!("retire_first={retire_first} must still reduce: {e}"))
+        };
+
+        let report_first = build(false);
+        let retire_first = build(true);
+        assert_eq!(
+            report_first.audits.len(),
+            1,
+            "the report must be recorded, not silently skipped"
+        );
+        assert_eq!(
+            format!("{report_first:#?}"),
+            format!("{retire_first:#?}"),
+            "GATE 15/16: both valid orders must reduce to identical state"
         );
     }
 
