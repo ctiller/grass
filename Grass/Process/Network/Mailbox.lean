@@ -43,13 +43,20 @@ million-entry mailbox and reported no cost would let a process do unbounded work
 inside one transition.
 
 Where that is refused is worth stating exactly, because an earlier version of
-this sentence said `Grass/Process/Progress.lean`'s argument assumes it away and
-that module says the opposite: "the internal work §7 refers to happens *inside*
+this sentence said `Grass/Process/Progress.lean`'s argument assumes it away.
+That module defers it instead: "the internal work §7 refers to happens *inside*
 one transition, in a serial call or in the machine realization, and the
-finite-internal-work clause is discharged there". `MeetsProcessProgress` is about
-which events arrive, not about the cost of handling one. So the bound belongs to
-whatever realizes the mailbox, and this layer records the obligation rather than
-discharging it.
+finite-internal-work clause is discharged there". None of
+`MeetsProcessProgress`'s clauses is that bound — `handlesEveryEvent` and
+`notStuck` are about a successor existing, and `ProcessMeasure.Decreases` ranks
+`(State, Bag Demand)` across transitions rather than costing one.
+
+What this layer does instead is record the cost exactly and leave it unbounded:
+`SelectiveReceive.scanWork` with `scanWorkExact` pins it to the skipped prefix's
+length, and `scan_is_charged` bounds it by the mailbox size — which bounds
+nothing until something bounds the mailbox. That is a real open obligation and it
+is `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.140, so it is trackable rather than
+a sentence saying the bound is somebody else's.
 -/
 
 namespace Grass.Process

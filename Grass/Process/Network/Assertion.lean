@@ -94,10 +94,21 @@ region rather than all shared state, one session's escrow rather than the whole
 ledger, one session's cursor rather than every session's. (An earlier version of
 this paragraph said seven and three. It predates the trace split; it does *not*
 predate the `session` fragment, which arrived in the same commit as the paragraph
-— a claims audit checked, after an earlier correction guessed.) The list is closed by `NetworkFragment` itself: an
-assertion cannot depend on a part of the network with no constructor here, which
-is what keeps the language from growing. Adding one is a deliberate edit to this
-inductive rather than something a mixin author can do from outside.
+— a claims audit checked, after an earlier correction guessed.) `NetworkFragment` closes the list of *names*, and adding a
+constructor is a deliberate edit to this inductive rather than something a mixin
+author can do from outside.
+
+**What it does not close is what an assertion may depend on**, and an earlier
+version of this paragraph said it did. Local adversarial review refuted that by
+building a `WorldAgreement` whose `.obligations` clause quietly also fixes an
+unnamed component of the world: `NetworkAssertion.framed` bounds an assertion
+relative to *the agreement it is given*, and `agreesGlue` forces mixability
+rather than coverage, so an agreement that hides a component inside a named
+fragment admits a `framed` assertion depending on it.
+`WorldAgreement.subsingleton_of_forced_equality` refuses only the global
+equality agreement and says nothing about that partial one. Coverage is a real
+obligation on whoever supplies the world, which is what the note above says
+about the world parameter generally.
 
 `escrow` and `session` are separate constructors because the world separates
 them — `inFlight : ChannelEscrowLedger` and `sessions : ChannelSessionLedger` are

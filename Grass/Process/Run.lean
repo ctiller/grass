@@ -77,9 +77,15 @@ nothing else.
 Causality is the opposite case. `docs/PROCESS.md` §4 requires the emitting
 segment of each observation to be *retained* through "later weaving, flattening,
 serialization, machine simulation, and projection". Carrying it as an index of
-`Reachable` is what keeps it: `Reachable.observationCausality` reads it, and
-because it is an index rather than a field of the state, it cannot reach an
-acceptance relation.
+`Reachable` is what keeps it, and `Reachable.observationCausality` reads it.
+
+What keeps it out of acceptance is the *type*: `ProcessAcceptance.TraceAccepts`
+takes a `Trace p.Observation`, so an acceptance relation sees only
+`ProcessRunState.history` and has nothing to branch the segmentation on. The
+declaration note further down this module states it that way, and an earlier
+version of this paragraph offered the index-versus-field distinction instead,
+which does not entail it — a field over `segmented` would be no more visible to
+`TraceAccepts` than an index is.
 
 An earlier draft put `Segmented` inside `ProcessRunState`, which failed the
 first test, and then deleted it from the run entirely, which failed the second.

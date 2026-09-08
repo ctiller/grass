@@ -5033,6 +5033,63 @@ the first's carrier, is a chain and is not forbidden. That is a genuine coalesce
 chain rather than a half-done merge — `EscrowLedger.no_cycle` is what keeps it
 finite — and §3 appears to permit it. Recorded rather than ruled on.
 
+### 10.140 The selective-receive scan cost is recorded and unbounded
+
+Numbered above the entries a sibling branch is adding, so the two do not collide;
+§10.132 through §10.139 belong to `agent/c-process/m4-reach-the-dead-worlds`.
+
+`Grass/Process/Network/Mailbox.lean` said a selective receive that walked a
+million-entry mailbox and reported no cost "is exactly what the progress argument
+in `Grass/Process/Progress.lean` assumes cannot happen". That is false, and
+Progress.lean says so in its own words: "the internal work §7 refers to happens
+*inside* one transition, in a serial call or in the machine realization, and the
+finite-internal-work clause is discharged there". It defers the clause rather
+than assuming it away, and none of `MeetsProcessProgress`'s clauses is that
+bound — `handlesEveryEvent` and `notStuck` are about a successor existing, and
+`ProcessMeasure.Decreases` ranks across transitions rather than costing one.
+
+**What this layer actually has** is `SelectiveReceive.scanWork`, pinned to the
+skipped prefix's length by `scanWorkExact` and bounded by the mailbox's size by
+`scan_is_charged`. That is an exact accounting and not a bound, because nothing
+bounds the mailbox. §3 is explicit that "unbounded mailboxes or postponed sets
+fail resource/progress gates", so the gate exists and this layer does not meet
+it; a realization that offers selective receive owes a mailbox bound, and until
+one does the cost is recorded and free.
+
+Filed as an obligation with a number so it is trackable. The reason it needed
+one: a reviewer pointed out that the corrected docstring ended at "whatever
+realizes the mailbox", which names no module, structure or milestone in this
+tree, while every comparable open obligation in this layer carries a section
+number. An untrackable obligation is a sentence, not a record.
+
+### 10.141 A citation of mine that named nothing, and what declaring it cost
+
+`StepsLocally.sharedWritesAdmitted_of_no_writes` was cited by that field's own
+docstring and by `Grass/Process/Network/Plan.lean`'s note on `sharedUpdate`, and
+declared by neither. My defect, landed by my own commit `c373340` alongside the
+field `agent-bus` ruling `g-design:84` asked for. `Tools/DocstringAudit.py` did
+not see it: its identifier check fires only inside sentences carrying a
+strong-claim word, and neither citation has one. `agent-bus` `c-process:106`
+reports that gap to the gate's owner.
+
+It is declared here rather than the citations deleted, because the content is
+real and `g-design:84` asked for it in the same breath as the field: "For a kind
+with no writable shared region, derive the stuttering contract automatically; add
+no author burden." A role that may write nothing supplies `writesPermitted` and
+gets `sharedWritesAdmitted` from it.
+
+**Declaring it is half the repair.** A lemma with no consumer and an
+unsatisfiable hypothesis is the shape §10.105 refuses, so both halves are here:
+`the_connection_writes_nothing` inhabits the hypothesis at a real role —
+`serverTopology`'s connection may write neither region — and
+`theConnectionOwesNoValueBound` consumes it.
+
+**And one more thing the prefix cost.** The two citations did not agree on where
+the theorem lives, and only one of them was wrong in a way a reader would notice:
+the bare name resolves, `StepsLocally.` does not, because `StepsLocally` is a
+structure and not the namespace the theorem sits in. A first attempt at this
+repair fixed one site and reported both fixed.
+
 ## 11. The authoring facade
 
 `docs/DECISIONS.md` decision 134, ruling `c-spike:4`'s third question and the
