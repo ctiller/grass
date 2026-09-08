@@ -208,4 +208,38 @@ example : (Id.run do
       n := n + 1
     return n) = 0 := by simp
 
+/-! ## Reading back a sequence you built
+
+The section above checks a single `push` read at its top, which is the only
+read-after-push shape `simp` could close before `Vec.get?_push` existed. A
+consumer that builds a sequence pushes more than once, and every other shape
+reported "no progress": the interaction of `Vec.length_push` normalising
+`(v.push a).length` to `v.length + 1` with `Vec.get?_push_self` wanting the
+unnormalised form meant the law could not fire on anything twice-pushed.
+
+These are the six goals that measurement used. Five of them failed before, and
+the one that passed is kept so the pair reads as a set rather than as a list of
+repairs.
+-/
+
+example (v : Vec Nat) (a : Nat) : (v.push a).get? v.length = some a := by simp
+
+example (v : Vec Nat) (a b : Nat) :
+    ((v.push a).push b).get? (v.length + 1) = some b := by simp
+
+example (v : Vec Nat) (a b : Nat) :
+    ((v.push a).push b).get? v.length = some a := by simp
+
+example (a b : Nat) : ((Vec.empty.push a).push b).get? 1 = some b := by simp
+
+example (a b : Nat) : ((Vec.empty.push a).push b).get? 0 = some a := by simp
+
+/-- Reading past the end, which the case split also has to get right. -/
+example (a b : Nat) : ((Vec.empty.push a).push b).get? 2 = none := by simp
+
+/-- And below the top of a variable sequence, which previously needed the
+conditional `Vec.get?_push_lt` supplied by hand. -/
+example (v : Vec Nat) (a : Nat) (i : Nat) (h : i < v.length) :
+    (v.push a).get? i = v.get? i := by simp [h]
+
 end Grass.Tests.Std.Instances
