@@ -47,6 +47,32 @@ rebuild cone. The command fails on any unresolved name. Pre-implementation
 burden classes are replaced by measured evidence; they are never copied into
 the report as if they were measurements.
 
+For the first vertical consumer it also emits this Schematic Lean report shape
+(the exact declaration belongs in the future tool signature module):
+
+```lean
+structure VerticalProofEconomyReportV1 where
+  authority : AuthorityReportV1
+  reusableWork : Array DeclarationUse
+  programSpecificWork : Array DeclarationUse
+  residualGoals : Array ResidualGoalDischarge
+  editCones : SpecAsmLayoutEditCones
+  unconsumedDeclarations : Array UnconsumedDeclaration
+  temporaryBridges : Array TemporaryBridge
+  credit : ProofEconomyCredit
+```
+
+Every declaration use carries exactly one of the six authority classifications
+from `SPIKE_PROOF_BURDEN.md`; `reusableWork` and `programSpecificWork` are a
+disjoint exhaustive partition. Each residual goal names its discharging checked
+declaration. `editCones` records specification, assembly-only, and layout-only
+rebuilds. Each unconsumed public declaration names an active-roadmap future
+gate, or the report rejects it; private declarations are identified separately.
+Each temporary bridge names its owner dependency, substitute contract, omitted
+theorems, and scheduled removal gate. `credit` must be `provisional` whenever
+that bridge array is nonempty and only `eligible` when it is empty. This schema
+is the retained evidence for the five-way measurement; prose counts are not.
+
 For constructor-heavy assembly, `elaborate` emits both the typed constructor
 tree and complete raw instruction hierarchy. Spike 4 additionally compares the
 frame-header expansion with `spike4-parse-header-raw-expansion`, emits the full

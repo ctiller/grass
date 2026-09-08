@@ -12,7 +12,11 @@ disappearing behind an optimistic source listing.
 The implementation ratchet replaces these estimates with an
 elaborator-produced authority report containing declaration identity, normalized
 theorem type, owning module, proof-term size, residual goals, dependencies, and
-rebuild cone.
+rebuild cone. The first vertical consumer embeds that authority report in
+`VerticalProofEconomyReportV1`, which separately retains reusable work,
+program-specific work, residual-goal discharges, the three required edit cones,
+unconsumed declarations, and any temporary bridges. Its declaration entries use
+the six classifications below rather than creating a parallel taxonomy.
 
 ## 1. Required classification
 

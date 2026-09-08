@@ -47,13 +47,23 @@ compile, which is what section 5 argues and P1 schedules.
 ### 1.1 The first proof-economy gate is a consumer
 
 Local declarations, green library modules, and plausible automation names do
-not establish proof economy. The next unit of credited implementation is the
-smallest compiling Spike 1 path from its precious specification through its
-authored assembly to the exact emitted artifact theorem. It may use narrow
-temporary bridges where an unrelated subsystem is not yet available, but each
-bridge is named honestly and cannot satisfy the final `VerifiedProgram` gate.
+not establish proof economy. The first measured implementation is the smallest
+compiling Spike 1 path from its precious specification through its authored
+assembly to the exact emitted artifact theorem. A path containing a temporary
+bridge is explicitly `provisional`: it earns no proof-economy or reuse credit
+until every bridge is discharged, and it cannot satisfy either this gate or the
+final `VerifiedProgram` gate.
 
-That vertical path records separately:
+The complete initially permitted bridge classes are memory call-frame/loan
+laws, ISA encoder/decoder closure, ABI call-frame/unwind closure, platform-call
+outcome semantics, and artifact writer/linker exactness. Each bridge names one
+direct bus dependency targeted at its owner, the exact substitute contract, every theorem it
+temporarily excludes, and its removal gate in that owner's active roadmap. A
+bridge outside this set, a bridge without a live dependency and scheduled
+removal gate, or a report that counts bridged work as verified is rejected.
+
+That vertical path emits the `VerticalProofEconomyReportV1` owned by
+[`IMPLEMENTATION_RATCHET.md`](IMPLEMENTATION_RATCHET.md), recording separately:
 
 - one-time reusable library work;
 - everything authored specifically for the program, including proofs,
@@ -63,10 +73,14 @@ That vertical path records separately:
   layout-only edit; and
 - declarations or wrappers built in anticipation but not consumed by the path.
 
-Reuse earns proof-economy credit only when a second real consumer imports the
+The report maps each referenced declaration to the six authority categories in
+[`SPIKE_PROOF_BURDEN.md`](SPIKE_PROOF_BURDEN.md); it does not invent a second
+classification. Reuse earns proof-economy credit only when a second real
+consumer imports the
 same checked boundary without bespoke repair. A public helper with no named
 consumer is not automatically wrong, but it must either be a necessary
-foundation constructor with a stated future gate, be kept private to its
+foundation constructor with a stated future gate present as a milestone in an
+active owner roadmap, be kept private to its
 implementation shard, or be deleted when the consumer demonstrates it is the
 wrong abstraction. Similar-looking induction machinery in two layers is
 consolidated only when their semantic carriers and intended invalidation cones
