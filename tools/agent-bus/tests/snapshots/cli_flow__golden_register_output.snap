@@ -9,6 +9,7 @@ expression: out
   },
   "freshness": "cached",
   "last_synced": null,
+  "outbox_held": [],
   "outbox_rejected": [],
   "published": {
     "refs/heads/agent-events/bob": "[hash]",

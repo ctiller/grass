@@ -455,8 +455,11 @@ fn from_hex(text: &str) -> Option<Vec<u8>> {
     if !digits.len().is_multiple_of(2) {
         return None;
     }
-    digits
-        .chunks_exact(2)
+    // `as_chunks` rather than `chunks_exact`: the odd-length guard above means
+    // the remainder is empty, and a `&[u8; 2]` indexes without a bounds check.
+    let (pairs, _) = digits.as_chunks::<2>();
+    pairs
+        .iter()
         .map(|pair| {
             let hi = (pair[0] as char).to_digit(16)?;
             let lo = (pair[1] as char).to_digit(16)?;
@@ -573,10 +576,15 @@ fn sha256_hex(data: &[u8]) -> String {
     }
     msg.extend_from_slice(&bit_len.to_be_bytes());
 
-    for block in msg.chunks_exact(64) {
+    // The padding loop above makes `msg` a whole number of 64-byte blocks, so
+    // both remainders here are empty. `as_chunks` yields `&[u8; N]`, which
+    // `from_be_bytes` takes directly.
+    let (blocks, _) = msg.as_chunks::<64>();
+    for block in blocks {
         let mut w = [0u32; 64];
-        for (i, word) in block.chunks_exact(4).enumerate() {
-            w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
+        let (words, _) = block.as_chunks::<4>();
+        for (i, word) in words.iter().enumerate() {
+            w[i] = u32::from_be_bytes(*word);
         }
         for i in 16..64 {
             let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);

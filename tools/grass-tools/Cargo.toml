@@ -2,46 +2,55 @@
 name = "grass-tools"
 version = "0.1.0"
 edition = "2021"
-description = "Grass validation and audit tools: docstring and source audits, differential checks against independent assemblers and disassemblers, and machine probes"
+description = "Grass validation and audit tools: docstring, source and observation-coverage audits, the Win64 unwind differential, the x86 assembler and disassembler differentials, and the machine probe"
 
 # Each tool is a self-contained binary with no shared library. The scripts these
 # replace were self-contained too, and each is invoked independently by
 # `.github/workflows/library.yml`; keeping them separate means a change to one
 # cannot silently alter another's verdict.
 #
-# `docstring-audit` still needs Lean, because the set of names the build knows
-# has no reading outside the environment. It generates the meta-program it needs
-# into a temporary file, elaborates it with `lake env lean`, and does the judging
-# here. That is what retires the checked-in Lean file it used to shell out to.
+# `docstring-audit` and `coverage-audit` still need Lean, because what the build
+# knows -- the set of declaration names, and every theorem's statement -- has no
+# reading outside the environment. Each generates the meta-program it needs into
+# a temporary file, elaborates it with `lake env lean`, and does the judging
+# here. That is what retires the checked-in Lean files they replace.
 #
 # This crate is where the remaining validation tools land as they are ported and
-# their equivalence against the originals is demonstrated. A `[[bin]]` entry is
-# a claim that the equivalence has been shown, so an entry appears only once
-# something has shown it.
+# their equivalence against the originals is demonstrated. It carries eight
+# binaries rather than a placeholder for nine, because a `[[bin]]` entry for a
+# tool nobody has verified is a claim this file cannot back.
 #
-# For the four x86 tools that is `equivalence/run.sh`, which runs each Python
-# original and its port over identical argv and byte-compares stdout, stderr and
-# the exit status: over the real generated corpus, over eight corpora carrying
-# one injected defect each -- so the comparison is known to be able to fail --
-# and over the case where the oracle is absent, which both must refuse rather
-# than pass over.
+# Each one's oracle could be run, which is what let the equivalence be shown.
+# `ml64.exe` ships with the MSVC build tools; a probe against an HTTP server is
+# a probe whether the server is a publisher or a loopback socket; the two
+# audits' oracle is the Lean file each replaces, run over the real tree under
+# the pinned toolchain; and for the four x86 tools it is NASM and NDISASM,
+# installed at `~/AppData/Local/bin/NASM`, plus the processor itself.
 #
-# This paragraph previously said neither assembler could be run here, and that
-# the four were therefore ported and unlanded with no differential against the
-# original. That was wrong. NASM and NDISASM are installed on the authoring host
-# at `~/AppData/Local/bin/NASM`, which is one of the fixed fallback directories
-# all four of these tools search after PATH -- they are missing from PATH, not
-# from the machine, so `shutil.which` and `command -v` miss them while the
-# tools' own lookup finds them.
+# That last clause replaces a sentence which said neither assembler could be run
+# here and that the four x86 tools were therefore ported and unlanded with no
+# differential against their originals. It was wrong, and wrong in a way worth
+# recording: NASM's Windows installer does not add itself to PATH, so `which`
+# and `command -v` both miss an installation that is present, and two separate
+# readers concluded from that that the machine had no assembler. All four of
+# these tools have named that exact directory in their own lookup since they
+# were written -- `Tools/x86-nasm-differential.py:81` carries the comment
+# explaining why -- so the answer was in the source being ported.
 #
-# `win64-unwind-differential` and `source-liveness` were the first two whose
-# oracles were run: `ml64.exe` ships with the MSVC build tools, and a probe
-# against an HTTP server is a probe whether the server is a publisher or a
-# loopback socket.
+# The four x86 tools' equivalence is shown by `equivalence/run.sh`, which runs
+# each Python original and its port over identical argv and byte-compares
+# stdout, stderr and the exit status: over the real generated corpus, over eight
+# corpora carrying one injected defect each -- so the comparison is known to be
+# able to fail -- and over the case where the oracle is absent, which both must
+# refuse rather than pass over.
 
 [[bin]]
 name = "docstring-audit"
 path = "src/bin/docstring_audit.rs"
+
+[[bin]]
+name = "coverage-audit"
+path = "src/bin/coverage_audit.rs"
 
 [[bin]]
 name = "source-liveness"

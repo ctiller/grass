@@ -149,11 +149,16 @@ mod sha256 {
         }
         msg.extend_from_slice(&bit_len.to_be_bytes());
 
-        for chunk in msg.chunks_exact(64) {
+        // The padding loop above makes `msg` a whole number of 64-byte blocks, so
+        // both remainders here are empty. `as_chunks` yields `&[u8; N]`, which
+        // `from_be_bytes` takes directly, and zipping the sixteen words it
+        // produces replaces the `take(16)` and the manual range indexing.
+        let (blocks, _) = msg.as_chunks::<64>();
+        for chunk in blocks {
             let mut w = [0u32; 64];
-            for (i, word) in w.iter_mut().enumerate().take(16) {
-                let b = &chunk[i * 4..i * 4 + 4];
-                *word = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+            let (bytes, _) = chunk.as_chunks::<4>();
+            for (word, raw) in w.iter_mut().zip(bytes.iter()) {
+                *word = u32::from_be_bytes(*raw);
             }
             for i in 16..64 {
                 let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
