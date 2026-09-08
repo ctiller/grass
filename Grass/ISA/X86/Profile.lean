@@ -195,8 +195,19 @@ def rexPrefixLayout : CommonRule :=
          "INC/DEC half of the statement is in §2.2.1.2, which says the sixteen " ++
          "opcodes 40H-4FH \"represent valid instructions INC or DEC\" in the " ++
          "other modes and \"the instruction prefix REX\" in 64-bit mode, with " ++
-         "the single-byte forms unavailable there. The prefix-ordering half is " ++
-         "not in this section and is an open obligation.")
+         "the single-byte forms unavailable there. The prefix-ordering half was " ++
+         "recorded here as absent from this section and owed. That was wrong: " ++
+         "it is in §2.2.1 itself, on the page numbered 2-8, in the paragraph " ++
+         "beginning \"Not all instructions require a REX prefix in 64-bit " ++
+         "mode\". That paragraph says a REX prefix is ignored, as are its " ++
+         "individual bits, when it \"does not immediately precede the opcode " ++
+         "byte or the escape opcode 0FH\" of an instruction needing it, and " ++
+         "draws the consequence that only one properly located REX affects an " ++
+         "instruction. Ignoring the individual bits is what gives both halves " ++
+         "of the modeled claim: no register extensions, since R, X and B are " ++
+         "among them, and no 64-bit operand size, since W is too. Figure 2-3, " ++
+         "\"Prefix Ordering in 64-bit Mode\", is in the same section and shows " ++
+         "REX between the legacy prefixes and the opcode.")
         (confirmed := some intelAnchorCheckDate))
       (cite .amd Volume.amdInstructions "1.2.7"
         "REX Prefix" [rexLayout]
