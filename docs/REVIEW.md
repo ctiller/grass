@@ -130,6 +130,52 @@ semantic policy.
 - Does the published corpus leak personal paths, hostnames, serials, credentials,
   or irrelevant workstation topology?
 
+### Documentation claims and mechanized gates
+
+Public documentation is part of the assurance surface, but prose is not a
+proof. A strong claim such as “ensures”, “prevents”, “cannot”, “exactly”, or
+“append-only” must identify the narrow evidence that supports it: a checked
+theorem or transition invariant, a type restriction that makes the contrary
+case unrepresentable, a named executable fixture, or an explicitly external
+validation boundary. The claim states that evidence's actual scope and does not
+promote a point fixture, finite test corpus, or syntactic check into a universal
+guarantee. When no mechanism enforces the statement, the prose says so.
+
+Docstrings should explain their own declaration and its immediate invariants.
+They should not duplicate remote declarations, counts, inventories, or
+repository-wide characterizations that silently become stale. Wider motivation,
+proof sketches, and review history belong in the owning design or implementation
+document, where their non-normative or not-yet-connected status can be stated
+honestly. Reviewers still compare a material prose claim with the declaration it
+describes and, where economical, attempt the contrary construction; merely
+resolving a cited identifier does not establish that the prose is true or that
+the theorem is non-vacuous.
+
+A static documentation audit is ordinary tooling, not semantic authority. It
+may cheaply enforce an explicitly syntactic contract such as “a strong-claim
+sentence carries a resolvable evidence reference”; it may not report that the
+referenced evidence proves the English claim. Before a new audit becomes a
+repository-wide mandatory gate, its proposal requires design review and tooling
+ownership. The review records:
+
+- its implementation-independent accepted inputs, outputs, and failure modes;
+- the exact defect class and governed paths;
+- positive, false-positive, and false-negative fixtures;
+- a mutation or equivalent negative test showing that the live gate is wired;
+- bounded local and clean-run cost, portability, and deterministic diagnostics;
+- rollout, exception ownership, versioning, and rollback; and
+- why a narrower proof, type, owner-local check, or human review question is
+  insufficient.
+
+An implementation plan may require owner-local checks for its own candidate. It
+cannot grant those checks authority over every other owner. The initial proposal
+to promote citation, projection-use, constructor-use, fixture-use, file-reachability,
+and authority-door scanners directly from the memory implementation plan into
+fleet-wide CI is therefore rejected. Those are useful candidate defect classes,
+but each must return through the tooling process above rather than entering as
+one unreviewed bundle. Memory documentation should name its local evidence in
+the meantime; rejecting the global gates does not waive that discipline.
+
 ### Standard library and proof economy
 
 - Does the precious resource-parameterized specification state only demanded
