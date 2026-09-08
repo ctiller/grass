@@ -84,6 +84,15 @@ def fragment
   entryCandidates := []
   sourceMap := checked.sourceMap.entries
 
+/-- Find the checked construction source range containing one initialized
+section byte offset. -/
+def sourceEntryAtByte?
+    {emission : RawProgramEmission State Terminal Instruction}
+    {config : RelocatableEmissionConfig}
+    (checked : CheckedRelocatableEmission emission config)
+    (offset : Nat) : Option SourceMapEntry :=
+  checked.sourceMap.entryAtByte? offset
+
 /-- The contributed initialized bytes are definitionally the emitted stream. -/
 @[simp] theorem sectionBytesExact
     {emission : RawProgramEmission State Terminal Instruction}
@@ -140,6 +149,31 @@ theorem uniqueSourceEntryForInitializedByte
   apply checked.sourceMap.uniqueEntryForByte offset
   simpa [contribution, SectionContent.initializedSize, Vec.length,
     RawProgramEmission.byteLength, List.length_map] using hbound
+
+/-- Relocatable byte lookup succeeds exactly for a projected source entry
+containing the initialized-section offset. -/
+theorem sourceEntryAtByte?_eq_some_iff
+    {emission : RawProgramEmission State Terminal Instruction}
+    {config : RelocatableEmissionConfig}
+    (checked : CheckedRelocatableEmission emission config)
+    (offset : Nat) (entry : SourceMapEntry) :
+    checked.sourceEntryAtByte? offset = some entry ↔
+      entry ∈ (checked.fragment (RelocKind := RelocKind)
+        (ImportIdentity := ImportIdentity)).sourceMap ∧
+      entry.offset ≤ offset ∧ offset < entry.offset + entry.length :=
+  checked.sourceMap.entryAtByte?_eq_some_iff offset entry
+
+/-- Relocatable byte lookup fails exactly beyond the initialized section. -/
+theorem sourceEntryAtByte?_eq_none_iff
+    {emission : RawProgramEmission State Terminal Instruction}
+    {config : RelocatableEmissionConfig}
+    (checked : CheckedRelocatableEmission emission config)
+    (offset : Nat) :
+    checked.sourceEntryAtByte? offset = none ↔
+      checked.contribution.content.initializedSize ≤ offset := by
+  rw [sourceEntryAtByte?, checked.sourceMap.entryAtByte?_eq_none_iff]
+  simp [contribution, SectionContent.initializedSize, Vec.length,
+    RawProgramEmission.byteLength, List.length_map]
 
 /-- `verifiedConstructionSectionBytesExact` relates the initialized logical
 section directly to the original pre-alpha authored instruction list. -/

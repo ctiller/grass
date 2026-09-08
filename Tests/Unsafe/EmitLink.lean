@@ -51,6 +51,11 @@ private def checked : CheckedLinkSourceMap accepted sectionId :=
 example : checked.entries = [
     ⟨sectionId, 0, 2, blockId "entry", ⟨[], [], 0⟩⟩,
     ⟨sectionId, 2, 1, blockId "entry", ⟨[], [], 1⟩⟩] := rfl
+example : checked.entryAtByte? 0 =
+    some ⟨sectionId, 0, 2, blockId "entry", ⟨[], [], 0⟩⟩ := rfl
+example : checked.entryAtByte? 2 =
+    some ⟨sectionId, 2, 1, blockId "entry", ⟨[], [], 1⟩⟩ := rfl
+example : checked.entryAtByte? 3 = none := rfl
 
 example : SourceMapConsecutiveFrom sectionId 0 checked.entries :=
   checked.entriesConsecutive
@@ -88,6 +93,14 @@ example (offset : Nat) (left right : SourceMapEntry)
     left = right :=
   checked.entryContainingByteUnique offset left right leftMem rightMem
     leftLower leftUpper rightLower rightUpper
+example (offset : Nat) (entry : SourceMapEntry) :
+    checked.entryAtByte? offset = some entry ↔
+      entry ∈ checked.entries ∧ entry.offset ≤ offset ∧
+        offset < entry.offset + entry.length :=
+  checked.entryAtByte?_eq_some_iff offset entry
+example (offset : Nat) :
+    checked.entryAtByte? offset = none ↔ accepted.byteLength ≤ offset :=
+  checked.entryAtByte?_eq_none_iff offset
 
 private def zeroWidth : RawProgramEmission Unit Unit Instruction :=
   emitRawProgram (program [first, empty]) encoder taint

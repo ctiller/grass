@@ -69,6 +69,11 @@ example : (checked.fragment (RelocKind := Unit)
     (ImportIdentity := Unit)).sourceMap = [
       ⟨sectionId, 0, 2, blockId, ⟨[], [], 0⟩⟩,
       ⟨sectionId, 2, 1, blockId, ⟨[], [], 1⟩⟩] := rfl
+example : checked.sourceEntryAtByte? 0 =
+    some ⟨sectionId, 0, 2, blockId, ⟨[], [], 0⟩⟩ := rfl
+example : checked.sourceEntryAtByte? 2 =
+    some ⟨sectionId, 2, 1, blockId, ⟨[], [], 1⟩⟩ := rfl
+example : checked.sourceEntryAtByte? 3 = none := rfl
 example : ((checked.fragment (RelocKind := Unit)
     (ImportIdentity := Unit)).sourceMap.map SourceMapEntry.length).sum =
     checked.contribution.content.initializedSize :=
@@ -91,6 +96,16 @@ example (offset : Nat)
           other.offset ≤ offset ∧ offset < other.offset + other.length →
         other = entry :=
   checked.uniqueSourceEntryForInitializedByte offset hbound
+example (offset : Nat) (entry : SourceMapEntry) :
+    checked.sourceEntryAtByte? offset = some entry ↔
+      entry ∈ (checked.fragment (RelocKind := Unit)
+        (ImportIdentity := Unit)).sourceMap ∧
+      entry.offset ≤ offset ∧ offset < entry.offset + entry.length :=
+  checked.sourceEntryAtByte?_eq_some_iff offset entry
+example (offset : Nat) :
+    checked.sourceEntryAtByte? offset = none ↔
+      checked.contribution.content.initializedSize ≤ offset :=
+  checked.sourceEntryAtByte?_eq_none_iff offset
 example : (checked.fragment (RelocKind := Unit)
     (ImportIdentity := Unit)).definitions = [] := rfl
 example : (checked.fragment (RelocKind := Unit)

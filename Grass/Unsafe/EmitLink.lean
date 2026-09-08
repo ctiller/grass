@@ -243,6 +243,15 @@ def entries
     List SourceMapEntry :=
   emission.linkSourceMap sectionId
 
+/-- Find the checked source range containing one emitted byte offset. -/
+def entryAtByte?
+    {emission : RawProgramEmission State Terminal Instruction}
+    {sectionId : SectionId}
+    (checked : CheckedLinkSourceMap emission sectionId)
+    (offset : Nat) : Option SourceMapEntry :=
+  checked.entries.find? fun entry =>
+    decide (entry.offset ≤ offset ∧ offset < entry.offset + entry.length)
+
 /-- Every projected entry names the section selected for this source map. -/
 theorem entrySectionExact
     {emission : RawProgramEmission State Terminal Instruction}
@@ -331,6 +340,20 @@ theorem entryForByte
     item.lowered.block, item.lowered.origin⟩, ?_, lower, upper⟩
   exact List.mem_map.mpr ⟨item, hitem, rfl⟩
 
+/-- A successful byte lookup returns a checked entry containing that byte. -/
+theorem entryAtByte?_sound
+    {emission : RawProgramEmission State Terminal Instruction}
+    {sectionId : SectionId}
+    (checked : CheckedLinkSourceMap emission sectionId)
+    (offset : Nat) (entry : SourceMapEntry)
+    (hfind : checked.entryAtByte? offset = some entry) :
+    entry ∈ checked.entries ∧ entry.offset ≤ offset ∧
+      offset < entry.offset + entry.length := by
+  constructor
+  · exact List.mem_of_find?_eq_some hfind
+  · have contains := List.find?_some hfind
+    simpa [entryAtByte?] using contains
+
 /-- Two checked source ranges containing the same byte are the same entry. -/
 theorem entryContainingByteUnique
     {emission : RawProgramEmission State Terminal Instruction}
@@ -366,6 +389,55 @@ theorem uniqueEntryForByte
   intro other hother
   exact checked.entryContainingByteUnique offset other entry
     hother.1 entryMem hother.2.1 hother.2.2 lower upper
+
+/-- Byte lookup succeeds exactly for a checked entry containing the offset. -/
+theorem entryAtByte?_eq_some_iff
+    {emission : RawProgramEmission State Terminal Instruction}
+    {sectionId : SectionId}
+    (checked : CheckedLinkSourceMap emission sectionId)
+    (offset : Nat) (entry : SourceMapEntry) :
+    checked.entryAtByte? offset = some entry ↔
+      entry ∈ checked.entries ∧ entry.offset ≤ offset ∧
+        offset < entry.offset + entry.length := by
+  constructor
+  · exact checked.entryAtByte?_sound offset entry
+  · intro contains
+    have foundSome : (checked.entryAtByte? offset).isSome := by
+      simp only [entryAtByte?, List.find?_isSome]
+      exact ⟨entry, contains.1, by simp [contains.2.1, contains.2.2]⟩
+    cases hfind : checked.entryAtByte? offset with
+    | none => simp [hfind] at foundSome
+    | some found =>
+        have foundContains := checked.entryAtByte?_sound offset found hfind
+        have foundExact := checked.entryContainingByteUnique offset found entry
+          foundContains.1 contains.1 foundContains.2.1 foundContains.2.2
+            contains.2.1 contains.2.2
+        exact congrArg some foundExact
+
+/-- Byte lookup fails exactly outside the emitted byte stream. -/
+theorem entryAtByte?_eq_none_iff
+    {emission : RawProgramEmission State Terminal Instruction}
+    {sectionId : SectionId}
+    (checked : CheckedLinkSourceMap emission sectionId)
+    (offset : Nat) :
+    checked.entryAtByte? offset = none ↔ emission.byteLength ≤ offset := by
+  constructor
+  · intro notFound
+    by_cases bound : offset < emission.byteLength
+    · obtain ⟨entry, entryMem, lower, upper⟩ :=
+        checked.entryForByte offset bound
+      have found := (checked.entryAtByte?_eq_some_iff offset entry).mpr
+        ⟨entryMem, lower, upper⟩
+      rw [notFound] at found
+      contradiction
+    · omega
+  · intro outOfBounds
+    cases hfind : checked.entryAtByte? offset with
+    | none => rfl
+    | some entry =>
+        have contains := checked.entryAtByte?_sound offset entry hfind
+        have bounded := checked.entryBounded entry contains.1
+        omega
 
 end CheckedLinkSourceMap
 
