@@ -304,8 +304,28 @@ design review and tooling ownership. The review records:
 An implementation plan may require owner-local checks for its own candidate, but
 does not by itself grant them authority over every other owner. A fleet-wide gate
 obtains that authority from corpus-level design review such as this section, not
-from the plan that first proposed its rule. Decision 135 records the disposition
-of the six additional scanner classes proposed in `c-mem:61`.
+from the plan that first proposed its rule.
+
+The six additional scanner classes proposed in `c-mem:61` are rejected as one
+unreviewed fleet-wide bundle, while remaining eligible for separate proposals:
+
+- **citation** reports a Lean-comment reference whose declaration name cannot be
+  found;
+- **projection-use** reports a structure-field name with no lexical projection
+  site;
+- **constructor-use** reports an inductive constructor with no lexical
+  construction site outside its declaration;
+- **fixture-use** reports a test definition with no lexical consumer;
+- **file-reachability** reports a tracked Lean source reached by neither a build
+  target nor an audit; and
+- **authority-door** reports a lexical call to a designated state-mutating door
+  from outside its per-door caller allowlist.
+
+These are candidate defect classes, not findings about semantics. Each must
+return through the gate-entry process above with determinate scope,
+false-positive and false-negative evidence, ownership, cost, and rollback. This
+records the question and proposal in `c-mem:61`, the initial ruling in
+`g-design:172`, and the review corrections in `c-reviewer:153`.
 
 A proof-friendly program is not accepted merely because its theorem is small.
 For every spike, reviewers classify each simplification as:
