@@ -348,10 +348,35 @@ and `Tests/ABI/Win64/PrologueRealization.lean` refutes both layouts above.
 Three things are still true and worth stating plainly.
 
 First, `Realizes` covers three of the nine operations -- the two allocation
-forms and a nonvolatile push. The rest have no unambiguous instruction,
-`UnwindOp.prologueInsns` returns `none` for them, and `Realizes` refuses rather
-than guesses. A layout using `setFramePointer` is no better checked than
-before.
+forms and a nonvolatile push. `UnwindOp.prologueInsns` returns `none` for the
+rest and `Realizes` refuses rather than guesses, so a layout using
+`setFramePointer` is no better checked than before.
+
+The reason is not that those operations are ambiguous. It was recorded that
+way, and `Tests/ABI/Win64/UnwindCorpus.lean` shows otherwise: `Step.length`
+names what `ml64` emits for every one of them, measured by the differential.
+The blocker is that this library cannot produce those encodings.
+
+`Grass.ISA.X86.encodeMem` is a canonical encoder, not a minimal one: every
+memory form it builds carries `mod=10` and a `disp32`, with no shorter
+displacement ever chosen. Measured against the corpus, that costs three bytes
+or five on each of the operations in question -- `lea rbp, [rsp+32]` encodes
+to 8 bytes here where `ml64` writes 5, and `mov [rsp+8], rbx` likewise 8
+against 5. A `prologueInsns` extended to `saveNonvolatile` today would
+therefore report lengths no assembler produces, which is worse than refusing:
+`Realizes` would accept layouts that mis-unwind and reject ones that do not.
+
+`setFramePointer` carries a second, independent blocker. At offset zero `ml64`
+writes `mov r, rsp` and not a `lea` at all -- 3 bytes against the 8 this
+library would build -- so covering it needs a register-direct `MOV r64, r64`
+encoder as well as the displacement work.
+
+So the order is: displacement minimisation in `Grass.ISA.X86.encodeMem`
+first, since nothing else can be attempted before it, and that is a change to
+every memory encoding in the library rather than an addition beside them.
+`Tests/ISA/X86/NasmCorpus.lean` pins the current forms, so it is the thing
+that decides whether canonical or minimal is what Grass emits -- a question
+for whoever takes it, not one this module settles.
 
 Second, `WellFormed` does not require `Realizes`, and should not. `Realizes`
 assumes the prologue is exactly its unwind-relevant instructions laid

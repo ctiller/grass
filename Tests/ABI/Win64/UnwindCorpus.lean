@@ -183,6 +183,44 @@ def op : Step → UnwindOp
       else .saveXmm128Far r off
   | .pushFrame withErrorCode => .pushMachineFrame withErrorCode
 
+/-! ### The gap between what `ml64` writes and what this library can build
+
+`Grass/ABI/Win64/UnwindBytes.lean` records why `Realizes` covers three unwind
+operations and not the rest. The reason is not ambiguity -- `length` above says
+exactly what `ml64` emits for all six -- but that `Grass.ISA.X86.encodeMem` is a
+*canonical* encoder: every memory form it builds carries `mod=10` and a
+`disp32`, and no shorter displacement is ever chosen.
+
+These pin the size of that gap. They are the numbers that obligation quotes, and
+they exist so it cannot go stale silently: an `encodeMem` that learned to
+minimise displacements would falsify the first three, and whoever writes it has
+to come back here and to that header rather than leaving both describing a
+library that no longer behaves that way. -/
+
+/-- `lea rbp, [rsp+0]`: eight bytes canonically. `ml64` writes `mov rbp, rsp`,
+which is three, and is a different instruction rather than a shorter encoding of
+the same one. -/
+example : (leaR64 .rbp (.base .rsp 0)).map InsnEncoding.size = some 8 := rfl
+example : Step.length (.setFrame .rbp 0) = 3 := rfl
+
+/-- `lea rbp, [rsp+32]`: eight canonically, five from `ml64`, and here the
+instruction *is* the same one -- only the displacement width differs. -/
+example : (leaR64 .rbp (.base .rsp 32)).map InsnEncoding.size = some 8 := rfl
+example : Step.length (.setFrame .rbp 32) = 5 := rfl
+
+/-- `mov [rsp+8], rbx`: the same three-byte difference, for the operation
+`UWOP_SAVE_NONVOL` describes. -/
+example : (encodeMemInsn false 0x89 true (.reg .rbx) (.base .rsp 8)).map
+    InsnEncoding.size = some 8 := rfl
+example : Step.length (.saveReg .rbx 8) = 5 := rfl
+
+/-- The gap is not constant, which is why `prologueInsns` cannot correct for it
+with an offset: it is three bytes for a `disp8` operand and five for the
+zero-displacement frame pointer, and it would be zero for an offset past 127
+where `disp32` is what `ml64` writes too. -/
+example : Step.length (.setFrame .rbp 240) = 8 := rfl
+example : (leaR64 .rbp (.base .rsp 240)).map InsnEncoding.size = some 8 := rfl
+
 /-! ### The small/large boundary
 
 `op` puts the boundary at 128, which its docstring says is exactly
