@@ -126,18 +126,23 @@ identities:
 
 ```lean
 structure PEImportIdentity where
-  providerOperation : NominalProviderOperation
+  logicalImport : SerializableImportEntry
   dll : CanonicalDllName
   symbol : ImportNameOrOrdinal
-  abi : Win64CallableContract providerOperation
 ```
 
-The plan owns this mapping. The linker derives descriptors and IAT slots from
-it, and artifact connection proves each resolved slot implements the identical
-nominal provider operation and ABI contract referenced by its call node. DLL
-name, symbol/ordinal, slot identity, and import-environment choice participate in
-the namespaced loaded/raw coupling; matching a function name alone is
-insufficient.
+The platform plan owns the proved mapping from the target-independent logical
+import to this PE identity. For a provider import it proves that the DLL and
+name-or-ordinal implement the identical provider profile, nominal operation,
+and ABI contract named by `logicalImport`; for an inter-object callable it
+resolves the named exported signature and callable under the same ABI contract.
+The linker derives descriptors and IAT slots from that mapping. A slot is a
+layout result, not serialized `.gobj` identity. DLL name, symbol/ordinal,
+derived slot identity, and import-environment choice participate in the
+namespaced loaded/raw coupling; matching a function name alone is insufficient.
+The accompanying in-kernel resolution certificate, rather than this
+first-order identity, carries the `Win64CallableContract` and proves that its
+nominal contract key is exactly `logicalImport.abiContract`.
 
 Exports are derived from
 verified callable declarations. Unused imports and unmodeled entry points are

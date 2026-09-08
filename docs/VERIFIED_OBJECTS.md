@@ -56,6 +56,54 @@ structure VerifiedObject (sig : ProgramSignature) where
   machine : ObjectMachineCodeRefines privateSpec source payload
 ```
 
+The target-independent import body has a small, first-order identity rather
+than embedding a platform loader record or a Lean contract:
+
+```lean
+inductive SerializableImportSubject where
+  | callable
+      (signature : StableScopeId)
+      (callable : StableId)
+  | providerOperation
+      (providerProfile : StableId)
+      (operation : StableId)
+
+structure SerializableImportEntry where
+  localTarget : StableId
+  subject : SerializableImportSubject
+  abiContract : StableId
+
+structure SerializableImportManifest where
+  entries : Vec SerializableImportEntry
+  localTargetsUnique : PairwiseDistinct entries.localTarget
+```
+
+All identifiers are encoded by their structured components; a dotted display
+name or digest is not an identity. `localTarget` is the stable object-local
+symbolic target used by relocations. A callable subject names an exported
+callable in an imported program signature. A provider subject names the exact
+selected provider profile and operation. `abiContract` names the complete,
+versioned ABI contract expected at that boundary. The rich signature, provider
+dictionary, ABI value, and their laws remain in the in-kernel object; a
+`PayloadImportsSignature` proof resolves every serialized name to those exact
+values and proves that every imported relocation uses the matching
+`localTarget`.
+
+The manifest deliberately contains neither a final loader spelling nor a slot
+address. A final platform link maps a provider subject to a format-specific
+physical import identity (for example DLL plus name-or-ordinal), proves that it
+implements the same nominal operation and ABI contract, and then derives and
+lays out any GOT/IAT/PLT slot. The selected import environment and derived slot
+identity enter the final loaded/raw coupling. This separation permits the same
+`.gobj` grammar to carry Win32, ELF, WASI, bare-metal, and inter-object imports
+without making a Windows import tuple the universal object identity.
+
+The binary reader validates framing, tags, structured identifier encodings,
+and uniqueness. It cannot manufacture the semantic lookup proofs. Unknown
+subject variants fail under the declared format version; future variants
+require a new version or an explicitly registered length-delimited extension
+with its own parser laws.
+
 The existential/private specification is lawful here because an object claims
 only its exported interface. It is not lawful at the final product gate, where
 the exact precious root specification is known and retained.
