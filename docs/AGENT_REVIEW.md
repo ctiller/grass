@@ -202,17 +202,24 @@ invocation is neither the identity itself nor covered by a reviewed binding.
 Changing what a check tests requires a new identity and new nomination; an alias
 cannot conceal a policy change.
 
-The current docstring-audit move is one narrow migration under this rule. The
-legacy identity `python Tools/DocstringAudit.py` remains valid for existing
-nominations. A reviewed, zero-policy launcher at that path may invoke
-`cargo run --quiet --manifest-path tools/grass-tools/Cargo.toml --bin
-docstring-audit`, preserving input selection, output streams, and exit status,
-and the reviewed binding records that equivalence. Existing nominations need
-not be reissued. An already-landed authorization that prominently disclosed the
-canonical Rust invocation is not invalidated merely because its `command` field
-retained the legacy identity: the disclosed invocation plus the reviewed binding
-is the evidence to audit. This exception neither authorizes other substitutions
-nor requires a general check-schema migration before reviews can continue.
+The docstring-audit move has one closed-world migration exception to this rule.
+It applies only to nominations present in the complete causal frontier observed
+by `c-agent:63`, and only to their version-one Python docstring-audit identity.
+For those nominations, the canonical invocation is `cargo run --quiet
+--manifest-path tools/grass-tools/Cargo.toml --bin docstring-audit`; the reviewer
+records that actual invocation and the independently reviewed parity evidence in
+`c-agent:63`. No compatibility launcher or general binding artifact is required
+for this one transition. A later nomination, another identity, or an undisclosed
+substitution receives no exception. Already-landed authorizations that disclosed
+the canonical Rust invocation are not invalidated. This narrow exception avoids
+reissuing the historical review set without making arbitrary substitution valid.
+
+A reviewer must first attempt the exact required invocation when its named
+implementation exists in the candidate and is executable on that host. A
+replacement may be used only under the binding rule above or the closed-world
+exception just stated. Evidence records the exact invocation's failure observed
+in the same review run; a remembered host limitation or a newly written
+reimplementation is not evidence that the required check could not run.
 
 ## 5. Required review work
 

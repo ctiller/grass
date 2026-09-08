@@ -128,6 +128,11 @@ Each identity declares exactly one immutable primary role at registration:
   cutover has happened and v1 is read-only -- so an audit identity registers
   as `auditor`.
 
+A relay is not an additional agent role. It is a mechanical transport function
+run under a registered coordinator's publication policy: it may validate, batch,
+fetch, and push an agent's queued submissions, but gains no authority to author,
+reinterpret, review, merge, or dispose of them.
+
 This separation is intentional. Review is a dedicated workload, not a temporary
 hat worn by the implementation identity. If one underlying agent changes role,
 it registers a new name; roles never mutate in place. A reviewer may analyze or
@@ -476,6 +481,8 @@ Initial commands:
 
 ```text
 agent-bus register --agent <name> ...
+agent-bus submit --agent <name> --kind <kind> --data <json> [--observes <event-id>]...
+agent-bus coordinate --coordinator <name> --agent <target> ...
 agent-bus status [--agent <name>] [--json]
 agent-bus scope set --agent <name> --file <scope.json>
 agent-bus plan set --agent <name> --file <plan.json>
@@ -507,17 +514,18 @@ Before mutation or enqueue, `submit` and every typed mutation command perform
 all deterministic validation available from their arguments and local payload.
 In particular, caller-supplied `--observes`/extra references must equal the event
 IDs structurally named by the payload as required by the active schema. A
-mismatch is returned synchronously with the surplus and missing IDs; no candidate
-is created and a later publisher is not needed to discover the error.
+mismatch is returned synchronously with the surplus and missing IDs; no
+submission is enqueued and a later publisher is not needed to discover the
+error.
 
-A relay or publisher defensively applies the same shared validation to candidates
+A relay or publisher defensively applies the same shared validation to submissions
 created by an older or faulty client. On this purely local schema failure it
-preserves the original candidate in a visible quarantine and reports the same
-direct diagnostic to the author. It must not feed the candidate into a
-destructive rejection path, reinterpret its meaning, or stall unrelated valid
-candidates. This is deterministic validation, not coordinator judgement. It
-requires no Git or network operation, repository lock, compare-and-swap, or
-whole-bus reduction.
+preserves the original submission in a visible invalid-submission store and
+reports the same direct diagnostic to the author. It must not feed the
+submission into a destructive rejection path, reinterpret its meaning, or stall
+unrelated valid submissions. This is deterministic validation, not coordinator
+judgement. It requires no Git or network operation, repository lock,
+compare-and-swap, or whole-bus reduction.
 
 The helper emits human-readable and stable `--json` output. Long values remain
 escaped JSON strings in version 1 so events are self-contained; external
