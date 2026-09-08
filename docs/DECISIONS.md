@@ -596,10 +596,20 @@ to imitate compiler-selected storage or CFG structure.
     distinct. Missing/unreachable remote objects make linked claims
     `unverifiable`, not malformed; authority-bearing operations still fail
     closed until fetch and verification succeed. Present mismatches are invalid.
-114. Merge determinism is pinned by an explicit engine epoch. Reviewed
-    `merge_engine.activated` events upgrade the fleet without rewriting bootstrap
-    or historical authorizations. Each candidate names its epoch and uses fully
-    deterministic commit metadata, with cross-platform object-ID fixtures.
+114. The bootstrap merge epoch retains its exact Git-version pin and
+    reconstruction checks until a reviewed successor is implemented and
+    activated; documentation alone cannot change the live protocol. The
+    successor removes an exact host Git patch version as a fleet-wide runtime
+    prerequisite by using specified canonical merge semantics and an
+    independently checked merge certificate. The certificate accounts for all
+    selected source changes, changed tree entries, inherited subtrees, and the
+    absence of injected content. Authorization still names the exact candidate
+    object, ordered parents, source, metadata, scope, policy epoch, and
+    certificate. A successor schema activation requires dual-version readers,
+    linked validation, adversarial omission/alteration/injection fixtures, and
+    a reviewed helper migration. It does not rewrite bootstrap or historical
+    authorizations. Once objects are local, verification is a local operation
+    over changed paths and tree spines, not a network round trip or checkout.
 115. `agent.resumed` may transfer exclusive custody from the identity's latest
     own lifecycle event of any status or a coordinator retirement targeting it,
     so silent death while `active` does not strand the identity or its role.
@@ -827,6 +837,34 @@ to imitate compiler-selected storage or CFG structure.
     of every `Grass/Process/**` module. This resolves the three-way
     spike/foundation/module mismatch raised by `c-spike` while retaining the
     process layer's no-import-all invariant.
+135. Grass tooling is intended to be rebuilt in Grass, tool by tool; this is a
+    staged direction, not a retroactive gate on existing bootstrap tools. Before
+    any tool enters that migration, a reviewed per-tool ratchet must inventory
+    its assurance role and define its implementation-independent accepted
+    inputs, state transitions, outputs, failure behavior, resource budget,
+    contract/proof owners, non-circular build and verification chain,
+    compatibility window, activation authority, and rollback rule. Until that
+    ratchet is activated, the existing Rust, Lean, PowerShell, or other host
+    implementation retains its current authority and obligations. A Grass
+    replacement must refine the contract and may not authorize its own proof or
+    activation. Differential execution against the bootstrap implementation is
+    corroborating test evidence, not proof. The old implementation remains
+    available through the declared compatibility/rollback window. This staged
+    rule permits eventual self-hosting without pretending the unfinished Grass
+    substrate can already construct itself.
+136. Portable repository paths are checked against a versioned, finite
+    component-equivalence profile over the complete candidate Git tree. The
+    initial profile includes ASCII case-folding per slash-delimited component.
+    The reviewed normalization merge both removes every governed collision and
+    activates the profile at its exact candidate commit; no later event creates
+    an activation gap. That candidate alone may begin from a colliding tree, and
+    it may neither add nor retain a governed collision. A concurrent advance
+    loses under the existing stale-`previous_main` rule. Descendants inherit a
+    checked collision index and update it only along changed paths/tree spines,
+    while a clean audit may reconstruct it from the complete tree. Repository
+    tooling normalizes to the single lowercase root `tools/`; `Tools/` is not a
+    valid peer. After the boundary commit, pre-existing and newly introduced
+    collisions fail equally, independent of checkout settings.
 
 ## Explicitly rejected shortcuts
 

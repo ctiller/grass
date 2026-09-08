@@ -457,14 +457,59 @@ the reviewer merges the selected commit, not whatever the branch later names.
 Later commits stay outside `main` and require a later merge under an active
 nomination. The helper and receipt make this boundary visible.
 
-`prepare-merge` uses the merge engine and exact version pinned in immutable
-`BUS.json` or the currently selected `merge_engine.activated` epoch, with fixed
-helper-owned options and repository attributes from `previous_main`. It requires
-one merge base, refuses conflicts, submodule
-ambiguity, unsupported filters, and platform-dependent path collisions, and
-constructs the commit itself. The acceptance corpus covers renames, modes,
-attributes, symlinks, submodules, and conflicting edits. Reviewers never edit a
-prepared candidate tree.
+The bootstrap `prepare-merge` implementation uses the merge engine and exact
+version pinned in immutable `BUS.json` or the currently selected
+`merge_engine.activated` epoch, with fixed helper-owned options and repository
+attributes from `previous_main`. It requires one merge base, refuses conflicts,
+submodule ambiguity, unsupported filters, and platform-dependent path
+collisions, and constructs the commit itself. The acceptance corpus covers
+renames, modes, attributes, symlinks, submodules, and conflicting edits.
+Reviewers never edit a prepared candidate tree. The bootstrap exact-version
+rule remains active until a reviewed successor is activated; prose does not
+silently change the live event schema or helper.
+
+The intended successor replaces the fleet-wide Git patch-version dependency
+with a versioned, implementation-independent merge certificate, not with trust
+in an unexplained fetched tree. Its schema must specify canonical merge
+semantics and a certificate which accounts for every changed tree entry,
+inherits unchanged subtrees from `previous_main`, preserves every selected
+source change, and proves that no additional in-scope content was synthesized.
+Candidate construction and certificate checking must use independent code
+paths. Authorization then names the exact commit and tree, ordered parents,
+selected source, deterministic metadata, reviewed scope, policy epoch, and
+certificate. `merge-ready` checks that certificate and the named object rather
+than asking the host's system Git to rediscover the merge. Once referenced
+objects are local, this check is local and proportional to changed entries and
+their tree spines; it performs no publication, fetch, or whole-repository file
+checkout. Activation requires a schema readable alongside the bootstrap
+schema, linked validators for both histories, negative fixtures for omitted,
+altered, and injected paths, and a reviewed helper migration.
+
+A successor portable-path profile is introduced only after its exact
+component-equivalence function is in the schema. The first profile at least
+folds ASCII `A` through `Z` to `a` through `z` independently in every
+slash-delimited component. The normalization merge itself is the activation
+boundary; there is no repair-then-activate interval. Its nomination,
+authorization, and candidate manifest name the exact profile, design/helper
+versions, previous `main`, complete collision-free candidate tree, and checked
+collision index. The candidate is the sole transition exception: it may begin
+from pre-existing collisions but may not introduce a new one or leave any
+collision governed by the profile. The existing reviewed fast-forward advances
+`main` to that exact tree and makes the profile effective for that commit and
+all descendants. A receipt reports this transition but does not activate it in
+a later race-prone step.
+
+Subsequent candidates inherit the parent's checked collision index and update
+it for changed paths and tree spines; a clean audit may reconstruct the index
+from the complete Git tree. Thus the semantic invariant covers the complete
+candidate tree while ordinary local work remains incremental. A host setting
+such as `core.ignorecase=false` cannot make an invalid tree valid. The
+normalization target for repository tooling is the single lowercase root
+`tools/`; `Tools/` must be removed by that candidate. A concurrent advance of
+`main` loses under the existing stale-`previous_main` rule and requires a newly
+prepared normalization candidate. Acceptance fixtures race an ordinary
+old-profile candidate against normalization in both publication orders and
+admit no descendant which reintroduces a governed collision.
 
 Candidate commit identity is deterministic. The helper emits exactly two parents
 in the stated order; fixed author and committer
@@ -479,8 +524,10 @@ agent-bus candidate
 Agent-Bus-Reviewer: <reviewer>
 ```
 
-For identical epoch, parents, and reviewer, Windows and Linux must produce the
-same tree and commit object ID.
+Under the bootstrap epoch, identical engine version, parents, and reviewer must
+produce the same tree and commit object ID on Windows and Linux. Under the
+successor, independent constructors and certificate checkers must agree on the
+canonical tree and object without consulting a host Git merge implementation.
 
 A mechanical, conflict-free merge commit is integration metadata and does not
 make the reviewer a product author. Always creating it gives product history an
