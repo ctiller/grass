@@ -2234,7 +2234,9 @@ live, and `tearDown?` refuses while any grant is outstanding over the storage --
 the two guards between them kept the bad state out. **That is an emergent property of
 two guards and not a stated law**, and it is the kind that stops holding when a third
 door is added. `Live` is `CurrentEpoch` and more, so this is a strict narrowing:
-nothing authorized before is refused now. -/
+the authorized set only shrinks. Nothing refused before is authorized now, and
+the case this adds -- a grant over storage torn down inside its own epoch -- is
+refused where it used to be admitted, which is the whole point of the change. -/
 theorem not_authorizedAt_of_dead {state : MemoryState} {grant : AuthorityGrant}
     {context : ContextId} {provenance : Provenance} {offset : Nat}
     {intent : AccessIntent} (h : ¬ state.Live provenance) :
