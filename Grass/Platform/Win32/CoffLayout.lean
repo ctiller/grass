@@ -69,11 +69,23 @@ declare `numberOfAuxSymbols = 1` and are followed by a record this profile does
 not emit, so an object written here with such a count would mis-index every
 symbol after it. `Symbol.toBytes` writes the field; nothing writes the record.
 
-Alignment. Sections are laid end to end with no padding, which
-`Object.length_toBytes` states exactly. Real toolchains align section data, and
-a version that does will have to add the padding to `toBytes` and to that
-theorem together -- which is what makes it the theorem that fails first if only
-one of them is changed.
+Nothing about alignment, and that is correct rather than a gap. An earlier
+version of this paragraph said real toolchains align section data in the file
+and that padding was owed. That was assumed and it is false: in the objects
+measured for these modules `ml64` puts `.pdata` at file offset 227 and `.xdata`
+at 270, neither of which is even four-byte aligned. Section data is packed.
+
+The alignment a section declares -- `ALIGN_4BYTES` for `.pdata`,
+`ALIGN_8BYTES` for `.xdata`, in `characteristics` -- constrains where the
+*linker* places the section in the image, not where the writer puts its bytes in
+the file. So `Object.length_toBytes` stating that the file is exactly its parts
+with no slack is not a simplification to be paid for later; it is what an object
+file looks like.
+
+What genuinely differs from `ml64` is arrangement, which the paragraph above
+already covers: it interleaves each section's relocations with its data, and
+this writes all data then all relocations. Both are legal, because the headers
+say where everything is.
 -/
 
 namespace Grass.Platform.Win32.Coff
