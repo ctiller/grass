@@ -125,3 +125,69 @@ engine's reuse claims and cache-key sufficiency.
 
 Published-corpus lint also rejects audience/workstation idioms used as evidence,
 including “worked on my machine,” in addition to literal private topology.
+
+## 8. Repository tools and staged self-hosting
+
+Correctness-critical repository tooling is production software. A bus reducer,
+review gate, linker, emitter, cache validator, compiler, or audit command can
+invalidate the evidence chain even when it is not shipped inside the user's
+program. Its assurance obligation is proportional to that authority, not to
+the language in which its first version happens to be written.
+
+Each such tool has a language-independent behavioral contract covering:
+
+- accepted, rejected, incomplete, stale, conflicting, and unsupported inputs;
+- state transitions, durable writes, recovery, idempotence, and replay;
+- authority and freshness checks at the operation which needs them;
+- bounded local latency and resource use for ordinary read/write paths;
+- compatibility and migration across simultaneously deployed versions; and
+- exact observable effects at filesystem, Git, process, and network boundaries.
+
+The contract is the durable asset. Rust, another native bootstrap language, and
+Grass are replaceable realizations. Implementation-specific structs, exit text,
+Git version strings, and cache layouts enter the contract only when an external
+consumer genuinely observes them. In particular, a reader must not make an
+append-only history unreadable merely because it cannot execute a newly selected
+mutation engine; it reduces and reports the selected state, while the affected
+mutation command fails closed with an explicit unsupported-capability result.
+
+Porting proceeds from small pure boundaries outward:
+
+1. codecs, canonical writers, schema validation, and pure state reduction;
+2. local queries and audits over the reduced state;
+3. preparation of mutations as explicit plans;
+4. filesystem, Git, publication, and integration effects; and
+5. the compiler and complete self-hosted toolchain.
+
+Every boundary keeps its normal serialization laws. Pure reducers additionally
+have model/state-machine tests for arbitrary valid interleavings and negative
+fixtures for every previously escaped corruption class. Effectful commands have
+crash-point, retry, concurrent-writer, stale-input, and cross-platform fixtures.
+Tests exercise the same public command boundary operators and agents use; a
+parallel test-only implementation is not evidence for the production path.
+
+A Grass replacement first runs in shadow against retained bootstrap traces.
+Differential campaigns compare classified results, reduced states, intended
+effects, and produced bytes—not timing, incidental diagnostics, or other
+unspecified details. Disagreement is a retained finding. The Grass realization
+is promoted only after its refinement theorem, exact emitted artifact
+connection, migration proof, negative fixtures, and measured local cost pass
+review. During an explicit compatibility window both implementations can read
+the same durable format, and mutating dual execution is performed only in an
+isolated fixture or through one proved single-commit protocol; two live writers
+must not duplicate an external effect merely to compare them.
+
+Self-hosting preserves an explicit induction anchor. Let `T₀` be the reviewed
+native seed and `T₁` the first verified Grass implementation built with it. The
+claim about `T₁` comes from its checked source-to-artifact proof plus independent
+validation of `T₀`'s relevant boundary—not from asking `T₁` to certify itself.
+Later `Tₙ₊₁` rebuilds carry forward exact source, proof environment, toolchain,
+and artifact identities and may be compared with independently rebuilt outputs.
+The current Lean kernel and allowed foundation remain part of the declared TCB
+until a separately reviewed theorem and checker transition changes that fact.
+
+Rebuild is the verb. A tooling defect adds the smallest durable specification,
+proof, property/state-machine test, mutation, or fault fixture which would have
+caught it, with burden review before a new universal proof demand is attached to
+the public verified-program or tool boundary. The repair must survive replacing
+the implementation rather than merely recognizing one historical code path.
