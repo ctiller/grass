@@ -395,13 +395,19 @@ the documented contract rather than a lawful failure. The over-approximation is
 in the safe direction: it admits a response the API may never produce, and never
 rejects one it does.
 
-It is worth naming because `writeAdequate` witnesses adequacy with a `.failure`
-response. A reviewer pointed out that the profile therefore proves "some
-response is allowed" using the one response whose lawfulness is least certain.
-Narrowing the branch to statuses the API documents is an open obligation; it
-would strengthen `Allowed` without changing `excess_not_allowed` or
-`success_allowed_or_excess`, which partition the `success` constructor and are
-where the content is.
+A reviewer pointed out that `writeAdequate` used to witness adequacy with
+`.failure 0`, so the profile proved "some response is allowed" using the one
+response whose lawfulness is least certain. It now witnesses with
+`.success q.requested`, a complete write, which is lawful beyond argument.
+Adequacy no longer rests on the branch the note is about.
+
+Narrowing the branch itself remains open and is deliberately not done here.
+Requiring a nonzero status would strengthen `Allowed`, but it would also reject
+a response if the API ever does produce one -- and this module's stated rule is
+that too narrow is unsound while too wide only makes a program unverifiable.
+Narrowing wants a documented enumeration of the statuses `WriteFile` can
+report, which is what the citation campaign is for, not a guess about which
+ones look plausible.
 -/
 
 /--
@@ -419,7 +425,7 @@ obligation** it cannot see, because nothing inside the model knows what the
 documentation says. That is what the citation and the probe campaign are for.
 -/
 theorem writeAdequate (q : WriteRequest) : ∃ r, Allowed q r :=
-  ⟨.failure 0, trivial⟩
+  ⟨.success q.requested, Nat.le_refl _⟩
 
 /-- Adequacy is not satisfied only by failures: a complete write is allowed for
 every request, so the profile does not accidentally permit only errors. -/
