@@ -155,6 +155,10 @@ alignments from selected object representations and ordinary struct placement.
 separation, while lookup theorems recover concrete placements from nominal field
 membership. Empty, packed, overlay, bitfield, and flexible-tail representations
 remain separate constructors rather than exceptions to the ordinary checker.
+`Grass.Construct.Layout.Array` adds positive fixed-length arrays with explicit
+stride and optional tail padding. Successful index selection has exact
+existence, within-bound, and pairwise-separation theorems; zero counts,
+zero-sized elements, short strides, and misaligned strides are rejected.
 
 Build layout and placement values under `Grass/Construct/`:
 
