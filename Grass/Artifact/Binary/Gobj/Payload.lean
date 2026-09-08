@@ -156,4 +156,19 @@ every following suffix. -/
     readGobj (writeGobj payload) = .done payload Vec.empty := by
   simpa using readGobj_write_append payload Vec.empty
 
+/-- Parse a complete `.gobj` buffer, rejecting both truncation and trailing data. -/
+def parseGobj (input : Std.Logical.ByteArray) : Except ParseError GobjPayload :=
+  match readGobj input with
+  | .done payload rest =>
+    if rest = Vec.empty then .ok payload else .error .trailingInput
+  | .needMore _ => .error (.malformed "truncated .gobj payload")
+  | .invalid error => .error error
+
+/-- `parseGobj_write` is the normative complete-input `.gobj` corpus law. -/
+@[simp] theorem parseGobj_write (payload : GobjPayload) :
+    parseGobj (writeGobj payload) = .ok payload := by
+  unfold parseGobj
+  rw [readGobj_write]
+  rfl
+
 end Grass.Artifact.Binary.Gobj
