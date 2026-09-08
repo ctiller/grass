@@ -598,9 +598,35 @@ permissive specification, implementation observations must be a subset of the
 allowed behavior relation. Infinite traces use coinductive/trace refinement;
 finite terminating cases may use ordinary equality or simulation.
 
+The foundation relation is `BehaviorRefinement`, not a one-instruction/
+one-transition bisimulation. Its `RefinementLens.project` is a compositional
+list homomorphism selecting the abstract audit segment for each concrete
+segment. `BehaviorRefinement.segment` therefore admits zero-denotation internal
+work, multi-instruction lowering, and branch-specific region summaries while
+retaining the exact mapped boundary state and graph. The derived
+`BehaviorRefinement.lockstep` constructor covers the special case where every
+concrete step already is one abstract step.
+
+Terminal frontiers map through `BehaviorRefinement.terminal`. Infinite
+executions map through `InfiniteRefinement`, whose `abstractPrefix` and
+`concreteBoundary` fields require every abstract intermediate prefix to occur
+within a projected concrete segment and every complete concrete boundary to
+match an abstract boundary exactly, including mapped state and graph.
+Consequently an implementation cannot erase an infinite internal loop merely
+by assigning each finite step zero denotation: it must supply an actual matching
+abstract divergence. A terminating abstraction has no such witness. CFG path
+and SCC discovery belong to assembly tooling; Foundation checks only the local
+segment summaries and their composition.
+
 Optimization may change instruction traces, layout, timing, or internal API
 structure only if it preserves the selected functional observation and every
-independent mandatory demand.
+independent mandatory demand. `RefinementLens.observationExact` handles the
+functional projection. `SpecProcess.evidenceRelevant` identifies the ordered
+audit occurrences belonging to each stable, open-world requirement key
+(including derived stages), and
+`RefinementLens.evidenceNonErasing` preserves that keyed subtrace with order and
+multiplicity. Thus a safety event hidden from functional output cannot disappear
+from its independent proof channel.
 
 ## 7. Adequacy and non-vacuity
 

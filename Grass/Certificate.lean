@@ -64,154 +64,265 @@ end ProgramBehavior
 variable {spec : SpecProcess}
 variable {lower middle upper concrete abstract : ProgramBehavior spec}
 
-/-- Behavioral inclusion from a concrete layer into its immediate abstraction. -/
+/-- The explicit lens used by one refinement edge.
+
+`project` selects the abstract audit segment. It is a list homomorphism so
+local region summaries compose into prefixes. `observationExact` fixes the
+specification-selected functional observation, while `evidence` is a separate
+non-erasing channel for safety and other independent demands. -/
+structure RefinementLens (spec : SpecProcess) where
+  project : List spec.AuditEvent -> List spec.AuditEvent
+  project_nil : project [] = []
+  project_append : forall left right,
+    project (left ++ right) = project left ++ project right
+  observationExact : forall events,
+    spec.observationProjection.project (project events) =
+      spec.observationProjection.project events
+  /-- For every independently keyed demand, preserve the ordered occurrences
+  it marks as evidence. `List.Sublist` retains order and multiplicity while
+  still permitting the abstraction to carry additional evidence. -/
+  evidenceNonErasing : forall (key : RequirementKey)
+    (events : List spec.AuditEvent),
+    (events.filter (spec.evidenceRelevant key)).Sublist
+      ((project events).filter (spec.evidenceRelevant key))
+
+namespace RefinementLens
+
+/-- A refinement lens is determined by its trace projection; its laws and
+keyed evidence obligations are proof-irrelevant. -/
+@[ext]
+theorem ext {left right : RefinementLens spec}
+    (project : left.project = right.project) : left = right := by
+  cases left
+  cases right
+  cases project
+  rfl
+
+/-- The identity refinement lens. -/
+def identity (spec : SpecProcess) : RefinementLens spec where
+  project := id
+  project_nil := rfl
+  project_append := fun _ _ => rfl
+  observationExact := fun _ => rfl
+  evidenceNonErasing := fun _ _ => List.Sublist.refl _
+
+/-- Apply the lower lens and then the upper lens. -/
+def comp (first second : RefinementLens spec) : RefinementLens spec where
+  project events := second.project (first.project events)
+  project_nil := by rw [first.project_nil, second.project_nil]
+  project_append left right := by
+    rw [first.project_append, second.project_append]
+  observationExact events := by
+    rw [second.observationExact, first.observationExact]
+  evidenceNonErasing key events :=
+    (first.evidenceNonErasing key events).trans
+      (second.evidenceNonErasing key (first.project events))
+
+/-- A compositional projection maps a source prefix to an abstract prefix. -/
+theorem project_isPrefix (lens : RefinementLens spec)
+    {left right : List spec.AuditEvent} (included : left.IsPrefix right) :
+    (lens.project left).IsPrefix (lens.project right) := by
+  obtain ⟨suffix, rfl⟩ := included
+  exact ⟨lens.project suffix, (lens.project_append left suffix).symm⟩
+
+end RefinementLens
+
+/-- An abstract infinite execution matches a concrete one when every abstract
+prefix occurs within a projected concrete segment and every complete concrete
+boundary has an exact abstract boundary. The coverage direction rejects an
+infinite concrete zero-denotation loop unless the abstraction also supplies a
+genuinely matching divergence. -/
+structure InfiniteRefinement {concrete abstract : ProgramBehavior spec}
+    (lens : RefinementLens spec)
+    {state : concrete.system.State} {graph : concrete.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    (mapState : concrete.system.State -> abstract.system.State)
+    (mapGraph : concrete.system.Graph -> abstract.system.Graph)
+    (concreteExecution : concrete.system.InfiniteContinuation state graph priorEvents) where
+  abstractExecution : abstract.system.InfiniteContinuation (mapState state) (mapGraph graph)
+    (lens.project priorEvents)
+  /-- Every abstract intermediate boundary lies inside the projection of some
+  complete concrete segment. This admits multi-step expansion. -/
+  abstractPrefix : forall abstractLength, exists concreteLength,
+    (abstractExecution.prefixEvents abstractLength).IsPrefix
+      (lens.project (concreteExecution.prefixEvents concreteLength))
+  /-- Every concrete boundary has an exact abstract boundary, including its
+  selected events, mapped state, and mapped graph. -/
+  concreteBoundary : forall concreteLength, exists abstractLength,
+    abstractExecution.prefixEvents abstractLength =
+      lens.project (concreteExecution.prefixEvents concreteLength) ∧
+    abstractExecution.stateAt abstractLength =
+      mapState (concreteExecution.stateAt concreteLength) ∧
+    abstractExecution.graphAt abstractLength =
+      mapGraph (concreteExecution.graphAt concreteLength)
+
+namespace InfiniteRefinement
+
+/-- An infinite refinement witness is determined by its selected abstract
+execution; coverage and boundary coupling are propositions. -/
+@[ext]
+theorem ext {concrete abstract : ProgramBehavior spec}
+    {lens : RefinementLens spec}
+    {state : concrete.system.State} {graph : concrete.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    {mapState : concrete.system.State -> abstract.system.State}
+    {mapGraph : concrete.system.Graph -> abstract.system.Graph}
+    {execution : concrete.system.InfiniteContinuation state graph priorEvents}
+    {left right : InfiniteRefinement lens mapState mapGraph execution}
+    (abstractExecution : left.abstractExecution = right.abstractExecution) :
+    left = right := by
+  cases left
+  cases right
+  cases abstractExecution
+  rfl
+
+end InfiniteRefinement
+
+/-- Weak behavioral inclusion over finite segments and exact maximal behavior. -/
 structure BehaviorRefinement (concrete abstract : ProgramBehavior spec) where
+  lens : RefinementLens spec
   mapState : concrete.system.State -> abstract.system.State
   mapGraph : concrete.system.Graph -> abstract.system.Graph
-  mapChoice : concrete.system.Choice -> abstract.system.Choice
   input : forall state, abstract.inputOf (mapState state) = concrete.inputOf state
   initial : forall {state graph}, concrete.system.Initial state graph ->
     abstract.system.Initial (mapState state) (mapGraph graph)
-  step : forall {graph state choice event nextState nextGraph},
-    concrete.system.Step graph state choice event nextState nextGraph ->
-    abstract.system.Step (mapGraph graph) (mapState state) (mapChoice choice) event
-      (mapState nextState) (mapGraph nextGraph)
+  segment : forall {state finalState graph finalGraph events},
+    concrete.system.Steps state graph events finalState finalGraph ->
+    abstract.system.Steps (mapState state) (mapGraph graph) (lens.project events)
+      (mapState finalState) (mapGraph finalGraph)
   terminal : forall {state graph}, concrete.system.Terminal state graph ->
     abstract.system.Terminal (mapState state) (mapGraph graph)
-  infiniteConsistency : forall {priorEvents stateAt graphAt choiceAt eventAt},
-    concrete.system.InfiniteConsistent priorEvents stateAt graphAt choiceAt eventAt ->
-    abstract.system.InfiniteConsistent priorEvents (fun index => mapState (stateAt index))
-      (fun index => mapGraph (graphAt index))
-      (fun index => mapChoice (choiceAt index)) eventAt
+  infinite : forall {state graph priorEvents}
+    (execution : concrete.system.InfiniteContinuation state graph priorEvents),
+    InfiniteRefinement lens mapState mapGraph execution
 
 namespace BehaviorRefinement
 
-/-- Two refinements are equal when their state, graph, and choice maps are
-equal. The remaining fields are propositions witnessing that those maps
-preserve the adjacent behaviors. -/
-@[ext]
+/-- Two weak refinements are equal when all computational selections agree;
+the remaining simulation, terminal, and evidence fields are propositions. -/
+@[ext (iff := false)]
 theorem ext {left right : BehaviorRefinement concrete abstract}
+    (lens : left.lens = right.lens)
     (state : left.mapState = right.mapState)
     (graph : left.mapGraph = right.mapGraph)
-    (choice : left.mapChoice = right.mapChoice) : left = right := by
+    (infinite : HEq
+      (@BehaviorRefinement.infinite spec concrete abstract left)
+      (@BehaviorRefinement.infinite spec concrete abstract right)) : left = right := by
   cases left
   cases right
+  cases lens
   cases state
   cases graph
-  cases choice
+  cases infinite
   rfl
 
+/-- Build the general segment certificate from the lockstep special case. -/
+def lockstep (mapState : concrete.system.State -> abstract.system.State)
+    (mapGraph : concrete.system.Graph -> abstract.system.Graph)
+    (mapChoice : concrete.system.Choice -> abstract.system.Choice)
+    (input : forall state, abstract.inputOf (mapState state) = concrete.inputOf state)
+    (initial : forall {state graph}, concrete.system.Initial state graph ->
+      abstract.system.Initial (mapState state) (mapGraph graph))
+    (step : forall {graph state choice event nextState nextGraph},
+      concrete.system.Step graph state choice event nextState nextGraph ->
+      abstract.system.Step (mapGraph graph) (mapState state) (mapChoice choice) event
+        (mapState nextState) (mapGraph nextGraph))
+    (terminal : forall {state graph}, concrete.system.Terminal state graph ->
+      abstract.system.Terminal (mapState state) (mapGraph graph))
+    (infiniteConsistency : forall {priorEvents stateAt graphAt choiceAt eventAt},
+      concrete.system.InfiniteConsistent priorEvents stateAt graphAt choiceAt eventAt ->
+      abstract.system.InfiniteConsistent priorEvents (fun index => mapState (stateAt index))
+        (fun index => mapGraph (graphAt index))
+        (fun index => mapChoice (choiceAt index)) eventAt) :
+    BehaviorRefinement concrete abstract where
+  lens := RefinementLens.identity spec
+  mapState := mapState
+  mapGraph := mapGraph
+  input := input
+  initial := initial
+  segment steps := by
+    induction steps with
+    | refl => exact .refl
+    | step prior transition inductionHypothesis =>
+        exact .step inductionHypothesis (step transition)
+  terminal := terminal
+  infinite execution :=
+    let mapped : abstract.system.InfiniteContinuation (mapState _) (mapGraph _)
+        ((RefinementLens.identity spec).project _) := {
+      stateAt := fun index => mapState (execution.stateAt index)
+      graphAt := fun index => mapGraph (execution.graphAt index)
+      choiceAt := fun index => mapChoice (execution.choiceAt index)
+      eventAt := execution.eventAt
+      stateZero := congrArg mapState execution.stateZero
+      graphZero := congrArg mapGraph execution.graphZero
+      step := fun index => step (execution.step index)
+      consistent := infiniteConsistency execution.consistent }
+    have prefixExact : forall length,
+        mapped.prefixEvents length = execution.prefixEvents length := by
+      intro length
+      induction length with
+      | zero => rfl
+      | succ length inductionHypothesis =>
+          simp only [RelationalSystem.InfiniteContinuation.prefixEvents]
+          rw [inductionHypothesis]
+    { abstractExecution := mapped
+      abstractPrefix := fun length => ⟨length, by
+        rw [prefixExact length]
+        change (execution.prefixEvents length).IsPrefix
+          (execution.prefixEvents length)
+        exact ⟨[], by simp⟩⟩
+      concreteBoundary := fun length => ⟨length, prefixExact length, rfl, rfl⟩ }
+
 /-- Refinement is reflexive. -/
-def refl (behavior : ProgramBehavior spec) : BehaviorRefinement behavior behavior where
-  mapState := id
-  mapGraph := id
-  mapChoice := id
-  input := fun _ => rfl
-  initial := id
-  step := id
-  terminal := id
-  infiniteConsistency := id
+def refl (behavior : ProgramBehavior spec) : BehaviorRefinement behavior behavior :=
+  lockstep id id id (fun _ => rfl) id id id id
 
-/-- Exact adjacent refinements compose without introducing a new proof route. -/
-def trans (lowerMiddle : BehaviorRefinement lower middle)
-    (middleUpper : BehaviorRefinement middle upper) :
-    BehaviorRefinement lower upper where
-  mapState state := middleUpper.mapState (lowerMiddle.mapState state)
-  mapGraph graph := middleUpper.mapGraph (lowerMiddle.mapGraph graph)
-  mapChoice choice := middleUpper.mapChoice (lowerMiddle.mapChoice choice)
-  input state := by
-    rw [middleUpper.input, lowerMiddle.input]
-  initial initial := middleUpper.initial (lowerMiddle.initial initial)
-  step step := middleUpper.step (lowerMiddle.step step)
-  terminal terminal := middleUpper.terminal (lowerMiddle.terminal terminal)
-  infiniteConsistency consistent :=
-    middleUpper.infiniteConsistency (lowerMiddle.infiniteConsistency consistent)
-
-/-- Reflexive refinement is a left identity for composition. -/
-@[simp]
-theorem refl_trans (refinement : BehaviorRefinement lower upper) :
-    (refl lower).trans refinement = refinement := by
-  apply ext <;> rfl
-
-/-- Reflexive refinement is a right identity for composition. -/
-@[simp]
-theorem trans_refl (refinement : BehaviorRefinement lower upper) :
-    refinement.trans (refl upper) = refinement := by
-  apply ext <;> rfl
-
-/-- Adjacent refinement composition is associative. The orientation gives
-the simplifier a right-associated normal form for certificate chains. -/
-@[simp]
-theorem trans_assoc {highest : ProgramBehavior spec}
-    (lowerMiddle : BehaviorRefinement lower middle)
-    (middleUpper : BehaviorRefinement middle upper)
-    (upperHighest : BehaviorRefinement upper highest) :
-    (lowerMiddle.trans middleUpper).trans upperHighest =
-      lowerMiddle.trans (middleUpper.trans upperHighest) := by
-  apply ext <;> rfl
-
-/-- Map a coherent finite suffix through a step simulation. -/
+/-- Map a coherent finite suffix through the segment simulation. -/
 theorem mapSteps (refinement : BehaviorRefinement concrete abstract)
     {state finalState : concrete.system.State}
     {graph finalGraph : concrete.system.Graph} {events : List spec.AuditEvent}
     (steps : concrete.system.Steps state graph events finalState finalGraph) :
     abstract.system.Steps (refinement.mapState state) (refinement.mapGraph graph)
-      events (refinement.mapState finalState) (refinement.mapGraph finalGraph) := by
-  induction steps with
-  | refl => exact .refl
-  | step prior transition inductionHypothesis =>
-      exact .step inductionHypothesis (refinement.step transition)
+      (refinement.lens.project events)
+      (refinement.mapState finalState) (refinement.mapGraph finalGraph) :=
+  refinement.segment steps
 
-/-- Map an infinite execution while retaining its global limit condition. -/
+/-- Map an infinite execution together with its cofinal-prefix evidence. -/
 def mapInfinite (refinement : BehaviorRefinement concrete abstract)
     {state : concrete.system.State} {graph : concrete.system.Graph}
     {priorEvents : List spec.AuditEvent}
     (execution : concrete.system.InfiniteContinuation state graph priorEvents) :
     abstract.system.InfiniteContinuation (refinement.mapState state)
-      (refinement.mapGraph graph) priorEvents where
-  stateAt index := refinement.mapState (execution.stateAt index)
-  graphAt index := refinement.mapGraph (execution.graphAt index)
-  choiceAt index := refinement.mapChoice (execution.choiceAt index)
-  eventAt := execution.eventAt
-  stateZero := congrArg refinement.mapState execution.stateZero
-  graphZero := congrArg refinement.mapGraph execution.graphZero
-  step index := refinement.step (execution.step index)
-  consistent := refinement.infiniteConsistency execution.consistent
+      (refinement.mapGraph graph) (refinement.lens.project priorEvents) :=
+  (refinement.infinite execution).abstractExecution
 
-/-- `BehaviorRefinement.mapInfinite_prefixEvents` states that mapping an
-infinite continuation preserves every finite observable event prefix exactly. -/
-@[simp]
+/-- Every finite prefix of the selected abstract execution occurs within the
+projection of a concrete prefix. -/
 theorem mapInfinite_prefixEvents
     (refinement : BehaviorRefinement concrete abstract)
     {state : concrete.system.State} {graph : concrete.system.Graph}
     {priorEvents : List spec.AuditEvent}
     (execution : concrete.system.InfiniteContinuation state graph priorEvents)
-    (length : Nat) :
-    (refinement.mapInfinite execution).prefixEvents length =
-      execution.prefixEvents length := by
-  induction length with
-  | zero => rfl
-  | succ length inductionHypothesis =>
-      rw [RelationalSystem.InfiniteContinuation.prefixEvents,
-        RelationalSystem.InfiniteContinuation.prefixEvents,
-        inductionHypothesis]
-      rfl
+    (length : Nat) : exists concreteLength,
+    ((refinement.mapInfinite execution).prefixEvents length).IsPrefix
+      (refinement.lens.project (execution.prefixEvents concreteLength)) :=
+  (refinement.infinite execution).abstractPrefix length
 
-/-- Mapping a finite restriction of an infinite continuation yields an exact
-abstract `Steps` witness at the corresponding mapped frontier. -/
+/-- Every finite restriction of the selected abstract execution is witnessed
+by abstract steps at its own frontier. -/
 theorem mapInfinite_prefixSteps
     (refinement : BehaviorRefinement concrete abstract)
     {state : concrete.system.State} {graph : concrete.system.Graph}
     {priorEvents : List spec.AuditEvent}
     (execution : concrete.system.InfiniteContinuation state graph priorEvents)
-    (length : Nat) :
-    abstract.system.Steps (refinement.mapState state)
-      (refinement.mapGraph graph) (execution.prefixEvents length)
-      (refinement.mapState (execution.stateAt length))
-      (refinement.mapGraph (execution.graphAt length)) :=
-  refinement.mapSteps (execution.prefixSteps length)
+    (length : Nat) : abstract.system.Steps (refinement.mapState state)
+      (refinement.mapGraph graph)
+      ((refinement.mapInfinite execution).prefixEvents length)
+      ((refinement.mapInfinite execution).stateAt length)
+      ((refinement.mapInfinite execution).graphAt length) :=
+  (refinement.mapInfinite execution).prefixSteps length
 
-/-- Reflexive refinement leaves every infinite continuation unchanged. -/
+/-- The lockstep identity constructor leaves an infinite execution unchanged. -/
 theorem mapInfinite_refl (behavior : ProgramBehavior spec)
     {state : behavior.system.State} {graph : behavior.system.Graph}
     {priorEvents : List spec.AuditEvent}
@@ -219,16 +330,106 @@ theorem mapInfinite_refl (behavior : ProgramBehavior spec)
     (refl behavior).mapInfinite execution = execution := by
   apply RelationalSystem.InfiniteContinuation.ext <;> rfl
 
-/-- Mapping an infinite continuation through a composite refinement agrees
-with mapping it through the two adjacent refinements in order. -/
+/-- The selected infinite image covers abstract prefixes and exactly matches
+projected concrete boundaries. -/
+def mapInfinite_prefixes (refinement : BehaviorRefinement concrete abstract)
+    {state : concrete.system.State} {graph : concrete.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    (execution : concrete.system.InfiniteContinuation state graph priorEvents) :
+    InfiniteRefinement refinement.lens refinement.mapState refinement.mapGraph execution :=
+  refinement.infinite execution
+
+/-- Adjacent weak refinements compose. -/
+def trans (lowerMiddle : BehaviorRefinement lower middle)
+    (middleUpper : BehaviorRefinement middle upper) :
+    BehaviorRefinement lower upper where
+  lens := lowerMiddle.lens.comp middleUpper.lens
+  mapState state := middleUpper.mapState (lowerMiddle.mapState state)
+  mapGraph graph := middleUpper.mapGraph (lowerMiddle.mapGraph graph)
+  input state := by rw [middleUpper.input, lowerMiddle.input]
+  initial valid := middleUpper.initial (lowerMiddle.initial valid)
+  segment steps := middleUpper.mapSteps (lowerMiddle.mapSteps steps)
+  terminal terminal := middleUpper.terminal (lowerMiddle.terminal terminal)
+  infinite execution :=
+    let first := lowerMiddle.infinite execution
+    let second := middleUpper.infinite first.abstractExecution
+    { abstractExecution := second.abstractExecution
+      abstractPrefix := fun length => by
+        obtain ⟨middleLength, upperPrefix⟩ :=
+          second.abstractPrefix length
+        obtain ⟨lowerLength, middlePrefix⟩ :=
+          first.abstractPrefix middleLength
+        exact ⟨lowerLength, upperPrefix.trans
+          (middleUpper.lens.project_isPrefix middlePrefix)⟩
+      concreteBoundary := fun length => by
+        obtain ⟨middleLength, middleEvents, middleState, middleGraph⟩ :=
+          first.concreteBoundary length
+        obtain ⟨upperLength, upperEvents, upperState, upperGraph⟩ :=
+          second.concreteBoundary middleLength
+        have events : second.abstractExecution.prefixEvents upperLength =
+            (lowerMiddle.lens.comp middleUpper.lens).project
+              (execution.prefixEvents length) := by
+          simp only [RefinementLens.comp]
+          rw [upperEvents, middleEvents]
+        exact ⟨upperLength, events,
+          upperState.trans (congrArg middleUpper.mapState middleState),
+          upperGraph.trans (congrArg middleUpper.mapGraph middleGraph)⟩ }
+
+/-- Infinite execution mapping respects adjacent-refinement composition. -/
 theorem mapInfinite_trans (lowerMiddle : BehaviorRefinement lower middle)
     (middleUpper : BehaviorRefinement middle upper)
     {state : lower.system.State} {graph : lower.system.Graph}
     {priorEvents : List spec.AuditEvent}
     (execution : lower.system.InfiniteContinuation state graph priorEvents) :
     (lowerMiddle.trans middleUpper).mapInfinite execution =
-      middleUpper.mapInfinite (lowerMiddle.mapInfinite execution) := by
-  apply RelationalSystem.InfiniteContinuation.ext <;> rfl
+      middleUpper.mapInfinite (lowerMiddle.mapInfinite execution) := rfl
+
+/-- Reflexive refinement is a left identity for weak-refinement composition. -/
+@[simp]
+theorem refl_trans (refinement : BehaviorRefinement lower upper) :
+    (refl lower).trans refinement = refinement := by
+  apply ext
+  · apply RefinementLens.ext
+    rfl
+  · rfl
+  · rfl
+  · apply heq_of_eq
+    funext state graph priorEvents execution
+    apply InfiniteRefinement.ext
+    exact congrArg (fun mapped => (refinement.infinite mapped).abstractExecution)
+      (mapInfinite_refl lower execution)
+
+/-- Reflexive refinement is a right identity for weak-refinement composition. -/
+@[simp]
+theorem trans_refl (refinement : BehaviorRefinement lower upper) :
+    refinement.trans (refl upper) = refinement := by
+  apply ext
+  · apply RefinementLens.ext
+    rfl
+  · rfl
+  · rfl
+  · apply heq_of_eq
+    funext state graph priorEvents execution
+    apply InfiniteRefinement.ext
+    exact mapInfinite_refl upper (refinement.mapInfinite execution)
+
+/-- Weak-refinement composition is associative. -/
+@[simp]
+theorem trans_assoc {highest : ProgramBehavior spec}
+    (lowerMiddle : BehaviorRefinement lower middle)
+    (middleUpper : BehaviorRefinement middle upper)
+    (upperHighest : BehaviorRefinement upper highest) :
+    (lowerMiddle.trans middleUpper).trans upperHighest =
+      lowerMiddle.trans (middleUpper.trans upperHighest) := by
+  apply ext
+  · apply RefinementLens.ext
+    rfl
+  · rfl
+  · rfl
+  · apply heq_of_eq
+    funext state graph priorEvents execution
+    apply InfiniteRefinement.ext
+    rfl
 
 /-- Map a terminal or infinite continuation coherently. -/
 def mapCompletion (refinement : BehaviorRefinement concrete abstract)
@@ -236,13 +437,13 @@ def mapCompletion (refinement : BehaviorRefinement concrete abstract)
     {priorEvents : List spec.AuditEvent}
     (completion : concrete.system.Completion state graph priorEvents) :
     abstract.system.Completion (refinement.mapState state) (refinement.mapGraph graph)
-      priorEvents := by
+      (refinement.lens.project priorEvents) := by
   cases completion with
   | finite steps terminal =>
       exact .finite (refinement.mapSteps steps) (refinement.terminal terminal)
   | infinite execution => exact .infinite (refinement.mapInfinite execution)
 
-/-- Reflexive refinement leaves every finite or infinite completion unchanged. -/
+/-- Completion mapping through the identity refinement is exact. -/
 theorem mapCompletion_refl (behavior : ProgramBehavior spec)
     {state : behavior.system.State} {graph : behavior.system.Graph}
     {priorEvents : List spec.AuditEvent}
@@ -257,8 +458,7 @@ theorem mapCompletion_refl (behavior : ProgramBehavior spec)
       rw [mapInfinite_refl]
       rfl
 
-/-- Mapping a completion through a composite refinement agrees with mapping it
-through the two adjacent refinements in order. -/
+/-- Completion mapping respects adjacent-refinement composition. -/
 theorem mapCompletion_trans (lowerMiddle : BehaviorRefinement lower middle)
     (middleUpper : BehaviorRefinement middle upper)
     {state : lower.system.State} {graph : lower.system.Graph}
@@ -283,12 +483,12 @@ theorem mapRuns (refinement : BehaviorRefinement concrete abstract)
     (execution : concrete.system.Runs initialState initialGraph state graph events) :
     abstract.system.Runs (refinement.mapState initialState)
       (refinement.mapGraph initialGraph) (refinement.mapState state)
-      (refinement.mapGraph graph) events :=
+      (refinement.mapGraph graph) (refinement.lens.project events) :=
   RelationalSystem.Runs.ofInitialSteps
     (refinement.initial execution.initialValid)
     (refinement.mapSteps execution.steps)
 
-/-- Prefix mapping is derived from the coherent state/graph simulation. -/
+/-- Prefix mapping is derived from the coherent segment simulation. -/
 def mapPrefix (refinement : BehaviorRefinement concrete abstract)
     (execution : concrete.system.ExecutionPrefix) :
     abstract.system.ExecutionPrefix where
@@ -296,25 +496,28 @@ def mapPrefix (refinement : BehaviorRefinement concrete abstract)
   initialGraph := refinement.mapGraph execution.initialGraph
   state := refinement.mapState execution.state
   graph := refinement.mapGraph execution.graph
-  events := execution.events
+  events := refinement.lens.project execution.events
   runs := refinement.mapRuns execution.runs
 
-/-- Reflexive refinement leaves every packaged execution prefix unchanged. -/
+/-- The reflexive weak refinement leaves every packaged prefix unchanged. -/
 @[simp]
 theorem mapPrefix_refl (behavior : ProgramBehavior spec)
     (execution : behavior.system.ExecutionPrefix) :
     (refl behavior).mapPrefix execution = execution := by
-  apply RelationalSystem.ExecutionPrefix.ext <;> rfl
+  apply RelationalSystem.ExecutionPrefix.ext <;>
+    simp [mapPrefix, refl, lockstep, RefinementLens.identity]
 
-/-- Mapping an initial prefix agrees with constructing the initial prefix from
-the mapped initial-state witness. -/
+/-- `BehaviorRefinement.mapPrefix_initial` preserves the selected initial
+configuration. -/
 @[simp]
 theorem mapPrefix_initial (refinement : BehaviorRefinement concrete abstract)
     {state : concrete.system.State} {graph : concrete.system.Graph}
     (valid : concrete.system.Initial state graph) :
     refinement.mapPrefix (RelationalSystem.ExecutionPrefix.initial valid) =
       RelationalSystem.ExecutionPrefix.initial (refinement.initial valid) := by
-  apply RelationalSystem.ExecutionPrefix.ext <;> rfl
+  apply RelationalSystem.ExecutionPrefix.ext <;>
+    simp [mapPrefix, RelationalSystem.ExecutionPrefix.initial,
+      refinement.lens.project_nil]
 
 /-- Mapping a prefix through a composite refinement agrees with mapping it
 through the two adjacent refinements in order. -/
@@ -324,23 +527,11 @@ theorem mapPrefix_trans (lowerMiddle : BehaviorRefinement lower middle)
     (execution : lower.system.ExecutionPrefix) :
     (lowerMiddle.trans middleUpper).mapPrefix execution =
       middleUpper.mapPrefix (lowerMiddle.mapPrefix execution) := by
-  apply RelationalSystem.ExecutionPrefix.ext <;> rfl
+  apply RelationalSystem.ExecutionPrefix.ext <;>
+    simp [mapPrefix, trans, RefinementLens.comp]
 
-/-- Mapping a one-step extension agrees with extending the mapped prefix by the
-mapped transition. -/
-@[simp]
-theorem mapPrefix_step (refinement : BehaviorRefinement concrete abstract)
-    (execution : concrete.system.ExecutionPrefix)
-    {choice : concrete.system.Choice} {event : spec.AuditEvent}
-    {nextState : concrete.system.State} {nextGraph : concrete.system.Graph}
-    (transition : concrete.system.Step execution.graph execution.state choice
-      event nextState nextGraph) :
-    refinement.mapPrefix (execution.step transition) =
-      (refinement.mapPrefix execution).step (refinement.step transition) := by
-  apply RelationalSystem.ExecutionPrefix.ext <;> rfl
-
-/-- `BehaviorRefinement.mapPrefix_append` states that refinement mapping
-preserves suffix append and its complete event order. -/
+/-- `BehaviorRefinement.mapPrefix_append` preserves segment boundaries and
+event order. -/
 @[simp]
 theorem mapPrefix_append (refinement : BehaviorRefinement concrete abstract)
     (execution : concrete.system.ExecutionPrefix)
@@ -350,25 +541,43 @@ theorem mapPrefix_append (refinement : BehaviorRefinement concrete abstract)
       finalState finalGraph) :
     refinement.mapPrefix (execution.append suffix) =
       (refinement.mapPrefix execution).append (refinement.mapSteps suffix) := by
-  apply RelationalSystem.ExecutionPrefix.ext <;> rfl
+  apply RelationalSystem.ExecutionPrefix.ext <;>
+    simp [mapPrefix, RelationalSystem.ExecutionPrefix.append,
+      refinement.lens.project_append]
 
-/-- `BehaviorRefinement.mapPrefix_events` exposes the exact event trace retained
-by prefix mapping. -/
+/-- A single concrete transition maps to one abstract segment, which may have
+zero, one, or many abstract transitions. -/
+@[simp]
+theorem mapPrefix_step (refinement : BehaviorRefinement concrete abstract)
+    (execution : concrete.system.ExecutionPrefix)
+    {choice : concrete.system.Choice} {event : spec.AuditEvent}
+    {nextState : concrete.system.State} {nextGraph : concrete.system.Graph}
+    (transition : concrete.system.Step execution.graph execution.state choice
+      event nextState nextGraph) :
+    refinement.mapPrefix (execution.step transition) =
+      (refinement.mapPrefix execution).append
+        (refinement.mapSteps (.step .refl transition)) := by
+  rw [RelationalSystem.ExecutionPrefix.step_eq_append,
+    refinement.mapPrefix_append]
+
+/-- Prefix mapping exposes exactly the lens-selected abstract trace. -/
 @[simp]
 theorem mapPrefix_events (refinement : BehaviorRefinement concrete abstract)
     (execution : concrete.system.ExecutionPrefix) :
-    (refinement.mapPrefix execution).events = execution.events := rfl
+    (refinement.mapPrefix execution).events =
+      refinement.lens.project execution.events := rfl
 
-/-- `BehaviorRefinement.observe_mapPrefix` states that prefix mapping preserves
-the specification-selected whole-trace observation. -/
+/-- Functional observations are exact even when internal audit events are
+inserted, removed, or grouped by the refinement lens. -/
 @[simp]
 theorem observe_mapPrefix (refinement : BehaviorRefinement concrete abstract)
     (execution : concrete.system.ExecutionPrefix) :
     abstract.observe (refinement.mapPrefix execution) =
-      concrete.observe execution := rfl
+      concrete.observe execution :=
+  refinement.lens.observationExact execution.events
 
-/-- `BehaviorRefinement.inputOf_mapPrefix` states that prefix mapping preserves
-the specification input selected by the initial state. -/
+/-- `BehaviorRefinement.inputOf_mapPrefix` preserves the specification input
+selected initially. -/
 @[simp]
 theorem inputOf_mapPrefix (refinement : BehaviorRefinement concrete abstract)
     (execution : concrete.system.ExecutionPrefix) :
@@ -376,8 +585,7 @@ theorem inputOf_mapPrefix (refinement : BehaviorRefinement concrete abstract)
       concrete.inputOf execution.initialState :=
   refinement.input execution.initialState
 
-/-- `BehaviorRefinement.hasInput_mapPrefix` transports the packaged input
-predicate exactly across a refinement. -/
+/-- Transport the packaged input predicate exactly across a refinement. -/
 @[simp]
 theorem hasInput_mapPrefix (refinement : BehaviorRefinement concrete abstract)
     (input : spec.Input) (execution : concrete.system.ExecutionPrefix) :
@@ -385,8 +593,7 @@ theorem hasInput_mapPrefix (refinement : BehaviorRefinement concrete abstract)
       concrete.HasInput input execution := by
   simp [ProgramBehavior.HasInput]
 
-/-- `BehaviorRefinement.terminal_mapPrefix` transports a terminal witness to
-the exact mapped frontier. -/
+/-- Transport a terminal witness to the exact mapped frontier. -/
 theorem terminal_mapPrefix (refinement : BehaviorRefinement concrete abstract)
     (execution : concrete.system.ExecutionPrefix)
     (terminal : concrete.system.Terminal execution.state execution.graph) :
@@ -394,8 +601,7 @@ theorem terminal_mapPrefix (refinement : BehaviorRefinement concrete abstract)
       (refinement.mapPrefix execution).graph :=
   refinement.terminal terminal
 
-/-- `BehaviorRefinement.mapCompletionAtPrefix` maps a completion while fixing
-its result type to the exact frontier and trace of the mapped prefix. -/
+/-- Map a completion at the exact projected prefix frontier. -/
 def mapCompletionAtPrefix (refinement : BehaviorRefinement concrete abstract)
     (execution : concrete.system.ExecutionPrefix)
     (completion : concrete.system.Completion execution.state execution.graph
@@ -405,8 +611,7 @@ def mapCompletionAtPrefix (refinement : BehaviorRefinement concrete abstract)
       (refinement.mapPrefix execution).events :=
   refinement.mapCompletion completion
 
-/-- Prefix-indexed completion mapping through the reflexive refinement leaves
-the completion unchanged. -/
+/-- Prefix-indexed completion mapping through the identity refinement is exact. -/
 theorem mapCompletionAtPrefix_refl (behavior : ProgramBehavior spec)
     (execution : behavior.system.ExecutionPrefix)
     (completion : behavior.system.Completion execution.state execution.graph
@@ -414,8 +619,7 @@ theorem mapCompletionAtPrefix_refl (behavior : ProgramBehavior spec)
     (refl behavior).mapCompletionAtPrefix execution completion = completion :=
   mapCompletion_refl behavior completion
 
-/-- Prefix-indexed completion mapping through a composite refinement agrees
-with mapping through the two adjacent refinements in order. -/
+/-- Prefix-indexed completion mapping respects adjacent-refinement composition. -/
 theorem mapCompletionAtPrefix_trans
     (lowerMiddle : BehaviorRefinement lower middle)
     (middleUpper : BehaviorRefinement middle upper)

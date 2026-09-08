@@ -88,7 +88,7 @@ def noDerivedDemands : DerivedDemandFamily noDemands.identities where
   origin := fun key => nomatch key
   fresh := fun derived => nomatch derived
 
-def spec : SpecProcess where
+abbrev spec : SpecProcess where
   Input := Bool
   AuditEvent := Bool
   Observation := Bool
@@ -96,6 +96,7 @@ def spec : SpecProcess where
   observationProjection := .identity Bool
   accepts := fun _ _ => True
   requirements := noDemands
+  evidenceRelevant := fun _ _ => false
 
 namespace ObservationProjectionFixture
 
@@ -160,14 +161,18 @@ def finiteCompletion (input : Bool) : system.Completion
     (initialExecution input).events :=
   .finite .refl trivial
 
-example (refinement : BehaviorRefinement behavior behavior) :
-    (BehaviorRefinement.refl behavior).trans refinement = refinement := by simp
+example (refinement : BehaviorRefinement behavior behavior) (state : system.State) :
+    ((BehaviorRefinement.refl behavior).trans refinement).mapState state =
+      refinement.mapState state := rfl
 
-example (refinement : BehaviorRefinement behavior behavior) :
-    refinement.trans (BehaviorRefinement.refl behavior) = refinement := by simp
+example (refinement : BehaviorRefinement behavior behavior) (graph : system.Graph) :
+    (refinement.trans (BehaviorRefinement.refl behavior)).mapGraph graph =
+      refinement.mapGraph graph := rfl
 
-example (first second third : BehaviorRefinement behavior behavior) :
-    (first.trans second).trans third = first.trans (second.trans third) := by simp
+example (first second third : BehaviorRefinement behavior behavior)
+    (state : system.State) :
+    ((first.trans second).trans third).mapState state =
+      (first.trans (second.trans third)).mapState state := rfl
 
 example : (BehaviorRefinement.refl behavior).mapCompletion
     (finiteCompletion true) = finiteCompletion true :=
@@ -480,15 +485,10 @@ abbrev abstractBehavior : ProgramBehavior spec where
   system := abstractSystem
   inputOf := fun _ => false
 
-def toAbstract : BehaviorRefinement behavior abstractBehavior where
-  mapState := fun _ => false
-  mapGraph := fun _ => 0
-  mapChoice := fun _ => 0
-  input := fun _ => rfl
-  initial := fun _ => trivial
-  step := fun _ => trivial
-  terminal := fun terminal => False.elim terminal
-  infiniteConsistency := fun _ => trivial
+def toAbstract : BehaviorRefinement behavior abstractBehavior :=
+  BehaviorRefinement.lockstep (fun _ => false) (fun _ => 0) (fun _ => 0)
+    (fun _ => rfl) (fun _ => trivial) (fun _ => trivial)
+    (fun terminal => False.elim terminal) (fun _ => trivial)
 
 abbrev highestSystem : RelationalSystem Bool where
   State := Nat
@@ -507,15 +507,10 @@ abbrev highestBehavior : ProgramBehavior spec where
   system := highestSystem
   inputOf := fun _ => false
 
-def toHighest : BehaviorRefinement abstractBehavior highestBehavior where
-  mapState := Bool.toNat
-  mapGraph := fun _ => true
-  mapChoice := fun _ => false
-  input := fun _ => rfl
-  initial := fun _ => trivial
-  step := fun _ => trivial
-  terminal := fun terminal => False.elim terminal
-  infiniteConsistency := fun _ => trivial
+def toHighest : BehaviorRefinement abstractBehavior highestBehavior :=
+  BehaviorRefinement.lockstep Bool.toNat (fun _ => true) (fun _ => false)
+    (fun _ => rfl) (fun _ => trivial) (fun _ => trivial)
+    (fun terminal => False.elim terminal) (fun _ => trivial)
 
 example : (samplePrefix.append falseSuffix).events = [true, false] := rfl
 
@@ -536,7 +531,8 @@ example : toAbstract.mapPrefix emptyPrefix =
   BehaviorRefinement.mapPrefix_initial toAbstract trivial
 
 example : toAbstract.mapPrefix samplePrefix =
-    (toAbstract.mapPrefix emptyPrefix).step (toAbstract.step firstStep) := by
+    (toAbstract.mapPrefix emptyPrefix).append
+      (toAbstract.mapSteps (.step .refl firstStep)) := by
   change toAbstract.mapPrefix (emptyPrefix.step firstStep) = _
   exact BehaviorRefinement.mapPrefix_step toAbstract emptyPrefix firstStep
 
@@ -550,7 +546,8 @@ example : toAbstract.mapPrefix (samplePrefix.append falseSuffix) =
   exact BehaviorRefinement.mapPrefix_append
     toAbstract samplePrefix falseSuffix
 
-example : (toAbstract.mapPrefix samplePrefix).events = samplePrefix.events :=
+example : (toAbstract.mapPrefix samplePrefix).events =
+    toAbstract.lens.project samplePrefix.events :=
   BehaviorRefinement.mapPrefix_events toAbstract samplePrefix
 
 example : abstractBehavior.observe (toAbstract.mapPrefix samplePrefix) =
@@ -632,30 +629,26 @@ example : indexedSystem.Extends 0 (indexedContinuation.graphAt 3) :=
 def completion : system.Completion samplePrefix.state samplePrefix.graph samplePrefix.events :=
   .infinite continuation
 
+example : ((BehaviorRefinement.refl behavior).mapInfinite continuation).prefixEvents 3 =
+    continuation.prefixEvents 3 := rfl
+
 example : (BehaviorRefinement.refl behavior).mapInfinite continuation = continuation :=
   BehaviorRefinement.mapInfinite_refl behavior continuation
+
+example : ((toAbstract.trans toHighest).mapInfinite continuation).prefixEvents 3 =
+    (toHighest.mapInfinite (toAbstract.mapInfinite continuation)).prefixEvents 3 := rfl
 
 example : (toAbstract.trans toHighest).mapInfinite continuation =
     toHighest.mapInfinite (toAbstract.mapInfinite continuation) :=
   BehaviorRefinement.mapInfinite_trans toAbstract toHighest continuation
 
-example : (BehaviorRefinement.refl behavior).mapCompletion completion = completion :=
-  BehaviorRefinement.mapCompletion_refl behavior completion
-
 example : (toAbstract.trans toHighest).mapCompletion completion =
     toHighest.mapCompletion (toAbstract.mapCompletion completion) :=
   BehaviorRefinement.mapCompletion_trans toAbstract toHighest completion
 
-example : (BehaviorRefinement.refl behavior).mapCompletionAtPrefix
-    samplePrefix completion = completion :=
-  BehaviorRefinement.mapCompletionAtPrefix_refl behavior samplePrefix completion
-
-example : (toAbstract.trans toHighest).mapCompletionAtPrefix
-    samplePrefix completion =
-    toHighest.mapCompletionAtPrefix (toAbstract.mapPrefix samplePrefix)
-      (toAbstract.mapCompletionAtPrefix samplePrefix completion) :=
-  BehaviorRefinement.mapCompletionAtPrefix_trans
-    toAbstract toHighest samplePrefix completion
+example : InfiniteRefinement toAbstract.lens toAbstract.mapState toAbstract.mapGraph
+    continuation :=
+  toAbstract.mapInfinite_prefixes continuation
 
 def mappedCompletion : abstractBehavior.system.Completion
     (toAbstract.mapPrefix samplePrefix).state
@@ -666,6 +659,420 @@ def mappedCompletion : abstractBehavior.system.Completion
 example : samplePrefix.events = [true] := rfl
 
 end InfinitePrefixFixture
+
+namespace WeakSegmentRefinementFixture
+
+inductive Event where
+  | internal
+  | visible (value : Nat)
+  | safety
+deriving DecidableEq
+
+inductive SafetyKey where
+  | audit
+
+def safetyDemands : DemandFamily where
+  Key := SafetyKey
+  keys := [.audit]
+  complete := fun key => by cases key; simp
+  unique := by simp
+  identity := fun _ => ⟨⟨"foundation-test", "safety-audit"⟩⟩
+  identityInjective := fun left right _ => by cases left; cases right; rfl
+  kind := fun _ => .safety
+  statement := fun _ => True
+
+/-- The functional view hides both implementation work and the independent
+safety marker. -/
+def observations : ObservationProjection Event Nat where
+  project events := events.filterMap fun
+    | .visible value => some value
+    | _ => none
+
+abbrev spec : SpecProcess where
+  Input := Unit
+  AuditEvent := Event
+  Observation := Nat
+  admits := fun _ => True
+  observationProjection := observations
+  accepts := fun _ _ => True
+  requirements := safetyDemands
+  evidenceRelevant := fun key event =>
+    decide (key = safetyDemands.identity .audit ∧ event = .safety)
+
+/-- Internal implementation events have zero denotation; visible and safety
+events remain in the abstract audit trace. -/
+def hideInternal : RefinementLens spec where
+  project events := events.filter fun event => decide (event ≠ .internal)
+  project_nil := rfl
+  project_append := List.filter_append
+  observationExact events := by
+    induction events with
+    | nil => rfl
+    | cons event events inductionHypothesis =>
+        change observations.project
+          (List.filter (fun event => decide (event ≠ .internal)) events) =
+          observations.project events at inductionHypothesis
+        cases event <;> simpa [observations] using inductionHypothesis
+  evidenceNonErasing key events := by
+    by_cases selected : key = safetyDemands.identity .audit
+    · subst key
+      induction events with
+      | nil => simp
+      | cons event events inductionHypothesis =>
+          cases event <;> simp_all
+    · induction events with
+      | nil => simp
+      | cons event events inductionHypothesis =>
+          cases event <;> simp_all
+
+abbrev ConcreteState := Nat × Nat
+
+/-- A finite machine region: internal instructions retain the logical state;
+all other instructions may cross an abstract boundary. -/
+abbrev concreteSystem : RelationalSystem Event where
+  State := ConcreteState
+  Choice := Unit
+  Graph := Unit
+  Initial := fun _ _ => True
+  Step := fun _ before _ event after _ =>
+    event = .internal -> after.1 = before.1
+  Terminal := fun _ _ => True
+  InfiniteConsistent := fun _ _ _ _ _ => False
+  Extends := fun _ _ => True
+  extendsRefl := fun _ => trivial
+  extendsTrans := fun _ _ => trivial
+  stepExtends := fun _ => trivial
+
+abbrev abstractSystem : RelationalSystem Event where
+  State := Nat
+  Choice := Unit
+  Graph := Unit
+  Initial := fun _ _ => True
+  Step := fun _ _ _ _ _ _ => True
+  Terminal := fun _ _ => True
+  InfiniteConsistent := fun _ _ _ _ _ => False
+  Extends := fun _ _ => True
+  extendsRefl := fun _ => trivial
+  extendsTrans := fun _ _ => trivial
+  stepExtends := fun _ => trivial
+
+def concrete : ProgramBehavior spec where
+  system := concreteSystem
+  inputOf := fun _ => ()
+
+def abstract : ProgramBehavior spec where
+  system := abstractSystem
+  inputOf := fun _ => ()
+
+theorem segment {state finalState : concreteSystem.State}
+    {graph finalGraph : concreteSystem.Graph} {events : List Event}
+    (steps : concreteSystem.Steps state graph events finalState finalGraph) :
+    abstractSystem.Steps state.1 graph (hideInternal.project events)
+      finalState.1 finalGraph := by
+  induction steps with
+  | refl => exact .refl
+  | step prior transition inductionHypothesis =>
+      rename_i prefixEvents current currentGraph choice event next nextGraph
+      by_cases internal : event = .internal
+      · have same : next.1 = current.1 := transition internal
+        subst event
+        simpa [hideInternal, same] using inductionHypothesis
+      · rw [hideInternal.project_append]
+        have selected : hideInternal.project [event] = [event] := by
+          simp [hideInternal, internal]
+        rw [selected]
+        exact RelationalSystem.Steps.step inductionHypothesis (choice := ()) trivial
+
+def refinement : BehaviorRefinement concrete abstract where
+  lens := hideInternal
+  mapState := Prod.fst
+  mapGraph := id
+  input := fun _ => rfl
+  initial := fun _ => trivial
+  segment := segment
+  terminal := fun _ => trivial
+  infinite execution := False.elim execution.consistent
+
+theorem insertedInstruction : concreteSystem.Steps (0, 0) () [.internal]
+    (0, 1) () :=
+  .step (choice := ()) .refl (fun _ => rfl)
+
+example : abstractSystem.Steps 0 () [] 0 () := by
+  simpa [refinement, concrete, abstract, hideInternal] using
+    refinement.mapSteps insertedInstruction
+
+theorem loweredInstruction : concreteSystem.Step () (0, 1) () (.visible 7)
+    (1, 2) () := by
+  intro impossible
+  cases impossible
+
+theorem loweredRegion : concreteSystem.Steps (0, 0) ()
+    [.internal, .visible 7] (1, 2) () :=
+  .step insertedInstruction loweredInstruction
+
+example : abstractSystem.Steps 0 () [.visible 7] 1 () := by
+  simpa [refinement, concrete, abstract, hideInternal] using
+    refinement.mapSteps loweredRegion
+
+/-- Two concrete branch summaries select their respective exact abstract
+segments through the same refinement. -/
+theorem branchOne : concreteSystem.Steps (0, 0) () [.visible 1] (1, 1) () :=
+  .step (choice := ()) .refl (fun impossible => nomatch impossible)
+
+theorem branchTwo : concreteSystem.Steps (0, 0) () [.visible 2] (1, 1) () :=
+  .step (choice := ()) .refl (fun impossible => nomatch impossible)
+
+example :
+    abstractSystem.Steps 0 () [.visible 1] 1 () ∧
+      abstractSystem.Steps 0 () [.visible 2] 1 () := by
+  constructor
+  · simpa [refinement, concrete, abstract, hideInternal] using
+      refinement.mapSteps branchOne
+  · simpa [refinement, concrete, abstract, hideInternal] using
+      refinement.mapSteps branchTwo
+
+theorem safetyRetained :
+    ([.safety].filter
+      (spec.evidenceRelevant (safetyDemands.identity .audit))).Sublist
+      ((hideInternal.project [.safety]).filter
+        (spec.evidenceRelevant (safetyDemands.identity .audit))) :=
+  hideInternal.evidenceNonErasing (safetyDemands.identity .audit) [.safety]
+
+example : observations.project [.safety] = [] := rfl
+
+example : abstract.observe (refinement.mapPrefix {
+    initialState := (0, 0)
+    initialGraph := ()
+    state := (1, 2)
+    graph := ()
+    events := [.internal, .visible 7]
+    runs := RelationalSystem.Runs.ofInitialSteps trivial loweredRegion }) =
+    [7] := rfl
+
+/-- A concrete infinite internal loop cannot refine a behavior with no step at
+all: finite zero-denotation alone does not hide divergence. -/
+abbrev loopSystem : RelationalSystem Event where
+  State := Unit
+  Choice := Unit
+  Graph := Unit
+  Initial := fun _ _ => True
+  Step := fun _ _ _ event _ _ => event = .internal
+  Terminal := fun _ _ => False
+  InfiniteConsistent := fun _ _ _ _ _ => True
+  Extends := fun _ _ => True
+  extendsRefl := fun _ => trivial
+  extendsTrans := fun _ _ => trivial
+  stepExtends := fun _ => trivial
+
+abbrev stoppedSystem : RelationalSystem Event where
+  State := Unit
+  Choice := Unit
+  Graph := Unit
+  Initial := fun _ _ => True
+  Step := fun _ _ _ _ _ _ => False
+  Terminal := fun _ _ => True
+  InfiniteConsistent := fun _ _ _ _ _ => False
+  Extends := fun _ _ => True
+  extendsRefl := fun _ => trivial
+  extendsTrans := fun _ _ => trivial
+  stepExtends := fun impossible => False.elim impossible
+
+def loopBehavior : ProgramBehavior spec where
+  system := loopSystem
+  inputOf := fun _ => ()
+
+def stoppedBehavior : ProgramBehavior spec where
+  system := stoppedSystem
+  inputOf := fun _ => ()
+
+def internalLoop : loopSystem.InfiniteContinuation () () [] where
+  stateAt := fun _ => ()
+  graphAt := fun _ => ()
+  choiceAt := fun _ => ()
+  eventAt := fun _ => .internal
+  stateZero := rfl
+  graphZero := rfl
+  step := fun _ => rfl
+  consistent := trivial
+
+theorem internalLoop_erased (length : Nat) :
+    hideInternal.project (internalLoop.prefixEvents length) = [] := by
+  induction length with
+  | zero => rfl
+  | succ length inductionHypothesis =>
+      rw [RelationalSystem.InfiniteContinuation.prefixEvents,
+        hideInternal.project_append, inductionHypothesis]
+      rfl
+
+theorem internalLoop_prefixEvents (length : Nat) :
+    internalLoop.prefixEvents length = List.replicate length Event.internal := by
+  induction length with
+  | zero => rfl
+  | succ length inductionHypothesis =>
+      rw [RelationalSystem.InfiniteContinuation.prefixEvents, inductionHypothesis]
+      change List.replicate length Event.internal ++ [Event.internal] =
+        List.replicate (length + 1) Event.internal
+      exact List.replicate_succ'.symm
+
+theorem hiddenLoopRejected
+    (claimed : BehaviorRefinement loopBehavior stoppedBehavior) : False :=
+  (claimed.mapInfinite internalLoop).step 0
+
+/-- Interactive divergence is accepted when the abstraction supplies the same
+infinite visible progress. -/
+abbrev interactiveSystem : RelationalSystem Event where
+  State := Unit
+  Choice := Unit
+  Graph := Unit
+  Initial := fun _ _ => True
+  Step := fun _ _ _ event _ _ => event = .visible 0
+  Terminal := fun _ _ => False
+  InfiniteConsistent := fun _ _ _ _ _ => True
+  Extends := fun _ _ => True
+  extendsRefl := fun _ => trivial
+  extendsTrans := fun _ _ => trivial
+  stepExtends := fun _ => trivial
+
+def interactiveBehavior : ProgramBehavior spec where
+  system := interactiveSystem
+  inputOf := fun _ => ()
+
+def interactiveExecution : interactiveSystem.InfiniteContinuation () () [] where
+  stateAt := fun _ => ()
+  graphAt := fun _ => ()
+  choiceAt := fun _ => ()
+  eventAt := fun _ => .visible 0
+  stateZero := rfl
+  graphZero := rfl
+  step := fun _ => rfl
+  consistent := trivial
+
+/-- Cofinality, not mere target inhabitation, rejects erasing the internal loop
+into an abstraction whose only divergence emits visible progress. -/
+theorem hiddenLoopCofinalityRejected
+    (claimed : InfiniteRefinement (concrete := loopBehavior)
+      (abstract := interactiveBehavior) hideInternal (fun _ => ()) (fun _ => ())
+      internalLoop) : False := by
+  obtain ⟨concreteLength, coverage⟩ := claimed.abstractPrefix 1
+  have visible := claimed.abstractExecution.step 0
+  have erased := internalLoop_erased concreteLength
+  have projectedEmpty :
+      (hideInternal.project (internalLoop.prefixEvents concreteLength)).IsPrefix [] := by
+    rw [erased]
+    exact ⟨[], rfl⟩
+  have coverageNil := List.IsPrefix.trans coverage projectedEmpty
+  change claimed.abstractExecution.eventAt 0 = .visible 0 at visible
+  simp [RelationalSystem.InfiniteContinuation.prefixEvents, visible] at coverageNil
+
+abbrev interactiveAbstractSystem : RelationalSystem Event where
+  State := Bool
+  Choice := Nat
+  Graph := Bool
+  Initial := fun _ _ => True
+  Step := fun _ _ _ event _ _ => event = .visible 0
+  Terminal := fun _ _ => False
+  InfiniteConsistent := fun _ _ _ _ _ => True
+  Extends := fun _ _ => True
+  extendsRefl := fun _ => trivial
+  extendsTrans := fun _ _ => trivial
+  stepExtends := fun _ => trivial
+
+def interactiveAbstractBehavior : ProgramBehavior spec where
+  system := interactiveAbstractSystem
+  inputOf := fun _ => ()
+
+def matchedInteractive : BehaviorRefinement interactiveBehavior
+    interactiveAbstractBehavior :=
+  BehaviorRefinement.lockstep (concrete := interactiveBehavior)
+    (abstract := interactiveAbstractBehavior)
+    (fun _ : Unit => false) (fun _ : Unit => false) (fun _ : Unit => (0 : Nat))
+    (fun _ => rfl) (fun _ => trivial) (fun step => step)
+    (fun terminal => False.elim terminal) (fun _ => trivial)
+
+example : InfiniteRefinement matchedInteractive.lens matchedInteractive.mapState
+    matchedInteractive.mapGraph interactiveExecution :=
+  matchedInteractive.mapInfinite_prefixes interactiveExecution
+
+/-- Expand one event into its selected abstract audit segment. -/
+def expandEvent : Event -> List Event
+  | .internal => [.internal, .internal]
+  | event => [event]
+
+theorem expandEvent_preservesEvidence (key : RequirementKey) (events : List Event) :
+    (events.flatMap expandEvent).filter (spec.evidenceRelevant key) =
+      events.filter (spec.evidenceRelevant key) := by
+  by_cases selected : key = safetyDemands.identity .audit
+  · subst key
+    induction events with
+    | nil => rfl
+    | cons event events inductionHypothesis =>
+        cases event <;> simp_all [expandEvent, spec, safetyDemands]
+  · induction events with
+    | nil => rfl
+    | cons event events inductionHypothesis =>
+        cases event <;> simp_all [expandEvent, spec, safetyDemands]
+
+/-- Duplicate only internal audit work. Functional observations remain exact,
+while an infinite concrete step may expand to two abstract steps. -/
+def duplicateInternal : RefinementLens spec where
+  project events := events.flatMap expandEvent
+  project_nil := rfl
+  project_append := fun _ _ => List.flatMap_append
+  observationExact events := by
+    induction events with
+    | nil => rfl
+    | cons event events inductionHypothesis =>
+        change observations.project (List.flatMap expandEvent events) =
+          observations.project events at inductionHypothesis
+        cases event <;> simpa [observations, expandEvent] using inductionHypothesis
+  evidenceNonErasing key events := by
+    rw [expandEvent_preservesEvidence]
+    exact List.Sublist.refl _
+
+theorem duplicateInternal_prefix (length : Nat) :
+    duplicateInternal.project (internalLoop.prefixEvents length) =
+      List.replicate (length + length) Event.internal := by
+  rw [internalLoop_prefixEvents]
+  change List.flatMap expandEvent (List.replicate length Event.internal) = _
+  induction length with
+  | zero => rfl
+  | succ length inductionHypothesis =>
+      change [Event.internal, Event.internal] ++
+          List.flatMap expandEvent (List.replicate length Event.internal) = _
+      rw [inductionHypothesis]
+      rw [show length + 1 + (length + 1) = (length + length) + 2 by omega]
+      simp [List.replicate_succ]
+
+theorem expandedPrefixEvents (length : Nat) :
+    internalLoop.prefixEvents (length + length) =
+      duplicateInternal.project (internalLoop.prefixEvents length) := by
+  rw [internalLoop_prefixEvents, duplicateInternal_prefix]
+
+theorem expandedCoverage (length : Nat) :
+    (internalLoop.prefixEvents length).IsPrefix
+      (duplicateInternal.project (internalLoop.prefixEvents length)) := by
+  rw [duplicateInternal_prefix, internalLoop_prefixEvents]
+  exact ⟨List.replicate length Event.internal, by simp⟩
+
+/-- This witness exercises an abstract intermediate boundary between every two
+abstract steps generated by one concrete step. -/
+def expandedInfinite : InfiniteRefinement (concrete := loopBehavior)
+    (abstract := loopBehavior) duplicateInternal (fun _ : Unit => ())
+      (fun _ : Unit => ()) internalLoop where
+  abstractExecution := internalLoop
+  abstractPrefix length := ⟨length, expandedCoverage length⟩
+  concreteBoundary length :=
+    ⟨length + length, expandedPrefixEvents length, rfl, rfl⟩
+
+example :
+    (expandedInfinite.abstractExecution.prefixEvents 1).IsPrefix
+      (duplicateInternal.project (internalLoop.prefixEvents 1)) :=
+  by
+    change (internalLoop.prefixEvents 1).IsPrefix
+      (duplicateInternal.project (internalLoop.prefixEvents 1))
+    exact expandedCoverage 1
+
+end WeakSegmentRefinementFixture
 
 example : artifactFormat.Parses (emitProgram verified) () :=
   emitProgram_parses verified
