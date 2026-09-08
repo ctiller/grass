@@ -412,6 +412,27 @@ pub fn drain_outbox(
             );
             continue;
         }
+        // AGENT_BUS_SCHEMA.md section 8's "a finding is disposed once".
+        // `apply` deliberately does not refuse a second disposal -- see
+        // `apply_finding_disposition` -- because two reviewers can each be
+        // the legitimate reviewer of a link they name and neither event
+        // references the other, so an `Err` there is decided by replay order
+        // and takes the whole bus down. Here `state` is this host's
+        // freshly-fetched, fully-reduced view, and "can I already see this
+        // finding disposed?" has exactly one answer.
+        if let Err(e) = verify_finding_is_still_open(&state, &data) {
+            let reason = e.to_string();
+            record_rejection(
+                git_common_dir,
+                agent,
+                path,
+                candidate,
+                reason,
+                &mut rejected,
+                &mut held,
+            );
+            continue;
+        }
         if let Err(e) = verify_object_ids_resolve(repo, &data) {
             let reason = e.to_string();
             record_rejection(
@@ -1260,6 +1281,59 @@ fn verify_review_reassignment_inherits_open_findings(
     Ok(())
 }
 
+/// AGENT_BUS_SCHEMA.md section 8: a finding is disposed once.
+///
+/// Asked here rather than in `apply` for the reason this whole class shares.
+/// After a `review.reassigned`, the outgoing reviewer and the incoming one
+/// are each -- at the moment each publishes -- the legitimate reviewer of a
+/// nomination link they name, so each can honestly dispose of the same
+/// finding. Neither event references the other, so `apply::topological_order`
+/// (which builds edges from `refs` and each stream's own predecessor, never
+/// from `observed`) gives them no edge at all and ties break on agent name.
+/// Refusing the second during replay therefore answered a well-formed event
+/// with `Err`, on whichever hosts happened to walk it second, and `reduce`
+/// propagates that with no per-event isolation: the whole bus unreadable,
+/// permanently, since the log is append-only and force-push is prohibited.
+///
+/// Reduction now records both and takes the smallest disposing `EventId`, a
+/// pure function of the recorded set. The policy lives here instead, where
+/// `state` is the publishing host's own freshly-fetched, fully-reduced view
+/// and the question has one answer.
+///
+/// `Ok(())` when the chain or the finding does not resolve at all: those are
+/// ordinary validation failures `apply::dry_run` reports moments later with
+/// clearer, more specific messages, so they are not duplicated here.
+fn verify_finding_is_still_open(
+    state: &crate::state::BusState,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    let (nomination, changes_event, finding_id) = match data {
+        crate::events::EventData::ReviewFindingsCleared(d) => {
+            (&d.nomination, &d.changes_event, &d.finding_id)
+        }
+        crate::events::EventData::ReviewFindingsSuperseded(d) => {
+            (&d.nomination, &d.changes_event, &d.finding_id)
+        }
+        _ => return Ok(()),
+    };
+    let Some(chain) = state.review_chain(nomination) else {
+        return Ok(());
+    };
+    let key = (changes_event.clone(), finding_id.as_str().to_string());
+    let Some(finding) = chain.findings.get(&key) else {
+        return Ok(());
+    };
+    let already = match &finding.disposition {
+        crate::state::FindingDisposition::Open => return Ok(()),
+        crate::state::FindingDisposition::Cleared { by_event } => by_event,
+        crate::state::FindingDisposition::Superseded { by_event, .. } => by_event,
+    };
+    Err(invalid(format!(
+        "finding {changes_event}/{finding_id} was already disposed by {already}; a finding is \
+         disposed once, and this host can already see that it has been"
+    )))
+}
+
 fn verify_object_ids_resolve(repo: &Path, data: &crate::events::EventData) -> AbResult<()> {
     let candidates: Vec<(&str, &crate::scalars::ObjectId)> = match data {
         crate::events::EventData::AgentRegistered(d) => {
@@ -1494,6 +1568,112 @@ mod tests {
 
     fn text(s: &str) -> Text {
         Text::parse(s.to_string()).unwrap()
+    }
+
+    /// "A finding is disposed once", pinned where it is now enforced.
+    ///
+    /// `apply` used to ask it, and answered a second disposal with `Err`.
+    /// Two reviewers can each be the legitimate reviewer of a nomination
+    /// link they name -- ordinary after a `review.reassigned` -- and neither
+    /// event references the other, so the refusal fired on whichever hosts
+    /// happened to replay them in the unlucky order and made the bus
+    /// unreadable there, permanently. It is asked here instead, against the
+    /// publishing host's own fully-reduced view, where the answer cannot
+    /// move afterwards.
+    #[test]
+    fn verify_finding_is_still_open_refuses_a_second_disposal() {
+        use crate::common::Priority;
+        use crate::events::{ReviewFindingsCleared, ReviewRequest};
+        use crate::state::{FindingDisposition, FindingState, ItemStatus, ReviewChain};
+
+        let nomination = EventId::new(&a("alice"), 1);
+        let changes = EventId::new(&a("bob"), 2);
+        let cleared_by = EventId::new(&a("bob"), 3);
+        let key = (changes.clone(), "f1".to_string());
+
+        let request = ReviewRequest {
+            authors: crate::scalars::StringSet::from_iter([a("alice")]),
+            product_branch: crate::scalars::Branch::parse(
+                "refs/heads/agent/alice/work".to_string(),
+            )
+            .unwrap(),
+            reviewer: a("bob"),
+            required_checks: vec![],
+            review_scope: crate::scalars::StringSet::default(),
+            summary: text("review"),
+            target_branch: crate::scalars::Branch::parse("refs/heads/main".to_string()).unwrap(),
+            evidence: crate::scalars::StringSet::default(),
+        };
+        let finding = |disposition| FindingState {
+            changes_event: changes.clone(),
+            finding_id: short("f1"),
+            priority: Priority::Normal,
+            locations: vec![],
+            rationale: text("because"),
+            closure_conditions: text("fix it"),
+            disposition,
+        };
+        let state_with = |disposition| {
+            let mut state = crate::state::BusState::new(minimal_config());
+            state.reviews.insert(
+                nomination.clone(),
+                ReviewChain {
+                    root: nomination.clone(),
+                    nomination_events: vec![nomination.clone()],
+                    current_nomination: nomination.clone(),
+                    current_request: request.clone(),
+                    nomination_reviewer: [(nomination.clone(), a("bob"))].into(),
+                    accepted_nominations: [nomination.clone()].into(),
+                    decline_or_withdraw_or_reassign_status: ItemStatus::Open,
+                    findings: [(key.clone(), finding(disposition))].into(),
+                    authorizations: Default::default(),
+                    merged: Default::default(),
+                    reconciled: Default::default(),
+                },
+            );
+            state
+                .review_chain_by_nomination
+                .insert(nomination.clone(), nomination.clone());
+            state
+        };
+
+        let dispose = crate::events::EventData::ReviewFindingsCleared(ReviewFindingsCleared {
+            nomination: nomination.clone(),
+            changes_event: changes.clone(),
+            finding_id: short("f1"),
+            resolved_commit: ObjectId::parse("1".repeat(40)).unwrap(),
+            summary: text("fixed"),
+        });
+
+        verify_finding_is_still_open(&state_with(FindingDisposition::Open), &dispose)
+            .expect("an open finding may be disposed of");
+
+        let err = verify_finding_is_still_open(
+            &state_with(FindingDisposition::Cleared {
+                by_event: cleared_by.clone(),
+            }),
+            &dispose,
+        )
+        .expect_err("a finding this host can already see disposed must not be disposed again");
+        assert!(
+            err.to_string().contains("already disposed by"),
+            "the refusal must name the disposal it lost to: {err}"
+        );
+
+        // And nothing else is touched: the gate is per-kind, not a general
+        // review-chain check.
+        verify_finding_is_still_open(
+            &state_with(FindingDisposition::Cleared {
+                by_event: cleared_by,
+            }),
+            &crate::events::EventData::AgentStatus(AgentStatusEvent {
+                status: crate::events::LifecycleStatus::Active,
+                note: text("unrelated"),
+                product_branch: None,
+                product_commit: None,
+            }),
+        )
+        .expect("an unrelated kind passes untouched");
     }
 
     fn init_repo() -> tempfile::TempDir {
