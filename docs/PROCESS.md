@@ -1708,6 +1708,10 @@ for request 4. The `ProcessSpec.Step` signature, `ProcessRun`, `ProcessCorrect`,
 local network stepping, progress, and spike consumers move together; c-process
 coordinates the Process-side migration with c-spike rather than requiring spike
 authors to bridge two transient signatures.
+The earlier request-blind `Step` shape could prove only that a state terminal
+for **every** request had no next step; it deliberately proved nothing about a
+state terminal for one selected request. This request-indexed replacement is
+the direct remedy rather than an undisclosed strengthening of that old law.
 
 `ProcessAcceptance` is trusted specification input when supplied directly. The
 preferred product path derives it from the precious `BehaviorContract`; a

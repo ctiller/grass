@@ -845,7 +845,11 @@ to imitate compiler-selected storage or CFG structure.
     `ProcessAcceptance` is specification authority, not a fact the process
     kernel can discover. Product construction preferentially derives it in
     Refinement from the precious `BehaviorContract` through an exact projection
-    bridge. A standalone protocol may supply it directly, in which case it is
+    bridge. That bridge carries equality to the selected `SpecProcess.contract`,
+    an explicit process-to-contract correspondence, and an exact-execution
+    theorem; every acceptance-projection exactness theorem is indexed by that
+    same correspondence. A standalone protocol may supply acceptance directly,
+    in which case it is
     itself adequacy-reviewed specification input. The deliberately permissive
     `ProcessAcceptance.trivial` may support local mechanism proofs but cannot
     close product adequacy or `VerifiedProgram`. Adding a nominal anti-vacuity
