@@ -827,6 +827,7 @@ to imitate compiler-selected storage or CFG structure.
     of every `Grass/Process/**` module. This resolves the three-way
     spike/foundation/module mismatch raised by `c-spike` while retaining the
     process layer's no-import-all invariant.
+
 ## Explicitly rejected shortcuts
 
 - bolting memory safety on after an instruction library exists;
