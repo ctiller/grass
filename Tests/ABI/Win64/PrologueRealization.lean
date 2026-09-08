@@ -217,4 +217,43 @@ theorem zeroByteReading_accepts_this :
 theorem zeroByteReading_accepts_this_singleton :
     ¬ (Layout.mk [⟨.setFramePointer .rbp 0, 0⟩] 0).Realizes := by decide
 
+/-! ### The encoding is exactly these operations
+
+`Grass/ABI/Win64/Convention.lean` argues from the fact that `UNWIND_CODE` has no
+opcode for mode state -- no `MXCSR`, no x87 control word, no direction flag -- so
+`preserved` there rests on the callee's epilogue and not on the unwinder. That
+argument is about the *absence* of operations, which is the kind of claim that
+rots silently when someone adds one.
+
+This is what makes it face something. -/
+
+/-- The opcode nibbles the encoding uses, and no others.
+
+`6` and `7` are absent because they are the reserved and unused slots, and the
+mode-state opcodes are absent because the encoding has none. A constructor added
+to `UnwindOp` must either reuse one of these nine values or falsify this, and
+either way the argument in `Convention.lean` gets re-read. -/
+example (op : UnwindOp) :
+    op.opcode.toNat ∈ [0, 1, 2, 3, 4, 5, 8, 9, 10] := by
+  cases op <;> simp [UnwindOp.opcode]
+
+/-- Nine constructors and nine distinct opcodes.
+
+The membership check alone would still pass if two constructors collapsed onto
+one value, which would silently shrink the encoding while looking like nothing
+had changed. Concrete witnesses are needed because `opcode` is not injective on
+*operations* -- two pushes of different registers share opcode 0 -- only on the
+constructor each one uses. -/
+example : ([ (UnwindOp.pushNonvolatile .rbx).opcode
+           , (UnwindOp.allocLarge 4096).opcode
+           , (UnwindOp.allocSmall 32).opcode
+           , (UnwindOp.setFramePointer .rbp 0).opcode
+           , (UnwindOp.saveNonvolatile .rbx 8).opcode
+           , (UnwindOp.saveNonvolatileFar .rbx 65536).opcode
+           , (UnwindOp.saveXmm128 .xmm6 16).opcode
+           , (UnwindOp.saveXmm128Far .xmm6 65536).opcode
+           , (UnwindOp.pushMachineFrame false).opcode
+           ] : List (BitVec 4)).Nodup := by decide
+
+
 end Tests.ABI.Win64.PrologueRealization

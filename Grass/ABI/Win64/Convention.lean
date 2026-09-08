@@ -129,11 +129,27 @@ would wrongly license a callee that leaves it set. `Volatility` has two values
 and the rule needs a third; `directionFlag_rule_not_a_volatility` states that
 rather than leaving it as prose, because prose is what went wrong here before.
 
-What survives is enforcement. `modeRule` records what the convention requires
-and nothing checks that emitted code honours it: no unwind operation describes
-saving `MXCSR`, and nothing refuses a function that returns with `DF` set.
-That is a smaller obligation than the one it replaces, and a different kind --
-a missing check rather than a missing fact.
+Two things survive, and they are not the same kind.
+
+The first is not an obligation at all and was recorded as one. "No unwind
+operation describes saving `MXCSR`" reads as a gap in this library; it is a
+fact about Windows. `UNWIND_CODE` has no opcode for mode state -- `UnwindOp`'s
+nine constructors are the whole encoding, and every one of them names a
+register, an allocation or a trap frame. Nothing here could add one.
+
+It has a consequence worth stating instead. `preserved` means something
+narrower for mode state than for a nonvolatile register. A saved register is
+both restored by the callee's epilogue *and* describable in unwind data, so an
+unwind through the function restores it; `MXCSR`'s control bits are only the
+former. Preservation rests entirely on the callee running its own epilogue, and
+an unwind does not run it. A caller reasoning "the callee must preserve the
+rounding mode, so it is unchanged when I regain control" is right after a
+normal return and wrong after an exception.
+
+The second is a real missing check: nothing refuses a function that returns
+with `DF` set. That needs a model of what a function emits, which is the same
+thing `Grass/ABI/Win64/UnwindBytes.lean` is waiting on for its prologue
+recogniser, and it is owed rather than done.
 -/
 
 /-- Which XMM registers a callee must preserve.
