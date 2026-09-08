@@ -323,6 +323,38 @@ def corpus : List Probe :=
     ++ [nopByte, xchgEaxEax, xchgR8dEax, movAh, movAl, movAx,
         movR64, bsfZeroSource, movAxOther, movAlOther, stc, clc]
 
+/-! ### The two-byte escape, in both places it is written
+
+`bsfZeroSource` above spells the escape as the literal `0x0F` at the head of its
+byte string, and `Grass.ISA.X86.InsnEncoding.escapeByte` spells it again as a
+constant. Two spellings of one fact, with nothing relating them: a sweep
+changing `escapeByte` to `0x0E` left the whole repository green, because the
+encoder and the decoder both read the constant and agree with each other
+whatever it says, and this probe's literal was written by hand.
+
+These tie the two together. The probe's own first byte is the check, so the
+constant is anchored to a byte string that a processor executed rather than to
+another copy of itself. -/
+
+/-- The constant is the byte the probe runs. -/
+example : bsfZeroSource.bytes.head? = some InsnEncoding.escapeByte := rfl
+
+/-- And it is `0F`, stated directly so the equation above cannot be satisfied by
+both moving together. -/
+example : InsnEncoding.escapeByte = 0x0F := rfl
+
+/-- The serializer emits it for a two-byte opcode and nothing for a one-byte
+one. `escapeBytes` is the only producer, so this is where a wrong constant would
+reach an object file. -/
+example : InsnEncoding.escapeBytes true = [0x0F] := rfl
+example : InsnEncoding.escapeBytes false = [] := rfl
+
+/-- `0F` is not a REX prefix, which is what lets a decoder read the first byte
+and branch on it. `Grass.ISA.X86.Decode` relies on this when it reads a possible
+escape before an opcode. -/
+example : Rex.isRexByte InsnEncoding.escapeByte = false := by decide
+
+
 end Grass.Tests.ISA.X86.Probe
 
 /-- Emit the corpus as `label TAB bytes TAB before TAB after TAB exception TAB note`,
