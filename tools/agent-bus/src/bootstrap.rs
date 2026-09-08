@@ -1,7 +1,7 @@
 //! The bus-wide configuration fixed at version-two activation
 //! (docs/AGENT_COORDINATION_EVOLUTION.md section 2.5): the product object
-//! format, the exact product commit migration started from, and the pinned
-//! merge engine. Unlike version one's single immutable `_bus/BUS.json`, this
+//! format, the exact product commit migration started from, and the merge
+//! engine metadata. Unlike version one's single immutable `_bus/BUS.json`, this
 //! is not a standalone commit of its own -- it's established alongside the
 //! registry's root epoch (`registry.rs`), since activation and the first
 //! roster epoch are one atomic act. There is deliberately no `coordinators`
@@ -13,10 +13,20 @@ use crate::scalars::ObjectId;
 use serde::{Deserialize, Serialize};
 
 pub const SUPPORTED_MERGE_ENGINE: &str = "git-ort";
-/// The exact `git` version this helper was validated against for candidate
-/// construction (`git merge-tree --write-tree`, ORT strategy). Activation
-/// refuses to run against a different version.
-pub const SUPPORTED_MERGE_ENGINE_VERSION: &str = "2.53.0";
+
+/// What newly activated buses record in [`BusConfig::merge_engine_version`].
+///
+/// There is deliberately no version here to compare against. The repository
+/// owner rejected treating a particular `git` build as protocol authority
+/// (g-design:249): agents need only ordinary `git pull`/`fetch` and non-force
+/// push, so no host may be refused for the version it happens to run, and no
+/// immutable history may be made sensitive to a reader's build constant.
+///
+/// The field itself survives because buses activated before that ruling
+/// recorded a real version in it, and their `_bus/BUS.json` must keep
+/// parsing. It is an ignored diagnostic in both directions: nothing reads an
+/// old bus's value to decide anything, and nothing compares this one.
+pub const UNPINNED_MERGE_ENGINE_VERSION: &str = "unpinned";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -24,6 +34,11 @@ pub struct BusConfig {
     pub object_format: String,
     pub product_review_from: ObjectId,
     pub merge_engine: String,
+    /// Diagnostic only, and never compared with anything. Buses activated
+    /// before g-design:249 recorded a specific `git` version here and must
+    /// keep parsing; new ones record [`UNPINNED_MERGE_ENGINE_VERSION`]. See
+    /// that constant, and `genesis`'s resume check, which deliberately
+    /// ignores this field.
     pub merge_engine_version: String,
 }
 
@@ -37,33 +52,21 @@ impl BusConfig {
                  could ever open"
             )));
         }
-        // Deliberately *not* gated on this host's installed git equalling
-        // `SUPPORTED_MERGE_ENGINE_VERSION`. Activation only *records* the
-        // pin; it never runs the merge engine. The single operation whose
-        // output can depend on the engine version is `git merge-tree
-        // --write-tree` (`gitrepo::merge_tree_write_tree`), reachable only
-        // through `merge_candidate::reconstruct_candidate`, and every path
-        // to that still calls `require_pinned_merge_engine` first. So the
-        // normative rule (AGENT_BUS_SCHEMA.md section 2, "refuses to run on
-        // a different version"; AGENT_REVIEW.md section 7, "`prepare-merge`
-        // uses the merge engine and exact version pinned...") is enforced
-        // exactly where it bites, and a host on a different git still cannot
-        // construct or authorize a candidate.
+        // Activation neither runs nor inspects this host's `git`. It does not
+        // read `git --version` at all, which is the point: a bus is a thing
+        // agents read, publish to and sync -- none of that is engine work,
+        // and making activation depend on a subprocess gave a host with a
+        // merely *unusual* git (or a malformed `~/.gitconfig`, which makes
+        // `git --version` exit nonzero with empty stdout) no way to start or
+        // open a bus at all.
         //
-        // Checking it *here* made the pin a precondition for merely starting
-        // a bus, which no rule asks for and which fails in the wrong
-        // direction: on a host whose distribution ships a different git
-        // (Ubuntu's 2.51.0 against this build's pinned 2.53.0) `genesis`
-        // refused outright, and with it every operation that has nothing to
-        // do with merging -- reading the bus, publishing ordinary events,
-        // succession, sync. It also silently made this the only place the
-        // *field* below could get its value from, so the recorded pin and
-        // the activating host's git could never be discussed separately.
+        // `merge_engine_version` is therefore recorded, not decided: see
+        // `UNPINNED_MERGE_ENGINE_VERSION`.
         Ok(BusConfig {
             object_format,
             product_review_from,
             merge_engine: SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: UNPINNED_MERGE_ENGINE_VERSION.to_string(),
         })
     }
 
@@ -103,81 +106,6 @@ impl BusConfig {
     }
 }
 
-/// AGENT_REVIEW.md section 7 requires candidate construction to use "the merge
-/// engine and exact version pinned in immutable `BUS.json` **or the currently
-/// selected `merge_engine.activated` epoch**", and section 12's fixture 13
-/// requires rejecting "candidate construction with an unpinned merge engine or
-/// helper options".
-///
-/// Both authorities matter, and reading only the first is worse than reading
-/// neither. `BusConfig::new` enforces the pin at *activation*, on whichever
-/// host activated, and `BusConfig::parse` checks only the engine name -- so
-/// every host afterwards could build candidates with whatever `git` it had.
-/// But a bus that later moves to a new engine version does so precisely by
-/// publishing `merge_engine.activated`; checking the frozen bootstrap value
-/// would then reject every host running the currently selected engine, and
-/// section 7's own upgrade mechanism would become the thing that permanently
-/// disables merging. The selected epoch therefore wins when one exists, and
-/// the bootstrap config is the fallback for a bus that has never upgraded.
-///
-/// Deliberately not the compile-time [`SUPPORTED_MERGE_ENGINE_VERSION`]: the
-/// authority is the bus's, not this binary's, so a bus pinned to an older git
-/// keeps rejecting a newer host even when this binary was built expecting the
-/// newer one.
-///
-/// **Where this belongs.** Exactly one operation in the crate can produce a
-/// different answer on a different engine version: `git merge-tree
-/// --write-tree` (`gitrepo::merge_tree_write_tree`), reached only through
-/// `merge_candidate::reconstruct_candidate`. Nothing else -- reading the bus,
-/// reducing it, publishing ordinary events, transport, or any of the local
-/// object and ref work, which goes through libgit2 in `gitobjects.rs` -- is
-/// engine-dependent at all. So every call site places this immediately before
-/// its `reconstruct_candidate`, and nowhere earlier: put it further up and a
-/// host on the wrong git is refused for the wrong reason, told its engine is
-/// wrong when what it actually got wrong was the authorship, the scope or the
-/// nomination. It used to gate activation, which is how a host on Ubuntu's git
-/// could not even create or read a bus.
-///
-/// **What it is, and is not, protecting.** It is not what makes a candidate
-/// trustworthy: both publication gates (`coordinator::verify_review_merge_
-/// authorized` and `merge_ready`) independently *rebuild* the candidate and
-/// reject any mismatch, so two hosts whose engines genuinely disagreed would
-/// refuse the merge rather than accept a tree nobody verified. Determinism
-/// itself comes from pinning *configuration* -- `gitrepo::pinned_merge_config_
-/// args`, `--attr-source` and `refuse_ambient_attributes`, every one of them
-/// added in response to a *measured* divergence. This check adds the upfront,
-/// legible refusal in front of that: without it, a host on another engine
-/// meets an unexplained "does not match the deterministic reconstruction"
-/// instead of being told which version the bus expects. AGENT_BUS_SCHEMA.md
-/// section 2 and AGENT_REVIEW.md section 7 require it, so it stays; but its
-/// value is diagnostic, and it must not be placed as though the safety of the
-/// merge rested on it.
-pub(crate) fn require_pinned_merge_engine(state: &crate::state::BusState) -> AbResult<()> {
-    let (engine, version) = match state
-        .current_merge_engine_epoch
-        .as_ref()
-        .and_then(|epoch| state.merge_engine_info.get(epoch))
-    {
-        Some((engine, version)) => (engine.as_str().to_string(), version.as_str().to_string()),
-        None => (
-            state.config.merge_engine.clone(),
-            state.config.merge_engine_version.clone(),
-        ),
-    };
-    if engine != SUPPORTED_MERGE_ENGINE {
-        return Err(invalid(format!(
-            "this bus selects merge engine {engine}, which this helper cannot run"
-        )));
-    }
-    let installed = crate::gitrepo::version()?;
-    if installed != version {
-        return Err(invalid(format!(
-            "installed git {installed} is not the merge engine version this bus selects ({version}); candidate construction refuses to run, because a tree built by a different engine version cannot be reconstructed by the hosts that must verify it"
-        )));
-    }
-    Ok(())
-}
-
 /// Creates a v2-native genesis from nothing: the registry's root epoch,
 /// naming `coordinator` as its sole `Role::Coordinator` member, and that
 /// coordinator's own stream root (its `agent.registered` event, sequence
@@ -196,11 +124,12 @@ pub(crate) fn require_pinned_merge_engine(state: &crate::state::BusState) -> AbR
 /// Safely resumable across a crash between its two commits (section 2.5:
 /// "define recovery for a partially created registry or stream set"). If
 /// the registry root already exists, this checks it was created by this
-/// exact call (same config, same sole coordinator member) before treating
-/// it as a resume point -- a genuinely different prior activation, or one
-/// that has already moved past its root epoch, is refused rather than
-/// silently adopted. If the coordinator's own stream root is also already
-/// there, this is a pure idempotent no-op returning the existing commit.
+/// exact call (same load-bearing config, same sole coordinator member)
+/// before treating it as a resume point -- a genuinely different prior
+/// activation, or one that has already moved past its root epoch, is refused
+/// rather than silently adopted. If the coordinator's own stream root is
+/// also already there, this is a pure idempotent no-op returning the
+/// existing commit.
 #[allow(clippy::too_many_arguments)]
 pub fn genesis(
     repo: &std::path::Path,
@@ -222,7 +151,18 @@ pub fn genesis(
                     .active_members
                     .get(coordinator)
                     .is_some_and(|b| b.role == crate::events::Role::Coordinator && b.host == host);
-            if existing.parent.is_some() || existing_config != config || !sole_coordinator {
+            // Only the load-bearing half of the config decides whether this
+            // is the same activation. `merge_engine`/`merge_engine_version`
+            // are diagnostics (see `UNPINNED_MERGE_ENGINE_VERSION`), and a
+            // bus activated before g-design:249 records a real git version
+            // in the latter -- comparing it would make resuming, or
+            // idempotently re-running, `genesis` against an existing bus
+            // fail on every host and every build but the one that first ran
+            // it, which is the same reader-build sensitivity that ruling
+            // removed everywhere else.
+            let same_activation = existing_config.object_format == config.object_format
+                && existing_config.product_review_from == config.product_review_from;
+            if existing.parent.is_some() || !same_activation || !sole_coordinator {
                 return Err(invalid(
                     "the agent-registry already has a root epoch that does not match this \
                      genesis call -- this bus was already activated (possibly differently); \
@@ -296,59 +236,6 @@ pub fn genesis(
     Ok((config, epoch, commit))
 }
 
-/// The engine version this host's `git` actually reports, measured once.
-///
-/// Fixtures that build a `BusState` by hand and then have to get *past*
-/// [`require_pinned_merge_engine`] must pin their bus to this, not to
-/// [`SUPPORTED_MERGE_ENGINE_VERSION`]. The two coincide on a host provisioned
-/// with the pinned git and nowhere else, so a fixture spelling the constant is
-/// quietly encoding a property of the *build* as if it were a property of the
-/// *host* -- which is precisely what made a large part of this suite fail on a
-/// host running Ubuntu's git 2.51.0 while asserting things that have nothing
-/// to do with merging. (`pinned_engine_tests` below already did this right;
-/// the fixtures elsewhere did not.)
-///
-/// Cached, because the suite has hundreds of tests and `version` spawns a
-/// subprocess.
-#[cfg(test)]
-pub(crate) fn host_engine_version() -> String {
-    static CACHED: std::sync::LazyLock<String> =
-        std::sync::LazyLock::new(|| crate::gitrepo::version().expect("git must be on PATH"));
-    CACHED.clone()
-}
-
-/// Reports whether this host runs the merge engine version this build pins,
-/// printing why it does not.
-///
-/// A host that does not run the pinned engine cannot construct a candidate,
-/// by design (AGENT_BUS_SCHEMA.md section 2: the helper "refuses to run on a
-/// different version"). That is a real constraint on such a host, not a
-/// defect, so the few tests that need a *real, reduced bus* to get past
-/// [`require_pinned_merge_engine`] -- ones that drive `drain_outbox`
-/// end-to-end, where there is no seam to hand them a differently-pinned state
-/// -- genuinely cannot run there.
-///
-/// They say so out loud and return. Failing would report a correctly
-/// configured helper as broken; passing silently would report an untested
-/// path as tested, which this suite treats as the worse of the two. Every
-/// other test runs on every host: activation, reduction, publication and sync
-/// no longer consult the engine version at all, hand-built fixtures pin
-/// [`host_engine_version`], and the gate's own tests pin a version nobody
-/// runs.
-#[cfg(test)]
-pub(crate) fn requires_the_pinned_engine(what: &str) -> bool {
-    let installed = host_engine_version();
-    if installed == SUPPORTED_MERGE_ENGINE_VERSION {
-        return false;
-    }
-    eprintln!(
-        "SKIPPED {what}: this host runs git {installed}, not the pinned merge engine version \
-         {SUPPORTED_MERGE_ENGINE_VERSION}. Constructing a candidate is refused on such a host by \
-         design, so this test cannot reach what it asserts. Install the pinned git to exercise it."
-    );
-    true
-}
-
 /// A fingerprint of the v2 schema this build implements, printed by
 /// `agent-bus --version` and carried in every stream header -- a reader can
 /// detect a schema mismatch without fully parsing content built against a
@@ -363,13 +250,19 @@ mod tests {
         ObjectId::parse(format!("{n:040x}")).unwrap()
     }
 
+    /// The exact version buses activated before g-design:249 recorded in
+    /// `merge_engine_version`. Real fleet history contains it, so `parse`
+    /// must go on accepting it -- as an ignored diagnostic, not as something
+    /// to agree or disagree with.
+    const HISTORICAL_PINNED_VERSION: &str = "2.53.0";
+
     #[test]
     fn to_canonical_bytes_round_trips_through_parse() {
         let config = BusConfig {
             object_format: "sha1".to_string(),
             product_review_from: oid(1),
             merge_engine: SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: HISTORICAL_PINNED_VERSION.to_string(),
         };
         let bytes = config.to_canonical_bytes();
         let parsed = BusConfig::parse(&bytes).unwrap();
@@ -382,7 +275,7 @@ mod tests {
             "object_format": "sha512",
             "product_review_from": oid(1).as_str(),
             "merge_engine": SUPPORTED_MERGE_ENGINE,
-            "merge_engine_version": SUPPORTED_MERGE_ENGINE_VERSION,
+            "merge_engine_version": HISTORICAL_PINNED_VERSION,
         });
         let err = BusConfig::parse(&serde_json::to_vec(&value).unwrap()).unwrap_err();
         assert!(
@@ -397,7 +290,7 @@ mod tests {
             "object_format": "sha1",
             "product_review_from": oid(1).as_str(),
             "merge_engine": "recursive",
-            "merge_engine_version": SUPPORTED_MERGE_ENGINE_VERSION,
+            "merge_engine_version": HISTORICAL_PINNED_VERSION,
         });
         let err = BusConfig::parse(&serde_json::to_vec(&value).unwrap()).unwrap_err();
         assert!(
@@ -420,7 +313,7 @@ mod tests {
             "object_format": "sha1",
             "product_review_from": sha256_shaped_id.as_str(),
             "merge_engine": SUPPORTED_MERGE_ENGINE,
-            "merge_engine_version": SUPPORTED_MERGE_ENGINE_VERSION,
+            "merge_engine_version": HISTORICAL_PINNED_VERSION,
         });
         let err = BusConfig::parse(&serde_json::to_vec(&value).unwrap()).unwrap_err();
         assert!(
@@ -435,7 +328,7 @@ mod tests {
             "object_format": "sha256",
             "product_review_from": "1".repeat(64),
             "merge_engine": SUPPORTED_MERGE_ENGINE,
-            "merge_engine_version": SUPPORTED_MERGE_ENGINE_VERSION,
+            "merge_engine_version": HISTORICAL_PINNED_VERSION,
         });
         let err = BusConfig::parse(&serde_json::to_vec(&value).unwrap()).unwrap_err();
         assert!(
@@ -453,7 +346,7 @@ mod tests {
         );
     }
 
-    fn init_repo() -> tempfile::TempDir {
+    pub(super) fn init_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path();
         std::process::Command::new("git")
@@ -730,145 +623,181 @@ mod tests {
     }
 }
 
+/// The engine pin is gone, and these are the properties that replaced it
+/// (g-design:249).
+///
+/// They are stated as their own module because the deleted
+/// `pinned_engine_tests` stated the opposite ones, and the pair should be
+/// read together in `git log`: every test here fails if a
+/// `require_pinned_merge_engine`, or anything shaped like it, comes back.
 #[cfg(test)]
-mod pinned_engine_tests {
+mod unpinned_engine_tests {
+    use super::tests::init_repo;
     use super::*;
     use crate::scalars::ObjectId;
 
-    fn config_pinning(version: &str) -> BusConfig {
-        BusConfig {
-            object_format: "sha1".to_string(),
-            product_review_from: ObjectId::parse("0".repeat(40)).unwrap(),
-            merge_engine: SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: version.to_string(),
-        }
+    fn coord() -> crate::scalars::Agent {
+        crate::scalars::Agent::parse("coord1".to_string()).unwrap()
     }
 
-    fn state_pinning(version: &str) -> crate::state::BusState {
-        crate::state::BusState::new(config_pinning(version))
+    fn short(s: &str) -> crate::scalars::Short {
+        crate::scalars::Short::parse(s.to_string()).unwrap()
     }
 
-    /// The host actually running the tests is on the pinned version (CI
-    /// installs it deliberately), so this is the accepting case.
+    fn text(s: &str) -> crate::scalars::Text {
+        crate::scalars::Text::parse(s.to_string()).unwrap()
+    }
+
+    fn sole_coordinator(
+        agent: &crate::scalars::Agent,
+    ) -> std::collections::BTreeMap<crate::scalars::Agent, crate::registry::MemberBinding> {
+        let mut members = std::collections::BTreeMap::new();
+        members.insert(
+            agent.clone(),
+            crate::registry::MemberBinding {
+                role: crate::events::Role::Coordinator,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        members
+    }
+
+    /// Activation records a version nobody compares against, and reads
+    /// nothing about this host to decide it.
     #[test]
-    fn a_host_on_the_pinned_engine_version_may_construct_candidates() {
-        let installed = crate::gitrepo::version().unwrap();
-        require_pinned_merge_engine(&state_pinning(&installed)).unwrap();
-    }
-
-    /// AGENT_REVIEW.md section 7 names two authorities, and the selected
-    /// `merge_engine.activated` epoch is the one that moves. A bus upgrades
-    /// its engine by publishing that event; if this check kept reading the
-    /// frozen bootstrap value, every host running the newly-selected engine
-    /// would be refused, and section 7's own upgrade mechanism would become
-    /// the thing that permanently disables merging.
-    #[test]
-    fn the_selected_engine_epoch_overrides_the_bootstrap_pin_in_both_directions() {
-        let installed = crate::gitrepo::version().unwrap();
-        let epoch = crate::scalars::EventId::new(
-            &crate::scalars::Agent::parse("coord1".to_string()).unwrap(),
-            4,
-        );
-        let short = |v: &str| crate::scalars::Short::parse(v.to_string()).unwrap();
-
-        // Bootstrap pins something nobody runs; the selected epoch pins what
-        // this host has. The epoch must win.
-        let mut upgraded = state_pinning("0.0.0-stale-bootstrap-pin");
-        upgraded.merge_engine_info.insert(
-            epoch.clone(),
-            (short(SUPPORTED_MERGE_ENGINE), short(&installed)),
-        );
-        upgraded.current_merge_engine_epoch = Some(epoch.clone());
-        require_pinned_merge_engine(&upgraded)
-            .expect("the selected epoch must override a stale bootstrap pin");
-
-        // And the other way: bootstrap agrees with this host, but the bus has
-        // since selected an engine version this host does not have.
-        let mut moved_on = state_pinning(&installed);
-        moved_on.merge_engine_info.insert(
-            epoch.clone(),
-            (short(SUPPORTED_MERGE_ENGINE), short("0.0.0-not-a-real-git")),
-        );
-        moved_on.current_merge_engine_epoch = Some(epoch);
-        let err = require_pinned_merge_engine(&moved_on)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("0.0.0-not-a-real-git"),
-            "the selected epoch must be the authority, got: {err}"
-        );
-    }
-
-    /// AGENT_REVIEW.md section 12, fixture 13. The version compared against
-    /// is the *bus's* pin, not this binary's compile-time constant, so the
-    /// fixture pins a version nobody is running rather than mutating the
-    /// constant.
-    #[test]
-    fn a_host_on_a_different_engine_version_is_refused() {
-        let err = require_pinned_merge_engine(&state_pinning("0.0.0-not-a-real-git"))
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("0.0.0-not-a-real-git") && err.contains("candidate construction"),
-            "the error must name the pin it failed against: {err}"
-        );
-    }
-
-    /// The two halves of the fix for the engine pin having gated the wrong
-    /// thing, asserted together because it is their *combination* that is the
-    /// rule: activation is permissive about this host's git, and the
-    /// candidate path is not.
-    ///
-    /// The first half is the regression. `BusConfig::new` used to refuse
-    /// unless this host's `git --version` equalled
-    /// [`SUPPORTED_MERGE_ENGINE_VERSION`], which made the pin a precondition
-    /// for merely *starting* a bus: on a host running Ubuntu's git 2.51.0
-    /// against this build's pinned 2.53.0, `genesis` refused, and with it
-    /// reading, publishing, succession and sync -- 43 tests in this crate
-    /// that never go near the merge engine. Activation records the pin; it
-    /// does not run the engine, and nothing in AGENT_BUS_SCHEMA.md section 2
-    /// or AGENT_REVIEW.md section 7 asks it to.
-    ///
-    /// On a host that *does* run the pinned engine this half passes either
-    /// way -- the deleted branch is simply unreachable there -- so it
-    /// discriminates only on the hosts the defect was reported from. The
-    /// second half discriminates everywhere: it is what must stay true for
-    /// the first to be safe, and it fails immediately if the gate is ever
-    /// removed along with the activation check.
-    #[test]
-    fn activation_ignores_this_hosts_git_but_candidate_construction_still_refuses_it() {
+    fn activation_records_an_unpinned_engine_version() {
         let config = BusConfig::new("sha1".to_string(), ObjectId::parse("0".repeat(40)).unwrap())
             .expect("activation must not depend on which git this host runs");
+        assert_eq!(config.merge_engine_version, UNPINNED_MERGE_ENGINE_VERSION);
         assert_eq!(
-            config.merge_engine_version, SUPPORTED_MERGE_ENGINE_VERSION,
-            "the bus must still record the version this build validated, whatever this host runs"
-        );
-
-        // ...and the bus that activation just described still refuses a host
-        // that is not on its engine. Pinned to a version nobody runs, so this
-        // is falsifying on every host including one provisioned with the
-        // pinned git.
-        let mut off_pin = config.clone();
-        off_pin.merge_engine_version = "0.0.0-not-a-real-git".to_string();
-        let err = require_pinned_merge_engine(&crate::state::BusState::new(off_pin))
-            .expect_err("a host off the bus's engine must still be refused a candidate")
-            .to_string();
-        assert!(
-            err.contains("0.0.0-not-a-real-git") && err.contains("candidate construction"),
-            "{err}"
+            config.merge_engine_version, "unpinned",
+            "the recorded value must not be readable as a version at all -- a real-looking \
+             version invites a future reader to compare it with something"
         );
     }
 
+    /// A `_bus/BUS.json` written before the ruling records a real git
+    /// version. It must still parse, and round-trip, unchanged.
     #[test]
-    fn an_engine_this_helper_cannot_run_is_refused_before_git_is_consulted() {
-        let mut config = config_pinning("irrelevant");
-        config.merge_engine = "some-other-merge-engine".to_string();
-        let err = require_pinned_merge_engine(&crate::state::BusState::new(config))
-            .unwrap_err()
-            .to_string();
+    fn a_config_recording_a_historical_pinned_version_still_parses() {
+        let value = serde_json::json!({
+            "object_format": "sha1",
+            "product_review_from": "0".repeat(40),
+            "merge_engine": SUPPORTED_MERGE_ENGINE,
+            "merge_engine_version": "2.53.0",
+        });
+        let parsed = BusConfig::parse(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_eq!(parsed.merge_engine_version, "2.53.0");
+        assert_eq!(
+            BusConfig::parse(&parsed.to_canonical_bytes()).unwrap(),
+            parsed
+        );
+    }
+
+    /// A version this crate has never heard of parses too. "Historical" is
+    /// not a whitelist of values some build once pinned.
+    #[test]
+    fn a_config_recording_an_unknown_engine_version_still_parses() {
+        let value = serde_json::json!({
+            "object_format": "sha1",
+            "product_review_from": "0".repeat(40),
+            "merge_engine": SUPPORTED_MERGE_ENGINE,
+            "merge_engine_version": "9.99.0-nobody-ships-this",
+        });
+        let parsed = BusConfig::parse(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_eq!(parsed.merge_engine_version, "9.99.0-nobody-ships-this");
+    }
+
+    /// The mixed-version half of activation: a bus whose registry root was
+    /// written by an *older build* -- one that recorded `2.53.0` -- must
+    /// still be resumable, and idempotently re-runnable, by this build.
+    ///
+    /// `genesis` used to compare the whole `BusConfig` for equality, which
+    /// meant the recorded engine version decided whether a second `genesis`
+    /// call was "the same activation". Once this build stopped recording
+    /// `2.53.0`, every real bus in the fleet would have answered "no": the
+    /// crash-recovery path (section 2.5) and plain idempotent re-runs would
+    /// both have failed with "already activated (possibly differently)",
+    /// which is exactly the reader-build sensitivity the ruling removes.
+    #[test]
+    fn genesis_resumes_a_bus_whose_root_recorded_a_different_engine_version() {
+        let repo = init_repo();
+        let coord1 = coord();
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+
+        // The registry half, as an older build would have written it.
+        let older_build_config = BusConfig {
+            object_format: "sha1".to_string(),
+            product_review_from: ObjectId::parse(review_from.clone()).unwrap(),
+            merge_engine: SUPPORTED_MERGE_ENGINE.to_string(),
+            merge_engine_version: "2.53.0".to_string(),
+        };
+        assert_ne!(
+            older_build_config.merge_engine_version, UNPINNED_MERGE_ENGINE_VERSION,
+            "the fixture must actually differ from what this build records, or it proves nothing"
+        );
+        crate::registry::create_root(repo.path(), &older_build_config, sole_coordinator(&coord1))
+            .unwrap();
+
+        let (config, epoch, commit) = genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps the fleet"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .expect("a bus recording another build's engine version must still be resumable");
+        assert!(epoch.is_active_member(&coord1));
+        assert_eq!(
+            crate::stream::read_stream_tip(repo.path(), &coord1).unwrap(),
+            Some(commit)
+        );
+        // The bus's own recorded config is untouched by the resume; only the
+        // value this call would have written differs.
+        assert_eq!(config.merge_engine_version, UNPINNED_MERGE_ENGINE_VERSION);
+        assert_eq!(
+            crate::registry::read_bus_config(repo.path(), &epoch.id)
+                .unwrap()
+                .merge_engine_version,
+            "2.53.0",
+            "resuming must not rewrite the immutable root the older build published"
+        );
+    }
+
+    /// The load-bearing half of the config is still compared. Relaxing the
+    /// engine fields must not have relaxed `product_review_from`, which
+    /// genuinely does say which bus this is.
+    #[test]
+    fn genesis_still_refuses_a_root_naming_a_different_product_review_from() {
+        let repo = init_repo();
+        let coord1 = coord();
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+
+        let other = BusConfig {
+            object_format: "sha1".to_string(),
+            product_review_from: ObjectId::parse("1".repeat(40)).unwrap(),
+            merge_engine: SUPPORTED_MERGE_ENGINE.to_string(),
+            merge_engine_version: UNPINNED_MERGE_ENGINE_VERSION.to_string(),
+        };
+        crate::registry::create_root(repo.path(), &other, sole_coordinator(&coord1)).unwrap();
+
+        let err = genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps the fleet"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap_err();
         assert!(
-            err.contains("some-other-merge-engine"),
-            "expected the engine name to be refused, got: {err}"
+            err.to_string().contains("does not match this genesis call"),
+            "{err}"
         );
     }
 }
