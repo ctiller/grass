@@ -1,5 +1,6 @@
 import Grass.Build.Manifest.Evidence
 import Tests.Build.Manifest.Campaign
+import Tests.Build.Manifest.Rooted
 
 /-! # Joint manifest-evidence admission fixtures -/
 
@@ -45,11 +46,30 @@ example : ¬cyclicDag.WellFormed := by decide
 example : checkManifestEvidence cyclicDag emptyChanges cyclicCampaign = none :=
   by decide
 
+def disconnectedReport (scenario : BuildScenario) : BuildRunReport where
+  scenario := scenario
+  wallNanoseconds := 0
+  peakResidentBytes := 0
+  nodes := Vec.fromList
+    [reportNode leafA .cacheHit 0 0, reportNode leafB .cacheHit 0 0]
+
+def disconnectedCampaign : MeasurementCampaign where
+  runs := requiredBuildScenarios.map disconnectedReport
+
+example : disconnectedCampaign.Complete := by decide
+example : disconnectedCampaign.ExactFor disconnectedDag emptyChanges := by decide
+example : disconnectedDag.WellFormed := by decide
+example : ¬disconnectedDag.Rooted := by decide
+
+example :
+    checkManifestEvidence disconnectedDag emptyChanges disconnectedCampaign = none :=
+  by decide
+
 example (evidence : CheckedManifestEvidence 4 scenarioChanges) :
-    evidence.dag.graph.WellFormed ∧
+    evidence.dag.graph.Rooted ∧
       evidence.campaign.campaign.Complete ∧
       evidence.campaign.campaign.ExactFor evidence.dag.graph scenarioChanges := by
-  exact ⟨evidence.dagWellFormed, evidence.campaignComplete,
+  exact ⟨evidence.dag.rooted, evidence.campaignComplete,
     evidence.campaignExact⟩
 
 end Grass.Tests.Build.Manifest

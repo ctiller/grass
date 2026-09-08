@@ -1,4 +1,5 @@
 import Grass.Build.Manifest.Campaign
+import Grass.Build.Manifest.Rooted
 
 /-!
 # Joint manifest and measurement admission
@@ -12,14 +13,14 @@ namespace Grass.Build.Manifest
 
 /-- A checked manifest DAG paired with a complete, exact measurement campaign. -/
 structure CheckedManifestEvidence (fanout : Nat) (changes : ScenarioChanges) where
-  dag : CheckedManifestDag fanout
+  dag : RootedManifestDag fanout
   campaign : CheckedMeasurementCampaign dag.graph changes
 
 /-- Jointly validate generated graph shape and its measured campaign. -/
 def checkManifestEvidence {fanout : Nat} (dag : ManifestDag fanout)
     (changes : ScenarioChanges) (campaign : MeasurementCampaign) :
     Option (CheckedManifestEvidence fanout changes) :=
-  match checkManifestDag dag with
+  match checkRootedManifestDag dag with
   | none => none
   | some checkedDag =>
     match checkMeasurementCampaign checkedDag.graph changes campaign with
@@ -31,17 +32,17 @@ theorem checkManifestEvidence_isSome_iff {fanout : Nat}
     (dag : ManifestDag fanout) (changes : ScenarioChanges)
     (campaign : MeasurementCampaign) :
     (checkManifestEvidence dag changes campaign).isSome = true ↔
-      dag.WellFormed ∧ campaign.Complete ∧ campaign.ExactFor dag changes := by
-  by_cases wellFormed : dag.WellFormed
+      dag.Rooted ∧ campaign.Complete ∧ campaign.ExactFor dag changes := by
+  by_cases rooted : dag.Rooted
   · by_cases complete : campaign.Complete
     · by_cases exact : campaign.ExactFor dag changes
-      · simp [checkManifestEvidence, checkManifestDag,
-          checkMeasurementCampaign, wellFormed, complete, exact]
-      · simp [checkManifestEvidence, checkManifestDag,
-          checkMeasurementCampaign, wellFormed, complete, exact]
-    · simp [checkManifestEvidence, checkManifestDag,
-        checkMeasurementCampaign, wellFormed, complete]
-  · simp [checkManifestEvidence, checkManifestDag, wellFormed]
+      · simp [checkManifestEvidence, checkRootedManifestDag,
+          checkMeasurementCampaign, rooted, complete, exact]
+      · simp [checkManifestEvidence, checkRootedManifestDag,
+          checkMeasurementCampaign, rooted, complete, exact]
+    · simp [checkManifestEvidence, checkRootedManifestDag,
+        checkMeasurementCampaign, rooted, complete]
+  · simp [checkManifestEvidence, checkRootedManifestDag, rooted]
 
 /-- Successful joint admission exposes the checked graph ordering invariant. -/
 theorem CheckedManifestEvidence.dagWellFormed {fanout : Nat}
