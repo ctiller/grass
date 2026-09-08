@@ -332,9 +332,29 @@ changing `escapeByte` to `0x0E` left the whole repository green, because the
 encoder and the decoder both read the constant and agree with each other
 whatever it says, and this probe's literal was written by hand.
 
-These tie the two together. The probe's own first byte is the check, so the
-constant is anchored to a byte string that a processor executed rather than to
-another copy of itself. -/
+These tie the two together, so the constant and the probe cannot drift apart.
+
+**They are not the anchor, and this said they were.** `g-design:190` is right
+that a byte string a processor executed is model validation and not the source
+of an architecture fact: it shows this processor did something, not that the
+architecture specifies it. The earlier wording here called the probe the anchor,
+which inverts the two.
+
+The vendor location, read from the manual rather than inferred: Intel SDM
+Vol. 2A, section 2.1.2 "Opcodes", on the page numbered 2-3. Two-byte opcode
+formats for general-purpose and SIMD instructions consist of "an escape opcode
+byte 0FH as the primary opcode and a second opcode byte", or a mandatory prefix
+followed by the same. That sentence is the source; the probe is evidence that
+this library reads it correctly.
+
+What `g-design:190` asks for beyond this is a first-class dual-cited rule in
+`Grass/ISA/X86/Profile.lean` with `InsnEncoding.escapeByte`, the decoder branch
+and every two-byte opcode row named as its subjects, plus an audit that refuses
+a new encoding constant whose file merely happens to contain some other cited
+subject. That is not done. The location above is recorded so whoever does it
+does not repeat the lookup, and the AMD half will sit at
+`assertedPendingConfirmation` like the other nine while that manual's retrieval
+location is dead. -/
 
 /-- The constant is the byte the probe runs. -/
 example : bsfZeroSource.bytes.head? = some InsnEncoding.escapeByte := rfl
