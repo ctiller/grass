@@ -1609,7 +1609,7 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   reported. A tactic must now also be *in tactic position*: at the start of the line
   or after `by`, `;`, `<;>`, a focus dot or a match bar. The tool's self-test seeds
   the binder line, and neutering the position test turns it red.
-- ~~**`Tools/DocstringAudit.py`'s hedge list was justified as covering statements of
+- ~~**The docstring audit's hedge list was justified as covering statements of
   limitation and silences guarantees.**~~ Three examples, each naming nothing that
   enforces it: "a table cannot answer with a space under the wrong name", "a protocol
   cannot introduce a duty of a kind the target never declared", "holdings that cannot
@@ -1925,7 +1925,7 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   note says "every line number from a real file was wrong" — and the sibling still had
   it. Blanking rather than concatenating fixes both; the probe now reports 433 and 436,
   once each.
-- ~~**`Tools/DocstringAudit.py`'s self-naming exemption pattern was still there**, one round
+- ~~**The docstring audit's self-naming exemption pattern was still there**, one round
   after the module docstring said it was deleted, with a comment above it describing an
   exemption that was not in force.~~ The same shape as `MemoryProfile.Admits` and
   `OperationFacets.Closes`, in `Tools/`, where no gate looks.
@@ -2186,7 +2186,7 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   section in a line comment passed. And the line-number fix that landed for the
   declaration half did not land for this one, one round after the note saying it had —
   a citation at real line 433 of a 431-line file was reported at line 36.
-- ~~**`Tools/DocstringAudit.py`'s hedge list was the fourth allowlist and had the
+- ~~**The docstring audit's hedge list was the fourth allowlist and had the
   opposite half of the fix.**~~ `--hedged` lists the silenced *sentences*; what three
   sibling tools grew was `--inert`, which lists the entries that have stopped silencing
   anything. Twenty-two of forty-three were inert. Both halves now.
@@ -2930,7 +2930,7 @@ the four generated-name prefixes as *prefixes* of the last name component, on
   `Tools/DoorAudit.py`'s own door set called "the five plus the two" when `DOORS` has
   thirteen; `RequirementKind` called a "ten-name closed vocabulary" when it declares
   twelve and carries an open `extension` escape — **a count written from an allowlist
-  counts the allowlist**; `Tools/DocstringAudit.py` calling itself one of four audits when
+  counts the allowlist**; the docstring audit calling itself one of four audits when
   there are seven and saying it has no self-test 250 lines below its own; §4.4.1's own
   "seven allowlists across seven gates" contradicted by that bullet's own premise two
   sentences earlier; "nine properties" over a ten-row table; and an inventory of unread
@@ -3052,9 +3052,9 @@ tripling the tree: 193 build jobs where there were 70, 10,616 audited declaratio
 there were 4,220, three other owners' subtrees under globs written for this one. Four
 things came out of it that are about the gates rather than about the merge.
 
-**Main's `Tools/DocstringAudit.py` is strictly stronger and found eight claims this
+**Main's docstring audit is strictly stronger and found eight claims this
 branch's version passed.** It resolves every backticked name against the real declaration
-set, printed by `Tools/DeclNames.lean`; the version here checked only that a claim-shaped
+set, printed by its declaration-name walk; the version here checked only that a claim-shaped
 sentence contained *some* backticked identifier. Merging took main's file wholesale and
 re-applied this branch's four additions on top — `__file__` anchoring, `--self-test`,
 `--hedged` and `--inert` — none of which main had.
@@ -3192,7 +3192,7 @@ the tooling built to police it did not.
   baseline with hedges *disabled*, which makes every narrowed run a subset and every
   entry read as inert — it reported all thirty-nine. A leave-one-out compares against the
   run the gate actually makes.
-- ~~**`Tools/DeclNames.lean`'s exclusion list: eight entries, six `main`s, two inert.**~~
+- ~~**The declaration-name walk's exclusion list: eight entries, six `main`s, two inert.**~~
   `Tests` itself is never enumerated, and `Tests/Memory/Spike1Reference.lean` defines no
   `main` — the grep that put it there matched `mainThread` — is not a generator but this
   layer's M1 freeze evidence, and was in the name set anyway through two importers.
@@ -3377,7 +3377,7 @@ was caught, four of them at statement level rather than by a tactic script.
   one. `an_offset_outside_the_aggregate_is_not_padding` pins it.
 - ~~**The two gates disagree about whether a Lean docstring may cite a tool
   function.**~~ `Tools/CitationAudit.py` scans `TOOL_FILES` and resolves
-  `worth_checking`; `Tools/DocstringAudit.py` resolves against the **Lean build** and
+  `worth_checking`; the docstring audit resolves against the **Lean build** and
   reports it as naming nothing. A paragraph written this round to explain a
   `CitationAudit` blind spot was itself reported by `DocstringAudit` for naming that
   gate's internals. Rewritten to describe the limits without naming them, and the
