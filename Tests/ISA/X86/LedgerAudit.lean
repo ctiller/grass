@@ -6,6 +6,7 @@ import Grass.ABI.Win64.UnwindBytes
 import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Profile
 import Grass.Platform.Win32.Coff
+import Grass.Platform.Win32.CoffLayout
 
 /-!
 # Ledger coverage gate
@@ -91,7 +92,8 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
-   `Grass.Platform.Win32.Profile, `Grass.Platform.Win32.Coff]
+   `Grass.Platform.Win32.Profile, `Grass.Platform.Win32.Coff,
+   `Grass.Platform.Win32.CoffLayout]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -105,7 +107,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 113
+def owedBaseline : Nat := 118
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -127,7 +129,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 57
+def notBehaviourBaseline : Nat := 62
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -333,7 +335,18 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.MemOperand.indexRegister,
     `Grass.ISA.X86.RmEncoding.needsRex, `Grass.ISA.X86.RmEncoding.modrm,
     `Grass.ISA.X86.RmEncoding.rex,
-    ]
+        -- The COFF layout arithmetic. None of these asserts anything about the
+    -- format: `dataSize` and `relocSize` are sums over sections this model
+    -- already holds, `dataOffsets` and `relocOffsets` are running totals over
+    -- an arrangement `Object.toBytes` chose rather than one COFF requires, and
+    -- `relocationBytes` only concatenates records whose own layout is cited
+    -- through `Relocation.toBytes` in `owed`. A vendor document would have
+    -- nothing to say about any of them.
+    `Grass.Platform.Win32.Coff.Object.dataSize,
+    `Grass.Platform.Win32.Coff.Object.relocSize,
+    `Grass.Platform.Win32.Coff.Section.relocationBytes,
+    `Grass.Platform.Win32.Coff.dataOffsets,
+    `Grass.Platform.Win32.Coff.relocOffsets ]
 
 /--
 Declarations that genuinely model external behaviour and have no citation yet.
@@ -486,7 +499,20 @@ def owed : List Name :=
     `Grass.Platform.Win32.Coff.SectionName.toBytes,
     `Grass.Platform.Win32.Coff.SectionHeader.toBytes,
     `Grass.Platform.Win32.Coff.FileHeader.toBytes,
-    `Grass.Platform.Win32.Coff.FileHeader.sectionTableOffset ]
+    `Grass.Platform.Win32.Coff.FileHeader.sectionTableOffset,
+    -- The layout constants, which are the same kind of fact one level up.
+    -- `headerSize` is twenty plus forty per section, and both numbers are the
+    -- record sizes the format fixes; `relocationSize` is ten per entry for the
+    -- same reason. `toBytes` places the file header at offset zero with the
+    -- section table immediately after it, which the format requires -- the
+    -- *rest* of its arrangement is a choice this profile makes and owes
+    -- nothing. `fileHeader` and `sectionHeaders` assert what each field means,
+    -- which is the format's claim and not this model's.
+    `Grass.Platform.Win32.Coff.Object.headerSize,
+    `Grass.Platform.Win32.Coff.Object.toBytes,
+    `Grass.Platform.Win32.Coff.Object.fileHeader,
+    `Grass.Platform.Win32.Coff.Object.sectionHeaders,
+    `Grass.Platform.Win32.Coff.Section.relocationSize ]
 
 /-- The declarations this gate holds the ledger responsible for. -/
 def modeledDeclarations : MetaM (Array Name) := do
