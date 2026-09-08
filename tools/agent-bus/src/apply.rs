@@ -1598,26 +1598,29 @@ fn apply_review_accept(
     let chain = state
         .review_chain(&d.nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.nomination)))?;
-    if chain.current_nomination != d.nomination {
-        // `d.nomination` was once this chain's current link but has since
-        // been superseded -- ordinarily, or by a concurrent reassignment
-        // this event's independently-published author could not have
-        // observed (AGENT_COORDINATION_EVOLUTION.md section 2.1: per-agent
-        // streams are single-writer and published without cross-observing
-        // each other). AGENT_BUS_SCHEMA.md section 8 says such an
-        // acceptance "never becomes an orphaned concurrent successor of a
-        // published reassignment" -- the fix is a no-op, not an `Err`:
-        // `reduce()`/`reduce_onto()` propagate any `Err` here via a bare
-        // `?` with no per-event isolation, so a hard failure would
-        // permanently break reduction of the *entire* bus for every host
-        // that has fetched both streams, not just this one chain
-        // (round-3 adversarial review, confirmed fleet-wide DoS).
-        return Ok(());
-    }
+    // Recorded against the link it *names*, never against whatever link is
+    // current, and this is the part that took three attempts.
+    //
+    // An `Err` here was a fleet-wide DoS: a reassignment the accepting
+    // reviewer had not observed superseded the link, and reduction then
+    // rejected an honest acceptance on every host (round-3 adversarial
+    // review, confirmed). So it became a no-op -- which stopped the outage
+    // and introduced a quieter fault: whether the acceptance was recorded
+    // depended on whether the racing reassignment had been replayed yet, so
+    // two hosts ended up with different `accepted_nominations` and neither
+    // reported anything wrong. A silent, permanent gates-15/16 divergence is
+    // worse than a loud failure, because nothing surfaces it.
+    //
+    // Both go away by recording the fact that is true regardless of order:
+    // this reviewer accepted this link. `accepted_nominations` is a set
+    // keyed by nomination id, so every extension inserts the same entry, and
+    // `chain.accepted()` still asks about the *current* link when deciding
+    // whether the chain may proceed. Same shape as
+    // `acknowledged_assignments` for issue acknowledgements.
     let expected_reviewer = chain
         .nomination_reviewer
         .get(&d.nomination)
-        .expect("every nomination has a reviewer");
+        .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.nomination)))?;
     if expected_reviewer != &env.agent {
         return Err(invalid(format!(
             "{}: only the named reviewer may accept this nomination",
@@ -1748,14 +1751,19 @@ fn reset_review_to_conflict(state: &mut BusState, nomination: &EventId) {
     };
     chain.decline_or_withdraw_or_reassign_status = ItemStatus::LifecycleConflict;
     if chain.current_nomination != *nomination {
+        // Only the derived view is retracted. `nomination_reviewer` and
+        // `review_chain_by_nomination` are how later events resolve a
+        // nomination link at all, so removing an entry made an honest
+        // acceptance or disposition naming the provisional link fail with
+        // "unknown nomination" and took the bus down fleet-wide. They are
+        // written for every candidate in `apply_review_reassigned` and
+        // never removed; see the reasoning there.
         let provisional = chain.current_nomination.clone();
         chain.nomination_events.retain(|id| id != &provisional);
-        chain.nomination_reviewer.remove(&provisional);
         chain.current_nomination = nomination.clone();
         if let Some(r) = baseline_request {
             chain.current_request = r;
         }
-        state.review_chain_by_nomination.remove(&provisional);
     }
 }
 
@@ -1957,6 +1965,31 @@ fn apply_review_reassigned(
     let root = chain.root.clone();
     let key = review_key(&d.replaces);
     state.exclusive.record(&key, &env.id)?;
+    // Which reviewer this nomination link named, and which chain it belongs
+    // to, are facts about *this event* -- true whether or not it wins the
+    // race -- so both are recorded before the disposition is consulted.
+    //
+    // Identical reasoning to `apply_issue_reassigned`, and the same defect:
+    // these two maps are how every later event resolves a nomination link,
+    // and they used to be written only on the winning path and then
+    // *retracted* when a race was detected. That converged, but it made the
+    // maps lie, so an honest `review.nomination_accepted` naming the
+    // provisional link -- which its own `refs` cite, so `topological_order`
+    // guarantees it is applied afterwards -- got "unknown nomination" and
+    // took the whole bus down.
+    //
+    // Recording every candidate is confluent because the keys are event ids,
+    // and it keeps every link anyone can legitimately name resolvable.
+    // `current_nomination`, `current_request` and `nomination_events` remain
+    // the derived, retractable view of which link is actually in force.
+    if let Some(chain_mut) = state.reviews.get_mut(&root) {
+        chain_mut
+            .nomination_reviewer
+            .insert(env.id.clone(), d.reviewer.clone());
+    }
+    state
+        .review_chain_by_nomination
+        .insert(env.id.clone(), root.clone());
     match state.exclusive.disposition(&key, &env.id) {
         Disposition::Applies => {
             confirm_review_reassigned(state, &env.id, &root, d);
@@ -5481,13 +5514,36 @@ mod tests {
                  not left dangling as the chain's current nomination"
             );
             assert_eq!(chain.current_request, request, "{label} order");
+            // The link stays *resolvable* even though it is no longer in
+            // force, and that distinction is the point. Removing the mapping
+            // was meant to stop a retracted link being queryable, but this
+            // map is how every later event finds the chain a link belongs
+            // to, so an honest acceptance or disposition naming the
+            // provisional link then failed with "unknown nomination" and
+            // took the bus down. Nothing is revived by keeping it: the
+            // derived view above -- `current_nomination`, `current_request`,
+            // `nomination_events` -- is what says which link is in force,
+            // and it is correctly back at the baseline.
             assert!(
-                !state
+                state
                     .review_chain_by_nomination
                     .contains_key(&reassign_env.id),
-                "{label} order: the retracted link's phantom mapping must not remain queryable"
+                "{label} order: a link that lost a race must still resolve to its chain"
+            );
+            assert_eq!(
+                chain.nomination_reviewer.get(&reassign_env.id),
+                Some(&carol),
+                "{label} order: and must still resolve to the reviewer it named"
             );
         }
+        // Both orders agree on the lookup maps, which is the property the
+        // retraction was reaching for. Keys are event ids, so every order
+        // inserts the same entries; it was the conditional *removal* that
+        // made this state depend on arrival order.
+        assert_eq!(
+            format!("{:?}", forward.review_chain_by_nomination),
+            format!("{:?}", reverse.review_chain_by_nomination),
+        );
     }
 
     /// Regression test for round-2 adversarial review's Significant finding:
@@ -8855,7 +8911,7 @@ mod tests {
     /// alice reassigns the nomination away from him. His late acceptance
     /// must be a no-op, not a fatal `Err`.
     #[test]
-    fn ignores_review_accept_against_a_stale_nomination() {
+    fn records_review_accept_against_a_stale_nomination_without_advancing_the_chain() {
         let alice = a("alice");
         let bob = a("bob");
         let carol = a("carol");
@@ -8911,9 +8967,21 @@ mod tests {
 
         let chain = state.review_chain(&reassign_env.id).unwrap();
         assert_eq!(chain.current_nomination, reassign_env.id);
+        // Recorded against the link bob actually named. Dropping it instead
+        // made the outcome depend on whether the racing reassignment had
+        // been replayed yet, so two hosts disagreed about
+        // `accepted_nominations` with nothing reporting a problem -- a
+        // silent gates-15/16 divergence, which is worse than the `Err` it
+        // replaced because nothing surfaces it.
         assert!(
-            !chain.accepted_nominations.contains(&nominate_env.id),
-            "bob's stale acceptance must not have taken effect"
+            chain.accepted_nominations.contains(&nominate_env.id),
+            "bob's acceptance of the link it named must be recorded"
+        );
+        // And it changes no decision: `accepted()` asks about the *current*
+        // link, which bob never accepted, so the chain still may not proceed.
+        assert!(
+            !chain.accepted_nominations.contains(&reassign_env.id),
+            "bob did not accept the link that is now in force"
         );
         assert!(!chain.accepted());
     }
@@ -10306,6 +10374,107 @@ mod tests {
         assert!(
             carol_ish.is_ok() && c_dash.is_ok(),
             "cold reduce must not wedge: carol1={carol_ish:?} c-one={c_dash:?}"
+        );
+    }
+
+    /// An acceptance naming a nomination link that lost a race must still
+    /// reduce.
+    ///
+    /// alice reassigns a review from bob to zed; zed accepts the new link,
+    /// citing it in its own `refs` so `topological_order` guarantees the
+    /// acceptance is applied after it; concurrently bob declines the
+    /// original nomination, which contests the reassignment.
+    ///
+    /// `reset_review_to_conflict` used to retract the provisional link from
+    /// `nomination_reviewer` and `review_chain_by_nomination`, so zed's
+    /// honest acceptance then failed with "unknown nomination" -- and with
+    /// no per-event isolation in `reduce`, that is every host unable to read
+    /// the bus, permanently, the log being append-only.
+    ///
+    /// The review twin of
+    /// `an_ack_naming_a_retracted_provisional_assignment_still_reduces`, and
+    /// the same resolution: the derived view retracts, the lookup maps do
+    /// not.
+    #[test]
+    fn an_acceptance_naming_a_retracted_nomination_link_still_reduces() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let zed = a("zed");
+        let mut base = empty_state(&[
+            ("alice", Role::Implementor),
+            ("bob", Role::Reviewer),
+            ("zed", Role::Reviewer),
+        ]);
+        apply_ok(&mut base, &register(&alice, Role::Implementor));
+        apply_ok(&mut base, &register(&bob, Role::Reviewer));
+        apply_ok(&mut base, &register(&zed, Role::Reviewer));
+
+        let request = review_request(&[&alice], &bob);
+        let nominate_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::ReviewNominated(request.clone()),
+            [],
+        );
+        apply_ok(&mut base, &nominate_env);
+
+        // alice reassigns the review from bob to zed.
+        let reassign_env = Envelope::new(
+            &alice,
+            2,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewReassigned(ReviewReassigned {
+                authors: request.authors.clone(),
+                product_branch: request.product_branch.clone(),
+                reviewer: zed.clone(),
+                required_checks: request.required_checks.clone(),
+                review_scope: request.review_scope.clone(),
+                summary: request.summary.clone(),
+                target_branch: request.target_branch.clone(),
+                evidence: StringSet::default(),
+                replaces: nominate_env.id.clone(),
+                reason: text("bob went quiet"),
+                inherited_findings: vec![],
+            }),
+            [],
+        );
+        apply_ok(&mut base, &reassign_env);
+
+        // zed accepts the new link.
+        let accept_env = Envelope::new(
+            &zed,
+            1,
+            frontier_seeing(&[&reassign_env.id]),
+            &EventData::ReviewNominationAccepted(ReviewNominationAccepted {
+                nomination: reassign_env.id.clone(),
+                note: text(""),
+            }),
+            [],
+        );
+        // bob concurrently declines the ORIGINAL nomination.
+        let decline_env = Envelope::new(
+            &bob,
+            1,
+            frontier_seeing(&[&nominate_env.id]),
+            &EventData::ReviewNominationDeclined(ReviewNominationDeclined {
+                nomination: nominate_env.id.clone(),
+                reason: text("too busy"),
+            }),
+            [],
+        );
+
+        let accept_first = reduce_onto(base.clone(), &[accept_env.clone(), decline_env.clone()]);
+        let decline_first = reduce_onto(base.clone(), &[decline_env.clone(), accept_env.clone()]);
+        assert!(accept_first.is_ok(), "accept-first must reduce");
+        assert!(
+            decline_first.is_ok(),
+            "both orders must reduce: the link an acceptance names must stay resolvable"
+        );
+        assert_eq!(
+            format!("{:?}", accept_first.unwrap()),
+            format!("{:?}", decline_first.unwrap()),
+            "both orders must reduce: the link an acceptance names must stay resolvable"
         );
     }
 }
