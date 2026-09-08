@@ -40,11 +40,57 @@ structure TargetPolicy (State : Type u) (Terminal : Type v) where
 
 namespace TargetPolicy
 
+/-- Find the exact finite evidence selected for one indirect-control site. -/
+def indirectEvidence? {State : Type u} {Terminal : Type v}
+    (policy : TargetPolicy State Terminal) (site : Name) :
+    Option (IndirectTargetEvidence policy.graph.blockIds) :=
+  policy.indirect.find? fun evidence => evidence.site == site
+
 /-- Whether the policy resolves one decoder-reported control target. -/
 def resolves {State : Type u} {Terminal : Type v}
     (policy : TargetPolicy State Terminal) : ControlTarget → Bool
   | .direct block => policy.graph.blockIds.contains block
-  | .indirect site => policy.indirect.any fun evidence => evidence.site == site
+  | .indirect site => (policy.indirectEvidence? site).isSome
+
+/-- Successful indirect lookup returns evidence for the requested site. -/
+theorem site_of_indirectEvidence?
+    {State : Type u} {Terminal : Type v}
+    {policy : TargetPolicy State Terminal} {site : Name}
+    {evidence : IndirectTargetEvidence policy.graph.blockIds}
+    (hfind : policy.indirectEvidence? site = some evidence) :
+    evidence.site = site := by
+  have matched := List.find?_some (p := fun candidate :
+    IndirectTargetEvidence policy.graph.blockIds => candidate.site == site)
+    (by simpa [indirectEvidence?] using hfind)
+  exact LawfulBEq.eq_of_beq matched
+
+/-- Successful indirect lookup returns evidence from the selected policy. -/
+theorem mem_of_indirectEvidence?
+    {State : Type u} {Terminal : Type v}
+    {policy : TargetPolicy State Terminal} {site : Name}
+    {evidence : IndirectTargetEvidence policy.graph.blockIds}
+    (hfind : policy.indirectEvidence? site = some evidence) :
+    evidence ∈ policy.indirect := by
+  exact List.mem_of_find?_eq_some (by
+    simpa [indirectEvidence?] using hfind)
+
+/-- Every target returned by selected indirect evidence is a graph block. -/
+theorem targetAllowed_of_indirectEvidence?
+    {State : Type u} {Terminal : Type v}
+    {policy : TargetPolicy State Terminal} {site : Name}
+    {evidence : IndirectTargetEvidence policy.graph.blockIds}
+    (_hfind : policy.indirectEvidence? site = some evidence)
+    (target : BlockId) (htarget : target ∈ evidence.targets) :
+    target ∈ policy.graph.blockIds :=
+  evidence.targetsAllowed target htarget
+
+/-- Indirect resolution is exactly successful finite-evidence lookup. -/
+theorem resolves_indirect_iff
+    {State : Type u} {Terminal : Type v}
+    (policy : TargetPolicy State Terminal) (site : Name) :
+    policy.resolves (.indirect site) = true ↔
+      (policy.indirectEvidence? site).isSome = true := by
+  rfl
 
 end TargetPolicy
 

@@ -439,6 +439,9 @@ precise out-of-bounds boundary.
 `ImportTargetsResolved` retains the importer's all-instruction target check, and
 `ImportedProgram.controlTargetResolved` exposes it without re-running the
 decoder or policy search.
+`TargetPolicy.indirectEvidence?` exposes the exact finite evidence behind an
+accepted indirect site; its lookup theorems retain requested-site identity and
+prove every enumerated target belongs to the selected CFG.
 
 `Grass.Unsafe.Step` maps imported instructions to the existing open
 `Grass.Op.SomeOperation` package plus explicit context, cause, and fault-plan

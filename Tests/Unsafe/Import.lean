@@ -68,6 +68,21 @@ private def directOnlyPolicy : TargetPolicy Nat String where
   indirect := []
   indirectSitesUnique := by decide
 
+example : policy.indirectEvidence? indirectSite = some indirectEvidence := rfl
+example : directOnlyPolicy.indirectEvidence? indirectSite = none := rfl
+example (evidence : IndirectTargetEvidence policy.graph.blockIds)
+    (hfind : policy.indirectEvidence? indirectSite = some evidence) :
+    evidence.site = indirectSite :=
+  TargetPolicy.site_of_indirectEvidence? hfind
+example (evidence : IndirectTargetEvidence policy.graph.blockIds)
+    (hfind : policy.indirectEvidence? indirectSite = some evidence)
+    (block : BlockId) (hblock : block ∈ evidence.targets) :
+    block ∈ policy.graph.blockIds :=
+  TargetPolicy.targetAllowed_of_indirectEvidence? hfind block hblock
+example : policy.resolves (.indirect indirectSite) = true ↔
+    (policy.indirectEvidence? indirectSite).isSome = true :=
+  policy.resolves_indirect_iff indirectSite
+
 private def summarize
     (result : Except (ImportError DecodeFailure)
       (ImportedProgram Nat String Nat Instruction)) :
