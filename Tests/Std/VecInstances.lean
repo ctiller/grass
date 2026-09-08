@@ -261,6 +261,15 @@ after it.
 Three of the nine below did not close when they were first written. Two were
 laws that already existed and were not in the `simp` set — `Vec.get?_replicate`
 and `Vec.get?_eq_none_iff` — and one, `Vec.get?_isSome_iff`, did not exist.
+
+**Each of the three was measured load-bearing rather than assumed to be.**
+Deleting `@[simp]` from any one of them and rebuilding this module breaks it, and
+the three were checked separately, since a fixture that happens to exercise one
+of a group is the ordinary way the others stay unreachable. Both attribute
+changes were also applied one at a time against the whole 204-job tree before the
+next, because adding a law to the `simp` set can break a proof that closed
+without it — `Vec.ofHostBytes_append` did exactly that to its own module and the
+docstring there records it.
 -/
 
 section ReadingWithABound
