@@ -34,8 +34,16 @@ rebuilt.
 So the property `docs/MEMORY_MODEL.md` §8 demands — "they cannot be erased or
 masked" — is not a property of the type. It is a property of the *transition
 relation*: the ledger threaded through an execution must only ever grow.
-`Extends` states that, and M2's step relation owes a proof that every step
-preserves it. What laundering produces is a different value that never enters the
+`Extends` states that, and `Grass.Op.step_extends_violations` proves every step
+preserves it, with `performAccess_extends_violations` and
+`runStep_extends_violations` beneath it. This said M2 "owes a proof" long after M2
+supplied one -- four hundred lines below, `not_isEmpty_append` cites the same
+theorem as done, so the file contradicted itself about its own central guarantee.
+The docstring audit cannot catch that: "owes" is in its hedge list, so a stale open
+obligation is exempt by construction and invisible to the gate built to police
+claims -- which is worth knowing about that gate, not only about this sentence.
+
+What laundering produces is a different value that never enters the
 execution; what would be a real violation is a step returning a ledger that does
 not extend its input, and that is what `Extends` is there to forbid.
 
@@ -65,11 +73,60 @@ namespace AuditViolationClass
 /-- An access was attempted outside the bounds its provenance authorizes. -/
 def outOfBounds : AuditViolationClass := ⟨⟨"outOfBounds"⟩⟩
 
-/-- An access was attempted through provenance that is no longer live. -/
+/-- The allocation table does not hold the identity the provenance names.
+
+Not "no longer live": never live here, as far as this state can tell. A profile
+diagnosing a fabricated or mis-copied provenance wants this and not the two below. -/
+def provenanceNotAllocated : AuditViolationClass := ⟨⟨"provenanceNotAllocated"⟩⟩
+
+/-- The allocation is in the table and its record is torn down, which is §5's teardown
+read at the access. -/
 def deadProvenance : AuditViolationClass := ⟨⟨"deadProvenance"⟩⟩
 
-/-- An access was attempted without the permission it requires. -/
+/-- The record is **live** and the access presents an epoch the record has moved past,
+which is §2's "address reuse never revives old pointers" read at the access.
+
+Split from `deadProvenance`, with `provenanceNotAllocated`, for the reason
+`conflictingAccess` and `authorityNotHeld` were split from `authorityUnavailable`. One
+class covered three independent conditions and its docstring described one of them --
+"no longer live", which is false of this one twice over, since the record is live and
+nothing about it changed. A profile reading §8's ledger could not tell a fabricated
+identity from a freed one from a stale pointer into reused storage, and §2's sentence is
+the one it most needs to state separately: reuse is legal and is the whole reason epochs
+exist, so an epoch mismatch is the expected diagnosis in correct code paths and a
+teardown violation is not.
+
+`Tests/Memory/Placement.lean` had all three cases as separate fixtures with separate
+docstrings, each asserting the same class -- the discriminating evidence was already
+written down and the class name was throwing it away. -/
+def staleEpoch : AuditViolationClass := ⟨⟨"staleEpoch"⟩⟩
+
+/-- The storage does not grant the permission the access **declared it requires**,
+which is §4's least privilege read at the access.
+
+About `AccessDescriptor.requiredPermission` and not about the intent: an access may
+declare more than it uses, and declaring more than the page carries is refused whether
+or not the intent would have needed it. -/
 def permissionDenied : AuditViolationClass := ⟨⟨"permissionDenied"⟩⟩
+
+/-- The storage grants what the access declared and does not permit what it **intends**,
+which is §3's "atomics do not grant ordinary non-atomic access" read at the access.
+
+Split from `permissionDenied`, and the fourth split of this kind on this branch after
+`conflictingAccess`, `authorityNotHeld` and `staleEpoch`. `denialOf` asked `Grants` and
+then `Permits` on two adjacent lines and returned one class for both, so a profile
+reading §8's ledger could not tell a least-privilege violation from an atomicity one.
+Neither implies the other: a *reading* access declaring `readWrite` against a read-only
+page fails `Grants` while `Permits` passes, and an ordinary write to an atomic-only page
+passes `Grants` and fails `Permits` — which
+`Tests/Memory/AtomicAuthority.lean`'s `the_page_grants_but_does_not_permit` had been
+deciding, conjunct by conjunct, while the theorem beside it asserted the shared class.
+
+**Found three lines from the previous split, by the round after it.** The commit that
+separated `deadProvenance` into three edited this same `match` six lines above and ended
+"a repair that names its own class and then enumerates the instances is a repair that
+can miss one". The adjacent instance was the one it missed. -/
+def intentNotPermitted : AuditViolationClass := ⟨⟨"intentNotPermitted"⟩⟩
 
 /-- A read was attempted of bytes that are not initialized. -/
 def uninitializedRead : AuditViolationClass := ⟨⟨"uninitializedRead"⟩⟩
@@ -77,8 +134,40 @@ def uninitializedRead : AuditViolationClass := ⟨⟨"uninitializedRead"⟩⟩
 /-- An access was attempted without satisfying its alignment demand. -/
 def misaligned : AuditViolationClass := ⟨⟨"misaligned"⟩⟩
 
-/-- An access was attempted without the authority its loan state requires. -/
+/-- The bytes' **authority state** refuses the access: `authorityOf` reports a state
+whose `PermitsIntent` is false for what the access intends.
+
+`PermitsIntent` is false four ways, not three: `frozen` at any intent, `unavailable` at
+any intent, `atomicShared` against a non-atomic intent, and **`sharedImmutable` against a
+write**. The fourth is live and fixtured — `a_write_against_shared_immutable_access_is_refused`
+drives exactly it — and was missing from this list the day the class was written.
+
+The question is *what other contexts hold makes your intent impossible*, against the
+holder clause's *something is held here and none of it is yours*. It is not "a question
+about the storage rather than about the accessor", which is what the first version of
+this paragraph said and is what produced the short enumeration:
+`MemoryState.authorityOf` takes the accessing context precisely so that it is not, which
+its own docstring argues at length, and `sharedImmutable` is the most accessor-relative
+state there is — the same bytes are `exclusive` to the context that lent them and
+`sharedImmutable` to everyone else, in one state, at one range. -/
 def authorityUnavailable : AuditViolationClass := ⟨⟨"authorityUnavailable"⟩⟩
+
+/-- The accessor **holds nothing** over bytes somebody holds: authority is outstanding,
+this context is not granted what it intends, and it is not an unencumbered owner.
+
+Distinct from `authorityUnavailable`, and split out for the reason that class's
+docstring gives for `conflictingAccess`. `refusalOf` recorded three rules under one
+name; the first split took §7.3's race out and left two, and this is the second. They
+are reachable independently and neither implies the other: a stranger reading bytes lent
+read-only passes the authority-state clause, because `sharedImmutable` permits a read,
+and is refused here; an accessor over `frozen` bytes is refused there before this clause
+is reached.
+
+A profile reading §8's ledger could not tell those two apart, which is the same
+complaint §7.3's second paragraph made about the race -- "an authority claim" and "a
+race-freedom claim" have to be separable to be stated separately, and so do "the bytes
+refuse you" and "you hold nothing". -/
+def authorityNotHeld : AuditViolationClass := ⟨⟨"authorityNotHeld"⟩⟩
 
 /-- An access declared a ledger effect its protocol does not authorize against
 the obligations actually outstanding: consuming a duty that is not live,
@@ -86,11 +175,122 @@ producing an identity that already is, or splitting into obligations governed by
 a different protocol. -/
 def obligationNotAuthorized : AuditViolationClass := ⟨⟨"obligationNotAuthorized"⟩⟩
 
+/-- Two accesses from distinct contexts touched the same bytes with at least one
+writer, unordered and not both compatible atomic accesses — `docs/MEMORY_MODEL.md`
+§7.3's race.
+
+Distinct from `authorityUnavailable`, and this class exists because it was not.
+`refusalOf` recorded three different rules under that one name: §3's authority-state
+clause, §3's holder clause, and this. Review demonstrated a race recorded as
+`authorityUnavailable` from a state where *nothing was held* — the ledger entry
+byte-identical in class to a genuine loan violation. The rule against collapsing
+distinguishable failures is stated once for each class that has needed it — for
+`wrongAddressSpace` here, and again wherever a split was made: `authorityEffectRefused`,
+`faultWithUndeclaredAuthorityEffect`, `provenanceExtentMismatch`, `authorityNotHeld`,
+`staleEpoch` and `intentNotPermitted`. It is not counted any more, because the count
+went stale three rounds running and once **in the same diff that added another
+statement of it** — a number that rises whenever the rule is applied is a number nobody
+will re-read at the moment they are applying it. And §7.3's second
+paragraph — race-freedom as a
+claim separate from an authority claim — could not be stated by a profile while it was
+broken.
+
+**It was broken three ways and this repair closed one of them.** The paragraph above
+said "was broken once" for a round after the split, while the other two rules were still
+sharing `authorityUnavailable`: the authority-state clause and the holder clause, which
+review showed are independently reachable. `authorityNotHeld` is the second split, and
+the count in a sentence like this one is worth re-reading whenever the thing it counts
+changes — a repair that closes one of three and reports the class closed is the shape
+this branch keeps finding. -/
+def conflictingAccess : AuditViolationClass := ⟨⟨"conflictingAccess"⟩⟩
+
+/-- An access declared a change to the authority map that the map refuses: lending
+under an identity already in use, lending bytes the named lender does not hold,
+returning a grant the acting context neither holds nor lent, splitting or joining
+another context's authority, or a transfer that would leave a conflicting pair.
+
+Distinct from `authorityUnavailable`, which is about an access *reading* bytes it
+lacks authority over. This one is about an access *changing* who holds what. -/
+def authorityEffectRefused : AuditViolationClass := ⟨⟨"authorityEffectRefused"⟩⟩
+
 /-- An access to storage in an address space other than the one its provenance
 names. `docs/MEMORY_MODEL.md` §7.5 makes this a distinct failure from a bounds
 error: the spaces are not interchangeable, so reporting it as `outOfBounds` would
 lose which rule was broken. -/
 def wrongAddressSpace : AuditViolationClass := ⟨⟨"wrongAddressSpace"⟩⟩
+
+/-- The machine could not complete an access the profile admitted.
+
+`Oracle.answer` returns `none` when it cannot fill a completed access, and the
+transition records this rather than accepting a short answer as success. It is a
+statement about the *model*, not about the program: an oracle whose
+`Oracle.answer` returns `none` for a store the profile admitted is a machine
+description that does not match the access, and `docs/FOUNDATION.md` law 8 says
+refuse rather than approximate. -/
+def machineAnswerIncomplete : AuditViolationClass := ⟨⟨"machineAnswerIncomplete"⟩⟩
+
+/-- A provenance whose recorded root extent is not the extent of the allocation it
+names.
+
+`Provenance.rootExtent` is what `AccessDescriptor.WellFormedIn.rangeInProvenance`
+bounds an access against, and nothing compared it to the allocation table — so a
+descriptor supplied the bound it was checked against, and a 512-byte write into a
+64-byte allocation was well formed. `denialOf`'s extent check caught the write
+incidentally, as `outOfBounds`, which is the wrong report: the access was not out
+of the bounds it declared, it declared the wrong bounds. Review found the gap and
+found `rootExtent`'s docstring claiming M2 checked it. -/
+def provenanceExtentMismatch : AuditViolationClass := ⟨⟨"provenanceExtentMismatch"⟩⟩
+
+/-- A provenance whose recorded allocation source is not the source of the allocation
+it names.
+
+`docs/MEMORY_MODEL.md` §2 requires a profile to distinguish sources such as
+`VirtualAlloc`, process heap, `malloc`, page-table mapping, kernel heap, bump
+allocator, stack, mapped file and device memory. `Provenance.source` recorded the
+claim and nothing in the layer held a counterpart, so the distinction was a name a
+descriptor supplied about itself: two provenances differing only in `source`
+designated the same storage to every rule here, and a descriptor claiming device
+memory over a heap allocation was denied nothing. That is the shape of the deleted
+`AccessIntent.isDevice` -- a fact carried and never read -- and review found it as
+one. `AllocationRecord.source` is the counterpart and `denialOf` compares them. -/
+def provenanceSourceMismatch : AuditViolationClass := ⟨⟨"provenanceSourceMismatch"⟩⟩
+
+/-- An access whose declared address is not the address its allocation's placement
+gives that offset.
+
+`AccessDescriptor.address` and `AccessDescriptor.range` were unconnected: the range
+is an offset into the provenance's root and the address is a separate field, and
+nothing compared them even once `AllocationRecord.base` existed to compare against.
+Every address in the Spike 1 fixtures contradicted the placement the same fixture
+built — a slot at offset 32 of an allocation based at `0x0000` declared `0x1020` —
+and six of `Tests/Op/FakeIsa.lean`'s own descriptors named an address belonging to a
+different allocation. Nothing complained, because `denialOf` read the base for
+nothing and `Grass/Memory/Addressing.lean`'s bridge lemmas had no consumer on the
+access path.
+
+Only checked where there is something to check: an unplaced allocation has no
+address, and a symbolic space has none either, so both skip. That is the `Option` in
+`base` doing its job rather than a hole. -/
+def addressDisagreesWithPlacement : AuditViolationClass :=
+  ⟨⟨"addressDisagreesWithPlacement"⟩⟩
+
+/-- An allocation placed so that its own bytes wrap the address space.
+
+The clause bounds by `extent.stop`. It bounded by `extent.size` until review placed
+an allocation with a non-zero `extent.start` past the wrap point and had its store
+admitted at an address inside another live allocation — the same demonstration that
+motivated this class, defeated by the one arithmetic difference nothing had stated.
+
+`Grass/Memory/Addressing.lean`'s `addressOf` is `base + offset` in `BitVec 64`,
+which reduces mod 2^64, and every bridge lemma in that module takes `FitsAllocation`
+as a hypothesis. Nothing checked it. Review placed a sixty-four-byte allocation at
+`2 ^ 64 - 16` and had its offset-16 store admitted at declared address **0**, which
+is the first byte of a second, unrelated live allocation — the exact non-aliasing
+debt `Grass/Memory/Range.lean` records and `Addressing.lean` claims to pay.
+
+Refused rather than approximated: an allocation whose addresses are not well defined
+is a placement the model has no account of. -/
+def placementWraps : AuditViolationClass := ⟨⟨"placementWraps"⟩⟩
 
 /--
 The classes the generic transition relation can emit.
@@ -98,10 +298,59 @@ The classes the generic transition relation can emit.
 A profile must declare all of these, which is what makes
 `AdmittedVocabulary.auditViolationClasses` a consulted registry rather than a
 field nothing reads. `StepPolicy` carries the proof.
+
+**`misaligned` was on this list and is not, because nothing emits it.** `denialOf`
+deliberately has no alignment branch -- `AccessDescriptor.WellFormedIn.aligned` rejects
+a misaligned access at the declaration, and `Grass/Memory/Apply.lean` argues that an
+unreachable branch looking like a check is worse than no branch. `refusalOf` returns
+`denialOf`'s eleven classes, five fixed ones of its own, and the providers';
+`runAccesses` and `runStep` add `machineAnswerIncomplete`. Seventeen, which is this
+list. None is this one.
+
+That sentence read "four fixed ones ... and four more" and was wrong in both halves
+before the last two splits and after them: `refusalOf` has always returned five classes
+of its own, and the tail is one. The paragraph four lines below says to re-read a count
+when the thing it counts changes, which is the instruction this sentence needed. Review deleted the entry and the whole tree stayed
+green, which is what a mandatory declaration of an unemittable class is worth: under
+`docs/MEMORY_MODEL.md` §8 an empty ledger is supposed to mean something, and it said
+nothing about alignment either way.
+
+The class itself stays, for a profile whose own alignment rule is stricter than the
+declared demand. Such a profile supplies an `AuthorityProvider`, and
+`AuthorityProvider.emittedClasses` puts its class in the declared set without help from
+this list.
 -/
 def emittedByTransition : List AuditViolationClass :=
-  [outOfBounds, deadProvenance, permissionDenied, uninitializedRead, misaligned,
-   authorityUnavailable, obligationNotAuthorized, wrongAddressSpace]
+  [outOfBounds, provenanceNotAllocated, deadProvenance, staleEpoch,
+   permissionDenied, intentNotPermitted, uninitializedRead,
+   authorityUnavailable, authorityNotHeld, obligationNotAuthorized, wrongAddressSpace,
+   machineAnswerIncomplete, provenanceExtentMismatch, provenanceSourceMismatch,
+   addressDisagreesWithPlacement, placementWraps, authorityEffectRefused,
+   conflictingAccess]
+
+/-- **The length, as a theorem, because nothing adjudicates a number in prose.**
+
+Review found fourteen stale counts in one round — this list called fifteen in one file
+and fourteen in another, `AdmittedVocabulary`'s registries called ten when they are
+fourteen, `RequiredProofPackage`'s weak fields called ten when they are eight, and
+`Tools/DoorAudit.py`'s door set called seven when it is thirteen. `CitationAudit`
+resolves a cited *name*; no gate resolves a cited *number*, and prose is where every
+count in this layer lives.
+
+This is the cheapest mechanism that exists: put the number in a `by decide` theorem, so
+adding a class breaks the build here and whoever adds it has to come to this line. Every
+sentence that states the count cites this theorem, so the sentence and the number are one
+edit apart rather than in different files. Where a count can be pinned this way it should
+be, as `emittedByTransition_length` pins this one; where a count cannot be a Lean
+theorem — a Python dict, a structure's fields — the gate's own self-test is the
+place, and `Tools/DoorAudit.py` asserts its door count there.
+
+That sentence backticked `self_test`, which is a Python function. The stricter
+docstring audit that arrived with main resolves every backticked name against the
+*build*, so a tool's internals in backticks now read as a Lean declaration that does
+not exist -- the convention is that backticks are for Lean names and a tool's parts
+are named in prose. -/
+theorem emittedByTransition_length : emittedByTransition.length = 18 := by decide
 
 end AuditViolationClass
 
