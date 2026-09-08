@@ -21,4 +21,13 @@ example : hierarchy.rootNode.CertificateGate LeafCertificate Nat
     CountsChildren :=
   certificates.rootCertificate
 
+theorem rootIsAggregate : hierarchy.rootNode =
+    .aggregate (aggregate product (Vec.singleton (child component))) := by
+  rfl
+
+example : ∃ summary,
+    CountsChildren (Vec.singleton (child component)) summary :=
+  certificates.rootAggregateComposition
+    (aggregate product (Vec.singleton (child component))) rootIsAggregate
+
 end Grass.Tests.Build.Manifest.RootCertificate

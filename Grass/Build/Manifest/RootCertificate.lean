@@ -79,4 +79,37 @@ theorem CertifiedManifestHierarchy.rootCertificate
     hierarchy.rootNode.CertificateGate LeafCertificate Summary Composes :=
   certificates.certificateFor hierarchy.rootNode hierarchy.rootNode_mem
 
+/-- `CertifiedManifestHierarchy.rootLeafCertificate` specializes the root gate
+when the rooted hierarchy consists of a leaf root. -/
+theorem CertifiedManifestHierarchy.rootLeafCertificate
+    {hasher : MerkleHasher} {fanout : Nat}
+    {hierarchy : ManifestHierarchy hasher fanout}
+    {LeafCertificate : LeafManifest hasher → Type u}
+    {Summary : Type} {Composes : Vec ChildSummary → Summary → Prop}
+    (certificates : CertifiedManifestHierarchy hierarchy LeafCertificate
+      Summary Composes)
+    (manifest : LeafManifest hasher)
+    (isLeaf : hierarchy.rootNode = .leaf manifest) :
+    Nonempty (LeafCertificate manifest) := by
+  have gate := certificates.rootCertificate
+  rw [isLeaf] at gate
+  exact gate
+
+/-- `CertifiedManifestHierarchy.rootAggregateComposition` exposes the composed
+summary witnessed by an aggregate root certificate. -/
+theorem CertifiedManifestHierarchy.rootAggregateComposition
+    {hasher : MerkleHasher} {fanout : Nat}
+    {hierarchy : ManifestHierarchy hasher fanout}
+    {LeafCertificate : LeafManifest hasher → Type u}
+    {Summary : Type} {Composes : Vec ChildSummary → Summary → Prop}
+    (certificates : CertifiedManifestHierarchy hierarchy LeafCertificate
+      Summary Composes)
+    (manifest : AggregateManifest fanout)
+    (isAggregate : hierarchy.rootNode = .aggregate manifest) :
+    ∃ summary, Composes manifest.children summary := by
+  have gate := certificates.rootCertificate
+  rw [isAggregate] at gate
+  rcases gate with ⟨certificate⟩
+  exact ⟨certificate.summary, certificate.composition⟩
+
 end Grass.Build.Manifest
