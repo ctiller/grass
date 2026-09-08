@@ -155,6 +155,11 @@ alignments from selected object representations and ordinary struct placement.
 separation, while lookup theorems recover concrete placements from nominal field
 membership. Empty, packed, overlay, bitfield, and flexible-tail representations
 remain separate constructors rather than exceptions to the ordinary checker.
+`Grass.Construct.Placement` then pairs the layout's exact nominal field order
+with consumer-supplied physical locations. Its proposition-level compatibility
+relation preserves the pointwise representation policy, while exact-name and
+lookup theorems reject missing, duplicate, extra, or reordered assignments
+without assuming registers, stack slots, an ABI, or an ISA.
 
 Build layout and placement values under `Grass/Construct/`:
 
