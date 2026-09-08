@@ -14,14 +14,25 @@ namespace Grass
 universe u
 
 /-- One exact portable behavior and its independently keyed demands. -/
-structure SpecProcess extends BehaviorContract.{u} where
+structure SpecProcess where
+  Input : Type u
+  AuditEvent : Type u
+  Observation : Type u
+  admits : Input → Prop
+  observationProjection : ObservationProjection AuditEvent Observation
+  accepts : Input → List Observation → Prop
   requirements : DemandFamily.{u}
 
 namespace SpecProcess
 
 /-- Forget certificate demands and expose only the precious behavior. -/
 def contract (spec : SpecProcess) : BehaviorContract :=
-  spec.toBehaviorContract
+  { Input := spec.Input
+    AuditEvent := spec.AuditEvent
+    Observation := spec.Observation
+    admits := spec.admits
+    observationProjection := spec.observationProjection
+    accepts := spec.accepts }
 
 @[simp] theorem contract_input (spec : SpecProcess) :
     spec.contract.Input = spec.Input := rfl

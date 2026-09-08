@@ -22,11 +22,12 @@ universe u
 /--
 The Process-owned structural network instantiated at semantic protocols.
 
-A protocol instance supplies one admitted protocol input, mirroring the
-`ProcessSpec.Request` instantiation used by Process-side structural networks.
+A protocol instance supplies one admitted protocol input.  The subtype retains
+the admission proof needed by later trace-composition certificates rather than
+letting a role claim an input outside its protocol's specified domain.
 -/
 abbrev ProcessPresentationNetwork :=
   Grass.Process.StructuralProcessNetwork SpecProcess.{u}
-    (fun protocol => protocol.Input)
+    (fun protocol => { input : protocol.Input // protocol.admits input })
 
 end Grass.Refinement
