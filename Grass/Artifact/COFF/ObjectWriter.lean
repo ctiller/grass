@@ -50,6 +50,15 @@ def SectionDescription.widthsFit (description : SectionDescription) : Bool :=
   description.relocations.length < 2 ^ 16 &&
   description.lineNumbers.length < 2 ^ 16
 
+/-- The executable per-section width check is exactly the three field bounds
+needed to construct header-indexed contents. -/
+theorem SectionDescription.widthsFit_iff (description : SectionDescription) :
+    description.widthsFit = true ↔
+      description.rawData.length < 2 ^ 32 ∧
+      description.relocations.length < 2 ^ 16 ∧
+      description.lineNumbers.length < 2 ^ 16 := by
+  simp [SectionDescription.widthsFit, and_assoc]
+
 /-- Canonical pointer value, using zero exactly for an empty extent. -/
 private def extentPointer (offset length : Nat) : BitVec 32 :=
   if length = 0 then 0 else BitVec.ofNat 32 offset
@@ -616,6 +625,82 @@ private theorem length_writeSectionDescriptionList
   | cons description descriptions ih =>
       simp [writeSectionDescriptionList, sectionDescriptionListLength, ih]
 
+/-- Construct the dependent section-content values corresponding to a list of
+raw descriptions at consecutive canonical offsets. -/
+def sectionContentsListAt (offset : Nat)
+    (descriptions : List SectionDescription)
+    (widths : ∀ description ∈ descriptions,
+      description.widthsFit = true) : List SectionContents :=
+  match descriptions with
+  | [] => []
+  | description :: descriptions =>
+    have descriptionFits :=
+      (description.widthsFit_iff).mp (widths description (by simp))
+    description.contentsAt offset descriptionFits.1 descriptionFits.2.1
+      descriptionFits.2.2 ::
+        sectionContentsListAt (offset + description.byteLength) descriptions
+          (fun tail member => widths tail (by simp [member]))
+
+/-- Canonical dependent contents retain exactly the synthesized header list. -/
+theorem sectionContentsListAt_headers (offset : Nat)
+    (descriptions : List SectionDescription)
+    (widths : ∀ description ∈ descriptions,
+      description.widthsFit = true) :
+    (sectionContentsListAt offset descriptions widths).map
+        SectionContents.header =
+      (layoutSectionList offset descriptions).1 := by
+  induction descriptions generalizing offset with
+  | nil => rfl
+  | cons description descriptions ih =>
+      simp only [sectionContentsListAt, List.map_cons,
+        SectionDescription.contentsAt_header, layoutSectionList,
+        List.cons.injEq, true_and]
+      exact ih (offset + description.byteLength)
+        (fun tail member => widths tail (by simp [member]))
+
+/-- Canonically packed section lists parse to the exact dependent content list
+at every sequence of representable section widths and offsets. -/
+theorem readSectionContentsList_writeSectionDescriptionList_append
+    (descriptions : List SectionDescription) (offset : Nat)
+    (filePrefix suffix : Std.Logical.ByteArray)
+    (prefixLength : filePrefix.length = offset)
+    (widths : ∀ description ∈ descriptions,
+      description.widthsFit = true)
+    (endFits : offset + sectionDescriptionListLength descriptions < 2 ^ 32) :
+    readSectionContentsList (layoutSectionList offset descriptions).1
+        (filePrefix ++ writeSectionDescriptionList descriptions ++ suffix) =
+      .done (sectionContentsListAt offset descriptions widths) Vec.empty := by
+  induction descriptions generalizing offset filePrefix with
+  | nil => simp [layoutSectionList, writeSectionDescriptionList,
+      sectionContentsListAt, readSectionContentsList]
+  | cons description descriptions ih =>
+      have descriptionFit := widths description (by simp)
+      have fieldFits := description.widthsFit_iff.mp descriptionFit
+      have tailWidths : ∀ tail ∈ descriptions, tail.widthsFit = true :=
+        fun tail member => widths tail (by simp [member])
+      have headEndFits : offset + description.byteLength < 2 ^ 32 := by
+        unfold sectionDescriptionListLength at endFits
+        omega
+      have headRead :=
+        readSectionContents_writeSectionDescription_append description offset
+          filePrefix (writeSectionDescriptionList descriptions ++ suffix)
+          prefixLength fieldFits.1 fieldFits.2.1 fieldFits.2.2 headEndFits
+      have tailPrefixLength :
+          (filePrefix ++ writeSectionDescription description).length =
+            offset + description.byteLength := by simp [prefixLength]
+      have tailEndFits :
+          offset + description.byteLength +
+            sectionDescriptionListLength descriptions < 2 ^ 32 := by
+        unfold sectionDescriptionListLength at endFits
+        omega
+      have tailRead := ih (offset + description.byteLength)
+        (filePrefix ++ writeSectionDescription description) tailPrefixLength
+        tailWidths tailEndFits
+      simp only [layoutSectionList, readSectionContentsList,
+        writeSectionDescriptionList, sectionContentsListAt]
+      simp only [Vec.append_assoc] at headRead tailRead ⊢
+      rw [headRead, tailRead]
+
 /-- Serialize an optional symbol/string-table tail. -/
 def writeSymbolDescription : SymbolDescription → Std.Logical.ByteArray
   | .absent => Vec.empty
@@ -697,6 +782,76 @@ def ObjectDescription.widthsFit (description : ObjectDescription) : Bool :=
   description.sections.toList.all SectionDescription.widthsFit &&
   description.symbols.cellCount < 2 ^ 32 &&
   layout.2 < 2 ^ 32 && totalLength < 2 ^ 32
+
+/-- Whole-object width validity supplies every per-section field-width check. -/
+theorem ObjectDescription.widthsFit_sections
+    (description : ObjectDescription)
+    (widths : description.widthsFit = true) :
+    ∀ sectionDescription ∈ description.sections.toList,
+      sectionDescription.widthsFit = true := by
+  unfold ObjectDescription.widthsFit at widths
+  simp only [Bool.and_eq_true] at widths
+  have sectionWidths :
+      description.sections.toList.all SectionDescription.widthsFit = true :=
+    widths.1.1.1.2
+  simpa only [List.all_eq_true] using sectionWidths
+
+/-- Canonical dependent contents corresponding to an object description's
+synthesized section layout. -/
+def ObjectDescription.contents (description : ObjectDescription)
+    (widths : description.widthsFit = true) : Vec SectionContents :=
+  Vec.fromList (sectionContentsListAt
+    (20 + 40 * description.sections.length) description.sections.toList
+    (description.widthsFit_sections widths))
+
+/-- Canonical object contents retain exactly the synthesized section headers. -/
+theorem ObjectDescription.contents_headers (description : ObjectDescription)
+    (widths : description.widthsFit = true) :
+    (description.contents widths).map SectionContents.header =
+      description.sectionLayout.1 := by
+  apply Vec.toList_injective
+  change (sectionContentsListAt (20 + 40 * description.sections.length)
+      description.sections.toList
+      (description.widthsFit_sections widths)).map SectionContents.header =
+    (layoutSectionList (20 + 40 * description.sections.length)
+      description.sections.toList).1
+  exact sectionContentsListAt_headers _ _ _
+
+/-- The section-list phase of the object reader recovers every canonical
+dependent section content from the object's serialized bytes. -/
+theorem ObjectDescription.readSectionContentsList_bytes
+    (description : ObjectDescription)
+    (widths : description.widthsFit = true) :
+    readSectionContentsList description.sectionLayout.1.toList
+        description.bytes =
+      .done (description.contents widths).toList Vec.empty := by
+  have sectionWidths := description.widthsFit_sections widths
+  have prefixLength :
+      (writeHeader description.header ++
+        writeSectionHeaders description.sectionLayout.1).length =
+        20 + 40 * description.sections.length := by
+    simp
+  have layoutEndFits : description.sectionLayout.2 < 2 ^ 32 := by
+    unfold ObjectDescription.widthsFit at widths
+    simp only [Bool.and_eq_true] at widths
+    exact of_decide_eq_true widths.1.2
+  have contentEndFits :
+      20 + 40 * description.sections.length +
+        sectionDescriptionListLength description.sections.toList < 2 ^ 32 := by
+    change 20 + 40 * description.sections.length +
+      description.sectionsByteLength < 2 ^ 32
+    rw [← description.end_sectionLayout]
+    exact layoutEndFits
+  have parsed := readSectionContentsList_writeSectionDescriptionList_append
+    description.sections.toList
+    (20 + 40 * description.sections.length)
+    (writeHeader description.header ++
+      writeSectionHeaders description.sectionLayout.1)
+    (writeSymbolDescription description.symbols) prefixLength sectionWidths
+    contentEndFits
+  simpa only [ObjectDescription.sectionLayout, ObjectDescription.bytes,
+    ObjectDescription.contents, Vec.toList_fromList, Vec.append_assoc] using
+    parsed
 
 /-- Validate widths plus auxiliary and primary-name structure before writing. -/
 def ObjectDescription.Writable (description : ObjectDescription) : Bool :=

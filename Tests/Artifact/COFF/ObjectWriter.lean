@@ -119,6 +119,16 @@ example :
 
 example : objectDescription.Writable = true := by decide
 
+example : (objectDescription.contents (by decide)).map SectionContents.header =
+    objectDescription.sectionLayout.1 := by
+  exact objectDescription.contents_headers (by decide)
+
+example :
+    readSectionContentsList objectDescription.sectionLayout.1.toList
+        objectDescription.bytes =
+      .done (objectDescription.contents (by decide)).toList Vec.empty := by
+  exact objectDescription.readSectionContentsList_bytes (by decide)
+
 example : (writeSectionDescription textDescription).length =
     textDescription.byteLength := by
   exact length_writeSectionDescription textDescription
