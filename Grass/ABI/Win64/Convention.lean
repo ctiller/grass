@@ -117,11 +117,23 @@ which registers a callee must preserve -- `xmm0`-`xmm5` volatile,
 twelve lines further down. It was a false claim about the file it was written
 in.
 
-`MXCSR`, the x87 control word and the direction-flag rule are still not named
-anywhere here, and that is the obligation that survives. Those are not register
-classes but *mode* state, which a caller reasoning from this table would
-assume unchanged across a call and which the convention constrains
-independently of any register's volatility.
+`MXCSR`, the x87 control word and the direction-flag rule are not register
+classes but *mode* state, which a caller reasoning from this table would assume
+unchanged across a call and which the convention constrains independently of
+any register's volatility. They are named now, under **Mode state** below.
+
+Modelling them is what showed why they could not have been rows in this table.
+The direction flag must be *clear* at a call boundary, so `nonvolatile` would
+wrongly license a caller that sets it and expects it preserved, and `volatile`
+would wrongly license a callee that leaves it set. `Volatility` has two values
+and the rule needs a third; `directionFlag_rule_not_a_volatility` states that
+rather than leaving it as prose, because prose is what went wrong here before.
+
+What survives is enforcement. `modeRule` records what the convention requires
+and nothing checks that emitted code honours it: no unwind operation describes
+saving `MXCSR`, and nothing refuses a function that returns with `DF` set.
+That is a smaller obligation than the one it replaces, and a different kind --
+a missing check rather than a missing fact.
 -/
 
 /-- Which XMM registers a callee must preserve.
@@ -143,6 +155,90 @@ theorem xmmVolatility_nonvolatile_iff (r : Xmm) :
     xmmVolatility r = .nonvolatile ↔ 6 ≤ r.index.val := by
   simp only [xmmVolatility]
   split <;> simp_all <;> omega
+
+/-! ### Mode state
+
+The obligation the section above leaves open. `MXCSR`, the x87 control word and
+the direction flag are not register classes, so `Volatility` does not describe
+them and the table cannot be extended to cover them.
+-/
+
+/-- Processor mode state the Windows x64 convention constrains, separately from
+any register's volatility.
+
+Split into control and status halves because the convention treats them
+differently: a callee may leave arithmetic status bits changed -- computing
+anything sets them -- while the control bits choose rounding modes and exception
+masks that its caller selected deliberately. -/
+inductive ModeState where
+  /-- `MXCSR` control bits: rounding mode, exception masks, flush-to-zero. -/
+  | mxcsrControl
+  /-- `MXCSR` status bits: the SSE exception flags. -/
+  | mxcsrStatus
+  /-- The x87 control word: precision and rounding control. -/
+  | x87Control
+  /-- The x87 status word. -/
+  | x87Status
+  /-- `EFLAGS.DF`, which selects the direction of string operations. -/
+  | directionFlag
+deriving DecidableEq, Repr, Inhabited
+
+/-- What the convention requires of a piece of mode state.
+
+Three cases and not two, which is the whole reason this type exists rather than
+a reuse of `Volatility`. -/
+inductive ModeRule where
+  /-- The callee must leave it as it found it. The `nonvolatile` analogue. -/
+  | preserved
+  /-- The callee may change it and a caller may not rely on it across a call.
+  The `volatile` analogue. -/
+  | mayChange
+  /-- The callee must leave it in one specific state regardless of what it
+  found. Neither analogue: this constrains the value and not the change. -/
+  | fixedAtBoundary
+deriving DecidableEq, Repr, Inhabited
+
+/-- The rule for each piece of mode state. -/
+def modeRule : ModeState → ModeRule
+  | .mxcsrControl => .preserved
+  | .mxcsrStatus => .mayChange
+  | .x87Control => .preserved
+  | .x87Status => .mayChange
+  | .directionFlag => .fixedAtBoundary
+
+/-- How a register's volatility would read as a mode rule, so the two can be
+compared. -/
+def ModeRule.ofVolatility : Volatility → ModeRule
+  | .volatile => .mayChange
+  | .nonvolatile => .preserved
+
+/--
+**The direction flag's rule is not any register's volatility.**
+
+The reason this section could not be written by adding rows to the table above.
+`DF` must be clear at a call boundary, so a caller may not set it and expect it
+preserved -- which `nonvolatile` would permit -- and a callee may not leave it
+set -- which `volatile` would permit. Both two-valued readings license a program
+the convention forbids, in opposite directions.
+
+Stated as a theorem rather than as prose because the prose version is what the
+section above got wrong once already: it claimed this table "still cannot say"
+something it said twelve lines further down, and went on claiming it.
+-/
+theorem directionFlag_rule_not_a_volatility (v : Volatility) :
+    modeRule .directionFlag ≠ ModeRule.ofVolatility v := by
+  cases v <;> simp [modeRule, ModeRule.ofVolatility]
+
+/-- Every other piece of mode state *is* expressible as a volatility, which is
+what makes the direction flag the exception rather than the rule. -/
+theorem mode_other_than_df_is_a_volatility (m : ModeState) (h : m ≠ .directionFlag) :
+    ∃ v : Volatility, modeRule m = ModeRule.ofVolatility v := by
+  cases m
+  · exact ⟨.nonvolatile, rfl⟩
+  · exact ⟨.volatile, rfl⟩
+  · exact ⟨.nonvolatile, rfl⟩
+  · exact ⟨.volatile, rfl⟩
+  · exact absurd rfl h
 
 /-- The registers a call may destroy. -/
 def volatileRegisters : List Gpr := Gpr.all.filter (fun r => volatility r == .volatile)

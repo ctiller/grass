@@ -128,8 +128,15 @@ obligation in `Grass/ABI/Win64/UnwindBytes.lean`: the three instruction
 encoders and the four declarations relating unwind code offsets to them. The
 gate's own message prescribes this path, and the alternative was worse --
 `notBehaviour` is a permanent claim and these model the ISA squarely.
+
+Then to 152 for `operandSizeDefault?`, the opcode-indexed default operand size
+model that `Width.default64BitMode` recorded as owed, and to 154 for `modeRule`
+and `ModeRule.ofVolatility`, which close the half of `Convention.lean`'s
+obligation the register table could not express. Each raise is one reviewed
+edit that closes a stated obligation, which is the trade this ratchet is meant
+to make visible rather than to forbid.
 -/
-def owedBaseline : Nat := 152
+def owedBaseline : Nat := 154
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -491,6 +498,13 @@ def owed : List Name :=
     -- declaration to carry it -- so the fact was real, load-bearing and
     -- absent from this ledger entirely. Naming it is what put it here.
     `Grass.ABI.Win64.xmmVolatility,
+    -- Mode state, and owed for the same reason `xmmVolatility` is. `modeRule`
+    -- says what the Windows x64 convention requires of MXCSR, the x87 control
+    -- word and the direction flag. `ofVolatility` is not merely a coercion
+    -- between this library's own types: it claims that the convention's
+    -- 'volatile' means may-change and 'nonvolatile' means preserved, which is
+    -- an external reading and belongs here rather than in notBehaviour.
+    `Grass.ABI.Win64.modeRule, `Grass.ABI.Win64.ModeRule.ofVolatility,
     -- The two ceilings of UWOP_ALLOC_LARGE. Both are external facts about the
     -- unwind encoding rather than choices: 524280 is what the 16-bit scaled
     -- field reaches, and 4294967288 is what the unscaled form reaches, which
