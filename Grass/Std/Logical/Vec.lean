@@ -403,6 +403,42 @@ theorem get?_push_lt (v : Vec α) (a : α) {i : Nat} (h : i < v.length) :
 @[simp] theorem get?_push_self (v : Vec α) (a : α) : (v.push a).get? v.length = some a := by
   simp [get?, push, length]
 
+/--
+Reading *any* index of a pushed sequence.
+
+`Vec.get?_push_self` reads the top and `Vec.get?_push_lt` reads below it, and
+between them they cover the cases — but neither is usable on a sequence pushed
+more than once, which is the shape a consumer that *builds* a sequence actually
+has.
+
+The reason is the interaction of two `simp` laws rather than a missing case.
+`Vec.length_push` normalises `(v.push a).length` to `v.length + 1`, so a goal
+about `((v.push a).push b).get? i` arrives with `i` as `v.length + 1`, while
+`get?_push_self`'s left side wants the unnormalised `(v.push a).length`. `simp`
+will never produce that shape, so the law cannot fire. Measured before this was
+written: of six read-after-push goals, `simp` closed only the single-push read at
+the top. Two pushes reading the top, two pushes reading below it, and both
+concrete indices into a two-element sequence built from `Vec.empty` all reported
+no progress.
+
+This states the case split instead, so the index never has to match a
+denormalised form. `Tests/Std/VecInstances.lean` pins all six.
+
+`get?_push_self` is kept rather than removed. It is subsumed — dropping its
+`@[simp]` breaks no fixture once this exists — but it is the cleaner one-step
+rewrite for the goal it names, the two agree wherever both apply, and removing a
+public `simp` law is a change for consumers this module cannot see.
+-/
+@[simp] theorem get?_push (v : Vec α) (a : α) (i : Nat) :
+    (v.push a).get? i =
+      if i < v.length then v.get? i else if i = v.length then some a else none := by
+  rcases Nat.lt_trichotomy i v.length with h | h | h
+  · rw [get?_push_lt v a h, if_pos h]
+  · subst h; rw [get?_push_self, if_neg (Nat.lt_irrefl _), if_pos rfl]
+  · rw [if_neg (Nat.not_lt.mpr (Nat.le_of_lt h)), if_neg (Nat.ne_of_gt h)]
+    simp only [get?, push, toList_fromList, length] at *
+    exact List.getElem?_eq_none (by simp; omega)
+
 @[simp] theorem pop?_empty : (empty : Vec α).pop? = none := rfl
 
 /-- `pop?` inverts `push`. -/
