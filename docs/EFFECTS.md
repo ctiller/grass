@@ -530,6 +530,30 @@ effect requirement, a platform provider requirement, and an obligation protocol
 key do not become interchangeable because each is ultimately scoped by a Core
 identifier. Bridges carry typed origin evidence rather than casts between names.
 
+Requirement ownership is determined by nominal key construction; it is not a
+second label chosen by the requirement author. In the normative interface the
+authority index appears on the key itself:
+
+```lean
+opaque ProviderRequirementKey (authority : RequirementAuthority) : Type
+
+structure ProviderDemandDescriptor (authority : RequirementAuthority) where
+  capabilityKey : ProviderRequirementKey authority
+  statement : Prop
+
+opaque ProviderDemand (authority : RequirementAuthority) : Type
+```
+
+Built-in key constructors are private to their owning layer. An extension gets
+its own opaque extension authority and constructs keys only in that namespace.
+The existential packaging used by heterogeneous families hides the authority;
+it does not permit a caller to replace it. Consequently a Memory-owned key
+cannot be paired with `.builtin .effect`, and the Effect discharge constructor
+accepts only a key whose type already fixes that authority. A diagnostic owner
+tag may be serialized, but parsing validates it against the key namespace and
+it is never proof authority. This is the anti-relabeling boundary: a family
+author chooses which owned key to require, not who owns that key.
+
 An effect row's requirement envelope is definitionally the
 membership-extensional union of its families' `requirements`. It is an ordinary
 definition over the row's complete duplicate-free key list, not an
@@ -1035,6 +1059,17 @@ Similarly, an allocation effect may state logical success/failure and resource
 requirements. `Memory` and `Std.Owned` prove provenance, loans, initialization,
 cleanup, and physical representation. Effect code cannot mint provenance or
 claim an allocation obligation discharged.
+
+This remains true even if a later refactor lets Effect-level code carry a
+provenance-shaped value. Such a value is descriptive, not authority: the Memory
+transition validates the live allocation identity, backing-store extent, and
+current grants before it issues access. The later bridge therefore names the
+canonical transition and its outcome, rather than copying the current fields of
+an allocation record. For allocation it proves that the named transition
+produced the fresh allocation required by the Effect key. For an operation that
+creates a duty it proves that the named transition produced the exact obligation
+identity through an owner-issued protocol-authority delta. Constructors for
+both bridge certificates remain private to their owning later layer.
 
 The bridge has one direction of ownership:
 
