@@ -424,17 +424,68 @@ theorem stopping_means_exiting {state : source.Machine}
 
 end SerialFunctionSource
 
+/-! ## The behaviour an implementation selects -/
+
+/--
+**The behaviour an implementation actually selects.**
+
+`agent-bus` `g-design:141`, ruling on `g-auditor:12`. The gap it closes: with
+`converse` stated between a source and the *contract*, every public `Post` came
+out single-valued — `post_is_determined` — and a public contract has no business
+being that. A caller quantifies over what a call is *permitted* to do; only the
+implementation knows what it *does*.
+
+So the exactness moves here. `exitOf` and `after` are **functions**, which is
+what "exact" means at this layer: given the input and the before-state, the
+implementation reaches one exit and one after-state. A relation that admitted two
+would not be a selection.
+
+**And this is where the frontier refusal now lives.** A `blockingRead` whose
+answer depends on how many bytes arrived is not a function of `(input, before)`
+at all, so it has no `ExactSerialBehavior` — which is the same refusal
+`a_call_that_can_answer_two_ways_is_not_serial` made before, moved to the layer
+that can carry it without forcing every contract to be deterministic. §3's "a
+synchronous platform API is still modeled by a child protocol because its return
+is external entropy" is unchanged.
+-/
+structure ExactSerialBehavior {State : Type w} (contract : SerialFunctionContract State) :
+    Type w where
+  /-- Which exit this call takes. -/
+  exitOf : contract.Input → State → contract.ExitState
+  /-- And the state it leaves behind. -/
+  after : contract.Input → State → State
+
+/--
+**The exact behaviour is one the contract permits.**
+
+The refinement half of `g-design:141`'s two layers, and the only thing a caller
+needs in order to reason from the contract about a real implementation: whatever
+the implementation selects is inside what the contract allows.
+
+It is deliberately one-directional. The contract may permit outcomes this
+implementation never produces — that is what makes it a *public* contract — and
+nothing here forces it not to.
+-/
+def ExactSerialBehavior.Refines {State : Type w} {contract : SerialFunctionContract State}
+    (behavior : ExactSerialBehavior contract) : Prop :=
+  ∀ input before, contract.Pre input before →
+    contract.Post input (behavior.exitOf input before) before (behavior.after input before)
+
+
 /-! ## Relating a source to its contract -/
 
 /--
 The conformance §3 calls `FiniteStutteringCallSimulation`, at the fields this
 layer can state.
 
-`converse` is the one that matters. Without it a contract may relate a
-before-state to many after-states and let the environment choose, which is
-exactly the external entropy §3 excludes from serial calls — and the shape of
-`SerialDecision` says nothing about it, because the contract is a separate
-object.
+**§3's `converse` is deliberately not a field here**, and `agent-bus`
+`g-design:141` is why. Stated between a source and the *contract*, it forces
+every public `Post` to be single-valued: a `Post` admitting two after-states for
+one call would need the machine to reach both, and `exit_is_unique` says it
+reaches one. A public contract has no business being deterministic, because a
+caller quantifies over what a call is *permitted* to do. `converse` relates a
+source to an `ExactSerialBehavior` instead, in `SerialFunctionRealizesExactly`,
+and a caller reads the contract through `ExactSerialBehavior.Refines`.
 -/
 structure SerialFunctionRealizes {State : Type w}
     (contract : SerialFunctionContract State)
@@ -446,19 +497,6 @@ structure SerialFunctionRealizes {State : Type w}
     source.InternalSteps (source.enter input before) finish →
     source.decide finish = .exit exitState →
     contract.Post input exitState before (source.read finish)
-  /--
-  **§3's `converse`: every exit the contract permits is one the machine
-  reaches.**
-
-  The load-bearing field. A `Post` that admits two after-states for one call
-  would need the machine to reach both, and `exit_is_unique` says it reaches
-  one — so `post_is_determined` follows, and a computation whose answer comes
-  from outside cannot be a serial call.
-  -/
-  converse : ∀ input before exitState after, contract.Pre input before →
-    contract.Post input exitState before after →
-    ∃ finish, source.InternalSteps (source.enter input before) finish ∧
-      source.decide finish = .exit exitState ∧ source.read finish = after
   /--
   **§3's `bounded`: a claimed work bound is met.**
 
@@ -476,90 +514,6 @@ namespace SerialFunctionRealizes
 variable {State : Type w} {contract : SerialFunctionContract State}
   {source : SerialFunctionSource contract}
 
-/--
-**A serial call's exit *and* its answer are determined by its input.**
-
-The theorem the whole module is for. `converse` sends each permitted answer to a
-machine execution, `exit_is_unique` says there is only one, and `read` is a
-function — so two permitted answers to one call agree, and so do the exits they
-came out of.
-
-**Both halves, and for a round it was only the second.** The earlier statement
-fixed a single `exitState` and concluded the after-states equal, which says
-nothing about a contract whose `Post` is single-valued *per exit* and answers one
-input two ways through *two* exits. A reviewer built exactly that contract — a
-non-degenerate `SerialFunctionContract` with `ExitState := Bool` answering one
-input as `(1,0)` at one exit and `(2,0)` at the other — and it satisfied the
-refusal below vacuously. The fields were always enough for the stronger
-statement; nobody had written it.
--/
-theorem exit_and_answer_are_determined (realizes : SerialFunctionRealizes contract source)
-    {input : contract.Input} {before left right : State}
-    {exitLeft exitRight : contract.ExitState} (pre : contract.Pre input before)
-    (leftPost : contract.Post input exitLeft before left)
-    (rightPost : contract.Post input exitRight before right) :
-    exitLeft = exitRight ∧ left = right := by
-  obtain ⟨finishLeft, stepsLeft, decidesLeft, readsLeft⟩ :=
-    realizes.converse input before exitLeft left pre leftPost
-  obtain ⟨finishRight, stepsRight, decidesRight, readsRight⟩ :=
-    realizes.converse input before exitRight right pre rightPost
-  have same : finishLeft = finishRight :=
-    SerialFunctionSource.exit_is_unique stepsLeft (by rw [decidesLeft]; trivial)
-      stepsRight (by rw [decidesRight]; trivial)
-  subst same
-  have sameDecision : (SerialDecision.exit exitLeft : SerialDecision _ _) = .exit exitRight :=
-    decidesLeft.symm.trans decidesRight
-  injection sameDecision with sameExit
-  exact ⟨sameExit, by rw [← readsLeft, ← readsRight]⟩
-
-/-- **So one exit's answer is determined**, which is the same theorem read at a
-fixed exit. -/
-theorem post_is_determined (realizes : SerialFunctionRealizes contract source)
-    {input : contract.Input} {before left right : State}
-    {exitState : contract.ExitState} (pre : contract.Pre input before)
-    (leftPost : contract.Post input exitState before left)
-    (rightPost : contract.Post input exitState before right) : left = right :=
-  (realizes.exit_and_answer_are_determined pre leftPost rightPost).2
-
-/--
-**So a call that can answer two ways is not a serial call.**
-
-§3's boundary, as a refusal rather than a promise. A `blockingRead` whose
-post-state depends on how many bytes arrived relates one before-state to many
-after-states; by `post_is_determined` it has no realizing source, so by
-`CollapsesToOneTransition` it has no collapse, so it stays a frontier and gets a
-child protocol.
-
-That is what §3 means by "a synchronous platform API is still modeled by a child
-protocol because its return is external entropy, even when its selected machine
-realization is one blocking ABI call". An earlier version of this module argued
-the same conclusion from the shape of `SerialDecision`, and local adversarial
-review built exactly this contract, gave it a source, and collapsed it.
-
-A second review pass then built the contract this refusal could *not* reach: one
-whose `Post` is single-valued at each exit and answers one input two ways through
-two exits. `a_call_that_can_exit_two_ways_is_not_serial` is the companion, and
-both come from `exit_and_answer_are_determined`.
--/
-theorem a_call_that_can_answer_two_ways_is_not_serial
-    (realizes : SerialFunctionRealizes contract source) {input : contract.Input}
-    {before left right : State} {exitLeft exitRight : contract.ExitState}
-    (pre : contract.Pre input before)
-    (leftPost : contract.Post input exitLeft before left)
-    (rightPost : contract.Post input exitRight before right)
-    (different : left ≠ right) : False :=
-  different (realizes.exit_and_answer_are_determined pre leftPost rightPost).2
-
-/-- **And a call that can leave two ways is not one either.** -/
-theorem a_call_that_can_exit_two_ways_is_not_serial
-    (realizes : SerialFunctionRealizes contract source) {input : contract.Input}
-    {before left right : State} {exitLeft exitRight : contract.ExitState}
-    (pre : contract.Pre input before)
-    (leftPost : contract.Post input exitLeft before left)
-    (rightPost : contract.Post input exitRight before right)
-    (different : exitLeft ≠ exitRight) : False :=
-  different (realizes.exit_and_answer_are_determined pre leftPost rightPost).1
-
 /-- **And a claimed responsiveness bound is met by the machine.** -/
 theorem responsive_is_realized (realizes : SerialFunctionRealizes contract source)
     (responsive : contract.Responsive)
@@ -572,6 +526,78 @@ theorem responsive_is_realized (realizes : SerialFunctionRealizes contract sourc
   exact ⟨bound, finish, isSome, steps, isExit⟩
 
 end SerialFunctionRealizes
+
+/-! ## Relating a source to the behaviour it selects -/
+
+/--
+**The machine does exactly what the implementation selected.**
+
+Where `agent-bus` `g-design:141` puts `converse`. Both directions are here and
+both are about a *function*, so neither forces anything on the contract:
+`onlyThatExit` says any exit the machine reaches is the selected one at the
+selected state, and `converse` says the selected one is reached.
+
+`exit_is_unique` already says a machine reaches at most one exit from an entry.
+What this adds is that the one it reaches is the one the implementation chose,
+which is the claim `CollapsesToOneTransition` needs and the claim a contract
+should never have had to make.
+-/
+structure SerialFunctionRealizesExactly {State : Type w}
+    {contract : SerialFunctionContract State}
+    (behavior : ExactSerialBehavior contract)
+    (source : SerialFunctionSource contract) : Prop where
+  /--
+  **Any exit the machine reaches is the selected one, at the selected state.**
+
+  What `exit_and_answer_are_determined` used to be, at the layer that can carry
+  it. That theorem concluded any two *permitted* answers to one call agree, which
+  was true only because `converse` forced the contract single-valued — the defect
+  `agent-bus` `g-design:141` corrects.
+
+  This says nothing about what the contract permits and everything about what the
+  implementation does. A `Post` relating one call to several after-states is left
+  alone, and the ones the machine does not produce are permitted-but-unproduced,
+  which is what a public contract is for.
+  -/
+  onlyThatExit : ∀ input before finish exitState, contract.Pre input before →
+    source.InternalSteps (source.enter input before) finish →
+    source.decide finish = .exit exitState →
+    exitState = behavior.exitOf input before ∧
+      source.read finish = behavior.after input before
+  /-- And the selected one is reached. -/
+  converse : ∀ input before, contract.Pre input before →
+    ∃ finish, source.InternalSteps (source.enter input before) finish ∧
+      source.decide finish = .exit (behavior.exitOf input before) ∧
+      source.read finish = behavior.after input before
+
+namespace SerialFunctionRealizesExactly
+
+variable {State : Type w} {contract : SerialFunctionContract State}
+  {behavior : ExactSerialBehavior contract} {source : SerialFunctionSource contract}
+
+/--
+**A source that realizes a refining behaviour realizes the contract.**
+
+The direction a caller needs, and the only one. Every exit the machine reaches
+is the selected one, and the selection is inside what the contract permits — so
+every machine exit is a contract exit at the state it reads, which is
+`SerialFunctionRealizes.exitsPost`.
+
+The converse direction is deliberately absent: the contract may permit outcomes
+this implementation never produces, and nothing here says otherwise.
+-/
+theorem exitsPost (exact : SerialFunctionRealizesExactly behavior source)
+    (refines : behavior.Refines) :
+    ∀ input before finish exitState, contract.Pre input before →
+      source.InternalSteps (source.enter input before) finish →
+      source.decide finish = .exit exitState →
+      contract.Post input exitState before (source.read finish) := by
+  intro input before finish exitState pre steps atExit
+  obtain ⟨sameExit, sameState⟩ := exact.onlyThatExit input before finish exitState pre steps atExit
+  rw [sameExit, sameState]
+  exact refines input before pre
+
+end SerialFunctionRealizesExactly
 
 /-! ## When a collapse is permitted -/
 
@@ -633,6 +659,12 @@ structure CollapsesToOneTransition {p : ProcessSpec.{u, w}}
   source : SerialFunctionSource contract
   /-- And the proof that it does — including §3's `converse`. -/
   realizes : SerialFunctionRealizes contract source
+  /-- The behaviour the implementation selected. -/
+  behavior : ExactSerialBehavior contract
+  /-- Which the machine runs exactly. -/
+  exact : SerialFunctionRealizesExactly behavior source
+  /-- And which is inside what the contract permits. -/
+  refines : behavior.Refines
   /-- Every permitted call is a step of the process, issuing nothing and emitting nothing. -/
   sound : ∀ input exit before after, contract.Pre input before →
     contract.Post input exit before after → p.Step before event after 0 []
@@ -671,21 +703,29 @@ theorem issues_nothing
   collapse.demandFree input exit before after issued emitted pre post step
 
 /--
-**And the call's answer is determined**, because a collapse carries a realizing
-machine.
+**And the call runs one answer**, because a collapse carries the behaviour its
+machine selects.
 
-The consequence of making `source` and `realizes` fields: a caller who has a
-collapse has the frontier-freedom argument, rather than having to trust that
+The consequence of making `behavior`, `exact` and `refines` fields: a caller who
+has a collapse has the frontier-freedom argument rather than having to trust that
 somebody checked one elsewhere.
+
+Note what it does *not* say, since the earlier version did and was wrong to. It
+does not say the contract's `Post` is single-valued. A `Post` may permit answers
+this machine never produces; what a collapse rules out is the machine producing
+an answer nobody selected, which is where external entropy would have to enter.
+`agent-bus` `g-design:141`.
 -/
-theorem answer_is_determined
+theorem answer_is_the_selection
     (collapse : CollapsesToOneTransition contract Exclusive LinearizationPoint
       LinearizesAt Noninterference event)
-    {input : contract.Input} {exit : contract.ExitState}
-    {before left right : p.State} (pre : contract.Pre input before)
-    (leftPost : contract.Post input exit before left)
-    (rightPost : contract.Post input exit before right) : left = right :=
-  collapse.realizes.post_is_determined pre leftPost rightPost
+    {input : contract.Input} {before : p.State} {finish : collapse.source.Machine}
+    {exitState : contract.ExitState} (pre : contract.Pre input before)
+    (steps : collapse.source.InternalSteps (collapse.source.enter input before) finish)
+    (atExit : collapse.source.decide finish = .exit exitState) :
+    exitState = collapse.behavior.exitOf input before ∧
+      collapse.source.read finish = collapse.behavior.after input before :=
+  collapse.exact.onlyThatExit input before finish exitState pre steps atExit
 
 /--
 A collapse names its visibility.

@@ -5034,6 +5034,71 @@ the first's carrier, is a chain and is not forbidden. That is a genuine coalesce
 chain rather than a half-done merge — `EscrowLedger.no_cycle` is what keeps it
 finite — and §3 appears to permit it. Recorded rather than ruled on.
 
+### 10.138 A public contract was forced to be deterministic, and the field that did it moved
+
+`agent-bus` `g-design:141`, implemented.
+
+**The defect.** `SerialFunctionRealizes` had a `converse` field relating a source
+to the *contract*: every exit the contract permits is one the machine reaches.
+Read alongside `exit_is_unique` — a machine reaches at most one exit from an
+entry — it forces every `Post` to be single-valued. A contract admitting two
+after-states for one call would need the machine to reach both, and it cannot,
+so no such contract could be realized at all.
+
+That is a real constraint imposed in the wrong place. A public contract is what
+a *caller* quantifies over, and a caller wants to know what a call is permitted
+to do, not to be told the permission is exact. `post_is_determined` and
+`exit_and_answer_are_determined` then read as theorems about serial calls when
+they were consequences of a field nobody should have been asked to supply.
+
+**The correction, in two layers.** `converse` still exists, but now between a
+source and a *function*:
+
+- `ExactSerialBehavior` picks one exit and one after-state per `(input, before)`.
+  A function, so nothing can be nondeterministic about it by construction.
+- `SerialFunctionRealizesExactly` relates a source to such a behaviour, with
+  both directions: `onlyThatExit` (any exit the machine reaches is the selected
+  one, at the selected state) and `converse` (the selected one is reached).
+- `ExactSerialBehavior.Refines` says the selection lands inside what the
+  contract permits.
+
+`SerialFunctionRealizesExactly.exitsPost` recovers the direction a caller needs,
+and only that one: every machine exit is a contract exit at the state it reads.
+The other direction is deliberately gone. A contract may permit outcomes this
+implementation never produces — permitted-but-unproduced is what a public
+contract is *for* — and nothing in the file says otherwise any more.
+
+**What replaced the theorems that leaned on it.**
+`CollapsesToOneTransition` gained `behavior`, `exact` and `refines` as fields,
+so a caller holding a collapse still holds the frontier-freedom argument rather
+than trusting that somebody checked one elsewhere. `answer_is_determined`
+became `answer_is_the_selection`: not "the contract's `Post` is single-valued"
+but "the machine runs the answer somebody selected", which is where external
+entropy would have to enter and the only thing a collapse ever ruled out.
+
+**Two fixtures that would not have compiled before, and one that still will
+not.**
+
+- `doubling_is_realized_exactly` and `doubling_runs_the_selection`: the
+  worked example carries its selection, and a caller with the machine knows
+  which answer it runs without the contract having promised there is only one.
+- `no_contract_permits_everything`: the constant-true `Post` the ruling used as
+  its illustration cannot be given an `ExactSerialBehavior` that refines it —
+  because `forbidding`'s `Post` is uninhabited, so no selection lands inside it.
+  Refinement is still a real obligation; it is just no longer the contract's job
+  to be exact.
+- `a_blocking_read_loses_an_answer` and `no_exact_behavior_covers_both_answers`:
+  the frontier refusal, restated at the layer that can carry it. A blocking read
+  admits two after-states for one call, and *whatever* behaviour is selected,
+  some permitted answer is not the selected one. Before, this was stated as "no
+  source realizes it", which was the old `converse` doing the work and said more
+  than was true.
+
+**The rule this leaves.** A field relating an implementation to a specification
+constrains whichever of the two it is stated against. If the constraint belongs
+to the implementation, name the implementation — do not state it against the
+specification and let the specification absorb it.
+
 ## 11. The authoring facade
 
 `docs/DECISIONS.md` decision 134, ruling `c-spike:4`'s third question and the
