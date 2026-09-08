@@ -3076,7 +3076,7 @@ that use this framing law touch grants, not storage. -/
 theorem cellAt?_of_allocations_eq {a b : MemoryState} (h : a.allocations = b.allocations)
     (hb : a.backings = b.backings) (id : AllocId) (offset : Nat) :
     a.cellAt? id offset = b.cellAt? id offset := by
-  unfold cellAt?
+  unfold cellAt? storeOf
   rw [h, hb]
 
 /-- The framing form `Grass/Op/Step.lean` uses. -/
@@ -3115,6 +3115,39 @@ instance (state : MemoryState) (id : AllocId) (range : ByteRange) :
     Decidable (state.RangeInitialized id range) := by
   unfold RangeInitialized
   split <;> infer_instance
+
+/-- **`RangeInitialized` is presence plus pointwise initialization.**
+
+The definition reads the backing store over the view's *translated* range; this says
+the same thing in allocation-local offsets, which is the vocabulary `AgreesOn` and
+`InitializedAt` use. Two states can agree at every cell of an allocation while their
+records sit at different origins in their backings, and without this every such
+proof has to reindex by hand. -/
+theorem rangeInitialized_iff (state : MemoryState) (id : AllocId) (range : ByteRange) :
+    state.RangeInitialized id range ↔
+      (state.allocations.lookup id).isSome = true ∧
+        ∀ offset, range.Covers offset → state.InitializedAt id offset := by
+  unfold RangeInitialized InitializedAt cellAt? ByteStore.Initialized
+  cases hl : state.allocations.lookup id with
+  | none => simp
+  | some r =>
+    simp only [Option.isSome_some, true_and, Option.bind_some]
+    constructor
+    · intro h offset hcov
+      refine h (r.origin + offset) ?_
+      unfold ByteRange.Covers ByteRange.stop at hcov
+      unfold ByteRange.translate ByteRange.Covers ByteRange.stop
+      simp only [] at hcov ⊢
+      omega
+    · intro h x hcov
+      have hx : ∃ offset, range.Covers offset ∧ x = r.origin + offset := by
+        unfold ByteRange.translate ByteRange.Covers ByteRange.stop at hcov
+        refine ⟨x - r.origin, ?_, by simp only [] at hcov; omega⟩
+        unfold ByteRange.Covers ByteRange.stop
+        simp only [] at hcov ⊢
+        omega
+      obtain ⟨offset, hcov', rfl⟩ := hx
+      exact h offset hcov'
 
 /-! ### Framing
 
@@ -3216,17 +3249,6 @@ theorem lookup_write_self (state : MemoryState) {id : AllocId} (start : Nat)
     (state.write id start bytes initializes).allocations.lookup id = some record := by
   rw [allocations_write]
   exact h
-
-/-- The store a write leaves under the written allocation's backing. -/
-theorem backings_write_self (state : MemoryState) {id : AllocId} (start : Nat)
-    (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
-    {store : ByteStore} (h : state.allocations.lookup id = some record)
-    (hs : state.backings.lookup record.backing = some store) :
-    (state.write id start bytes initializes).backings.lookup record.backing =
-      some (store.write (record.origin + start) bytes initializes) := by
-  unfold write
-  simp only [h, hs]
-  exact FiniteMap.lookup_insert_self _ _ _
 
 /-- **Two views onto one backing read one store**, whatever their origins.
 
@@ -3352,13 +3374,12 @@ theorem byteAt?_write_of_covers (state : MemoryState) {id : AllocId} {start : Na
 
 /-- An initializing write initializes each byte it covered. -/
 theorem initializedAt_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}
-    {bytes : ByteSeq} {record : AllocationRecord} {store : ByteStore}
-    (hfound : state.allocations.lookup id = some record)
-    (hs : state.backings.lookup record.backing = some store) {offset : Nat}
+    {bytes : ByteSeq} {record : AllocationRecord}
+    (hfound : state.allocations.lookup id = some record) {offset : Nat}
     (h : (ByteRange.mk start bytes.length).Covers offset) :
     (state.write id start bytes true).InitializedAt id offset := by
   unfold InitializedAt
-  rw [cellAt?_write_of_covers state hfound hs h]
+  rw [cellAt?_write_of_covers state hfound h]
   cases hb : bytes[offset - start]? with
   | none =>
     rw [ByteRange.covers_def] at h
@@ -3456,35 +3477,21 @@ theorem rangeInitialized_congr_of_agrees {a b : MemoryState} {id : AllocId}
     (hcells : a.AgreesOn b) : a.RangeInitialized id range ↔ b.RangeInitialized id range := by
   have hsome : (a.allocations.lookup id).isSome = (b.allocations.lookup id).isSome := by
     rw [← isSome_metadataAt, ← isSome_metadataAt, hpresent]
-  unfold RangeInitialized
-  cases ha : a.allocations.lookup id with
-  | none =>
-    have : (b.allocations.lookup id).isSome = false := by rw [← hsome, ha]; rfl
-    cases hb : b.allocations.lookup id with
-    | none => exact Iff.rfl
-    | some _ => rw [hb] at this; simp at this
-  | some ra =>
-    cases hb : b.allocations.lookup id with
-    | none =>
-      have : (a.allocations.lookup id).isSome = false := by rw [hsome, hb]; rfl
-      rw [ha] at this; simp at this
-    | some rb =>
-      constructor <;> intro h offset hcov
-      · have := h offset hcov
-        have hc := hcells id offset
-        unfold cellAt? at hc
-        rw [ha, hb] at hc
-        simp only [Option.bind_some] at hc
-        unfold ByteStore.InitializedAt at this ⊢
-        rw [← hc]; exact this
-      · have := h offset hcov
-        have hc := hcells id offset
-        unfold cellAt? at hc
-        rw [ha, hb] at hc
-        simp only [Option.bind_some] at hc
-        unfold ByteStore.InitializedAt at this ⊢
-        rw [hc]; exact this
-      
+  rw [rangeInitialized_iff, rangeInitialized_iff]
+  constructor
+  · rintro ⟨hpres, hall⟩
+    refine ⟨by rw [← hsome]; exact hpres, fun offset hcov => ?_⟩
+    have := hall offset hcov
+    unfold InitializedAt at this ⊢
+    rw [← hcells id offset]
+    exact this
+  · rintro ⟨hpres, hall⟩
+    refine ⟨by rw [hsome]; exact hpres, fun offset hcov => ?_⟩
+    have := hall offset hcov
+    unfold InitializedAt at this ⊢
+    rw [hcells id offset]
+    exact this
+
 
 /-- A write depends on the record it names and the store that record is a view
 onto, so two states agreeing about both write it identically.
@@ -3496,22 +3503,21 @@ and different stores write different results. -/
 theorem cellAt?_write_congr {a b : MemoryState} {id : AllocId}
     (h : a.allocations.lookup id = b.allocations.lookup id)
     (hb : ∀ record, a.allocations.lookup id = some record →
-      a.backings.lookup record.backing = b.backings.lookup record.backing)
+      a.storeOf record = b.storeOf record)
     (start : Nat) (bytes : ByteSeq) (initializes : Bool) (offset : Nat) :
     (a.write id start bytes initializes).cellAt? id offset =
       (b.write id start bytes initializes).cellAt? id offset := by
-  unfold write cellAt?
+  unfold cellAt?
+  rw [allocations_write, allocations_write]
   cases hl : b.allocations.lookup id with
   | none =>
     have ha : a.allocations.lookup id = Option.none := by rw [h, hl]
-    simp only [ha, hl]
+    simp only [ha, Option.bind_none]
   | some r =>
     have ha : a.allocations.lookup id = some r := by rw [h, hl]
-    have hstore := hb r ha
-    simp only [ha, hl, hstore]
-    cases hs : b.backings.lookup r.backing with
-    | none => simp only [ha, hl]
-    | some store => simp only [FiniteMap.lookup_insert_self, ha, hl]
+    simp only [ha, Option.bind_some,
+      storeOf_write_self a start bytes initializes ha,
+      storeOf_write_self b start bytes initializes hl, hb r ha]
 
 /--
 **Writes to allocations that do not share bytes commute**, whatever ranges they
@@ -3719,13 +3725,13 @@ theorem write_comm (state : MemoryState) (id : AllocId) {a b : Nat}
 /-- An initializing write initializes what it wrote, provided the allocation is
 there. The state-level form of `ByteStore.initialized_write`. -/
 theorem rangeInitialized_write (state : MemoryState) {id : AllocId} {start : Nat}
-    {bytes : ByteSeq} {record : AllocationRecord} {store : ByteStore}
-    (hfound : state.allocations.lookup id = some record)
-    (hs : state.backings.lookup record.backing = some store) :
+    {bytes : ByteSeq} {record : AllocationRecord}
+    (hfound : state.allocations.lookup id = some record) :
     (state.write id start bytes true).RangeInitialized id ⟨start, bytes.length⟩ := by
-  unfold RangeInitialized write
-  simp only [hfound, hs, FiniteMap.lookup_insert_self]
-  exact ByteStore.initialized_write store (record.origin + start) bytes
+  unfold RangeInitialized
+  rw [lookup_write_self state start bytes true hfound]
+  simp only [storeOf_write_self state start bytes true hfound]
+  exact ByteStore.initialized_write (state.storeOf record) (record.origin + start) bytes
 
 
 /-- **A provenance in a superseded epoch is not live.** `docs/MEMORY_MODEL.md` §2:
