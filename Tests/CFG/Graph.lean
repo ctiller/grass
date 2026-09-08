@@ -101,6 +101,14 @@ example (located : LocatedEdge Terminal)
     located ∈ good.locatedEdges ∧ located.key = entryNormalKey :=
   good.findEdge?_sound entryNormalKey located hfind
 
+example (located : LocatedEdge Terminal)
+    (hfind : good.findEdge? entryNormalKey = some located) :
+    ∃ block ∈ good.blocks,
+      block.id = entryNormalKey.source ∧
+      located.edge ∈ block.outgoing ∧
+      located.edge.exit = entryNormalKey.exit :=
+  good.findEdge?_structural entryNormalKey located hfind
+
 example : ∃ located, good.findEdge? entryNormalKey = some located :=
   good.edgeForKey entryNormalKey (by decide)
 

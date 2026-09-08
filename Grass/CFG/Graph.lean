@@ -107,6 +107,23 @@ theorem findEdge?_sound
         simpa [findEdge?] using hfind)
     exact LawfulBEq.eq_of_beq matched
 
+/-- `Graph.findEdge?_structural` exposes the containing source block and exact
+exit identity of every successful canonical lookup. -/
+theorem findEdge?_structural
+    (graph : Graph State Terminal) (key : EdgeKey)
+    (located : LocatedEdge Terminal)
+    (hfind : graph.findEdge? key = some located) :
+    ∃ block ∈ graph.blocks,
+      block.id = key.source ∧
+      located.edge ∈ block.outgoing ∧
+      located.edge.exit = key.exit := by
+  rcases graph.findEdge?_sound key located hfind with ⟨member, keyExact⟩
+  rcases (graph.mem_locatedEdges_iff located.source located.edge).mp member with
+    ⟨block, blockMember, sourceExact, edgeMember⟩
+  refine ⟨block, blockMember, ?_, edgeMember, ?_⟩
+  · exact sourceExact.trans (congrArg EdgeKey.source keyExact)
+  · exact congrArg EdgeKey.exit keyExact
+
 /-- Edge lookup succeeds exactly for canonical identities present in structural
 source order. -/
 theorem findEdge?_isSome_iff_mem_edgeKeys
