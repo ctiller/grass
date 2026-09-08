@@ -154,6 +154,12 @@ list on a structurally well-formed graph, so selection cannot introduce a
 second contract value that disagrees with the selected block. Loop invariants,
 measures, and frontier admission remain the next separate C1 obligation.
 
+The following loop slice, `Grass.CFG.Loop`, derives mutually reachable cyclic
+regions in graph order and requires an exact `LoopObligation` identity list.
+Each obligation carries an invariant plus a measure or frontier description,
+but `LoopSelection.wellFormed` is deliberately structural: later block checking
+must still prove preservation and either rank decrease or frontier advancement.
+
 ### C2 — Logical placement and static layouts
 
 Build layout and placement values under `Grass/Construct/`:
