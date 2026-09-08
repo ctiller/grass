@@ -259,6 +259,14 @@ already there. They needed the attribute.
 Each was applied on its own against the whole tree before the next, because
 adding a law to the `simp` set can break a proof that closed without it, and
 `Vec.ofHostBytes_append` did exactly that to its own module.
+
+**All six were then measured load-bearing, separately.** Deleting `@[simp]` from
+any one of `Vec.get?_set`, `Vec.sum_append`, `Vec.map_append`,
+`Vec.isPrefix_append`, `FiniteMap.lookup_insert` or `FiniteMap.lookup_erase` and
+rebuilding breaks this module or
+`Tests/Std/CollectionInstances.lean`. One at a time, restoring from a saved copy
+rather than from git — an earlier run of this measurement used `git checkout --`
+on uncommitted work and reverted the laws it was measuring.
 -/
 
 section ConditionalLaws
