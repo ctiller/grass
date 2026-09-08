@@ -3143,7 +3143,7 @@ entries recording defects that did not exist, every one filed from an argument
 rather than a construction. It should be read as owed work, not as a result.
 
 **Closed.** `ProcessPlan.wellFormed_preserved` is the theorem, every clause,
-`#print axioms` clean. Six clauses then; eight now, since §10.109 and §10.115
+`#print axioms` clean. Six clauses then; nine now, since §10.109, §10.115 and §10.128
 each added one after this entry was written. Reading the entry back against what
 it took:
 
@@ -5140,7 +5140,8 @@ clause says nothing. Local adversarial review built that world and proved
 
 **The fix is to drop the transport, not to add the guard as a conjunct.**
 `ProcessInstance.lifecycle` is already indexed by the incarnation's own kind, so
-`incarnation.lifecycle ≠ .died reason` is well-typed with no equation at all;
+`incarnation.lifecycle ≠ .died reason` is well-typed with no equation at all.
+
 The same fix belongs one declaration over, and a reviewer proved it by
 writing both halves: with `dying_was_supervised` also stated at the incarnation's
 own kind, the `WellFormed` hypothesis `execution_holds_an_unkilled_root` used to
@@ -5173,19 +5174,63 @@ what was wrong with them was expressible in Lean and still true.
   `a_corpse_may_be_orphaned`, `theJoinIntoTheDeadSender` and
   `the_corpse_is_collected` are all that.
 * Resolve every backticked Lean-style name, **prefix included**, against the
-  declaration set before committing. `Tools/DocstringAudit.py` checks identifiers
-  only inside sentences carrying a strong-claim word, which `agent-bus`
-  `c-process:106` reports to the gate's owner.
+  declaration set before committing. The docstring audit -- `tools/grass-tools`'s
+  `docstring-audit` binary since `main` retired the Python one -- checks
+  identifiers only inside sentences carrying a strong-claim word, which
+  `agent-bus` `c-process:106` reports to the gate's owner.
 
 None of them catches the **scope word** — "every world in this file" where
 "this section" was true. Nothing mechanical has caught one yet.
 
+**Round fourteen, and a hypothesis that was never about the theorem.**
+`dying_was_supervised` took `notAlreadyDead` and concluded that a slot found
+dead after a step had recorded a current parent. That hypothesis is consumed in
+two of twenty-four branches, and one of them — `detach` — does not need it:
+`Detaches.wasAttached` hands back the conclusion directly. Only the off-scope
+branch used it, and there it was refuting what should have been stated as a
+second case. So the theorem is a disjunction —
+`dying_was_supervised_or_untouched`: a slot found dead after a step either
+recorded a current parent, or was already dead with that same reason and the
+step did not touch it. The old form is two lines from it and every consumer
+takes that one. The private helper the off-scope branch called becomes dead code
+and is deleted.
+
+This is the entry's own rule about transports, one layer out: a hypothesis added
+to make a proof go through is not evidence the theorem needs it. The reader
+cannot tell the difference from the statement, which is why the disjunction is
+better even though it is longer — it says in Lean what three paragraphs of this
+theorem's docstring were saying in prose.
+
+`ProcessParentage.currentParent_of_isRoot`, added by this branch, is deleted for
+the same reason `parentless_slot_is_unkilled` was: `root_currentParent` on `main`
+is the same statement with the same proof. A branch whose subject is claims that
+outlived their code should not be adding a lemma that already exists one file
+over.
+
+**One finding deferred, and disclosed rather than closed.** Round fourteen also
+showed, with 247 compiled lines, that the invariant can carry
+`ProcessParentage.IsRoot` and not merely "records no current parent" — closing a
+gap `execution_holds_an_unkilled_root`'s own docstring concedes, since a
+`.detached` incarnation is parentless too. It is not in this branch. The reason
+is `agent-bus` `coord1:339`, relaying Craig: collapse and dag-ify stacks and
+nominate in parallel rather than deepening them. It is `agent-bus`
+`c-process`'s next Process branch and the tracking issue names this paragraph.
+Whoever reviews this branch should know the stronger statement exists and
+compiles, so that "why is this not `IsRoot`" has an answer that is not "nobody
+noticed".
+
 ### 10.135 A role that may write no region owes nothing
 
-*(The sibling branch `agent/c-process/docstring-claims-for-the-strict-gate`
-continues this numbering, and declares
-`ProcessPlan.sharedWritesAdmitted_of_no_writes` as this entry does; whichever
-lands second drops its copy.)*
+*(The sibling branch `agent/c-process/docstring-claims-swept` continues this
+numbering with §10.136 and §10.137. It does **not** declare
+`ProcessPlan.sharedWritesAdmitted_of_no_writes` — an earlier version of this
+parenthetical said it did, and said whichever branch landed second should drop
+its copy, which would have deleted the only declaration there is. The sibling
+carries `Grass/Process/Network/Plan.lean`'s and
+`Grass/Process/Network/Transition.lean`'s dangling citations exactly as `main`
+does. Landing this branch second means taking this side of both files. Round
+fourteen of local adversarial review measured the sibling's tip rather than
+believing this sentence, which is how it was caught.)*
 
 `sharedWritesAdmitted_of_no_writes` was cited by `StepsLocally.sharedWritesAdmitted`'s
 own docstring under the bare name and by `Grass/Process/Network/Plan.lean`'s note

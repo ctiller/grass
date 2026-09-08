@@ -140,8 +140,15 @@ directions.
 transport, so that it is a claim about the stored lifecycle rather than one
 guarded by an equation that may be uninhabited — local adversarial review built a
 world where the guarded form was vacuous and a corpse counted as an unkilled
-root. This is what bridges that untransported form to
-`NetworkTransition.dying_was_supervised`, which is stated at the slot's kind.
+root.
+
+`NetworkTransition.dying_was_supervised` is stated at the incarnation's own kind
+too, and needs no bridge; an earlier version of this sentence said it was stated
+at the slot's kind, which was true of the revision that named it and not of this
+one. What this bridges is inside that proof: `EndsInstance.nowEnded`, whose
+`ending` argument *is* at the slot's kind, and `Detaches.identityPreserved`,
+whose lifecycle clause relates two incarnations of possibly different kinds.
+§10.134.
 -/
 theorem died_cast {registry : ProtocolRegistry.{u, w, v}}
     {boundary : DriverBoundary.{u}}
@@ -297,15 +304,6 @@ theorem knownParent_of_currentParent (parentage : ProcessParentage topology kind
   | root => exact absurd rfl hasParent
   | attached parentKind parent => exact ⟨parentKind, parent, rfl⟩
   | detached _ _ => exact absurd rfl hasParent
-
-/-- A root has no current parent, which is `currentParent`'s first case read
-back through `IsRoot`. -/
-theorem currentParent_of_isRoot (parentage : ProcessParentage topology kind)
-    (isRoot : parentage.IsRoot) : parentage.currentParent = none := by
-  cases parentage with
-  | root => rfl
-  | attached _ _ => exact absurd isRoot (fun claim => claim)
-  | detached _ _ => exact absurd isRoot (fun claim => claim)
 
 /--
 Transporting a parentage across an equation of kinds does not change who its

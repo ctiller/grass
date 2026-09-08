@@ -1186,9 +1186,15 @@ structure Restarts (before after : plan.LogicalProcessNetwork)
   A supervisor restarts a child, and a root has no supervisor — but note that
   this field is what says so, and it says it of the *new* incarnation only:
   nothing here constrains the old one, so a restart at a root's slot is admitted
-  by the family and deletes the root. §10.132's last section. If a root ends the program is
-  over, and starting again is a new run — `ExactInitialNetwork`, not a
-  transition.
+  by the family and deletes the root. §10.132's last section.
+
+  The intended reading is that if a root ends the program is over, and starting
+  again is a new run — `ExactInitialNetwork`, not a transition. Nothing in this
+  family enforces that: `ProcessPlan.parentless_slot_survives` is the proof that
+  a restart at the root's slot is a step the family admits, and
+  `ProcessPlan.execution_holds_an_unkilled_root` has to take its absence as a
+  hypothesis rather than derive it. `agent-bus` `g-design:167` is the open
+  question.
 
   Found by working `ProcessPlan.wellFormed_preserved` clause by clause and asking
   which constructor could break each. `Spawns` was fixed in the same pass and
@@ -2232,34 +2238,6 @@ theorem moving_the_ledger_ends_an_instance (transition : plan.NetworkTransition 
   | detach _ _ step => exact absurd (step.onlyThatSlot.scope .obligations (by simp)) moved
 
 /--
-A slot nothing moved holds the same instance afterwards, so under
-`LogicalProcessNetworkCore.Agrees` an instance already recorded as not dead
-cannot be found dead there.
-
-The off-scope half of `dying_was_supervised` below. That proof takes it exactly
-once, before splitting on the constructor at all: the `by_cases` on whether the
-transition's scope names this slot has a negative branch that holds of any
-constructor, and this is it.
-
-It took a `Live` hypothesis and used `ProcessLifecycle.live_cast` until
-`dying_was_supervised` was weakened to `notAlreadyDead`; now it needs neither,
-which is what the weakening bought.
--/
-private theorem not_dead_where_nothing_moved
-    {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
-    {was now : ProcessInstance plan.topology} {reason : ProcessDeathReason}
-    (agrees : before.instances kind slot = after.instances kind slot)
-    (foundBefore : before.instances kind slot = some was)
-    (notAlreadyDead : ∀ earlier : ProcessDeathReason,
-      was.lifecycle ≠ ProcessLifecycle.died earlier)
-    (foundAfter : after.instances kind slot = some now)
-    (dead : now.lifecycle = ProcessLifecycle.died reason) : False := by
-  rw [foundBefore, foundAfter] at agrees
-  injection agrees with same
-  subst same
-  exact notAlreadyDead reason dead
-
-/--
 **A step that kills an instance found it recording a current parent.**
 
 `docs/PROCESS.md` §3's supervision half, stated over the whole family rather than
@@ -2270,7 +2248,7 @@ carries `wasChild`, so no constructor kills something that records no supervisor
 Where that one splits on a fragment no constructor but an ending names, this one
 splits on `.instanceState kind slot`, which eleven constructors can name — so the
 split is on the transition's own `scope` at that fragment, and the negative
-branch is `touchesOnly` handing back `not_dead_where_nothing_moved`.
+branch is `touchesOnly`, which gives the right disjunct directly.
 
 **Three things this does not say, each of which an earlier version of this
 docstring did.** Two of them have a machine-checked witness — the first and the
@@ -2309,27 +2287,41 @@ whatsoever. `LogicalProcessNetworkCore.ParentageValid` is what checks the
 recorded parent against the topology; this field checks only that one is
 recorded.
 
-The `sameKind` transport is `EndsInstance.nowEnded`'s and is there for the same
-reason: an incarnation carries its own `kind`, and the slot's is what indexes the
-lifecycle. The `notAlreadyDead` hypothesis replaced a `Live` one: `Live` was
-stronger than the proof needed and excluded the terminated-then-killed case by
-assumption rather than by argument.
+**What the second disjunct is.** An earlier version took `notAlreadyDead` as a
+hypothesis and concluded the left disjunct alone. That hypothesis is consumed in
+exactly two of twenty-four branches, and one of them -- `detach` -- does not need
+it: `Detaches.wasAttached` hands back the conclusion directly. Only the
+off-scope branch used it, and there it was refuting what is now the right
+disjunct. So the hypothesis was never about the theorem; it was about not having
+stated the theorem's second case. `dying_was_supervised` below recovers the old
+form in two lines, and every consumer takes that one.
+
+Note that `dead` and the disjuncts are stated at the *incarnation's* own kind.
+`ProcessInstance.lifecycle` is indexed by the incarnation's `kind`, not the
+slot's; what needs `ProcessLifecycle.died_cast` is `EndsInstance.nowEnded`,
+whose `ending` argument is at the slot's kind, and `Detaches.identityPreserved`,
+whose lifecycle clause relates two incarnations of possibly different kinds.
+Both are inside the proof and neither reaches the statement. §10.134.
 -/
-theorem dying_was_supervised (transition : plan.NetworkTransition before after)
+theorem dying_was_supervised_or_untouched (transition : plan.NetworkTransition before after)
     {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
     {was now : ProcessInstance plan.topology} {reason : ProcessDeathReason}
     (foundBefore : before.instances kind slot = some was)
-    (notAlreadyDead : ∀ earlier : ProcessDeathReason,
-      was.lifecycle ≠ ProcessLifecycle.died earlier)
     (foundAfter : after.instances kind slot = some now)
     (dead : now.lifecycle = ProcessLifecycle.died reason) :
-    was.parentage.currentParent ≠ none := by
+    was.parentage.currentParent ≠ none ∨
+      was.lifecycle = ProcessLifecycle.died reason := by
   by_cases inScope : transition.scope (.instanceState kind slot)
   case neg =>
-    exact absurd (transition.touchesOnly (.instanceState kind slot) inScope)
-      (fun agrees =>
-        not_dead_where_nothing_moved agrees foundBefore notAlreadyDead foundAfter dead)
+    refine Or.inr ?_
+    have agrees : before.instances kind slot = after.instances kind slot :=
+      transition.touchesOnly (.instanceState kind slot) inScope
+    rw [foundBefore, foundAfter] at agrees
+    injection agrees with same
+    subst same
+    exact dead
   case pos =>
+    refine Or.inl ?_
     revert inScope
     cases transition with
     | processStep otherKind otherSlot _ _ _ _ step =>
@@ -2457,17 +2449,10 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
       injection sameSlot with sameKinds sameSlots
       subst sameKinds
       cases sameSlots
-      obtain ⟨fromInstance, toInstance, fromKind, toKind, foundFrom, foundTo, _,
-        sameLifecycle, _⟩ := step.identityPreserved
-      rw [foundBefore] at foundFrom
-      rw [foundAfter] at foundTo
-      injection foundFrom with isWas
-      injection foundTo with isNow
-      subst isWas
-      subst isNow
-      refine absurd ?_ (notAlreadyDead reason)
-      refine (ProcessLifecycle.died_cast fromKind).mp ?_
-      exact sameLifecycle.symm.trans ((ProcessLifecycle.died_cast toKind).mpr dead)
+      obtain ⟨earlier, foundEarlier, hadAuthority⟩ := step.wasAttached
+      have same : was = earlier := Option.some.inj (foundBefore ▸ foundEarlier)
+      subst same
+      exact hadAuthority
     | send _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
     | commit _ step => intro inScope; exact absurd inScope.2 (by simp)
     | receive _ _ _ step =>
@@ -2485,6 +2470,30 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
     | reroute _ _ _ _ step =>
       intro inScope; rcases inScope with isScope | isScope <;> exact absurd isScope (by simp)
     | coalesce _ _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
+
+/--
+**A step that kills a *live* instance found it recording a current parent.**
+
+`dying_was_supervised_or_untouched` with the right disjunct refused. This is the
+form every consumer takes, and the form the eight `no_run_reaches_*` corollaries
+in `Tests/Process/PreservationFixtures.lean` are stated against.
+
+`notAlreadyDead` is a hypothesis here and not a premise of the theorem above,
+which is the distinction round fourteen of local adversarial review drew: the
+supervision fact does not need it, and only the reader who wants the
+single-conclusion form does. §10.134.
+-/
+theorem dying_was_supervised (transition : plan.NetworkTransition before after)
+    {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
+    {was now : ProcessInstance plan.topology} {reason : ProcessDeathReason}
+    (foundBefore : before.instances kind slot = some was)
+    (notAlreadyDead : ∀ earlier : ProcessDeathReason,
+      was.lifecycle ≠ ProcessLifecycle.died earlier)
+    (foundAfter : after.instances kind slot = some now)
+    (dead : now.lifecycle = ProcessLifecycle.died reason) :
+    was.parentage.currentParent ≠ none :=
+  (transition.dying_was_supervised_or_untouched foundBefore foundAfter dead).resolve_right
+    (notAlreadyDead reason)
 
 /--
 Parentlessness carried across a step's identity clause is still parentlessness.

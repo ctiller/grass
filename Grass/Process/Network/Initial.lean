@@ -421,7 +421,7 @@ theorem start_holds_an_unkilled_root {request : (plan.topology.protocol plan.top
     {network : plan.LogicalProcessNetwork} (start : plan.ExactInitialNetwork request network) :
     plan.UnkilledRootAt network plan.topology.root start.rootSlot := by
   refine ⟨start.root, start.rootPresent,
-    ProcessParentage.currentParent_of_isRoot _ start.rootParentage, ?_⟩
+    ProcessParentage.root_currentParent start.rootParentage, ?_⟩
   intro reason dead
   rw [start.rootRunning] at dead
   cases dead
