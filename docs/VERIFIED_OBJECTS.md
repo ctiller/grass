@@ -56,6 +56,34 @@ structure VerifiedObject (sig : ProgramSignature) where
   machine : ObjectMachineCodeRefines privateSpec source payload
 ```
 
+Each serialized section also declares how relocations at its patch sites are
+interpreted:
+
+```lean
+inductive SerializableRelocationPolicy where
+  | forbidden
+  | registered (dialect : StableId)
+
+structure SerializableRelocatableSection where
+  id : StableId
+  alignment : Alignment
+  permissions : SectionPermissions
+  relocationPolicy : SerializableRelocationPolicy
+  contents : ByteArray
+```
+
+The numeric relocation kind is scoped by the selected section's registered
+dialect. The in-kernel object resolves that nominal dialect to the exact
+target-owned decoder, positive patch width, arithmetic/encoding semantics, and
+soundness laws used by its relocation certificate. Structural parsing checks
+the policy tag and rejects every relocation whose patch section is
+`forbidden`; semantic validation additionally rejects an unknown dialect or an
+unknown kind within a known dialect. Section spelling, file extension, ambient
+linker options, and digests are not dispatch authority. Two equal numeric kinds
+under different dialects are intentionally different operations. This permits
+heterogeneous objects while letting ordinary single-target objects select one
+standard policy mechanically.
+
 The target-independent import body has a small, first-order identity rather
 than embedding a platform loader record or a Lean contract:
 
