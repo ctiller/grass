@@ -108,7 +108,12 @@ by `Tests/ISA/X86/LedgerAudit.lean`. -/
 def TargetAbi.handleBits : TargetAbi → Nat
   | .x64 => 64
 
-/-- The width of a Win32 pointer under this ABI, in bits. -/
+/-- The width of a Win32 pointer under this ABI, in bits.
+
+Unlike `handleBits` this has no consumer: nothing in the repository needs a
+pointer width yet, so the asymmetry between the two is real and is left
+visible rather than evened out by inventing one. Its guarantee is the
+exhaustiveness alone. -/
 def TargetAbi.pointerBits : TargetAbi → Nat
   | .x64 => 64
 

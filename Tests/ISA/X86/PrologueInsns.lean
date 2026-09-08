@@ -108,4 +108,58 @@ example :
     decodeInsn ((pushR64 .rbx).toBytes ++ (subR64Imm8 .rsp 32).toBytes) =
       .ok (pushR64 .rbx, (subR64Imm8 .rsp 32).toBytes) := rfl
 
+/-! ## The residue `InsnEncoding.WellFormed` leaves
+
+That header records what `WellFormed` does not check: the immediate is
+unconstrained there, because the module has no opcode table. The instruction
+layer discharges it for everything this library emits -- `MatchesSpec` reads the
+immediate width off the table, and all nine encoders have a round-trip corollary
+taking it as a premise.
+
+What survives is the gap between what the library emits and what its types
+permit. This is that gap, as a witness rather than a sentence. -/
+
+/-- A `lea` carrying a four-byte immediate. `0x8D` takes none, so the decoder
+would read the four bytes as the start of the next instruction and resume inside
+it -- the length failure `Tests/ISA/X86/DecodeCorpus.lean` exists to catch. -/
+def leaWithStrayImmediate : InsnEncoding :=
+  { rex := some (Rex.of true false false false)
+    escape := false
+    opcode := 0x8D
+    modrm := some ⟨ModRm.modRegisterDirect, 0, 0⟩
+    sib := Option.none
+    disp := .none
+    imm := .i32 0x11223344 }
+
+/-- `WellFormed` accepts it. Nothing here is about the opcode. -/
+example : leaWithStrayImmediate.WellFormed := by decide
+
+/-- `MatchesSpec` against the row `findSpec` returns for `0x8D` refuses it, so
+the constraint exists -- one layer up, where the table is. -/
+example : ¬ (∃ s, findSpec false 0x8D = some s ∧
+    MatchesSpec leaWithStrayImmediate s) := by decide
+
+/-- The refusal above is not vacuous: the table does have a row for `0x8D`, so
+`MatchesSpec` is being evaluated against a real one rather than failing for want
+of anything to compare with. -/
+example : (findSpec false 0x8D).isSome := by decide
+
+/-- And the immediate is the field doing it. The same record with no immediate
+matches the row, so the three fields `MatchesSpec` shares with `WellFormed`'s
+concerns -- escape, opcode, ModR/M presence -- are all already in agreement, and
+only the immediate width differs. Without this the refusal above would not say
+which field was wrong. -/
+example : ∃ s, findSpec false 0x8D = some s ∧
+    MatchesSpec { leaWithStrayImmediate with imm := .none } s := by decide
+
+/-- And the encoders cannot build it: `leaR64` fixes the immediate to `.none`,
+so no argument reaches this record. That is why the residue is about
+hand-written values and not about anything the library emits. -/
+example (dst : Gpr) (m : MemOperand) (i : InsnEncoding) :
+    leaR64 dst m = some i → i.imm = .none := by
+  intro h
+  simp only [leaR64, encodeMemInsn, Option.map_eq_some_iff] at h
+  obtain ⟨_, _, rfl⟩ := h
+  rfl
+
 end Tests.ISA.X86.PrologueInsns

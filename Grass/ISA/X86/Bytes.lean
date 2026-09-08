@@ -267,10 +267,25 @@ address is named:
   the form Spike 1 depends on;
 - a displacement belongs to a ModR/M operand, so `WellFormed` requires one.
 
-The immediate is deliberately *not* constrained here. Which immediate an opcode
-takes is a fact about the opcode, and this module has no opcode table; putting a
-guess here would be inventing a constraint rather than modeling one. It is an
-**open obligation** for the instruction layer.
+The immediate is deliberately *not* constrained here, and still is not. Which
+immediate an opcode takes is a fact about the opcode, this module has no opcode
+table, and putting a guess here would invent a constraint rather than model one.
+
+It was recorded as an open obligation for the instruction layer, and that layer
+has since discharged it. `Grass.ISA.X86.MatchesSpec` is the constraint --
+`s.immSizeFor (rexWSet i.rex) = i.imm.sizeOf`, read off the opcode table rather
+than guessed -- and every encoder in this module now satisfies it, because each
+has a round-trip corollary in `Grass/ISA/X86/Decode.lean` that takes it as a
+premise and discharges it. All nine: `movRegImm32`, `movRegImm64`, `leaR64`,
+`callMem64`, `movMem32Imm32`, `movMem64Imm32`, `pushR64`, `subR64Imm8` and
+`subR64Imm32`.
+
+What is left is narrower and belongs here rather than there. A record written by
+hand instead of by an encoder is still `WellFormed` with any immediate at all,
+so the guarantee covers what this library *emits* and not what its types
+*permit*. Closing that would mean giving `InsnEncoding` the opcode table as an
+index, which is the same shape of change `Grass/ISA/X86/Profile.lean` records
+for `CommonRule` and carries the same cost: every construction site.
 -/
 def WellFormed (i : InsnEncoding) : Prop :=
   (i.sib.isSome → ∃ m, i.modrm = some m ∧ m.rm = ModRm.rmSelectsSib ∧
