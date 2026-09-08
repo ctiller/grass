@@ -297,6 +297,14 @@ copied the wrong pattern from `FiniteMap`.
 [STDLIB.md](STDLIB.md) §3 lists a wider interface than S1 implements. Each
 absence is a band-3 item under §1 with a named blocker, not an oversight:
 
+**Read this table against §3.13 before trusting it.** Several rows say a thing is
+undemanded, and that is true, but §3.13 measures what "demand" currently means: one
+product module in the whole tree can reach `Vec`, and `Spikes/` is not a build
+target, so most of the consumers this section reasons about are prospective. The
+absences are still right — guessing at a law is worse than waiting — but "no
+consumer has demanded it" is weaker evidence here than it sounds.
+
+
 | Absent | Blocked on |
 |---|---|
 | `mapM`, `traverse` | the `Grass.Effect` law-bearing monad interface. §5 asks for traverse *order preservation*, which is a claim about effect order; writing these over Lean's bare `Monad` now would fix the wrong contract and would have to be rewritten, not extended. |
@@ -692,6 +700,104 @@ intended behaviour. `Tests/Std/VecVocabulary.lean` already pins both halves, a
 cost it describes is real and permanent, and a future reader meeting the
 ambiguity error deserves to find the reason rather than rediscover the
 argument.
+
+### 3.13 Who actually consumes this library, measured
+
+Every band judgement in §1 and every "no consumer has demanded it" in §3.4 rests
+on a model of who consumes this library. That model had never been measured. It
+has now, two ways, and both results are worth having in front of a reader before
+they trust a band judgement.
+
+#### Reach: which product modules can see each module
+
+Build the import graph over `Grass/**` and `Tests/**` and ask, for each module of
+this library, which modules under `Grass/` outside `Grass/Std/Logical/` can reach
+it transitively.
+
+| Module | Product modules that reach it | Fixtures that reach it |
+|---|---|---|
+| `Byte` | 16 | 32 |
+| `FiniteMap` | 6 | 12 |
+| `Vec` | **1** | 12 |
+| `HostBytes` | 0 | 2 |
+| `Text` | 0 | 1 |
+| `Order` | 0 | 1 |
+| `Bag` | 0 | 1 |
+
+**The flagship type has one product consumer.** `Grass/Build/Cache/Key.lean` is
+the only module under `Grass/` outside this library that can reach `Vec`, and it
+reaches it for one field's type. `Byte` and `FiniteMap` are the two modules
+carrying the library's weight, and neither is what §1 spends its argument on.
+
+This is not a surprise once stated — `Spikes/` is not a build target, so the
+corpus §3.4 reasons about does not compile, and the consumers it describes are
+prospective. It is worth stating because "no consumer has demanded it" reads like
+a measurement of demand when it is mostly a measurement of the corpus not being
+built yet.
+
+`Bag`'s zero is a different thing and is a defect rather than a stage: the
+process layer still imports its own `Grass/Process/Bag.lean`, so the library copy
+has no consumer at all. §4.2 records that; `c-process:120` took the port.
+
+#### Coverage: which laws any fixture actually depends on
+
+Strip one `@[simp]` at a time, rebuild the whole `Tests` target, and record
+whether anything breaks. Breaking means some fixture goal needed it.
+
+| Module | Laws load-bearing for a fixture | Total `@[simp]` |
+|---|---|---|
+| `FiniteMap` | 8 | 9 |
+| `Vec` | 25 | 72 |
+| `Bag` | 10 | 23 |
+| `HostBytes` | 5 | 12 |
+| `Text` | 1 | 7 |
+| `Order` | **0** | 6 |
+
+`Byte` is absent from this table because it declares no `@[simp]` law at all: it
+is two `abbrev`s, and there is nothing to strip. That is also why it can be the
+most-reached module in the tree and contribute nothing here.
+
+Forty-nine of a hundred and twenty-nine. **The two tables tell the same story:**
+`FiniteMap` has the most product consumers and the highest coverage; `Order` has
+none of either. Coverage tracks demand, and there is not much demand yet.
+
+**This is a list of questions, not a defect list, and the distinction is the
+whole point.** A law nothing exercises is not wrong — the kernel type-checked it —
+but it is unverified in the only sense a fixture can verify: no goal depends on
+it, so a law with the wrong orientation, the wrong side condition, or the wrong
+normal form would sit there looking correct. `Vec.get?_push` is the case that
+proves the concern is real: it was a genuine gap, `simp` could not close a
+read-after-push, and no fixture noticed until one was written to look for it.
+
+`Order`'s zero has a benign explanation that is worth checking rather than
+assuming: its six laws are all empty, singleton and `push` base cases, and
+`Tests/Std/StableSort.lean` works with concrete two- and three-element vectors
+that `decide` and `rfl` reduce without reaching a law. That explains the number
+without excusing it.
+
+**What this section is not.** It is not an argument for writing fixtures against
+the other eighty laws. Fixtures written to raise this number would exercise the
+laws in the shape the fixture author chose, which is the shape the law is already
+stated in, and would measure nothing. The number goes up when a consumer arrives,
+which is §1's band rule working rather than failing.
+
+**Which tips these were taken on, since they are not all the same.** The `Vec`
+row was measured on `befcdb19`, the tip of `agent/c-stdlib/vec-literal-probe`,
+which carries two fixtures not yet on `main`; the other five rows and both
+reach tables were measured on `790a2455`, which has merged. The two extra
+fixtures close by `rfl` and so should reach no `simp` law, but that is a
+prediction, and the five laws they could plausibly touch — `length_fromList`,
+`toList_fromList`, `get?_fromList`, `toList_append`, `length_append` — were
+re-run on `main` and gave the same answers. The full 72-law run was not repeated.
+
+**Rerunning it.** Both measurements are scripts over the import graph and the
+build; neither is checked in, because a tool that takes forty minutes and is run
+once a milestone is not a gate. The method is stated above in enough detail to
+redo, and the first run of the coverage measurement was wrong in a way worth
+knowing about: matching a declaration by name without a trailing boundary is a
+prefix match, so `get?_push` also matched `get?_push_self` and three laws were
+reported as unmeasurable when each is declared exactly once. The number was 22
+before that was fixed and 25 after.
 
 ## 4. S2 — Custody consolidation
 
