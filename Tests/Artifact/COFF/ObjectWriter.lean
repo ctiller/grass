@@ -34,6 +34,35 @@ example : objectDescription.sectionLayout.1 = layoutSections := by decide
 
 example : objectDescription.header = layoutHeader := by decide
 
+example : objectDescription.header.numberOfSections.toNat = 1 := by
+  exact objectDescription.header_numberOfSections (by decide)
+
+example : objectDescription.header.numberOfSymbols.toNat = 1 := by
+  exact objectDescription.header_numberOfSymbols (by decide)
+
+example : objectDescription.header.pointerToSymbolTable.toNat = 86 := by
+  exact objectDescription.header_pointerToSymbolTable_present
+    (Vec.singleton mainCell) longNames (by rfl) (by decide)
+
+example : (textDescription.headerAt 60).sizeOfRawData.toNat =
+    textDescription.rawData.length := by
+  exact textDescription.headerAt_sizeOfRawData 60 (by decide)
+
+example : (textDescription.headerAt 60).pointerToRawData.toNat = 60 := by
+  exact textDescription.headerAt_pointerToRawData_of_pos 60 (by decide)
+    (by decide)
+
+example : (textDescription.headerAt 60).pointerToRelocations.toNat = 76 := by
+  exact textDescription.headerAt_pointerToRelocations_of_pos 60 (by decide)
+    (by decide)
+
+example : (textDescription.headerAt 60).pointerToLineNumbers.toNat = 0 := by
+  exact textDescription.headerAt_pointerToLineNumbers_of_empty 60 (by rfl)
+
+example : (textDescription.headerAt 60).PointersCoherent := by
+  exact textDescription.headerAt_pointersCoherent 60 (by decide) (by decide)
+    (by decide) (by decide) (by decide)
+
 example : objectDescription.Writable = true := by decide
 
 example : (writeSectionDescription textDescription).length =

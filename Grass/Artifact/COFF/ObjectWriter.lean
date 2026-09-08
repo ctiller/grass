@@ -11,7 +11,7 @@ contiguous placement and rejects values that do not fit their COFF fields.
 
 namespace Grass.Artifact.COFF
 
-open Grass.Grammar Grass.Std.Logical
+open Grass.Artifact.Binary Grass.Grammar Grass.Std.Logical
 
 /-- Raw contents and retained non-placement fields for one output section. -/
 structure SectionDescription where
@@ -72,6 +72,142 @@ def SectionDescription.headerAt (description : SectionDescription)
     numberOfLineNumbers := BitVec.ofNat 16 description.lineNumbers.length
     characteristics := description.characteristics }
 
+/-- A representable raw-data length is recovered exactly from its header field. -/
+@[simp] theorem SectionDescription.headerAt_sizeOfRawData
+    (description : SectionDescription) (offset : Nat)
+    (fits : description.rawData.length < 2 ^ 32) :
+    (description.headerAt offset).sizeOfRawData.toNat =
+      description.rawData.length := by
+  simp [SectionDescription.headerAt, BitVec.toNat_ofNat,
+    Nat.mod_eq_of_lt fits]
+
+/-- A representable relocation count is recovered exactly from its header field. -/
+@[simp] theorem SectionDescription.headerAt_numberOfRelocations
+    (description : SectionDescription) (offset : Nat)
+    (fits : description.relocations.length < 2 ^ 16) :
+    (description.headerAt offset).numberOfRelocations.toNat =
+      description.relocations.length := by
+  simp [SectionDescription.headerAt, BitVec.toNat_ofNat,
+    Nat.mod_eq_of_lt fits]
+
+/-- A representable line count is recovered exactly from its header field. -/
+@[simp] theorem SectionDescription.headerAt_numberOfLineNumbers
+    (description : SectionDescription) (offset : Nat)
+    (fits : description.lineNumbers.length < 2 ^ 16) :
+    (description.headerAt offset).numberOfLineNumbers.toNat =
+      description.lineNumbers.length := by
+  simp [SectionDescription.headerAt, BitVec.toNat_ofNat,
+    Nat.mod_eq_of_lt fits]
+
+/-- Nonempty raw data retains its canonical starting offset exactly. -/
+@[simp] theorem SectionDescription.headerAt_pointerToRawData_of_pos
+    (description : SectionDescription) (offset : Nat)
+    (nonempty : 0 < description.rawData.length) (fits : offset < 2 ^ 32) :
+    (description.headerAt offset).pointerToRawData.toNat = offset := by
+  simp [SectionDescription.headerAt, extentPointer, Nat.ne_of_gt nonempty,
+    BitVec.toNat_ofNat, Nat.mod_eq_of_lt fits]
+
+/-- Empty raw data receives the canonical zero pointer. -/
+@[simp] theorem SectionDescription.headerAt_pointerToRawData_of_empty
+    (description : SectionDescription) (offset : Nat)
+    (empty : description.rawData.length = 0) :
+    (description.headerAt offset).pointerToRawData.toNat = 0 := by
+  simp [SectionDescription.headerAt, extentPointer, empty]
+
+/-- Nonempty relocations retain their exact offset after the raw data. -/
+@[simp] theorem SectionDescription.headerAt_pointerToRelocations_of_pos
+    (description : SectionDescription) (offset : Nat)
+    (nonempty : 0 < description.relocations.length)
+    (fits : offset + description.rawData.length < 2 ^ 32) :
+    (description.headerAt offset).pointerToRelocations.toNat =
+      offset + description.rawData.length := by
+  simp [SectionDescription.headerAt, extentPointer, Nat.ne_of_gt nonempty,
+    BitVec.toNat_ofNat, Nat.mod_eq_of_lt fits]
+
+/-- An empty relocation block receives the canonical zero pointer. -/
+@[simp] theorem SectionDescription.headerAt_pointerToRelocations_of_empty
+    (description : SectionDescription) (offset : Nat)
+    (empty : description.relocations.length = 0) :
+    (description.headerAt offset).pointerToRelocations.toNat = 0 := by
+  simp [SectionDescription.headerAt, extentPointer, empty]
+
+/-- Nonempty line records retain their exact offset after raw data and relocations. -/
+@[simp] theorem SectionDescription.headerAt_pointerToLineNumbers_of_pos
+    (description : SectionDescription) (offset : Nat)
+    (nonempty : 0 < description.lineNumbers.length)
+    (fits : offset + description.rawData.length +
+      10 * description.relocations.length < 2 ^ 32) :
+    (description.headerAt offset).pointerToLineNumbers.toNat =
+      offset + description.rawData.length +
+        10 * description.relocations.length := by
+  simp [SectionDescription.headerAt, extentPointer, Nat.ne_of_gt nonempty,
+    BitVec.toNat_ofNat, Nat.mod_eq_of_lt fits]
+
+/-- An empty line-number block receives the canonical zero pointer. -/
+@[simp] theorem SectionDescription.headerAt_pointerToLineNumbers_of_empty
+    (description : SectionDescription) (offset : Nat)
+    (empty : description.lineNumbers.length = 0) :
+    (description.headerAt offset).pointerToLineNumbers.toNat = 0 := by
+  simp [SectionDescription.headerAt, extentPointer, empty]
+
+/-- Representable canonical section headers have coherent zero/nonzero pointers. -/
+theorem SectionDescription.headerAt_pointersCoherent
+    (description : SectionDescription) (offset : Nat)
+    (offsetPositive : 0 < offset)
+    (rawFits : description.rawData.length < 2 ^ 32)
+    (relocationCountFits : description.relocations.length < 2 ^ 16)
+    (lineCountFits : description.lineNumbers.length < 2 ^ 16)
+    (endFits : offset + description.byteLength < 2 ^ 32) :
+    (description.headerAt offset).PointersCoherent := by
+  have offsetFits : offset < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  have relocationOffsetFits :
+      offset + description.rawData.length < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  have lineOffsetFits :
+      offset + description.rawData.length +
+        10 * description.relocations.length < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  have rawCoherent :
+      (description.headerAt offset).rawDataSpan.PointerCoherent := by
+    change (description.headerAt offset).pointerToRawData.toNat = 0 ↔
+      (description.headerAt offset).sizeOfRawData.toNat = 0
+    rw [description.headerAt_sizeOfRawData offset rawFits]
+    by_cases empty : description.rawData.length = 0
+    · rw [description.headerAt_pointerToRawData_of_empty offset empty]
+      simp [empty]
+    · have positive := Nat.pos_of_ne_zero empty
+      rw [description.headerAt_pointerToRawData_of_pos offset positive offsetFits]
+      constructor <;> intro impossible <;> omega
+  have relocationsCoherent :
+      (description.headerAt offset).relocationSpan.PointerCoherent := by
+    change (description.headerAt offset).pointerToRelocations.toNat = 0 ↔
+      10 * (description.headerAt offset).numberOfRelocations.toNat = 0
+    rw [description.headerAt_numberOfRelocations offset relocationCountFits]
+    by_cases empty : description.relocations.length = 0
+    · rw [description.headerAt_pointerToRelocations_of_empty offset empty]
+      simp [empty]
+    · have positive := Nat.pos_of_ne_zero empty
+      rw [description.headerAt_pointerToRelocations_of_pos offset positive
+        relocationOffsetFits]
+      constructor <;> intro impossible <;> omega
+  have linesCoherent :
+      (description.headerAt offset).lineNumberSpan.PointerCoherent := by
+    change (description.headerAt offset).pointerToLineNumbers.toNat = 0 ↔
+      6 * (description.headerAt offset).numberOfLineNumbers.toNat = 0
+    rw [description.headerAt_numberOfLineNumbers offset lineCountFits]
+    by_cases empty : description.lineNumbers.length = 0
+    · rw [description.headerAt_pointerToLineNumbers_of_empty offset empty]
+      simp [empty]
+    · have positive := Nat.pos_of_ne_zero empty
+      rw [description.headerAt_pointerToLineNumbers_of_pos offset positive
+        lineOffsetFits]
+      constructor <;> intro impossible <;> omega
+  exact ⟨rawCoherent, relocationsCoherent, linesCoherent⟩
+
 /-- Build canonically placed headers and the first offset following all sections. -/
 private def layoutSectionList :
     Nat → List SectionDescription → List SectionHeader × Nat
@@ -105,6 +241,44 @@ def ObjectDescription.header (description : ObjectDescription) : Header :=
     numberOfSymbols := BitVec.ofNat 32 description.symbols.cellCount
     sizeOfOptionalHeader := 0
     characteristics := description.characteristics }
+
+/-- A representable synthesized header retains the exact section count. -/
+@[simp] theorem ObjectDescription.header_numberOfSections
+    (description : ObjectDescription)
+    (fits : description.sections.length < 2 ^ 16) :
+    description.header.numberOfSections.toNat = description.sections.length := by
+  simp [ObjectDescription.header, BitVec.toNat_ofNat, Nat.mod_eq_of_lt fits]
+
+/-- A representable synthesized header retains the exact symbol-cell count. -/
+@[simp] theorem ObjectDescription.header_numberOfSymbols
+    (description : ObjectDescription)
+    (fits : description.symbols.cellCount < 2 ^ 32) :
+    description.header.numberOfSymbols.toNat = description.symbols.cellCount := by
+  simp [ObjectDescription.header, BitVec.toNat_ofNat, Nat.mod_eq_of_lt fits]
+
+/-- An absent symbol tail synthesizes a zero symbol-table pointer. -/
+@[simp] theorem ObjectDescription.header_pointerToSymbolTable_absent
+    (description : ObjectDescription)
+    (absent : description.symbols = .absent) :
+    description.header.pointerToSymbolTable.toNat = 0 := by
+  simp [ObjectDescription.header, absent]
+
+/-- A present symbol tail starts exactly after all canonically packed sections. -/
+@[simp] theorem ObjectDescription.header_pointerToSymbolTable_present
+    (description : ObjectDescription) (cells : Vec SymbolCell)
+    (strings : StringTable)
+    (present : description.symbols = .present cells strings)
+    (fits : description.sectionLayout.2 < 2 ^ 32) :
+    description.header.pointerToSymbolTable.toNat =
+      description.sectionLayout.2 := by
+  simp [ObjectDescription.header, present, BitVec.toNat_ofNat,
+    Nat.mod_eq_of_lt fits]
+
+/-- Relocatable-object synthesis always emits a zero optional-header size. -/
+@[simp] theorem ObjectDescription.header_sizeOfOptionalHeader
+    (description : ObjectDescription) :
+    description.header.sizeOfOptionalHeader.toNat = 0 := by
+  simp [ObjectDescription.header]
 
 /-- Serialize one section's raw bytes, relocations, and line numbers in order. -/
 def writeSectionDescription (description : SectionDescription) :
