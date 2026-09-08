@@ -4927,8 +4927,11 @@ it would buy, which is the part that mattered. Three of the
 four before-worlds have a step into them and none of the six worlds involved is a
 world of a run; the fourth holds a dead *root*, and what refuses it is not a
 step-local theorem but `ProcessPlan.execution_holds_an_unkilled_root`, an
-invariant over whole executions. §10.133 is where that lands and §10.134 and
-§10.135 are the two further rounds it took.
+invariant over whole executions. §10.133 is where that lands, and the entries after
+it are the further rounds of adversarial review it took; §10.137 is where that
+sequence is summed up. Deliberately not enumerated: this sentence has now gone
+stale twice by naming the entries that existed when it was written, which is the
+failure §10.135 records about this very paragraph.
 
 ### 10.130 The fixture that proved the generalisation had content could not be satisfied
 
@@ -5048,8 +5051,8 @@ finite — and §3 appears to permit it. Recorded rather than ruled on.
 
 **Superseded by §10.133, which refutes this entry's headline and one of its two
 open questions.** Left standing rather than edited, because what it got wrong is
-the point of the next entry: it is the third consecutive entry in which the
-fixture, not the prose, was right.
+the point of the next entry: it is another entry in which the fixture, not the
+prose, was right.
 
 §10.129 closed §10.89's check and left one thing owed: the two endpoint deaths
 and the two instance endings are steps *from worlds no step reaches*, and
@@ -5132,8 +5135,8 @@ got rather than a unilateral field.
 
 §10.132 is refuted in its headline and in one of its two open questions, by a
 fresh no-context adversarial reviewer who built machine-checked witnesses for
-both rather than arguing. Three entries in a row now — §10.130, §10.131, and this
-— where what was wrong was the prose and what caught it was a fixture. The
+both rather than arguing. Three entries out of the last four — §10.130, §10.131 and this — where what was
+wrong was the prose and what caught it was a fixture. The
 pattern is worth naming: each time, the sentence that failed was the one
 generalising from what had just been built to what it meant.
 
@@ -5267,7 +5270,9 @@ should not have been asserting it by accident.
 the same commit *renamed*. `Tools/DocstringAudit.py` exits zero on all three,
 because its identifier check fires only inside a sentence carrying a strong-claim
 word. This is the third time a citation of a nonexistent declaration has reached
-a branch here (§10.131's audit pass found nine at once), and the pattern is
+a branch here — §10.105 found five, §10.122's audit pass found nine after fifty
+missing imports were added to `Tools/DeclNames.lean` so the gate could see the
+subtree, and this is three — and the pattern is
 specific enough to be worth a gate: a backticked lower-camel name in a docstring
 is either a declaration or a typo, whatever sentence it sits in. That is
 `Tools/`'s owner's call and is reported rather than assumed.
@@ -5382,7 +5387,11 @@ rewriting.** §10.135 corrected "the seven refusals below are read off this
 theorem" to "the three `no_run_reaches_*` … the four `*_is_no_world_of_a_run`".
 Both new numbers were wrong on arrival, because the same commit added
 `deadOrphanWorld_is_no_world_of_a_run` and `no_run_reaches_deadOrphanWorld`
-further down the same file. There are four and five.
+further down the same file, and a later one added
+`no_run_reaches_sentWithLiveReceiver`. The docstring that carried them states no
+number at all now, which is the only durable fix: a count in prose beside a
+growing list is a defect with a delay fuse, and a seventh round found this very
+sentence had acquired one.
 
 That is the third round in a row containing a miscount, and the second in which
 the miscount is *inside the correction of a miscount*. The pattern is specific
@@ -5502,6 +5511,47 @@ before writing it. The third is not mechanisable and is the one that keeps
 biting: after a fix falsifies a claim, search for the **claim's wording** rather
 than the declaration's name. `agent-bus` `c-process:106` reports the first of
 these to the gate's owner as a proposed rule for `Tools/DocstringAudit.py`.
+
+### 10.138 Every remaining defect was the ledger describing itself
+
+A seventh fresh reviewer. It rebuilt, re-derived every constructor count,
+resolved every backticked identifier in the new docstrings and in §10.132 onward
+against a declaration set dumped from an environment importing both `Grass.Process`
+and the fixture modules, and re-derived the §10.134 vacuity attack from scratch —
+building the wrong-kind world itself and machine-checking that the landed
+`UnkilledRootAt` refuses it while a locally re-declared transported form accepts
+it. **No defect in a proof, for the seventh time**, and no dangling citation, no
+duplicated prose, and no false claim about this branch's git history.
+
+What it found was three defects and two notes, and every one of them is the
+ledger describing itself wrongly rather than the ledger describing the code
+wrongly. §10.134 attributed the nine-dangling-names audit pass to §10.131; it is
+§10.122's, reached by adding fifty missing imports to `Tools/DeclNames.lean`.
+§10.129's forward reference named the entries that existed when it was written
+and had gone stale twice by the same mechanism §10.135 records about that very
+paragraph. And §10.136's "there are four and five" was correct when written and
+falsified by the commit that wrote it, which added a fifth refusal corollary and
+edited that same entry to announce it.
+
+**The fix for two of those is to stop writing the thing.** The forward reference
+no longer enumerates entries and the count is gone from the entry entirely; the
+docstring the count was correcting states no number at all. A count in prose
+beside a growing list is a defect with a delay fuse, and §10.136's rule — do not
+write a count you have not measured — turns out to be too weak. The stronger form
+is: do not write a count beside something that will grow. Measuring it correctly
+only sets the fuse accurately.
+
+**And the shape of the whole sequence is now clear enough to state.** Seven
+rounds. Zero defects in Lean. The defect population moved steadily inward: rounds
+one and two found claims about the *code* that the code refuted; rounds three
+through five found claims about *earlier corrections* that the diffs refuted;
+rounds six and seven found claims the ledger made *about itself* that the ledger
+refuted. That is what convergence looks like when the artefact under review is
+prose and the reviewer is the only gate it has. It is also the argument for
+`agent-bus` `c-process:106`: two of the three checks these rounds ran — resolve
+every backticked name including its prefix, and measure every count — are
+mechanical, and a gate that ran them would have caught most of this without
+seven reviewers.
 
 ## 11. The authoring facade
 

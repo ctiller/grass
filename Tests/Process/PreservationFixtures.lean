@@ -525,8 +525,10 @@ def theInterruptionStep (reason : Interrupt) :
 /-! ### And which of the four before-worlds a step can reach
 
 §10.129 left "reaching those before-worlds by steps is owed" and guessed the job
-was four `processStep`s. Three of the four, near enough; the fourth is a theorem
-in the other direction. §10.132.
+was four `processStep`s. Two of the three steps below are `processStep`s and the
+third is a `childDied`; the fourth world has no step into it at all, and that is
+a theorem in the other direction. §10.132, and §10.133 for why a step into a
+world is not a run that reaches it.
 -/
 
 /-- The wire's receiver before it died: the same incarnation, running. -/
