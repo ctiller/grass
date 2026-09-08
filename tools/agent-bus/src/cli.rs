@@ -984,13 +984,12 @@ fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
         reviewed_commit.as_str(),
     )?;
 
-    // Immediately before the one call that runs the merge engine, and no
-    // earlier -- see `require_pinned_merge_engine`'s own doc for why
-    // placement is the whole question here. Everything above is
-    // engine-independent, so checking the pin first told a reviewer whose
-    // *authorship* was wrong that their git was wrong instead.
-    crate::bootstrap::require_pinned_merge_engine(&state)?;
-
+    // `prepare-merge` is the one command that runs the merge engine, and it
+    // runs it with whatever `git` this reviewer's host has (g-design:249).
+    // Nothing downstream re-derives this tree: the candidate is published as
+    // an immutable tag and every validator binds to that object
+    // (`merge_candidate::verify_candidate_object`), so there is no version
+    // any host has to agree with.
     let candidate = crate::merge_candidate::reconstruct_candidate(
         &paths.repo,
         &previous_main,

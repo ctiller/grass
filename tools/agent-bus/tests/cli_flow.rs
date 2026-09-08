@@ -60,73 +60,22 @@ fn path_str(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
-// ------------------------------------------------- the pinned merge engine
+// ------------------------------------------------- the merge engine record
 
-/// The merge engine version this build pins
-/// (`bootstrap::SUPPORTED_MERGE_ENGINE_VERSION`).
+/// The `merge_engine_version` every fixture in this file activates its bus
+/// with.
 ///
-/// Spelled as a literal because these tests drive the compiled binary as a
-/// black box: the crate has no library target, so there is nothing to read
-/// the constant from. `activate_merge_engine` below must put the same value
-/// into an event payload regardless -- `apply` rejects a
-/// `merge_engine.activated` naming any other version -- so one named constant
-/// here is better than the two bare literals this file used to carry.
-const PINNED_MERGE_ENGINE_VERSION: &str = "2.53.0";
-
-/// This host's `git` version, normalized the way `gitrepo::version` does it
-/// ("git version 2.53.0.windows.1" -> "2.53.0").
-fn installed_git_version() -> String {
-    let out = StdCommand::new("git")
-        .arg("--version")
-        .output()
-        .expect("git must be on PATH");
-    let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let digits: String = raw
-        .strip_prefix("git version ")
-        .unwrap_or(&raw)
-        .split(|c: char| !c.is_ascii_digit() && c != '.')
-        .next()
-        .unwrap_or("")
-        .to_string();
-    let parts: Vec<&str> = digits.split('.').collect();
-    if parts.len() >= 3 {
-        format!("{}.{}.{}", parts[0], parts[1], parts[2])
-    } else {
-        digits
-    }
-}
-
-/// Reports whether this host cannot run the tests that need a *real* merge
-/// candidate, printing why.
+/// Deliberately a version no `git` release has ever carried and no build of
+/// this crate has ever pinned. `agent-bus` records this pair and judges it
+/// nowhere (g-design:249), so the entire end-to-end flow below --
+/// `prepare-merge`, `merge-ready`, `audit-main`, reconciliation -- runs on a
+/// bus whose declared engine version matches neither the constant this
+/// binary was built with nor the `git` on this host's PATH. If any equality
+/// gate against either ever returns, roughly a dozen tests here fail at once.
 ///
-/// Constructing a candidate is refused outright on a host whose git is not
-/// the version the bus pins (AGENT_BUS_SCHEMA.md section 2: the helper
-/// "refuses to run on a different version"; AGENT_REVIEW.md section 7). That
-/// is a genuine property of such a host, not a defect, so every test here
-/// that drives `prepare-merge` through to a candidate -- and everything
-/// downstream of one: `merge-ready`, `audit-main`'s correlation of a real
-/// merge, reconciliation -- cannot reach what it asserts there. On Ubuntu's
-/// git 2.51.0 against the pinned 2.53.0 all fourteen of them failed with an
-/// engine complaint instead.
-///
-/// They say so out loud and return. Failing would report a correctly
-/// configured helper as broken; passing silently would report an unexercised
-/// path as exercised, which this suite treats as the worse of the two. The
-/// other fifty-four tests in this file run on any git: genesis, registration,
-/// publication, sync, tail, status, succession, the outbox and the registry
-/// no longer consult the engine version at all.
-fn requires_the_pinned_engine(what: &str) -> bool {
-    let installed = installed_git_version();
-    if installed == PINNED_MERGE_ENGINE_VERSION {
-        return false;
-    }
-    eprintln!(
-        "SKIPPED {what}: this host runs git {installed}, not the pinned merge engine version \
-         {PINNED_MERGE_ENGINE_VERSION}. Constructing a candidate is refused on such a host by \
-         design, so this test cannot reach what it asserts. Install the pinned git to exercise it."
-    );
-    true
-}
+/// This file used to spell the pinned version instead, and skip fourteen
+/// tests outright on any host that did not run it. Nothing is skipped now.
+const FOREIGN_MERGE_ENGINE_VERSION: &str = "1.2.3-no-build-ever-pinned-this";
 
 /// A bare "origin" remote, empty until something is genesis'd and pushed to
 /// it.
@@ -352,7 +301,7 @@ fn activate_merge_engine(repo: &Path, coordinator: &str) -> String {
     let data = serde_json::json!({
         "previous_epoch": format!("{coordinator}:0"),
         "merge_engine": "git-ort",
-        "merge_engine_version": PINNED_MERGE_ENGINE_VERSION,
+        "merge_engine_version": FOREIGN_MERGE_ENGINE_VERSION,
         "design_commit": "0".repeat(40),
         "helper_commit": "0".repeat(40),
     });
@@ -1966,9 +1915,6 @@ fn tail_of_an_unregistered_agent_fails_cleanly() {
 /// the push would still be caught even if the printed JSON looked right.
 #[test]
 fn prepare_merge_constructs_and_pushes_the_candidate_tag() {
-    if requires_the_pinned_engine("prepare_merge_constructs_and_pushes_the_candidate_tag") {
-        return;
-    }
     let (origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2225,9 +2171,6 @@ fn prepare_merge_rejects_an_unknown_nomination() {
 /// reports it ready and names the exact same candidate.
 #[test]
 fn merge_ready_reports_ready_for_a_genuinely_valid_authorization() {
-    if requires_the_pinned_engine("merge_ready_reports_ready_for_a_genuinely_valid_authorization") {
-        return;
-    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2281,9 +2224,6 @@ fn merge_ready_rejects_unknown_authorization() {
 /// asking `merge-ready` about the same authorization id must be refused.
 #[test]
 fn merge_ready_rejects_wrong_authorizer() {
-    if requires_the_pinned_engine("merge_ready_rejects_wrong_authorizer") {
-        return;
-    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2325,9 +2265,6 @@ fn merge_ready_rejects_wrong_authorizer() {
 /// this, since both run before `main` has had the chance to move.
 #[test]
 fn merge_ready_rejects_main_advanced() {
-    if requires_the_pinned_engine("merge_ready_rejects_main_advanced") {
-        return;
-    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2372,15 +2309,22 @@ fn merge_ready_rejects_main_advanced() {
 }
 
 /// The reviewed commit touches sneaky.txt too, but review_scope/
-/// reviewed_scope only ever name feature.txt -- `merge-ready`'s own diff
-/// check is what must catch this (nothing upstream of it inspects changed
-/// paths at all: neither `apply_review_merge_authorized` nor `prepare-merge`
-/// ever looks at the actual diff content).
+/// reviewed_scope only ever name feature.txt.
+///
+/// The publication gate is what catches this now, and catching it there is
+/// the point. Scope used to be checked only by `merge-ready`, on the
+/// reviewer's own host, because the coordinator's gate bounded a candidate's
+/// content by *rebuilding the merge* and comparing object ids -- which is
+/// the reader-build-sensitive check g-design:249 removed. Without a rebuild,
+/// scope is what bounds the tree, so the coordinator asks it directly, and a
+/// candidate carrying an unreviewed path is now refused before it is ever
+/// published rather than only before it is pushed.
+///
+/// (`merge-ready` still asks the same question -- it runs later, against
+/// live `main` -- and `merge_ready::tests::rejects_a_hand_pushed_candidate_
+/// whose_tree_leaves_the_reviewed_scope` covers that side directly.)
 #[test]
-fn merge_ready_rejects_a_changed_path_outside_reviewed_scope() {
-    if requires_the_pinned_engine("merge_ready_rejects_a_changed_path_outside_reviewed_scope") {
-        return;
-    }
+fn the_publication_gate_rejects_a_changed_path_outside_reviewed_scope() {
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     register(repo.path(), "aiden", "reviewer", "host2");
@@ -2444,33 +2388,40 @@ fn merge_ready_rejects_a_changed_path_outside_reviewed_scope() {
     let candidate = prepared["candidate"].as_str().unwrap().to_string();
     // Authorized `reviewed_scope` matches the nomination's declared scope
     // exactly (["feature.txt"]) -- only the *actual* diff leaks sneaky.txt.
-    let authorization_id = authorize_merge(
+    // Submitted directly rather than through `authorize_merge`, which
+    // asserts the publication succeeds.
+    let data = serde_json::json!({
+        "nomination": nomination,
+        "product_branch": "refs/heads/agent/zoe/feature",
+        "previous_main": previous_main,
+        "reviewed_commit": feature_commit,
+        "candidate": candidate,
+        "merge_engine_epoch": merge_engine_epoch,
+        "checks": [{"command": "build", "result": "passed"}],
+        "finding_dispositions": [],
+        "evidence": [],
+        "reviewed_scope": ["feature.txt"],
+        "limitations": [],
+        "summary": "looks good",
+    });
+    submit(
         repo.path(),
         "aiden",
-        &nomination,
-        &previous_main,
-        &feature_commit,
-        &candidate,
-        &merge_engine_epoch,
-        &["feature.txt"],
+        "review.merge_authorized",
+        &data.to_string(),
+        "authorize",
     );
-
-    // `merge-ready` fetches `main` from `origin` (round-7 review); `main`
-    // itself is never otherwise pushed anywhere in this flow.
-    git(repo.path(), &["push", "origin", "refs/heads/main"]);
-
-    bin()
-        .current_dir(repo.path())
-        .args([
-            "merge-ready",
-            "--agent",
-            "aiden",
-            "--authorization",
-            &authorization_id,
-        ])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("is outside reviewed_scope"));
+    let coordinated = coordinate(repo.path(), "aiden", "host2", 0);
+    assert_eq!(
+        coordinated["published_events"],
+        serde_json::json!([]),
+        "{coordinated}"
+    );
+    assert_eq!(
+        coordinated["outbox_rejected"][0]["reason"],
+        serde_json::json!("changed path sneaky.txt is outside reviewed_scope"),
+        "{coordinated}"
+    );
 }
 
 // ---------------------------------------------------------------- audit-main
@@ -2523,9 +2474,6 @@ fn audit_main_json_states_its_own_freshness() {
 /// publish `review.merged`, and `audit-main` reports it clean.
 #[test]
 fn audit_main_reports_clean_when_fully_correlated() {
-    if requires_the_pinned_engine("audit_main_reports_clean_when_fully_correlated") {
-        return;
-    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2572,9 +2520,6 @@ fn audit_main_reports_clean_when_fully_correlated() {
 /// missing or mismatched receipt is detected by `audit-main`").
 #[test]
 fn audit_main_flags_missing_receipt() {
-    if requires_the_pinned_engine("audit_main_flags_missing_receipt") {
-        return;
-    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2619,9 +2564,6 @@ fn audit_main_flags_missing_receipt() {
 /// commit, `audit-main` reports it clean again.
 #[test]
 fn audit_main_reports_clean_after_review_merge_reconciled() {
-    if requires_the_pinned_engine("audit_main_reports_clean_after_review_merge_reconciled") {
-        return;
-    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2680,10 +2622,6 @@ fn audit_main_reports_clean_after_review_merge_reconciled() {
 /// was never published. A bootstrap coordinator's reconciliation succeeds.
 #[test]
 fn reconcile_via_submit_succeeds_when_main_was_genuinely_advanced() {
-    if requires_the_pinned_engine("reconcile_via_submit_succeeds_when_main_was_genuinely_advanced")
-    {
-        return;
-    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2738,9 +2676,6 @@ fn reconcile_via_submit_succeeds_when_main_was_genuinely_advanced() {
 /// reconciled`'s live `git rev-list --first-parent` check can.
 #[test]
 fn reconcile_via_submit_rejects_when_main_was_never_advanced() {
-    if requires_the_pinned_engine("reconcile_via_submit_rejects_when_main_was_never_advanced") {
-        return;
-    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2793,9 +2728,6 @@ fn reconcile_via_submit_rejects_when_main_was_never_advanced() {
 /// covered by `apply.rs`'s own unit tests).
 #[test]
 fn reconcile_via_submit_rejects_a_non_coordinator_agent() {
-    if requires_the_pinned_engine("reconcile_via_submit_rejects_a_non_coordinator_agent") {
-        return;
-    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2990,9 +2922,6 @@ fn golden_succeed_output() {
 
 #[test]
 fn golden_prepare_merge_output() {
-    if requires_the_pinned_engine("golden_prepare_merge_output") {
-        return;
-    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, _previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -3008,9 +2937,6 @@ fn golden_prepare_merge_output() {
 
 #[test]
 fn golden_merge_ready_output() {
-    if requires_the_pinned_engine("golden_merge_ready_output") {
-        return;
-    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -3050,9 +2976,6 @@ fn golden_merge_ready_output() {
 /// has no hash to redact at all.
 #[test]
 fn golden_audit_main_output() {
-    if requires_the_pinned_engine("golden_audit_main_output") {
-        return;
-    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -3398,5 +3321,258 @@ fn the_cli_refuses_an_auditor_issue_that_blocks_a_candidate() {
     assert!(
         drained["published_events"].as_array().unwrap().is_empty(),
         "nothing may publish: {drained}"
+    );
+}
+
+// ------------------------------------------------- mixed hosts, one candidate
+//
+// g-design:249. Validation must bind to the exact immutable candidate --
+// its tag, parents, tree, scope and trailer -- and must not reconstruct it
+// locally, because reconstructing it is what made one particular `git` build
+// protocol authority over history somebody else had already published.
+//
+// A host running a different git is the case that matters, and it cannot be
+// staged directly: CI installs one git, and so does a developer's machine.
+// So these fixtures stage the property that actually follows from it. A host
+// that cannot run the merge engine *at all* is strictly harder than a host
+// running a different version of it, and it is reproducible anywhere.
+
+/// Makes `repo` a clone that physically cannot construct a candidate.
+///
+/// `$GIT_COMMON_DIR/info/attributes` is consulted by git no matter what
+/// `merge_tree_write_tree` pins, so `gitrepo::refuse_ambient_attributes`
+/// refuses to run the merge engine in a clone that has one -- a real,
+/// pre-existing rule this fixture merely takes advantage of. Its content is
+/// irrelevant; its existence is the whole mechanism.
+///
+/// This is what makes the tests below falsifying rather than decorative. Any
+/// validation path that reaches `reconstruct_candidate` fails here, loudly
+/// and by construction, with no dependence on which git the test host has.
+fn forbid_candidate_construction(repo: &Path) {
+    let info = repo.join(".git").join("info");
+    std::fs::create_dir_all(&info).unwrap();
+    std::fs::write(
+        info.join("attributes"),
+        "# this clone deliberately cannot construct merge candidates\n",
+    )
+    .unwrap();
+}
+
+/// A second working clone of `origin`, configured with its own identity.
+fn second_checkout(origin: &Path) -> TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["clone", "--quiet", &path_str(origin), "."]);
+    git(dir.path(), &["config", "user.email", "other@example.com"]);
+    git(dir.path(), &["config", "user.name", "Other"]);
+    dir
+}
+
+/// The whole point of the ruling, end to end: one host prepares the
+/// candidate, a *different* host -- one that could not have produced that
+/// merge itself -- pulls it, coordinates the authorization, validates it,
+/// and lands it on `main`.
+///
+/// Every step the ruling names is exercised on the second host: pull (its
+/// own `sync`, plus fetching the candidate tag it deliberately does not
+/// have), coordinate (`review.merge_authorized` through the real publication
+/// gate), validate (`merge-ready`), and land (`git push` to `main`). None of
+/// them may run the merge engine, and this clone proves it: the same clone
+/// is asked to run `prepare-merge` first, and refuses.
+///
+/// The bus underneath also declares an engine version no host runs
+/// ([`FOREIGN_MERGE_ENGINE_VERSION`]), so nothing here can be passing
+/// because the recorded version happens to match something.
+#[test]
+fn a_host_that_cannot_run_the_merge_engine_can_still_coordinate_validate_and_land_a_candidate() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+
+    git(repo.path(), &["push", "origin", "refs/heads/main"]);
+
+    // Host B is cloned *before* the candidate exists anywhere, so it cannot
+    // be holding the object by accident -- fetching the candidate tag is the
+    // only way it can ever see one. It also cannot run the merge engine.
+    let other = second_checkout(origin.path());
+    forbid_candidate_construction(other.path());
+
+    // Host A -- the reviewer's own checkout -- builds and pushes the
+    // candidate tag, using whatever git it has.
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+    assert!(
+        !StdCommand::new("git")
+            .arg("-C")
+            .arg(other.path())
+            .args(["cat-file", "-e", &candidate])
+            .status()
+            .unwrap()
+            .success(),
+        "the second host must start without the candidate object, or it proves nothing about \
+         fetching one"
+    );
+
+    // Pull: `sync` is how a host gets the bus at all.
+    let synced = status(other.path(), true);
+    assert_eq!(
+        synced["freshness"], "current-as-of-remote-probe",
+        "{synced}"
+    );
+
+    // Coordinate: the real publication gate, on the host that cannot rebuild
+    // the merge.
+    let authorization_id = authorize_merge(
+        other.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+
+    // Validate: the pre-merge gate, same host.
+    let out = merge_ready(other.path(), "aiden", &authorization_id);
+    assert_eq!(out["ready"], true, "{out}");
+    assert_eq!(out["candidate"], candidate, "{out}");
+
+    // And this clone genuinely cannot construct a candidate -- asked at the
+    // point where it demonstrably holds every object involved, so the
+    // refusal is about the merge engine and nothing else. If any step above
+    // had reconstructed the candidate, it would have hit exactly this.
+    bin()
+        .current_dir(other.path())
+        .args([
+            "prepare-merge",
+            "--agent",
+            "aiden",
+            "--nomination",
+            &nomination,
+            "--reviewed-commit",
+            &feature_commit,
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "candidate construction refuses to run",
+        ));
+
+    // Land: an ordinary non-force push of the exact candidate.
+    let push = StdCommand::new("git")
+        .arg("-C")
+        .arg(other.path())
+        .args(["push", "origin", &format!("{candidate}:refs/heads/main")])
+        .output()
+        .unwrap();
+    assert!(
+        push.status.success(),
+        "landing the candidate must be an ordinary push: {}",
+        String::from_utf8_lossy(&push.stderr)
+    );
+    let landed = StdCommand::new("git")
+        .arg("-C")
+        .arg(origin.path())
+        .args(["rev-parse", "refs/heads/main"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&landed.stdout).trim(),
+        candidate,
+        "`main` must be the exact candidate the reviewer authorized"
+    );
+}
+
+/// The same second host, now shown to *reject* a candidate that is wrong --
+/// so the test above is not passing because validation stopped checking.
+///
+/// The forged candidate has the right parents and the right reviewer
+/// trailer; only its tree carries a path the nomination never covered. That
+/// used to be caught incidentally, by the object id failing to match a local
+/// rebuild. There is no rebuild here -- this clone cannot perform one -- so
+/// the scope bound is what catches it.
+#[test]
+fn a_host_that_cannot_run_the_merge_engine_still_rejects_an_out_of_scope_candidate() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+
+    // A tree carrying an unreviewed path, and a forged "candidate" built on
+    // it with otherwise-correct parents and message.
+    git(
+        repo.path(),
+        &["checkout", "--quiet", "--detach", &feature_commit],
+    );
+    std::fs::write(repo.path().join("sneaky.txt"), "not reviewed\n").unwrap();
+    git(repo.path(), &["add", "."]);
+    git(
+        repo.path(),
+        &["commit", "-q", "-m", "sneaky\n\nAgent-Bus-Agent: zoe"],
+    );
+    let sneaky_tree = crate_rev_parse(repo.path(), "HEAD^{tree}");
+    git(repo.path(), &["checkout", "--quiet", "main"]);
+
+    let forged = StdCommand::new("git")
+        .arg("-C")
+        .arg(repo.path())
+        .args([
+            "commit-tree",
+            &sneaky_tree,
+            "-p",
+            &previous_main,
+            "-p",
+            &feature_commit,
+            "-m",
+            "agent-bus candidate\n\nAgent-Bus-Reviewer: aiden\n",
+        ])
+        .output()
+        .unwrap();
+    assert!(forged.status.success(), "{forged:?}");
+    let forged = String::from_utf8_lossy(&forged.stdout).trim().to_string();
+    let tag = format!("agent-candidate/aiden/{forged}");
+    git(repo.path(), &["tag", &tag, &forged]);
+    git(
+        repo.path(),
+        &["push", "origin", &format!("refs/tags/{tag}")],
+    );
+    git(repo.path(), &["push", "origin", "refs/heads/main"]);
+
+    let other = second_checkout(origin.path());
+    forbid_candidate_construction(other.path());
+    status(other.path(), true);
+
+    let data = serde_json::json!({
+        "nomination": nomination,
+        "product_branch": "refs/heads/agent/zoe/feature",
+        "previous_main": previous_main,
+        "reviewed_commit": feature_commit,
+        "candidate": forged,
+        "merge_engine_epoch": merge_engine_epoch,
+        "checks": [{"command": "build", "result": "passed"}],
+        "finding_dispositions": [],
+        "evidence": [],
+        "reviewed_scope": ["feature.txt"],
+        "limitations": [],
+        "summary": "looks good",
+    });
+    submit(
+        other.path(),
+        "aiden",
+        "review.merge_authorized",
+        &data.to_string(),
+        "authorize",
+    );
+    let coordinated = coordinate(other.path(), "aiden", "host2", 0);
+    assert_eq!(
+        coordinated["published_events"],
+        serde_json::json!([]),
+        "{coordinated}"
+    );
+    assert_eq!(
+        coordinated["outbox_rejected"][0]["reason"],
+        serde_json::json!("changed path sneaky.txt is outside reviewed_scope"),
+        "{coordinated}"
     );
 }

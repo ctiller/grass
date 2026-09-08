@@ -9,14 +9,17 @@
 //!    so these keep going through the user's credential helpers, SSH agent
 //!    and `.netrc`. Reimplementing them would mean acquiring OpenSSL and
 //!    libssh2 as build dependencies and reimplementing credential discovery.
-//!  - **`merge-tree --write-tree`** -- pinned to git's own ORT
-//!    implementation because AGENT_REVIEW.md section 7 requires every host to
-//!    produce a byte-identical tree, which libgit2's separate merge algorithm
-//!    would not.
+//!  - **`merge-tree --write-tree`** -- git's own ORT implementation, which
+//!    libgit2's separate merge algorithm is not. Reached from exactly one
+//!    caller, `cli::prepare_merge`, which *constructs* a candidate with
+//!    whatever git that host has. No validator runs it: since g-design:249
+//!    nothing re-derives a published merge, so no host's version is an
+//!    authority over anyone else's (`merge_candidate::verify_candidate_
+//!    object`). The `pinned_merge_config_args` below stay, because they are
+//!    about not letting the *ambient environment* into a tree, which is a
+//!    different question from which git built it.
 //!  - **`interpret-trailers --parse`** -- see `commit_message_trailers` for
 //!    why this one is deliberately not reimplemented.
-//!  - **`git --version`** -- the merge-engine pin check, which is a question
-//!    about the `git` binary itself.
 //!
 //! Everything here runs under a deadline with a process-tree kill
 //! (`run_with_deadline`), because the remote operations above are exactly the
@@ -483,42 +486,6 @@ pub fn run_ok(dir: &Path, args: &[&str]) -> AbResult<String> {
     Ok(out.stdout)
 }
 
-pub fn version() -> AbResult<String> {
-    let mut command = Command::new("git");
-    command.arg("--version");
-    let out = run_with_deadline(command, "--version", ConfigPolicy::Inherit)?;
-    // A nonzero exit here is not a version. A malformed `~/.gitconfig` makes
-    // `git --version` die with an empty stdout, and returning `Ok("")` sent
-    // that straight into the pinned-engine comparison, which then reported
-    // "installed git  is not the merge engine version this bus selects" --
-    // a confident, wrong diagnosis for a broken config file.
-    if !out.success {
-        return Err(AbError::Git(format!(
-            "git --version failed: {}",
-            if out.stderr.trim().is_empty() {
-                "(no output)"
-            } else {
-                out.stderr.trim()
-            }
-        )));
-    }
-    let s = out.stdout.trim().to_string();
-    // "git version 2.53.0.windows.1" -> "2.53.0"
-    let ver = s
-        .strip_prefix("git version ")
-        .unwrap_or(&s)
-        .split(|c: char| !c.is_ascii_digit() && c != '.')
-        .next()
-        .unwrap_or("")
-        .to_string();
-    let parts: Vec<&str> = ver.split('.').collect();
-    if parts.len() >= 3 {
-        Ok(format!("{}.{}.{}", parts[0], parts[1], parts[2]))
-    } else {
-        Ok(ver)
-    }
-}
-
 pub fn repo_root(start: &Path) -> AbResult<PathBuf> {
     crate::gitobjects::Libgit2Reader::open(start)?.workdir()
 }
@@ -731,6 +698,20 @@ pub fn remote_refs_existing(
 /// What *was* worth taking off the subprocess is the message read, which is
 /// not security-critical and used to be a second `git show` per commit. So
 /// this costs one process per commit now instead of two.
+/// `rev`'s commit message, exactly as recorded (see
+/// `gitobjects::HistoryReader::commit_message` for the two documented
+/// differences from `git show -s --format=%B`, both of which lose trailers
+/// rather than inventing them).
+///
+/// `merge_candidate::verify_candidate_object` compares a candidate's whole
+/// message against the one `prepare-merge` writes, which is a stricter check
+/// than reading its trailers back: it also rejects a candidate carrying
+/// *additional* trailers alongside the expected one.
+pub fn commit_message(dir: &Path, rev: &str) -> AbResult<String> {
+    let g = crate::gitobjects::Libgit2Reader::open(dir)?;
+    crate::gitobjects::HistoryReader::commit_message(&g, &resolve_required(&g, rev)?)
+}
+
 pub fn commit_message_trailers(dir: &Path, rev: &str) -> AbResult<Vec<(String, String)>> {
     let g = crate::gitobjects::Libgit2Reader::open(dir)?;
     let body = crate::gitobjects::HistoryReader::commit_message(&g, &resolve_required(&g, rev)?)?;
