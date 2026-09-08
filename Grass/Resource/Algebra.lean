@@ -51,6 +51,16 @@ The corpus displays this idea twice with different shapes.
 (combine axis) (zero axis) (le axis)`, with a zero and a different name. They are
 sketches of one thing, and this module unifies them rather than shipping both.
 
+**Both sketches are being repaired to match this module rather than the other way
+round.** `g-design:308` reports the reconciliation above going stale once that
+lands: both documents then select the same five-argument bundle, with
+`docs/SEMANTICS.md` projecting the weave-independent model and `docs/PROCESS.md`
+adding network holdings and an explicit compatible premise on parallel
+composition. The shapes quoted above are what main carries today, so this section
+is accurate until then and becomes history the moment it is not; it is written
+this way because a module comment that describes an unlanded document is worse
+than one that describes an old one.
+
 ## Two compositions, not one
 
 The bundle carries **two** binary operations, and conflating them is the error
