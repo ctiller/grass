@@ -109,6 +109,22 @@ def empty : FiniteMap K V := ⟨[]⟩
 
 instance : EmptyCollection (FiniteMap K V) := ⟨empty⟩
 
+omit [DecidableEq K] in
+/--
+`∅` and `FiniteMap.empty` are the same map.
+
+Stated as `simp` because the `EmptyCollection` instance above makes the notation
+*typecheck* without making it *rewrite*: `simp` does not see through the instance
+projection, so a goal written with `∅` reaches neither `lookup_empty` nor
+`isEmpty_empty`, which are the two laws a consumer wants the moment they write it.
+
+Oriented towards `empty` because that is what this module's laws are stated
+about. `Grass/Std/Logical/Bag.lean` orients the same bridge towards `0` instead,
+for the same reason in its own module: the direction follows the theorems, not
+the notation.
+-/
+@[simp] theorem emptyCollection_eq_empty : (∅ : FiniteMap K V) = empty := rfl
+
 /-- The value bound to `key`, if any. -/
 def lookup (m : FiniteMap K V) (key : K) : Option V := findValue m.entries key
 

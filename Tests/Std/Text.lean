@@ -72,6 +72,31 @@ example (s : String) : (Text.utf8 s).length = s.utf8ByteSize := Text.length_utf8
 /-- And the crossing back is Lean's own encoding, for any string. -/
 example (s : String) : (Text.utf8 s).toHostBytes = s.toUTF8 := Text.toHostBytes_utf8 s
 
+/-! ## The two facts about core this module's argument rests on
+
+`Grass/Std/Logical/Text.lean` argues that its laws are "consequences of that
+structure, not of any encoder being correct", and it supports that by quoting
+Lean core's `String` in a fenced block and asserting two things about it:
+`String.toUTF8` *is* the projection, and `String.utf8ByteSize` *is defined as*
+`toByteArray.size`.
+
+Both are true in this toolchain and both were checked by hand rather than by
+anything that would notice them changing. A fenced block is not typechecked, so a
+toolchain bump could falsify the module's central argument with every gate still
+green — the same drift that put a superseded specification in
+`Grass/Std/Logical/Order.lean` for a day and a half.
+
+These two `rfl`s are that quote made executable. If core reshapes `String`, this
+fixture fails and the prose gets revisited, which is the point.
+-/
+
+/-- `String.toUTF8` is the field projection, not an encoder. -/
+example (s : String) : s.toUTF8 = s.toByteArray := rfl
+
+/-- `String.utf8ByteSize` is the byte count of that field, so `Text.length_utf8`
+is close to definitional. -/
+example (s : String) : s.utf8ByteSize = s.toByteArray.size := rfl
+
 /-- Distinct texts stay distinguishable after encoding, which is what lets a
 specification compare payloads without collapsing them. -/
 example : Text.utf8 "a" ≠ Text.utf8 "b" := by

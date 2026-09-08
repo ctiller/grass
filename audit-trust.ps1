@@ -557,3 +557,23 @@ finally {
         [System.IO.File]::Delete($runtimeConsumerOlean)
     }
 }
+
+# Every failure path above terminates with `throw`, so reaching here means the
+# audit passed -- and it must say so with an exit code, not just a message.
+#
+# `shell: pwsh` in .github/workflows/library.yml runs this script and then
+# exits with `$LASTEXITCODE`. This script never called `exit`, so that code
+# was whatever the last native command left behind, and the last native
+# command on the success path is the scoped-csimp probe's `lake env lean`,
+# which the audit requires to *fail*: the check immediately above passes only
+# when `$LASTEXITCODE -ne 0`. Passing therefore guaranteed a non-zero exit.
+#
+# The `finally` block only calls .NET file methods, which do not touch
+# `$LASTEXITCODE`, so nothing reset it before the wrapper read it.
+#
+# This gate had never once been green on main -- 39 of the last 39 runs
+# failed -- while printing "Trust audit passed" as its final line every time.
+# A gate that always fails hides a real regression exactly as well as a gate
+# that always passes: there was no state it could report that anyone could
+# tell apart from the state it was already in.
+exit 0

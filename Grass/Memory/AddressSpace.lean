@@ -70,6 +70,56 @@ def spirvOutput : AddressSpaceId := ⟨⟨"spirv.output"⟩⟩
 /-- A SPIR-V `PushConstant` storage class under the Logical addressing model. -/
 def spirvPushConstant : AddressSpaceId := ⟨⟨"spirv.pushConstant"⟩⟩
 
+/--
+What representation an identity this module names requires.
+
+Two answers, and there were three: `anyRepresentation` was the default for every
+identity this module does not name, on the reasoning that most identities are a
+profile's own and this module has nothing to say about them.
+
+**That default was the round-fifteen attack, still live under a fresh name.** Review
+declared a CPU space under the identity `win32.processHeap` with `repr := .symbolic`,
+and it was well formed, its table was well formed, and a store of `2 ^ 70` bytes at a
+symbolic address demanding 4096-byte alignment passed both the descriptor seal and
+`Substep.WellFormedIn` -- because `AccessDescriptor.WellFormedIn`'s `aligned` and
+`rangeFitsSpace` are both vacuous for a symbolic representation. §4.4.1a's table said
+"nothing about a space is a profile's choice now except which identity it declares",
+and that was true of the eight identities named below and of no others.
+
+So the default is numeric. A genuinely symbolic new space is added to
+`requiredRepresentation` here, in the open, which is what `docs/FOUNDATION.md` law 8
+asks of an unknown: reject it rather than approximate it as the permissive case. The
+cost is that a vendor with a symbolic address model edits this module, and that is the
+right cost -- every numeric guard in the seal is off for such a space, so admitting one
+sight unseen is admitting a descriptor nothing bounds.
+-/
+inductive RepresentationDemand where
+  /-- Addresses in this space are machine addresses. -/
+  | numericallyAddressed
+  /-- The space has no machine addresses at all. -/
+  | symbolicallyAddressed
+deriving DecidableEq, Repr
+
+/--
+The representation each named identity requires.
+
+Kind only, never width: how many bits a CPU virtual space has is a profile's answer
+and `AddressSpace.WellFormed`'s 64-bit bound is the only limit on it. What is not a
+profile's answer is whether `cpu.virtual` has machine addresses, because
+`AccessDescriptor.WellFormedIn`'s alignment and range-width clauses are both vacuous
+without them -- see `AddressSpace.RepresentationMatchesIdentity`.
+
+The SPIR-V identities are symbolic because the Logical addressing model has no
+addresses to represent; `docs/MEMORY_MODEL.md` §7.5 lists GPU storage classes among
+the spaces that are not interchangeable with the rest.
+-/
+def requiredRepresentation (id : AddressSpaceId) : RepresentationDemand :=
+  if id = spirvPrivate || id = spirvInput || id = spirvOutput ||
+      id = spirvPushConstant then
+    .symbolicallyAddressed
+  else
+    .numericallyAddressed
+
 end AddressSpaceId
 
 /-- The identity of a memory type, which fixes caching behavior. -/
@@ -173,29 +223,96 @@ structure AddressSpace where
   /-- Whether host visibility needs an explicit operation. -/
   coherence : Coherence
   /-- The agent that owns this storage, for externally owned buffers. `none`
-  means the program's own address space. `docs/MEMORY_MODEL.md` §7.5 treats
-  externally owned buffers as a distinct space, so the owner is part of the
-  space's identity rather than a property of individual allocations. -/
+  means the program's own address space, and `docs/MEMORY_MODEL.md` §7.5 treats
+  externally owned buffers as a distinct space.
+
+  **Carried and unread.** Nothing projects it. An earlier version of this docstring
+  said the owner is "part of the space's identity rather than a property of
+  individual allocations", and that is false in any operational sense:
+  `AddressSpaceTable.find?` matches on `space.id`, `WellFormed` requires
+  `(spaces.map AddressSpace.id).Nodup`, and two externally owned buffers with
+  different owners and one id cannot be told apart. Review found it, and found why no
+  gate did: `Tools/ConsultedAudit.py` keys on the field *name*, and `owner` is
+  projected freely elsewhere as `Obligation.owner`, which is the same-name blind spot
+  that tool's own docstring documents.
+
+  It is kept rather than deleted because §7.5's distinction is real and a device
+  authority will need it; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 lists it with the
+  other facts the model carries and nothing consults. -/
   owner : Option ContextId := none
 deriving DecidableEq, Repr
 
 namespace AddressSpace
 
 /--
-`space.WellFormed` holds when the space's declared representation is realizable.
+`space.RepresentationMatchesIdentity` holds when the space's representation is the one
+its identity requires.
 
-A numeric space wider than the 64 bits `MachineAddress` provides is not a space
-this vocabulary version can express; per `docs/MEMORY_MODEL.md` §9 that is a
-versioned extension, and it must be rejected here rather than silently accepted
-by a bound nothing checks.
+**This exists because `repr` was a profile input that could only remove refusals**,
+which `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1a says a profile input must never be.
+`AccessDescriptor.WellFormedIn` reads it twice -- `aligned` and `rangeFitsSpace` are
+both vacuous for a symbolic representation, because there is no numeric address to
+align and no width to exceed. A table declaring `cpu.virtual` with `repr := .symbolic`
+*once* was well formed, so `StepPolicy.vocabularyWellFormed` was dischargeable, and
+against that space a store of more than `2^64` bytes at a symbolic address with a
+4096-byte alignment demand passed both the descriptor seal and `Substep.WellFormedIn`.
+Review built it and stepped it.
+
+`AccessDescriptor.WellFormedIn`'s docstring named that exact attack and said the seal
+was resolution through the profile's table plus the ambiguity check. Those close the
+hand-made space and the duplicate; neither closes a table that declares the pairing
+once. The tree's own fixture wrote the value down and refused it as a duplicate.
+
+Every identity is constrained, and only in kind. It used to be only the eight this
+module names, on the reasoning that a profile with a genuinely new space uses a new
+identity and this should say nothing about it -- and review then declared a hostile
+space under a new identity and walked the same attack through. `AllocationSourceId` is
+not the right analogy: a source is a fact about storage that no rule reads twice,
+whereas a representation switches two clauses of the declaration-time seal off.
+-/
+def RepresentationMatchesIdentity (space : AddressSpace) : Prop :=
+  match space.id.requiredRepresentation with
+  | .numericallyAddressed => space.repr ≠ .symbolic
+  | .symbolicallyAddressed => space.repr = .symbolic
+
+instance (space : AddressSpace) : Decidable space.RepresentationMatchesIdentity := by
+  unfold RepresentationMatchesIdentity
+  split <;> infer_instance
+
+/--
+`space.WellFormed` holds when the space's declared representation is realizable and is
+the one its identity requires.
+
+A numeric space of any width but 64 is not a space this vocabulary version can
+express; per `docs/MEMORY_MODEL.md` §9 that is a versioned extension, and it must be
+rejected here rather than silently accepted by a bound nothing checks.
+
+**The bound was `bits ≤ 64` and a narrower space was admissible**, which review found
+was admissible in the wrong way. `MachineAddress` is 64 bits and
+`Grass/Memory/Addressing.lean`'s `FitsAllocation` compares against `2 ^ 64`, so for a
+32-bit space the wrap check ran in the wrong modulus: an allocation based at
+`2 ^ 32 - 16` with a 64-byte extent satisfied `FitsAllocation`, `placementWraps` did not
+fire, and `distinct_allocations_do_not_alias` then yielded distinct machine addresses
+for two offsets that are *the same byte* in the space the profile declared. The bridge a
+profile is meant to cite was being discharged in 64-bit arithmetic for a space that is
+not 64 bits.
+
+Not reachable through `step` today, because an access at that offset must declare an
+address `addressRepresentable` rejects in a 32-bit space -- so it was latent, and
+latent in exactly the way `Addressing.lean` exists to worry about. The alternative
+repair is to make `FitsAllocation` and the placement checks take the space, which
+`denialOf` cannot do without the resolved `AddressSpace` in hand;
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records that as what a future vocabulary
+version does instead of this.
 -/
 def WellFormed (space : AddressSpace) : Prop :=
-  match space.repr with
-  | .numeric bits => bits ≤ 64
-  | .symbolic => True
+  (match space.repr with
+   | .numeric bits => bits = 64
+   | .symbolic => True) ∧ space.RepresentationMatchesIdentity
 
 instance (space : AddressSpace) : Decidable space.WellFormed := by
   unfold WellFormed
+  refine instDecidableAnd (dp := ?_) (dq := inferInstance)
   split <;> infer_instance
 
 /--
@@ -238,10 +355,58 @@ def spirvPrivate : AddressSpace :=
   { id := .spirvPrivate, repr := .symbolic, memoryType := .notHostCached
     coherence := .requiresExplicitVisibility }
 
-@[simp] theorem wellFormed_cpuVirtual64 : cpuVirtual64.WellFormed := by
-  simp [WellFormed, cpuVirtual64]
+@[simp] theorem wellFormed_cpuVirtual64 : cpuVirtual64.WellFormed := by decide
 
-@[simp] theorem wellFormed_spirvPrivate : spirvPrivate.WellFormed := trivial
+@[simp] theorem wellFormed_spirvPrivate : spirvPrivate.WellFormed := by decide
+
+/-- **`cpu.virtual` cannot be declared symbolically addressed.** The attack
+`AccessDescriptor.WellFormedIn`'s docstring names, refused at the table where the
+docstring said the seal was. -/
+theorem not_wellFormed_symbolic_cpuVirtual :
+    ¬ ({ cpuVirtual64 with repr := .symbolic } : AddressSpace).WellFormed := by decide
+
+/-- And a SPIR-V storage class cannot be declared numerically addressed, which is the
+same rule read the other way: `Representable` would then admit a machine address for a
+space that has none. -/
+theorem not_wellFormed_numeric_spirvPrivate :
+    ¬ ({ spirvPrivate with repr := .numeric 64 } : AddressSpace).WellFormed := by decide
+
+/-- **An identity this module does not name is numerically addressed**, which is the
+default `AddressSpaceId.requiredRepresentation` gives it and a profile does not
+supply. It used to be unconstrained, and review declared a
+symbolic space under `win32.processHeap` -- an allocator name Spike 1's own profile uses
+-- and put a store of `2 ^ 70` bytes at a symbolic address through the seal with a
+4096-byte alignment demand, both numeric clauses vacuous. -/
+theorem an_unnamed_identity_is_numerically_addressed :
+    ¬ ({ cpuVirtual64 with id := ⟨⟨"win32.processHeap"⟩⟩, repr := .symbolic } :
+      AddressSpace).WellFormed ∧
+    ({ cpuVirtual64 with id := ⟨⟨"win32.processHeap"⟩⟩ } : AddressSpace).WellFormed := by
+  exact ⟨by decide, by decide⟩
+
+/-- **A narrow numeric space is not well formed**, and this theorem asserted the
+opposite for a day. `MachineAddress` and `FitsAllocation` are fixed at 64 bits, so a
+32-bit space had its wrap check run in the wrong modulus; see `WellFormed` above. -/
+theorem a_narrow_numeric_cpu_space_is_not_well_formed :
+    ¬ ({ cpuVirtual64 with repr := .numeric 32 } : AddressSpace).WellFormed := by decide
+
+/-- **Every identity this module names is constrained**, not only the two the theorems
+above happen to exercise. Review mutated `requiredRepresentation` down to `cpuVirtual`
+and `spirvPrivate` alone and the whole tree stayed green, so six of the eight -- the
+two device spaces §7.5 needs among them -- could have regressed invisibly. -/
+theorem every_named_identity_constrains_its_representation :
+    [AddressSpaceId.cpuVirtual, .cpuPhysical, .deviceLocal, .deviceHostVisible].all
+      (fun id => !decide (({ cpuVirtual64 with id := id, repr := .symbolic } :
+        AddressSpace).WellFormed)) = true ∧
+    [AddressSpaceId.spirvPrivate, .spirvInput, .spirvOutput, .spirvPushConstant].all
+      (fun id => !decide (({ spirvPrivate with id := id, repr := .numeric 64 } :
+        AddressSpace).WellFormed)) = true ∧
+    [AddressSpaceId.cpuVirtual, .cpuPhysical, .deviceLocal, .deviceHostVisible].all
+      (fun id => decide (({ cpuVirtual64 with id := id } : AddressSpace).WellFormed))
+        = true ∧
+    [AddressSpaceId.spirvPrivate, .spirvInput, .spirvOutput, .spirvPushConstant].all
+      (fun id => decide (({ spirvPrivate with id := id } : AddressSpace).WellFormed))
+        = true := by
+  exact ⟨by decide, by decide, by decide, by decide⟩
 
 /-- Every 64-bit value is representable in a space declaring the full width. -/
 theorem representable_of_bits_eq_64 {space : AddressSpace} (h : space.repr = .numeric 64)
