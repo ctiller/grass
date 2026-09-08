@@ -179,4 +179,87 @@ theorem measuredTwoFunctions_stride :
       = 12 * measuredTwoFunctions.functions.length := by
   decide
 
+/-! ## A linked table, which an object file cannot be
+
+`SearchablePdata` demands `PdataSection.WellFormed`: consecutive ranges
+disjoint, every range nonempty, every entry's unwind data outside the function
+it describes. None of that can hold of a measured object, where every address
+is an unresolved relocation reading zero -- the ranges are all empty and all
+identical.
+
+So this section is synthetic and says so. It is what the same two functions look
+like *after* linking, with the addresses a linker would assign, and it is the
+only way to exercise the searchability rules at all. The addresses are invented;
+the rules they satisfy are not.
+-/
+
+/--
+Three functions as a linker would lay them out.
+
+`alpha` at 0x1000 for five bytes, `beta` at 0x1010 for seven, a third at
+0x1020 -- ascending, disjoint, each with unwind data in `.xdata` at 0x2000 and
+beyond, which is outside every function. -/
+def linkedFunctions : List RuntimeFunction :=
+  [ ⟨0x1000, 0x1005, 0x2000⟩
+  , ⟨0x1010, 0x1017, 0x2008⟩
+  , ⟨0x1020, 0x1030, 0x2010⟩ ]
+
+/-- **A linked table is searchable.** -/
+theorem linkedFunctions_searchable :
+    (SearchablePdata.mk? linkedFunctions).isSome := by decide
+
+/--
+**Its bytes are twelve per entry, in ascending order.**
+
+`SearchablePdata.toBytes` is the table's bytes and nothing more -- the
+searchability is a property of the entries, not an extra field. -/
+theorem linkedFunctions_bytes :
+    (SearchablePdata.mk? linkedFunctions).map SearchablePdata.toBytes
+      = some
+        [0x00, 0x10, 0x00, 0x00, 0x05, 0x10, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00,
+         0x10, 0x10, 0x00, 0x00, 0x17, 0x10, 0x00, 0x00, 0x08, 0x20, 0x00, 0x00,
+         0x20, 0x10, 0x00, 0x00, 0x30, 0x10, 0x00, 0x00, 0x10, 0x20, 0x00, 0x00]
+      := by decide
+
+/--
+**Overlapping functions are refused.**
+
+The second entry begins before the first ends. A binary search over such a
+table can return either, so the unwinder may be handed the wrong function's
+prologue -- which is why `Separated` is a precondition rather than a warning. -/
+theorem overlapping_refused :
+    SearchablePdata.mk?
+      [ ⟨0x1000, 0x1010, 0x2000⟩, ⟨0x1008, 0x1018, 0x2008⟩ ] = none := by
+  decide
+
+/--
+**Descending entries are refused.**
+
+Disjoint but out of order, which a binary search cannot handle either. The two
+refusals are different: the one above overlaps, this one does not. -/
+theorem descending_refused :
+    SearchablePdata.mk?
+      [ ⟨0x1010, 0x1017, 0x2008⟩, ⟨0x1000, 0x1005, 0x2000⟩ ] = none := by
+  decide
+
+/--
+**An entry whose unwind data sits inside its own function is refused.**
+
+`PointsOutside`. Unwind data inside the code it describes would be executed as
+instructions, and read as unwind codes by the unwinder -- each interpretation
+plausible and at most one right. -/
+theorem unwindInsideFunction_refused :
+    SearchablePdata.mk? [ ⟨0x1000, 0x1010, 0x1004⟩ ] = none := by decide
+
+/--
+**And a measured object's table is refused, which is the point.**
+
+The two entries from the real two-function object have `BeginAddress` and
+`EndAddress` both zero, so their ranges are empty and identical. That is not a
+defect in the object -- it is what an unlinked file looks like -- and it is
+exactly why the searchability rules need a synthetic table to be exercised at
+all. -/
+theorem measured_object_table_not_searchable :
+    SearchablePdata.mk? measuredTwoFunctions.functions = none := by decide
+
 end Grass.Tests.ABI.Win64.Measured

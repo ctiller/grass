@@ -49,7 +49,14 @@ not move, so a recorded measurement catches what a re-run would. It is *not*
 the right shape for the encoder differentials, where the corpus is generated
 and the point is to re-run a moving corpus against a live assembler.
 
-`SearchablePdata.toBytes` remains covered by nothing.
+`SearchablePdata` is covered in the same file, but only synthetically, and the
+distinction is worth keeping. It demands `PdataSection.WellFormed` -- disjoint,
+nonempty, ascending ranges with unwind data outside each function -- and none of
+that can hold of a measured object, where every address is an unresolved
+relocation reading zero, so the ranges are all empty and all identical. A
+theorem there states exactly that: the real object's table is refused. The
+searchability rules are therefore exercised against a table with the addresses a
+linker would assign, which is invented; what those addresses satisfy is not.
 
 ## What ml64 was measured to do, and why none of it is checked here
 
