@@ -2718,47 +2718,16 @@ A *fresh* identity is always accepted. An identity with nothing outstanding over
 may be replaced freely, which is how a fixture builds a state and how a profile
 records a permission change or a placement.
 -/
-def ensureBacking (state : MemoryState) (backing : StorageId) : MemoryState :=
-  match state.backings.lookup backing with
-  | some _ => state
-  | Option.none => { state with backings := state.backings.insert backing .empty }
-
-/-- Installing a store leaves the allocation table alone. -/
-@[simp] theorem allocations_ensureBacking (state : MemoryState) (backing : StorageId) :
-    (state.ensureBacking backing).allocations = state.allocations := by
-  unfold ensureBacking; split <;> rfl
-
-/-- Installing a store leaves the grants alone. -/
-@[simp] theorem grantEntries_ensureBacking (state : MemoryState) (backing : StorageId) :
-    (state.ensureBacking backing).grantEntries = state.grantEntries := by
-  unfold ensureBacking; split <;> rfl
-
-/--
-Allocate `record` under `id`, installing its backing store if that identity has
-none yet.
-
-**A record naming a backing that already exists keeps that store**, which is how a
-fixture builds two views of one allocation: allocate both with the same
-`AllocationRecord.backing`, and they share bytes with no further declaration. The
-previous design needed an `alias` door for this and the door was a lie, because
-`write` wrote only the named allocation.
-
-`ByteStore.empty` is `⟨[]⟩` and carries no size, so installing one commits to
-nothing about the extent -- reads before writes return `none` exactly as they did
-when each record carried its own store.
--/
 def allocate? (state : MemoryState) (id : AllocId) (record : AllocationRecord) :
     Option MemoryState :=
-  let installed := state.ensureBacking record.backing
   match state.allocations.lookup id with
   | some existing =>
       if existing ≠ record ∧
           state.grantEntries.any
             (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) then
         Option.none
-      else some { installed with allocations := state.allocations.insert id record }
-  | Option.none =>
-      some { installed with allocations := state.allocations.insert id record }
+      else some { state with allocations := state.allocations.insert id record }
+  | Option.none => some { state with allocations := state.allocations.insert id record }
 
 /-- Allocate several records in order, refusing if any is refused.
 
@@ -3039,6 +3008,22 @@ def mapOnto (state : MemoryState) (a b : AllocId) : MemoryState :=
   | _, _ => state
 
 /--
+The store a view reads and writes.
+
+**A backing with no store is an empty store, not a third state.** Nothing can build
+a record whose backing has no store and then distinguish it from one whose backing
+has an empty one: they agree at every cell, and this makes them agree everywhere
+else too. Without that, `RangeInitialized` read `False` for the absent case while
+`ByteStore.Initialized` -- a forall over covered offsets -- held vacuously on an
+empty range for the empty case, and `rangeInitialized_congr_of_agrees` was false.
+
+Collapsing them here rather than case-splitting at each use is what keeps the
+framing lemmas free of a store-existence hypothesis their callers cannot always
+discharge. -/
+def storeOf (state : MemoryState) (record : AllocationRecord) : ByteStore :=
+  (state.backings.lookup record.backing).getD .empty
+
+/--
 Write `bytes` at `start` in allocation `id`.
 
 `initializes` is `AccessDescriptor.producesInitialized`: a completed write does
@@ -3052,15 +3037,12 @@ def write (state : MemoryState) (id : AllocId) (start : Nat) (bytes : ByteSeq)
   match state.allocations.lookup id with
   | Option.none => state
   | some record =>
-      match state.backings.lookup record.backing with
-      | Option.none => state
-      | some store =>
-          -- Through the *backing*, at the view's translated offset. This is the
-          -- line that makes sharing real: another view onto the same store sees
-          -- this write with nothing having to propagate it.
-          { state with
-            backings := state.backings.insert record.backing
-              (store.write (record.origin + start) bytes initializes) }
+      -- Through the *backing*, at the view's translated offset. This is the line
+      -- that makes sharing real: another view onto the same store sees this write
+      -- with nothing having to propagate it.
+      { state with
+        backings := state.backings.insert record.backing
+          ((state.storeOf record).write (record.origin + start) bytes initializes) }
 
 /-- **Writing bytes changes no authority.** Half of "authority is not data", from
 the other side: `cellAt?_applyAuthorityEffect?` says a declared authority change
@@ -3070,22 +3052,18 @@ moves no bytes, and this says a write grants nothing. Both are needed by
     (bytes : ByteSeq) (initializes : Bool) :
     (state.write id start bytes initializes).grantEntries = state.grantEntries := by
   unfold write
-  split
-  · rfl
-  · split <;> rfl
+  split <;> rfl
 
 /-- The byte allocation `id` holds at `offset`, if it holds one. -/
 def byteAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option Byte :=
   (state.allocations.lookup id).bind fun record =>
-    (state.backings.lookup record.backing).bind fun store =>
-      store.byteAt? (record.origin + offset)
+    (state.storeOf record).byteAt? (record.origin + offset)
 
 /-- What allocation `id` holds at `offset`: the byte and whether it counts as
 initialized. Both from one lookup, for the reason `ByteStore.cellAt?` gives. -/
 def cellAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option (Byte × Bool) :=
   (state.allocations.lookup id).bind fun record =>
-    (state.backings.lookup record.backing).bind fun store =>
-      store.cellAt? (record.origin + offset)
+    (state.storeOf record).cellAt? (record.origin + offset)
 
 /-- A cell is a function of the allocation table and the backing stores.
 
@@ -3113,11 +3091,7 @@ framing fact proved for cells is immediately a framing fact for bytes. -/
 @[simp] theorem byteAt?_eq_map_cellAt? (state : MemoryState) (id : AllocId) (offset : Nat) :
     state.byteAt? id offset = (state.cellAt? id offset).map Prod.fst := by
   unfold byteAt? cellAt? ByteStore.byteAt?
-  cases state.allocations.lookup id with
-  | none => rfl
-  | some record =>
-    simp only [Option.bind_some]
-    cases state.backings.lookup record.backing <;> rfl
+  cases state.allocations.lookup id <;> rfl
 
 /-- `state.InitializedAt id offset` holds when that byte is initialized. The
 pointwise form of `RangeInitialized`, which a padding argument needs because
@@ -3135,16 +3109,12 @@ def RangeInitialized (state : MemoryState) (id : AllocId) (range : ByteRange) : 
   match state.allocations.lookup id with
   | Option.none => False
   | some record =>
-      match state.backings.lookup record.backing with
-      | Option.none => False
-      | some store => store.Initialized (ByteRange.translate record.origin range)
+      (state.storeOf record).Initialized (ByteRange.translate record.origin range)
 
 instance (state : MemoryState) (id : AllocId) (range : ByteRange) :
     Decidable (state.RangeInitialized id range) := by
   unfold RangeInitialized
-  split
-  · infer_instance
-  · split <;> infer_instance
+  split <;> infer_instance
 
 /-! ### Framing
 
@@ -3172,9 +3142,7 @@ identity at once. -/
     (bytes : ByteSeq) (initializes : Bool) :
     (state.write id start bytes initializes).allocations = state.allocations := by
   unfold write
-  split
-  · rfl
-  · split <;> rfl
+  split <;> rfl
 
 /-- **A write never changes the allocation table.**
 
@@ -3260,78 +3228,68 @@ theorem backings_write_self (state : MemoryState) {id : AllocId} (start : Nat)
   simp only [h, hs]
   exact FiniteMap.lookup_insert_self _ _ _
 
-/-- **A write changes the store of exactly one backing.**
+/-- **Two views onto one backing read one store**, whatever their origins.
 
-The byte-level framing fact, and the one that replaces "a write to another
-allocation changes nothing". It is stated over backings rather than identities
-because that is where the truth now lives. -/
-theorem backings_write_of_ne (state : MemoryState) (id : AllocId) (start : Nat)
-    (bytes : ByteSeq) (initializes : Bool) {b : StorageId}
-    (h : ∀ record, state.allocations.lookup id = some record → b ≠ record.backing) :
-    (state.write id start bytes initializes).backings.lookup b =
-      state.backings.lookup b := by
-  unfold write
-  cases hfound : state.allocations.lookup id with
-  | none => rfl
-  | some record =>
-    simp only []
-    cases hs : state.backings.lookup record.backing with
-    | none => rfl
-    | some store => exact FiniteMap.lookup_insert_ne _ (h record hfound) _
+`storeOf` depends on a record only through `AllocationRecord.backing`, so this is
+`rfl` under an unfold. It is the fact the `aliases` list used to assert and could
+not implement: there, two allocations declared aliased still had separate
+`ByteStore`s and `write` touched only the named one. -/
+theorem storeOf_congr (state : MemoryState) {r₁ r₂ : AllocationRecord}
+    (h : r₁.backing = r₂.backing) : state.storeOf r₁ = state.storeOf r₂ := by
+  unfold storeOf
+  rw [h]
 
-/-- A write to `id` leaves every backing but `id`'s own alone.
+/-- **A write replaces exactly the store its own view names.**
 
-`backings_write_of_ne` in the form callers want: the caller usually has the record
-in hand and an inequality of backings, not a proof about every record the lookup
-could return. -/
-theorem backings_write_of_backing_ne (state : MemoryState) {id : AllocId}
-    {record : AllocationRecord} (hfound : state.allocations.lookup id = some record)
-    (start : Nat) (bytes : ByteSeq) (initializes : Bool) {b : StorageId}
-    (h : b ≠ record.backing) :
-    (state.write id start bytes initializes).backings.lookup b =
-      state.backings.lookup b := by
-  refine backings_write_of_ne state id start bytes initializes ?_
-  intro r hr
-  rw [hfound] at hr
-  cases hr
-  exact h
+The byte-level fact the framing lemmas rest on. It needs no hypothesis about the
+store existing, because `MemoryState.storeOf` reads an absent backing as an empty
+store and a write installs one either way. -/
+@[simp] theorem storeOf_write_self (state : MemoryState) {id : AllocId} (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
+    (h : state.allocations.lookup id = some record) :
+    (state.write id start bytes initializes).storeOf record =
+      (state.storeOf record).write (record.origin + start) bytes initializes := by
+  unfold storeOf write
+  rw [h]
+  simp only [FiniteMap.lookup_insert_self]
+  rfl
 
-/-- A write to an allocation with no store under its backing changes nothing. -/
-theorem write_of_missing_store (state : MemoryState) {id : AllocId}
-    {record : AllocationRecord} (hfound : state.allocations.lookup id = some record)
-    (hs : state.backings.lookup record.backing = Option.none)
-    (start : Nat) (bytes : ByteSeq) (initializes : Bool) :
-    state.write id start bytes initializes = state := by
-  unfold write
-  simp only [hfound, hs]
+/-- **And leaves every other backing's store alone.**
+
+This is what replaces "a write to another allocation changes nothing". The
+hypothesis is about backings rather than identities, which is the whole content of
+`g-design:185`: two views onto one backing are distinct identities over one store,
+so identity distinctness frames nothing. -/
+theorem storeOf_write_of_backing_ne (state : MemoryState) {id : AllocId}
+    {written viewer : AllocationRecord}
+    (hfound : state.allocations.lookup id = some written) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) (h : viewer.backing ≠ written.backing) :
+    (state.write id start bytes initializes).storeOf viewer = state.storeOf viewer := by
+  unfold storeOf write
+  rw [hfound]
+  simp only [FiniteMap.lookup_insert_ne _ h]
 
 /-- The cell a write leaves at an offset, in terms of the store's own law. -/
 theorem cellAt?_write_self (state : MemoryState) {id : AllocId} (start : Nat)
     (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
-    {store : ByteStore} (h : state.allocations.lookup id = some record)
-    (hs : state.backings.lookup record.backing = some store) (offset : Nat) :
+    (h : state.allocations.lookup id = some record) (offset : Nat) :
     (state.write id start bytes initializes).cellAt? id offset =
-      (store.write (record.origin + start) bytes initializes).cellAt?
+      ((state.storeOf record).write (record.origin + start) bytes initializes).cellAt?
         (record.origin + offset) := by
   unfold cellAt?
   rw [lookup_write_self state start bytes initializes h]
-  simp only [Option.bind_some]
-  rw [backings_write_self state start bytes initializes h hs]
-  rfl
+  simp only [Option.bind_some, storeOf_write_self state start bytes initializes h]
 
 /-- The byte a write leaves at an offset, in terms of the store's own law. -/
 theorem byteAt?_write_self (state : MemoryState) {id : AllocId} (start : Nat)
     (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
-    {store : ByteStore} (h : state.allocations.lookup id = some record)
-    (hs : state.backings.lookup record.backing = some store) (offset : Nat) :
+    (h : state.allocations.lookup id = some record) (offset : Nat) :
     (state.write id start bytes initializes).byteAt? id offset =
-      (store.write (record.origin + start) bytes initializes).byteAt?
+      ((state.storeOf record).write (record.origin + start) bytes initializes).byteAt?
         (record.origin + offset) := by
   unfold byteAt?
   rw [lookup_write_self state start bytes initializes h]
-  simp only [Option.bind_some]
-  rw [backings_write_self state start bytes initializes h hs]
-  rfl
+  simp only [Option.bind_some, storeOf_write_self state start bytes initializes h]
 
 /-- Two states whose allocation records agree at `id`, and whose stores agree,
 agree on what is initialized there.
@@ -3343,7 +3301,7 @@ theorem rangeInitialized_congr_of_lookup {a b : MemoryState} {id : AllocId}
     {range : ByteRange} (h : a.allocations.lookup id = b.allocations.lookup id)
     (hb : a.backings = b.backings) :
     a.RangeInitialized id range ↔ b.RangeInitialized id range := by
-  unfold RangeInitialized
+  unfold RangeInitialized storeOf
   rw [h, hb]
 
 /-- **A write neither creates nor destroys initialization outside its own range.**
@@ -3360,45 +3318,36 @@ theorem rangeInitialized_write_iff_of_disjoint (state : MemoryState) {id : Alloc
   | none => rw [write_of_missing state _ _ _ hfound, hfound]
   | some record =>
     rw [lookup_write_self state start bytes initializes hfound]
-    simp only []
-    cases hs : state.backings.lookup record.backing with
-    | none =>
-      -- No store under this backing, so the write changed nothing at all.
-      have hnop : state.write id start bytes initializes = state := by
-        unfold write; simp only [hfound, hs]
-      rw [hnop, hs]
-    | some store =>
-      rw [backings_write_self state start bytes initializes hfound hs]
-      -- The write and the range are disjoint in the view's own coordinates, so
-      -- they are disjoint in the store's, both having moved by `record.origin`.
-      exact ByteStore.initialized_write_iff_of_disjoint store
-        (ByteRange.translate_disjoint_of_disjoint record.origin hd)
+    simp only [storeOf_write_self state start bytes initializes hfound]
+    -- The write and the range are disjoint in the view's own coordinates, so they
+    -- are disjoint in the store's, both having moved by `record.origin`.
+    exact ByteStore.initialized_write_iff_of_disjoint (state.storeOf record)
+      (ByteRange.translate_disjoint_of_disjoint record.origin hd)
 
-/-- The byte a write leaves inside its own range. -/
+/-- The cell a write leaves inside its own range. -/
 theorem cellAt?_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}
     {bytes : ByteSeq} {initializes : Bool} {record : AllocationRecord}
-    {store : ByteStore} (hfound : state.allocations.lookup id = some record)
-    (hs : state.backings.lookup record.backing = some store) {offset : Nat}
+    (hfound : state.allocations.lookup id = some record) {offset : Nat}
     (h : (ByteRange.mk start bytes.length).Covers offset) :
     (state.write id start bytes initializes).cellAt? id offset =
       (bytes[offset - start]?).map (·, initializes) := by
-  rw [cellAt?_write_self state start bytes initializes hfound hs]
+  rw [cellAt?_write_self state start bytes initializes hfound]
   have h' : (ByteRange.mk (record.origin + start) bytes.length).Covers
       (record.origin + offset) := by
     unfold ByteRange.Covers ByteRange.stop at h ⊢
     simp only [] at h ⊢
     omega
-  have := ByteStore.cellAt?_write_of_covers (initializes := initializes) store h'
+  have := ByteStore.cellAt?_write_of_covers (initializes := initializes)
+    (state.storeOf record) h'
   simpa [Nat.add_sub_add_left] using this
 
 /-- The byte a write leaves inside its own range. -/
 theorem byteAt?_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}
     {bytes : ByteSeq} {initializes : Bool} {record : AllocationRecord}
-    {store : ByteStore} (hfound : state.allocations.lookup id = some record)
-    (hs : state.backings.lookup record.backing = some store) {offset : Nat}
+    (hfound : state.allocations.lookup id = some record) {offset : Nat}
     (h : (ByteRange.mk start bytes.length).Covers offset) :
     (state.write id start bytes initializes).byteAt? id offset = bytes[offset - start]? := by
-  rw [byteAt?_eq_map_cellAt?, cellAt?_write_of_covers state hfound hs h]
+  rw [byteAt?_eq_map_cellAt?, cellAt?_write_of_covers state hfound h]
   cases bytes[offset - start]? <;> rfl
 
 /-- An initializing write initializes each byte it covered. -/
@@ -3441,30 +3390,25 @@ theorem cellAt?_write_of_not_covers (state : MemoryState) (id : AllocId) {start 
       state.cellAt? other offset := by
   unfold cellAt?
   rw [allocations_write]
-  cases h with
-  | inl hshare =>
-    cases hother : state.allocations.lookup other with
-    | none => rfl
-    | some ro =>
-      simp only [Option.bind_some]
-      rw [backings_write_of_ne state id start bytes initializes]
-      intro ri hri hbe
-      exact hshare (sharesBytes_of_backing_eq hother hri hbe)
-  | inr hsame =>
-    obtain ⟨rfl, hout⟩ := hsame
-    cases hfound : state.allocations.lookup other with
-    | none => rfl
-    | some record =>
-      simp only [Option.bind_some]
-      cases hs : state.backings.lookup record.backing with
-      | none =>
-        have hnop : state.write other start bytes initializes = state := by
-          unfold write; simp only [hfound, hs]
-        rw [hnop, hs]
-      | some store =>
-        rw [backings_write_self state start bytes initializes hfound hs]
-        simp only [Option.bind_some]
-        refine ByteStore.cellAt?_write_of_not_covers store ?_
+  cases hother : state.allocations.lookup other with
+  | none => rfl
+  | some ro =>
+    simp only [Option.bind_some]
+    cases hfound : state.allocations.lookup id with
+    | none => rw [write_of_missing state start bytes initializes hfound]
+    | some ri =>
+      cases h with
+      | inl hshare =>
+        refine congrArg (ByteStore.cellAt? · (ro.origin + offset)) ?_
+        refine storeOf_write_of_backing_ne state hfound start bytes initializes ?_
+        intro hbe
+        exact hshare (sharesBytes_of_backing_eq hother hfound hbe)
+      | inr hsame =>
+        obtain ⟨rfl, hout⟩ := hsame
+        rw [hother] at hfound
+        cases hfound
+        rw [storeOf_write_self state start bytes initializes hother]
+        refine ByteStore.cellAt?_write_of_not_covers (state.storeOf ro) ?_
         unfold ByteRange.Covers ByteRange.stop at hout ⊢
         simp only [] at hout ⊢
         omega
@@ -3594,61 +3538,51 @@ theorem write_comm_of_ne (state : MemoryState) {a b : AllocId}
       ((state.write b sb bb ib).write a sa ba ia) := by
   intro other offset
   -- Each write lands in one store, and the two stores are distinct because the
-  -- allocations share no bytes. Writes at distinct backings commute, so every
-  -- viewer reads the same -- including one that is itself a view onto either store,
-  -- which is the case the old identity-based proof could not have covered.
-  cases hra : state.allocations.lookup a with
-  | none =>
-    rw [write_of_missing state sa ba ia hra,
-      write_of_missing _ sa ba ia (by rw [allocations_write]; exact hra)]
-  | some ra =>
-    cases hrb : state.allocations.lookup b with
+  -- allocations share no bytes. Writes at distinct backings commute for every
+  -- viewer, including one that is itself a view onto either store -- the case the
+  -- identity-based proof could not have covered, because it did not know it existed.
+  unfold cellAt?
+  rw [allocations_write, allocations_write, allocations_write, allocations_write]
+  cases hother : state.allocations.lookup other with
+  | none => rfl
+  | some ro =>
+    simp only [Option.bind_some]
+    cases hra : state.allocations.lookup a with
     | none =>
-      rw [write_of_missing _ sb bb ib (by rw [allocations_write]; exact hrb),
-        write_of_missing state sb bb ib hrb]
-    | some rb =>
-      have hbk : ra.backing ≠ rb.backing := fun he =>
-        hshare (sharesBytes_of_backing_eq hra hrb he)
-      have hfa := lookup_write_self state sa ba ia hra
-      have hfb := lookup_write_self state sb bb ib hrb
-      have hra' : (state.write b sb bb ib).allocations.lookup a = some ra := by
-        rw [allocations_write]; exact hra
-      have hrb' : (state.write a sa ba ia).allocations.lookup b = some rb := by
-        rw [allocations_write]; exact hrb
-      have hkeepA : (state.write b sb bb ib).backings.lookup ra.backing =
-          state.backings.lookup ra.backing :=
-        backings_write_of_backing_ne state hrb sb bb ib hbk
-      have hkeepB : (state.write a sa ba ia).backings.lookup rb.backing =
-          state.backings.lookup rb.backing :=
-        backings_write_of_backing_ne state hra sa ba ia (Ne.symm hbk)
-      cases hsa : state.backings.lookup ra.backing with
+      rw [write_of_missing state sa ba ia hra,
+        write_of_missing _ sa ba ia (by rw [allocations_write]; exact hra)]
+    | some ra =>
+      cases hrb : state.allocations.lookup b with
       | none =>
-        rw [write_of_missing_store state hra hsa sa ba ia,
-          write_of_missing_store _ hra' (by rw [hkeepA]; exact hsa) sa ba ia]
-      | some sA =>
-        cases hsb : state.backings.lookup rb.backing with
-        | none =>
-          rw [write_of_missing_store _ hrb' (by rw [hkeepB]; exact hsb) sb bb ib,
-            write_of_missing_store state hrb hsb sb bb ib]
-        | some sB =>
-          unfold cellAt?
-          rw [allocations_write, allocations_write, allocations_write, allocations_write]
-          cases hother : state.allocations.lookup other with
-          | none => rfl
-          | some ro =>
-            simp only [Option.bind_some]
-            by_cases hoa : ro.backing = ra.backing
-            · rw [hoa, backings_write_of_backing_ne _ hrb' sb bb ib hbk,
-                backings_write_self state sa ba ia hra hsa,
-                backings_write_self _ sa ba ia hra' (by rw [hkeepA]; exact hsa)]
-            · by_cases hob : ro.backing = rb.backing
-              · rw [hob, backings_write_self _ sb bb ib hrb' (by rw [hkeepB]; exact hsb),
-                  backings_write_of_backing_ne _ hra' sa ba ia (Ne.symm hbk),
-                  backings_write_self state sb bb ib hrb hsb]
-              · rw [backings_write_of_backing_ne _ hrb' sb bb ib hob,
-                  backings_write_of_backing_ne _ hra sa ba ia hoa,
-                  backings_write_of_backing_ne _ hra' sa ba ia hoa,
-                  backings_write_of_backing_ne _ hrb sb bb ib hob]
+        rw [write_of_missing _ sb bb ib (by rw [allocations_write]; exact hrb),
+          write_of_missing state sb bb ib hrb]
+      | some rb =>
+        have hbk : ra.backing ≠ rb.backing := fun he =>
+          hshare (sharesBytes_of_backing_eq hra hrb he)
+        have hra' : (state.write b sb bb ib).allocations.lookup a = some ra := by
+          rw [allocations_write]; exact hra
+        have hrb' : (state.write a sa ba ia).allocations.lookup b = some rb := by
+          rw [allocations_write]; exact hrb
+        by_cases hoa : ro.backing = ra.backing
+        · have hcongr : ∀ t : MemoryState, t.storeOf ro = t.storeOf ra :=
+            fun t => storeOf_congr t hoa
+          simp only [hcongr]
+          rw [storeOf_write_of_backing_ne _ hrb' sb bb ib hbk,
+            storeOf_write_self state sa ba ia hra,
+            storeOf_write_self _ sa ba ia hra',
+            storeOf_write_of_backing_ne state hrb sb bb ib hbk]
+        · by_cases hob : ro.backing = rb.backing
+          · have hcongr : ∀ t : MemoryState, t.storeOf ro = t.storeOf rb :=
+              fun t => storeOf_congr t hob
+            simp only [hcongr]
+            rw [storeOf_write_self _ sb bb ib hrb',
+              storeOf_write_of_backing_ne state hra sa ba ia (Ne.symm hbk),
+              storeOf_write_of_backing_ne _ hra' sa ba ia (Ne.symm hbk),
+              storeOf_write_self state sb bb ib hrb]
+          · rw [storeOf_write_of_backing_ne _ hrb' sb bb ib hob,
+              storeOf_write_of_backing_ne state hra sa ba ia hoa,
+              storeOf_write_of_backing_ne _ hra' sa ba ia hoa,
+              storeOf_write_of_backing_ne state hrb sb bb ib hob]
 
 /-! ### Placement
 
@@ -3753,38 +3687,34 @@ theorem write_comm (state : MemoryState) (id : AllocId) {a b : Nat}
   -- The split is on the *backing*, not on the identity. Under `g-design:185` a
   -- viewer other than `id` may be a view onto the same store, so "a different
   -- allocation sees nothing" is no longer a case that can be discharged.
-  cases hfound : state.allocations.lookup id with
-  | none =>
-    rw [write_of_missing state a bytesA initA hfound,
-      write_of_missing state b bytesB initB hfound,
-      write_of_missing state a bytesA initA hfound]
-  | some ri =>
-    cases hs : state.backings.lookup ri.backing with
+  unfold cellAt?
+  rw [allocations_write, allocations_write, allocations_write, allocations_write]
+  cases hother : state.allocations.lookup other with
+  | none => rfl
+  | some ro =>
+    simp only [Option.bind_some]
+    cases hfound : state.allocations.lookup id with
     | none =>
-      rw [write_of_missing_store state hfound hs a bytesA initA,
-        write_of_missing_store state hfound hs b bytesB initB,
-        write_of_missing_store state hfound hs a bytesA initA]
-    | some store =>
+      rw [write_of_missing state a bytesA initA hfound,
+        write_of_missing state b bytesB initB hfound,
+        write_of_missing state a bytesA initA hfound]
+    | some ri =>
       have hfa := lookup_write_self state a bytesA initA hfound
       have hfb := lookup_write_self state b bytesB initB hfound
-      have hsa := backings_write_self state a bytesA initA hfound hs
-      have hsb := backings_write_self state b bytesB initB hfound hs
-      unfold cellAt?
-      rw [allocations_write, allocations_write, allocations_write, allocations_write]
-      cases hother : state.allocations.lookup other with
-      | none => rfl
-      | some ro =>
-        simp only [Option.bind_some]
-        by_cases hbk : ro.backing = ri.backing
-        · rw [hbk, backings_write_self _ b bytesB initB hfa hsa,
-            backings_write_self _ a bytesA initA hfb hsb]
-          simp only [Option.bind_some]
-          exact ByteStore.cellAt?_write_comm store
-            (ByteRange.translate_disjoint_of_disjoint ri.origin hd) _
-        · rw [backings_write_of_backing_ne _ hfa b bytesB initB hbk,
-            backings_write_of_backing_ne _ hfound a bytesA initA hbk,
-            backings_write_of_backing_ne _ hfb a bytesA initA hbk,
-            backings_write_of_backing_ne _ hfound b bytesB initB hbk]
+      by_cases hbk : ro.backing = ri.backing
+      · have hcongr : ∀ t : MemoryState, t.storeOf ro = t.storeOf ri :=
+          fun t => storeOf_congr t hbk
+        simp only [hcongr]
+        rw [storeOf_write_self _ b bytesB initB hfa,
+          storeOf_write_self state a bytesA initA hfound,
+          storeOf_write_self _ a bytesA initA hfb,
+          storeOf_write_self state b bytesB initB hfound]
+        exact ByteStore.cellAt?_write_comm (state.storeOf ri)
+          (ByteRange.translate_disjoint_of_disjoint ri.origin hd) _
+      · rw [storeOf_write_of_backing_ne _ hfa b bytesB initB hbk,
+          storeOf_write_of_backing_ne state hfound a bytesA initA hbk,
+          storeOf_write_of_backing_ne _ hfb a bytesA initA hbk,
+          storeOf_write_of_backing_ne state hfound b bytesB initB hbk]
 
 /-- An initializing write initializes what it wrote, provided the allocation is
 there. The state-level form of `ByteStore.initialized_write`. -/
