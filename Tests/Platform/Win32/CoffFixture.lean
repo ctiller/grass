@@ -4,6 +4,7 @@ import Grass.Platform.Win32.CoffPdata
 import Grass.Platform.Win32.CoffXdata
 import Grass.Platform.Win32.CoffAux
 import Grass.Platform.Win32.CoffWellFormed
+import Grass.Platform.Win32.CoffText
 
 /-!
 # COFF records, against a real object file
@@ -707,6 +708,119 @@ gives a file that links with every address computed against the wrong base. -/
 theorem fixed_kinds_distinct :
     RelocationType.addr64.code ≠ RelocationType.addr32nb.code
     ∧ RelocationType.addr32nb.code ≠ RelocationType.rel32.code := by
+  refine ⟨?_, ?_⟩ <;> decide
+
+/-! ## `.text` and its displacement sites
+
+The measured call object: `push rbp; call callee; mov rax, [rip+globalWord];
+lea rcx, [rip+globalWord]; pop rbp; ret` -- twenty-two bytes with three
+displacement fields, at offsets 2, 9 and 16.
+-/
+
+/-- The twenty-two bytes `ml64` assembled, displacements left zero. -/
+def callerCode : ByteSeq :=
+  [0x55, 0xe8, 0x00, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x05, 0x00, 0x00,
+   0x00, 0x00, 0x48, 0x8d, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x5d, 0xc3]
+
+/--
+The three sites, as a writer knows them.
+
+None has trailing bytes: in each instruction the displacement is the last four
+bytes. `callee` is symbol 12 and `globalWord` is 13, which is what `ml64`
+recorded. -/
+def callerSites : List DisplacementSite :=
+  [ ⟨2, 12, 0⟩, ⟨9, 13, 0⟩, ⟨16, 13, 0⟩ ]
+
+/--
+**The three relocations `ml64` emitted for those sites.**
+
+Thirty bytes: offsets 2, 9 and 16, symbols 12, 13 and 13, all type 4. Built
+from the sites rather than transcribed, so this says the constructor agrees
+with the assembler. -/
+theorem callerRelocations_bytes :
+    (displacementRelocations? callerSites).map
+        (fun rs => (rs.map Relocation.toBytes).flatten)
+      = some
+        [0x02, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x04, 0x00,
+         0x09, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x04, 0x00,
+         0x10, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x04, 0x00] := by
+  decide
+
+/--
+**Every site fits, so the section is built.**
+
+The last one is the tight case: its field is at 16 and the code is 22 bytes, so
+the field ends exactly at 20 with the `pop rbp; ret` after it. A field two
+bytes later would not fit and `textSection?` would refuse. -/
+theorem callerSection_builds :
+    (textSection? dotText callerCode callerSites).isSome := by decide
+
+/--
+**Moving the last site two bytes on makes it run off the end.**
+
+22 bytes of code, a field at 18, and four bytes of field need through 21 --
+which fits. At 19 it does not. This is the boundary, checked on the real
+instruction stream rather than a made-up one. -/
+theorem callerSection_boundary :
+    (textSection? dotText callerCode [⟨18, 13, 0⟩]).isSome
+    ∧ textSection? dotText callerCode [⟨19, 13, 0⟩] = none := by
+  refine ⟨?_, ?_⟩ <;> decide
+
+/-- **`.text`'s flag word, as `ml64` wrote it.** -/
+theorem textCharacteristics_measured :
+    textCharacteristics = 0x60500020 := by decide
+
+/-! ## Sites with trailing bytes, which is what pins that term
+
+Every site above has `trailing = 0`, so the `+ trailing` in
+`DisplacementSite.InRange` was invisible: dropping it survived every check. The
+second measured object has three sites with nonzero counts.
+
+Its code is `mov DWORD PTR [rip+d], 5; mov BYTE PTR [rip+d], 7;
+mov WORD PTR [rip+d], 9; ret` -- twenty-seven bytes, with displacement fields at
+2, 12 and 20 followed by four, one and two bytes of immediate.
+-/
+
+/-- The twenty-seven bytes `ml64` assembled. -/
+def immediateCode : ByteSeq :=
+  [0xc7, 0x05, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00,
+   0xc6, 0x05, 0x00, 0x00, 0x00, 0x00, 0x07,
+   0x66, 0xc7, 0x05, 0x00, 0x00, 0x00, 0x00, 0x09, 0x00, 0xc3]
+
+/-- The three sites, with the trailing counts the immediates imply. -/
+def immediateSites : List DisplacementSite :=
+  [ ⟨2, 13, 4⟩, ⟨12, 13, 1⟩, ⟨20, 13, 2⟩ ]
+
+/--
+**The relocations `ml64` emitted: `REL32_4`, `REL32_1` and `REL32_2`.**
+
+Types 8, 5 and 6 -- four plus the trailing count in each case. This is the
+family being selected by the instruction, checked against the assembler that
+selected it. -/
+theorem immediateRelocations_bytes :
+    (displacementRelocations? immediateSites).map
+        (fun rs => (rs.map Relocation.toBytes).flatten)
+      = some
+        [0x02, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x08, 0x00,
+         0x0c, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x05, 0x00,
+         0x14, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x06, 0x00] := by
+  decide
+
+/-- **All three fit in the twenty-seven bytes.** -/
+theorem immediateSection_builds :
+    (textSection? dotText immediateCode immediateSites).isSome := by decide
+
+/--
+**A site whose field fits but whose immediate does not is refused.**
+
+The case that pins the `+ trailing` term. In eight bytes of code a field at
+offset two ends at six, so the field alone fits -- but four trailing bytes
+carry the instruction through nine, which does not. A range check written
+without the trailing term accepts this, and a mutation to that effect survived
+every other theorem here. -/
+theorem trailing_bytes_are_counted :
+    (textSection? dotText (List.replicate 8 0x90) [⟨2, 0, 0⟩]).isSome
+    ∧ textSection? dotText (List.replicate 8 0x90) [⟨2, 0, 4⟩] = none := by
   refine ⟨?_, ?_⟩ <;> decide
 
 end Grass.Tests.Platform.Win32.Coff

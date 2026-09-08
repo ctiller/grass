@@ -13,6 +13,7 @@ import Grass.Platform.Win32.CoffPdata
 import Grass.Platform.Win32.CoffXdata
 import Grass.Platform.Win32.CoffAux
 import Grass.Platform.Win32.CoffWellFormed
+import Grass.Platform.Win32.CoffText
 
 /-!
 # Ledger coverage gate
@@ -105,7 +106,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.CoffPdata,
    `Grass.Platform.Win32.CoffXdata,
    `Grass.Platform.Win32.CoffAux,
-   `Grass.Platform.Win32.CoffWellFormed]
+   `Grass.Platform.Win32.CoffWellFormed,
+   `Grass.Platform.Win32.CoffText]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -119,7 +121,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 136
+def owedBaseline : Nat := 138
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -141,7 +143,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 78
+def notBehaviourBaseline : Nat := 82
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -401,7 +403,15 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.Coff.symbolTableBytes,
     -- A one-line restatement of `ResolvableIn` at the entry level, carrying no
     -- fact the row above does not.
-    `Grass.Platform.Win32.Coff.SymbolEntry.SectionResolvable ]
+    `Grass.Platform.Win32.Coff.SymbolEntry.SectionResolvable,
+    -- `.text` assembly. `relocation?` and `displacementRelocations?` apply
+    -- `ripRelative?`, whose rule is cited above; `textSection?` combines that
+    -- with the range check; `dotText` is a name literal used by this module's
+    -- own theorems, which need a closed term to evaluate.
+    `Grass.Platform.Win32.Coff.DisplacementSite.relocation?,
+    `Grass.Platform.Win32.Coff.displacementRelocations?,
+    `Grass.Platform.Win32.Coff.textSection?,
+    `Grass.Platform.Win32.Coff.dotText ]
 
 /--
 Declarations that genuinely model external behaviour and have no citation yet.
@@ -647,7 +657,14 @@ def owed : List Name :=
     -- imposes, and neither produces a diagnostic when violated -- which is why
     -- they are stated rather than assumed.
     `Grass.Platform.Win32.Coff.SectionNumber.ResolvableIn,
-    `Grass.Platform.Win32.Coff.Section.RelocationsInRange ]
+    `Grass.Platform.Win32.Coff.Section.RelocationsInRange,
+    -- `.text`'s two facts. `InRange` is what it means for a displacement site
+    -- to fit: four bytes of field plus the instruction bytes after it, all
+    -- inside the section -- a linker writing past the end is not diagnosed by
+    -- anything. `textCharacteristics` is the section's flag word as `ml64`
+    -- writes it: code, executable, readable.
+    `Grass.Platform.Win32.Coff.DisplacementSite.InRange,
+    `Grass.Platform.Win32.Coff.textCharacteristics ]
 
 /-- The declarations this gate holds the ledger responsible for. -/
 def modeledDeclarations : MetaM (Array Name) := do
