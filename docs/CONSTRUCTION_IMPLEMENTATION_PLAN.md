@@ -155,6 +155,10 @@ alignments from selected object representations and ordinary struct placement.
 separation, while lookup theorems recover concrete placements from nominal field
 membership. Empty, packed, overlay, bitfield, and flexible-tail representations
 remain separate constructors rather than exceptions to the ordinary checker.
+`Grass.Construct.Layout.Union` gives untagged alternatives one explicit shared
+storage range. Its checker proves nonempty unique alternatives, representation
+validity, storage containment, and aggregate alignment compatibility without
+claiming pairwise disjointness or selecting which alternative is live.
 
 Build layout and placement values under `Grass/Construct/`:
 
