@@ -118,12 +118,21 @@ pub struct ReviewChain {
     pub accepted_nominations: std::collections::BTreeSet<EventId>,
     pub decline_or_withdraw_or_reassign_status: ItemStatus,
     pub findings: BTreeMap<(EventId, String), FindingState>,
-    pub authorizations: Vec<EventId>,
+    /// Sets, not vectors, and that is load-bearing rather than tidiness.
+    /// Each of these can now receive entries from two agents who never
+    /// observed one another -- two reviewers authorizing the same chain, or
+    /// a reviewer's `review.merged` racing a coordinator's
+    /// `review.merge_reconciled` -- and reduction records both rather than
+    /// making one of the two valid orders fatal. A `Vec` would then hold
+    /// them in arrival order, so two hosts that fetched in different orders
+    /// would hold different state and gates 15/16 would break in the very
+    /// place the totality fix was meant to repair.
+    pub authorizations: std::collections::BTreeSet<EventId>,
     /// Receipts recorded so far; concurrently published redundant receipts
     /// with identical authorization-derived values are all kept
     /// (AGENT_BUS_SCHEMA.md section 8).
-    pub merged: Vec<EventId>,
-    pub reconciled: Vec<EventId>,
+    pub merged: std::collections::BTreeSet<EventId>,
+    pub reconciled: std::collections::BTreeSet<EventId>,
 }
 
 impl ReviewChain {
@@ -181,10 +190,17 @@ impl AgentState {
 #[derive(Debug, Clone)]
 pub struct BusState {
     pub config: BusConfig,
-    /// The *current* registry epoch -- what ordinary membership/authority
-    /// checks (e.g. `is_bootstrap_coordinator`, `authorize_stream_write`)
-    /// use (docs/AGENT_COORDINATION_EVOLUTION.md section 2.1). `None` only
-    /// before migration/activation has ever established one.
+    /// The *current* registry epoch (docs/AGENT_COORDINATION_EVOLUTION.md
+    /// section 2.1). `None` only before migration/activation has ever
+    /// established one.
+    ///
+    /// Read sparingly, and never to decide an already-published event's
+    /// authority: this is whatever the registry tip says at *reduction*
+    /// time, which for a replayed event is routinely a later epoch than the
+    /// one it was authored against -- see `apply::require_bootstrap_
+    /// coordinator`. Membership and custody are enforced against this epoch
+    /// where that is sound: at publication, by `registry::
+    /// authorize_stream_write`.
     pub roster_epoch: Option<crate::registry::RosterEpoch>,
     /// Every epoch reachable from the current registry tip, keyed by its
     /// own id -- what a complete frontier's completeness is actually
@@ -283,19 +299,20 @@ impl BusState {
         self.kind_of_event.insert(id, kind.to_string());
     }
 
-    /// Coordinator authority is `Role::Coordinator` membership in the
-    /// current roster epoch -- unlike version one's separate immutable
-    /// `_bus/BUS.json` list, a stream existing at all already implies
-    /// registry authorization (checked by `registry::authorize_stream_write`
-    /// before the stream was ever created), so there is nothing further to
-    /// consult beyond the epoch itself.
-    pub fn is_bootstrap_coordinator(&self, agent: &Agent) -> bool {
-        self.roster_epoch
-            .as_ref()
-            .and_then(|e| e.active_members.get(agent))
-            .map(|binding| binding.role == Role::Coordinator)
-            .unwrap_or(false)
-    }
+    // Deliberately no `is_bootstrap_coordinator` here any more.
+    //
+    // It answered "is this agent bound as `Role::Coordinator` in
+    // `roster_epoch`", and `apply::require_bootstrap_coordinator` was its
+    // only caller. Reading the *live* epoch to judge an event authored
+    // against an older one made every historical coordinator event
+    // unreducible fleet-wide the moment any epoch dropped that coordinator
+    // -- see that function's own doc for the full argument and for where
+    // the membership and liveness halves are enforced instead. The helper
+    // is gone rather than merely unused so nothing reaches for it again:
+    // its own observation, that "a stream existing at all already implies
+    // registry authorization (checked by `registry::authorize_stream_write`
+    // before the stream was ever created)", is exactly why replay does not
+    // need to re-ask it.
 
     pub fn agent(&self, a: &Agent) -> Option<&AgentState> {
         self.agents.get(a)
