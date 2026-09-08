@@ -406,11 +406,25 @@ pub fn drain_outbox(
                 next_seq += 1;
             }
             Err(e) => {
-                reject_candidate(git_common_dir, agent, path, candidate, &e.to_string())?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
-                    reason: e.to_string(),
-                });
+                // This arm is the last one, and it was the one left behind.
+                //
+                // The other eight rejection paths were routed through
+                // `record_rejection`, but `dry_run`'s -- the final semantic
+                // rejection, and the one every well-formed-but-invalid
+                // candidate actually reaches -- still propagated a receipt
+                // write failure with `?`, aborting the whole drain and
+                // leaving every later valid candidate unpublished. Exactly
+                // the outage the rest of the change exists to remove, still
+                // reachable through the busiest door.
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
+                    e.to_string(),
+                    &mut rejected,
+                    &mut held,
+                );
             }
         }
     }
@@ -1602,6 +1616,93 @@ mod tests {
                 == 0,
             "a held candidate must not get a rejection receipt"
         );
+    }
+
+    /// The semantic rejection path -- `apply::dry_run`'s -- also holds
+    /// instead of aborting when its receipt cannot be written.
+    ///
+    /// The sibling test covers the *parse* arm, and covering only that is
+    /// what let this survive: the parse arm is reached by a payload that
+    /// will not deserialize at all, while `dry_run`'s arm is reached by
+    /// every candidate that is well-formed but invalid, which is the common
+    /// case by a wide margin. It was the last of the nine rejection paths
+    /// still propagating a receipt-write failure with `?`, so a read-only or
+    /// blocked `rejected/` directory still aborted the whole drain through
+    /// the busiest door in the loop.
+    ///
+    /// The candidate here parses cleanly and is refused on its content -- an
+    /// `issue.acknowledged` naming an issue that does not exist -- so it
+    /// reaches `dry_run` rather than the parse arm, which is the whole point.
+    #[test]
+    fn an_unwritable_receipt_on_the_semantic_path_holds_and_still_publishes_the_rest() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        // Parses fine; refused by `dry_run` because the issue it names was
+        // never opened.
+        let semantically_invalid = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.acknowledged".to_string(),
+            data: serde_json::json!({
+                "issue": "coord1:9000",
+                "assignment": "coord1:9001",
+                "note": "acknowledging an issue that does not exist",
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-1", &semantically_invalid).unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "client-2",
+            &status_candidate(&coord1, "queued behind the unwritable rejection"),
+        )
+        .unwrap();
+
+        // A *file* where the receipt directory must go, so `create_dir_all`
+        // can never succeed. `list_pending` only considers `.json` files, so
+        // the blocker is invisible to the listing.
+        let blocker = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .expect("an unwritable receipt must not fail the drain");
+
+        // The later valid candidate published.
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1)]);
+        assert!(drained.rejected.is_empty());
+        assert_eq!(drained.held.len(), 1);
+        assert!(
+            drained.held[0]
+                .reason
+                .contains("receipt could not be written"),
+            "the hold must say why it could not reject: {}",
+            drained.held[0].reason
+        );
+
+        // Held on disk, not destroyed: the receipt is what makes removal
+        // safe, and there is no receipt.
+        let still = crate::outbox::list_pending(repo.path(), &coord1).unwrap();
+        assert_eq!(still.pending.len(), 1);
+        assert_eq!(still.pending[0].1.kind, "issue.acknowledged");
     }
 
     /// A receipt that cannot be written holds the candidate instead of
