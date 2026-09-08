@@ -709,7 +709,8 @@ reviewed source and its base. Linked validation checks:
 - where `M[p] = B[p]`, `C[p] = A[p]`; and
 - every remaining path is represented exactly once by an
   `overlap_resolutions` row containing `p`, `B[p]`, `A[p]`, `M[p]`, `C[p]`,
-  and the reviewer's explanation of the ordinary clean merge result.
+  and the reviewer's assertion that the two changes are semantically compatible
+  at that path, with enough rationale to review that assertion.
 
 There are no extra rows, and each row's entries must equal the fetched trees.
 Renames are represented by their deleted and added paths; modes, symlinks, and
@@ -717,7 +718,10 @@ submodule entries are compared without platform interpretation. This does not
 reconstruct a merge or demand a cross-host candidate object ID. It does make
 every tree entry not inherited verbatim from an unopposed parent explicit and
 independently checkable, so a reviewer cannot silently inject content into the
-merge candidate. An overlap row is disclosure, not permission to hand-edit: if
+merge candidate. In this tree relation, an overlap row means a
+both-sides-changed tree path; it is distinct from the scope-claim overlap defined
+in `AGENT_BUS.md` section 6.2. A tree-overlap row is disclosure, not permission
+to hand-edit: if
 ordinary Git cannot make the candidate without manual resolution, the author
 must publish a new reviewed source commit.
 
@@ -751,7 +755,7 @@ substantive review and expensive audit commands are not repeated for every new
 base.
 
 The registry is the reviewed product-tree file
-`Tools/agent-bus/protected-paths.json`. It is a versioned JSON object containing
+`tools/agent-bus/protected-paths.json`. It is a versioned JSON object containing
 an ordered `classes` array; each class has a stable `key`, a nonempty list of
 repository-relative path globs, and a nonempty list of landing checks shaped as
 `{ key, argv : List<Text> }`. Duplicate keys and ambiguous duplicate check keys

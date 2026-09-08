@@ -293,6 +293,18 @@ not make a known counterexample easier to admit. A limitation cannot excuse an
 unsound theorem, missing required case, disconnected certificate, trust-boundary
 expansion, or regression against a normative demand.
 
+A finding blocks when the nominated change regresses the selected baseline,
+falsifies one of its own or the corpus's claims, violates a current milestone or
+gate, or cannot satisfy the contract it declares. An explicitly scoped,
+internally sound incompleteness in new material is a follow-up when the missing
+property is neither claimed nor currently required. A pre-existing defect left
+unchanged does not become a blocker merely because the nomination passes near
+it. A defect outside `review_scope` is filed separately because the author has
+no authority to repair it in that nomination. If the candidate depends on that
+external defect being fixed, the unmet dependency or false candidate claim may
+still block; review must not instead demand an out-of-scope edit. A partial fix
+also must not claim that the wider issue is closed.
+
 Each accepted limitation is recorded in the authorization with its exact scope,
 why it is non-blocking now, and a bus issue or other durable follow-up naming an
 owner and closure condition. “Future work,” proof size, or schedule pressure
@@ -476,6 +488,12 @@ promise that independently correct components cannot interact badly. Broader
 integration, platform, differential, and performance suites may complete after
 landing. A failure opens an urgent defect and produces a forward repair or a
 clean revert; it does not retroactively pretend the review never happened.
+Normative prose and other non-typechecked artifacts often have no post-landing
+suite at all. Their backstops are the reviewer's inspection of every disclosed
+both-sides-changed row and later human or auditor review; changes in distinct
+files can still interact semantically without generating such a row. Carrying
+approval therefore reduces repeated mechanical work but never turns a clean Git
+merge into evidence that two normative changes agree.
 
 The source branch may advance between selection and the push. That is harmless:
 the reviewer merges the selected commit, not whatever the branch later names.
@@ -504,8 +522,12 @@ cannot block bus reads, coordination, host transfer, review, or landing.
 Reviewers never edit the prepared candidate tree. Linked validation compares
 its tree entries with `review_base`, the reviewed source, and `previous_main`:
 unopposed entries must come verbatim from the corresponding parent, and every
-both-sides-changed path must be exhaustively disclosed by an exact overlap row
-in the landing authorization. A merge requiring manual resolution goes back to
+both-sides-changed path must be exhaustively disclosed by an exact tree-overlap
+row in the landing authorization. Here tree-overlap means a path changed on both
+merge sides; it is distinct from the scope-claim overlap defined in
+`AGENT_BUS.md` section 6.2. Each row's rationale asserts that the two changes
+are semantically compatible at that path, rather than merely describing Git's
+result. A merge requiring manual resolution goes back to
 an author as a new source commit. This characterization is independent of the
 Git version that produced the clean merge and detects undisclosed candidate
 content without reconstructing a candidate object id.
@@ -573,7 +595,7 @@ Required checks are classified when nominated:
 - **post-merge checks** are broad corroboration allowed to finish after landing.
 
 The helper derives mandatory landing checks from the reviewed
-`Tools/agent-bus/protected-paths.json` registry in `previous_main`. An author
+`tools/agent-bus/protected-paths.json` registry in `previous_main`. An author
 cannot classify away current-tree validation for the proof
 kernel, agent-bus/schema/merge helper, serialization trust boundaries, or other
 registered critical surfaces. Ordinary leaf libraries do not inherit those
