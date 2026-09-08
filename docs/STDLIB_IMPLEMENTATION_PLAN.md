@@ -630,7 +630,8 @@ when it was checked, rather than that it passed.
    directly rather than assumed — all seven are imported by
    `Tools/AxiomAudit.lean`. It is also not evidence about the `@[extern]`
    boundary of §3.9, because an `@[extern]` is not an axiom.
-3. `python Tools/DocstringAudit.py` reports no unbacked claim.
+3. `cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin
+   docstring-audit` reports no unbacked claim.
 4. **Every** fixture under `Tests/Std/` elaborates, including all `#guard_msgs`
    rejection cases. This criterion previously named one of eight. Checked by
    confirming that *every* file under `Tests/Std/` produces an `olean`, not by
@@ -943,7 +944,7 @@ reader will want a reason for:
    rather than left implicit. §3.9.
 
 Found in a shared tool rather than in this library, and reported rather than
-changed: `Tools/DocstringAudit.py` defines `SELF_NAMING` to exempt a theorem's
+changed: the docstring audit defined `SELF_NAMING` to exempt a theorem's
 own docstring — its module comment says "a theorem's own docstring is exempt,
 because the theorem beneath it *is* the enforcement" — but the constant is never
 used, so that exemption is not implemented and the gate is stricter than it
