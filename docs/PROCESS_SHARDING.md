@@ -42,9 +42,12 @@ structure ProcessSignature where
   providers : ProviderDemandSummary
 
 structure ProcessShardCertificate (sig : ProcessSignature) where
-  private State : Type
-  private topology : OpenProcessGraph State
-  private realization : ProcessRealization topology
+  private Resources : Type
+  private resourceModel : ResourceModel Resources
+  private resources : Resources
+  private spec : @SpecProcess Resources resourceModel resources
+  private realization :
+    @ProcessRealization Resources resourceModel resources spec
   private localProof : LocalProcessCorrect realization
   public boundary : RealizesProcessSignature realization sig
   public providerOriginsExact :
@@ -53,9 +56,12 @@ structure ProcessShardCertificate (sig : ProcessSignature) where
 ```
 
 The public theorem type contains `sig`, including its semantic `behavior`, but
-not `topology`, `State`, a global registry, or the source of child processes. A
-body edit with the same behavioral and operational boundary rebuilds the shard
-certificate but does not alter its consumers.
+not the private resource model, `SpecProcess`, process plan, global registry, or
+the source of child processes. `ProcessRealization` is exactly the canonical
+spec-indexed carrier from [PROCESS.md](PROCESS.md#4-application-proof-package),
+not a second topology-indexed type with the same name. A body edit with the same
+behavioral and operational boundary rebuilds the shard certificate but does not
+alter its consumers.
 
 `ProviderDemandSummary` is lossless proof data, not a hash/count approximation:
 its family retains every origin ID and dependent descriptor. The canonical
@@ -70,7 +76,7 @@ relation, not merely an interface shape. The certificate's public theorem means:
 
 ```lean
 def RealizesProcessSignature
-    (realization : ProcessRealization topology)
+    (realization : ProcessRealization spec)
     (sig : ProcessSignature) : Prop :=
   ∀ execution, realization.Accepts execution →
     sig.behavior.Accepts
@@ -94,7 +100,7 @@ Each module owns only its local role keys:
 
 ```lean
 structure ProcessRegistryFragment where
-  namespace : StableScopeId
+  scopeId : StableScopeId
   entries : Array ProcessRegistryEntry
   unique : PairwiseDistinct entries.key
 

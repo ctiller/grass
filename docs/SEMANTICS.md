@@ -469,9 +469,21 @@ structure ExtensionAuthorityRegistry where
   complete : forall entry, entry ∈ entries
   unique : entries.Nodup
   owner : Entry -> ExtensionAuthorityOwner
-  key : Entry -> StableId := fun entry => (owner entry).stableId
-  keyInjective : Function.Injective key
-  freshFromBuiltins : forall entry, key entry ∉ builtinRequirementAuthorityKeys
+  ownerStableIdInjective :
+    Function.Injective (fun entry => (owner entry).stableId)
+  ownerStableIdFreshFromBuiltins : forall entry,
+    (owner entry).stableId ∉ builtinRequirementAuthorityKeys
+
+def ExtensionAuthorityRegistry.key
+    (registry : ExtensionAuthorityRegistry) (entry : registry.Entry) : StableId :=
+  (registry.owner entry).stableId
+theorem ExtensionAuthorityRegistry.keyInjective
+    (registry : ExtensionAuthorityRegistry) : Function.Injective registry.key :=
+  registry.ownerStableIdInjective
+theorem ExtensionAuthorityRegistry.freshFromBuiltins
+    (registry : ExtensionAuthorityRegistry) : forall entry,
+      registry.key entry ∉ builtinRequirementAuthorityKeys :=
+  registry.ownerStableIdFreshFromBuiltins
 
 structure ExtensionAuthorityContainedIn
     (registry : ExtensionAuthorityRegistry)
@@ -502,11 +514,11 @@ structure ExtensionAuthorityUnionPlan
     (registries : List ExtensionAuthorityRegistry)
     (compatible : PairwiseExtensionAuthorityKeysDisjointOrExact registries) where
   merged : ExtensionAuthorityRegistry
-  include : forall registry, registry ∈ registries ->
+  embeddingFor : forall registry, registry ∈ registries ->
     ExtensionAuthorityEmbedding registry merged
   coverage : forall entry : merged.Entry,
     exists registry member source,
-      (include registry member).entry source = entry
+      (embeddingFor registry member).entry source = entry
 
 def ExtensionAuthorityRegistry.normalize
     (registries : List ExtensionAuthorityRegistry)
@@ -522,8 +534,8 @@ def ExtensionAuthorityRegistry.mergePlan
     (compatible : ExtensionAuthorityKeysDisjointOrExact left right) :
     ExtensionAuthorityUnionPlan [left, right] compatible.asPairwise
 def ExtensionAuthorityRegistry.merge ... := (mergePlan ...).merged
-def ExtensionAuthorityRegistry.leftEmbedding ... := (mergePlan ...).include ...
-def ExtensionAuthorityRegistry.rightEmbedding ... := (mergePlan ...).include ...
+def ExtensionAuthorityRegistry.leftEmbedding ... := (mergePlan ...).embeddingFor ...
+def ExtensionAuthorityRegistry.rightEmbedding ... := (mergePlan ...).embeddingFor ...
 theorem ExtensionAuthorityRegistry.normalize_proof_irrelevant ...
 theorem ExtensionAuthorityRegistry.normalize_permutation ...
 
@@ -569,7 +581,7 @@ structure ProviderBindingView where
 opaque RequirementOriginScope (authority : RequirementAuthority) : Type
 
 namespace RequirementOriginScope
-def namespace : RequirementOriginScope authority -> ScopeId
+def scopeId : RequirementOriginScope authority -> ScopeId
 def Slot : RequirementOriginScope authority -> Type
 def slots (scope : RequirementOriginScope authority) : List scope.Slot
 theorem complete (scope : RequirementOriginScope authority) :
@@ -584,7 +596,7 @@ structure ProviderDemandDescriptor (authority : RequirementAuthority) where
   capabilityKey : ProviderRequirementKey authority
   statement : ProviderBindingView -> Prop
 
-opaque ProviderDemand (authority : RequirementAuthority) : Type
+opaque ProviderDemand (authority : RequirementAuthority) : Type 1
 def ProviderDemand.introduce
     (scope : RequirementOriginScope authority) (slot : scope.Slot)
     (descriptor : ProviderDemandDescriptor authority) : ProviderDemand authority
@@ -601,7 +613,7 @@ structure RequirementOriginScopeEmbedding
   targetScope : RequirementOriginScope
     (.extension (authority.reindex embedding))
   slot : scope.Slot ≃ targetScope.Slot
-  namespaceExact : targetScope.namespace = scope.namespace
+  scopeIdExact : targetScope.scopeId = scope.scopeId
   slotKeyExact : forall sourceSlot,
     targetScope.slotKey (slot sourceSlot) = scope.slotKey sourceSlot
 
@@ -660,7 +672,7 @@ theorem SameRequirementOriginProvenance.viewExact
     (same : SameRequirementOriginProvenance left right) :
     left.view = right.view
 
-opaque ProviderDemandFamily : Type
+opaque ProviderDemandFamily : Type 1
 
 def ProviderDemandFamily.authorityRegistry :
     ProviderDemandFamily -> ExtensionAuthorityRegistry
@@ -699,7 +711,7 @@ theorem ProviderDemandFamily.lookup_from_support ...
 theorem ProviderDemandFamily.support_exact ...
 theorem ProviderDemandFamily.support_noExtras ...
 structure ProviderDemandFamily.AuthorityEquiv
-    (left right : ProviderDemandFamily) : Prop where
+    (left right : ProviderDemandFamily) : Type 1 where
   commonRegistry : ExtensionAuthorityRegistry
   includeLeft : ExtensionAuthorityEmbedding left.supportRegistry commonRegistry
   includeRight : ExtensionAuthorityEmbedding right.supportRegistry commonRegistry
@@ -763,7 +775,7 @@ def ProviderDemandFamily.singleton
     (demand : ProviderDemand authority) : ProviderDemandFamily
 def ProviderDemandFamily.ofScope
     (scope : RequirementOriginScope authority)
-    (descriptor : scope.Slot -> ProviderDemandDescriptor) : ProviderDemandFamily
+    (descriptor : scope.Slot -> ProviderDemandDescriptor authority) : ProviderDemandFamily
 def ProviderDemandFamily.union
     (left right : ProviderDemandFamily)
     (compatible : OriginsDisjointOrSameOriginProvenance left right) :
@@ -849,6 +861,10 @@ disagree about a fact that authority equivalence already fixes.
 
 `StableId` is serialization and collision-diagnostic data, not extension
 authority. `ExtensionAuthorityOwner` is opaque and has no public constructor.
+The registry key is definitionally `owner.stableId`; it is not a constructor
+field. Injectivity and built-in freshness are therefore stated directly over
+that projection. A package cannot hide a duplicate owner ID or a collision with
+a built-in by supplying an unrelated comparison key.
 The `declare_extension_authority name => stableId` command is the sole creation
 surface: its checked elaborator emits a fresh nominal owner declaration and the
 kernel-checked stable-ID projection theorem. It does not accept a caller-
@@ -858,7 +874,8 @@ owner witnesses, and every embedding preserves it. Reusing an imported owner's
 published witness is an explicit adoption of that authority; reproducing its
 string key alone is insufficient. The command implementation and generated
 declaration shape are trust-audited, and negative fixtures attempt duplicate-key
-owners from separate modules. Normalization deduplicates equal keys only under
+owners from separate modules as well as the impossible mutation which adds an
+overriding registry key. Normalization deduplicates equal keys only under
 the typed owner-equality proof and retains the nominal owner in the merged
 entry. `includeCompatible` requires key *and owner* containment; key occurrence
 alone cannot construct an embedding.
@@ -895,7 +912,8 @@ differently indexed packages. Raw family equality additionally requires equal
 into a larger registry is semantically equivalent, not equal, to its source.
 `supportRegistry` is the minimal owner registry induced by extension demands
 which actually occur in `lookup`; its no-extras theorem excludes unused ambient
-entries. `AuthorityEquiv` is the stronger certificate-facing relation: it
+entries. `AuthorityEquiv` is the stronger proof-relevant, `Type`-valued
+certificate-facing relation: it
 embeds both support registries into one registry and requires dependent lookup
 correspondence there. It is reflexive, symmetric, and transitive. Transitivity
 normalizes only the three finite supports, so unrelated conflicting entries in

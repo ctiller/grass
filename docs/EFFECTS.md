@@ -138,6 +138,40 @@ separate theory, and the specification selects a finite suite of independently
 keyed propositions about that theory:
 
 ```lean
+universe uDemand uContext uHistory uChain
+
+opaque PendingHistoryFrontierRequirement
+    (requirements : ProviderDemandFamily)
+    {Demand : Type uDemand} {Context : Type uContext}
+    (demand : Demand) (before : Context)
+    {History : Type uHistory} (history : History) : Type 1
+def PendingHistoryFrontierRequirement.originId :
+    PendingHistoryFrontierRequirement requirements demand before history ->
+      RequirementOriginId
+def PendingHistoryFrontierRequirement.memberDemand
+    (pending : PendingHistoryFrontierRequirement
+      requirements demand before history) : SomeProviderDemand
+theorem PendingHistoryFrontierRequirement.memberExact
+    (pending : PendingHistoryFrontierRequirement
+      requirements demand before history) :
+    requirements.lookup pending.originId = some pending.memberDemand
+
+opaque PendingInfiniteFrontierRequirement
+    (requirements : ProviderDemandFamily)
+    {Demand : Type uDemand} {Context : Type uContext}
+    (demand : Demand) (before : Context)
+    {Chain : Type uChain} (chain : Chain) : Type 1
+def PendingInfiniteFrontierRequirement.originId :
+    PendingInfiniteFrontierRequirement requirements demand before chain ->
+      RequirementOriginId
+def PendingInfiniteFrontierRequirement.memberDemand
+    (pending : PendingInfiniteFrontierRequirement
+      requirements demand before chain) : SomeProviderDemand
+theorem PendingInfiniteFrontierRequirement.memberExact
+    (pending : PendingInfiniteFrontierRequirement
+      requirements demand before chain) :
+    requirements.lookup pending.originId = some pending.memberDemand
+
 structure EffectTheory (family : EffectFamily) where
   Context : Type w
   Observation : Type x
@@ -178,7 +212,8 @@ structure EffectTheory (family : EffectFamily) where
     exists history : History demand before, outcome history = some result
   pendingRequirement : forall {demand before}
       (history : History demand before), outcome history = none ->
-    PendingFrontierRequirement family.requirements demand before history
+    PendingHistoryFrontierRequirement
+      family.requirements demand before history
   infiniteAllowed : forall {demand before},
     InfinitePendingExtensionChain
       (History demand before) (@Extends demand before) (@outcome demand before) -> Prop
@@ -186,7 +221,8 @@ structure EffectTheory (family : EffectFamily) where
       (chain : InfinitePendingExtensionChain
         (History demand before) (@Extends demand before) (@outcome demand before)),
     infiniteAllowed chain ->
-    PendingFrontierRequirement family.requirements demand before chain
+    PendingInfiniteFrontierRequirement
+      family.requirements demand before chain
   behaviorNonempty : forall {demand before}, enabled demand before ->
     Or (exists result, AllowedResult demand before result)
        (exists chain, infiniteAllowed chain)
@@ -230,20 +266,26 @@ belong to the same coherent operation witness. Emitted observations grow by
 prefix, and a returned history cannot extend further.
 
 The enabled root is inhabited, unchanged, silent, and nonterminal. Every
-nonterminal history carries a neutral typed `PendingFrontierRequirement` whose
-key and origin are members of `family.requirements`. The Process adapter must
-realize that exact progress policy; an anonymous `Unit`/`True` reason cannot make
-a vacuous effect lawful. Whether the policy requires a response or permits an
-environment-controlled infinite wait belongs to the selected requirement and
-later Process proof. `AllowedResult` is explicit; `outcomeSound` forbids extra
-results and `outcomeComplete` prevents a theory from silently omitting an
-allowed failure or nondeterministic branch. Every enabled request has an allowed
-result or a constructive infinite pending chain whose exact pending policy is in the
-requirement envelope. More strongly, every admitted nonterminal history either
-has a proper coherent extension or begins an allowed infinite chain. Thus a
-theory cannot hide a dead finite sibling behind a different successful branch.
-Every theorem about a caller ranges over every history branch. A test run,
-oracle, or selected successful response cannot prove the universal theorem.
+nonterminal history carries a neutral typed `PendingHistoryFrontierRequirement`
+whose key and origin are members of `family.requirements`; every admitted
+infinite pending chain separately carries a
+`PendingInfiniteFrontierRequirement` from that same family. These are distinct
+owner-neutral carriers because a finite history and an infinite extension chain
+are different witness types. Their constructors retain the exact member origin;
+they are not arbitrary predicates selected by an effect-theory author. The
+Process adapter must realize those exact progress policies; an anonymous
+`Unit`/`True` reason cannot make a vacuous effect lawful. Whether a policy
+requires a response or permits an environment-controlled infinite wait belongs
+to the selected requirement and later Process proof. `AllowedResult` is
+explicit; `outcomeSound` forbids extra results and `outcomeComplete` prevents a
+theory from silently omitting an allowed failure or nondeterministic branch.
+Every enabled request has an allowed result or a constructive infinite pending
+chain whose exact pending policy is in the requirement envelope. More strongly,
+every admitted nonterminal history either has a proper coherent extension or
+begins an allowed infinite chain. Thus a theory cannot hide a dead finite sibling
+behind a different successful branch. Every theorem about a caller ranges over
+every history branch. A test run, oracle, or selected successful response cannot
+prove the universal theorem.
 
 Expected operational failure is normally a constructor of
 `family.Result demand`. For example a write result distinguishes accepted
@@ -564,9 +606,35 @@ may use a sub-row and be lifted explicitly into a larger row:
 structure EffectSubrow (small large : EffectRow) where
   embed : forall family, HasEffect family small -> EffectEmbedding family large
 
+def EffectSubrow.refl (row : EffectRow) : EffectSubrow row row
+def EffectSubrow.trans
+    (first : EffectSubrow small middle)
+    (second : EffectSubrow middle large) : EffectSubrow small large
+
 def EffectProgram.weaken
     (embedding : EffectSubrow small large) :
     EffectProgram small alpha -> EffectProgram large alpha
+
+theorem EffectProgram.weaken_refl
+    (program : EffectProgram row alpha) :
+    EffectProgram.weaken (EffectSubrow.refl row) program = program
+theorem EffectProgram.weaken_trans
+    (first : EffectSubrow small middle)
+    (second : EffectSubrow middle large)
+    (program : EffectProgram small alpha) :
+    EffectProgram.weaken second (EffectProgram.weaken first program) =
+      EffectProgram.weaken (first.trans second) program
+theorem EffectProgram.weaken_pure
+    (embedding : EffectSubrow small large) :
+    EffectProgram.weaken embedding (EffectProgram.pure value) =
+      EffectProgram.pure value
+theorem EffectProgram.weaken_bind
+    (embedding : EffectSubrow small large)
+    (program : EffectProgram small alpha)
+    (next : alpha -> EffectProgram small beta) :
+    EffectProgram.weaken embedding (program >>= next) =
+      (EffectProgram.weaken embedding program >>= fun value =>
+        EffectProgram.weaken embedding (next value))
 
 structure EffectRowModelEmbedding
     (rows : EffectSubrow small large)
@@ -575,13 +643,24 @@ structure EffectRowModelEmbedding
   worldRelation : smallModel.World -> largeModel.World -> Prop
   enabledExact : EmbeddedEnabledPredicatesAgree rows worldRelation
   historiesExact : EmbeddedOperationHistoriesAgree rows worldRelation
+
+def EffectRowModelEmbedding.refl
+    (model : EffectRowModel row) :
+    EffectRowModelEmbedding (EffectSubrow.refl row) model model
+def EffectRowModelEmbedding.trans
+    (first : EffectRowModelEmbedding firstRows smallModel middleModel)
+    (second : EffectRowModelEmbedding secondRows middleModel largeModel) :
+    EffectRowModelEmbedding (firstRows.trans secondRows) smallModel largeModel
 ```
 
 Dependent-result transport and requirement inclusion are derived from the exact
 family embeddings; authors do not fill proof fields restating them. Syntax
-weakening needs only `EffectSubrow`. A theorem preserving `Prefixes`/`Runs`
-additionally consumes `EffectRowModelEmbedding`, because family membership alone
-cannot prove that two independently chosen worlds and rooted histories agree.
+weakening needs only `EffectSubrow`. Its identity, composition, `pure`, and
+`bind` laws make weakening a functorial monad morphism rather than an opaque
+syntax rewrite. A theorem preserving `Prefixes`/`Runs` additionally consumes
+`EffectRowModelEmbedding`, whose identity and composition laws compose the
+corresponding world relations. Family membership alone cannot prove that two
+independently chosen worlds and rooted histories agree.
 
 The row is a declared capability envelope, not a claim that every possible
 execution reaches every family. This distinction avoids an impossible finite
@@ -855,6 +934,13 @@ structure EffectPlanRealizedByView
   privateProductivity : EveryNonterminalPrivateViewSegmentHasFiniteDecreasingRankOrProducesHistoryExtension
     view plan.handoff.model
 
+theorem EffectProviderDemandDescriptor.jointlyExhaustive
+    (plan : EffectLoweringPlan identity source sourceModel)
+    (view : ProviderBindingView) :
+    (forall slot : (EffectRequirementOriginScope plan.core).Slot,
+      (EffectProviderDemandDescriptor plan.handoff slot).statement view) <->
+      EffectPlanRealizedByView plan view
+
 theorem EffectLoweringPlan.providerDemands_certified_iff :
     plan.providerDemands.CertifiedBy view <->
       (plan.handoff.requirements.CertifiedBy view /\
@@ -883,7 +969,10 @@ drop the inherited half.
 
 `EffectPlanRealizedByView` is Effect-owned and mentions only the neutral binding
 snapshot. Every fresh realization-demand statement is a local projection of this
-structure.
+structure. `jointlyExhaustive` states the converse as well: the conjunction over
+all finite origin-scope slots is exactly the complete structure. The two
+`CertifiedBy` equivalences derive from that theorem, so an empty or incomplete
+slot family cannot certify the realization predicate vacuously.
 Act 3 connects the selected physical environment to this predicate through
 `providerEnv.bindingView`; environment-wide ABI/import/coexistence coherence
 remains a separate Platform proof.
@@ -1139,7 +1228,9 @@ The reusable core proofs are conventional structural inductions:
 4. handler composition: relational composition and the lifting theorem;
 5. requirement preservation: finite-set union/subset algebra; and
 6. sequential adaptation: simulation on pure/request constructors plus the
-   process adapter's occurrence invariant.
+   process adapter's occurrence invariant; and
+7. row weakening: structural induction for identity, composition, `pure`, and
+   `bind`, plus relational composition for row-model embeddings.
 
 Automation may construct and kernel-check these certificates. It may normalize
 syntax, solve finite row membership, transport dependent results through proved
@@ -1185,15 +1276,18 @@ The first implementation is incomplete until checked fixtures demonstrate:
    because this body reaches no request.
 2. Two writes retain source order through `bind`, `mapM`, and `Vec.traverse`.
 3. A result-dependent branch is proved for every permitted success and failure,
-   including an infinite result type without enumeration; removing one
-   `AllowedResult` branch violates outcome completeness.
+   including an infinite result type without enumeration. Removing one
+   `AllowedResult` disjunct while retaining a history which returns that result
+   violates `outcomeSound`; retaining an allowed result while removing every
+   history which returns it violates `outcomeComplete`.
 4. An outstanding request admits a pending prefix without fabricating a result.
    The same fixture makes an unenabled request unable to construct
    `EffectProgramAdequate` or enter a DSL-capture/model junction. An enabled root
    with no terminal history must carry a real member
-   `PendingFrontierRequirement` and an allowed constructive infinite chain, not
-   an anonymous proposition. The same pending-only program cannot satisfy a
-   terminating specification's `EffectProgramMeetsProgress`.
+   `PendingHistoryFrontierRequirement`, and its allowed constructive infinite
+   chain must carry a real member `PendingInfiniteFrontierRequirement`; neither
+   may be an anonymous proposition. The same pending-only program cannot satisfy
+   a terminating specification's `EffectProgramMeetsProgress`.
    Two individually valid prefixes from sibling history branches cannot form an
    `EffectPrefixExtends` chain. A two-history model with universal `Extends`
    and unequal observation prefixes is rejected by
@@ -1234,6 +1328,8 @@ The first implementation is incomplete until checked fixtures demonstrate:
    A second extension authority declared with the same serialized `StableId`
    cannot satisfy owner compatibility or `includeCompatible`; deliberately
    importing the first owner's opaque declaration is the only way to adopt it.
+   A registry literal has no independent key field to override; a mutation which
+   adds one and uses it to hide that collision is rejected.
    `AuthorityEquiv.trans` succeeds for three empty families whose ambient
    registries contain unused mutually conflicting owners, because equivalence
    composes their exact empty support registries rather than ambient storage.
@@ -1257,6 +1353,10 @@ The first implementation is incomplete until checked fixtures demonstrate:
    rejected later by `PlatformPlan.ProviderEnv`.
 8. Syntax weakening derives result/requirement preservation without authored
    fields; behavioral preservation requires and consumes a row-model embedding.
+   Identity weakening is the identity, two successive weakenings equal their
+   direct composition, and weakening commutes with both `pure` and dependent
+   `bind`. Row-model embedding identity and composition preserve those laws at
+   `Prefixes`/`Runs`.
 9. A handler discharges and introduces exactly its declared requirement delta;
    omission of one lower requirement fails, and an Effect handler cannot claim
    to discharge an obligation-, memory-, ABI-, or provider-owned key. The
@@ -1267,6 +1367,9 @@ The first implementation is incomplete until checked fixtures demonstrate:
    Exactness quantifies over every `ProviderDemandView`, not merely selected
    members: omitting one semantically required view makes the reverse direction
    of `origins_exact` false even when every retained origin remains registered.
+   Removing a realization-demand slot or its projection prevents
+   `EffectProviderDemandDescriptor.jointlyExhaustive`; an empty slot family cannot
+   certify a nontrivial `EffectPlanRealizedByView`.
 10. Handler identity and two-stage composition agree with direct handling in
     both complete and pending-prefix behavior directions.
 11. Graphics-only lowering leaves storage abstract, followed by storage-only
@@ -1302,8 +1405,10 @@ The first implementation is incomplete until checked fixtures demonstrate:
     complete dependent indices of `ClosedBlendProvenance`, `ClosedBlend`,
     `PortableProcessModel.processOrigin`, `ProjectedDriverCertificate.processOrigin`,
     `MachineSubsystemRealization`, `MachineBlend`,
-    `RegisteredDirectOperationModel.register`, disposition transport, and the
-    final staged-family connection. Every displayed application elaborates.
+    `RegisteredDirectOperationModel.register`, the `Type`-valued
+    `ProviderDemandFamily.AuthorityEquiv`, disposition transport, the two pending
+    frontier requirement carriers, row-weakening identity/composition/monad laws,
+    and the final staged-family connection. Every displayed application elaborates.
     Omitting a boundary certificate, registry certificate, provider certificate,
     exact origin, or forwarded-family equivalence fails in that fixture.
 
