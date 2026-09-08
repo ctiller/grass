@@ -126,6 +126,16 @@ engine's reuse claims and cache-key sufficiency.
 Published-corpus lint also rejects audience/workstation idioms used as evidence,
 including “worked on my machine,” in addition to literal private topology.
 
+`corpus-links-v1` scans every Markdown file recursively below the selected
+repository root except files below `.git`, `.lake`, and `.claude` directories.
+It recognizes inline Markdown link and image targets, removes an optional angle
+bracket wrapper and fragment, percent-decodes the path, and ignores empty,
+fragment-only, or URI-scheme targets. It accepts exactly when every remaining
+target resolves literally relative to its containing document. A missing target,
+unreadable input, invalid encoding/path, or inability to enumerate the selected
+root is rejection or an explicit input error, never a clean result over an
+assumed corpus.
+
 ## 8. Repository tools and staged self-hosting
 
 Correctness-critical repository tooling is production software. A tool is
@@ -137,6 +147,17 @@ a human and whose output cannot enter any of those uses is outside this
 definition. Thus a bus reducer, review gate, linker, emitter, cache validator,
 compiler, or audit command can invalidate the evidence chain even when it is
 not shipped inside the user's program.
+
+This section governs tooling whose behavior Grass specifies and whose
+implementation Grass may replace. It does not claim a Grass behavioral contract
+for pinned external dependencies such as system Git, the Lean/Lake toolchain,
+PowerShell, Python, the differential oracles NASM, NDISASM, and `ml64`, the
+operating system, or hardware. Those dependencies enter the per-profile trust
+ledger in section 6 at an exact selected revision, with their validation evidence
+and downstream dependence stated explicitly. If Grass wraps one behind a
+specified public boundary, that wrapper becomes correctness-critical under the
+output-use rule below; the external implementation beneath the boundary remains
+a declared assumption until a separately reviewed trust transition removes it.
 
 The strongest downstream use fixes the assurance floor. Review or nomination
 evidence requires the language-independent contract, reproducible invocation,

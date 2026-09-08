@@ -111,6 +111,11 @@ retained by `provenanceProjection`. A schema revision must classify every new
 field before it can be emitted. Thus tool versions remain reviewable without
 making two implementations disagree by construction.
 
+Moving an existing field out of `semanticProjection`, or otherwise narrowing a
+declared semantic projection, is a design change with the same burden review as
+weakening a theorem-demand family. It may not be used to close or bypass an open
+differential disagreement on that field.
+
 ## 3. Phase reports and acceptance
 
 ### 3.1 Mirror
