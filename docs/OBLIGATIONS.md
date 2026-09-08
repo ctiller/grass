@@ -27,6 +27,21 @@ Every semantic transition states how it transforms the ledger. It may preserve,
 create, discharge, split, join, or transfer obligations only through the owning
 protocol theorem. Dropping, duplicating, or fabricating obligations is forbidden.
 
+Ledger effects are sequenced at explicit commit points in the operation's
+ordered effect frontier. A delta whose commit point precedes a later fault
+remains visible; a delta scheduled at or after an access that faults is not
+applied. In particular, one instruction-wide delta scheduled after all accesses
+does not apply when an earlier access fails. A fault may create a distinct
+fault-handling obligation only through the fault protocol's own typed delta and
+applicability theorem. There is no generic recovery fold that guesses whether a
+failed operation created, discharged, or abandoned a duty.
+
+The memory/operation proof package relates each possible fault frontier to the
+exact committed ledger prefix and proves every retained or fault-created delta
+well formed and applicable. It includes discriminating fixtures for faults
+before, at, and after a ledger commit point; merely showing that one successful
+path updates the ledger is insufficient.
+
 CFG block contracts list obligations allowed and forbidden on entry and exit.
 Calls and jumps prove ledger compatibility. Macros may introduce obligations and
 must expose their interruption/fault/concurrency interactions; constructs such

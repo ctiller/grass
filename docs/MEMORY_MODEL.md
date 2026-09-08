@@ -288,6 +288,25 @@ private append-only diagnostic ledger. They cannot be erased or masked.
 `VerifiedProgram` proves the ledger remains empty and that only spec-allowed
 fault outcomes occur.
 
+Every operation has one ordered **commit frontier** over its declared memory,
+event, and obligation subeffects. A fault or denied access exposes exactly the
+prefix before that frontier and prevents every later subeffect from committing.
+A denial at substep `i` records that attempted access and its violation; an
+environment fault declared for a later substep is unreachable and is not also
+recorded. A fault is attributed to the denied access only when the ISA or API
+profile identifies that same attempted substep as its faulting operation.
+Thus an out-of-range or stale fault index is invalid profile input, never a
+request to complete the whole operation.
+
+The profile supplies the ordered visibility relation for partial or restartable
+operations. It must state which reads, writes, events, and obligation deltas are
+visible at each possible frontier. The common stepper consumes that relation;
+it may not continue after denial, discard an observed fault, or infer a later
+fault merely because one was offered by the environment. Required negative
+fixtures cover denial before a declared fault, an invalid fault index, and a
+post-denial access that must not run. Positive fixtures cover a fault at the
+exact attempted substep and every declared partial-completion frontier.
+
 An external contract violation terminates modeled assurance at that boundary:
 the prior prefix remains proved, while no post-boundary functional claim is
 made. A real model/hardware discrepancy invalidates the affected profile and
