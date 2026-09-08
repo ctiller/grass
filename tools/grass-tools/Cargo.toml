@@ -2,7 +2,7 @@
 name = "grass-tools"
 version = "0.1.0"
 edition = "2021"
-description = "Grass validation and audit tools: source and docstring audits over the Lean tree"
+description = "Grass validation and audit tools: differential checks against independent assemblers and disassemblers, machine probes, and docstring audits over the Lean tree"
 
 # Each tool is a self-contained binary with no shared library. The scripts these
 # replace were self-contained too, and each is invoked independently by
@@ -15,13 +15,34 @@ description = "Grass validation and audit tools: source and docstring audits ove
 # here. That is what retires the checked-in Lean file it used to shell out to.
 #
 # This crate is where the remaining validation tools land as they are ported and
-# their equivalence against the originals is demonstrated. It carries one binary
-# today rather than a placeholder for nine, because a `[[bin]]` entry for a tool
-# nobody has verified is a claim this file cannot back.
+# their equivalence against the originals is demonstrated. A `[[bin]]` entry is
+# a claim that the equivalence has been shown, so an entry appears only once
+# something has shown it. For the four x86 tools below that something is
+# `equivalence/run.sh`, which runs the Python original and the binary here over
+# the same generated corpus and byte-compares stdout, stderr and the exit
+# status. It covers the real corpus, eight corpora carrying one injected defect
+# each -- so the comparison is known to be able to fail -- and the case where
+# the oracle is absent, which both must refuse rather than pass over.
 
 [[bin]]
 name = "docstring-audit"
 path = "src/bin/docstring_audit.rs"
+
+[[bin]]
+name = "x86-nasm-differential"
+path = "src/bin/x86_nasm_differential.rs"
+
+[[bin]]
+name = "x86-ndisasm-differential"
+path = "src/bin/x86_ndisasm_differential.rs"
+
+[[bin]]
+name = "x86-decode-differential"
+path = "src/bin/x86_decode_differential.rs"
+
+[[bin]]
+name = "x86-machine-probe"
+path = "src/bin/x86_machine_probe.rs"
 
 [dependencies]
 regex = "1"
