@@ -973,50 +973,56 @@ one outright defect that had already merged — see §3.11's denial row.
 
   The second is the better shape. Neither should be taken without the design owner,
   because both change `MemoryState`.
-- **`MemoryState.aliases` records an offset now, and nothing consults it.** The
-  representation half of this gap is closed and the deciding half is not, which is
-  the distinction worth keeping: `AliasEdge` carries a `delta : Int`, `AliasHop`
-  carries the shift, and `SharesBytesAt` accumulates it along a path, with
-  `Tests/Memory/Placement.lean` demonstrating a view mapped 2048 bytes in, its
-  negation at zero, the reverse hop at `-2048`, and two hops composing to 2304.
+- ~~**`MemoryState.aliases` records no offset mapping.**~~ Closed for authority and
+  open for conflicts, which is a real split rather than a hedge.
 
-  **`AuthorizedAt` and `grantsOver` still use the unoffset form.** `AuthorizedAt`
-  compares a grant's range to an *offset* with `Covers`, and `grantsOver` compares
-  ranges with `Meets`, across aliased allocations — so an authority decision still
-  assumes aliased allocations agree offset for offset, and a view mapped at a
-  non-zero file offset is still decided wrongly. What changed is that the model can
-  now *say* what the right answer is. That is expressive power, not a repair, and
-  calling it one would be this corpus's "disclosed gap treated as a closed one"
-  applied to the entry recording the gap.
+  `AliasEdge` carries a `delta : Int`, `AliasHop` carries the shift, `SharesBytesAt`
+  accumulates it along a path, and `MemoryState.AuthorizedAt`'s coverage clause is
+  `CoversAcrossAliases`, which moves a grant's range into the access allocation's
+  coordinates before comparing. `Tests/Memory/Placement.lean` has the pair that shows
+  it is a fix and not merely a tightening: the old `Covers` admitted a grant at the
+  view's own offset zero — both numbers being zero — and refused the grant at the
+  view's offset 2048, which is the one that actually reaches the buffer's first byte.
+  The new clause does the opposite in both cases, and `SharesBytes` is true of both
+  grants, so the offset is the whole of the difference.
 
-  Two separate relations, because the two callers want opposite conservatism.
-  `AliasLinked` is the old relation unchanged — same storage at all — and
-  `SharesBytes` still traverses it, which is what conflict detection asks and where
-  more sharing is safe. `SharesBytesAt` answers at what offset, which is what
-  authority asks and where a wrong offset admits an access a grant does not cover.
-  A single predicate would have to pick a direction to be conservative in.
+  **`aliasShift?` is where an inconsistent alias graph is refused.** `SharesBytesAt`
+  holds at every shift some path witnesses and deliberately chooses between none of
+  them; a profile may declare a cycle that does not close at zero. Picking the first
+  path, the shortest, or zero would each be [FOUNDATION.md](FOUNDATION.md) law 8's
+  permissive fallback, so the answer is `none` and the caller refuses.
 
-  **`SharesBytesAt` holds at every shift some path witnesses**, and a profile can
-  declare a cycle that does not close at zero. It does not resolve that; the caller
-  needing one answer owes the refusal, which is [FOUNDATION.md](FOUNDATION.md) law
-  8's direction. That refusal is unwritten, and it is what the deciding half needs
-  before `AuthorizedAt` can move onto the offset-aware form.
+  **Three things this did not close, and the first is the one to read.**
 
-  This entry named `AuthorizedBy`, which nothing declares, and gave it operations the
-  real predicate does not perform. It is the record of this layer's largest open gap,
-  so a reader chasing it was sent to a name that does not exist.
-  `Tools/CitationAudit.py` cannot see a bare token with no dot and no underscore, and
-  its self-test asserts that blind spot as permanent — which is right as a limit and
-  is why three of this round's findings were prose no gate could reach.
-- ~~**`AccessDescriptor.WellFormedIn.rangeInProvenance` is self-certifying.**~~ Half
-  closed. `denialOf` compares `provenance.rootExtent` to the allocation record's
-  `extent` and records `provenanceExtentMismatch` when they differ, so a descriptor
-  no longer supplies the bound it is checked against. It remains a recorded violation
-  rather than a rejection, which is `denialOf`'s shape for every access-time failure.
+  1. ~~`ByteRange.shiftBy` returned `none` when a shifted range would start below
+     zero, and that is not monotone.~~ A container starts *earlier* than what it
+     contains, so a grant's range could fail to shift while a part of it succeeded,
+     making "the part is covered, therefore the source is" false — which is
+     `splitGrant?_creates_no_authority`. **A split would have created authority.** It
+     clips now. Found by a proof failing to close, not by review; the definition was
+     wrong and the missing lemma was a symptom.
+  2. **Two clauses of `LoanMapLaws` are narrowed to shift zero** — the join and
+     transfer directions. That is a §10 required-proof-package item, so the narrowing
+     is written into the law's own statement rather than hidden in a lemma. The
+     general join case needs decomposing a *joined* range across a non-zero shift and
+     is unproved. The split direction needed no hypothesis, because
+     `coversAcrossAliases_mono` holds unconditionally.
+  3. **`grantsOver` and `MayLend` still compare ranges without the offset**, and that
+     is deliberate. They ask which grants *might* overlap, so ignoring the offset
+     over-includes, and over-including is what conflict detection wants: a grant a
+     precise comparison would exclude stays in the list and freezes something it need
+     not have, which costs progress and never soundness. **The same `none` must make
+     `AuthorizedAt` refuse and `grantsOver` keep**, and writing that down was most of
+     the design work. Making them precise means deciding what an undeterminable
+     offset does to a *conflict*, which is a different question from what it does to
+     an authorization and one this layer has not answered.
 
-  Provenance `path` step extents are still unchecked: nothing requires a `field` step
-  at `⟨2048, 64⟩` to correspond to anything, and `Provenance.Nested` relates the
-  steps to each other and to `rootExtent` only.
+  Six authority theorems now take an `hshift` hypothesis. They are the ones that
+  assumed offset agreement silently: `authorizedAt_of_covering` concluded that a
+  grant covering offset `i` authorizes offset `i` under an aliased provenance, which
+  is true exactly when the two agree offset for offset and was stated as though it
+  were true always.
+
 - **`ByteRange.Contains` and `ByteRange.Meets` disagree about one past the end.**
   `Contains` places `empty r.stop` inside `r`, which is what a bounds check wants;
   `Meets` places it outside, which is what an authority check wants. Both cite §5.1.
