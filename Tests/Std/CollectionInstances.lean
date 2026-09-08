@@ -1,4 +1,5 @@
 import Grass.Std.Logical.Bag
+import Grass.Std.Logical.Vec
 import Grass.Std.Logical.FiniteMap
 
 /-!
@@ -149,5 +150,45 @@ example (k : Nat) : (∅ : FiniteMap Nat Nat).lookup k = none := by
   simp only [FiniteMap.lookup_empty]
 
 example : (∅ : FiniteMap Nat Nat).IsEmpty := by simp
+
+/-! ## Confluence, because the bridges rewrite towards different targets
+
+Three bridges normalise towards `0` and one towards `empty`, and `Vec`'s three
+normalise towards `Vec.empty`. Different targets in one `simp` set is where a loop
+or a split normal form would come from, and the argument that neither happens --
+that the reverse lemmas are deliberately not `simp` -- is reasoning, not evidence.
+
+These are the evidence. Each writes one value two ways and asks `simp` to close
+the gap, which it can only do by driving both to the same normal form. The mixed
+goals stack every bridge in one term; a cycle would show up as a recursion-depth
+failure rather than a wrong answer, so they are worth having even though they look
+redundant.
+-/
+
+example (v : Vec α) : (∅ : Vec α) ++ v = Vec.empty ++ v := by simp
+
+example (v : Vec α) : (default : Vec α) ++ v = (∅ : Vec α) ++ v := by simp
+
+example (b : Bag α) : (∅ : Bag α) + b = Bag.empty + b := by simp
+
+example (b : Bag α) : Bag.empty + b = (0 : Bag α) + b := by simp
+
+example (k : Nat) :
+    (∅ : FiniteMap Nat Nat).lookup k = FiniteMap.empty.lookup k := by simp
+
+/-- Every `Vec` bridge in one term. -/
+example (v : Vec α) :
+    ((default : Vec α) ++ ((∅ : Vec α) ++ v)).toList = v.toList := by simp
+
+/-- Every `Bag` bridge in one term. -/
+example (b : Bag α) : ((∅ : Bag α) + (Bag.empty + b)).card = b.card := by simp
+
+/-- And iteration reached through two of them at once, which is the case that
+needs `Vec.toList_empty` as well as the two `empty` bridges. -/
+example : (Id.run do
+    let mut n : Nat := 0
+    for _ in ((∅ : Vec Nat) ++ (default : Vec Nat)) do
+      n := n + 1
+    return n) = 0 := by simp
 
 end Grass.Tests.Std.Collections
