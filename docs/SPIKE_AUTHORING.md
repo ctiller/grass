@@ -66,6 +66,30 @@ become authored ceremony merely because the pre-implementation spike writes it
 out. It still counts toward elaboration, kernel checking, generated artifact
 size, and build-performance measurements.
 
+### Split ownership without a broken mirror
+
+The byte-exact authored blocks do not make the two views one ownership unit.
+The spike implementor owns `Spikes/N_Name/**`; the design steward owns the
+normative `docs/SPIKE_N.md`. A change crossing that boundary uses a direct
+two-agent handoff:
+
+1. the implementor commits and publishes the authored-source change on its own
+   branch, without the documentary mirror;
+2. the design steward takes that exact commit onto the steward's product
+   branch, reviews the semantic change, and adds a second commit updating the
+   annotated document byte-for-byte; and
+3. one nomination names both authors and the final combined snapshot. Its
+   reviewer checks the mirror, the normative adequacy, and the ordinary build
+   gates before merging the combined history to `main`.
+
+The intermediate branch state may fail the mirror check; it is handoff
+material, not a merge candidate. No source-only or document-only intermediate
+state may land on `main`. The final snapshot must pass
+`check-spike-sources.ps1`. The implementor may provide a generated mirror patch
+as evidence, but only the design steward publishes the normative copy. This is
+direct peer coordination: it needs neither a coordinator nor an atomic
+cross-branch write.
+
 Every fenced code block must be preceded immediately by one machine-readable
 classification line:
 
