@@ -652,20 +652,25 @@ fn check(path: &str, source: &str, known: &HashSet<String>) -> Vec<String> {
 /// exactly, because an earlier version of this comment got it wrong. Windows
 /// `pathlib` lowercases each component before comparing, so the two orders
 /// diverge wherever case-folding reorders a pair -- which is not only where two
-/// names differ *only* by case. This tree has such a pair: `Grass/CFG` and
+/// names differ *only* by case. This tree has two such pairs. `Grass/CFG` and
 /// `Grass/Certificate.lean` sort as `CFG` then `Certificate.lean` here and on
-/// the runner, because `F` (0x46) precedes `e` (0x65), and as
-/// `Certificate.lean` then `CFG` under Windows Python, because `ce` precedes
-/// `cf`. A differential over a tree carrying a finding in every module found
-/// that one transposition and no other difference; the same Python re-run with
-/// POSIX path semantics reproduced this tool's output byte for byte.
+/// the runner, because `F` (0x46) precedes `e` (0x65), and the other way under
+/// Windows Python, because `ce` precedes `cf`. `Grass/Memory/AddressSpace.lean`
+/// and `Grass/Memory/Addressing.lean` do the same, on `S` (0x53) against `i`
+/// (0x69) folding to `s` against `i`.
+///
+/// A differential over a tree carrying a finding in every module found those two
+/// transpositions and no other difference; the same Python re-run with POSIX
+/// path semantics reproduced this tool's output byte for byte. The count is the
+/// count for this tree, not a bound: any new pair whose components' first
+/// differing characters straddle the case boundary joins them.
 ///
 /// The divergence is between the Python on two platforms, not between the
 /// Python and this port, and it moves findings rather than adding or losing
 /// one. The runner's order is the one the gate reports, so it is the one below.
 ///
-/// The test `file_selection_orders_case_sensitively_like_the_runner` pins that
-/// pair, so a change to the comparison below fails rather than silently
+/// The test `file_selection_orders_case_sensitively_like_the_runner` pins both
+/// pairs, so a change to the comparison below fails rather than silently
 /// adopting the Windows order.
 fn lean_files(root: &Path, prefix: &str) -> Result<Vec<(String, std::path::PathBuf)>, String> {
     let mut found = Vec::new();
@@ -1131,21 +1136,27 @@ mod tests {
 
     #[test]
     fn file_selection_orders_case_sensitively_like_the_runner() {
-        // The real pair from this tree, and the one place a differential against
-        // the Python disagreed -- because Windows `pathlib` lowercases each
-        // component before comparing and the Linux runner does not. `CFG` must
-        // precede `Certificate.lean`, as `F` (0x46) precedes `e` (0x65); the
-        // case-folded order the Windows Python produces is `ce` before `cf`, and
-        // adopting it here would make the gate's report platform-dependent.
+        // Both real pairs from this tree, and the only two places a differential
+        // against the Python disagreed -- because Windows `pathlib` lowercases
+        // each component before comparing and the Linux runner does not.
+        //
+        // A directory against a sibling file: `CFG` must precede
+        // `Certificate.lean`, as `F` (0x46) precedes `e` (0x65), where the
+        // case-folded order is `ce` before `cf`. And two files: `AddressSpace`
+        // must precede `Addressing`, as `S` (0x53) precedes `i` (0x69), where
+        // the case-folded order is `i` before `s`. Adopting either would make
+        // the gate's report platform-dependent.
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path().join("Grass");
         fs::create_dir_all(root.join("CFG")).expect("mkdir");
-        fs::create_dir_all(root.join("Core")).expect("mkdir");
+        fs::create_dir_all(root.join("Memory")).expect("mkdir");
         for relative in [
             "Certificate.lean",
             "CFG/Contract.lean",
             "CFG/Graph.lean",
-            "Core/Context.lean",
+            "Memory/Access.lean",
+            "Memory/AddressSpace.lean",
+            "Memory/Addressing.lean",
         ] {
             fs::write(root.join(relative), "").expect("write");
         }
@@ -1160,7 +1171,9 @@ mod tests {
                 "Grass/CFG/Contract.lean",
                 "Grass/CFG/Graph.lean",
                 "Grass/Certificate.lean",
-                "Grass/Core/Context.lean",
+                "Grass/Memory/Access.lean",
+                "Grass/Memory/AddressSpace.lean",
+                "Grass/Memory/Addressing.lean",
             ],
             "case-folding this comparison would adopt the Windows Python's order, \
              which is not the order the gate reports"
