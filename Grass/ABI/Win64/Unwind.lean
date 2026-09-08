@@ -318,6 +318,31 @@ def opInfo : UnwindOp → BitVec 4
   | .pushMachineFrame withErrorCode => if withErrorCode then 1 else 0
 
 /--
+The form `OpInfo` announces is the form `slots` reserves.
+
+`slots` and `opInfo` both decide which `allocLarge` form applies, both decide it
+from the size, and they decided it separately. Nothing related them, so swapping
+`opInfo`'s two values left every test in the repository green -- measured, not
+supposed -- while the emitted code announced the three-slot form and reserved
+two. An unwinder walking that array reads the slot after it as a new operation
+and everything past that point is garbage.
+
+The same shape as `Grass/ABI/Win64/Convention.lean`'s complaint about a number
+spelled twice, except that here the two spellings are of a *choice* rather than
+a constant, and a choice made twice can disagree in one direction only.
+-/
+theorem allocLarge_opInfo_slots (n : Nat) :
+    (UnwindOp.allocLarge n).opInfo = 0 ↔ (UnwindOp.allocLarge n).slots = 2 := by
+  simp only [UnwindOp.opInfo, UnwindOp.slots]
+  split <;> simp
+
+/-- And the mirror, so neither direction is left to inference. -/
+theorem allocLarge_opInfo_slots_far (n : Nat) :
+    (UnwindOp.allocLarge n).opInfo = 1 ↔ (UnwindOp.allocLarge n).slots = 3 := by
+  simp only [UnwindOp.opInfo, UnwindOp.slots]
+  split <;> simp
+
+/--
 The allocation sizes `allocSmall` can encode: multiples of 8 from 8 to 128.
 
 `OpInfo` is four bits holding `n/8 - 1`, so `n = 8` is `0` and `n = 128` is

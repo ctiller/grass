@@ -256,4 +256,33 @@ example : ([ (UnwindOp.pushNonvolatile .rbx).opcode
            ] : List (BitVec 4)).Nodup := by decide
 
 
+/-! ### Which generator `opInfo` reproduces for `setFramePointer`
+
+`Grass/ABI/Win64/Unwind.lean` records a vendor disagreement: for
+`UWOP_SET_FPREG`, `ml64` writes the frame *register* in `OpInfo` and `cl.exe`
+writes the frame *offset*. Grass reproduces `ml64`. Nothing rests on it for the
+unwinder, which takes the register from `FrameRegister` -- which is exactly why
+it needs pinning rather than why it does not. A field nothing depends on can be
+changed without any downstream failure, and the only check on it was the `ml64`
+differential, which needs an assembler this build does not have. A mutation
+replacing the nibble with 0 left every test green.
+
+The example is the docstring's own, chosen because it is the one where the two
+generators visibly differ. -/
+
+/-- `lea rbp, [rsp+96]`: frame register 5, frame offset 6. Grass writes 5. -/
+example : (UnwindOp.setFramePointer .rbp 96).opInfo = 5 := rfl
+
+/-- And not 6, which is what `cl.exe` would write for the same frame. Stated as
+its own example because the equation above would still hold if the two happened
+to coincide, and this is a fixture chosen so they do not. -/
+example : (UnwindOp.setFramePointer .rbp 96).opInfo ≠ 6 := by decide
+
+/-- The offset that would have been written: 96/16. Pinned so the contrast
+above cannot quietly stop being one -- if `FrameSpec`'s scaling changed, 6 might
+no longer be the competing value and the example would still pass while testing
+nothing. -/
+example : BitVec.ofNat 4 (96 / 16) = (6 : BitVec 4) := rfl
+
+
 end Tests.ABI.Win64.PrologueRealization
