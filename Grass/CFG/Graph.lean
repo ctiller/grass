@@ -99,6 +99,26 @@ def hasDirectEdgeTo (block : Block State Terminal) (target : BlockId) : Bool :=
     | .block id => id == target
     | .terminal _ => false
 
+/-- A positive direct-edge query exposes one exact structural edge witness. -/
+theorem hasDirectEdgeTo_eq_true_iff
+    (block : Block State Terminal) (target : BlockId) :
+    hasDirectEdgeTo block target = true ↔
+      ∃ edge ∈ block.outgoing, edge.target = .block target := by
+  constructor
+  · rw [hasDirectEdgeTo, List.any_eq_true]
+    rintro ⟨edge, member, matched⟩
+    refine ⟨edge, member, ?_⟩
+    cases targetShape : edge.target with
+    | block id =>
+        simp [targetShape] at matched
+        simp [matched]
+    | terminal disposition =>
+        simp [targetShape] at matched
+  · rintro ⟨edge, member, targetExact⟩
+    rw [hasDirectEdgeTo, List.any_eq_true]
+    refine ⟨edge, member, ?_⟩
+    simp [targetExact]
+
 /-- Exact predecessor discovery from the nested edge lists.
 
 One predecessor identity occurs per source block, even when malformed raw input
@@ -107,6 +127,25 @@ has unique block identities, so its result has no duplicates.
 -/
 def predecessors (graph : Graph State Terminal) (target : BlockId) : List BlockId :=
   (graph.blocks.filter fun block => hasDirectEdgeTo block target).map Block.id
+
+/-- Predecessor membership is exactly membership of a source block carrying one
+direct edge to the requested target. -/
+theorem mem_predecessors_iff
+    (graph : Graph State Terminal) (source target : BlockId) :
+    source ∈ graph.predecessors target ↔
+      ∃ block ∈ graph.blocks,
+        block.id = source ∧
+          ∃ edge ∈ block.outgoing, edge.target = .block target := by
+  constructor
+  · intro member
+    rcases List.mem_map.mp member with ⟨block, selected, identity⟩
+    rcases List.mem_filter.mp selected with ⟨structural, hasEdge⟩
+    exact ⟨block, structural, identity,
+      (hasDirectEdgeTo_eq_true_iff block target).mp hasEdge⟩
+  · rintro ⟨block, structural, identity, hasEdge⟩
+    apply List.mem_map.mpr
+    exact ⟨block, List.mem_filter.mpr ⟨structural,
+      (hasDirectEdgeTo_eq_true_iff block target).mpr hasEdge⟩, identity⟩
 
 /-- The outgoing exit identities of one block. -/
 def outgoingTags (block : Block State Terminal) : List ExitTag :=

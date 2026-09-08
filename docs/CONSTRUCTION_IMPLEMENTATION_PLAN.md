@@ -124,6 +124,10 @@ Exit criteria:
 - straight-line single-predecessor blocks can inherit an entry contract; and
 - fixtures reject a missing target, duplicate label, and mismatched exit tag.
 
+`Graph.hasDirectEdgeTo_eq_true_iff` and `Graph.mem_predecessors_iff` expose the
+structural witnesses behind executable predecessor discovery: a reported source
+is an actual graph block carrying an actual direct edge to the requested target.
+
 ### C1 — Joins, loops, calls, and stack shapes
 
 Extend the CFG kernel without introducing an authored parallel manifest:

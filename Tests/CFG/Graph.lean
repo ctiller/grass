@@ -73,6 +73,20 @@ example : good.directTargets = [blockId "return"] := by decide
 
 example : good.predecessors (blockId "return") = [blockId "entry"] := by decide
 
+example : Graph.hasDirectEdgeTo entryBlock (blockId "return") = true := by decide
+
+example : ∃ edge ∈ entryBlock.outgoing,
+    edge.target = EdgeTarget.block (blockId "return") :=
+  (Graph.hasDirectEdgeTo_eq_true_iff entryBlock (blockId "return")).mp (by decide)
+
+example : blockId "entry" ∈ good.predecessors (blockId "return") := by decide
+
+example : ∃ block ∈ good.blocks,
+    block.id = blockId "entry" ∧
+      ∃ edge ∈ block.outgoing,
+        edge.target = EdgeTarget.block (blockId "return") :=
+  (good.mem_predecessors_iff (blockId "entry") (blockId "return")).mp (by decide)
+
 def missingTarget : Graph Nat Terminal where
   entry := blockId "entry"
   blocks := [{ entryBlock with outgoing := [
