@@ -65,6 +65,18 @@ example : readGobjSymbolTable (writeGobjSymbolTable table ++ suffix) =
 example : readGobjSymbolTable (Vec.fromList [2, 0, 0, 0]) =
     .needMore (some 32) := by rfl
 
+/-- An unknown binding tag is rejected before absent reserved or later table
+bytes can turn it into a misleading short-input result. -/
+example : readGobjSymbolTable
+    (Vec.fromList [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3]) =
+    .invalid (.malformed "invalid .gobj symbol binding") := by rfl
+
+/-- The exact deficit includes the selected owner bytes, the second nominal-id
+length field, and the smallest (imported) symbol body. -/
+example : readGobjSymbolTable
+    (Vec.fromList [1, 0, 0, 0, 100, 0, 0, 0]) =
+    .needMore (some 112) := by rfl
+
 def duplicateBytes : Std.Logical.ByteArray :=
   writeLittleEndian (count := 4) (2 : BitVec 32) ++
     writeGobjSymbol entry ++ writeGobjSymbol entry
@@ -76,8 +88,6 @@ example : readGobjSymbolTable duplicateBytes =
   simp only [Vec.append_assoc]
   rw [takeLittleEndian_writeLittleEndian_append]
   simp only
-  rw [dif_pos (by decide : 16 * (2 : BitVec 32).toNat ≤
-    (writeGobjSymbol entry ++ writeGobjSymbol entry).length)]
   have countEq : (2 : BitVec 32).toNat = 2 := by decide
   simp only [countEq, readGobjSymbolList]
   rw [readGobjSymbol_write_append]
