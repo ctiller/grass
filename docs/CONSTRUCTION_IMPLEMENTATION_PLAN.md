@@ -265,6 +265,12 @@ missing check and any additional missing obligations. `Raw.map` and
 cannot contain a certificate type, and the unsafe namespace exposes no
 taint-removal or certificate constructor.
 
+`Grass.Unsafe.Emit` flattens a raw byte hierarchy in deterministic leaf order
+and passes each exact `ByteSeq` to a caller-owned writer. Successful receipts
+returned by `emit` retain both those writer inputs and every leaf's taint; they
+make no claim that the callback persisted an artifact or discharged a proof
+obligation.
+
 Exit criteria include round trips for supported raw instructions, structured
 errors for unknown/ambiguous bytes and targets, exact stepping agreement with
 `Grass.Op.step`, and exact byte/list input passed to the artifact writer.

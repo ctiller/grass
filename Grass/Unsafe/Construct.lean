@@ -97,6 +97,21 @@ abbrev X86Instruction := Raw .x86Instruction
 /-- Raw byte sequence retaining the proof obligations of its source. -/
 abbrev Bytes := Raw .bytes
 
+/-- Admit a byte sequence only as explicitly tainted raw construction. -/
+def bytes (value : ByteSeq) (primary : MissingCheck)
+    (additional : List MissingCheck := []) : Bytes :=
+  Raw.unchecked value primary additional
+
+/-- `bytes_value` recovers the admitted byte sequence unchanged. -/
+@[simp] theorem bytes_value (value : ByteSeq) (primary : MissingCheck)
+    (additional : List MissingCheck) :
+    (bytes value primary additional).value = value := rfl
+
+/-- `bytes_taint` recovers the byte sequence's missing-check account exactly. -/
+@[simp] theorem bytes_taint (value : ByteSeq) (primary : MissingCheck)
+    (additional : List MissingCheck) :
+    (bytes value primary additional).taint = ⟨primary, additional⟩ := rfl
+
 /-- Admit an x86 encoding only as explicitly tainted raw construction. -/
 def x86Instruction (encoding : InsnEncoding) (primary : MissingCheck)
     (additional : List MissingCheck := []) : X86Instruction :=
