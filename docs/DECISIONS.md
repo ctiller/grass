@@ -630,16 +630,19 @@ to imitate compiler-selected storage or CFG structure.
     instance, protocol, and composition shape used by the spikes, and contains
     no `BehaviorContract`, denotation, trace-denotation, or exactness field.
     `Refinement`, which imports both independent dependency arms, instantiates
-    that structure inside the wrapper `ProcessPresentationNetwork`; this is not
-    a second structural declaration. `ProcessPresentation` there selects an
-    explicit trace for that wrapper and proves exact behavior and requirement
+    that structure through the transparent specialization
+    `ProcessPresentationNetwork`; this is neither a wrapper with a second
+    `roles` field nor a second structural declaration. Composition laws remain
+    outside the Process-owned structure, so the specialization preserves its
+    projections directly without forwarding accessors. `ProcessPresentation`
+    there selects an explicit trace for that network and proves exact behavior and requirement
     correspondence. Neither the selected trace nor its exactness theorem is a
     field of `StructuralProcessNetwork`; `Semantics` does not import `Process`
-    to construct the wrapper. This corrects the original owner wording to obey
+    to construct the specialization. This corrects the original owner wording to obey
     decision 116's dependency diamond without changing the selected interface.
     This records `coord1:5`, originating at `c-process:3`, and names the wrapper
     consumed by the synchronized Spike 4/5 surface under dependency
-    `g-design:23`.
+    `g-design:23`, and supersedes the older wrapper-pattern fixture wording.
 118. Cancellation coverage is scope-indexed. One core `CancellationPolicy` is
     indexed by a scoped cancellation-point family and consistently names its
     discovered `blockingCalls`; `ScopedCancellationCertificate` ties both

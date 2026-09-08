@@ -315,6 +315,12 @@ def PartialProcessRealization.close
     ClosedBlend partial complete coherent
 ```
 
+`ProcessPresentationNetwork` is deliberately a transparent specialization, not
+a wrapper with a second `roles` field.  `StructuralProcessNetwork` owns no
+embedded composition-law field: composition evidence belongs to the selected
+trace and presentation below.  The specialization therefore preserves the
+Process-owned projections directly and adds no forwarding-accessor ceremony.
+
 `AdmittedProtocolInput` is the `InstanceOf` parameter of the Process-owned
 structural network. An instance therefore selects one exact input accepted by
 its role protocol. It is not a process identifier, mutable process state, or a
@@ -322,6 +328,13 @@ second protocol implementation; those belong to the later `ProcessPlan`. A
 protocol with no admitted input consequently cannot acquire a structural
 instance. This is the only admission ceremony carried by an ordinary role;
 standard constructors infer the subtype witness from the protocol builder.
+That inference is an obligation of those constructors, not a hole in the
+presentation: a constructor must produce `instanceOf` with its admission proof
+for every structural instance, and must construct the complete
+`AbstractNetworkTraceSemantics` value consumed by `SelectedProcessTrace`.
+Spike 4 and Spike 5 constructors are not conforming implementations until both
+values are present; their current prose calls are demands on the eventual
+standard-library constructors, not evidence that the obligation has closed.
 
 Despite its retained public name, `SelectedProcessTrace` does **not** select one
 execution trace. It selects one complete trace *semantics* for the structural
@@ -377,6 +390,24 @@ provide the positive boundary fixtures. If the current foundation can express
 only finite list acceptance, its carrier must be named as a finite-prefix
 intermediate and kept private; it may not freeze either complete public name
 while infinite and maximal behavior is absent.
+
+`ExactProtocolInstanceBehavior protocol input contract` is likewise a
+proof-bearing relation, not an unconstrained proposition.  Its defining law is
+extensional exactness at the named admitted input: `contract` admits exactly
+the complete finite and infinite executions denoted by `protocol` from
+`input`, under the protocol's observation projection and outcome vocabulary.
+Consequently, if two admitted inputs have behaviorally distinct protocol
+denotations, no single contract can satisfy
+`ExactProtocolInstanceBehavior` for both.  Any implementation of the relation
+must expose the two directions of this equivalence so callers can transport
+both safety and completeness; a constantly true predicate is invalid.
+
+The first implementation must therefore also include a negative fixture with
+two instances of one schema, distinct admitted inputs, and behaviorally
+distinct protocol denotations.  Giving both instances one shared
+`abstractBehavior` must fail to elaborate.  Positive fixtures use the same
+contract for two inputs only after proving their protocol denotations
+extensionally equivalent.
 
 `RoleSchema` is finite static syntax; its `Instance` family may be infinite.
 Thus one connection-session schema has a proof polymorphic in

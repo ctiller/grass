@@ -92,64 +92,32 @@ theorem shared_protocol_distinct_roles :
   refine ⟨rfl, ?_⟩
   decide
 
-/-! ## A wrapper keeps the short author spelling
+/-! ## A transparent specialization keeps the Process-owned projections
 
-`docs/SEMANTICS.md`'s `ProcessPresentationNetwork` wraps a structural network in
-a field called `roles` and adds a composition law. `g-design:28` observed that
-its consumers — `docs/REFINEMENT.md` and Spike 5 — write `network.RoleSchema`
-and `network.protocol schema`, which a bare wrapper does not provide, and that
-making every consumer spell `network.roles.protocol` would leak the wrapper's
-representation and add permanent ceremony.
-
-The fix is forwarding accessors, now declared in `SEMANTICS.md`. That structure
-has no Lean layer yet, so what is pinned here is the *pattern*, on the structure
-this layer does own: a wrapper with forwarding abbreviations is transparent, and
-the short spelling means exactly the long one. When `Grass.Semantics` lands, its
-own fixture replaces this one.
+`docs/REFINEMENT.md`'s `ProcessPresentationNetwork` is a transparent
+specialization of `StructuralProcessNetwork`, not a wrapper.  This local alias
+pins that shape using the fixture's protocol family and admitted-input family.
+No forwarding accessors or duplicate composition-law field are required.
 -/
 
-/-- A wrapper shaped like `ProcessPresentationNetwork`. -/
-structure WrappedNetwork where
-  roles : StructuralProcessNetwork ProcessSpec.{0, 0} requestOf
+/-- A local specialization shaped like `ProcessPresentationNetwork`. -/
+abbrev PresentationNetwork :=
+  StructuralProcessNetwork ProcessSpec.{0, 0} requestOf
 
-namespace WrappedNetwork
+/-- The existing structural value inhabits the specialization definitionally. -/
+def presentationServer : PresentationNetwork := serverNetwork
 
-abbrev RoleSchema (network : WrappedNetwork) : Type := network.roles.RoleSchema
+/-- Process-owned projections remain directly available through the alias. -/
+theorem presentation_role_schema_usable
+    (schema : presentationServer.RoleSchema) :
+    schema ∈ presentationServer.schemas := presentationServer.schemasComplete schema
 
-abbrev protocol (network : WrappedNetwork) :
-    network.RoleSchema → ProcessSpec.{0, 0} := network.roles.protocol
-
-abbrev Instance (network : WrappedNetwork) : network.RoleSchema → Type :=
-  network.roles.Instance
-
-abbrev schemas (network : WrappedNetwork) : List network.RoleSchema :=
-  network.roles.schemas
-
-end WrappedNetwork
-
-/-- The wrapped server. -/
-def wrappedServer : WrappedNetwork := ⟨serverNetwork⟩
-
-/-- The short spelling elaborates, which is the whole point of the accessors. -/
-theorem wrapper_role_schema_usable (schema : wrappedServer.RoleSchema) :
-    schema ∈ wrappedServer.schemas := serverNetwork.schemasComplete schema
-
-/-- And it means exactly the long spelling; the wrapper is transparent. -/
-theorem wrapper_protocol_agrees (schema : wrappedServer.RoleSchema) :
-    wrappedServer.protocol schema = wrappedServer.roles.protocol schema := rfl
-
-/--
-A consumer written against the short spelling type-checks.
-
-This is the shape `docs/REFINEMENT.md` uses for `resourceView`, and the reason
-`g-design:28` asked for the accessors rather than accepting `network.roles.*`
-at every use site.
--/
-def rolePredicate (network : WrappedNetwork) : Type :=
+/-- A consumer written against the specialized spelling type-checks. -/
+def rolePredicate (network : PresentationNetwork) : Type :=
   network.RoleSchema → Prop
 
 theorem rolePredicate_is_over_roles :
-    rolePredicate wrappedServer = (ServerRole → Prop) := rfl
+    rolePredicate presentationServer = (ServerRole → Prop) := rfl
 
 /-! ## Neither historical field family can return
 
