@@ -141,7 +141,8 @@ duplicates rather than making lookup partial or block-first.
 
 `Grass.CFG.Intake` is the construction-owned target for upstream lowering
 adapters. It binds opaque upstream entry identities to graph blocks and opaque
-step identities to canonical edges, checks uniqueness and exact structural
+step identities to canonical edges, requires injective source and target
+bindings plus an explicitly resolved graph root, checks exact structural
 resolution, and exposes proof-bearing lookup results. It deliberately does not
 claim that an upstream process or specification is realized; the process owner
 must provide that adapter theorem once the complete process-plan interface is

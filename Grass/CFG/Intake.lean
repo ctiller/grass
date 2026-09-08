@@ -46,6 +46,23 @@ def entryIds (intake : AuthoredCFGIntake EntryId StepId graph) : List EntryId :=
 def stepIds (intake : AuthoredCFGIntake EntryId StepId graph) : List StepId :=
   intake.steps.map IntakeStep.source
 
+/-- Structural block identities selected by upstream entry bindings. -/
+def entryBlocks (intake : AuthoredCFGIntake EntryId StepId graph) : List BlockId :=
+  intake.entries.map IntakeEntry.block
+
+/-- Canonical structural edge identities selected by upstream step bindings. -/
+def stepKeys (intake : AuthoredCFGIntake EntryId StepId graph) : List EdgeKey :=
+  intake.steps.map IntakeStep.edge
+
+/-- Source and target sides of both binding tables are injective. -/
+def BindingsInjective (intake : AuthoredCFGIntake EntryId StepId graph) : Prop :=
+  intake.entryIds.Nodup ∧ intake.stepIds.Nodup ∧
+    intake.entryBlocks.Nodup ∧ intake.stepKeys.Nodup
+
+/-- At least one upstream entry binds the authored graph's structural root. -/
+def RootResolved (intake : AuthoredCFGIntake EntryId StepId graph) : Prop :=
+  graph.entry ∈ intake.entryBlocks
+
 /-- Every entry binding names a structural graph block. -/
 def EntriesResolved (intake : AuthoredCFGIntake EntryId StepId graph) : Prop :=
   ∀ binding ∈ intake.entries, binding.block ∈ graph.blockIds
@@ -69,6 +86,9 @@ def wellFormed (intake : AuthoredCFGIntake EntryId StepId graph) : Bool :=
   graph.wellFormed &&
   decide intake.entryIds.Nodup &&
   decide intake.stepIds.Nodup &&
+  decide intake.entryBlocks.Nodup &&
+  decide intake.stepKeys.Nodup &&
+  intake.entryBlocks.contains graph.entry &&
   intake.entries.all (fun binding => graph.blockIds.contains binding.block) &&
   intake.steps.all (fun binding => graph.edgeKeys.contains binding.edge)
 
@@ -84,34 +104,63 @@ instance (intake : AuthoredCFGIntake EntryId StepId graph) :
 @[simp] theorem wellFormed_iff
     (intake : AuthoredCFGIntake EntryId StepId graph) :
     intake.WellFormed ↔
-      (((graph.WellFormed ∧ intake.entryIds.Nodup) ∧ intake.stepIds.Nodup) ∧
-        intake.EntriesResolved) ∧ intake.StepsResolved := by
-  simp [WellFormed, wellFormed, Graph.WellFormed, EntriesResolved, StepsResolved]
+      graph.WellFormed ∧ intake.BindingsInjective ∧ intake.RootResolved ∧
+        intake.EntriesResolved ∧ intake.StepsResolved := by
+  simp [WellFormed, wellFormed, Graph.WellFormed, BindingsInjective,
+    RootResolved, EntriesResolved, StepsResolved]
+  constructor
+  · rintro ⟨⟨⟨⟨⟨⟨⟨graphClosed, entryIdsUnique⟩, stepIdsUnique⟩,
+        entryBlocksUnique⟩, stepKeysUnique⟩, rootResolved⟩, entriesResolved⟩,
+        stepsResolved⟩
+    exact ⟨graphClosed,
+      ⟨entryIdsUnique, stepIdsUnique, entryBlocksUnique, stepKeysUnique⟩,
+      rootResolved, entriesResolved, stepsResolved⟩
+  · rintro ⟨graphClosed,
+      ⟨entryIdsUnique, stepIdsUnique, entryBlocksUnique, stepKeysUnique⟩,
+      rootResolved, entriesResolved, stepsResolved⟩
+    exact ⟨⟨⟨⟨⟨⟨⟨graphClosed, entryIdsUnique⟩, stepIdsUnique⟩,
+      entryBlocksUnique⟩, stepKeysUnique⟩, rootResolved⟩, entriesResolved⟩,
+      stepsResolved⟩
 
 theorem graphWellFormed_of_wellFormed
     (intake : AuthoredCFGIntake EntryId StepId graph) (h : intake.WellFormed) :
     graph.WellFormed :=
-  (wellFormed_iff intake).mp h |>.1.1.1.1
+  (wellFormed_iff intake).mp h |>.1
 
 theorem entryIdsNodup_of_wellFormed
     (intake : AuthoredCFGIntake EntryId StepId graph) (h : intake.WellFormed) :
     intake.entryIds.Nodup :=
-  (wellFormed_iff intake).mp h |>.1.1.1.2
+  (wellFormed_iff intake).mp h |>.2.1.1
 
 theorem stepIdsNodup_of_wellFormed
     (intake : AuthoredCFGIntake EntryId StepId graph) (h : intake.WellFormed) :
     intake.stepIds.Nodup :=
-  (wellFormed_iff intake).mp h |>.1.1.2
+  (wellFormed_iff intake).mp h |>.2.1.2.1
+
+theorem entryBlocksNodup_of_wellFormed
+    (intake : AuthoredCFGIntake EntryId StepId graph) (h : intake.WellFormed) :
+    intake.entryBlocks.Nodup :=
+  (wellFormed_iff intake).mp h |>.2.1.2.2.1
+
+theorem stepKeysNodup_of_wellFormed
+    (intake : AuthoredCFGIntake EntryId StepId graph) (h : intake.WellFormed) :
+    intake.stepKeys.Nodup :=
+  (wellFormed_iff intake).mp h |>.2.1.2.2.2
+
+theorem rootResolved_of_wellFormed
+    (intake : AuthoredCFGIntake EntryId StepId graph) (h : intake.WellFormed) :
+    intake.RootResolved :=
+  (wellFormed_iff intake).mp h |>.2.2.1
 
 theorem entriesResolved_of_wellFormed
     (intake : AuthoredCFGIntake EntryId StepId graph) (h : intake.WellFormed) :
     intake.EntriesResolved :=
-  (wellFormed_iff intake).mp h |>.1.2
+  (wellFormed_iff intake).mp h |>.2.2.2.1
 
 theorem stepsResolved_of_wellFormed
     (intake : AuthoredCFGIntake EntryId StepId graph) (h : intake.WellFormed) :
     intake.StepsResolved :=
-  (wellFormed_iff intake).mp h |>.2
+  (wellFormed_iff intake).mp h |>.2.2.2.2
 
 omit [DecidableEq StepId] in
 theorem findEntry?_sound

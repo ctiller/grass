@@ -52,6 +52,9 @@ example : intake.WellFormed := by decide
 example : graph.WellFormed := intake.graphWellFormed_of_wellFormed (by decide)
 example : intake.entryIds.Nodup := intake.entryIdsNodup_of_wellFormed (by decide)
 example : intake.stepIds.Nodup := intake.stepIdsNodup_of_wellFormed (by decide)
+example : intake.entryBlocks.Nodup := intake.entryBlocksNodup_of_wellFormed (by decide)
+example : intake.stepKeys.Nodup := intake.stepKeysNodup_of_wellFormed (by decide)
+example : intake.RootResolved := intake.rootResolved_of_wellFormed (by decide)
 
 example : ∃ binding block,
     intake.findEntry? .root = some binding ∧
@@ -77,6 +80,27 @@ def duplicateStep : AuthoredCFGIntake EntryId StepId graph := {
 }
 
 example : ¬ duplicateStep.WellFormed := by decide
+
+def aliasedEntryTarget : AuthoredCFGIntake EntryId StepId graph := {
+  intake with entries := [⟨.root, blockId "root"⟩, ⟨.worker, blockId "root"⟩]
+}
+
+example : ¬ aliasedEntryTarget.WellFormed := by decide
+
+def aliasedStepTarget : AuthoredCFGIntake EntryId StepId graph := {
+  intake with steps := [
+    ⟨.dispatch, ⟨blockId "root", exitTag "dispatch"⟩⟩,
+    ⟨.finish, ⟨blockId "root", exitTag "dispatch"⟩⟩
+  ]
+}
+
+example : ¬ aliasedStepTarget.WellFormed := by decide
+
+def missingRoot : AuthoredCFGIntake EntryId StepId graph := {
+  intake with entries := [⟨.worker, blockId "worker"⟩]
+}
+
+example : ¬ missingRoot.WellFormed := by decide
 
 def missingBlock : AuthoredCFGIntake EntryId StepId graph := {
   intake with entries := [⟨.root, blockId "missing"⟩]
