@@ -123,11 +123,19 @@ operation, get-after-construction and get-after-update laws, order preservation
 for `append` and `map`, and `map` fusion. `abbrev ByteArray := Vec Byte`
 realizes the §1 name.
 
-#### What has landed since, with the merge that carried it
+#### What has landed since, and what each one cost to find
 
-Kept as a list of merges rather than folded into the paragraph above, because
-that paragraph describes the module's shape and this records its history. Each
-entry is a reviewed merge on `main`.
+Kept out of the paragraph above, because that paragraph describes the module's
+shape and this records how it got there.
+
+**This is not a roster and is not extended on every merge.** `git log` on
+`Grass/Std/Logical/Vec.lean` is the authoritative history; what a plan adds is
+the *reason*, which a commit subject cannot carry. Entries earn their place by
+having one — a defect that was invisible to every gate, or a claim in this
+document that turned out to be false — and the list stops being written when
+that stops being true of new merges. A section that lists "everything since"
+is a growing set with the same fuse as a count, and §3.2's fixture paragraph
+gives the argument.
 
 - **The notation bridges.** `Vec.emptyCollection_eq_empty`,
   `Vec.default_eq_empty`, `Vec.get_eq_iff_get?_eq`, `Vec.forIn_eq_forIn_toList`
@@ -151,6 +159,15 @@ entry is a reviewed merge on `main`.
   superseded, and described two defects in it that the same commit had fixed. A
   later paragraph in the same module kept the superseded spelling in the present
   tense and was caught by `g-reviewer:75` after the first repair merged.
+- **Reading back what you just built** (`94fa4926`). `Vec.get?_push` states
+  `(v.push a).get? i` for every `i` rather than only the indices the two
+  earlier lemmas reached. `Vec.get?_push_lt` cannot be `@[simp]` at all, because
+  it carries the hypothesis `i < v.length`; `Vec.get?_push_self` is `@[simp]`
+  but fires only where the index is syntactically that vector's length. So a
+  goal that pushed twice and read once reached neither, and `simp` stopped on a
+  term about a sequence it had just constructed. Found by pushing every
+  operation twice and reading back, not by reading the module: `map`, `mem`,
+  `pop?`, `sum` and `set` all survive that, which is why the gap was invisible.
 
 None of this changes §3.11's exit criteria, which the S1 section reports against
 directly.
@@ -186,12 +203,16 @@ on it.
 
 For the same reason the descriptions below are *illustrative, not exhaustive*:
 `Tests/Std/` is the authoritative list, and this section explains only the
-fixtures whose purpose is not obvious from their name. Fixtures added since it
-was written — the representation probe, the collection-instance bridges, the fold
-recursors — are described where they were introduced, in §3.1 and §3.2, rather
-than by growing this paragraph every time. `Tests/Std/VecVocabulary.lean` covers the type's own
-claims: that a `List Byte` and a host `_root_.ByteArray` are each rejected where
-a Grass `ByteArray` is required, that extensionality is usable in the shape a
+fixtures whose purpose is not obvious from their name. A fixture added later is
+described in the section that motivated it — the representation probe in §3.2,
+the literal probe in §3.5, the collection-instance bridges and fold recursors in
+§3.1 — rather than by growing this paragraph. That is not a style preference:
+a list of "the fixtures added since" is a roster of a growing set, carrying the
+same fuse as the count above and lit by the next merge.
+
+`Tests/Std/VecVocabulary.lean` covers the type's own claims: that a `List Byte`
+and a host `_root_.ByteArray` are each rejected where a Grass `ByteArray` is
+required, that extensionality is usable in the shape a
 consumer would use it, and that the update framing law composes the way the
 memory layer applies it. `Tests/Std/SpikeSurface.lean` covers the demand side:
 every `Vec` operation the authored spike sources call, compiled in the shape they
