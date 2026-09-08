@@ -196,10 +196,10 @@ one.
 
 **Decided — a run state carries the flat trace, not its segmentation.** An
 earlier draft put a `Segmented` history inside `ProcessRunState`. That was a law
-18 violation: `segments.length` is the number of transitions taken, so an
-acceptance relation handed a segmented history could distinguish one transition
-emitting two observations from two transitions emitting one each, which is
-provider batching and a replaceable realization fact. The segmentation and its
+18 violation: `segments.length` is the number of transitions taken, so a run
+state carrying it distinguishes one transition emitting two observations from
+two transitions emitting one each, which is provider batching and a replaceable
+realization fact. The segmentation and its
 origin theorems stay in `Grass/Process/Observation.lean` for the run-level
 causality bookkeeping that [PROCESS.md](PROCESS.md) §4 keeps out of the
 application proof, and the origin theorem is stated over an occurrence's
@@ -247,12 +247,13 @@ property to be re-proved after a refinement rather than transported.
 
 **Decided — the segmentation is an index of `Reachable`, not a field of the run
 state and not absent.** Two failed drafts bracket this. Putting `Segmented`
-inside `ProcessRunState` let an acceptance relation branch on the transition
-count, which breaks under a refinement that produces the same observations in a
+inside `ProcessRunState` made it part of the state a refinement has to preserve,
+which breaks under a replacement that produces the same observations in a
 different number of steps. Deleting it left `docs/PROCESS.md` §4's observation
 causality with nothing to be stated over — the module was 186 lines with no
-consumer. Carrying it as an index gives `Reachable.observationCausality` while
-keeping it out of reach of `TraceAccepts`, which sees only the flat history.
+consumer. Carrying it as an index gives `Reachable.observationCausality` without making it
+state; acceptance never reaches it either way, since
+`Grass/Process/Acceptance.lean` does not mention `ProcessRunState`.
 
 **Decided — `ProcessCorrect.progress` is indexed by request.**
 [PROCESS.md](PROCESS.md) §4 writes `progress : MeetsProcessProgress p`. The
@@ -553,7 +554,7 @@ at any footprint whatsoever, and reduce every framing obligation in the weave to
 "the worlds are identical". Nothing was unsound; everything was useless, and no
 theorem in the module noticed. The fix is `agreesGlue`: any two worlds can be
 mixed along any set of fragments, which the equality agreement fails. It does not
-say the fragments cover the world — §10.144 records the refutation. Two further defects came from the same review: the frame rule
+say the fragments cover the world — §10.137 records the refutation. Two further defects came from the same review: the frame rule
 was not stated in the shape `docs/PROCESS.md` §8 asks for (scope-disjointness
 implies preservation, not agreement-implies-preservation), and `Separate` had no
 consumer anywhere, so the separating conjunction's formation gate gated nothing.
@@ -5032,10 +5033,10 @@ the first's carrier, is a chain and is not forbidden. That is a genuine coalesce
 chain rather than a half-done merge — `EscrowLedger.no_cycle` is what keeps it
 finite — and §3 appears to permit it. Recorded rather than ruled on.
 
-### 10.140 The selective-receive scan cost is recorded and unbounded
+### 10.136 The selective-receive scan cost is recorded and unbounded
 
-Numbered above the entries a sibling branch is adding, so the two do not collide;
-§10.132 through §10.139 belong to `agent/c-process/m4-reach-the-dead-worlds`.
+Numbered after the entries the sibling branch
+`agent/c-process/m4-reach-the-dead-worlds` adds, which run to §10.135.
 
 `Grass/Process/Network/Mailbox.lean` said a selective receive that walked a
 million-entry mailbox and reported no cost "is exactly what the progress argument
@@ -5043,9 +5044,9 @@ in `Grass/Process/Progress.lean` assumes cannot happen". That is false, and
 Progress.lean says so in its own words: "the internal work §7 refers to happens
 *inside* one transition, in a serial call or in the machine realization, and the
 finite-internal-work clause is discharged there". It defers the clause rather
-than assuming it away, and none of `MeetsProcessProgress`'s clauses is that
-bound — `handlesEveryEvent` and `notStuck` are about a successor existing, and
-`ProcessMeasure.Decreases` ranks across transitions rather than costing one.
+than assuming it away, and `MeetsProcessProgress` does not supply the bound
+either: what it constrains is whether a successor transition exists and how a
+rank moves across transitions, not what handling one costs.
 
 **What this layer actually has** is `SelectiveReceive.scanWork`, pinned to the
 skipped prefix's length by `scanWorkExact` and bounded by the mailbox's size by
@@ -5061,40 +5062,9 @@ realizes the mailbox", which names no module, structure or milestone in this
 tree, while every comparable open obligation in this layer carries a section
 number. An untrackable obligation is a sentence, not a record.
 
-### 10.141 A citation of mine that named nothing, and what declaring it cost
+### 10.137 Two premises the corrections contradicted, and neither was noticed
 
-`sharedWritesAdmitted_of_no_writes` was cited by
-`StepsLocally.sharedWritesAdmitted`'s own docstring under the bare name and by
-`Grass/Process/Network/Plan.lean`'s note on `sharedUpdate` under the
-`StepsLocally.` prefix, and declared under neither. My defect, landed by my own commit `c373340` alongside the
-field `agent-bus` ruling `g-design:84` asked for. `Tools/DocstringAudit.py` did
-not see it: its identifier check fires only inside sentences carrying a
-strong-claim word, and neither citation has one. `agent-bus` `c-process:106`
-reports that gap to the gate's owner.
-
-It is declared here rather than the citations deleted, because the content is
-real and `g-design:84` asked for it in the same breath as the field: "For a kind
-with no writable shared region, derive the stuttering contract automatically; add
-no author burden." A role that may write nothing supplies `writesPermitted` and
-gets `sharedWritesAdmitted` from it.
-
-**Declaring it is half the repair.** A lemma with no consumer and an
-unsatisfiable hypothesis is the shape §10.130 refuses — "a record nothing
-inhabits, a law that cannot fail, a disjunct no plan can reach" — so both halves
-are here:
-`the_connection_writes_nothing` inhabits the hypothesis at a real role —
-`serverTopology`'s connection may write neither region — and
-`theConnectionOwesNoValueBound` consumes it.
-
-**And one more thing the prefix cost.** The two citations did not agree on where
-the theorem lives, and only one of them was wrong in a way a reader would notice:
-the bare name resolves, `StepsLocally.` does not, because `StepsLocally` is a
-structure and not the namespace the theorem sits in. A first attempt at this
-repair fixed one site and reported both fixed.
-
-### 10.144 Two premises the corrections contradicted, and neither was noticed
-
-The corrections in §10.140 and §10.141 were reviewed and two of them turned out
+The corrections in §10.136 and §10.137 were reviewed and two of them turned out
 to leave standing the sentences they repudiate. Both are on `main`, both are
 mine, and in each case the correction landed on the *conclusion* while the
 *premise* it was derived from stayed where it was.
@@ -5115,16 +5085,15 @@ misreading and survived several revisions.
 the agreement forcing equality at *every* fragment, and this one forces it at
 one. So **coverage is an obligation on whoever supplies the world and this layer
 does not state it** — nothing says the fragments exhaust `World`. Filed here with
-a number rather than left as a sentence, on the rule §10.140 adopted one file
+a number rather than left as a sentence, on the rule §10.136 adopted one file
 over and this repair had broken.
 
 **And acceptance cannot see the segmentation whatever carries it.**
 `Grass/Process/Run.lean` said the segmentation is an index rather than a field
 "so that an acceptance relation, which sees only `ProcessRunState.history`,
-cannot branch on it". The "so that" does not follow. `ProcessAcceptance` has
-three clauses — `TerminalAccepts` over a request and result, `TraceAccepts` over
-a `Trace`, `DemandsWellFormed` over a `Bag` — and none takes a `ProcessRunState`,
-so no acceptance relation can reach a field of it either.
+cannot branch on it". The "so that" does not follow. `Grass/Process/Acceptance.lean` does not mention `ProcessRunState` anywhere, so
+no clause of `ProcessAcceptance` can reach a field of one — which a field of the
+run state would be, exactly as an index is not.
 
 What index-versus-field decides is something else and worth keeping: whether the
 segmentation is part of the state a refinement has to preserve. As a field it
@@ -5133,9 +5102,8 @@ of transitions changes it. That is the first of the module's two tests and it is
 what the earlier draft failed — the right conclusion from the wrong reason, which
 is why three sites and a ledger paragraph all repeated it.
 
-**The pattern, since it is the third time.** §10.134's title is "the correction
-left the sentences it corrected in place". Here the correction left the sentence
-it was *derived from* in place, which is harder to see: the repaired paragraph
+**The pattern.** A correction can leave in place not the sentence it corrected
+but the sentence it was *derived from*, which is harder to see: the repaired paragraph
 reads correctly on its own and only contradicts something forty lines up, or four
 hundred lines down, or in another file. Grepping the claim's wording finds the
 first kind. It does not find this kind, because the premise is phrased as a

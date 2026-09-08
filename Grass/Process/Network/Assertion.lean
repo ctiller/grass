@@ -58,7 +58,7 @@ and independent decomposition of the world: agreement on a set of fragments
 carries no information about the rest". That is false — mixability is not
 coverage — and `Tests/Process/AssertionFixtures.lean`'s `leakyAgreement` is an
 agreement satisfying every law while its `.obligations` clause forces the whole
-world equal. §10.144.
+world equal. §10.137.
 
 It is a real obligation on whoever supplies the world, and the shape it demands
 is a product over fragments. `docs/PROCESS.md` §3's `LogicalProcessNetwork` is
@@ -116,9 +116,9 @@ equality agreement and says nothing about that partial one.
 
 So coverage is an obligation on whoever supplies the world, and this layer does
 not state it: nothing here says the fragments exhaust `World`.
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.144 files it with a number rather than
-leaving it as a sentence. The note above states a *different* obligation — that
-gluing demands a product shape — which is not the same thing.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.137 files it with a number rather than
+leaving it as a sentence. The note above is about the same law, and was wrong in
+the same direction until this was written.
 
 `escrow` and `session` are separate constructors because the world separates
 them — `inFlight : ChannelEscrowLedger` and `sessions : ChannelSessionLedger` are
@@ -233,7 +233,7 @@ structure WorldAgreement {registry : ProtocolRegistry.{u, w, v}}
   It excludes that one and not the general shape. Mixability is not coverage,
   and `Tests/Process/AssertionFixtures.lean`'s `leakyAgreement` satisfies this
   law while one fragment's clause fixes the whole world — so a footprint can
-  still carry information about the rest. §10.144.
+  still carry information about the rest. §10.137.
   -/
   agreesGlue : ∀ (inside : NetworkFragment topology → Prop) (left right : World),
     ∃ mixed,

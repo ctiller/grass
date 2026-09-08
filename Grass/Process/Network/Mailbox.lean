@@ -55,7 +55,7 @@ What this layer does instead is record the cost exactly and leave it unbounded:
 `SelectiveReceive.scanWork` with `scanWorkExact` pins it to the skipped prefix's
 length, and `scan_is_charged` bounds it by the mailbox size — which bounds
 nothing until something bounds the mailbox. That is a real open obligation and it
-is `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.140, so it is trackable rather than
+is `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.136, so it is trackable rather than
 a sentence saying the bound is somebody else's.
 -/
 

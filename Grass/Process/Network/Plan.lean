@@ -196,7 +196,7 @@ structure ProcessPlan (registry : ProtocolRegistry.{u, w, v})
 
   `StepsLocally.sharedWritesAdmitted` is where it is spent, and only for regions
   that actually moved. A kind with no writable region pays nothing: the field is
-  vacuous there, which `ProcessPlan.sharedWritesAdmitted_of_no_writes` states so
+  vacuous there, which `StepsLocally.sharedWritesAdmitted_of_no_writes` states so
   that no author has to notice.
   -/
   sharedUpdate : (kind : topology.ProcessKind) →

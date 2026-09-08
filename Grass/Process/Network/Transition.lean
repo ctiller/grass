@@ -983,8 +983,8 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
   in `Grass/Process/Trace/Independence.lean`.
 
   A kind with no writable region owes nothing here — see
-  `ProcessPlan.sharedWritesAdmitted_of_no_writes`, which derives the whole field
-  from `writesPermitted`.
+  `sharedWritesAdmitted_of_no_writes`, which derives the whole field from
+  `writesPermitted`.
   -/
   sharedWritesAdmitted : ∀ region, before.shared region ≠ after.shared region →
     ∀ (fromInstance toInstance : ProcessInstance plan.topology)
@@ -1015,46 +1015,6 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
     (fun fragment => fragment = .instanceState kind slot ∨
       (emitted ≠ [] ∧ fragment = .pending) ∨
       ∃ region, before.shared region ≠ after.shared region ∧ fragment = .region region)
-
-/--
-**A role that may write no region owes `sharedWritesAdmitted` nothing.**
-
-Cited by `StepsLocally.sharedWritesAdmitted`'s own docstring and by
-`Grass/Process/Network/Plan.lean`'s note on `sharedUpdate`, and declared by
-neither until now — a dangling citation of mine, found by a mechanical sweep over
-every backticked name in the files this branch touches rather than by the
-docstring gate, which checks identifiers only inside sentences carrying a
-strong-claim word. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.141.
-
-The content is small and worth having anyway: `writesPermitted` says a region
-that moved is one this role may write, so at a role that may write nothing, no
-region moved, and the value bound is discharged from an impossible hypothesis.
-An author whose role has no write capability supplies `writesPermitted` and gets
-`sharedWritesAdmitted` for free, which is what `agent-bus` ruling `g-design:84`
-asked for in the same breath as the field itself: "For a kind with no writable
-shared region, derive the stuttering contract automatically; add no author
-burden".
--/
-theorem sharedWritesAdmitted_of_no_writes {before after : plan.LogicalProcessNetwork}
-    {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
-    {event : (plan.topology.protocol kind).Event}
-    {issued : Bag (plan.topology.protocol kind).Demand}
-    {localEmitted : ObservationSegment (plan.topology.protocol kind).Observation}
-    (noWrites : ∀ region, (plan.topology.sharedAccess kind region).mayWrite = false)
-    (writesPermitted : ∀ region, before.shared region ≠ after.shared region →
-      (plan.topology.sharedAccess kind region).mayWrite = true) :
-    ∀ region, before.shared region ≠ after.shared region →
-      ∀ (fromInstance toInstance : ProcessInstance plan.topology)
-        (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
-        before.instances kind slot = some fromInstance →
-        after.instances kind slot = some toInstance →
-        plan.sharedUpdate kind event (fromKind ▸ fromInstance.localState)
-          (toKind ▸ toInstance.localState) issued localEmitted region
-          (before.shared region) (after.shared region) := by
-  intro region moved
-  have permitted := writesPermitted region moved
-  rw [noWrites region] at permitted
-  exact absurd permitted (by intro equal; cases equal)
 
 /--
 A new incarnation appears in a slot that was empty.

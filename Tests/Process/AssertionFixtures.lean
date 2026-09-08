@@ -34,7 +34,7 @@ family, and the instance and channel fields are *functions of their index*. That
 is not incidental convenience: it is what makes `agreesGlue` easy to
 discharge here, since a product mixes componentwise. It is not what `agreesGlue`
 *demands* — `leakyAgreement` below satisfies the law over the same world without
-any such correspondence, which is §10.144. An earlier draft of this fixture had a single
+any such correspondence, which is §10.137. An earlier draft of this fixture had a single
 `listenerCursor : Nat` read by every `instanceState` fragment, which made two
 assertions about different slots `Separate` while reading the same field —
 exactly the aliasing `agreesGlue` now forbids.
@@ -378,8 +378,24 @@ theorem acceptedSomething_needs_its_region
 decomposition* of the world: agreement on a set of fragments carries no
 information about the rest". Local adversarial review refuted it and this is the
 refutation, kept because the claim is the natural reading of a gluing law and was
-believed for several revisions. §10.144.
+believed for several revisions. §10.137.
 -/
+
+/-- **The agreement that distinguishes nothing**, over a world of any shape.
+
+`agreesGlue` constrains the agreement and not the world: this satisfies every
+law, and it does so over `FixtureWorld` or over a world carrying a cross-fragment
+invariant as a field, indifferently. An earlier note in
+`Grass/Process/Network/Assertion.lean` said such a world could not satisfy the
+law. §10.137. -/
+def blindAgreement {World : Type} : WorldAgreement serverTopology World where
+  Agrees _ _ _ := True
+  agreesRefl := by intro _ _; trivial
+  agreesSymm := by intro _ _ _ _; trivial
+  agreesTrans := by intro _ _ _ _ _ _; trivial
+  agreesGlue := by
+    intro _ left _
+    exact ⟨left, fun _ _ => trivial, fun _ _ => trivial⟩
 
 open Classical in
 /--

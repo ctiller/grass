@@ -34,7 +34,7 @@ to "the worlds are identical". `agreesGlue` is what excludes that, and it is a
 real obligation: any two worlds must be mixable along any set of fragments,
 which the equality agreement cannot do. It does not say the fragments cover the
 world — see `Tests/Process/AssertionFixtures.lean`'s `leakyAgreement`, and
-§10.144.
+§10.137.
 
 `logicalWorldAgreement` discharges it, and the shape of `Core` below is what
 makes that possible rather than a coincidence. There is **exactly one component

@@ -88,14 +88,14 @@ clause of it can read one, and a field of the run state would be no more visible
 than an index is. An earlier version of this paragraph offered the
 index-versus-field distinction as the reason, which does not entail it, and a
 later one enumerated three of `ProcessAcceptance`'s clauses as though that were
-all of them. §10.144.
+all of them. §10.137.
 
 **What index-versus-field does decide** is whether the segmentation is part of
 the state a refinement has to preserve. As a field of `ProcessRunState` it would
 be, and a replacement producing the same observations in a different number of
 transitions changes it — which is the first test above, and what the earlier
 draft that put it there failed. Deleting it from the run entirely failed the
-second. §10.144.
+second. §10.137.
 -/
 
 namespace Grass.Process

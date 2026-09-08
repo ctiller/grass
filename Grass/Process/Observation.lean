@@ -114,7 +114,7 @@ list. It contributes nothing to `flat` — that is `emit_flat` with
 `List.append_nil`. What keeps the segmentation away from acceptance is not that
 it is an index: `Grass/Process/Acceptance.lean` never mentions `ProcessRunState`
 at all, so no clause of `ProcessAcceptance` could read it either way.
-`Grass/Process/Run.lean`'s module note has the argument. §10.144.
+`Grass/Process/Run.lean`'s module note has the argument. §10.137.
 -/
 
 /--
