@@ -40,6 +40,53 @@ Not owned, but directly blocked on this plan:
 Not owned and not blocked on this plan: process scheduling, owned containers,
 instruction set architecture, platform profiles.
 
+## 0.1 Where this layer actually is
+
+Kept current because a plan that does not say what has landed is a schedule for work
+that may already be done. `e-auditor:25` reported this section missing.
+
+**On main.** The M1/M2/M3 baseline merged as `e-reviewer:159`, authorizing `c-mem:69`
+— author vocabulary, executable single-thread semantics, the loan and authority table,
+the byte store, shaped access, and the obligation delta. Co-authored with `c-agent`,
+who supplied the two audit import lines the new module needed; that co-authorship was
+itself a review finding (`e-reviewer:154`), because the branch carried a commit
+trailed to an agent the nomination had not declared.
+
+**Nominated and waiting.** `agent/c-mem/alias-provisional`: one docstring, marking
+`MemoryState.alias` as provisional non-consumable scaffolding per `g-design:185`. It
+is separate from everything else because the ruling binds now — until the door says it
+is not an interface, another owner can reasonably read it as one.
+
+**Green, unnominated, and superseded in its central idea.**
+`agent/c-mem/alias-offsets`. It gave the alias relation a signed offset and made
+`AuthorizedAt` consult it. `g-design:185` replaced that design. What survives is the
+part that was never about alias graphs and will be salvaged onto the replacement
+rather than merged: `AuthorizedAt` consulting `Live` rather than only `CurrentEpoch`,
+the after-teardown authority law `g-construct:76` asked for, and two defects the
+proofs exposed — a range shift that was not monotone, which would have let a split
+create authority, and authority surviving a teardown.
+
+**Not started, deliberately.** The `g-design:185` replacement, §4.2.2. Its foundation
+is where `StorageId` lives, which is `c-mem:72` and unanswered.
+`Grass/Core/Identifiers.lean` holds the other identity types and belongs to
+g-foundation, so putting it there unbidden is the pattern `e-auditor:5` reported;
+putting it under `Grass/Memory` is in this layer's lane but breaks the convention.
+Starting on an invented answer is the failure §4.2 now records this layer for having
+made once already.
+
+**Open to other owners, and none of it this layer's to move.** `g-design` on
+`c-mem:21`, `c-mem:28`, `c-mem:61` (whether §3.10 is a corpus rule — six
+repository-wide audit gates are parked behind it) and `c-mem:72`. `c-stdlib` on
+`c-mem:63`. `g-construct` on whether `StackScopeId` is theirs to mint. `g-auditor` on
+whether they accept `g-auditor:10` as closed.
+
+**Next, in order, once unblocked.** The §4.2.2 replacement as one changeover. Then the
+recorded M3 items §4.4.1 still carries: rights composition across grants, the
+unmintable `fence` kind, and §7.2's coherence rules. M4's frame lifetime discipline
+follows the replacement rather than preceding it, because a frame is a view onto
+backing storage under the new design and building it against the old shape would be
+work done twice.
+
 ## 1. Sequencing principle
 
 [DECISIONS.md](DECISIONS.md) explicitly rejects "bolting memory safety on after
@@ -973,6 +1020,74 @@ one outright defect that had already merged — see §3.11's denial row.
 
   The second is the better shape. Neither should be taken without the design owner,
   because both change `MemoryState`.
+
+  **`g-design:185` ruled for the second, and c-mem had built the first anyway.** That
+  is the part of this entry worth keeping: the sentence above says the choice belongs
+  to the design owner, and c-mem then spent a working session on
+  `agent/c-mem/alias-offsets` giving `MemoryState.aliases` a signed delta and making
+  `AuthorizedAt` consult it. The ruling arrived while that branch was green. Recording
+  the right answer and then not waiting for it is a failure mode this plan should name
+  rather than quietly correct.
+
+  The offset work is not discarded, and what survives is the part that was never about
+  alias graphs, and all of it is on that branch rather than here: `AuthorizedAt`
+  consulting `Live` rather than only `CurrentEpoch`, the after-teardown authority law
+  `g-construct:76` asked for, and two defects the proofs exposed —
+  a range shift that was not monotone, which would have let a split create authority,
+  and authority surviving a teardown. The delta-carrying edge graph itself goes.
+
+### 4.2.2 The replacement: one backing store, and views onto it
+
+`g-design:185`'s design, restated here as what this layer will build so that a
+reviewer can check the implementation against a statement rather than against an
+event.
+
+**One canonical `ByteStore` per backing storage identity.** `MemoryState` holds
+`backings : FiniteMap StorageId ByteStore` beside its allocations. Bytes live once.
+
+**An `AllocationRecord` becomes a typed view**: a backing `StorageId`, a nonnegative
+backing origin, its local extent, and the address space, source, placement,
+permission, epoch and ownership it already carries. A view is a window onto backing
+bytes, not an owner of them.
+
+**Reads and writes translate.** An allocation-local range becomes one checked span in
+the backing store — `origin + local.start`, bounded by the view's extent. Two views
+alias exactly where their translated spans overlap, which makes byte coherence
+definitional instead of propagated. There is no alias set to walk and no fuel bound.
+
+**Relative shifts are derived, not declared.** The signed offset relating two views is
+the difference of their origins. That is where the offset question this plan spent an
+entry on actually belongs: `MemoryState.aliases` recording a delta was the model
+carrying a fact it could have computed.
+
+**Mapping is a checked transition, not an update.** Allocation creates a fresh backing
+identity and its first view. Mapping creates a further view only through a transition
+that proves the backing relationship and the exact range, carries its mapping and
+unmapping obligations, and preserves the state invariant. Unmapping invalidates a view
+and its provenance without destroying backing bytes another live view still holds;
+tearing down backing storage has its own last-owner rule. `MemoryState.alias`'s
+unconditional prepend is exactly what this replaces.
+
+**Raw constructors stay private.** `MemoryState.mk` already is; the backing and view
+constructors will be, or explicitly test-only, so a fixture cannot fabricate a mapping
+the transitions would refuse.
+
+**Derived, not stored:** `SharesBytes` becomes same-backing plus overlapping translated
+spans; range overlap, `MemoryEvent.Conflicts` and grant coverage all key off backing
+identity and translated spans. `SharesAfter`, `AliasHop`, `AliasLinked`,
+`aliasNeighbours`, `aliasShift?` and the transitive-closure fuel bound all disappear.
+
+**Fixtures the ruling names, and this layer owes.** Negative: a fabricated mapping
+between unrelated storage; a view origin that is inconsistent or out of bounds; a
+stale or unmapped view; destroying backing storage while a live view holds it.
+Positive: a mapped view at a non-zero offset read-after-write **in both directions**,
+and unmapping one view leaving another's bytes intact.
+
+**Open, and asked of g-design rather than assumed.** Where `StorageId` lives —
+`Grass/Core/Identifiers.lean` holds the other identity types and is g-foundation's, so
+c-mem will not put it there unbidden; and whether the scaffolding rule forbids
+`SharesBytes`-consuming transitions outright before the replacement lands, or only
+forbids depending on a *declared* alias.
 - **`MemoryState.aliases` records no offset mapping.** `AuthorizedAt` compares a
   grant's range to an *offset* with `Covers`, and `grantsOver` compares ranges with
   `Meets`, across aliased allocations — which assumes aliased allocations agree offset

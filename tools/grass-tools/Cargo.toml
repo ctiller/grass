@@ -2,7 +2,7 @@
 name = "grass-tools"
 version = "0.1.0"
 edition = "2021"
-description = "Grass validation and audit tools: source and docstring audits over the Lean tree"
+description = "Grass validation and audit tools: docstring and source audits, and the Win64 unwind differential"
 
 # Each tool is a self-contained binary with no shared library. The scripts these
 # replace were self-contained too, and each is invoked independently by
@@ -23,10 +23,16 @@ description = "Grass validation and audit tools: source and docstring audits ove
 # what made that file conflict with `main` on every rebase.
 #
 # This crate is where the remaining validation tools land as they are ported and
-# their equivalence against the originals is demonstrated. It carries the two
+# their equivalence against the originals is demonstrated. It carries the four
 # binaries whose equivalence has been demonstrated rather than a placeholder for
 # nine, because a `[[bin]]` entry for a tool nobody has verified is a claim this
 # file cannot back.
+#
+# `docstring-audit` and `axiom-audit` replace Lean and Python tools whose oracle
+# is the Lean kernel itself. `win64-unwind-differential` and `source-liveness`
+# are the two whose external oracles could actually be run here: `ml64.exe`
+# ships with the MSVC build tools, and a liveness probe works against a loopback
+# socket as well as a publisher.
 
 [[bin]]
 name = "docstring-audit"
@@ -35,6 +41,14 @@ path = "src/bin/docstring_audit.rs"
 [[bin]]
 name = "axiom-audit"
 path = "src/bin/axiom_audit.rs"
+
+[[bin]]
+name = "source-liveness"
+path = "src/bin/source_liveness.rs"
+
+[[bin]]
+name = "win64-unwind-differential"
+path = "src/bin/win64_unwind_differential.rs"
 
 [dependencies]
 regex = "1"

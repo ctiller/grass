@@ -12,11 +12,11 @@ same point from opposite directions: one that a docstring claiming the status is
 "set by probing" was false, and one that an invented document carrying
 `.verified` defeats the whole obligation.
 
-This is the reader. `Tools/source-liveness.py` fetches each `url` and checks
-whether `livenessProbe` appears in what comes back, then compares that against
-the recorded `retrieval`. A recorded `.verified` whose probe string is absent is
-a finding; so is a recorded `.dead` whose probe string is present, because a
-document that came back is no longer a release blocker.
+This is the reader. The `source-liveness` binary in `tools/grass-tools` fetches
+each `url` and checks whether `livenessProbe` appears in what comes back, then
+compares that against the recorded `retrieval`. A recorded `.verified` whose
+probe string is absent is a finding; so is a recorded `.dead` whose probe string
+is present, because a document that came back is no longer a release blocker.
 
 ## Why a probe string and not an HTTP status
 
