@@ -85,6 +85,23 @@ example : summarize (importBytes decoder policy [0, 1, 0, 2]) = .ok (
       ⟨3, [2], .computed indirectSite, [.indirect indirectSite]⟩],
     [entry, target],
     ⟨.importedBytes, "raw imported bytes"⟩) := by rfl
+example : (importBytes decoder policy [0, 1, 0, 2]).map
+    (fun imported => decide (ImportReadyFrom 0 imported.instructions)) =
+    .ok true := by rfl
+
+example (imported : ImportedProgram Nat String Nat Instruction) :
+    ImportReadyFrom 0 imported.instructions := by
+  exact imported.ready
+example (imported : ImportedProgram Nat String Nat Instruction)
+    (instruction : ImportedInstruction Nat Instruction)
+    (hinstruction : instruction ∈ imported.instructions) :
+    instruction.bytes ≠ [] :=
+  imported.instructionBytesNonempty instruction hinstruction
+example (imported : ImportedProgram Nat String Nat Instruction)
+    (instruction : ImportedInstruction Nat Instruction)
+    (hinstruction : instruction ∈ imported.instructions) :
+    instruction.endOffset ≤ imported.sourceBytes.length :=
+  imported.instructionBounded instruction hinstruction
 
 example : (importBytes decoder policy [1, 1]).map (fun _ => ()) =
     .error (.unresolvedControlTarget 0 (.direct missing)) := by rfl

@@ -61,6 +61,47 @@ structure ImportedInstruction (Byte : Type w) (Instruction : Type x) where
   controlTargets : List ControlTarget
 deriving Repr, DecidableEq
 
+namespace ImportedInstruction
+
+/-- First byte offset immediately after one imported instruction. -/
+def endOffset {Byte : Type w} {Instruction : Type x}
+    (instruction : ImportedInstruction Byte Instruction) : Nat :=
+  instruction.offset + instruction.bytes.length
+
+end ImportedInstruction
+
+/-- Consecutive nonempty byte-slice invariant retained by imported programs. -/
+def ImportReadyFrom {Byte : Type w} {Instruction : Type x} :
+    Nat → List (ImportedInstruction Byte Instruction) → Prop
+  | _, [] => True
+  | expected, instruction :: rest =>
+      instruction.offset = expected ∧ instruction.bytes ≠ [] ∧
+        ImportReadyFrom instruction.endOffset rest
+
+private def importReadyFromDecidable
+    {Byte : Type w} {Instruction : Type x} [DecidableEq Byte] :
+    (expected : Nat) →
+      (instructions : List (ImportedInstruction Byte Instruction)) →
+      Decidable (ImportReadyFrom expected instructions)
+  | _, [] => isTrue trivial
+  | expected, instruction :: rest =>
+      if offsetExact : instruction.offset = expected then
+        if bytesNonempty : instruction.bytes ≠ [] then
+          match importReadyFromDecidable instruction.endOffset rest with
+          | isTrue restReady =>
+              isTrue ⟨offsetExact, bytesNonempty, restReady⟩
+          | isFalse restNotReady =>
+              isFalse fun ready => restNotReady ready.2.2
+        else
+          isFalse fun ready => bytesNonempty ready.2.1
+      else
+        isFalse fun ready => offsetExact ready.1
+
+instance {Byte : Type w} {Instruction : Type x} [DecidableEq Byte]
+    (expected : Nat) (instructions : List (ImportedInstruction Byte Instruction)) :
+    Decidable (ImportReadyFrom expected instructions) :=
+  importReadyFromDecidable expected instructions
+
 /-- Structured rejection from the generic byte importer. -/
 inductive ImportError (DecodeError : Type y) where
   | decode (offset : Nat) (error : DecodeError)
@@ -76,19 +117,90 @@ structure ImportedProgram (State : Type u) (Terminal : Type v)
   sourceBytes : List Byte
   instructions : List (ImportedInstruction Byte Instruction)
   bytesExact : instructions.flatMap ImportedInstruction.bytes = sourceBytes
+  ready : ImportReadyFrom 0 instructions
   policy : TargetPolicy State Terminal
   taint : Taint
+
+private theorem importReady_bytesNonempty
+    {Byte : Type w} {Instruction : Type x}
+    (expected : Nat) (instructions : List (ImportedInstruction Byte Instruction))
+    (ready : ImportReadyFrom expected instructions) :
+    ∀ instruction ∈ instructions, instruction.bytes ≠ [] := by
+  induction instructions generalizing expected with
+  | nil => simp
+  | cons head rest ih =>
+      rcases ready with ⟨_, bytesNonempty, restReady⟩
+      intro instruction hinstruction
+      simp only [List.mem_cons] at hinstruction
+      rcases hinstruction with rfl | hinstruction
+      · exact bytesNonempty
+      · exact ih head.endOffset restReady instruction hinstruction
+
+private theorem importReady_bounded
+    {Byte : Type w} {Instruction : Type x}
+    (expected : Nat) (instructions : List (ImportedInstruction Byte Instruction))
+    (ready : ImportReadyFrom expected instructions) :
+    ∀ instruction ∈ instructions,
+      instruction.endOffset ≤ expected +
+        (instructions.flatMap ImportedInstruction.bytes).length := by
+  induction instructions generalizing expected with
+  | nil => simp
+  | cons head rest ih =>
+      rcases ready with ⟨offsetExact, _, restReady⟩
+      intro instruction hinstruction
+      simp only [List.mem_cons] at hinstruction
+      rcases hinstruction with rfl | hinstruction
+      · simp only [List.flatMap_cons, List.length_append,
+          ImportedInstruction.endOffset]
+        omega
+      · have bound := ih head.endOffset restReady instruction hinstruction
+        simp only [List.flatMap_cons, List.length_append,
+          ImportedInstruction.endOffset] at bound ⊢
+        omega
+
+namespace ImportedProgram
+
+/-- Every accepted imported instruction owns a nonempty source-byte slice. -/
+theorem instructionBytesNonempty
+    {State : Type u} {Terminal : Type v} {Byte : Type w}
+    {Instruction : Type x}
+    (program : ImportedProgram State Terminal Byte Instruction)
+    (instruction : ImportedInstruction Byte Instruction)
+    (hinstruction : instruction ∈ program.instructions) :
+    instruction.bytes ≠ [] :=
+  importReady_bytesNonempty 0 program.instructions program.ready instruction
+    hinstruction
+
+/-- Every accepted imported instruction ends within the exact source bytes. -/
+theorem instructionBounded
+    {State : Type u} {Terminal : Type v} {Byte : Type w}
+    {Instruction : Type x}
+    (program : ImportedProgram State Terminal Byte Instruction)
+    (instruction : ImportedInstruction Byte Instruction)
+    (hinstruction : instruction ∈ program.instructions) :
+    instruction.endOffset ≤ program.sourceBytes.length := by
+  rw [← program.bytesExact]
+  simpa using
+    importReady_bounded 0 program.instructions program.ready instruction
+      hinstruction
+
+end ImportedProgram
+
+private structure DecodedAt (Byte : Type w) (Instruction : Type x)
+    (offset : Nat) (bytes : List Byte) where
+  instructions : List (ImportedInstruction Byte Instruction)
+  bytesExact : instructions.flatMap ImportedInstruction.bytes = bytes
+  ready : ImportReadyFrom offset instructions
 
 private def decodeFuel {State : Type u} {Terminal : Type v}
     {Byte : Type w} {Instruction : Type x} {DecodeError : Type y}
     [DecidableEq Byte]
     (decoder : Decoder Byte Instruction DecodeError)
     (policy : TargetPolicy State Terminal) :
-    Nat → Nat → (bytes : List Byte) →
+    Nat → (offset : Nat) → (bytes : List Byte) →
       Except (ImportError DecodeError)
-        { instructions : List (ImportedInstruction Byte Instruction) //
-          instructions.flatMap ImportedInstruction.bytes = bytes }
-  | _, _, [] => .ok ⟨[], rfl⟩
+        (DecodedAt Byte Instruction offset bytes)
+  | _, _, [] => .ok ⟨[], rfl, trivial⟩
   | 0, offset, _ :: _ => .error (.fuelExhausted offset)
   | fuel + 1, offset, head :: tail =>
       let bytes := head :: tail
@@ -105,10 +217,20 @@ private def decodeFuel {State : Type u} {Terminal : Type v}
                   match decodeFuel decoder policy fuel (offset + consumed.length) rest with
                   | .error error => .error error
                   | .ok tail =>
-                      .ok ⟨⟨offset, consumed, instruction, targets⟩ :: tail.val, by
-                        simp only [List.flatMap_cons]
-                        rw [tail.property]
-                        simpa [bytes] using exactRemainder⟩
+                      have consumedNonempty : consumed ≠ [] := by
+                        intro consumedEmpty
+                        have restExact : rest = bytes := by
+                          simpa [consumedEmpty] using exactRemainder
+                        rw [restExact] at _progress
+                        omega
+                      .ok ⟨
+                        ⟨offset, consumed, instruction, targets⟩ ::
+                          tail.instructions,
+                        by
+                          simp only [List.flatMap_cons]
+                          rw [tail.bytesExact]
+                          simpa [bytes] using exactRemainder,
+                        ⟨rfl, consumedNonempty, tail.ready⟩⟩
             else .error (.invalidRemainder offset)
           else .error (.stalledDecoder offset)
 
@@ -126,7 +248,7 @@ def importBytes {State : Type u} {Terminal : Type v}
       (ImportedProgram State Terminal Byte Instruction) :=
   match decodeFuel decoder policy bytes.length 0 bytes with
   | .error error => .error error
-  | .ok decoded => .ok ⟨bytes, decoded.val, decoded.property, policy,
-      ⟨.importedBytes, detail⟩⟩
+  | .ok decoded => .ok ⟨bytes, decoded.instructions, decoded.bytesExact,
+      decoded.ready, policy, ⟨.importedBytes, detail⟩⟩
 
 end Grass.Unsafe

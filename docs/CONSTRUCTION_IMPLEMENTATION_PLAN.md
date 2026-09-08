@@ -429,8 +429,10 @@ requires each decode step to consume a nonempty exact prefix, rejects unresolved
 direct or indirect targets against a `TargetPolicy` tied to one structurally
 well-formed CFG and its derived block identities, and returns an `ImportedProgram`
 whose concatenated instruction byte slices equal the original input and which
-retains the exact policy used for acceptance. That byte-coverage proof is not an
-instruction-semantics certificate.
+retains the exact policy used for acceptance. `ImportReadyFrom` additionally
+retains the decoder-enforced consecutive offsets and nonempty slice for every
+accepted instruction. Those byte-coverage facts are not an instruction-semantics
+certificate.
 
 `Grass.Unsafe.Step` maps imported instructions to the existing open
 `Grass.Op.SomeOperation` package plus explicit context, cause, and fault-plan

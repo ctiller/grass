@@ -39,6 +39,7 @@ private def program : ImportedProgram Nat String Nat SomeOperation where
     ⟨1, [1], rejected, []⟩,
     ⟨2, [2], unattempted, []⟩]
   bytesExact := rfl
+  ready := by decide
   policy := targetPolicy
   taint := ⟨.importedBytes, "step fixture"⟩
 
