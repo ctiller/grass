@@ -2336,9 +2336,12 @@ by proving the same network relation and transition coverage.
 
 Processes and process compositions expose theorem projections, not only a final
 behavioral refinement. Network holdings form an owned resource algebra and a
-metric is a valuation of that state. Disjoint holdings add by default; explicit
-attribution, phase-exclusion, and transfer witnesses justify shared-once,
-maximum, or affine-transfer equations:
+metric is a valuation of that state. A metric must prove that disjoint owned
+holdings are compatible and add; explicit attribution, phase-exclusion, and
+transfer witnesses justify shared-once, maximum, or affine-transfer equations.
+A bounded metric represents overflow or an exceeded budget in its value domain
+instead of making compatibility empty, because an empty compatibility relation
+would make every composition theorem vacuous:
 
 ```lean
 structure NetworkResourceState (plan : ProcessPlan registry boundary) where
@@ -2366,9 +2369,11 @@ structure ResourceMetric (plan : ProcessPlan registry boundary) where
   empty : forall axis, valuation axis EmptyNetworkResourceState = zero axis
   monotone : forall axis left right,
     OwnedSubstate left right -> le axis (valuation axis left) (valuation axis right)
+  disjointCompatible : forall axis left right,
+    OwnedDisjoint left right ->
+    compatible axis (valuation axis left) (valuation axis right)
   disjointUnion : forall axis left right,
     OwnedDisjoint left right ->
-    compatible axis (valuation axis left) (valuation axis right) ->
     valuation axis (left ∪ᵣ right) =
       combine axis (valuation axis left) (valuation axis right)
   attribution : SharedAttributionValuationLaw valuation
