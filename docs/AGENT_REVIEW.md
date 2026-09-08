@@ -146,8 +146,10 @@ eligible reviewer, and carries every open prior finding forward unchanged. The
 replacement must accept, then personally clear or supersede those findings with
 explicit rationale. Elapsed time never transfers authority by itself.
 The former reviewer cannot create new findings or authorizations under the
-superseded nomination. An authorization already published remains immutable and
-may only win or lose its pinned product compare-and-swap.
+superseded nomination. A candidate-specific landing authorization already
+published remains immutable and may still win or lose its ordinary non-force
+push; a source approval is historical evidence and does not transfer the former
+reviewer's authority to the replacement.
 
 Git publication serializes a reassignment racing an old reviewer's final offline
 finding. Whichever event lands first changes the parent state seen when the
@@ -425,32 +427,53 @@ comes from reviewer-owned selection and merge, not from freezing author work.
 
 ## 7. Reviewer-owned merge
 
+The sequence below is the required successor protocol. Active bus version two
+combines approval and landing authorization in `review.merge_authorized` and
+therefore retains the safe but expensive full-rerun rule until the split event
+schema, reducer, commands, and fixtures are reviewed and activated together.
+
 When satisfied, the reviewer:
 
 1. fetches current `refs/heads/main` and the nominated product branch;
 2. selects the product-branch commit to incorporate;
 3. verifies authorship and review eligibility for commits introduced by that
    selection;
-4. uses `agent-bus prepare-merge` to create a no-conflict merge commit with
+4. fixes the selected source base, runs the nomination's **review checks**
+   against that immutable source range, and publishes `review.approved`;
+5. uses `agent-bus prepare-merge` to create a no-conflict merge commit with
    current `main` as first parent and the selected commit as second parent, even
    if a fast-forward is possible;
-5. stops and requests author changes if Git requires conflict resolution;
-6. runs every required integration check on the exact candidate;
-7. publishes the candidate under its immutable candidate tag;
-8. emits and synchronizes `review.merge_authorized` for that exact candidate;
-9. runs `merge-ready` against the published authorization; and
-10. pushes the candidate without force:
+6. stops and requests author changes if Git requires conflict resolution;
+7. runs the small **landing checks** on the exact candidate;
+8. publishes the candidate under its immutable candidate tag;
+9. emits and synchronizes `review.merge_authorized` for that exact candidate;
+10. runs `merge-ready` against the published authorization; and
+11. pushes the candidate without force:
 
 ```text
 git push origin <candidate>:refs/heads/main
 ```
 
-The push is the compare-and-swap boundary. If `main` advanced and the push is
-rejected, that authorization can never be used against the new `main`. The
-reviewer fetches, constructs a new clean candidate, reruns every required check,
-and publishes a new authorization. This does not require re-nomination:
-the selected product snapshot has not changed. A new conflict goes to the
-author.
+`review.approved` is deliberately not indexed by the moving `main` head. It says
+that the immutable authored range from `review_base` through `reviewed_commit`,
+its scope, authorship, findings, and review checks were accepted. A landing base
+must descend from `review_base`, but rapid later landing cannot destroy that
+judgment.
+
+`review.merge_authorized` remains an exact short-lived authorization for one
+candidate. If a normal non-force push loses a race, the reviewer constructs a
+new clean candidate on current `main`, reruns only its landing checks, publishes
+a replacement authorization, and pushes. The review approval and its expensive
+checks remain valid. No re-nomination or substantive re-review occurs unless the
+selected authored commit changes, Git reports a conflict, or the reviewer sees
+a new semantic concern.
+
+This is intentionally optimistic. A clean merge plus current-tree Lean
+typechecking catches structural and theorem dependency failures. It does not
+promise that independently correct components cannot interact badly. Broader
+integration, platform, differential, and performance suites may complete after
+landing. A failure opens an urgent defect and produces a forward repair or a
+clean revert; it does not retroactively pretend the review never happened.
 
 The source branch may advance between selection and the push. That is harmless:
 the reviewer merges the selected commit, not whatever the branch later names.
@@ -490,8 +513,10 @@ auditable review boundary. Its message includes exactly one trailer:
 Agent-Bus-Reviewer: bob
 ```
 
-Before the push, `review.merge_authorized` records passed checks, limitations,
-scope, previous main, reviewed commit, and candidate. After a successful push,
+Before candidate construction, `review.approved` records the selected source,
+review checks, limitations, scope, and finding dispositions. Before the push,
+`review.merge_authorized` references that approval and records the current
+base, exact candidate, and landing checks. After a successful push,
 the reviewer emits the smaller `review.merged` receipt:
 
 ```json
@@ -524,16 +549,59 @@ author is the accepted eligible reviewer; selected commit authors match trailers
 and exclude that reviewer; every finding has an explicit terminal disposition;
 no unresolved issue explicitly blocks its nomination chain; current `main`
 equals `previous_main`; the candidate has exactly the required two parents,
-reviewer trailer, and conflict-free tree; all required check results are present;
+reviewer trailer, and conflict-free tree; a valid immutable `review.approved`
+names its exact second parent; all required landing check results are present;
 authorization `reviewed_scope` exactly equals nomination `review_scope`; every
 changed path is within that scope; and structural bus validation passes. It
 outputs the exact candidate object ID to push.
+
+Required checks are classified when nominated:
+
+- **review checks** judge the selected authored commit and run once for that
+  approval: adversarial audits, proof-surface inspection, full mutation suites,
+  source-authority review, and other expensive evidence which does not become a
+  different judgment merely because another merge lands;
+- **landing checks** judge the exact combined tree and must be fast enough to
+  repeat after a lost push: at minimum the affected Lean/build closure and the
+  repository's cheap structural gates; and
+- **post-merge checks** are broad corroboration allowed to finish after landing.
+
+The helper derives mandatory landing checks from a reviewed protected-path
+registry. An author cannot classify away current-tree validation for the proof
+kernel, agent-bus/schema/merge helper, serialization trust boundaries, or other
+registered critical surfaces. Ordinary leaf libraries do not inherit those
+exceptional gates. Adding a protected class is a proof/tooling-demand change and
+requires the same burden and rebuild-cone review as any other mandatory gate.
 
 The authorization consumes the bus state named by its `observed` field. Events
 published later do not retroactively change that verdict. This makes the
 non-atomic bus/product sequence explicit rather than pretending a cross-ref CAS
 exists. The gate does not prove semantic adequacy or merge anything. Review
 judgment, Lean, tests, CI, and Git history remain independent authorities.
+
+### 8.1 Post-merge CI custody
+
+A dedicated registered `auditor` owns continuous CI observation. For every new
+first-parent `main` commit it waits for the configured post-merge checks and
+publishes one `audit.reported` naming that exact commit. A green report has no
+issues. A red, cancelled, missing-artifact, or timed-out run first produces one
+or more ordinary issues against the responsible implementation owner, then
+references them from the audit report. The report records the check/run identity,
+observed conclusion, and limitations; a dashboard color or movable branch name
+is not durable evidence.
+
+The host coordinator owns coverage and escalation, not technical judgment. It
+checks that every landed commit receives a terminal CI audit, requests another
+auditor when the monitor becomes unavailable, and prioritizes a red build for a
+forward repair or reviewed revert. It does not mark checks passed, resolve the
+auditor's issues, author a fix, or acquire merge authority. An auditor likewise
+cannot block or merge a candidate merely by reporting it. Only a separately
+reviewed protected landing gate may prevent further landings automatically.
+
+The eventual implementation should be a deterministic GitHub/CI watcher; an LLM
+may perform the role during bootstrap. Silence is not green. Missing or stale CI
+is reported distinctly from a failing check so infrastructure outage is not
+misdiagnosed as product failure.
 
 ## 9. Repository configuration
 
@@ -579,10 +647,11 @@ merge. An unregistered subagent cannot satisfy independent review. Review depth
 follows novelty, risk, trust-boundary impact, and blast radius, not a fixed
 duration or comment count.
 
-Under sustained merge contention, a coordinator may announce advisory merge
-slots so reviewers do not repeatedly invalidate long-running candidate checks.
-Slots never grant merge authority. Throughput is measured under concurrent
-nominations before adding a scheduler or merge service.
+Under sustained merge contention, approval remains attached to selected source
+rather than a moving `main`. A coordinator may prioritize the small landing
+authorization or announce advisory merge slots, but never gains review, rebase,
+candidate-construction, or merge authority. There is no fleet-wide merge queue,
+repository-wide client lock, force-push, or custom Git CAS loop.
 
 ## 11. Disputes and failures
 
@@ -594,8 +663,14 @@ nominations before adding a scheduler or merge service.
 - If a reviewer resolves a conflict or adds a material fix, another reviewer is
   required for that content.
 - If `main` changes during merge, the reviewer retries from the new main; authors
-  need act only if the merge no longer stays clean. Every required check reruns
-  on the new candidate, which requires a new published authorization.
+  need act only if the merge no longer stays clean. Review approval survives;
+  only landing checks rerun on the new exact candidate, which receives a new
+  published authorization.
+- A post-merge check failure is recorded immediately. The normal remedy is a
+  forward repair. When leaving the change in `main` is materially worse, an
+  implementor authors the smallest clean revert and a reviewer lands it through
+  the same protocol. Rollback is an expected recovery operation, not evidence
+  that unchecked direct pushes should be allowed.
 - If the reviewer merges but omits `review.merged`, product history remains
   authoritative. The reviewer must publish it before taking more work; if they
   are unavailable, a bootstrap-authorized coordinator emits
@@ -632,6 +707,19 @@ both publication orders of reassignment racing a final offline finding,
 no-fast-forward clean merge after unrelated `main` advancement, authorization
 publication, push-race reauthorization, missing-receipt audit, and post-selection
 commits left for a later merge.
+
+The push-race fixture proves the substantive `review.approved` event and review
+checks are reused unchanged while a newly constructed candidate reruns only the
+landing checks. A changed reviewed commit cannot reuse the approval. Protected
+path fixtures prove an author cannot omit or downgrade their mandatory landing
+profile. A post-merge failure fixture produces a durable urgent issue and a
+reviewed forward repair or revert rather than rewriting `main`.
+
+CI-custody fixtures cover green, red, cancelled, timed-out, missing-artifact,
+and auditor-loss cases. They prove the audit names the exact landed commit, a red
+report references independently actionable issues, the coordinator detects a
+missing terminal report and reassigns monitoring, and neither role can turn an
+audit report into review or merge authority.
 
 ## 13. Adversarial review questions
 

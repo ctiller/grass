@@ -618,6 +618,82 @@ reconstruction, and tag. A fetched mismatch is invalid; an unavailable remote
 or object is `unverifiable` and blocks authorization/merge without making the
 bus malformed.
 
+### Successor approval/landing split
+
+The active version-two record above remains authoritative until a later schema
+activation. That activation replaces its overloaded proof role with two events;
+old events retain their historical meaning during replay.
+
+`review.approved` is independent of a target-branch head:
+
+```text
+data = {
+  nomination : EventId,
+  review_base : ObjectId,
+  reviewed_commit : ObjectId,
+  reviewed_scope : StringSet<PathClaim>,
+  review_checks : List<CheckResult>,
+  finding_dispositions : List<FindingDisposition>,
+  limitations : List<Text>,
+  summary : Text
+}
+refs = unique ([nomination] + every finding_dispositions.changes_event)
+```
+
+Only the accepting reviewer emits it. `review_base` is an ancestor of both the
+selected source and the target branch at selection; a later landing base must
+descend from it. `reviewed_commit` is reachable from the nominated product branch
+at publication time. Commits in the exact `review_base..reviewed_commit` range
+have authors and trailers equal to the nomination authors; its changed paths are
+a subset of the exact nomination scope; every open finding has one terminal
+disposition; and every nominated review check passed. Publication freezes only
+this selected source judgment. Later product-branch commits and later `main`
+commits do not enter it.
+
+The successor `review.merge_authorized` is the bounded landing authority:
+
+```text
+data = {
+  approval : EventId,
+  product_branch : Branch,
+  previous_main : ObjectId,
+  candidate : ObjectId,
+  merge_engine_epoch : EventId,
+  landing_checks : List<CheckResult>,
+  reviewed_scope : StringSet<PathClaim>,
+  summary : Text
+}
+refs = [approval, merge_engine_epoch]
+```
+
+Only the reviewer who emitted `approval` emits it. The helper derives the
+reviewed commit from that approval and reconstructs the exact candidate with
+`previous_main` as first parent and that commit as second parent. The merge is
+clean under the selected engine, every changed path lies in the frozen scope,
+and every mandatory landing check derived from the protected-path registry is
+present and passed. The registry and check classification come from
+`previous_main`; neither author nor reviewer can omit a protected check.
+
+Review checks bind to the selected authored source. Landing checks bind to the
+exact combined candidate and are intentionally small: affected Lean/build
+typechecking plus the registered exceptional gates for trust-critical paths.
+Post-merge corroboration is not represented as merge authority. A failed
+post-merge check opens an urgent issue and leads to a reviewed repair or revert.
+
+If a push loses to a newer `main`, the approval remains current. The reviewer
+constructs another exact candidate and emits another landing authorization
+after rerunning only landing checks. No event authorizes a candidate whose first
+parent differs from its recorded `previous_main`.
+
+The successor nomination schema replaces each free-form required-check string
+with `{ command, phase }`, where `phase` is `review`, `landing`, or
+`post_merge`. The accepting reviewer may strengthen a phase but cannot weaken
+it. The helper unions the nomination with mandatory phase assignments from the
+protected-path registry selected by `review_base`/`previous_main`. Thus an
+author cannot move a trust-critical check after landing, while ordinary
+substantive review and expensive audit commands are not repeated for every new
+base.
+
 ### `review.merged`
 
 ```text
@@ -700,7 +776,7 @@ The event cannot select a transition outside that exact conflict set.
   published reassignment.
 - Reassignment closes future authority under the replaced opening event and
   creates a successor opening event. A published merge authorization remains
-  immutable and can only win or lose its product compare-and-swap. A receipt for
+  immutable and can only win or lose its ordinary non-force product push. A receipt for
   an authorization remains valid after reassignment if that candidate won.
 - Retirement removes scope and new-action authority but does not silently close
   work. Open targeted work is explicitly reassigned, resolved, rejected, or

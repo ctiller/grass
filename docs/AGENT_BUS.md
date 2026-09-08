@@ -91,7 +91,7 @@ from the orphan branch.
 
 Prepared merge candidates are published as immutable lightweight tags at
 `refs/tags/agent-candidate/<reviewer>/<candidate-object-id>` before authorization.
-They are never moved, force-pushed, or deleted. This makes losing CAS candidates
+They are never moved, force-pushed, or deleted. This makes losing race candidates
 available to bus validation and audit without merging them into any branch.
 
 ## 3. Agent identity, roles, and single writers
@@ -381,15 +381,23 @@ silence never change authority implicitly. Every prior open finding is inherited
 as open. Only the accepting replacement reviewer may later clear it or supersede
 it with rationale. A returning superseded reviewer has no new authority. If the
 old reviewer had already published `review.merge_authorized`, reassignment does
-not revoke that immutable authorization; the old and replacement candidates
-race through ordinary `main` compare-and-swap, so at most one candidate based on
-the same previous main can land.
+not revoke that immutable authorization; the old and replacement candidates use
+ordinary non-force pushes, so at most one candidate based on the same previous
+main can land.
 
-`review.merge_authorized` is the positive review verdict and the pre-merge
-authority. The accepting reviewer publishes it after checks, pinning the
-nomination chain, observed bus state, previous `main`, reviewed product commit,
-exact conflict-free merge candidate, check results, finding dispositions, and
-review scope. Once published it authorizes only that reviewer and candidate.
+The next activated schema splits the current combined authorization as follows.
+Until activation, version two retains its exact-base combined
+`review.merge_authorized` and full-rerun behavior.
+
+`review.approved` is the positive review verdict. The accepting reviewer pins
+one immutable reviewed product commit, authors, scope, review-check results,
+finding dispositions, and limitations. It is deliberately independent of a
+`main` head and remains valid when unrelated product commits land.
+
+`review.merge_authorized` is the pre-merge authority. It references one
+`review.approved`, pins current `main`, the exact conflict-free merge candidate,
+and its landing-check results. Once published it authorizes only that reviewer
+and candidate.
 The matching immutable candidate tag must already be fetchable. Later branch
 commits are excluded. Later bus events cannot retroactively revoke
 the pinned authorization; they govern later candidates and may require an
@@ -408,9 +416,10 @@ previous `main`. Reconciliation cannot authorize or perform a merge.
 
 These events implement [AGENT_REVIEW.md](AGENT_REVIEW.md). Only an eligible
 non-author reviewer may merge. The selected snapshot must merge without
-conflict into current `main`, and required checks run against that exact
-candidate. Later branch commits remain available for a later reviewer-owned
-merge and do not retroactively enter the completed one.
+conflict into current `main`. Review checks bind to the approved authored
+snapshot; only the bounded landing profile reruns against each exact candidate.
+Later branch commits remain available for a later reviewer-owned merge and do
+not retroactively enter the completed one.
 
 ## 7. State reduction
 
@@ -433,7 +442,9 @@ coordinator, on user direction, emits `lifecycle.conflict_resolved` naming the
 complete competing set and selected successor. Review findings are open from
 `review.changes_requested` until the accepting reviewer emits a causally linked
 `review.findings_cleared`; clearing findings does not close the nomination.
-`review.merge_authorized` freezes one candidate but does not close the branch
+`review.approved` freezes one reviewed source judgment but does not close the
+branch or approve future commits. `review.merge_authorized` freezes one
+candidate but does not close the branch
 workstream; matching `review.merged` or `review.merge_reconciled` closes that
 nomination chain for the recorded candidate. Reassignment creates a successor
 chain while preserving inherited findings. Invalid authority or malformed
@@ -698,11 +709,17 @@ in. Measurements record events, bytes, cold/incremental query time, and peak
 memory. No number is promised before measurement; ordinary status and inbox
 queries must remain comfortably interactive.
 
-Review-throughput fixtures also record merge latency and exact-candidate check
-reruns under at least 16 concurrent nominations. If reviewers repeatedly lose
-the `main` compare-and-swap race, a coordinator may announce advisory merge
-slots through ordinary plan/progress events. Slots improve throughput but never
-grant authority or replace review authorization.
+Review-throughput fixtures also record merge latency, review-check executions,
+and landing-check reruns under at least 16 concurrent nominations. Landing one
+candidate may require bounded landing work for the others, but must not repeat
+their substantive review suites. A coordinator may prioritize authorization or
+announce advisory merge slots; it never rebases or merges product content.
+
+A dedicated CI-monitoring identity uses the existing `auditor` role. It emits an
+`audit.reported` for each exact landed `main` commit and opens ordinary targeted
+issues for red, cancelled, timed-out, incomplete, or unavailable runs. The host
+coordinator checks coverage and routes escalation or reassignment; it does not
+decide that CI passed. See [AGENT_REVIEW.md](AGENT_REVIEW.md) section 8.1.
 
 Scope should follow [PROCESS_SHARDING.md](PROCESS_SHARDING.md): implementors
 normally claim a component's implementation/certificate shards, keep signature
