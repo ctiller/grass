@@ -8,6 +8,7 @@ import Grass.Build.Manifest.Comparison
 import Grass.Build.Manifest.Core
 import Grass.Build.Manifest.Dag
 import Grass.Build.Manifest.Evidence
+import Grass.Build.Manifest.Hierarchy
 import Grass.Build.Manifest.Invalidation
 import Grass.Build.Manifest.Report
 import Grass.Build.Manifest.Rooted

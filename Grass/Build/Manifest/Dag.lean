@@ -21,7 +21,7 @@ structure DependencyNode (fanout : Nat) where
   scope : ScopeId
   dependencies : Vec ScopeId
   bounded : dependencies.length ≤ fanout
-  deriving Repr
+  deriving DecidableEq, Repr
 
 /-- A manifest graph in child-before-parent traversal order. Structural
 well-formedness is a separate proposition so untrusted generated metadata can
