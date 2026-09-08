@@ -41,18 +41,26 @@ happened. A missing or mismatched receipt is detected by `audit-main` and blocks
 that reviewer from taking more work until repaired.
 
 There is no emergency, documentation-only, trivial-change, generated-change,
-revert, or administrator exception. Urgency may shorten latency, not remove the
-second agent. The live bus branch is coordination state, not product history,
-and follows its separate single-writer protocol.
+revert, or administrator exception. The sole authorship bootstrap is the exact
+user-directed design-steward transition commit defined by
+[`README.md`](README.md); it still requires an independent reviewer. Urgency may
+shorten latency, not remove the second agent. The live bus branch is
+coordination state, not product history, and follows its separate single-writer
+protocol.
 
 Normative publication has an additional ownership gate. For every path that
 [`README.md`](README.md) identifies as part of the normative corpus, each commit
-introducing a delta at that path carries the current design steward's authorship
-trailer and the steward coordinates the nominated branch. Other agents submit
+introducing a delta at that path carries an authorship trailer naming the
+current design steward recorded by the single authoritative line in that file,
+and the nomination's `product_branch` is that steward's registered product
+branch. Other agents submit
 findings and candidate patches to the steward; they do not turn a local design
 choice into project law by placing it in a convenient product commit. Reviewers
 reject a candidate that violates this gate even when its Lean build and tests
-pass. Generated or mechanically mirrored normative text is still normative.
+pass. The narrowly scoped succession bootstrap defined there is evaluated
+against its user direction, successor identity, and the successor's registered
+product branch instead of the prior-steward trailer and branch. Generated or
+mechanically mirrored text at a manifested normative path is still normative.
 
 No participant force-pushes any protocol branch: not `main`, a product branch,
 or `agent-bus`. Product branches advance through ordinary commits and merges.

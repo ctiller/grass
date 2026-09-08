@@ -20,28 +20,63 @@ No document may override a narrower owner by restating it differently.
 
 ### Publication ownership
 
-`g-design` is the current design steward and the exclusive publisher of changes
+Current design steward: `g-design`.
+
+The identity on that single line is the authoritative current-steward record.
+The recorded current design steward is the exclusive publisher of changes
 to the normative corpus identified by this index. An implementor, reviewer, or
 auditor may identify a defect, propose wording, or prepare a suggested patch,
-but publishes that material as evidence to `g-design`; it does not merge a
-normative edit under its own authority. `g-design` must inspect the affected
-owner documents, record the ruling, rebuild or explicitly adopt the change, and
+but publishes that material as evidence to the recorded steward; it does not
+merge a normative edit under its own authority. The steward must inspect the
+affected owner documents, record the ruling, rebuild or explicitly adopt the
+change, and
 nominate the resulting branch to a dedicated reviewer. Every commit that
-introduces a normative-path delta carries `Agent-Bus-Agent: g-design` (possibly
-beside other credited authors), and the product branch is coordinated by
-`g-design`. The reviewer remains independent and owns acceptance and merge.
+introduces a normative-path delta carries an `Agent-Bus-Agent:` trailer naming
+that recorded steward (possibly beside other credited authors), and its
+nomination's `product_branch` is the steward's registered product branch. The
+reviewer remains independent and owns acceptance and merge.
 Thus design ownership is not a review exemption.
 
 This rule is about normative authority, not who first typed useful words. It
 prevents a locally sensible implementation choice from silently becoming a
 cross-project contract. Mechanical mirror updates are not an exception: the
-implementor may supply the exact generated diff, but `g-design` publishes the
-normative copy. Urgent corrections may be reverted or repaired through the
+implementor may supply the exact generated diff, but the recorded steward
+publishes the normative copy. Urgent corrections may be reverted or repaired through the
 ordinary optimistic merge-and-rollback policy; urgency does not make `docs/`
 open season. A successor gains this authority only through an explicit
-user-directed steward transition recorded on the bus and a reviewed update to
-this paragraph; ordinary scope claims, assignments, or handoffs cannot confer
-it.
+user-directed steward transition recorded on the bus. That direction authorizes
+the named successor to author exactly one transition commit whose normative
+delta only updates the current-steward line and any mechanically necessary
+references to it, published from the successor's registered product branch. The
+transition commit follows the direction; it does not gate or create it. An
+independent reviewer verifies the direction, scope, exact successor, and branch,
+then merges the commit through the ordinary review protocol. All later normative
+commits use the updated line. This is the sole bootstrap
+exception to the prior steward's authorship trailer; ordinary scope claims,
+assignments, handoffs, silence, or presumed unavailability cannot confer it.
+
+### Normative path set
+
+The following repository-relative manifest is the complete path domain of the
+normative-publication gate. It stops at `docs/`; no path under `Spikes/`,
+`Grass/`, `Tools/`, or any other directory is included by implication.
+
+```yaml
+normative-paths-v1:
+  include:
+    - docs/*.md
+  exclude:
+    - docs/*_IMPLEMENTATION_PLAN.md
+    - docs/AGENT_COORDINATION_EVOLUTION.md
+    - docs/AGENT_WORKSTREAM_TRANSITION.md
+```
+
+The exclusions are tier-four implementation ledgers or unratified review
+candidates. Adding, removing, or changing an entry in this manifest is itself a
+normative-path delta. Generated or mechanically mirrored text at an included
+path remains subject to the gate. A mirror outside this manifest is not brought
+inside the gate by similarity or generation; its owning review must instead
+check the declared mirror relation and reject incoherence.
 
 Long-lived implementation roadmaps belong under [`../plans/`](../plans/).
 Legacy `*_IMPLEMENTATION_PLAN.md` files still under `docs/` are tier-four

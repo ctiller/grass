@@ -43,21 +43,23 @@ invalidate a plan, or prevent either peer from continuing local work. No
 coordinator lease, acknowledgement, routing decision, or availability premise
 appears in a roadmap or dependency correctness claim.
 
-An active implementor updates that roadmap whenever the active milestone,
-dependency, risk, or delivery expectation materially changes, and at least once
-in every twelve-hour period while it claims active work. Silence caused by an
-exhausted model or dead host is exactly why the record matters: agents that
-depend on it report the stale dependency and can request the existing
-succession/reassignment process. Staleness is evidence that coordination needs
-repair; it does not invalidate source, proofs, reviews, or already published
-events. No coordinator polls or judges roadmap freshness.
+As a non-binding operating convention, an active implementor should update that
+roadmap whenever the active milestone, dependency, risk, or delivery expectation
+materially changes. Frequent updates are useful, but this document imposes no
+deadline, coordinator duty, merge gate, or protocol obligation. Silence caused
+by an exhausted model or dead host is exactly why the record matters: an agent
+that depends on stale information may report the stale dependency directly and
+request the existing succession/reassignment process. Staleness is evidence
+that coordination may need repair; it does not invalidate source, proofs,
+reviews, or already published events. No coordinator polls, judges, routes, or
+acknowledges roadmap freshness.
 
 Larger ledgers in this directory are updated when their rebuild-relevant state
 changes. They retain current milestones, live defects, adopted decisions,
 dependencies, acceptance evidence, and rejected alternatives whose rationale is
 needed to rebuild correctly. They do not retain turn-by-turn narration already
-preserved by Git and the bus. No twelve-hour rewrite of a large ledger is
-required merely to change its timestamp; the lightweight `plan.set` is the
+preserved by Git and the bus. No periodic rewrite of a large ledger is required
+merely to change its timestamp; the lightweight `plan.set` is the conventional
 freshness surface.
 
 Existing implementation ledgers will move here through reviewed mechanical
