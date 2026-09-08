@@ -121,7 +121,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 138
+def owedBaseline : Nat := 140
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -143,7 +143,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 82
+def notBehaviourBaseline : Nat := 83
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -411,7 +411,10 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.Coff.DisplacementSite.relocation?,
     `Grass.Platform.Win32.Coff.displacementRelocations?,
     `Grass.Platform.Win32.Coff.textSection?,
-    `Grass.Platform.Win32.Coff.dotText ]
+    `Grass.Platform.Win32.Coff.dotText,
+    -- Assembles a site from the two rows above plus a placement and a symbol;
+    -- asserts nothing either of them does not.
+    `Grass.Platform.Win32.Coff.siteForInsn ]
 
 /--
 Declarations that genuinely model external behaviour and have no citation yet.
@@ -664,7 +667,15 @@ def owed : List Name :=
     -- anything. `textCharacteristics` is the section's flag word as `ml64`
     -- writes it: code, executable, readable.
     `Grass.Platform.Win32.Coff.DisplacementSite.InRange,
-    `Grass.Platform.Win32.Coff.textCharacteristics ]
+    `Grass.Platform.Win32.Coff.textCharacteristics,
+    -- Where a displacement sits inside an instruction, and what follows it.
+    -- Both are facts about x86-64 encoding rather than about COFF: the field
+    -- comes after any REX prefix, escape byte, opcode, ModR/M and SIB, and the
+    -- immediate is what remains. A relocation needs both numbers and cannot
+    -- recover either from the byte string, which does not say where one field
+    -- ends and the next begins.
+    `Grass.ISA.X86.InsnEncoding.dispOffset,
+    `Grass.ISA.X86.InsnEncoding.dispTrailing ]
 
 /-- The declarations this gate holds the ledger responsible for. -/
 def modeledDeclarations : MetaM (Array Name) := do

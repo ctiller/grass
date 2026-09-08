@@ -300,6 +300,47 @@ def size (i : InsnEncoding) : Nat :=
     (if i.modrm.isSome then 1 else 0) + (if i.sib.isSome then 1 else 0) +
     i.disp.size + i.imm.size
 
+/--
+Where the displacement field starts, counted from the instruction's first byte.
+
+Everything `toBytes` emits before the displacement: the REX prefix if present,
+the escape byte if present, the opcode, and the ModR/M and SIB bytes if
+present.
+
+This exists for one consumer. A COFF relocation for a RIP-relative operand
+names the *displacement field*, not the instruction, so a writer needs this
+number and cannot get it from the byte string -- the bytes do not say where one
+field ends and the next begins. `Grass/Platform/Win32/CoffText.lean` took it on
+trust before this. -/
+def dispOffset (i : InsnEncoding) : Nat :=
+  (if i.rex.isSome then 1 else 0) + (if i.escape then 1 else 0) + 1 +
+    (if i.modrm.isSome then 1 else 0) + (if i.sib.isSome then 1 else 0)
+
+/--
+Bytes of the instruction after the displacement field: the immediate, if any.
+
+The other number a relocation needs. `IMAGE_REL_AMD64_REL32` resolves relative
+to the byte after the field, so an instruction that continues past it takes
+`REL32_1` through `REL32_5` instead -- selected by exactly this count. -/
+def dispTrailing (i : InsnEncoding) : Nat := i.imm.size
+
+/--
+**The displacement field is where these two say it is.**
+
+Offset, field, and trailing bytes account for the whole instruction. This is
+what makes `dispOffset` and `dispTrailing` usable by a relocation: a
+displacement placed anywhere else would still satisfy each definition
+separately, and only their sum against `size` pins them together. -/
+theorem dispOffset_add_disp_add_trailing (i : InsnEncoding) :
+    i.dispOffset + i.disp.size + i.dispTrailing = i.size := by
+  simp only [dispOffset, dispTrailing, size]
+
+/-- **An instruction with no immediate has nothing after its displacement.**
+
+The common case, and the one that makes plain `REL32` correct. -/
+theorem dispTrailing_eq_zero_iff (i : InsnEncoding) :
+    i.dispTrailing = 0 ↔ i.imm.size = 0 := Iff.rfl
+
 /-- Every instruction is at least one byte, so a parser always makes progress. -/
 theorem size_pos (i : InsnEncoding) : 0 < i.size := by
   simp only [size]; omega

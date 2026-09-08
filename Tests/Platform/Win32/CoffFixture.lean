@@ -823,4 +823,53 @@ theorem trailing_bytes_are_counted :
     ∧ textSection? dotText (List.replicate 8 0x90) [⟨2, 0, 4⟩] = none := by
   refine ⟨?_, ?_⟩ <;> decide
 
+/-! ## Sites derived from the encoder, checked against the assembler
+
+`siteForInsn` computes a displacement site from an `InsnEncoding` instead of
+taking the numbers on trust. These check that what it computes is what `ml64`
+actually recorded for the same instruction.
+-/
+
+open Grass.ISA.X86 in
+/--
+`mov DWORD PTR [rip+disp], 5`, encoded by this project.
+
+The first instruction of the measured immediate object, at section offset
+zero. -/
+def movMemImmInsn : Option InsnEncoding :=
+  movMem32Imm32 (.ripRelative 0) 5
+
+/--
+**The encoding is the seven-plus-three bytes `ml64` emitted.**
+
+`c7 05` then a four-byte displacement then a four-byte immediate: ten bytes,
+matching the head of `immediateCode`. -/
+theorem movMemImmInsn_bytes :
+    movMemImmInsn.map Grass.ISA.X86.InsnEncoding.toBytes
+      = some [0xc7, 0x05, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00] := by
+  decide
+
+/--
+**The site derived from it is the one `ml64` relocated.**
+
+Field at offset two, four trailing bytes -- so `REL32_4`, which is type 8.
+`immediateSites` states the same triple as a literal; this derives it. If
+`dispOffset` counted the ModR/M byte wrongly, or `dispTrailing` missed the
+immediate, the two would disagree and the literal would be the one that is
+right. -/
+theorem derived_site_matches_measured :
+    movMemImmInsn.map (fun i => siteForInsn 0 i 13)
+      = some ⟨2, 13, 4⟩ := by
+  decide
+
+/--
+**And it is the first site of the measured object.**
+
+Stated against `immediateSites` rather than against a repeated literal, so a
+change to either has to be a change to both. -/
+theorem derived_site_is_first_measured :
+    movMemImmInsn.map (fun i => siteForInsn 0 i 13)
+      = immediateSites.head? := by
+  decide
+
 end Grass.Tests.Platform.Win32.Coff

@@ -23,13 +23,25 @@ linker writes four bytes at that offset and, if the section is shorter, into
 whatever follows it in the file. `DisplacementSite.InRange` is the condition,
 and `textSection?` refuses a section any of whose sites fails it.
 
+## Where a site's numbers come from
+
+`DisplacementSite` is a bare triple, and an earlier version of this paragraph
+said the trailing count was taken on trust because only an encoder knows how
+long an instruction is. That was true and it is no longer necessary.
+`Grass/ISA/X86/Bytes.lean` now exposes `dispOffset` and `dispTrailing`, and
+`siteForInsn` builds the triple from an encoding, so neither number has to be
+supplied by hand.
+
+`DisplacementSite` stays a plain structure because a section may hold bytes
+this profile did not encode -- a hand-written stub, or code from elsewhere --
+and refusing those would be a stronger claim than this layer can make. The
+derived path is the one to use where an encoding exists.
+
 ## What is still not modelled
 
-Which instruction a site belongs to. This layer takes the trailing-byte count
-on trust, because only an encoder knows how long the instruction is -- and
-`Grass/ISA/X86/Bytes.lean` is where that knowledge lives. A wrong count
-produces a wrongly-resolved address that nothing here can detect; the seam is
-recorded rather than papered over.
+That the symbol a site names is the one the instruction meant. `siteForInsn`
+takes the symbol index as an argument, and nothing relates it to the operand
+the encoder was given.
 -/
 
 namespace Grass.Platform.Win32.Coff
@@ -86,6 +98,39 @@ theorem DisplacementSite.relocation_is_rel32 (d : DisplacementSite)
   obtain ⟨t, ht, hr⟩ := h
   subst hr
   exact RelocationType.ripRelative_code ht
+
+/--
+The site for a RIP-relative instruction placed at `base` in the section.
+
+Both numbers come from the encoding: `dispOffset` says where the field sits
+inside the instruction, and `dispTrailing` counts the immediate after it, which
+is what picks the member of the `REL32` family. A caller supplies only where the
+instruction was placed and which symbol it means.
+
+`Grass.ISA.X86.InsnEncoding.dispOffset_add_disp_add_trailing` is what makes
+this sound --
+without it the two numbers could each be plausible and jointly describe a field
+outside the instruction. -/
+def siteForInsn (base : Nat) (i : Grass.ISA.X86.InsnEncoding)
+    (symbolIndex : BitVec 32) : DisplacementSite where
+  fieldOffset := base + i.dispOffset
+  symbolIndex := symbolIndex
+  trailing := i.dispTrailing
+
+/--
+**A derived site lies within the instruction that produced it.**
+
+The field starts inside the instruction and the trailing bytes end exactly
+where the instruction does, so a site derived this way is in range of any
+section that contains the instruction. That is the property a hand-supplied
+triple cannot be trusted to have. -/
+theorem siteForInsn_within (base : Nat) (i : Grass.ISA.X86.InsnEncoding)
+    (sym : BitVec 32) (hdisp : i.disp.size = 4) :
+    (siteForInsn base i sym).InRange (base + i.size) := by
+  simp only [siteForInsn, DisplacementSite.InRange]
+  have h := Grass.ISA.X86.InsnEncoding.dispOffset_add_disp_add_trailing i
+  rw [hdisp] at h
+  omega
 
 /-- Every site's relocation, or nothing if any is unencodable. -/
 def displacementRelocations? (sites : List DisplacementSite) :
