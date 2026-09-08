@@ -36,7 +36,7 @@ Their composition is sound because those fragments are disjoint, and
 `frame_of_disjoint_scope` below is the theorem that turns that into
 preservation.
 
-## `agreesGlue` is what makes a footprint a bound
+## `agreesGlue` is what stops the degenerate agreement
 
 `framed` alone does not make `footprint` mean anything, and an earlier revision
 of this module claimed it did. The counterexample is one line: supply
@@ -48,19 +48,28 @@ in the weave became dischargeable only at identical worlds, and no theorem
 noticed.
 
 `agreesGlue` is the law that excludes it. It says any two worlds can be mixed
-along any set of fragments, which is exactly the statement that the fragments
-name a *complete and independent decomposition* of the world: agreement on a set
-of fragments carries no information about the rest. Under the equality agreement
-gluing at a proper subset would force `left = right`, so the degenerate
-agreement is no longer a `WorldAgreement`.
+along any set of fragments, and under the equality agreement gluing at a proper
+subset would force `left = right`, so the degenerate agreement is no longer a
+`WorldAgreement`.
 
-It is a real obligation on whoever supplies the world, and the shape it demands
-is a product over fragments. `docs/PROCESS.md` §3's `LogicalProcessNetwork` is
-one — seven independent fields, with `instances`, `shared` and the two ledgers
-pointwise over their indices — so the law is satisfiable there. A later world
-that carried a cross-fragment well-formedness invariant *as a field* would not
-satisfy it, and that is the right outcome: such a world's fragments would not be
-independent, and its assertions could not be framed fragment-wise.
+**It says less than that, and an earlier version of this paragraph said more.**
+It claimed gluing was "exactly the statement that the fragments name a complete
+and independent decomposition of the world: agreement on a set of fragments
+carries no information about the rest". That is false — mixability is not
+coverage — and `Tests/Process/AssertionFixtures.lean`'s `leakyAgreement` is an
+agreement satisfying every law while its `.obligations` clause forces the whole
+world equal. §10.137.
+
+It is a real obligation on whoever supplies the *agreement*, and it demands
+nothing of the world's shape. `docs/PROCESS.md` §3's `LogicalProcessNetwork` is a
+product with one component per fragment family, which is why
+`logicalWorldAgreement` glues componentwise and the law is easy to discharge
+there — but ease is not demand.
+`Tests/Process/AssertionFixtures.lean`'s `blindAgreement` discharges it at a
+world of any shape, including one carrying a cross-fragment invariant as a
+field. What a badly shaped world costs is not this law; it is that a
+componentwise agreement is no longer available, and the assertions it would
+frame have to be framed some other way. §10.137.
 
 ## The world is abstract on purpose
 
@@ -94,9 +103,26 @@ region rather than all shared state, one session's escrow rather than the whole
 ledger, one session's cursor rather than every session's. (An earlier version of
 this paragraph said seven and three. It predates the trace split; it does *not*
 predate the `session` fragment, which arrived in the same commit as the paragraph
-— a claims audit checked, after an earlier correction guessed.) The list is closed: an assertion
-cannot depend on something with no name here, which is what keeps the language
-from growing.
+— a claims audit checked, after an earlier correction guessed.)
+`NetworkFragment` closes the list of *names*, and adding a constructor is a
+deliberate edit to this inductive rather than something a mixin author can do
+from outside.
+
+**What it does not close is what an assertion may depend on**, and an earlier
+version of this paragraph said it did. Local adversarial review refuted that by
+building a `WorldAgreement` whose `.obligations` clause quietly also fixes an
+unnamed component of the world: `NetworkAssertion.framed` bounds an assertion
+relative to *the agreement it is given*, and `agreesGlue` forces mixability
+rather than coverage, so an agreement that hides a component inside a named
+fragment admits a `framed` assertion depending on it.
+`WorldAgreement.subsingleton_of_forced_equality` refuses only the global
+equality agreement and says nothing about that partial one.
+
+So coverage is an obligation on whoever supplies the world, and this layer does
+not state it: nothing here says the fragments exhaust `World`.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.137 files it with a number rather than
+leaving it as a sentence. The note above is about the same law, and was wrong in
+the same direction until this was written.
 
 `escrow` and `session` are separate constructors because the world separates
 them — `inFlight : ChannelEscrowLedger` and `sessions : ChannelSessionLedger` are
@@ -118,7 +144,7 @@ either unstatable or smuggled in through some other fragment's agreement.
 (ProcessInstance topology)`, one live incarnation per slot, with the generation
 inside the stored instance rather than in the key. Keying the fragment by
 `ProcessRef` instead would put two refs that differ only in generation on two
-fragments reading one slot, and `agreesGlue` would then be unsatisfiable at the
+fragments reading one slot, and a componentwise agreement is then unavailable at the
 real world: no mixed network can agree with one and not the other about the same
 field. The cost is that framing over a slot is conservative — a restart replaces
 the incarnation, touches the slot, and any assertion naming it must be
@@ -201,11 +227,17 @@ structure WorldAgreement {registry : ProtocolRegistry.{u, w, v}}
   agreesTrans : ∀ fragment a b c,
     Agrees fragment a b → Agrees fragment b c → Agrees fragment a c
   /--
-  **The fragments decompose the world.**
+  **Any two worlds can be mixed along any set of fragments.**
 
-  Any two worlds can be mixed along any set of fragments. This is what excludes
-  a degenerate agreement — equality, say — under which agreeing on a footprint
-  would force agreement everywhere and `footprint` would carry no information.
+  This is what excludes the *equality* agreement, under which agreeing on a
+  proper footprint would force agreement everywhere: gluing at that footprint
+  would have to produce a world agreeing with `left` inside and `right` outside,
+  and under equality no such world exists unless `left = right`.
+
+  It excludes that one and not the general shape. Mixability is not coverage,
+  and `Tests/Process/AssertionFixtures.lean`'s `leakyAgreement` satisfies this
+  law while one fragment's clause fixes the whole world — so a footprint can
+  still carry information about the rest. §10.137.
   -/
   agreesGlue : ∀ (inside : NetworkFragment topology → Prop) (left right : World),
     ∃ mixed,

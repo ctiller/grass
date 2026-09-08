@@ -196,10 +196,10 @@ one.
 
 **Decided — a run state carries the flat trace, not its segmentation.** An
 earlier draft put a `Segmented` history inside `ProcessRunState`. That was a law
-18 violation: `segments.length` is the number of transitions taken, so an
-acceptance relation handed a segmented history could distinguish one transition
-emitting two observations from two transitions emitting one each, which is
-provider batching and a replaceable realization fact. The segmentation and its
+18 violation: `segments.length` is the number of transitions taken, so a run
+state carrying it distinguishes one transition emitting two observations from
+two transitions emitting one each, which is provider batching and a replaceable
+realization fact. The segmentation and its
 origin theorems stay in `Grass/Process/Observation.lean` for the run-level
 causality bookkeeping that [PROCESS.md](PROCESS.md) §4 keeps out of the
 application proof, and the origin theorem is stated over an occurrence's
@@ -247,12 +247,13 @@ property to be re-proved after a refinement rather than transported.
 
 **Decided — the segmentation is an index of `Reachable`, not a field of the run
 state and not absent.** Two failed drafts bracket this. Putting `Segmented`
-inside `ProcessRunState` let an acceptance relation branch on the transition
-count, which breaks under a refinement that produces the same observations in a
+inside `ProcessRunState` made it part of the state a refinement has to preserve,
+which breaks under a replacement that produces the same observations in a
 different number of steps. Deleting it left `docs/PROCESS.md` §4's observation
 causality with nothing to be stated over — the module was 186 lines with no
-consumer. Carrying it as an index gives `Reachable.observationCausality` while
-keeping it out of reach of `TraceAccepts`, which sees only the flat history.
+consumer. Carrying it as an index gives `Reachable.observationCausality` without making it
+state; acceptance never reaches it either way, since
+`Grass/Process/Acceptance.lean` does not mention `Segmented`.
 
 **Decided — `ProcessCorrect.progress` is indexed by request.**
 [PROCESS.md](PROCESS.md) §4 writes `progress : MeetsProcessProgress p`. The
@@ -552,9 +553,8 @@ fragment, so a caller could supply equality, discharge every `framed` by `subst`
 at any footprint whatsoever, and reduce every framing obligation in the weave to
 "the worlds are identical". Nothing was unsound; everything was useless, and no
 theorem in the module noticed. The fix is `agreesGlue`: any two worlds can be
-mixed along any set of fragments, which is the statement that the fragments are
-a complete independent decomposition of the world, and which the equality
-agreement fails. Two further defects came from the same review: the frame rule
+mixed along any set of fragments, which the equality agreement fails. It does not
+say the fragments cover the world — §10.137 records the refutation. Two further defects came from the same review: the frame rule
 was not stated in the shape `docs/PROCESS.md` §8 asks for (scope-disjointness
 implies preservation, not agreement-implies-preservation), and `Separate` had no
 consumer anywhere, so the separating conjunction's formation gate gated nothing.
@@ -5033,6 +5033,122 @@ one sense: two `Coalesces` into two *different* carriers, the second consuming
 the first's carrier, is a chain and is not forbidden. That is a genuine coalesce
 chain rather than a half-done merge — `EscrowLedger.no_cycle` is what keeps it
 finite — and §3 appears to permit it. Recorded rather than ruled on.
+
+### 10.136 The selective-receive scan cost is recorded and unbounded
+
+Numbered after the entries the sibling branch
+`agent/c-process/m4-reach-the-dead-worlds` adds, which run to §10.135.
+
+`Grass/Process/Network/Mailbox.lean` said a selective receive that walked a
+million-entry mailbox and reported no cost "is exactly what the progress argument
+in `Grass/Process/Progress.lean` assumes cannot happen". That is false, and
+Progress.lean says so in its own words: "the internal work §7 refers to happens
+*inside* one transition, in a serial call or in the machine realization, and the
+finite-internal-work clause is discharged there". It defers the clause rather
+than assuming it away, and `MeetsProcessProgress` does not supply the bound
+either: what it constrains is whether a successor transition exists and how a
+rank moves across transitions, not what handling one costs.
+
+**What this layer actually has** is `SelectiveReceive.scanWork`, pinned to the
+skipped prefix's length by `scanWorkExact` and bounded by the mailbox's size by
+`scan_is_charged`. That is an exact accounting and not a bound, because nothing
+bounds the mailbox. §3 is explicit that "unbounded mailboxes or postponed sets
+fail resource/progress gates", so the gate exists and this layer does not meet
+it; a realization that offers selective receive owes a mailbox bound, and until
+one does the cost is recorded and free.
+
+Filed as an obligation with a number so it is trackable. The reason it needed
+one: a reviewer pointed out that the corrected docstring ended at "whatever
+realizes the mailbox", which names no module, structure or milestone in this
+tree, while every comparable open obligation in this layer carries a section
+number. An untrackable obligation is a sentence, not a record.
+
+### 10.137 Two premises the corrections contradicted, and neither was noticed
+
+Two corrections on this branch turned out to leave standing the sentences they
+repudiate. Both premises are mine and both were on `main` before this branch
+touched them; in each case the correction landed on the *conclusion* while the
+*premise* it was derived from stayed where it was, phrased differently enough
+that no search for the refutation found it.
+
+**`agreesGlue` is a mixability law, not a coverage law.**
+`Grass/Process/Network/Assertion.lean`'s module note said gluing "is exactly the
+statement that the fragments name a *complete and independent decomposition* of
+the world: agreement on a set of fragments carries no information about the
+rest". That is false. `agreesGlue` asks only that any two worlds can be mixed
+along any set of fragments, and an agreement can satisfy every law while one
+fragment's clause fixes the whole world.
+`Tests/Process/AssertionFixtures.lean`'s `leakyAgreement` is that agreement —
+`Agrees fragment left right := fragment = .obligations → left = right` — and it
+is kept, because a gluing law reading as a decomposition law is the natural
+misreading and survived several revisions.
+
+`WorldAgreement.subsingleton_of_forced_equality` does not catch it: that refuses
+the agreement forcing equality at *every* fragment, and this one forces it at
+one. So **coverage is an obligation on whoever supplies the world and this layer
+does not state it** — nothing says the fragments exhaust `World`. Filed here with
+a number rather than left as a sentence, on the rule §10.136 adopted one file
+over and this repair had broken.
+
+**And acceptance cannot see the segmentation whatever carries it.**
+`Grass/Process/Run.lean` said the segmentation is an index rather than a field
+"so that an acceptance relation, which sees only `ProcessRunState.history`,
+cannot branch on it". The "so that" does not follow. `Grass/Process/Acceptance.lean` does not mention `Segmented` anywhere, so no
+clause of `ProcessAcceptance` takes one, whether it is carried as an index or as
+a field.
+
+What index-versus-field decides is something else and worth keeping: whether the
+segmentation is part of the state a refinement has to preserve. As a field it
+would be, and a replacement producing the same observations in a different number
+of transitions changes it. That is the first of the module's two tests and it is
+what the earlier draft failed — the right conclusion from the wrong reason, which
+is why it was repeated at several sites in the Lean and in two ledger
+paragraphs.
+
+**The pattern.** A correction can leave in place not the sentence it corrected
+but the sentence it was *derived from*, which is harder to see: the repaired paragraph
+reads correctly on its own and only contradicts something forty lines up, or four
+hundred lines down, or in another file. Grepping the claim's wording finds the
+first kind. It does not find this kind, because the premise is phrased as a
+different claim.
+
+**Third round, and the paragraph above was describing the wrong failure.** The
+sentence "Grepping the claim's wording finds the first kind" is true. What it
+implies — that the first kind had therefore been found — was not. A cold
+reviewer ran `grep -rn "product over" Grass/ Tests/ docs/`, got exactly one hit
+in the whole tree, and it was a site I had reported sweeping: `fixtureAgreement`'s
+docstring, still saying the mixed world is writable "because the world is a
+product over the fragments, which is the point of the law". That is the refuted
+claim verbatim, and it is the twin of the sentence in
+`Grass/Process/Network/World.lean` that the same correction did fix. Two more
+beside it: `FixtureWorld`'s docstring pointing at a module note for "why this
+shape is forced rather than chosen", which the note no longer says, and the file
+header's bullet "`agreesGlue` makes the bound mean something", which
+`gluing_does_not_bound_the_footprint` refutes three hundred and sixty lines
+below it in the same file.
+
+All three were in the file the correction edited. None of them was found,
+because I searched for `agreesGlue` and for the declarations, and the sentences
+that say the refuted thing do not always name it.
+
+So the rule that comes out of the third round is not another sentence about
+grepping. It is that the sweep has to be a script that outputs every hit for
+reading, rather than a search I remember to run and report having run. The
+phrasings go in the script when the claim is refuted, not afterwards from
+memory; the script is what the next round is answerable to.
+
+**And the fixtures were carrying only the easy half.** `blindAgreement` shows the
+law does not constrain the world's shape — one line, `Agrees := True`. The
+replacement claim, stated at four sites, is that what a badly shaped world costs
+is a *componentwise* agreement rather than the law. Nothing checked it, in a file
+whose stated purpose is checking claims about what its types reject. It is now
+`tangled_componentwise_has_no_glue`: gluing `tangledComponentwise` at
+`{.obligations}` would need a world taking `left` from one argument and `right`
+from the other, and `TangledWorld.tied` forbids exactly that. `tangledAgreement`
+stays, relabelled as the instantiation it is rather than the consumer it claimed
+to be — `blindAgreement` is polymorphic, so it carries nothing the elaborator had
+not already checked. `blindAgreement` is now universe-polymorphic too, which the
+prose around it had been assuming.
 
 ## 11. The authoring facade
 

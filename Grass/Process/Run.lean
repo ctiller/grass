@@ -71,17 +71,30 @@ Splitting them this way is not arbitrary. An acceptance relation must survive
 refinement: when a role is replaced by a flattened subsystem, the *same*
 observations are produced by a different number of process transitions, so an
 acceptance stated over the segmentation would be broken by a replacement that
-changes nothing observable. Acceptance therefore sees `runState.history` and
-nothing else.
+changes nothing observable. So the segmentation must not be something acceptance
+can read — and it is not: `Grass/Process/Acceptance.lean` never mentions
+`Segmented`, so no clause of `ProcessAcceptance` takes one. What each clause is
+given, `ProcessCorrect` supplies at the call site.
 
 Causality is the opposite case. `docs/PROCESS.md` §4 requires the emitting
 segment of each observation to be *retained* through "later weaving, flattening,
-serialization, machine simulation, and projection", so it cannot be discarded.
-Carrying it as an index of `Reachable` gives `Reachable.observationCausality`
-without letting it reach an acceptance relation.
+serialization, machine simulation, and projection". Carrying it as an index of
+`Reachable` is what keeps it, and `Reachable.observationCausality` reads it.
 
-An earlier draft put `Segmented` inside `ProcessRunState`, which failed the
-first test, and then deleted it from the run entirely, which failed the second.
+Two earlier versions of the paragraph above gave reasons that do not entail it —
+the index-versus-field distinction, and then the absence of `ProcessRunState`
+from `Grass/Process/Acceptance.lean`, which is true and about the wrong type,
+since the segmentation is an index of `Reachable` rather than a field of the run
+state. What does entail it is what that paragraph now says: no clause of
+`ProcessAcceptance` takes a `Segmented`.
+§10.137.
+
+**What index-versus-field does decide** is whether the segmentation is part of
+the state a refinement has to preserve. As a field of `ProcessRunState` it would
+be, and a replacement producing the same observations in a different number of
+transitions changes it — which is the first test above, and what the earlier
+draft that put it there failed. Deleting it from the run entirely failed the
+second. §10.137.
 -/
 
 namespace Grass.Process
@@ -446,9 +459,10 @@ The states reachable by a finite execution prefix, together with the
 segmentation that produced their trace.
 
 The `Segmented` index is what keeps `docs/PROCESS.md` §4's observation causality
-available. It is an index rather than a field of the run state so that an
-acceptance relation, which sees only `ProcessRunState.history`, cannot branch on
-it — see the module note.
+available. It is an index rather than a field of the run state so that a
+refinement changing only the number of transitions does not change the run state
+— see the module note, which also records why this is not what keeps acceptance
+from branching on it.
 
 Finite by construction: this is the prefix relation, and every statement about
 maximal or infinite executions belongs to `Grass.Semantics`.
@@ -545,8 +559,8 @@ theorem observationCausality_unique {segmented : Segmented p.Observation}
 /--
 One segment per transition, including the silent ones.
 
-`segments.length` is the number of steps taken, which is exactly why it must not
-reach an acceptance relation, and exactly why it is available to a causality
+`segments.length` is the number of steps taken, which is exactly why acceptance
+must not be stated over it, and exactly why it is available to a causality
 argument that needs to name a transition.
 -/
 theorem segment_count {segmented : Segmented p.Observation}

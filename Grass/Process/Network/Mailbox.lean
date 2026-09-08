@@ -40,8 +40,23 @@ is free to change.
 `docs/PROCESS.md` §3: "Neither mechanism is free: unbounded mailboxes or
 postponed sets fail resource/progress gates." A selective receive that walked a
 million-entry mailbox and reported no cost would let a process do unbounded work
-inside one transition, which is exactly what the progress argument in
-`Grass/Process/Progress.lean` assumes cannot happen.
+inside one transition.
+
+Where that is refused is worth stating exactly, because an earlier version of
+this sentence said `Grass/Process/Progress.lean`'s argument assumes it away.
+That module defers it instead: "the internal work §7 refers to happens *inside*
+one transition, in a serial call or in the machine realization, and the
+finite-internal-work clause is discharged there". `MeetsProcessProgress` does not
+supply that bound: its clauses are about a successor transition existing and
+about a rank over `(State, Bag Demand)` decreasing across transitions, neither of
+which bounds what handling one costs.
+
+What this layer does instead is record the cost exactly and leave it unbounded:
+`SelectiveReceive.scanWork` with `scanWorkExact` pins it to the skipped prefix's
+length, and `scan_is_charged` bounds it by the mailbox size — which bounds
+nothing until something bounds the mailbox. That is a real open obligation and it
+is `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.136, so it is trackable rather than
+a sentence saying the bound is somebody else's.
 -/
 
 namespace Grass.Process

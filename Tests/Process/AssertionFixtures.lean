@@ -10,10 +10,13 @@ fixture checks them.
 
 * `framed` bounds what an assertion may read. `understated_footprint_impossible`
   is that: no assertion with an empty footprint can read `acceptCount`.
-* `agreesGlue` makes the bound mean something. `fixtureAgreement` discharges it,
-  and `separate_fragments_are_independent` shows the payoff — two worlds
-  agreeing on one fragment and differing on another, which the degenerate
-  equality agreement the module note describes could not exhibit.
+* `agreesGlue` excludes the degenerate *equality* agreement, and no more than
+  that. `fixtureAgreement` discharges it, and
+  `separate_fragments_are_independent` shows the payoff — two worlds agreeing on
+  one fragment and differing on another, which the equality agreement could not
+  exhibit. What it does not do is make the bound mean something in general:
+  `gluing_does_not_bound_the_footprint` refutes that, and `blindAgreement`
+  discharges the law while distinguishing nothing at all.
 
 It also pins the two compositions `Grass/Process/Network/Channel.lean` has to
 write and would otherwise discover were unwritable:
@@ -31,18 +34,21 @@ rebuilt, so a change to the topology surface breaks this file too.
 
 `FixtureWorld` below is a product with exactly one field per `NetworkFragment`
 family, and the instance and channel fields are *functions of their index*. That
-is not incidental convenience: `agreesGlue` demands that the fragments be a
-complete independent decomposition of the world, so a world shaped any other way
-could not discharge it. An earlier draft of this fixture had a single
+is not incidental convenience: it is what makes `agreesGlue` easy to
+discharge here, since a product mixes componentwise. It is not what `agreesGlue`
+*demands* — `blindAgreement` below satisfies the law at a world of any shape at
+all. §10.137. An earlier draft of this fixture had a single
 `listenerCursor : Nat` read by every `instanceState` fragment, which made two
 assertions about different slots `Separate` while reading the same field —
-exactly the aliasing `agreesGlue` now forbids.
+exactly the aliasing a componentwise agreement cannot survive.
 -/
 
 namespace Grass.Process.Tests.NetworkAssertions
 
 open Grass.Process
 open Grass.Process.Tests
+
+universe fixtureWorld
 
 /-- Two incarnations of the listener, to have distinct instance fragments. -/
 @[reducible] def listenerRef (generation : Nat) :
@@ -63,7 +69,8 @@ A concrete world for the fixture topology: one component per fragment family.
 
 The instance and channel components are functions of their index, so that
 `instanceState kind slot` reads *that* slot and no other. See the module note on
-why this shape is forced rather than chosen.
+why this shape is what makes the `agreesGlue` discharge componentwise — not on
+why it is forced, because it is not.
 -/
 structure FixtureWorld where
   /-- `region .routeTable`. -/
@@ -108,8 +115,9 @@ The agreement, with all four laws.
 `agreesGlue` is the interesting one and it is discharged by construction: the
 mixed world takes each component from `left` or from `right` according to
 whether the fragment reading it is inside the split. That is only writable
-because the world is a product over the fragments, which is the point of the
-law.
+because *this* world is a product over the fragments — a fact about
+`FixtureWorld` and not the point of the law, which asks only that some mixture
+exist. §10.137.
 
 `inside` is an arbitrary predicate, so the construction decides it classically.
 The library carries no such dependency — `agreesGlue` is a hypothesis there, not
@@ -369,5 +377,134 @@ theorem acceptedSomething_needs_its_region
   (Classical.em (∃ fragment, assertion.footprint fragment)).elim id
     (fun empty => (understated_footprint_impossible assertion
       (fun fragment member => empty ⟨fragment, member⟩) sameMeaning).elim)
+
+/-! ## What `agreesGlue` does not say
+
+`Grass/Process/Network/Assertion.lean`'s module note claimed `agreesGlue` is
+"exactly the statement that the fragments name a *complete and independent
+decomposition* of the world: agreement on a set of fragments carries no
+information about the rest". Local adversarial review refuted it and this is the
+refutation, kept because the claim is the natural reading of a gluing law and was
+believed for several revisions. §10.137.
+-/
+
+/-- **The agreement that distinguishes nothing**, over a world of any shape.
+
+`agreesGlue` constrains the agreement and not the world: this satisfies every
+law, and it does so over `FixtureWorld` or over a world carrying a cross-fragment
+invariant as a field, indifferently. An earlier note in
+`Grass/Process/Network/Assertion.lean` said such a world could not satisfy the
+law. §10.137. -/
+def blindAgreement {World : Type fixtureWorld} :
+    WorldAgreement serverTopology World where
+  Agrees _ _ _ := True
+  agreesRefl := by intro _ _; trivial
+  agreesSymm := by intro _ _ _ _; trivial
+  agreesTrans := by intro _ _ _ _ _ _; trivial
+  agreesGlue := by
+    intro _ left _
+    exact ⟨left, fun _ _ => trivial, fun _ _ => trivial⟩
+
+/-- **Two components pinned equal by a field.**
+
+The shape a componentwise agreement cannot be built over, which is what
+`tangled_componentwise_has_no_glue` below shows. The pinning is the whole
+content: any assignment of these components to fragments has to answer for
+`tied`, and a mixture taking `left` from one world and `right` from another
+cannot.
+
+It is deliberately not a world whose components are *indexed* by
+`NetworkFragment` — nothing here assigns one to the other, and the componentwise
+agreement below supplies that assignment explicitly rather than leaving it to be
+read off the structure. -/
+structure TangledWorld where
+  left : Nat
+  right : Nat
+  tied : left = right
+
+/-- **And `blindAgreement` is a `WorldAgreement` over it.**
+
+Half of the claim, and the easy half: `agreesGlue` asks that some mixture exist,
+and the blind agreement always has one, so a world carrying a cross-fragment
+invariant as a field does satisfy the law.
+
+This is an instantiation and not a consumer — `blindAgreement` is already
+polymorphic, so the elaborator checked this when it checked that. The half that
+had been prose until §10.137's second round is
+`tangled_componentwise_has_no_glue` below. -/
+def tangledAgreement : WorldAgreement serverTopology TangledWorld := blindAgreement
+
+/-- A componentwise agreement over `TangledWorld`: `.obligations` reads `left`
+and every other fragment reads `right`. -/
+def tangledComponentwise :
+    NetworkFragment serverTopology → TangledWorld → TangledWorld → Prop
+  | .obligations, a, b => a.left = b.left
+  | _, a, b => a.right = b.right
+
+/-- **And no `agreesGlue` exists for it**, which is the claim four docstrings
+had been making in prose.
+
+`blindAgreement` shows the law does not constrain the world's *shape*.
+This shows what a badly shaped world actually costs: not the law, but a
+componentwise agreement over it. Gluing at `{.obligations}` would need a world
+whose `left` comes from one argument and whose `right` comes from the other, and
+`tied` forbids exactly that.
+
+So the two together are the whole of §10.137: the shape is not what `agreesGlue`
+demands, and it is what a componentwise discharge needs. -/
+theorem tangled_componentwise_has_no_glue :
+    ¬ (∀ (inside : NetworkFragment serverTopology → Prop) (left right : TangledWorld),
+        ∃ mixed, (∀ fragment, inside fragment → tangledComponentwise fragment mixed left) ∧
+          (∀ fragment, ¬ inside fragment → tangledComponentwise fragment mixed right)) := by
+  intro glue
+  obtain ⟨mixed, inside, outside⟩ :=
+    glue (fun fragment => fragment = .obligations) ⟨0, 0, rfl⟩ ⟨1, 1, rfl⟩
+  have fromLeft : mixed.left = 0 := inside .obligations rfl
+  have fromRight : mixed.right = 1 := outside .observations (by intro same; cases same)
+  rw [mixed.tied, fromRight] at fromLeft
+  exact absurd fromLeft (by decide)
+
+open Classical in
+/--
+**An agreement that says nothing except at one fragment, where it says
+everything.**
+
+`agreesGlue` asks that any two worlds can be *mixed* along any set of fragments.
+It does not ask that the fragments cover the world, and this satisfies it: when
+`.obligations` is inside, the mixture is `left`, and every fragment outside is
+not `.obligations` so its clause is vacuous; when it is outside, the mixture is
+`right` symmetrically.
+
+`WorldAgreement.subsingleton_of_forced_equality` is not violated, because it
+refuses the agreement that forces equality at *every* fragment. This one forces
+it at one.
+-/
+def leakyAgreement : WorldAgreement serverTopology FixtureWorld where
+  Agrees fragment left right := fragment = .obligations → left = right
+  agreesRefl := by intro _ _ _; rfl
+  agreesSymm := by
+    intro fragment left right holds isObligations
+    exact (holds isObligations).symm
+  agreesTrans := by
+    intro fragment a b c first second isObligations
+    exact (first isObligations).trans (second isObligations)
+  agreesGlue := by
+    intro inside left right
+    by_cases obligationsInside : inside .obligations
+    · refine ⟨left, ?_, ?_⟩
+      · intro _ _ _; rfl
+      · intro fragment outside isObligations
+        exact absurd (isObligations ▸ obligationsInside) outside
+    · refine ⟨right, ?_, ?_⟩
+      · intro fragment isInside isObligations
+        exact absurd (isObligations ▸ isInside) obligationsInside
+      · intro _ _ _; rfl
+
+/-- **So agreement at one fragment can determine every other**, and gluing does
+not forbid it. An assertion framed by `{.obligations}` under this agreement may
+depend on anything at all. -/
+theorem gluing_does_not_bound_the_footprint (left right : FixtureWorld)
+    (agreed : leakyAgreement.Agrees .obligations left right) : left = right :=
+  agreed rfl
 
 end Grass.Process.Tests.NetworkAssertions
