@@ -35,6 +35,15 @@ schema version. It exits nonzero if its certificate phase fails or if its output
 cannot be written atomically. JSON is a review projection; the referenced
 kernel-checked declaration and verified object remain proof authority.
 
+These commands are also eventual Grass programs. Their initial host-language
+implementations are bootstrap mechanisms governed by
+[VALIDATION.md](VALIDATION.md), not a permanently trusted layer. Reports retain
+stable schemas across an implementation replacement. During cutover, the host
+and Grass executables run the same positive and rejecting fixtures and their
+outputs are compared at the schema's declared semantic projection. The Grass
+executable becomes the default only after its own exact verified artifact and
+replacement evidence are reviewed.
+
 `mirror` may be implemented first by `check-spike-sources.ps1`, but the eventual
 command must emit the same classified manifest rather than merely print a pass
 line.

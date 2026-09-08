@@ -125,3 +125,36 @@ engine's reuse claims and cache-key sufficiency.
 
 Published-corpus lint also rejects audience/workstation idioms used as evidence,
 including “worked on my machine,” in addition to literal private topology.
+
+## 8. Bootstrap and Grass-tool replacement
+
+Repository tooling is not exempt from the ratchet merely because it is outside
+the emitted product. Every persistent tool has a versioned behavior contract,
+input/output schemas, rejecting fixtures, failure and interruption semantics,
+resource expectations where material, and a declared trust role. A tool which
+constructs a proof-bearing object must emit enough exact input and certificate
+identity for an independent checker to reject substitution, truncation,
+reordering, stale-cache replay, and malformed data.
+
+A bootstrap implementation may be used before a Grass implementation exists.
+Its successful run is operational evidence only. Acceptance of its output rests
+on a parser/checker theorem, Lean kernel check, or another explicitly recorded
+trust boundary—not on the fact that the producer reported success.
+
+Replacement by a Grass implementation requires:
+
+- the same reviewed behavior specification and serialized-format laws;
+- universal proofs for semantic behavior, including admitted failures and
+  external responses, at the strength appropriate to that tool;
+- exact source-to-artifact connection for the replacement executable;
+- negative fixtures for corrupt, stale, partial, and adversarial inputs;
+- differential campaigns against the bootstrap implementation, without
+  treating agreement as proof;
+- measured resource and rebuild evidence; and
+- a reversible deployment interval with both implementations available.
+
+For a compiler or another tool capable of rebuilding itself, a fixed-point
+build is an additional campaign. Byte-for-byte stability is required only when
+the format and build specification demand canonical bytes; otherwise compare
+the specified semantic/artifact projections. No self-build result discharges a
+correctness obligation about the compiler which produced it.

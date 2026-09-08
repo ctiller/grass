@@ -42,6 +42,39 @@ process, observation, safety, progress, obligation, resource, exact-source, and
 artifact laws. Grass does not make users choose a weaker theorem architecture
 when code grows beyond the shape of the first prototype.
 
+### Tooling is an eventual Grass product
+
+Grass's destination includes its own assembler, linker, emitter, format
+readers, proof-report generators, build drivers, agent-bus client, and—when the
+language boundary is sufficiently modeled—its Lean compiler. The first
+versions may be written in Rust, Lean, PowerShell, or another host language so
+the product can be built at all. That is a bootstrap stage, not a permanent
+lower-assurance class.
+
+Each enduring tool therefore acquires the same three assets as another Grass
+program: a minimal behavior specification, one or more replaceable
+implementations, and an exact verified artifact. A host implementation and a
+Grass implementation consume the same versioned formats and behavioral test
+suite. Once the Grass implementation closes the required safety, progress,
+resource, and exact-artifact theorems, it can replace the bootstrap executable
+without changing the protocol it serves.
+
+This transition is deliberately non-circular. Output from a bootstrap tool is
+a candidate which a checker or kernel validates; the tool's own execution is
+not proof. Later, a Grass tool's correctness follows from its checked
+source-to-artifact chain. Rebuilding the tool with itself, reaching a fixed
+point, and agreeing with the bootstrap implementation are strong validation
+evidence, but none substitutes for that theorem. The current implementation
+may act as a differential oracle for discovery and tests, never as the premise
+which proves its successor correct.
+
+Self-application happens tool by tool. A small format reader or agent-bus query
+client can cross the boundary before the linker; a linker can cross before the
+compiler. Both implementations may coexist during migration, and rollback
+remains possible until the replacement has survived its reviewed evidence
+window. Grass does not delay useful tooling until the whole stack can already
+self-host.
+
 ## 2. One architecture, fractally applied
 
 Grass uses one process semantics for composition, nondeterminism, lifecycle,
