@@ -111,8 +111,14 @@ whenever the input contains two identical occurrences**, and
 `p < p`. `no_sort_can_satisfy_repeated` proves it. The specification therefore
 needs a well-formedness hypothesis it does not state — occurrences carry an
 `ordinal` precisely so that a parser makes them distinct, and nothing says so —
-or it needs to index by position rather than by element. Raised as an open item
-against the spike surface rather than patched here.
+or it needs to index by position rather than by element. Raised with the corpus's
+owner as `c-stdlib:28` rather than patched here, because `Spikes/**` is authored
+surface and not this library's to edit.
+
+That sentence previously read "raised as an open item against the spike surface",
+which was true of this library's own plan and false of anything `c-spike` could
+see. It stood for three days while the only record was a document its subject had
+no reason to read.
 -/
 
 /-- Two occurrences identical in both fields: a degenerate input a real parser
@@ -194,5 +200,66 @@ example (i o : Vec Occurrence) (h : StableSorted i o)
     (a b : Nat) (ha : a < o.length) (hb : b < o.length) (hab : a < b) :
     Occurrence.le (o.get a ha) (o.get b hb) :=
   (Vec.pairwise_iff_get o).mp h.2.1 a b ha hb hab
+
+/-! ## The repair, demonstrated rather than preferred
+
+`c-stdlib:28` reports the unsatisfiability above to `c-spike`, who owns
+`Spikes/**`, and offers two repairs: state the well-formedness hypothesis that
+occurrences are distinct, or index the stability conjunct by *position* rather
+than by element. Saying which one this library prefers is worth little; showing
+that one of them works is worth more, so the second is written out here and the
+two properties that matter are proved of it.
+
+The difference is where the output position comes from. `StableSorted` asks
+`idxOf?` to find it *by element*, which collapses when two occurrences are equal.
+This asks for a witnessing map from input positions to output positions, so equal
+elements still have distinct positions and the order requirement is about those.
+-/
+
+/-- Stability over positions: an injection carrying elements, monotone on ties. -/
+def StableSortedByPos (input output : Vec Occurrence) : Prop :=
+  output.length = input.length ∧
+  output.Pairwise Occurrence.le ∧
+  ∃ σ : Nat → Nat,
+    (∀ i, i < input.length → σ i < output.length) ∧
+    (∀ i, i < input.length → output.get? (σ i) = input.get? i) ∧
+    (∀ i j, i < input.length → j < input.length → i ≠ j → σ i ≠ σ j) ∧
+    (∀ i j, i < input.length → j < input.length → i < j →
+      (input.get? i).map Occurrence.value = (input.get? j).map Occurrence.value →
+      σ i < σ j)
+
+/-- **Satisfiable exactly where the element-indexed version is not.** The identity
+witnesses it on the degenerate input `no_sort_can_satisfy_repeated` rules out. -/
+theorem pos_satisfiable_on_repeated : StableSortedByPos repeated repeated := by
+  refine ⟨rfl, by decide, id, ?_, ?_, ?_, ?_⟩
+  · intro i h; exact h
+  · intro i _; rfl
+  · intro i j _ _ h; exact h
+  · intro i j hi hj hlt _; exact hlt
+
+/-- **And still discriminating**, which is the half that matters more: a predicate
+satisfiable by weakening until everything passes would be worse than an
+unsatisfiable one. Carrying elements pins the witness, and the pinned witness
+contradicts the order requirement. -/
+theorem pos_rejects_unstable : ¬ StableSortedByPos input unstableOutput := by
+  rintro ⟨-, -, σ, hbound, hcarry, -, hstable⟩
+  have hb0 : σ 0 < 3 := by simpa [unstableOutput, Vec.length] using hbound 0 (by decide)
+  have hc0 := hcarry 0 (by decide)
+  have hb2 : σ 2 < 3 := by simpa [unstableOutput, Vec.length] using hbound 2 (by decide)
+  have hc2 := hcarry 2 (by decide)
+  have h0 : σ 0 = 2 := by
+    have hcase : σ 0 = 0 ∨ σ 0 = 1 ∨ σ 0 = 2 := by omega
+    rcases hcase with h | h | h
+    · rw [h] at hc0; simp [input, unstableOutput, Vec.get?] at hc0
+    · rw [h] at hc0; simp [input, unstableOutput, Vec.get?] at hc0
+    · exact h
+  have h2 : σ 2 = 1 := by
+    have hcase : σ 2 = 0 ∨ σ 2 = 1 ∨ σ 2 = 2 := by omega
+    rcases hcase with h | h | h
+    · rw [h] at hc2; simp [input, unstableOutput, Vec.get?] at hc2
+    · exact h
+    · rw [h] at hc2; simp [input, unstableOutput, Vec.get?] at hc2
+  have hlt := hstable 0 2 (by decide) (by decide) (by decide) (by decide)
+  omega
 
 end Grass.Tests.Std.StableSort
