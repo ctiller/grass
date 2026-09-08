@@ -874,6 +874,34 @@ theorem get?_zipWith (f : α → β → γ) (v : Vec α) (w : Vec β) (i : Nat) 
     foldr f init (v.push a) = foldr f (f a init) v := by
   simp [foldr, push]
 
+/--
+The cons law for `foldr`: the first element is folded last.
+
+`Vec.recOnCons` was added because a consumer review found `recOnPush` hands an
+induction hypothesis about the wrong end of a stream that is read from the head.
+The recursor landed and this did not, so `induction v using Vec.recOnCons`
+produced a `singleton a ++ w` goal that `Vec.foldr_push` could not touch — the
+same shape as the gap `recOnCons` itself was added to close, one level up.
+`Grass/Build/Cache/Key.lean` is the module that hits it: its
+`importedSummariesTree` is a `Vec.foldr` and its docstring claims the tree
+retains import order, which is a statement about this law.
+-/
+@[simp] theorem foldr_cons (f : α → β → β) (init : β) (a : α) (w : Vec α) :
+    foldr f init (singleton a ++ w) = f a (foldr f init w) := rfl
+
+/--
+The cons law for `foldl`: the first element is folded first, into the
+accumulator.
+
+Stated alongside `Vec.foldr_cons` rather than because a consumer asked. A
+recursor with a law for one fold and not the other is the asymmetry this section
+exists to remove, and leaving `foldl` out would reproduce it for the next reader
+who happens to accumulate leftwards.
+-/
+@[simp] theorem foldl_cons (f : β → α → β) (init : β) (a : α) (w : Vec α) :
+    foldl f init (singleton a ++ w) = foldl f (f init a) w := rfl
+
+
 /-!
 ## Predicates and search
 -/
