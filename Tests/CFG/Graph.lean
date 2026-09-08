@@ -54,6 +54,21 @@ def good : Graph Nat Terminal where
 
 example : good.WellFormed := by decide
 
+example : good.findBlock? (blockId "entry") = some entryBlock := by rfl
+
+example (block : Block Nat Terminal)
+    (hfind : good.findBlock? (blockId "entry") = some block) :
+    block ∈ good.blocks ∧ block.id = blockId "entry" :=
+  good.findBlock?_sound (blockId "entry") block hfind
+
+example (id : BlockId) :
+    (good.findBlock? id).isSome = true ↔ id ∈ good.blockIds :=
+  good.findBlock?_isSome_iff_mem_blockIds id
+
+example (id : BlockId) (member : id ∈ good.blockIds) :
+    ∃ block, good.findBlock? id = some block :=
+  good.blockForId id member
+
 example : good.directTargets = [blockId "return"] := by decide
 
 example : good.predecessors (blockId "return") = [blockId "entry"] := by decide
