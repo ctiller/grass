@@ -596,10 +596,6 @@ fn verify_review_merge_authorized(
             d.nomination
         )));
     }
-    // The verifying host must also be on the pinned engine: reconstructing
-    // the candidate below with a different ORT version would disagree with a
-    // perfectly honest reviewer and reject a valid authorization.
-    crate::bootstrap::require_pinned_merge_engine(state)?;
     let expected_authors: std::collections::BTreeSet<Agent> =
         chain.current_request.authors.iter().cloned().collect();
     crate::merge_candidate::verify_authorship(
@@ -609,6 +605,17 @@ fn verify_review_merge_authorized(
         d.previous_main.as_str(),
         d.reviewed_commit.as_str(),
     )?;
+    // The verifying host must also be on the pinned engine: reconstructing
+    // the candidate below with a different ORT version would disagree with a
+    // perfectly honest reviewer and reject a valid authorization.
+    //
+    // Deliberately here rather than at the top of this gate. Nothing above is
+    // engine-dependent -- `blocking_issue_for_chain` reads reduced state and
+    // `verify_authorship` reads commit trailers through libgit2 -- so an
+    // authorization that is wrong about its *authors* must say so, not blame
+    // this host's git. Same reasoning as the `merge_engine_epoch` check at the
+    // end of this function, and see `require_pinned_merge_engine`'s own doc.
+    crate::bootstrap::require_pinned_merge_engine(state)?;
     let reconstructed = crate::merge_candidate::reconstruct_candidate(
         repo,
         d.previous_main.as_str(),
@@ -3097,6 +3104,15 @@ mod tests {
 
     #[test]
     fn drain_outbox_rejects_review_merge_authorized_with_a_candidate_that_does_not_reconstruct() {
+        // Drives the real `drain_outbox`, so the bus it reduces is pinned by
+        // `genesis` to this build's engine version and there is no seam to
+        // hand it a differently-pinned state -- see
+        // `bootstrap::requires_the_pinned_engine`.
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_rejects_review_merge_authorized_with_a_candidate_that_does_not_reconstruct",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         // A syntactically valid but *wrong* candidate id -- never actually
         // built by `merge_candidate::reconstruct_candidate`.
@@ -3122,6 +3138,11 @@ mod tests {
 
     #[test]
     fn drain_outbox_rejects_review_merge_authorized_with_no_candidate_tag_at_all() {
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_rejects_review_merge_authorized_with_no_candidate_tag_at_all",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -3155,6 +3176,11 @@ mod tests {
     #[test]
     fn drain_outbox_rejects_review_merge_authorized_with_a_candidate_tag_that_never_reached_origin()
     {
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_rejects_review_merge_authorized_with_a_candidate_tag_that_never_reached_origin",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -3234,20 +3260,25 @@ mod tests {
         // The epoch the authorization names is real and this host runs its
         // engine, so nothing else in the gate objects to it -- but the bus
         // has since selected a different one.
+        //
+        // "This host runs its engine" has to be spelled `host_engine_version`
+        // rather than the compile-time `SUPPORTED_MERGE_ENGINE_VERSION`: the
+        // two are equal only on a host provisioned with the pinned git, and
+        // anywhere else this fixture claimed an engine the host does not have,
+        // so the gate refused for that reason and never reached the stale
+        // -epoch refusal under test. See `bootstrap::host_engine_version`.
         let newer = EventId::new(&f.coord1, 4242);
+        let host_engine = short(&crate::bootstrap::host_engine_version());
         state.merge_engine_info.insert(
             d.merge_engine_epoch.clone(),
             (
                 short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                host_engine.clone(),
             ),
         );
         state.merge_engine_info.insert(
             newer.clone(),
-            (
-                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
-            ),
+            (short(crate::bootstrap::SUPPORTED_MERGE_ENGINE), host_engine),
         );
         state.current_merge_engine_epoch = Some(newer.clone());
 
@@ -3327,6 +3358,11 @@ mod tests {
     /// absent from the exclusion list below.
     #[test]
     fn drain_outbox_review_merge_authorized_gate_passes_a_genuinely_valid_candidate() {
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_review_merge_authorized_gate_passes_a_genuinely_valid_candidate",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -3388,6 +3424,11 @@ mod tests {
     /// ran `prepare-merge` could never validly drain the authorization.
     #[test]
     fn drain_outbox_review_merge_authorized_gate_accepts_a_tag_never_fetched_into_this_checkout() {
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_review_merge_authorized_gate_accepts_a_tag_never_fetched_into_this_checkout",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -3934,6 +3975,14 @@ mod tests {
 
     #[test]
     fn drain_outbox_rejects_review_merge_reconciled_when_main_was_never_advanced() {
+        // The reconciliation gate itself is engine-independent, but its
+        // fixture is not: `authorized_and_published` has to get a real
+        // `review.merge_authorized` through the publication gate first.
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_rejects_review_merge_reconciled_when_main_was_never_advanced",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         let (candidate, authorization_id) = authorized_and_published(&f);
         // `main` deliberately left at `previous_main` -- the candidate was
@@ -3983,6 +4032,13 @@ mod tests {
     /// reconciliation.
     #[test]
     fn drain_outbox_accepts_review_merge_reconciled_when_main_was_genuinely_advanced() {
+        // See the sibling rejection test: the fixture needs a genuinely
+        // published authorization, which needs the pinned engine.
+        if crate::bootstrap::requires_the_pinned_engine(
+            "drain_outbox_accepts_review_merge_reconciled_when_main_was_genuinely_advanced",
+        ) {
+            return;
+        }
         let f = build_review_fixture(Some("zoe"));
         let (candidate, authorization_id) = authorized_and_published(&f);
         git(

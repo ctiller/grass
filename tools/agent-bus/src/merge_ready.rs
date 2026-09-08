@@ -340,12 +340,26 @@ mod tests {
         ObjectId::parse(format!("{n:040x}")).unwrap()
     }
 
+    /// A bus pinned to the engine this host actually runs.
+    ///
+    /// Deliberately `host_engine_version()` and not the compile-time
+    /// `SUPPORTED_MERGE_ENGINE_VERSION`: every test here has to get *past*
+    /// `require_pinned_merge_engine` to reach the gate behaviour it actually
+    /// asserts (reviewer eligibility, scope, reconstruction), and pinning the
+    /// constant only got past it on a host provisioned with the pinned git.
+    /// On any other -- a Linux host on its distribution's git -- all seven
+    /// tests below failed with an engine complaint that had nothing to do
+    /// with what they were checking. See `bootstrap::host_engine_version`.
+    ///
+    /// This does not soften the gate: it still runs, and still compares this
+    /// host against the bus's pin. It is the *bus's* pin that the fixture
+    /// chooses, which is ordinary test data.
     fn config() -> crate::bootstrap::BusConfig {
         crate::bootstrap::BusConfig {
             object_format: "sha1".to_string(),
             product_review_from: hash(1),
             merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: crate::bootstrap::host_engine_version(),
         }
     }
 
@@ -1021,6 +1035,46 @@ mod tests {
             err.to_string()
                 .contains("not one this nomination chain accepted"),
             "expected the never-accepted refusal, got: {err}"
+        );
+    }
+
+    /// This gate's pinned-engine *call site*, not the predicate.
+    ///
+    /// `bootstrap::pinned_engine_tests` proves what
+    /// `require_pinned_merge_engine` decides; it cannot see whether
+    /// `check_merge_ready` calls it. Nothing here did: every other test in
+    /// this module now pins `host_engine_version()`, so deleting the call
+    /// entirely would leave them all green -- the same invisible-call-site
+    /// gap mutation testing already found in `coordinator`'s twin of this
+    /// gate. Pinning a version nobody runs makes the call observable.
+    ///
+    /// Independent of what git this host has, in both directions: the
+    /// accepting case above pins whatever this host runs, and this one pins
+    /// something no host runs.
+    #[test]
+    fn the_gate_refuses_a_host_that_is_not_on_the_buss_pinned_engine() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+        let (dir, _origin, remote, previous_main, feature_commit, candidate) =
+            git_fixture(&author, &reviewer);
+        let (mut state, auth_id) = state_with_authorization(
+            &author,
+            &reviewer,
+            &previous_main,
+            &feature_commit,
+            &candidate,
+            &["feature.txt"],
+        );
+        check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+            .expect("fixture must be ready on the engine this host runs");
+
+        state.config.merge_engine_version = "0.0.0-not-a-real-git".to_string();
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+            .expect_err("a host that is not on the bus's pinned engine must not merge");
+        assert!(
+            err.to_string().contains("0.0.0-not-a-real-git")
+                && err.to_string().contains("candidate construction"),
+            "expected the pinned-engine refusal naming the bus's pin, got: {err}"
         );
     }
 

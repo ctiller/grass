@@ -60,6 +60,74 @@ fn path_str(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
+// ------------------------------------------------- the pinned merge engine
+
+/// The merge engine version this build pins
+/// (`bootstrap::SUPPORTED_MERGE_ENGINE_VERSION`).
+///
+/// Spelled as a literal because these tests drive the compiled binary as a
+/// black box: the crate has no library target, so there is nothing to read
+/// the constant from. `activate_merge_engine` below must put the same value
+/// into an event payload regardless -- `apply` rejects a
+/// `merge_engine.activated` naming any other version -- so one named constant
+/// here is better than the two bare literals this file used to carry.
+const PINNED_MERGE_ENGINE_VERSION: &str = "2.53.0";
+
+/// This host's `git` version, normalized the way `gitrepo::version` does it
+/// ("git version 2.53.0.windows.1" -> "2.53.0").
+fn installed_git_version() -> String {
+    let out = StdCommand::new("git")
+        .arg("--version")
+        .output()
+        .expect("git must be on PATH");
+    let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let digits: String = raw
+        .strip_prefix("git version ")
+        .unwrap_or(&raw)
+        .split(|c: char| !c.is_ascii_digit() && c != '.')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    let parts: Vec<&str> = digits.split('.').collect();
+    if parts.len() >= 3 {
+        format!("{}.{}.{}", parts[0], parts[1], parts[2])
+    } else {
+        digits
+    }
+}
+
+/// Reports whether this host cannot run the tests that need a *real* merge
+/// candidate, printing why.
+///
+/// Constructing a candidate is refused outright on a host whose git is not
+/// the version the bus pins (AGENT_BUS_SCHEMA.md section 2: the helper
+/// "refuses to run on a different version"; AGENT_REVIEW.md section 7). That
+/// is a genuine property of such a host, not a defect, so every test here
+/// that drives `prepare-merge` through to a candidate -- and everything
+/// downstream of one: `merge-ready`, `audit-main`'s correlation of a real
+/// merge, reconciliation -- cannot reach what it asserts there. On Ubuntu's
+/// git 2.51.0 against the pinned 2.53.0 all fourteen of them failed with an
+/// engine complaint instead.
+///
+/// They say so out loud and return. Failing would report a correctly
+/// configured helper as broken; passing silently would report an unexercised
+/// path as exercised, which this suite treats as the worse of the two. The
+/// other fifty-four tests in this file run on any git: genesis, registration,
+/// publication, sync, tail, status, succession, the outbox and the registry
+/// no longer consult the engine version at all.
+fn requires_the_pinned_engine(what: &str) -> bool {
+    let installed = installed_git_version();
+    if installed == PINNED_MERGE_ENGINE_VERSION {
+        return false;
+    }
+    eprintln!(
+        "SKIPPED {what}: this host runs git {installed}, not the pinned merge engine version \
+         {PINNED_MERGE_ENGINE_VERSION}. Constructing a candidate is refused on such a host by \
+         design, so this test cannot reach what it asserts. Install the pinned git to exercise it."
+    );
+    true
+}
+
 /// A bare "origin" remote, empty until something is genesis'd and pushed to
 /// it.
 fn init_bare_origin() -> TempDir {
@@ -284,7 +352,7 @@ fn activate_merge_engine(repo: &Path, coordinator: &str) -> String {
     let data = serde_json::json!({
         "previous_epoch": format!("{coordinator}:0"),
         "merge_engine": "git-ort",
-        "merge_engine_version": "2.53.0",
+        "merge_engine_version": PINNED_MERGE_ENGINE_VERSION,
         "design_commit": "0".repeat(40),
         "helper_commit": "0".repeat(40),
     });
@@ -1888,6 +1956,9 @@ fn tail_of_an_unregistered_agent_fails_cleanly() {
 /// the push would still be caught even if the printed JSON looked right.
 #[test]
 fn prepare_merge_constructs_and_pushes_the_candidate_tag() {
+    if requires_the_pinned_engine("prepare_merge_constructs_and_pushes_the_candidate_tag") {
+        return;
+    }
     let (origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2144,6 +2215,9 @@ fn prepare_merge_rejects_an_unknown_nomination() {
 /// reports it ready and names the exact same candidate.
 #[test]
 fn merge_ready_reports_ready_for_a_genuinely_valid_authorization() {
+    if requires_the_pinned_engine("merge_ready_reports_ready_for_a_genuinely_valid_authorization") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2197,6 +2271,9 @@ fn merge_ready_rejects_unknown_authorization() {
 /// asking `merge-ready` about the same authorization id must be refused.
 #[test]
 fn merge_ready_rejects_wrong_authorizer() {
+    if requires_the_pinned_engine("merge_ready_rejects_wrong_authorizer") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2238,6 +2315,9 @@ fn merge_ready_rejects_wrong_authorizer() {
 /// this, since both run before `main` has had the chance to move.
 #[test]
 fn merge_ready_rejects_main_advanced() {
+    if requires_the_pinned_engine("merge_ready_rejects_main_advanced") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2288,6 +2368,9 @@ fn merge_ready_rejects_main_advanced() {
 /// ever looks at the actual diff content).
 #[test]
 fn merge_ready_rejects_a_changed_path_outside_reviewed_scope() {
+    if requires_the_pinned_engine("merge_ready_rejects_a_changed_path_outside_reviewed_scope") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     register(repo.path(), "aiden", "reviewer", "host2");
@@ -2430,6 +2513,9 @@ fn audit_main_json_states_its_own_freshness() {
 /// publish `review.merged`, and `audit-main` reports it clean.
 #[test]
 fn audit_main_reports_clean_when_fully_correlated() {
+    if requires_the_pinned_engine("audit_main_reports_clean_when_fully_correlated") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2476,6 +2562,9 @@ fn audit_main_reports_clean_when_fully_correlated() {
 /// missing or mismatched receipt is detected by `audit-main`").
 #[test]
 fn audit_main_flags_missing_receipt() {
+    if requires_the_pinned_engine("audit_main_flags_missing_receipt") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2520,6 +2609,9 @@ fn audit_main_flags_missing_receipt() {
 /// commit, `audit-main` reports it clean again.
 #[test]
 fn audit_main_reports_clean_after_review_merge_reconciled() {
+    if requires_the_pinned_engine("audit_main_reports_clean_after_review_merge_reconciled") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2578,6 +2670,10 @@ fn audit_main_reports_clean_after_review_merge_reconciled() {
 /// was never published. A bootstrap coordinator's reconciliation succeeds.
 #[test]
 fn reconcile_via_submit_succeeds_when_main_was_genuinely_advanced() {
+    if requires_the_pinned_engine("reconcile_via_submit_succeeds_when_main_was_genuinely_advanced")
+    {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2632,6 +2728,9 @@ fn reconcile_via_submit_succeeds_when_main_was_genuinely_advanced() {
 /// reconciled`'s live `git rev-list --first-parent` check can.
 #[test]
 fn reconcile_via_submit_rejects_when_main_was_never_advanced() {
+    if requires_the_pinned_engine("reconcile_via_submit_rejects_when_main_was_never_advanced") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2684,6 +2783,9 @@ fn reconcile_via_submit_rejects_when_main_was_never_advanced() {
 /// covered by `apply.rs`'s own unit tests).
 #[test]
 fn reconcile_via_submit_rejects_a_non_coordinator_agent() {
+    if requires_the_pinned_engine("reconcile_via_submit_rejects_a_non_coordinator_agent") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2878,6 +2980,9 @@ fn golden_succeed_output() {
 
 #[test]
 fn golden_prepare_merge_output() {
+    if requires_the_pinned_engine("golden_prepare_merge_output") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, _previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2893,6 +2998,9 @@ fn golden_prepare_merge_output() {
 
 #[test]
 fn golden_merge_ready_output() {
+    if requires_the_pinned_engine("golden_merge_ready_output") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
@@ -2932,6 +3040,9 @@ fn golden_merge_ready_output() {
 /// has no hash to redact at all.
 #[test]
 fn golden_audit_main_output() {
+    if requires_the_pinned_engine("golden_audit_main_output") {
+        return;
+    }
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
