@@ -11,8 +11,12 @@ statement of what this library owes an application author. It reads:
 def stableSorted (input output : Vec Occurrence) : Prop :=
   output.Permutation input ∧
   output.Pairwise Occurrence.le ∧
-  ∀ i j, i < j -> input[i].value = input[j].value ->
-    (output.findIdx? input[i]).get! < (output.findIdx? input[j]).get!
+  ∀ (i j : Nat) (hi : i < input.length) (hj : j < input.length),
+    (input.get i hi).value = (input.get j hj).value ->
+    (input.get i hi).ordinal < (input.get j hj).ordinal ->
+    ∀ p q, output.idxOf? (input.get i hi) = some p ->
+           output.idxOf? (input.get j hj) = some q ->
+           p < q
 ```
 
 Three `Vec` operations appear there and none of them existed: `Permutation`,
@@ -33,20 +37,35 @@ theorem about itself.
 whole-element transfers to "derive occurrence, permutation, and initialization
 transport from the proved physical copy".
 
-## What `stableSorted` reveals about the authored surface
+## What `stableSorted` revealed about the authored surface, and how it resolved
 
-Two things in that specification do not typecheck against this library, and both
-are recorded in `docs/STDLIB_IMPLEMENTATION_PLAN.md` rather than accommodated.
+The block above is what the spike reads *now*. It did not always, and the history
+is the argument for the operations below rather than a digression.
 
-`input[i]` carries no proof that `i` is in range, and the surrounding binder
-offers none — `∀ i j, i < j → …` bounds `i` below `j` and nothing above.
-`Vec.get` demands the bound and `Vec.get?` returns an `Option`, deliberately, so
-that an out-of-range read is not expressible. The specification wants a total
-indexing it can write without a proof.
+As written until `47da3f8`, two things in it did not typecheck against this
+library, and this module recorded them rather than accommodating them. `input[i]`
+carried no proof that `i` was in range and the surrounding binder offered none —
+`∀ i j, i < j → …` bounds `i` below `j` and nothing above — while `Vec.get`
+demands the bound and `Vec.get?` returns an `Option`, deliberately, so that an
+out-of-range read is not expressible. And `output.findIdx? input[i]` passed an
+*element* where `findIdx?` takes a predicate; the operation it named is
+`Vec.idxOf?`. A third defect was worse than either: keyed on `i < j`, the
+conjunct was unsatisfiable on any input holding two identical occurrences,
+because indexing the output by element gives one position for both and `p < q`
+becomes `p < p`. `Tests/Std/StableSort.lean` proves that, and it was reported to
+the spike's owner as `c-stdlib:28`.
 
-`output.findIdx? input[i]` passes an *element* where `findIdx?` takes a
-predicate. The operation it names is `Vec.idxOf?`. Both are supplied below under
-their accurate names rather than one being bent to fit the call.
+All three are fixed, and fixed *towards* what this module supplies: bounds are
+now hypotheses carried by `Vec.get`, the search is `Vec.idxOf?` under its
+accurate name and returning its honest `Option`, and stability keys on `ordinal`,
+which makes the degenerate input vacuous rather than contradictory. That last
+choice was the spike owner's and was neither repair this library offered — the
+ground was that `docs/SPIKE_2.md`'s prose already stated the ordinal rule, so the
+two views of one spike had drifted and there was no decision left to take.
+
+The operations are supplied below under their accurate names. That they are now
+exactly the ones the specification calls is the outcome this section was arguing
+for, not a coincidence to leave unremarked.
 -/
 
 namespace Grass.Std.Logical
