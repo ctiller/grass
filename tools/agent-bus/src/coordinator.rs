@@ -252,6 +252,15 @@ pub fn drain_outbox(
                 continue;
             }
         }
+        if let Err(e) = verify_declared_role_matches_roster(&state, agent, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
         if let Err(e) = verify_schema_activation_advances(&state, &data) {
             let reason = e.to_string();
             reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
@@ -987,6 +996,45 @@ fn verify_predecessor_not_contested(
 /// question has one answer. A coordinator that genuinely cannot see a
 /// concurrent activation yet is not stopped, and should not be: it has
 /// committed no error, and the two activations reconcile to the higher
+/// AGENT_BUS_SCHEMA.md section 2.1: a registration's declared `primary_role`
+/// must match the roster epoch's binding for that agent, since it is the
+/// declared role that grants authority.
+///
+/// `apply` cannot ask this. It used to, against `state.roster_epoch` --
+/// whatever epoch happened to be current on the reducing host -- so a later
+/// registry transition that merely restated a binding retroactively
+/// invalidated an already-published `agent.registered`, and `reduce`'s bare
+/// `?` turned that into every host being unable to read the bus at all,
+/// permanently. It was also host-local: two hosts at different registry tips
+/// gave different answers for the same event.
+///
+/// Here the registration and the registry transition are written together by
+/// the same command (`cli::register` lands the transition, then drains the
+/// event), so the comparison is against the epoch this registration is
+/// actually being published into, and it cannot move afterwards.
+fn verify_declared_role_matches_roster(
+    state: &crate::state::BusState,
+    agent: &Agent,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    let crate::events::EventData::AgentRegistered(d) = data else {
+        return Ok(());
+    };
+    if let Some(binding) = state
+        .roster_epoch
+        .as_ref()
+        .and_then(|e| e.active_members.get(agent))
+    {
+        if binding.role != d.primary_role {
+            return Err(invalid(format!(
+                "registers as {} but the roster epoch binds {agent} as {} -- the declared role must match the registry, since it is the declared one that grants authority",
+                d.primary_role, binding.role
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// version on every host either way.
 fn verify_schema_activation_advances(
     state: &crate::state::BusState,
@@ -1229,6 +1277,57 @@ mod tests {
 
     fn a(name: &str) -> Agent {
         Agent::parse(name.to_string()).unwrap()
+    }
+
+    /// The declared-role rule, pinned where it is now enforced.
+    ///
+    /// `apply` used to ask it, against whatever roster epoch was current on
+    /// the reducing host, so a later transition that merely restated a
+    /// binding retroactively invalidated an already-published
+    /// `agent.registered` and made the bus unreadable for everyone. It is
+    /// asked here instead, where the registration and the registry
+    /// transition are written by the same command and the answer cannot move
+    /// afterwards.
+    #[test]
+    fn verify_declared_role_matches_roster_refuses_a_mismatch() {
+        use crate::events::AgentRegistered;
+        use crate::registry::MemberBinding;
+
+        let aud = a("aud");
+        let mut state = crate::state::BusState::new(minimal_config());
+        let mut members = std::collections::BTreeMap::new();
+        members.insert(
+            aud.clone(),
+            MemberBinding {
+                role: Role::Auditor,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        state.roster_epoch = Some(crate::registry::RosterEpoch::root(
+            ObjectId::parse("0".repeat(40)).unwrap(),
+            members,
+        ));
+
+        let declare = |role| {
+            EventData::AgentRegistered(AgentRegistered {
+                display_name: short("Auditor"),
+                primary_role: role,
+                purpose: text("audits"),
+                product_base: None,
+                product_branch: None,
+                provider: None,
+                model: None,
+            })
+        };
+
+        let err = verify_declared_role_matches_roster(&state, &aud, &declare(Role::Implementor))
+            .expect_err("an auditor may not register as an implementor");
+        assert!(err.to_string().contains("must match the registry"), "{err}");
+
+        verify_declared_role_matches_roster(&state, &aud, &declare(Role::Auditor))
+            .expect("the honest declaration passes");
     }
 
     fn short(s: &str) -> Short {

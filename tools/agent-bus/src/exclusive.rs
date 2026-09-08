@@ -51,7 +51,22 @@ pub enum Disposition {
 #[derive(Debug, Clone, Default)]
 pub struct ExclusiveTracker {
     groups: BTreeMap<String, BTreeSet<EventId>>,
-    resolved: BTreeMap<String, EventId>,
+    /// Every winner a coordinator has named for a key, not just the first.
+    ///
+    /// A set because two coordinators can resolve the same visible race
+    /// without either having erred -- succession makes more than one
+    /// coordinator routine -- and `resolve` used to answer the second one
+    /// with `Err` whichever order it arrived in. That is a reduction handler
+    /// failing on a well-formed event, so it took the whole bus down, in
+    /// both orders, permanently.
+    ///
+    /// The effective winner is the smallest member (see `resolved_winner`).
+    /// Arbitrary between two good-faith resolutions, but it is a pure
+    /// function of the set, so every host agrees -- which is the property
+    /// that actually matters. Picking by arrival order would not, and
+    /// leaving the key contested forever would deadlock it, since a third
+    /// resolution could never break the tie.
+    resolved: BTreeMap<String, std::collections::BTreeSet<EventId>>,
 }
 
 impl ExclusiveTracker {
@@ -79,7 +94,7 @@ impl ExclusiveTracker {
     /// the final membership (`winner`), so hosts that assembled the same set
     /// in different orders still agree.
     pub fn record(&mut self, key: &str, candidate: &EventId) -> AbResult<()> {
-        if let Some(winner) = self.resolved.get(key) {
+        if let Some(winner) = self.resolved_winner(key) {
             if winner.agent() == candidate.agent() {
                 return Err(invalid(format!(
                     "{candidate}: this agent's own {winner} already has a coordinator-resolved disposition, so a further claim on the same predecessor is forward progress rather than a new exclusive claim"
@@ -108,8 +123,8 @@ impl ExclusiveTracker {
     /// for treating the predecessor as contested again -- resetting there
     /// would undo the resolution. That third case is `Superseded`.
     pub fn disposition(&self, key: &str, candidate: &EventId) -> Disposition {
-        if let Some(w) = self.resolved.get(key) {
-            return if w == candidate {
+        if let Some(w) = self.resolved_winner(key) {
+            return if &w == candidate {
                 Disposition::Applies
             } else {
                 Disposition::Superseded
@@ -126,19 +141,37 @@ impl ExclusiveTracker {
     /// (or the sole member of a still-unrecorded group is not required --
     /// resolution can name any candidate that was validly recorded).
     pub fn resolve(&mut self, key: &str, winner: EventId) -> AbResult<()> {
-        if self.resolved.contains_key(key) {
-            return Err(invalid(format!(
-                "{key}: already has a coordinator-resolved disposition"
-            )));
-        }
+        // A second resolution is recorded, never refused.
+        //
+        // Refusing it made two coordinators resolving the same visible race
+        // -- even to the *same* winner -- a permanent fleet-wide wedge, in
+        // both orders, from two events that were each correct when
+        // published. Neither coordinator did anything wrong, and the log is
+        // append-only, so there was no way back.
         let group = self.groups.get(key);
         if !group.map(|g| g.contains(&winner)).unwrap_or(false) {
             return Err(invalid(format!(
                 "{winner} was never recorded as a candidate for {key}"
             )));
         }
-        self.resolved.insert(key.to_string(), winner);
+        self.resolved
+            .entry(key.to_string())
+            .or_default()
+            .insert(winner);
         Ok(())
+    }
+
+    /// The winner in force for `key`: the smallest of the winners
+    /// coordinators have named, or `None` if none have.
+    ///
+    /// A duplicate resolution naming the same winner collapses into the set
+    /// and changes nothing. Two resolutions naming *different* winners are
+    /// both kept, and the minimum is taken -- a pure function of the set, so
+    /// hosts that received them in different orders still agree, which is
+    /// the whole requirement. "Whichever landed first" would not be, because
+    /// there is no shared notion of first.
+    fn resolved_winner(&self, key: &str) -> Option<EventId> {
+        self.resolved.get(key)?.iter().next().cloned()
     }
 
     /// The event whose effect should currently be applied for `key`, or
@@ -148,8 +181,8 @@ impl ExclusiveTracker {
     /// same final set of candidates in any order always gives the same
     /// answer (gate 16).
     pub fn winner(&self, key: &str) -> Option<EventId> {
-        if let Some(w) = self.resolved.get(key) {
-            return Some(w.clone());
+        if let Some(w) = self.resolved_winner(key) {
+            return Some(w);
         }
         let group = self.groups.get(key)?;
         if group.len() == 1 {
@@ -186,10 +219,24 @@ impl ExclusiveTracker {
     /// `groups` is a `BTreeMap`, so where more than one group could match,
     /// the choice is deterministic rather than whichever a hash order
     /// happened to yield.
+    /// An already-resolved group is still findable, deliberately.
+    ///
+    /// Skipping resolved keys was the other half of the two-coordinator
+    /// wedge. A second `lifecycle.conflict_resolved` for a race both
+    /// coordinators could see would not find its key at all and died with
+    /// "no unresolved conflict covers this competing set" -- so making
+    /// `resolve` idempotent achieved nothing on its own, because the second
+    /// resolution never reached it. Both orders were fatal, and neither
+    /// coordinator had erred.
+    ///
+    /// `resolve` now records rather than refuses, so returning a resolved
+    /// key here is safe: a duplicate naming the same winner collapses into
+    /// the set, and a genuine disagreement is settled by
+    /// `resolved_winner`'s minimum, identically on every host.
     pub fn key_for_competing(&self, competing: &BTreeSet<EventId>) -> Option<String> {
         self.groups
             .iter()
-            .find(|(key, group)| !self.resolved.contains_key(*key) && competing.is_subset(group))
+            .find(|(_, group)| competing.is_subset(group))
             .map(|(key, _)| key.clone())
     }
 }
@@ -298,17 +345,47 @@ mod tests {
         assert!(err.to_string().contains("never recorded"), "{err}");
     }
 
+    /// A second resolution is absorbed, not refused -- and two coordinators
+    /// who disagree still land on the same answer.
+    ///
+    /// This test used to assert the refusal, which pinned a wedge: two
+    /// coordinators resolving the same visible race is routine once
+    /// succession has happened, neither has erred, and `Err` here took the
+    /// whole bus down in both orders with no way back, the log being
+    /// append-only.
     #[test]
-    fn resolve_rejects_a_second_resolution_of_the_same_key() {
+    fn a_second_resolution_is_absorbed_and_disagreement_still_converges() {
         let mut t = ExclusiveTracker::default();
         let alice = eid("alice", 0);
+        let bob = eid("bob", 0);
         t.record("issue:1", &alice).unwrap();
+        t.record("issue:1", &bob).unwrap();
+
+        // The same winner twice changes nothing.
         t.resolve("issue:1", alice.clone()).unwrap();
-        let err = t.resolve("issue:1", alice).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("already has a coordinator-resolved"),
-            "{err}"
+        t.resolve("issue:1", alice.clone())
+            .expect("a duplicate resolution must be absorbed");
+        assert_eq!(t.winner("issue:1"), Some(alice.clone()));
+
+        // Two coordinators naming different winners both land, and the
+        // answer is a pure function of the set -- so the reverse order gives
+        // the same result rather than last-writer-wins.
+        let mut forward = ExclusiveTracker::default();
+        forward.record("issue:2", &alice).unwrap();
+        forward.record("issue:2", &bob).unwrap();
+        forward.resolve("issue:2", alice.clone()).unwrap();
+        forward.resolve("issue:2", bob.clone()).unwrap();
+
+        let mut backward = ExclusiveTracker::default();
+        backward.record("issue:2", &alice).unwrap();
+        backward.record("issue:2", &bob).unwrap();
+        backward.resolve("issue:2", bob.clone()).unwrap();
+        backward.resolve("issue:2", alice.clone()).unwrap();
+
+        assert_eq!(
+            forward.winner("issue:2"),
+            backward.winner("issue:2"),
+            "hosts that saw two resolutions in different orders must agree"
         );
     }
 

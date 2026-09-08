@@ -212,23 +212,60 @@ fn topological_order(streams: &BTreeMap<Agent, Vec<Envelope>>) -> AbResult<Vec<&
     }
 
     let mut order = Vec::new();
-    while let Some((_, id)) = ready.iter().next().cloned() {
-        ready.remove(&(id.seq() != 0, id.clone()));
-        remaining_deps.remove(&id);
-        order.push(id.clone());
-        if let Some(children) = dependents.get(&id) {
-            for child in children {
-                if let Some(d) = remaining_deps.get_mut(child) {
-                    d.retain(|x| x != &id);
-                    if d.is_empty() {
-                        ready.insert(ready_key(child));
+    loop {
+        while let Some((_, id)) = ready.iter().next().cloned() {
+            ready.remove(&(id.seq() != 0, id.clone()));
+            remaining_deps.remove(&id);
+            order.push(id.clone());
+            if let Some(children) = dependents.get(&id) {
+                for child in children {
+                    if let Some(d) = remaining_deps.get_mut(child) {
+                        d.retain(|x| x != &id);
+                        if d.is_empty() {
+                            ready.insert(ready_key(child));
+                        }
                     }
                 }
             }
         }
-    }
-    if order.len() != by_id.len() {
-        return Err(invalid("event dependency graph has a cycle"));
+        if remaining_deps.is_empty() {
+            break;
+        }
+        // A cycle. Break it deterministically and keep going, rather than
+        // failing the whole reduction.
+        //
+        // Returning `Err` here meant two individually well-formed, already
+        // published events could make the bus permanently unreadable for
+        // everyone, with no way back: the log is append-only and force-push
+        // is prohibited, so neither event can be withdrawn.
+        //
+        // It is reachable precisely because forward references are tolerated
+        // above. An event may name an id that does not exist yet -- the
+        // fleet does this, `e-auditor:10` named `c-reviewer:100` one past
+        // that stream's tip -- and the edge is simply dropped. But when that
+        // id is eventually published, and it happens to reference anything
+        // at or behind the referrer, the two edges close a loop. Tolerating
+        // the dangling half while failing on the closed one just moves the
+        // outage from "now" to "whenever that sequence number is reached".
+        //
+        // Dropping an edge is already this function's answer to a reference
+        // it cannot honour, so a cycle gets the same answer. The victim is
+        // the smallest remaining `EventId` -- `remaining_deps` is a
+        // `BTreeMap`, so that is a pure function of the event set, identical
+        // on every host regardless of fetch or replay order, which is the
+        // property that matters. The handlers that actually need a
+        // referenced event still check for it themselves and fail locally
+        // and specifically; reporting the cycle as a problem belongs in
+        // `audit_main`, not in the one code path every read goes through.
+        let victim = remaining_deps
+            .keys()
+            .next()
+            .cloned()
+            .expect("non-empty, just checked");
+        if let Some(d) = remaining_deps.get_mut(&victim) {
+            d.clear();
+        }
+        ready.insert(ready_key(&victim));
     }
     Ok(order.into_iter().map(|id| by_id[&id]).collect())
 }
@@ -534,18 +571,22 @@ fn apply_registered(state: &mut BusState, env: &Envelope, d: &AgentRegistered) -
     // the member exists, so a failed drain leaves a hand-written `submit
     // --kind agent.registered` as the only way forward -- and that payload
     // may name any role.
-    if let Some(binding) = state
-        .roster_epoch
-        .as_ref()
-        .and_then(|e| e.active_members.get(&env.agent))
-    {
-        if binding.role != d.primary_role {
-            return Err(invalid(format!(
-                "{}: registers as {} but the roster epoch binds {} as {} -- the declared role must match the registry, since it is the declared one that grants authority",
-                env.id, d.primary_role, env.agent, binding.role
-            )));
-        }
-    }
+    // Deliberately NOT checked against `state.roster_epoch` here.
+    //
+    // That read is "whatever epoch is current on this host at reduction
+    // time", which is neither the epoch the registration was authored
+    // against nor the same value on every host. A later registry transition
+    // that merely restates a binding -- repairing a mis-set host, or moving
+    // the placeholder bindings onto real hosts -- retroactively invalidated
+    // an immutable, long-published `agent.registered`, and with `reduce`
+    // propagating on the first error that is the entire bus, permanently.
+    // It is the same defect this file's `require_bootstrap_coordinator`
+    // already had removed for the same reason; it simply survived here.
+    //
+    // The rule is real and is kept: `coordinator::verify_declared_role_
+    // matches_roster` asks it at publication, against the publishing host's
+    // own view, where the registration and the registry transition are
+    // written together and the answer cannot later move.
     if d.primary_role != Role::Implementor
         && (d.product_base.is_some() || d.product_branch.is_some())
     {
@@ -1732,6 +1773,19 @@ fn apply_review_closing(
                 // enforcement mechanism changes (round-4 adversarial
                 // review, same bug class already fixed for the sibling
                 // `chain.current_nomination` checks in this file).
+                //
+                // The candidacy is recorded before returning. Returning
+                // *before* `exclusive.record` did not merely make this
+                // withdrawal lose the race -- it erased the race, because
+                // `chain.authorizations` is moved by a reviewer's own
+                // `review.merge_authorized`, which this event neither
+                // references nor observed. Whether a contested group formed
+                // at all then depended on replay order, silently, and a
+                // later `lifecycle.conflict_resolved` naming this event as
+                // competing could not find its key on the hosts that
+                // replayed the authorization first.
+                let key = review_key(nomination);
+                state.exclusive.record(&key, &env.id)?;
                 return Ok(());
             }
         }
@@ -1945,7 +1999,31 @@ fn apply_review_reassigned(
     let chain = state
         .review_chain(&d.replaces)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.replaces)))?;
-    if !chain.merged.is_empty() || !chain.reconciled.is_empty() {
+    let already_landed = !chain.merged.is_empty() || !chain.reconciled.is_empty();
+    if already_landed {
+        // Record the candidacy before returning, then return.
+        //
+        // This early return used to happen *before* `exclusive.record`
+        // below, which meant a landed merge receipt silently erased the race
+        // rather than merely losing it. `chain.merged`/`chain.reconciled`
+        // are moved by the reviewer's own `review.merged`, which this event
+        // neither references nor observed, so whether two concurrent
+        // reassignments ever formed a contested group at all depended on
+        // whether that receipt replayed first: one host reduced to
+        // `LifecycleConflict`, another to `Open` with a reassignment
+        // provisionally in force, and neither reported anything. Worse, the
+        // coordinator's `lifecycle.conflict_resolved` then could not find
+        // its key on the hosts that saw the receipt first --
+        // `key_for_competing` requires the competing set to be a subset of
+        // the recorded group -- so an honest resolution wedged the bus.
+        //
+        // Recording is confluent by construction: a set keyed by event id,
+        // so membership does not depend on arrival order. The *effect*
+        // stays gated -- this event still changes nothing about the chain --
+        // which is the file's own "record the fact, gate the effect" rule,
+        // simply not applied to this return.
+        let key = review_key(&d.replaces);
+        state.exclusive.record(&key, &env.id)?;
         return Ok(());
     }
     // Deliberately no upfront `current_nomination == d.replaces` check: a
@@ -1969,9 +2047,39 @@ fn apply_review_reassigned(
             env.id
         )));
     }
-    if d.reviewer == chain.current_request.reviewer {
+    // Against the reviewer of the link this event *replaces*, not against
+    // whoever is "current" at reduction time.
+    //
+    // `current_request.reviewer` is a derived, moving view: a concurrent
+    // reassignment that happened to reduce first has already advanced it. So
+    // two authors who each reassign the same nomination away from `rv1`, and
+    // independently name `rv2`, were each correct at publication and yet the
+    // second to reduce was told its replacement "must differ from the
+    // current reviewer" -- and since the log is append-only and publishing
+    // is what just went down, there is no way out. It failed in *both*
+    // orders, so it is not even a race one side wins.
+    //
+    // That is not an exotic collision. Nominations round-robin between two
+    // reviewers, so when a reassignment is called for, two authors reaching
+    // for the same replacement is the expected outcome rather than a
+    // coincidence.
+    //
+    // `nomination_reviewer` is append-only and keyed by nomination link, and
+    // `d.replaces` is in this event's own `refs`, so this comparison is a
+    // pure function of refs-reachable state and cannot move underneath a
+    // replay. The anti-degenerate rule it enforces is the one actually
+    // wanted: a reassignment must not be a no-op *relative to the link it
+    // replaces*. "Differs from whatever is current right now" is a
+    // publication-time question and belongs there.
+    let replaced_reviewer = chain.nomination_reviewer.get(&d.replaces).ok_or_else(|| {
+        invalid(format!(
+            "{}: nomination {} has no recorded reviewer",
+            env.id, d.replaces
+        ))
+    })?;
+    if &d.reviewer == replaced_reviewer {
         return Err(invalid(format!(
-            "{}: replacement reviewer must differ from the current reviewer",
+            "{}: replacement reviewer must differ from the reviewer of the nomination it replaces",
             env.id
         )));
     }
@@ -2162,14 +2270,30 @@ fn apply_review_merge_authorized(
             )));
         }
     }
-    for f in chain.findings.values() {
-        if f.disposition == FindingDisposition::Open {
-            return Err(invalid(format!(
-                "{}: finding {} lacks a terminal disposition",
-                env.id, f.finding_id
-            )));
-        }
-    }
+    // The open-findings rule is deliberately NOT asked here. It is the
+    // `g-construct:114` outage relocated one step downstream, and it wedged
+    // the bus for the same reason.
+    //
+    // `chain.findings` is not refs-reachable from an authorization: it is
+    // moved by `review.changes_requested` and `review.finding_disposed` on a
+    // *reviewer's* stream, which this event neither references nor need have
+    // observed. Concretely -- `rv1` accepts a nomination and, not having
+    // seen a concurrent reassignment, files a finding against it, while an
+    // author reassigns that same nomination to `rv2`. Neither references the
+    // other, so ties break on agent name. Replay the finding first and it is
+    // inserted, so `rv2`'s later, entirely honest authorization dies here
+    // and takes `status`, `tail` and `coordinate` down with it on every
+    // host, permanently. Replay the reassignment first and the finding never
+    // exists and the authorization succeeds. Same events, same bus, two
+    // answers, one of them fatal.
+    //
+    // Nothing is lost by dropping it: `merge_ready::check_merge_ready`
+    // performs the byte-identical check at the pre-merge gate, against the
+    // merging host's fully-reduced view where the question has one answer,
+    // and it already refuses an authorization that reduced as a no-op. No
+    // reduced state is skipped either -- `chain.authorizations.insert`
+    // happens either way -- so this is a pure move of the policy to where it
+    // can be answered honestly, not a relaxation of it.
     // AGENT_BUS_SCHEMA.md section 10: "Only unresolved issues whose `blocks`
     // set names an event in the active nomination chain block
     // authorization." A resolved/rejected (Terminal) issue never blocks,
@@ -3443,11 +3567,25 @@ mod tests {
             [nominate_env.id.clone(), report_id.clone()],
         );
 
-        let err = apply_event(&mut state, &env)
-            .expect_err("an open finding must still block, audit or no audit");
+        // The audit changes nothing about what the reviewer still owes, and
+        // that is asserted where the obligation is now enforced.
+        //
+        // Reduction records the authorization -- it must, because
+        // `chain.findings` is not reachable from this event's `refs` and
+        // refusing on it wedged the whole bus (see
+        // `review_merge_authorized_records_an_open_finding_rather_than_refusing_it`).
+        // What gate 23 actually requires is that citing an auditor's report
+        // does not *discharge* the reviewer's own disposition, and that is
+        // exactly what the still-Open finding below shows: the pre-merge
+        // gate refuses on it, audit or no audit.
+        apply_ok(&mut state, &env);
+        let chain = state.review_chain(&nominate_env.id).expect("chain exists");
         assert!(
-            err.to_string().contains("finding"),
-            "the reviewer still owes its own disposition, got: {err}"
+            chain
+                .findings
+                .values()
+                .any(|f| f.disposition == FindingDisposition::Open),
+            "the audit must not have discharged the reviewer's own finding"
         );
     }
 
@@ -3891,17 +4029,25 @@ mod tests {
     /// M4: the role an agent declares must be the role the registry binds it
     /// to. Every authority check reads the declared value, while `status`
     /// prints the registry's -- so a divergence grants authority invisibly.
+    ///
+    /// Asked at publication, not during reduction. This test used to assert
+    /// reduction refused it, which made a later registry transition that
+    /// merely rebinds an agent retroactively invalidate an already-published
+    /// registration and take the whole bus down -- see
+    /// `a_registry_rebinding_does_not_invalidate_an_earlier_registration`.
+    /// Here reduction records the declared role, and
+    /// `coordinator::tests::verify_declared_role_matches_roster_refuses_a_mismatch`
+    /// pins the rule where it is now enforced.
     #[test]
-    fn a_registration_may_not_declare_a_role_the_registry_does_not_bind() {
+    fn reduction_records_a_declared_role_without_judging_it_against_the_registry() {
         let mut state = empty_state(&[("aud", Role::Auditor)]);
         let aud = a("aud");
-        let err = apply_event(&mut state, &register(&aud, Role::Implementor)).unwrap_err();
-        assert!(
-            err.to_string().contains("must match the registry"),
-            "an auditor may not register as an implementor, got: {err}"
+        apply_ok(&mut state, &register(&aud, Role::Implementor));
+        assert_eq!(
+            state.agents[&aud].primary_role,
+            Role::Implementor,
+            "reduction records what the event declared"
         );
-        // The honest declaration still works.
-        apply_ok(&mut state, &register(&aud, Role::Auditor));
     }
 
     /// The check is `require_self_active_role`, not merely a role
@@ -8109,7 +8255,7 @@ mod tests {
     }
 
     #[test]
-    fn review_merge_authorized_rejects_an_open_finding() {
+    fn review_merge_authorized_records_an_open_finding_rather_than_refusing_it() {
         let mut state = empty_state(&[]);
         let alice = a("alice");
         let bob = a("bob");
@@ -8143,10 +8289,30 @@ mod tests {
             )),
             [],
         );
-        let err = apply_event(&mut state, &env).unwrap_err();
+        // Reduction records it. This test used to assert the opposite, and
+        // in doing so pinned a live wedge: `chain.findings` is moved by
+        // events on a reviewer's stream that an authorization neither
+        // references nor observed, so refusing here made an honest
+        // authorization fatal on whichever hosts replayed the finding first
+        // -- and `reduce` has no per-event isolation, so that is the whole
+        // bus, permanently.
+        //
+        // The rule itself is untouched and still blocks the merge: see
+        // `merge_ready::tests::rejects_an_open_finding`, which asserts the
+        // byte-identical check at the pre-merge gate, where the question has
+        // one answer.
+        apply_ok(&mut state, &env);
+        let chain = state.review_chain(&nominate_env.id).expect("chain exists");
         assert!(
-            err.to_string().contains("lacks a terminal disposition"),
-            "{err}"
+            !chain.authorizations.is_empty(),
+            "the authorization must be recorded, not silently dropped"
+        );
+        assert!(
+            chain
+                .findings
+                .values()
+                .any(|f| f.disposition == FindingDisposition::Open),
+            "and the open finding must still be visible to the pre-merge gate"
         );
     }
 
@@ -10775,11 +10941,26 @@ mod tests {
         );
     }
 
-    /// The tolerance above is narrow: a genuine cycle among events that are
-    /// all present is still a hard failure, because there is no order that
-    /// satisfies it and silently picking one would diverge between hosts.
+    /// A genuine cycle among present events is broken deterministically,
+    /// not refused.
+    ///
+    /// This test previously asserted the refusal, on the stated grounds that
+    /// "silently picking one would diverge between hosts". That premise is
+    /// what was wrong: the pick is the smallest remaining `EventId` from a
+    /// `BTreeMap`, which is a pure function of the event set and therefore
+    /// identical on every host, whatever it fetched and in whatever order.
+    /// There is no divergence to protect against.
+    ///
+    /// What the refusal did protect against was nothing, and what it cost
+    /// was total: two already-published, individually well-formed events
+    /// could make the bus permanently unreadable for the whole fleet, with
+    /// no way back, because the log is append-only. That is reachable
+    /// directly from the forward-reference tolerance the test above pins --
+    /// an event may name an id that does not exist yet, and the fleet does
+    /// this, so the loop closes the moment that id is published with a
+    /// reference of its own.
     #[test]
-    fn a_real_cycle_between_present_events_is_still_refused() {
+    fn a_real_cycle_between_present_events_is_broken_deterministically() {
         let alice = a("alice");
         let bob = a("bob");
         let epoch = epoch_with(&[("alice", Role::Implementor), ("bob", Role::Implementor)]);
@@ -10812,8 +10993,317 @@ mod tests {
             ),
             (bob.clone(), vec![register(&bob, Role::Implementor), bob_1]),
         ]);
-        let err = reduce(config(), Some(epoch), known_epochs, &streams)
-            .expect_err("a genuine cycle has no valid order and must be refused");
-        assert!(err.to_string().contains("cycle"), "{err}");
+        let forward = reduce(
+            config(),
+            Some(epoch.clone()),
+            known_epochs.clone(),
+            &streams,
+        )
+        .expect("a cycle must not make the bus unreadable");
+        assert!(forward.agents.contains_key(&alice) && forward.agents.contains_key(&bob));
+
+        // The same events assembled the other way round must reduce to the
+        // same thing -- that is the property the refusal was defending, and
+        // it holds without the refusal.
+        let reversed: BTreeMap<Agent, Vec<Envelope>> = streams
+            .iter()
+            .rev()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let backward = reduce(config(), Some(epoch), known_epochs, &reversed)
+            .expect("and must still reduce from the other direction");
+        assert_eq!(
+            format!("{forward:?}"),
+            format!("{backward:?}"),
+            "hosts that assembled the same cyclic set differently must agree"
+        );
+    }
+
+    /// A registry transition that restates a binding must not retroactively
+    /// invalidate an already-published `agent.registered`.
+    ///
+    /// The role check used to read `state.roster_epoch` -- whatever epoch is
+    /// current on the reducing host -- rather than the epoch the registration
+    /// was authored against. So a later transition that merely rebinds an
+    /// agent made a years-old, immutable registration fail, and with
+    /// `reduce` propagating on the first error that is `status`, `tail` and
+    /// `coordinate` down for the whole fleet, permanently, since the log is
+    /// append-only and the registration cannot be withdrawn.
+    ///
+    /// It was host-local as well: two hosts at different registry tips gave
+    /// different answers for the same event.
+    ///
+    /// The rule itself is kept, at publication, where the registration and
+    /// the registry transition are written by the same command -- see
+    /// `coordinator::verify_declared_role_matches_roster`.
+    #[test]
+    fn a_registry_rebinding_does_not_invalidate_an_earlier_registration() {
+        let alice = a("alice");
+        let epoch1 = epoch_with(&[("alice", Role::Implementor)]);
+        let streams: BTreeMap<Agent, Vec<Envelope>> =
+            BTreeMap::from([(alice.clone(), vec![register(&alice, Role::Implementor)])]);
+        let mut known1 = BTreeMap::new();
+        known1.insert(epoch1.id.clone(), epoch1.clone());
+        reduce(config(), Some(epoch1.clone()), known1.clone(), &streams)
+            .expect("valid under the epoch it was authored against");
+
+        // A later transition restates alice's binding with a different role.
+        // Alice's stream cannot have changed -- it is append-only -- so this
+        // must still reduce.
+        let epoch2 = {
+            let mut m = BTreeMap::new();
+            m.insert(
+                alice.clone(),
+                MemberBinding {
+                    role: Role::Reviewer,
+                    host: short("host2"),
+                    coordinator_custody_epoch: 1,
+                    standby: None,
+                },
+            );
+            RosterEpoch::root(hash(998), m)
+        };
+        let mut both = known1;
+        both.insert(epoch2.id.clone(), epoch2.clone());
+        let state = reduce(config(), Some(epoch2), both, &streams)
+            .expect("a later rebinding must not invalidate a historical registration");
+        assert_eq!(
+            state.agents[&alice].primary_role,
+            Role::Implementor,
+            "reduction records the role the registration declared"
+        );
+    }
+
+    mod reduction_totality {
+        use super::*;
+
+        fn reassign_env(
+            author: &Agent,
+            seq: u64,
+            replaces: &EventId,
+            authors: &[&Agent],
+            old_reviewer: &Agent,
+            new_reviewer: &Agent,
+        ) -> Envelope {
+            let request = review_request(authors, old_reviewer);
+            Envelope::new(
+                author,
+                seq,
+                frontier_seeing(&[replaces]),
+                &EventData::ReviewReassigned(ReviewReassigned {
+                    authors: request.authors.clone(),
+                    product_branch: request.product_branch.clone(),
+                    reviewer: new_reviewer.clone(),
+                    required_checks: request.required_checks.clone(),
+                    review_scope: request.review_scope.clone(),
+                    summary: request.summary.clone(),
+                    target_branch: request.target_branch.clone(),
+                    evidence: request.evidence.clone(),
+                    replaces: replaces.clone(),
+                    reason: text("reviewer went quiet"),
+                    inherited_findings: vec![],
+                }),
+                [],
+            )
+        }
+
+        /// Two authors reassigning one nomination to the same replacement
+        /// reviewer must both reduce, in either order.
+        ///
+        /// The "replacement must differ" rule was judged against
+        /// `chain.current_request.reviewer`, a derived view that a concurrent
+        /// reassignment has already moved. Both authors were correct at
+        /// publication, and the second to reduce was refused -- in *both*
+        /// orders, so not even a race one side wins -- which with `reduce`'s
+        /// bare `?` is the whole bus, permanently. Nominations round-robin
+        /// between two reviewers, so reaching for the same replacement is the
+        /// expected outcome rather than a coincidence.
+        #[test]
+        fn two_concurrent_reassignments_naming_the_same_replacement_both_reduce() {
+            let alice = a("alice");
+            let bob = a("bob");
+            let rv1 = a("rv1");
+            let rv2 = a("rv2");
+            let mut state = empty_state(&[]);
+            apply_ok(&mut state, &register(&alice, Role::Implementor));
+            apply_ok(&mut state, &register(&bob, Role::Implementor));
+            apply_ok(&mut state, &register(&rv1, Role::Reviewer));
+            apply_ok(&mut state, &register(&rv2, Role::Reviewer));
+
+            let request = review_request(&[&alice, &bob], &rv1);
+            let nominate = Envelope::new(
+                &alice,
+                1,
+                no_frontier(),
+                &EventData::ReviewNominated(request),
+                [],
+            );
+            apply_ok(&mut state, &nominate);
+
+            // Neither author observed the other; each names rv2 because rv2
+            // is the only other reviewer. Each was valid at publication.
+            let ea = reassign_env(&alice, 2, &nominate.id, &[&alice, &bob], &rv1, &rv2);
+            let eb = reassign_env(&bob, 1, &nominate.id, &[&alice, &bob], &rv1, &rv2);
+
+            let mut outcomes = Vec::new();
+            for (label, order) in [
+                ("alice first", vec![ea.clone(), eb.clone()]),
+                ("bob first", vec![eb.clone(), ea.clone()]),
+            ] {
+                let reduced = reduce_onto(state.clone(), order.as_slice())
+                    .unwrap_or_else(|e| panic!("{label} must reduce, got: {e}"));
+                let chain = reduced.review_chain(&nominate.id).expect("chain exists");
+                outcomes.push(format!(
+                    "{:?}",
+                    chain.decline_or_withdraw_or_reassign_status
+                ));
+            }
+            assert_eq!(
+                outcomes[0], outcomes[1],
+                "both orders must agree about the race, not merely both survive"
+            );
+        }
+
+        /// A landed merge receipt must not erase a concurrent reassignment race.
+        ///
+        /// `apply_review_reassigned` returned early when the chain was already
+        /// merged, *before* `exclusive.record`, and `chain.merged` is moved by a
+        /// reviewer's `review.merged` that the reassignment neither references
+        /// nor observed. So whether a contested group existed at all depended on
+        /// replay order -- silent divergence -- and the coordinator's honest
+        /// `lifecycle.conflict_resolved` then could not find its key on the
+        /// hosts that saw the receipt first, wedging them.
+        #[test]
+        fn a_landed_merge_receipt_does_not_erase_a_concurrent_reassignment_race() {
+            let alice = a("alice");
+            let bob = a("bob");
+            let rv1 = a("rv1");
+            let rv2 = a("rv2");
+            let rv3 = a("rv3");
+            let coord = a("coord1");
+            let mut state = empty_state(&[
+                ("alice", Role::Implementor),
+                ("bob", Role::Implementor),
+                ("rv1", Role::Reviewer),
+                ("rv2", Role::Reviewer),
+                ("rv3", Role::Reviewer),
+                ("coord1", Role::Coordinator),
+            ]);
+            for (ag, role) in [
+                (&alice, Role::Implementor),
+                (&bob, Role::Implementor),
+                (&rv1, Role::Reviewer),
+                (&rv2, Role::Reviewer),
+                (&rv3, Role::Reviewer),
+                (&coord, Role::Coordinator),
+            ] {
+                apply_ok(&mut state, &register(ag, role));
+            }
+            let epoch = state.roster_epoch.as_ref().unwrap().clone();
+            state
+                .merge_engine_info
+                .entry(default_merge_engine_epoch())
+                .or_insert_with(|| {
+                    (
+                        short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                        short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                    )
+                });
+            state
+                .current_merge_engine_epoch
+                .get_or_insert(default_merge_engine_epoch());
+
+            let request = review_request(&[&alice, &bob], &rv1);
+            let nominate = Envelope::new(
+                &alice,
+                1,
+                no_frontier(),
+                &EventData::ReviewNominated(request),
+                [],
+            );
+            apply_ok(&mut state, &nominate);
+            let accept = Envelope::new(
+                &rv1,
+                1,
+                frontier_seeing(&[&nominate.id]),
+                &EventData::ReviewNominationAccepted(ReviewNominationAccepted {
+                    nomination: nominate.id.clone(),
+                    note: text(""),
+                }),
+                [],
+            );
+            apply_ok(&mut state, &accept);
+            let auth = Envelope::new(
+                &rv1,
+                2,
+                complete_frontier(&epoch),
+                &EventData::ReviewMergeAuthorized(merge_authorized(
+                    &nominate.id,
+                    StringSet::default(),
+                    &[],
+                )),
+                [],
+            );
+            apply_ok(&mut state, &auth);
+            let auth_data = match auth.typed_data().unwrap() {
+                EventData::ReviewMergeAuthorized(d) => d,
+                _ => unreachable!(),
+            };
+            let merged = Envelope::new(
+                &rv1,
+                3,
+                frontier_seeing(&[&auth.id]),
+                &EventData::ReviewMerged(ReviewMerged {
+                    authorization: auth.id.clone(),
+                    product_branch: auth_data.product_branch.clone(),
+                    previous_main: auth_data.previous_main.clone(),
+                    reviewed_commit: auth_data.reviewed_commit.clone(),
+                    main_commit: auth_data.candidate.clone(),
+                    summary: text("landed"),
+                }),
+                [],
+            );
+
+            // Two authors race a reassignment; neither observed the merge.
+            let ea = reassign_env(&alice, 2, &nominate.id, &[&alice, &bob], &rv1, &rv2);
+            let eb = reassign_env(&bob, 1, &nominate.id, &[&alice, &bob], &rv1, &rv3);
+
+            let resolution = Envelope::new(
+                &coord,
+                1,
+                frontier_seeing(&[&ea.id, &eb.id, &nominate.id]),
+                &EventData::LifecycleConflictResolved(LifecycleConflictResolved {
+                    root: nominate.id.clone(),
+                    competing: StringSet::from_iter([ea.id.clone(), eb.id.clone()]),
+                    selected: ea.id.clone(),
+                    reason: text("alice's reassignment stands"),
+                    user_authority: text("operator"),
+                }),
+                [],
+            );
+
+            // Order A: the race reduces before the merge receipt.
+            let race_first =
+                reduce_onto(state.clone(), &[ea.clone(), eb.clone(), merged.clone()]).unwrap();
+            let chain_a = race_first.review_chain(&nominate.id).unwrap();
+            assert_eq!(
+                chain_a.decline_or_withdraw_or_reassign_status,
+                ItemStatus::LifecycleConflict,
+                "order A sees a real race"
+            );
+            reduce_onto(race_first, std::slice::from_ref(&resolution))
+                .expect("order A can resolve the conflict");
+
+            // Order B: the merge receipt reduces first, so both
+            // reassignments return Ok *before* `exclusive.record` ever runs.
+            let merge_first =
+                reduce_onto(state.clone(), &[merged.clone(), ea.clone(), eb.clone()]).unwrap();
+            // The receipt no longer erases the race: both reassignments are
+            // recorded as candidates before the early return, so the group is
+            // the same set on either host and the coordinator's resolution
+            // still finds its key.
+            reduce_onto(merge_first, std::slice::from_ref(&resolution))
+                .expect("order B must be able to resolve the same conflict");
+        }
     }
 }
