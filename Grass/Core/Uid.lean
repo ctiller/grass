@@ -8,10 +8,16 @@ completions never regain authority after numeric reuse."
 That law has two halves and they need different mechanisms.
 
 **Grass's own identities are never reused within one supply.** A `Uid` can only be
-produced by `FreshSupply.fresh`. The constructor and the index field are
-`private`, so outside this module there is no `Uid.mk` and no way to read an
-index back out. `never_reissued` is therefore a mechanism rather than a
-convention for a given supply.
+produced by `FreshSupply.fresh`. The constructor and named index projection are
+`private`, so outside this module there is no supported constructor, ordinal
+projection, or runtime representation exposing the ordinal. `never_reissued`
+is therefore a mechanism rather than a convention for a given supply.
+
+This is direct representation hiding, not observational secrecy. Because
+`initial`, `fresh`, and equality are public, a consumer can replay the canonical
+mint sequence and compare an identity against it, or compare a supply's next
+mint against that sequence. Allocation order and mint count can therefore be
+inferred by search; no proof may treat them as secret.
 
 What this module does not deliver: uniqueness of the supply itself. `initial` is public, and it must be — something has to start. So a second
 `FreshSupply.initial` for the same tag reissues every identity from zero, and
@@ -21,9 +27,14 @@ speaks of freshness "over a monotone execution history", and only the thing that
 owns the history can guarantee there is one. `Semantics` inherits this obligation
 when it takes custody of the execution state.
 
-`Uid.rec` and `Uid.casesOn` also remain public, as they do for every Lean
-structure, so a proof can case on a `Uid` and reach its index. The type is opaque
-to construction, not to elimination.
+`Uid.rec`, `Uid.casesOn`, `FreshSupply.rec`, and `FreshSupply.casesOn` remain
+public, as generated eliminators do for every Lean structure. A consumer can
+therefore define a noncomputable proof-level function which reaches either
+private field. Lean's `private` protects construction and named projection; it
+is not module sealing or theorem-level representation independence. Repository
+proofs must not depend on those ordinals: `docs/FOUNDATION.md` law 14 makes that
+a review obligation. The types are opaque to supported construction, not to
+logical elimination.
 
 **Externally reused numbers are paired with a generation.** An OS handle, a slot
 index, or an array position genuinely does recycle, and forbidding that is not
@@ -55,9 +66,11 @@ universe u
 An identity in the domain named by `Tag`.
 
 `Tag` is phantom: it appears in the type but not in any field, so an `AllocId`
-cannot be passed where a `LoanId` is expected. The representation is private, so
-outside this module a `Uid` is an opaque token that can be compared and nothing
-else.
+cannot be passed where a `LoanId` is expected. Outside this module the supported
+runtime interface permits minting and comparison but neither construction nor a
+direct ordinal projection or diagnostic rendering. Equality against replayed
+canonical mints can still infer allocation order as documented above. Generated
+logical eliminators remain public as documented above.
 -/
 structure Uid (Tag : Type u) where
   private mk ::
@@ -67,7 +80,7 @@ namespace Uid
 
 variable {Tag : Type u}
 
-instance : Repr (Uid Tag) := ⟨fun i _ => "uid#" ++ repr i.index⟩
+instance : Repr (Uid Tag) := ⟨fun _ _ => "<uid>"⟩
 
 instance : DecidableEq (Uid Tag) := fun a b =>
   if h : a.index = b.index then
@@ -83,9 +96,12 @@ end Uid
 /--
 The mint state of one identity domain.
 
-`nextIndex` is the least index never yet issued. Both the constructor and the
-field are private, so no consumer can fabricate a supply, rewind one, or observe
-how many identities have been issued.
+`nextIndex` is the least index never yet issued. The private constructor and
+named field prevent supported consumers from fabricating or rewinding a supply,
+and the runtime API exposes no direct count projection or rendering. Consumers
+can still infer the count by comparing the next mint with a replayed canonical
+sequence, and generated logical eliminators can inspect the representation, as
+documented in the module header.
 -/
 structure FreshSupply (Tag : Type u) where
   private mk ::
