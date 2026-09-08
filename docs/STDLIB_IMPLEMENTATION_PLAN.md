@@ -352,7 +352,7 @@ and `bitAccRep` is a physical bit-accumulator representation. None of the three
 is scheduled, and each becomes a demand on `Std.Owned` or on an algorithm owner
 if it becomes one at all.
 
-### 3.5 Open: `Vec` has no literal syntax, and the obvious fix is harmful
+### 3.5 Open: `Vec` has no literal syntax, and one mechanism does work
 
 The spike sources write `Vec` literals with array-literal syntax — seven ascribed
 sites such as `def deviceExtensionNames : Vec CString := #["VK_KHR_swapchain"]`,
@@ -370,15 +370,37 @@ correct until measured:
 | `instance : CoeTail (Array α) (Vec α)` | **Insufficient.** Ascribed non-empty literals work and `Array` literals are unaffected, but `def b : Vec Nat := #[]` fails, because the element type is a metavariable and the coercion does not fire; and `v ++ #[9]` fails, because the coercion does not reach into `HAppend`. The spike uses both. It also silently converts any `Array` value, not just a literal. |
 | `elab_rules : term <= expectedType` deferring to `Array` | **Does not fire.** `#[...]` is expanded by a macro, and macro expansion wins over a term elaborator for the same syntax kind, so the rule never runs. It would also require `import Lean` in `Grass/Std/Logical/Vec.lean`, putting Lean's metaprogramming frontend at the base of the dependency chain that [MODULES.md](MODULES.md) starts with `Core`. |
 
-Two conclusions. First, if notation is added it belongs in a separate module that
-consumers opt into, not in `Vec.lean`, because of the `import Lean` cost and
-because a global literal rule is not something a library at the bottom of the
-chain should impose. Second, the choice is not wholly this library's: the
+A fourth mechanism was not tried, and it works: **`scoped macro_rules`**. The
+row above is correct about the unscoped form and says nothing about this one, and
+the difference is the whole objection — a scoped rule activates only where it is
+opened, so `Array` literals are untouched in every module that does not ask for
+the notation, including modules that merely open the parent namespace to reach
+`Vec`. It handles all three shapes the spike sources use, including the two the
+coercion could not reach. It needs no `import Lean`, because `macro_rules` is core
+syntax.
+
+`Tests/Std/VecLiteral.lean` and `Tests/Std/VecLiteralImporter.lean` are that
+measurement, built rather than described. Deleting `scoped` from the declaration
+breaks both, which is how the row above is confirmed rather than assumed.
+
+**The cost is real and is why this is a decision rather than a fix.** A module
+that opts in cannot write an `Array` literal in that scope: `#[1, 2, 3]` means a
+`Vec` there. That is confined to modules that ask for it, but a module needing
+both containers cannot have literal syntax for both.
+
+Two conclusions, which the fourth mechanism sharpens rather than overturns.
+First, if notation is added it belongs in a separate module that consumers opt
+into, not in `Vec.lean` — the scoped rule makes that not merely advisable but
+the mechanism itself. Second, the choice is not wholly this library's: the
 authored spike surface is governed by [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md),
 so "the spikes should write `Vec.fromList [...]`" is as available an answer as
-"the library should support `#[...]`", and it is a cheaper one. Breaking `Array`
-literals repository-wide to save this library some punctuation is not a trade
-this owner takes quietly.
+"the library should support `#[...]`", and it is a cheaper one.
+
+What has changed is the ground the second conclusion stands on. This section
+used to be able to say that supporting `#[...]` would break `Array` literals
+repository-wide, which settled it. It would not: the cost is now known to be a
+local trade a consumer chooses. So the question is genuinely open on its merits
+and this plan is not going to close it alone.
 
 This interacts with §3.2's open question. If `Vec α := Array α` were adopted,
 this section would be moot — array-literal syntax would work by construction, as
