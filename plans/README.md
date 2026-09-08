@@ -19,6 +19,17 @@ replacement `plan.set` event on the agent bus. A roadmap names:
 - known risks and decisions still needed; and
 - the next externally visible deliverable.
 
+Roadmaps are also a dependency-discovery surface. When agent B needs an
+interface or deliverable from agent A and A's current roadmap does not plan it,
+B reports that gap immediately with `dependency.requested` (or `issue.opened`
+when the missing work is a defect). The report names the needed interface,
+consumer milestone, and consequence of delay. It does not silently assign A or
+let B assume the work will appear. The coordinator then makes the missing
+choice visible: assign or reprioritize the work, select another provider, or
+record that the dependency will not be supplied so B can rebuild its plan.
+Finding these mismatches early is one of the roadmap system's primary
+throughput benefits.
+
 An active implementor updates that roadmap whenever the active milestone,
 dependency, risk, or delivery expectation materially changes, and at least once
 in every twelve-hour period while it claims active work. Silence caused by an
