@@ -2991,6 +2991,29 @@ theorem tearDown?_kills_every_name {state : MemoryState} :
             rfl
         · exact ih h id hcase
 
+/-- No alias has been declared.
+
+`g-design:257` rules the current alias relation acceptable only as proof and test
+scaffolding, and forbids any `VerifiedProgram`-facing transition from consuming it.
+`Op.refusalOf` and `MemoryEvent.Conflicts` do consume it, so the ruling requires the
+interim system to *reject* states that are not alias-free rather than to warn about
+them -- "a docstring warning is insufficient" is its wording, and the warning this
+replaces was c-mem's.
+
+The relation is not reflexive and that is the specific defect: two allocations
+declared aliased share bytes by `SharesBytes` while `MemoryState.write` writes only
+the named one, so authority treats them as one storage and the byte semantics does
+not. Until the canonical backing-store changeover lands, a state carrying such a
+declaration cannot be reasoned about soundly, and the honest answer is to refuse it
+rather than to decide accesses against a relation the semantics does not implement. -/
+def AliasFree (state : MemoryState) : Prop := state.aliases = []
+
+instance (state : MemoryState) : Decidable state.AliasFree :=
+  inferInstanceAs (Decidable (_ = _))
+
+@[simp] theorem aliasFree_empty : MemoryState.empty.AliasFree := rfl
+
+
 /--
 Declare that two allocations name the same storage.
 
@@ -3038,6 +3061,13 @@ that records an intent, not as an interface.
 def alias (state : MemoryState) (a b : AllocId) : MemoryState :=
   { state with aliases := (a, b) :: state.aliases }
 
+/-- Declaring an alias is exactly what makes a state not alias-free, which is the
+link `Op.refusalOf` needs and the reason this door is scaffolding. -/
+@[simp] theorem not_aliasFree_alias (state : MemoryState) (a b : AllocId) :
+    ¬ (state.alias a b).AliasFree := by
+  unfold AliasFree alias
+  simp
+
 /--
 Write `bytes` at `start` in allocation `id`.
 
@@ -3055,6 +3085,15 @@ def write (state : MemoryState) (id : AllocId) (start : Nat) (bytes : ByteSeq)
       { state with
         allocations := state.allocations.insert id
           { record with bytes := record.bytes.write start bytes initializes } }
+
+/-- Writing bytes declares no alias, so it cannot make a state stop being
+alias-free. Needed by the framing lemmas now that `denialOf` asks.
+`Grass/Memory/Apply.lean`'s `denialOf_write_of_other_allocation` is the caller. -/
+@[simp] theorem aliases_write (state : MemoryState) (id : AllocId) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) :
+    (state.write id start bytes initializes).aliases = state.aliases := by
+  unfold write
+  split <;> rfl
 
 /-- **Writing bytes changes no authority.** Half of "authority is not data", from
 the other side: `cellAt?_applyAuthorityEffect?` says a declared authority change

@@ -61,6 +61,21 @@ inductive StepRejection where
   | substepsNotWellFormed
   /-- The profile does not admit one of the declared accesses. -/
   | accessNotAdmitted (reason : AdmittedVocabulary.AdmissibilityFailure)
+  /-- The state carries a declared alias, which this relation cannot decide
+  against.
+
+  `g-design:257`: no `VerifiedProgram`-facing transition may consume the current
+  alias relation, and this one does -- `ConflictsWithHistory` decides against
+  `MemoryState.SharesBytes`. The relation is an authority-level claim with no
+  byte-level counterpart: two aliased allocations share bytes by `SharesBytes`
+  while `MemoryState.write` writes only the named one.
+
+  Rejected rather than warned about, because the ruling says a docstring warning
+  is insufficient, and rejected rather than recorded as an audit violation
+  because the state is unsupported rather than the program at fault. It goes when
+  the canonical backing-store replacement lands and aliasing becomes overlapping
+  translated spans. -/
+  | aliasedStateUnsupported
   /-- The operation faulted under a visibility rule this relation cannot read.
   The rule belongs to a profile, and guessing which effects survive would be
   worse than refusing. -/
@@ -1426,6 +1441,7 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
     (context : ContextId) (contextKind : ContextKind) (cause : EventCause)
     (faultAt : (sequence : SubstepSequence) → FaultPlan sequence :=
       fun _ => .none) : StepOutcome :=
+  if ¬ state.memory.AliasFree then .rejected .aliasedStateUnsupported else
   match policy.requiredFacets.find?
       (fun required => !operation.facets.supplied.contains required) with
   | some missing =>
@@ -2166,6 +2182,10 @@ theorem step_frames_untouched (policy : StepPolicy) (state : MachineState)
       ∀ d ∈ sequence.accesses, ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
     final.memory.cellAt? id offset = state.memory.cellAt? id offset := by
   unfold step at h
+  -- The alias guard `g-design:257` added is the first branch now; its rejection
+  -- is `.rejected _ = .ran final`, which is absurd.
+  split at h
+  · exact absurd h (by simp)
   split at h
   · exact absurd h (by simp)
   · rename_i hfacets
