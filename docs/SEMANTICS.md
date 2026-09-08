@@ -457,6 +457,15 @@ inductive BuiltinRequirementAuthority
   | effect | process | memory | resource | obligation | abi | platform | isa
   deriving DecidableEq
 
+-- Neutral Specification owns this injective assignment.  These are the exact
+-- reserved keys, not a caller-supplied approximation of them.
+def BuiltinRequirementAuthority.stableId :
+    BuiltinRequirementAuthority -> StableId
+theorem BuiltinRequirementAuthority.stableId_injective :
+    Function.Injective BuiltinRequirementAuthority.stableId
+def builtinRequirementAuthorityKeys : Set StableId :=
+  Set.range BuiltinRequirementAuthority.stableId
+
 opaque ExtensionAuthorityOwner : Type
 def ExtensionAuthorityOwner.stableId : ExtensionAuthorityOwner -> StableId
 
@@ -499,6 +508,16 @@ structure ExtensionAuthorityEmbedding
   keyExact : forall source, large.key (entry source) = small.key source
   ownerExact : forall source, large.owner (entry source) = small.owner source
   injective : Function.Injective entry
+
+def ExtensionAuthorityEmbedding.refl
+    (registry : ExtensionAuthorityRegistry) :
+    ExtensionAuthorityEmbedding registry registry
+def ExtensionAuthorityEmbedding.trans
+    (first : ExtensionAuthorityEmbedding small middle)
+    (second : ExtensionAuthorityEmbedding middle large) :
+    ExtensionAuthorityEmbedding small large
+theorem ExtensionAuthorityEmbedding.trans_entry ...
+theorem ExtensionAuthorityEmbedding.refl_entry ...
 
 structure ExtensionAuthorityKeysDisjointOrExact
     (left right : ExtensionAuthorityRegistry) : Prop where
@@ -720,15 +739,15 @@ structure ProviderDemandFamily.AuthorityEquiv
     StructurallySameReindexedLookup
       (left.supportLookup origin) includeLeft
       (right.supportLookup origin) includeRight
-theorem ProviderDemandFamily.AuthorityEquiv.refl ...
-theorem ProviderDemandFamily.AuthorityEquiv.symm ...
-theorem ProviderDemandFamily.AuthorityEquiv.trans ...
+def ProviderDemandFamily.AuthorityEquiv.refl ...
+def ProviderDemandFamily.AuthorityEquiv.symm ...
+def ProviderDemandFamily.AuthorityEquiv.trans ...
 theorem ProviderDemandFamily.AuthorityEquiv.transportCompatibility
     (left : firstLeft.AuthorityEquiv secondLeft)
     (right : firstRight.AuthorityEquiv secondRight)
     (compatible : OriginsDisjointOrSameOriginProvenance firstLeft firstRight) :
     OriginsDisjointOrSameOriginProvenance secondLeft secondRight
-theorem ProviderDemandFamily.AuthorityEquiv.union
+def ProviderDemandFamily.AuthorityEquiv.union
     (left : firstLeft.AuthorityEquiv secondLeft)
     (right : firstRight.AuthorityEquiv secondRight)
     (firstCompatible : OriginsDisjointOrSameOriginProvenance firstLeft firstRight) :
@@ -760,7 +779,7 @@ def ProviderDemandFamily.AuthorityEquiv.transportDisposition
     (disposition : ExactAuthorityRespectingRequirementDisposition left provider) :
     ExactAuthorityRespectingRequirementDisposition right provider
 
-theorem ProviderDemandFamily.AuthorityEquiv.transportDisposition_forwardedExact
+def ProviderDemandFamily.AuthorityEquiv.transportDisposition_forwardedExact
     (equivalent : left.AuthorityEquiv right)
     (disposition : ExactAuthorityRespectingRequirementDisposition left provider) :
     (equivalent.transportDisposition disposition).exactForwardedFamily.AuthorityEquiv

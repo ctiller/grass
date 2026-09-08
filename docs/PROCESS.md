@@ -91,43 +91,59 @@ def OriginOccursIn
     family.lookupView originId = some view
 
 opaque DemandProviderEnvelope
-    (semantics : DemandProviderSemantics Demand) : Type
+    (semantics : DemandProviderSemantics Demand)
+    (registry : ExtensionAuthorityRegistry) : Type
 def DemandProviderEnvelope.demands :
-    DemandProviderEnvelope semantics -> ProviderDemandFamily
+    DemandProviderEnvelope semantics registry -> ProviderDemandFamily
+theorem DemandProviderEnvelope.demands_registry
+    (envelope : DemandProviderEnvelope semantics registry) :
+    envelope.demands.authorityRegistry = registry
 def DemandProviderEnvelope.origins
-    (envelope : DemandProviderEnvelope semantics) (demand : Demand) :
+    (envelope : DemandProviderEnvelope semantics registry) (demand : Demand) :
     RegisteredOperationOrigins envelope.demands demand
 theorem DemandProviderEnvelope.origins_exact
-    (envelope : DemandProviderEnvelope semantics) (demand : Demand) :
+    (envelope : DemandProviderEnvelope semantics registry) (demand : Demand) :
     forall view : ProviderDemandView,
       OriginOccursIn (envelope.origins demand) view <->
         semantics.Requires demand view
 def DemandProviderEnvelope.reindex
-    (envelope : DemandProviderEnvelope semantics)
-    (embedding : ExtensionAuthorityEmbedding
-      envelope.demands.authorityRegistry target) :
-    DemandProviderEnvelope semantics
+    (envelope : DemandProviderEnvelope semantics source)
+    (embedding : ExtensionAuthorityEmbedding source target) :
+    DemandProviderEnvelope semantics target
 theorem DemandProviderEnvelope.reindex_demands ...
 theorem DemandProviderEnvelope.reindex_origins
-    (envelope : DemandProviderEnvelope semantics) :
+    (envelope : DemandProviderEnvelope semantics source) :
     forall demand view,
       OriginOccursIn ((envelope.reindex embedding).origins demand) view <->
         OriginOccursIn (envelope.origins demand) view
-theorem DemandProviderEnvelope.reindex_id ...
-theorem DemandProviderEnvelope.reindex_comp ...
+theorem DemandProviderEnvelope.reindex_id
+    (envelope : DemandProviderEnvelope semantics registry) :
+    envelope.reindex (ExtensionAuthorityEmbedding.refl registry) = envelope
+theorem DemandProviderEnvelope.reindex_comp
+    (envelope : DemandProviderEnvelope semantics first)
+    (left : ExtensionAuthorityEmbedding first middle)
+    (right : ExtensionAuthorityEmbedding middle last) :
+    (envelope.reindex left).reindex right =
+      envelope.reindex (left.trans right)
 
 opaque CertifiedProcessVocabulary (vocabulary : ProcessVocabulary) : Type
 def CertifiedProcessVocabulary.semantics :
     CertifiedProcessVocabulary vocabulary ->
       DemandProviderSemantics vocabulary.Demand
+def CertifiedProcessVocabulary.providerRegistry
+    (certificate : CertifiedProcessVocabulary vocabulary) :
+    ExtensionAuthorityRegistry
 def CertifiedProcessVocabulary.providers
     (certificate : CertifiedProcessVocabulary vocabulary) :
-    DemandProviderEnvelope certificate.semantics
+    DemandProviderEnvelope certificate.semantics certificate.providerRegistry
 def CertifiedProcessVocabulary.reindexProviders
     (certificate : CertifiedProcessVocabulary vocabulary)
     (embedding : ExtensionAuthorityEmbedding
-      certificate.providers.demands.authorityRegistry target) :
+      certificate.providerRegistry target) :
     CertifiedProcessVocabulary vocabulary
+theorem CertifiedProcessVocabulary.reindexProviders_registry
+    (certificate : CertifiedProcessVocabulary vocabulary) :
+    (certificate.reindexProviders embedding).providerRegistry = target
 theorem CertifiedProcessVocabulary.reindexProviders_semantics
     (certificate : CertifiedProcessVocabulary vocabulary) :
     (certificate.reindexProviders embedding).semantics = certificate.semantics
@@ -501,14 +517,20 @@ opaque CertifiedDriverBoundary (boundary : DriverBoundary) : Type
 def CertifiedDriverBoundary.semantics
     (certificate : CertifiedDriverBoundary boundary) :
     DemandProviderSemantics boundary.Demand
+def CertifiedDriverBoundary.providerRegistry
+    (certificate : CertifiedDriverBoundary boundary) :
+    ExtensionAuthorityRegistry
 def CertifiedDriverBoundary.providers
     (certificate : CertifiedDriverBoundary boundary) :
-    DemandProviderEnvelope certificate.semantics
+    DemandProviderEnvelope certificate.semantics certificate.providerRegistry
 def CertifiedDriverBoundary.reindexProviders
     (certificate : CertifiedDriverBoundary boundary)
     (embedding : ExtensionAuthorityEmbedding
-      certificate.providers.demands.authorityRegistry target) :
+      certificate.providerRegistry target) :
     CertifiedDriverBoundary boundary
+theorem CertifiedDriverBoundary.reindexProviders_registry
+    (certificate : CertifiedDriverBoundary boundary) :
+    (certificate.reindexProviders embedding).providerRegistry = target
 theorem CertifiedDriverBoundary.reindexProviders_semantics
     (certificate : CertifiedDriverBoundary boundary) :
     (certificate.reindexProviders embedding).semantics = certificate.semantics
@@ -2183,7 +2205,9 @@ newly issued effect and its continuation is indexed by that exact effect's
 result, occurrence identity, pending multiplicity, child binding, and terminal
 disposition are generated structurally. Its generic theorem transports a
 `SequentialMachineRealizes spec machine model pending` proof to
-`DirectProgramRealizes spec (certifiedMachine machine model pending)`.
+`DirectProgramRealizes spec (SequentialAdapter.certifiedMachine
+boundaryCertificate machine model pending)` for the exact selected boundary
+certificate.
 
 The ordinary atomic API selects the canonical Unit-start, Unit-history model
 and `SequentialPendingSemantics.atomic`; authors provide neither a model nor a
@@ -2605,6 +2629,33 @@ one-root network with identity-correlated API children and proves the complete
 `ProcessPlanRealizes`; that graph and proof are generated, inspectable, and not
 application-maintained.
 
+The two names consumed by this route have the following exact Process-owned
+signatures. The semantic realization proposition is independent of provider
+packaging; producing a certified program requires the explicit boundary
+certificate which indexes its result.
+
+```lean
+opaque SequentialMachineRealizes {R : Type u} [ResourceModel R]
+    {resources : R} (spec : SpecProcess resources)
+    (machine : SequentialMachine spec.driverBoundary)
+    (pendingModel : PendingInteractionModel spec.driverBoundary)
+    (pending : SequentialPendingSemantics machine pendingModel) : Prop
+
+def SequentialAdapter.certifiedMachine
+    (boundaryCertificate : CertifiedDriverBoundary boundary)
+    (machine : SequentialMachine boundary)
+    (pendingModel : PendingInteractionModel boundary)
+    (pending : SequentialPendingSemantics machine pendingModel) :
+    CertifiedDirectProgram boundary boundaryCertificate
+
+theorem SequentialMachineRealizes.toDirect
+    (correct : SequentialMachineRealizes spec machine pendingModel pending)
+    (boundaryCertificate : CertifiedDriverBoundary spec.driverBoundary) :
+    DirectProgramRealizes spec
+      (SequentialAdapter.certifiedMachine boundaryCertificate
+        machine pendingModel pending)
+```
+
 Small spikes may request this route with one explicit closing clause:
 
 ```lean
@@ -2678,14 +2729,16 @@ structure StandardSequentialRealization {R : Type u} [ResourceModel R]
   pending : SequentialPendingSemantics machine pendingModel
   boundaryCertificate : CertifiedDriverBoundary spec.driverBoundary
   program : CertifiedDirectProgram spec.driverBoundary boundaryCertificate
-  exactElaboration : program = certifiedMachine machine pendingModel pending
+  exactElaboration : program = SequentialAdapter.certifiedMachine
+    boundaryCertificate machine pendingModel pending
   correct : SequentialMachineRealizes spec machine pendingModel pending
 
 def StandardSequentialRealization.directCorrect
     (realization : StandardSequentialRealization spec) :
     DirectProgramRealizes spec realization.program :=
   realization.exactElaboration.symm ▸
-    SequentialMachineRealizes.toDirect realization.correct
+    SequentialMachineRealizes.toDirect
+      realization.correct realization.boundaryCertificate
 
 structure StandardRealizerEntry where
   R : Type u

@@ -190,7 +190,10 @@ out of precious program identity.
 optional well-founded sequential authoring language and abstract handler laws in
 [EFFECTS.md](EFFECTS.md), not process scheduling, physical operations, or a
 second obligation ledger. Process core does not depend on Effect; only the
-adapter shards which embed effect programs into process occurrences do. This
+explicit `Grass.Process.Adapter.Effect` shard above both module interfaces imports
+them and owns the sealed owner-issued direct-operation model which embeds Effect
+programs into Process occurrences. Neither dependency-lower module owns values
+whose type requires the other. This
 keeps direct serial functions and direct authored assembly available without a
 decorative monadic witness.
 

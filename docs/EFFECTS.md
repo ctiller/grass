@@ -28,9 +28,11 @@ pre-Effect skeleton is not evidence for that gate.
 
 `Grass.Effect` imports only `Core`, `Std.Logical`, and neutral
 `Specification` vocabulary. It imports neither `Semantics`, `Process`, `Memory`,
-`Obligation`, a platform, nor an ISA. `Process` may consume Effect signatures and
-programs; `Refinement` and `Weave` connect them to a precious `SpecProcess`, a
-process presentation, or a provider.
+`Obligation`, a platform, nor an ISA. Process core likewise does not import
+Effect. The separately named `Grass.Process.Adapter.Effect` shard is above both
+interfaces and may consume their signatures and programs; `Refinement` and
+`Weave` connect its result to a precious `SpecProcess`, a process presentation,
+or a provider.
 
 The layer owns:
 
@@ -233,9 +235,33 @@ structure EffectTheory (family : EffectFamily) where
           (History demand before) Extends outcome,
           chain.startsAt history /\ infiniteAllowed chain)
 
+-- An effect law is owned by, and therefore indexed by, one exact theory.  Its
+-- proposition cannot be transported to a different theory of the same family.
+opaque EffectLaw {family : EffectFamily}
+    (theory : EffectTheory family) : Type
+def EffectLaw.stableId : EffectLaw theory -> RequirementKey
+def EffectLaw.kind : EffectLaw theory -> RequirementKind
+def EffectLaw.statement : EffectLaw theory -> Prop
+theorem EffectLaw.stableId_injective : Function.Injective (@EffectLaw.stableId _ theory)
+
 structure EffectLawSuite {family : EffectFamily}
     (theory : EffectTheory family) where
-  demands : DemandFamily
+  Key : Type
+  keys : List Key
+  complete : forall key, key ∈ keys
+  unique : keys.Nodup
+  law : Key -> EffectLaw theory
+  lawInjective : Function.Injective law
+
+def EffectLawSuite.demands (suite : EffectLawSuite theory) : DemandFamily where
+  Key := suite.Key
+  keys := suite.keys
+  complete := suite.complete
+  unique := suite.unique
+  identity := fun key => (suite.law key).stableId
+  identityInjective := EffectLaw.stableId_injective.comp suite.lawInjective
+  kind := fun key => (suite.law key).kind
+  statement := fun key => (suite.law key).statement
 
 structure CertifiedEffectTheory (family : EffectFamily) where
   theory : EffectTheory family
@@ -297,8 +323,12 @@ turned into an ordinary result. Those exits remain visible to the surrounding
 process vocabulary unless a separately proved adapter converts one into an
 explicit result demanded by the specification.
 
-Each keyed theorem in an `EffectLawSuite` states a real proposition over the
-theory; it is not a string tag. `CertifiedEffectTheory.certificates` is its
+Each `EffectLaw theory` is nominally indexed by that exact theory and projects a
+real proposition over it; it is not a string tag or an author-provided arbitrary
+`Prop`. `EffectLawSuite.demands` derives the generic certificate family from
+those indexed laws. Consequently a suite for another theory of the same family
+is a different type and cannot be reused by definitional equality.
+`CertifiedEffectTheory.certificates` is its
 separate proof object and may be opaque downstream. Common laws include:
 
 - result-space completeness and no fabricated result;
@@ -424,16 +454,54 @@ structure EffectPrefixWitness
   frontier : EffectFrontier model alpha
   valid : program.Prefixes model before trace after frontier
 
+structure SameWaitingPrefix
+    (first second : EffectPrefixWitness model before program) : Prop where
+  demand : row.Demand
+  operationBefore : model.World
+  firstHistory : model.History demand operationBefore
+  secondHistory : model.History demand operationBefore
+  firstPending : model.outcome firstHistory = none
+  secondPending : model.outcome secondHistory = none
+  firstFrontier : first.frontier =
+    .waiting demand operationBefore firstHistory firstPending
+  secondFrontier : second.frontier =
+    .waiting demand operationBefore secondHistory secondPending
+  completedInteractionsExact : first.trace = second.trace
+  historyExtends : model.Extends firstHistory secondHistory
+
+-- This predicate is supplied by the Prefixes decomposition theorem.  All four
+-- witness arguments are explicit so it can describe only continuation behavior
+-- reached from this exact terminal extension of this exact waiting history.
+opaque RemainingInteractionsExtendFromThatExactCompletion
+    (first second : EffectPrefixWitness model before program)
+    {demand : row.Demand} {operationBefore : model.World}
+    (waitingHistory completingHistory : model.History demand operationBefore)
+    (result : row.Result demand) : Prop
+
+structure ExactWaitingPrefixResumption
+    (first second : EffectPrefixWitness model before program) : Prop where
+  demand : row.Demand
+  operationBefore : model.World
+  waitingHistory : model.History demand operationBefore
+  waitingProof : model.outcome waitingHistory = none
+  firstFrontier : first.frontier =
+    .waiting demand operationBefore waitingHistory waitingProof
+  completingHistory : model.History demand operationBefore
+  extendsExactWaitingHistory : model.Extends waitingHistory completingHistory
+  result : row.Result demand
+  completes : model.outcome completingHistory = some result
+  remaining : RemainingInteractionsExtendFromThatExactCompletion
+    first second waitingHistory completingHistory result
+
 inductive EffectPrefixExtends :
     EffectPrefixWitness model before program ->
     EffectPrefixWitness model before program -> Prop
-  | waiting : SameCompletedInteractions first second ->
-      model.Extends firstWaitingHistory secondWaitingHistory ->
+  | waiting {first second} : SameWaitingPrefix first second ->
       EffectPrefixExtends first second
-  | resumes : secondCompletesAnExtensionOf firstWaitingHistory ->
-      RemainingInteractionsExtendFromThatExactCompletion ->
+  | resumes {first second} : ExactWaitingPrefixResumption first second ->
       EffectPrefixExtends first second
-  | returned : SameReturnedPrefix first second -> EffectPrefixExtends first second
+  | returned {first second} : SameReturnedPrefix first second ->
+      EffectPrefixExtends first second
 ```
 
 The exact lens/overlap certificate behind `realizes` belongs with the row/weave
@@ -1040,12 +1108,14 @@ transition which preserves its exact held-occurrence bag. The general Effect
 adapter may not be implemented by the atomic route, and the two routes share a
 theorem only after preserving and reflecting `EffectPrefixExtends`.
 
-The adapter constructs a `Process.CertifiedDirectProgram` whose dependent
+The adapter shard `Grass.Process.Adapter.Effect` constructs a
+`Process.CertifiedDirectProgram` whose dependent
 `DirectProgramDerivation` payload retains the exact effect program,
 `EffectProgramAdequate`, selected `EffectProgramMeetsProgress`, and adapter
 certificate. The derivation is also indexed by the exact projected
 `PendingInteractionModel`, `SequentialPendingSemantics`, and
-Effect-theory-to-model projection; neither `certifiedMachine` nor the final
+Effect-theory-to-model projection; neither
+`SequentialAdapter.certifiedMachine` nor the final
 source constructor performs ambient model inference. Separately, the generated `CertifiedDriverBoundary` sidecar carries
 the stable `plan.providerDemands`; the underlying five-field `DriverBoundary`
 does not change. Its statements are indexed only by the source
@@ -1057,7 +1127,11 @@ to that boundary envelope, so a continuation-only edit rebuilds local adapter pr
 without changing an otherwise identical provider certificate.
 
 ```lean
-declare_direct_operation_owner Effect.directOperationOwner =>
+-- File: Grass/Process/Adapter/Effect.lean
+-- Imports Grass.Effect.Signature and the narrow Grass.Process.Direct interfaces.
+namespace Grass.Process.Adapter.Effect
+
+declare_direct_operation_owner EffectAdapter.directOperationOwner =>
   `grass.effect.direct-operation`
 
 structure EffectAdapterCertificate
@@ -1074,34 +1148,41 @@ structure EffectAdapterCertificate
   operationSelection : EveryDirectOccurrenceSelectsItsExactEffectLowering
     junction plan directProgram
 
-def Effect.ownerIssuedModel
+def EffectAdapter.ownerIssuedModel
     (junction : EffectSpecJunction spec program)
     (plan : EffectLoweringPlan identity source sourceModel)
     (adapter : EffectAdapterCertificate junction plan) :
-    OwnerIssuedDirectOperationModel Effect.directOperationOwner
+    OwnerIssuedDirectOperationModel EffectAdapter.directOperationOwner
       adapter.boundaryCertificate adapter.directProgram
-theorem Effect.ownerIssuedModel_semantics_exact ...
+theorem EffectAdapter.ownerIssuedModel_semantics_exact ...
 
-def EffectProgram.registeredDirectOperationModel
+def EffectAdapter.registeredDirectOperationModel
     (junction : EffectSpecJunction spec program)
     (plan : EffectLoweringPlan identity source sourceModel)
     (adapter : EffectAdapterCertificate junction plan) :
     RegisteredDirectOperationModel
       adapter.boundaryCertificate adapter.directProgram :=
   RegisteredDirectOperationModel.register
-    (Effect.ownerIssuedModel junction plan adapter)
+    (EffectAdapter.ownerIssuedModel junction plan adapter)
 
-def EffectProgram.directDerivation ... :
+def EffectAdapter.directDerivation ... :
     DirectProgramDerivation adapter.boundaryCertificate adapter.directProgram :=
   DirectProgramDerivation.certify
-    (EffectProgram.registeredDirectOperationModel junction plan adapter)
+    (EffectAdapter.registeredDirectOperationModel junction plan adapter)
+
+end Grass.Process.Adapter.Effect
 ```
 
-Effect owns the sealed package constructor; Process sees only the registered
-owner-neutral model. The derived predicate is definitionally the selected
-lowering plan's exact per-occurrence requirements. An application cannot swap
-in `False`, and a new DSL owner uses the same registration seam under its own
-fresh nominal owner rather than asking Process to add a constructor.
+`Grass.Process.Adapter.Effect`, not the dependency-lower `Grass.Effect` module,
+owns this sealed owner-issued Process package. It is the named adapter shard
+which can legally import both interfaces. Effect exports only its theory,
+program, lowering-plan, and adequacy signatures; Process core exports the open
+direct-operation registration seam. The adapter's private constructor combines
+them and exposes only the registered owner-neutral model. The derived predicate
+is definitionally the selected lowering plan's exact per-occurrence
+requirements. An application cannot swap in `False`, and a new DSL gets its own
+adapter shard and fresh nominal owner rather than asking Process core to add a
+constructor.
 
 The envelope is conservative: even `.pure` over a deliberately broad nonempty
 row retains the plan's requirements. Unused broad rows remain a proof-economy
