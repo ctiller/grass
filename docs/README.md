@@ -102,6 +102,7 @@ no normative authority.
 | [AGENT_BUS.md](AGENT_BUS.md) | orphan-branch, segmented JSONL coordination protocol for implementation agents |
 | [AGENT_BUS_SCHEMA.md](AGENT_BUS_SCHEMA.md) | exact version-one event fields, bounds, authority, and lifecycle laws |
 | [AGENT_REVIEW.md](AGENT_REVIEW.md) | mandatory distinct-author/reviewer nomination, review, and reviewer-owned merge protocol |
+| [AGENT_BUS_HISTORY_AUDIT.md](AGENT_BUS_HISTORY_AUDIT.md) | narrow design disposition of the six historical `c-agent` coordination commits audited in `e-auditor:21` |
 | [MEMORY_MODEL.md](MEMORY_MODEL.md) | memory, provenance, borrowing, concurrency, faults |
 | [OBLIGATIONS.md](OBLIGATIONS.md) | linear obligations, transfer, exit dispositions |
 | [REFINEMENT.md](REFINEMENT.md) | refinement proof concerns, weaving, provider realization, generated/authored machine routes |
