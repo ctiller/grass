@@ -184,6 +184,40 @@ structure Decoder (Byte : Type w) (Instruction : Type x) (DecodeError : Type y) 
   decodeOne : List Byte → Except DecodeError (Instruction × List Byte)
   controlTargets : Instruction → List ControlTarget
 
+/-- A machine-supplied encoder/decoder pair with exact nonempty one-instruction
+round trips in front of any remaining byte suffix. -/
+structure RoundTripCodec (Byte : Type w) (Instruction : Type x)
+    (DecodeError : Type y) extends Decoder Byte Instruction DecodeError where
+  encodeOne : Instruction → List Byte
+  encodedNonempty : ∀ instruction, encodeOne instruction ≠ []
+  decode_encode : ∀ instruction suffix,
+    decodeOne (encodeOne instruction ++ suffix) = .ok (instruction, suffix)
+
+namespace RoundTripCodec
+
+/-- A codec's encoded instruction always makes decoder progress over its suffix. -/
+theorem encodedProgress
+    {Byte : Type w} {Instruction : Type x} {DecodeError : Type y}
+    (codec : RoundTripCodec Byte Instruction DecodeError)
+    (instruction : Instruction) (suffix : List Byte) :
+    suffix.length < (codec.encodeOne instruction ++ suffix).length := by
+  have positive : 0 < (codec.encodeOne instruction).length :=
+    List.length_pos_iff.mpr (codec.encodedNonempty instruction)
+  simp only [List.length_append]
+  omega
+
+/-- The importer's length-derived consumed prefix is exactly the codec output. -/
+theorem encodedPrefixExact
+    {Byte : Type w} {Instruction : Type x} {DecodeError : Type y}
+    (codec : RoundTripCodec Byte Instruction DecodeError)
+    (instruction : Instruction) (suffix : List Byte) :
+    (codec.encodeOne instruction ++ suffix).take
+      ((codec.encodeOne instruction ++ suffix).length - suffix.length) =
+        codec.encodeOne instruction := by
+  simp
+
+end RoundTripCodec
+
 /-- One decoded instruction paired with its exact input byte prefix and offset. -/
 structure ImportedInstruction (Byte : Type w) (Instruction : Type x) where
   offset : Nat
@@ -664,5 +698,52 @@ def importBytes {State : Type u} {Terminal : Type v}
   | .ok decoded => .ok ⟨bytes, decoded.instructions, decoded.bytesExact,
       decoded.ready, policy, decoded.targetsResolved,
       ⟨.importedBytes, detail⟩⟩
+
+namespace RoundTripCodec
+
+/-- Encoding one supported instruction and resolving all targets makes the raw
+importer accept that exact one-instruction byte stream. -/
+theorem importEncoded
+    {State : Type u} {Terminal : Type v}
+    {Byte : Type w} {Instruction : Type x} {DecodeError : Type y}
+    [DecidableEq Byte]
+    (codec : RoundTripCodec Byte Instruction DecodeError)
+    (policy : TargetPolicy State Terminal) (instruction : Instruction)
+    (targetsResolved : ∀ target ∈ codec.controlTargets instruction,
+      policy.resolves target = true)
+    (detail : String := "raw imported bytes") :
+    ∃ program, importBytes codec.toDecoder policy (codec.encodeOne instruction)
+      detail = .ok program ∧
+        program.instructions.map ImportedInstruction.instruction =
+          [instruction] := by
+  have nonempty := codec.encodedNonempty instruction
+  cases encoded : codec.encodeOne instruction with
+  | nil => exact False.elim (nonempty encoded)
+  | cons head tail =>
+      have decoded : codec.decodeOne (head :: tail) = .ok (instruction, []) := by
+        simpa [encoded] using codec.decode_encode instruction []
+      have noUnresolved :
+          (codec.controlTargets instruction).find?
+            (fun target => !policy.resolves target) = none := by
+        apply List.find?_eq_none.mpr
+        intro target member
+        simp [targetsResolved target member]
+      have fuelSuccess : ∃ result,
+          decodeFuel codec.toDecoder policy (head :: tail).length 0
+            (head :: tail) = .ok result ∧
+          result.instructions.map ImportedInstruction.instruction =
+            [instruction] := by
+        simp [decodeFuel, decoded]
+        split
+        · rename_i target unresolved
+          rw [noUnresolved] at unresolved
+          contradiction
+        · exact ⟨_, rfl, ⟨_, rfl, rfl⟩⟩
+      obtain ⟨result, hresult, instructionsExact⟩ := fuelSuccess
+      simp only [importBytes]
+      rw [hresult]
+      exact ⟨_, rfl, instructionsExact⟩
+
+end RoundTripCodec
 
 end Grass.Unsafe

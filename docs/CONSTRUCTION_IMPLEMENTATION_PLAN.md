@@ -433,6 +433,13 @@ retains the exact policy used for acceptance. `ImportReadyFrom` additionally
 retains the decoder-enforced consecutive offsets and nonempty slice for every
 accepted instruction. Those byte-coverage facts are not an instruction-semantics
 certificate.
+`RoundTripCodec` is the stronger optional machine boundary for supported raw
+instructions: it pairs an encoder with that decoder, requires a nonempty
+encoding, and proves exact decoding in front of every suffix. Its generic
+progress and consumed-prefix theorems match the importer's structural checks;
+`RoundTripCodec.importEncoded` proves those bytes are accepted whenever every
+reported target resolves. The machine owner remains responsible for
+instantiating the law.
 `ImportedProgram.instructionAtByte?` exposes exact byte-to-instruction lookup;
 its success and failure theorems identify membership plus containment and the
 precise out-of-bounds boundary.

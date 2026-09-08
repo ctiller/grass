@@ -68,6 +68,55 @@ private def directOnlyPolicy : TargetPolicy Nat String where
   indirect := []
   indirectSitesUnique := by decide
 
+private inductive CodecInstruction where
+  | plain
+  | jumpTarget
+  | computed
+deriving Repr, DecidableEq
+
+private def roundTripCodec : RoundTripCodec Nat CodecInstruction DecodeFailure where
+  decodeOne
+    | [] => .error .truncated
+    | 0 :: rest => .ok (.plain, rest)
+    | 1 :: rest => .ok (.jumpTarget, rest)
+    | 2 :: rest => .ok (.computed, rest)
+    | byte :: _ => .error (.unknown byte)
+  controlTargets
+    | .plain => []
+    | .jumpTarget => [.direct target]
+    | .computed => [.indirect indirectSite]
+  encodeOne
+    | .plain => [0]
+    | .jumpTarget => [1]
+    | .computed => [2]
+  encodedNonempty := by intro instruction; cases instruction <;> decide
+  decode_encode := by intro instruction suffix; cases instruction <;> rfl
+
+example (instruction : CodecInstruction) (suffix : List Nat) :
+    roundTripCodec.decodeOne (roundTripCodec.encodeOne instruction ++ suffix) =
+      .ok (instruction, suffix) :=
+  roundTripCodec.decode_encode instruction suffix
+
+example (instruction : CodecInstruction) (suffix : List Nat) :
+    suffix.length < (roundTripCodec.encodeOne instruction ++ suffix).length :=
+  roundTripCodec.encodedProgress instruction suffix
+
+example (instruction : CodecInstruction) (suffix : List Nat) :
+    (roundTripCodec.encodeOne instruction ++ suffix).take
+      ((roundTripCodec.encodeOne instruction ++ suffix).length - suffix.length) =
+        roundTripCodec.encodeOne instruction :=
+  roundTripCodec.encodedPrefixExact instruction suffix
+
+example (instruction : CodecInstruction)
+    (resolved : ∀ reported ∈ roundTripCodec.controlTargets instruction,
+      policy.resolves reported = true) :
+    ∃ imported,
+      importBytes roundTripCodec.toDecoder policy
+        (roundTripCodec.encodeOne instruction) = .ok imported ∧
+      imported.instructions.map ImportedInstruction.instruction =
+        [instruction] :=
+  roundTripCodec.importEncoded policy instruction resolved
+
 example : policy.indirectEvidence? indirectSite = some indirectEvidence := rfl
 example : directOnlyPolicy.indirectEvidence? indirectSite = none := rfl
 example (evidence : IndirectTargetEvidence policy.graph.blockIds)
