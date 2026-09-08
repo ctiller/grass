@@ -76,6 +76,7 @@ structure SerializableImportEntry where
 structure SerializableImportManifest where
   entries : Vec SerializableImportEntry
   localTargetsUnique : PairwiseDistinct entries.localTarget
+  canonicallyOrdered : StrictlyIncreasing canonicalImportKey entries
 ```
 
 All identifiers are encoded by their structured components; a dotted display
@@ -88,6 +89,25 @@ dictionary, ABI value, and their laws remain in the in-kernel object; a
 `PayloadImportsSignature` proof resolves every serialized name to those exact
 values and proves that every imported relocation uses the matching
 `localTarget`.
+
+Relocations keep one uniform target index into the object symbol table. The
+symbol table therefore has two disjoint entry forms: a defined symbol carries
+its section-relative extent and local/exported visibility, while an imported
+symbol carries an index into `SerializableImportManifest` and no section or
+extent. Its local symbol name is exactly the referenced import entry's
+`localTarget`. Structural validation checks the correct arm, checks every
+import index, and rejects a defined symbol masquerading as an import (or the
+reverse). This avoids a second relocation target namespace while making an
+external call representable; a table containing only local/exported defined
+symbols cannot implement the import design.
+
+Manifest semantics are a finite map keyed by `localTarget`, not authored list
+order. The wire writer sorts entries by the injective canonical encoding of the
+structured key. The reader checks that order and uniqueness, so permuting an
+otherwise identical import set is not a second canonical payload. Multiple
+relocations may share one imported symbol, and final linking may intern
+distinct local imports only after proving their subjects and ABI contracts
+identical.
 
 The manifest deliberately contains neither a final loader spelling nor a slot
 address. A final platform link maps a provider subject to a format-specific
