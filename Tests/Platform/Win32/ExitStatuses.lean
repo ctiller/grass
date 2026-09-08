@@ -17,6 +17,18 @@ It matters more than it looks. A process exit status is what a shell, a test
 harness or a parent process branches on, and every one of them treats zero as
 success by convention -- so a program returning 2 for success reports failure to
 everything that runs it, while satisfying `statuses_distinct` perfectly.
+
+A retraction, recorded here rather than dropped. The first version of this file
+carried a fourth example justified by the claim that
+`Spikes/5_Spinning_Cube/Process.lean` spells the failure status as a literal `1`
+instead of naming this constant, making a second spelling that could drift.
+It does contain that literal, and the rest does not follow: `Spikes` is not in
+`lakefile.toml`'s `defaultTargets`, nothing under `Grass/` or `Tests/` imports
+it, and the `TargetProjection.win10VulkanInteractive` it passes the literal to
+does not exist anywhere in the repository. That file is a design sketch which
+does not compile, so there is no second spelling and nothing to drift from.
+The example it justified was a type-ascribed restatement of the second one
+above, so it went with the claim.
 -/
 
 namespace Tests.Platform.Win32.ExitStatuses
@@ -34,12 +46,5 @@ example : failureStatus = 1 := rfl
 example that would fail if the two were swapped, which `statuses_distinct`
 cannot see. -/
 example : successStatus ≠ 1 ∧ failureStatus ≠ 0 := by decide
-
-/-- `Spikes/5_Spinning_Cube/Process.lean` passes the literal `1` for its
-failure status rather than naming this constant. Pinned here so the two
-spellings cannot drift apart silently -- that spike is not this agent's tree to
-edit, and a literal in one place with a definition in another is the
-arrangement `Grass/ABI/Win64/Convention.lean` records as a hazard. -/
-example : failureStatus = (1 : BitVec 32) := rfl
 
 end Tests.Platform.Win32.ExitStatuses
