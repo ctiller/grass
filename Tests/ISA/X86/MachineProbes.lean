@@ -28,10 +28,22 @@ against the harness, or a genuine erratum. It is resolved by reading the manual.
 
 Two reviewers flagged that `Rules.registerWriteExtension` states the 32-bit
 zero-extension rule without qualification, and named cases where it is claimed
-not to hold. The manuals settle these; the manuals are also exactly what this
-corpus cannot currently reach, since `Grass/ISA/X86/Sources.lean` records the
-AMD APM as unretrievable and no anchor is confirmed. So the probes decide them
-on silicon in the meantime:
+not to hold.
+
+This said the manuals settle these and are "exactly what this corpus cannot
+currently reach", because the AMD APM is unretrievable "and no anchor is
+confirmed". Both halves of that are wrong now, and the second was wrong when
+written. The Intel SDM is reachable -- `Grass/ISA/X86/Sources.lean` records it
+live by the same probe that shows AMD is not -- and every Intel anchor in the
+profile carries a confirmation date. It is the AMD half that cannot be
+followed, which is enough to keep any dual-cited rule short of
+`CommonBasis.agreed` but is not the same as having no manual.
+
+So the probes are not standing in for absent documents. They decide these
+cases on silicon because a dual-cited rule cannot reach `agreed` while one
+vendor's manual is unreachable, and because hardware settles a question about
+a degenerate encoding faster than an argument about what a manual's
+unqualified sentence covers:
 
 - **`0x90` is `NOP`, not `xchg eax, eax`.** The one-byte form does not write
   `RAX` at all, so the zero-extension rule must not apply to it. `87 C0` is the
