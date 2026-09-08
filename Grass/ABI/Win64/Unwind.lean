@@ -671,7 +671,18 @@ end Prologue
 `push r12; push r13; push r14`, then the shadow space allocation.
 
 The prologue of `Spikes/1_Hello_World/Program.lean`, as the unwind language
-sees it.
+sees it. Checked against that file: lines 33 to 35 are those three pushes.
+
+What the spike is, precisely, because it is easy to read as more. It is a
+hand-written assembly listing, not output: it imports `Grass.Emit`, which does
+not exist, so it does not compile, and `Spikes` is absent from
+`lakefile.toml`'s `defaultTargets` in any case. Nothing in this repository
+emits a prologue yet -- which is also the reason
+`Grass/ABI/Win64/UnwindBytes.lean` declines to extend `Layout.Realizes` to the
+operations that would need an emission policy chosen.
+
+So this declaration is a model of a prologue somebody wrote down, and agreeing
+with it is agreement with a design sketch rather than with a generator.
 -/
 def spike1Prologue : Prologue :=
   { ops := [.pushNonvolatile .r12, .pushNonvolatile .r13, .pushNonvolatile .r14,
