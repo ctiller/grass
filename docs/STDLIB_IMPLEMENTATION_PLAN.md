@@ -846,10 +846,10 @@ reader will want a reason for:
    plan's, and it is adopted because it survives the attack that killed the
    previous two.
 
-   **And it is now checked by a program.** `Tools/CoverageAudit.lean` walks the
-   environment for every `def` in `Grass.Std.Logical.Vec` returning a `Vec` and
-   reports any without both laws; it runs in CI beside the axiom and docstring
-   audits. That is the response to the deepest point review made about the rule:
+   **And it is now checked by a program.** The `coverage-audit` binary in
+   `tools/grass-tools` walks the environment for every `def` in
+   `Grass.Std.Logical.Vec` returning a `Vec` and reports any without both laws;
+   it runs in CI beside the axiom and docstring audits. That is the response to the deepest point review made about the rule:
    it had been rewritten three times, and each version was violated in the very
    commit that stated it — the coverage rule itself shipped alongside `Vec.sum`
    and `Vec.count`, both lawless, with `sum` on the right-hand side of

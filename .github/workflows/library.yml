@@ -20,7 +20,7 @@ name: Library build
 # a law computing its get?. That rule was stated in prose three times and
 # violated in the same commit that stated it each time - most recently by
 # Vec.sum, on the right-hand side of a law consumers apply. lake build says
-# nothing about it: an operation with no law compiles. Tools/CoverageAudit.lean
+# nothing about it: an operation with no law compiles. The coverage-audit tool
 # is what says something.
 #
 # The x86 differentials check something no Lean theorem can. Every theorem in
@@ -66,10 +66,11 @@ jobs:
 
       # The tool crate first: it needs no Lean toolchain, so a broken tool is
       # reported in a minute rather than after a library build. The unit tests
-      # are the safety case for the port from the Python original -- a safety
-      # case nothing runs decays into a comment -- and `cargo build` exiting 0
-      # says nothing about whether the empty-scan refusal or the record-set
-      # truncation check still work.
+      # are the safety case for the ports from the originals -- a safety case
+      # nothing runs decays into a comment -- and `cargo build` exiting 0 says
+      # nothing about whether the empty-scan refusals, the record-set truncation
+      # checks, or the coverage audit's cross-check against its own census still
+      # work.
       - name: Check the validation tools' formatting
         run: cargo fmt --manifest-path tools/grass-tools/Cargo.toml --all -- --check
 
@@ -114,7 +115,7 @@ jobs:
         run: lake env lean Tests/ISA/X86/LedgerAudit.lean
 
       - name: Audit observation coverage
-        run: lake env lean Tools/CoverageAudit.lean
+        run: ./tools/grass-tools/target/release/coverage-audit
 
       - name: Install NASM
         run: sudo apt-get update && sudo apt-get install -y nasm

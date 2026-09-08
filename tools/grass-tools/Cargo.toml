@@ -2,26 +2,31 @@
 name = "grass-tools"
 version = "0.1.0"
 edition = "2021"
-description = "Grass validation and audit tools: source and docstring audits over the Lean tree"
+description = "Grass validation and audit tools: docstring and observation-coverage audits over the Lean tree"
 
 # Each tool is a self-contained binary with no shared library. The scripts these
 # replace were self-contained too, and each is invoked independently by
 # `.github/workflows/library.yml`; keeping them separate means a change to one
 # cannot silently alter another's verdict.
 #
-# `docstring-audit` still needs Lean, because the set of names the build knows
-# has no reading outside the environment. It generates the meta-program it needs
-# into a temporary file, elaborates it with `lake env lean`, and does the judging
-# here. That is what retires the checked-in Lean file it used to shell out to.
+# Both binaries still need Lean, because what the build knows -- the set of
+# declaration names, and every theorem's statement -- has no reading outside the
+# environment. Each generates the meta-program it needs into a temporary file,
+# elaborates it with `lake env lean`, and does the judging here. That is what
+# retires the checked-in Lean files they replace.
 #
 # This crate is where the remaining validation tools land as they are ported and
-# their equivalence against the originals is demonstrated. It carries one binary
-# today rather than a placeholder for nine, because a `[[bin]]` entry for a tool
-# nobody has verified is a claim this file cannot back.
+# their equivalence against the originals is demonstrated. It carries the two
+# whose differentials have been run rather than a placeholder for nine, because a
+# `[[bin]]` entry for a tool nobody has verified is a claim this file cannot back.
 
 [[bin]]
 name = "docstring-audit"
 path = "src/bin/docstring_audit.rs"
+
+[[bin]]
+name = "coverage-audit"
+path = "src/bin/coverage_audit.rs"
 
 [dependencies]
 regex = "1"
