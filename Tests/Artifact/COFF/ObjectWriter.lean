@@ -63,6 +63,34 @@ example : (textDescription.headerAt 60).PointersCoherent := by
   exact textDescription.headerAt_pointersCoherent 60 (by decide) (by decide)
     (by decide) (by decide) (by decide)
 
+def textContents : SectionContents :=
+  textDescription.contentsAt 60 (by decide) (by decide) (by decide)
+
+example : textContents.header = textDescription.headerAt 60 := by rfl
+
+example : textContents.rawData.1 = textDescription.rawData := by rfl
+
+example : textContents.relocations.relocations = textDescription.relocations := by
+  rfl
+
+example : textContents.lineNumbers.lines = textDescription.lineNumbers := by rfl
+
+def fullyPopulatedDescription : SectionDescription :=
+  { textDescription with
+    lineNumbers := Vec.singleton (.functionSymbolIndex 3) }
+
+example :
+    readSectionContents (fullyPopulatedDescription.headerAt 4)
+        (Vec.replicate 4 0 ++
+          writeSectionDescription fullyPopulatedDescription ++
+          Vec.singleton 0xff) =
+      .done (fullyPopulatedDescription.contentsAt 4 (by decide) (by decide)
+        (by decide)) Vec.empty := by
+  exact readSectionContents_writeSectionDescription_append_of_pos
+    fullyPopulatedDescription 4 (Vec.replicate 4 0) (Vec.singleton 0xff)
+    (by decide) (by decide) (by decide) (by decide) (by decide) (by decide)
+    (by decide) (by decide)
+
 example : objectDescription.Writable = true := by decide
 
 example : (writeSectionDescription textDescription).length =

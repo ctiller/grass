@@ -208,6 +208,59 @@ theorem SectionDescription.headerAt_pointersCoherent
       constructor <;> intro impossible <;> omega
   exact ⟨rawCoherent, relocationsCoherent, linesCoherent⟩
 
+/-- Repackage a raw section description as the dependent value expected by the
+section-content reader. The three hypotheses are precisely the on-disk field
+width obligations used by `SectionDescription.headerAt`. -/
+def SectionDescription.contentsAt (description : SectionDescription)
+    (offset : Nat)
+    (rawFits : description.rawData.length < 2 ^ 32)
+    (relocationCountFits : description.relocations.length < 2 ^ 16)
+    (lineCountFits : description.lineNumbers.length < 2 ^ 16) :
+    SectionContents where
+  header := description.headerAt offset
+  rawData := ⟨description.rawData, by
+    symm
+    exact description.headerAt_sizeOfRawData offset rawFits⟩
+  relocations :=
+    { relocations := description.relocations
+      relocationCount := by
+        symm
+        exact description.headerAt_numberOfRelocations offset
+          relocationCountFits }
+  lineNumbers :=
+    { lines := description.lineNumbers
+      lineCount := by
+        symm
+        exact description.headerAt_numberOfLineNumbers offset lineCountFits }
+
+/-- The canonical content value retains the synthesized section header. -/
+@[simp] theorem SectionDescription.contentsAt_header
+    (description : SectionDescription) (offset : Nat) (rawFits)
+    (relocationCountFits) (lineCountFits) :
+    (description.contentsAt offset rawFits relocationCountFits
+      lineCountFits).header = description.headerAt offset := rfl
+
+/-- The canonical content value retains the raw section bytes exactly. -/
+@[simp] theorem SectionDescription.contentsAt_rawData
+    (description : SectionDescription) (offset : Nat) (rawFits)
+    (relocationCountFits) (lineCountFits) :
+    (description.contentsAt offset rawFits relocationCountFits
+      lineCountFits).rawData.1 = description.rawData := rfl
+
+/-- The canonical content value retains the relocation records exactly. -/
+@[simp] theorem SectionDescription.contentsAt_relocations
+    (description : SectionDescription) (offset : Nat) (rawFits)
+    (relocationCountFits) (lineCountFits) :
+    (description.contentsAt offset rawFits relocationCountFits
+      lineCountFits).relocations.relocations = description.relocations := rfl
+
+/-- The canonical content value retains the line-number records exactly. -/
+@[simp] theorem SectionDescription.contentsAt_lineNumbers
+    (description : SectionDescription) (offset : Nat) (rawFits)
+    (relocationCountFits) (lineCountFits) :
+    (description.contentsAt offset rawFits relocationCountFits
+      lineCountFits).lineNumbers.lines = description.lineNumbers := rfl
+
 /-- Build canonically placed headers and the first offset following all sections. -/
 private def layoutSectionList :
     Nat → List SectionDescription → List SectionHeader × Nat
@@ -290,6 +343,90 @@ def writeSectionDescription (description : SectionDescription) :
 @[simp] theorem length_writeSectionDescription (description : SectionDescription) :
     (writeSectionDescription description).length = description.byteLength := by
   simp [writeSectionDescription, SectionDescription.byteLength, Nat.add_assoc]
+
+/-- A canonically packed section whose three regions are nonempty is recovered
+exactly from its synthesized header, even inside an arbitrary file prefix and
+suffix. Empty-region pointer cases are separate because COFF represents them
+with the distinguished zero pointer. -/
+theorem readSectionContents_writeSectionDescription_append_of_pos
+    (description : SectionDescription) (offset : Nat)
+    (filePrefix suffix : Std.Logical.ByteArray)
+    (prefixLength : filePrefix.length = offset)
+    (rawPositive : 0 < description.rawData.length)
+    (relocationPositive : 0 < description.relocations.length)
+    (linePositive : 0 < description.lineNumbers.length)
+    (rawFits : description.rawData.length < 2 ^ 32)
+    (relocationCountFits : description.relocations.length < 2 ^ 16)
+    (lineCountFits : description.lineNumbers.length < 2 ^ 16)
+    (endFits : offset + description.byteLength < 2 ^ 32) :
+    readSectionContents (description.headerAt offset)
+        (filePrefix ++ writeSectionDescription description ++ suffix) =
+      .done (description.contentsAt offset rawFits relocationCountFits
+        lineCountFits) Vec.empty := by
+  let contents := description.contentsAt offset rawFits relocationCountFits
+    lineCountFits
+  have offsetFits : offset < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  have relocationOffsetFits :
+      offset + description.rawData.length < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  have lineOffsetFits :
+      offset + description.rawData.length +
+        10 * description.relocations.length < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  apply readSectionContents_of_regions contents
+    (filePrefix ++ writeSectionDescription description ++ suffix)
+    (writeRelocations description.relocations ++
+      writeLineNumbers description.lineNumbers ++ suffix)
+    (writeLineNumbers description.lineNumbers ++ suffix) suffix
+  · simp [contents, SectionHeader.requiredContentEnd,
+      SectionHeader.rawDataSpan, SectionHeader.relocationSpan,
+      SectionHeader.lineNumberSpan, ByteSpan.endExclusive,
+      description.headerAt_pointerToRawData_of_pos offset rawPositive
+        offsetFits,
+      description.headerAt_pointerToRelocations_of_pos offset
+        relocationPositive relocationOffsetFits,
+      description.headerAt_pointerToLineNumbers_of_pos offset linePositive
+        lineOffsetFits,
+      description.headerAt_sizeOfRawData offset rawFits,
+      description.headerAt_numberOfRelocations offset relocationCountFits,
+      description.headerAt_numberOfLineNumbers offset lineCountFits,
+      writeSectionDescription, prefixLength]
+    omega
+  · simp only [contents, SectionDescription.contentsAt_header,
+      SectionHeader.rawDataSpan, writeSectionDescription, Vec.append_assoc]
+    rw [description.headerAt_pointerToRawData_of_pos offset rawPositive
+      offsetFits]
+    rw [Vec.drop_append_of_length_eq prefixLength]
+    rfl
+  · have prefixRawLength :
+        (filePrefix ++ description.rawData).length =
+          offset + description.rawData.length := by simp [prefixLength]
+    simp only [contents, SectionDescription.contentsAt_header,
+      SectionHeader.relocationSpan, writeSectionDescription, Vec.append_assoc]
+    rw [description.headerAt_pointerToRelocations_of_pos offset
+      relocationPositive relocationOffsetFits]
+    rw [← Vec.append_assoc filePrefix description.rawData]
+    rw [Vec.drop_append_of_length_eq prefixRawLength]
+    rfl
+  · have prefixRelocationLength :
+        (filePrefix ++ description.rawData ++
+          writeRelocations description.relocations).length =
+          offset + description.rawData.length +
+            10 * description.relocations.length := by
+      simp [prefixLength]
+    simp only [contents, SectionDescription.contentsAt_header,
+      SectionHeader.lineNumberSpan, writeSectionDescription, Vec.append_assoc]
+    rw [description.headerAt_pointerToLineNumbers_of_pos offset linePositive
+      lineOffsetFits]
+    rw [← Vec.append_assoc filePrefix description.rawData]
+    rw [← Vec.append_assoc (filePrefix ++ description.rawData)
+      (writeRelocations description.relocations)]
+    rw [Vec.drop_append_of_length_eq prefixRelocationLength]
+    rfl
 
 /-- Serialize all section descriptions in source order. -/
 private def writeSectionDescriptionList :

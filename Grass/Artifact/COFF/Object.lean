@@ -78,6 +78,25 @@ def readSectionContents (sectionHeader : SectionHeader)
   else
     .needMore (some (sectionHeader.requiredContentEnd - file.length))
 
+/-- Exact independently addressed region serializations compose into a
+successful section-content parse. Each suffix may include arbitrary following
+object bytes because the three component readers preserve it. -/
+theorem readSectionContents_of_regions (contents : SectionContents)
+    (file rawSuffix relocationSuffix lineSuffix : Std.Logical.ByteArray)
+    (enough : contents.header.requiredContentEnd ≤ file.length)
+    (rawAt : file.drop contents.header.rawDataSpan.offset =
+      writeSectionRawData contents.rawData ++ rawSuffix)
+    (relocationsAt : file.drop contents.header.relocationSpan.offset =
+      writeRelocationBlock contents.relocations ++ relocationSuffix)
+    (linesAt : file.drop contents.header.lineNumberSpan.offset =
+      writeLineNumberBlock contents.lineNumbers ++ lineSuffix) :
+    readSectionContents contents.header file = .done contents Vec.empty := by
+  rcases contents with ⟨header, rawData, relocations, lineNumbers⟩
+  simp only [readSectionContents, enough, dite_true]
+  rw [rawAt, readSectionRawData_write_append]
+  rw [relocationsAt, readRelocationBlock_writeRelocationBlock_append]
+  rw [linesAt, readLineNumberBlock_write_append]
+
 /-- Read independently addressed contents for every header in source order. -/
 private def readSectionContentsList :
     List SectionHeader → Std.Logical.ByteArray → ParseResult (List SectionContents)
