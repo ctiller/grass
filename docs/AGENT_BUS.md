@@ -424,6 +424,21 @@ events by `seq`; recent progress is a bounded tail of progress events. `done`,
 Coordinator authority is the immutable set in `BUS.json`; user-directed custody
 transfer under one of those names uses `agent.resumed`.
 
+An identity's lifecycle events form a chain rooted at its `agent.registered`:
+`agent.status` extends the chain from that identity's own stream, and
+`agent.resumed`/`agent.retired` name their exact predecessor. Whether an
+identity is currently retired is derived from the whole recorded chain rather
+than from the order a host happened to fetch it in, since an identity's own
+`agent.resumed` and a coordinator's `agent.retired` may validly name the same
+predecessor without observing each other. Among the transitions naming one
+predecessor, each stream is represented by its earliest claim, since two
+claims from one single-writer stream are not concurrent; what survives is
+mutually concurrent and resolves to the lowest identity, except that an
+explicit `agent.resumed`/`agent.retired` takes precedence over a concurrent
+`agent.status`, so a routine status cannot void a user-directed retirement. An
+identity has no `lifecycle_conflict` state: the chain always has one derived
+head.
+
 For issues, dependencies, handoffs, and reviews, the opening event defines
 identity and authorized respondents. Acknowledgement does not close an item.
 Mutually exclusive transitions name their exact predecessor. Concurrent

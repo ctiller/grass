@@ -610,6 +610,9 @@ fn apply_registered(state: &mut BusState, env: &Envelope, d: &AgentRegistered) -
             product_commit: None,
             last_lifecycle_event: env.id.clone(),
             retired: false,
+            lifecycle_root: env.id.clone(),
+            own_lifecycle_tail: env.id.clone(),
+            lifecycle_transitions: BTreeMap::new(),
             scope: None,
             plan: None,
             progress_tail: Vec::new(),
@@ -639,33 +642,71 @@ fn apply_status(state: &mut BusState, env: &Envelope, d: &AgentStatusEvent) -> A
     if d.product_commit.is_some() {
         ag.product_commit = d.product_commit.clone();
     }
-    ag.last_lifecycle_event = env.id.clone();
+    // `agent.status` is a lifecycle event ("the same identity's latest own
+    // lifecycle event of any status", AGENT_BUS_SCHEMA.md `agent.resumed`),
+    // so a later `previous_lifecycle` may legitimately cite it and it has to
+    // sit on the chain. It carries no `previous_lifecycle` of its own, so it
+    // inherits one: the identity's own preceding lifecycle event. Since
+    // `apply_event` enforces strictly sequential per-stream sequence numbers,
+    // that predecessor is already final by the time this runs, on every host,
+    // in every reduction order.
+    let previous = ag.own_lifecycle_tail.clone();
+    ag.own_lifecycle_tail = env.id.clone();
+    ag.record_lifecycle_transition(env.id.clone(), previous, LifecycleTransitionKind::Status);
     Ok(())
 }
 
+/// Both this and `apply_retired` record their event on the target's
+/// lifecycle chain unconditionally and then let `recompute_lifecycle`
+/// derive the effect, rather than deciding for themselves whether they
+/// apply.
+///
+/// The version this replaced compared `previous_lifecycle` against the
+/// current head and returned `Ok(())` on a mismatch. That kept reduction
+/// total -- `reduce`/`reduce_onto` propagate any `Err` through a bare `?`
+/// with no per-event isolation, and the log is append-only, so one `Err`
+/// leaves every host permanently unable to read the bus -- but it bought
+/// totality with divergence, which is worse. An identity's own
+/// `agent.resumed` and a coordinator's `agent.retired` can validly cite the
+/// *same* `previous_lifecycle`: that is precisely the silent-death case
+/// `agent.retired` exists for (AGENT_COORDINATION_EVOLUTION.md section 2.1
+/// -- per-agent streams are single-writer and published without
+/// cross-observing each other), and neither references the other, so
+/// `topological_order` gives them no edge and their relative position falls
+/// out of agent-name ordering. Whichever reduced first won; the other
+/// silently vanished. One host ended with `retired = true` and another with
+/// `retired = false`, with no error anywhere -- and since `retired` gates
+/// publication authority through `coordinator::verify_author_active`, the
+/// two hosts disagreed about whether that identity may publish at all
+/// (gate 16 violation, bus issue c-agent:69, severity High).
+///
+/// Recording first and deriving after is what fixes it: the effect is a
+/// function of the recorded set, not of the order the set was assembled in.
+/// Note that the mismatch check could not simply be moved below a `record`
+/// call -- whichever transition applied first had already mutated
+/// `retired`/`status`/`last_lifecycle_event`, and unlike a review chain's
+/// `ItemStatus::LifecycleConflict` there is no neutral state on
+/// `AgentState` to reset to. The effect had to stop being applied as it
+/// went and start being derived.
 fn apply_resumed(state: &mut BusState, env: &Envelope, d: &AgentResumed) -> AbResult<()> {
-    let ag = require_agent(state, &env.agent)?;
-    if ag.last_lifecycle_event != d.previous_lifecycle {
-        // `previous_lifecycle` named a predecessor that is no longer this
-        // agent's latest lifecycle event -- ordinarily, or because a
-        // concurrent lifecycle event this event's author never observed
-        // (e.g. a coordinator's `agent.retired`, independently published
-        // from a different host -- AGENT_COORDINATION_EVOLUTION.md section
-        // 2.1: per-agent streams are single-writer and published without
-        // cross-observing each other) landed first. A no-op, not an `Err`:
-        // `reduce()`/`reduce_onto()` propagate any `Err` here via a bare
-        // `?` with no per-event isolation, so a hard failure would
-        // permanently break reduction of the *entire* bus for every host
-        // that has fetched both streams, not just this one agent's record
-        // (round-4 adversarial review, same bug class already fixed for
-        // review.* events -- see `apply_review_accept`'s identical
-        // reasoning).
-        return Ok(());
-    }
+    require_agent(state, &env.agent)?;
     let ag = state.agents.get_mut(&env.agent).expect("just checked");
-    ag.retired = false;
+    // `status` is deliberately *not* derived from the chain, and is set
+    // whether or not this resumption wins its position. Every event that
+    // writes `status` -- `agent.registered`, `agent.status`, and this one --
+    // is published by the identity itself, so they are already totally
+    // ordered by one single-writer stream and no reduction order can
+    // reorder them; deriving them would buy nothing. A resumption that
+    // loses its chain position therefore reports `active` while `retired`
+    // stays true, and `AgentState::active()` (`!retired && ...`) still
+    // correctly denies it authority.
     ag.status = LifecycleStatus::Active;
-    ag.last_lifecycle_event = env.id.clone();
+    ag.own_lifecycle_tail = env.id.clone();
+    ag.record_lifecycle_transition(
+        env.id.clone(),
+        d.previous_lifecycle.clone(),
+        LifecycleTransitionKind::Resume,
+    );
     Ok(())
 }
 
@@ -674,20 +715,17 @@ fn apply_retired(state: &mut BusState, env: &Envelope, d: &AgentRetired) -> AbRe
     if d.target == env.agent {
         return Err(invalid(format!("{}: cannot retire self", env.id)));
     }
-    let target = require_agent(state, &d.target)?;
-    if target.last_lifecycle_event != d.previous_lifecycle {
-        // See the identical comment in `apply_resumed`: a no-op, not an
-        // `Err`. Two coordinators on different hosts can each validly
-        // retire the same silent target, each citing the same
-        // `previous_lifecycle`, without observing each other -- exactly
-        // the "silent death" scenario `agent.retired` exists for. Whichever
-        // reduces first must not poison reduction of the entire bus for
-        // the second.
-        return Ok(());
-    }
+    require_agent(state, &d.target)?;
     let target = state.agents.get_mut(&d.target).expect("just checked");
-    target.retired = true;
-    target.last_lifecycle_event = env.id.clone();
+    // Recorded against the *target's* chain, not the emitting coordinator's,
+    // and deliberately without touching `own_lifecycle_tail`: this is not an
+    // event on the target's own stream, so it is not what the target's next
+    // `agent.status` inherits as a predecessor.
+    target.record_lifecycle_transition(
+        env.id.clone(),
+        d.previous_lifecycle.clone(),
+        LifecycleTransitionKind::Retire,
+    );
     Ok(())
 }
 
@@ -3044,6 +3082,76 @@ mod tests {
         )
     }
 
+    /// `agent` resumes at `seq`, citing `previous_lifecycle`.
+    fn resume_env(agent: &Agent, seq: u64, previous_lifecycle: &EventId) -> Envelope {
+        Envelope::new(
+            agent,
+            seq,
+            frontier_seeing(&[previous_lifecycle]),
+            &EventData::AgentResumed(AgentResumed {
+                previous_lifecycle: previous_lifecycle.clone(),
+                reason: text("back online"),
+                user_authority: text("operator"),
+            }),
+            [],
+        )
+    }
+
+    fn status_env(agent: &Agent, seq: u64, status: LifecycleStatus) -> Envelope {
+        Envelope::new(
+            agent,
+            seq,
+            no_frontier(),
+            &EventData::AgentStatus(AgentStatusEvent {
+                status,
+                note: text("note"),
+                product_branch: None,
+                product_commit: None,
+            }),
+            [],
+        )
+    }
+
+    /// The three values a host actually acts on for one identity's
+    /// lifecycle, after applying `events` in exactly the order given.
+    ///
+    /// The convergence tests below compare this across arrival orders rather
+    /// than merely checking that no order returns `Err`. A fix that stops
+    /// erroring while still depending on arrival order would trade a wedged
+    /// bus for silent permanent divergence, which is strictly worse, so
+    /// "neither order failed" is not the property worth asserting.
+    fn derive_lifecycle(
+        members: &[(&str, Role)],
+        events: &[&Envelope],
+        subject: &Agent,
+    ) -> (bool, LifecycleStatus, EventId) {
+        let mut state = empty_state(members);
+        for env in events {
+            apply_ok(&mut state, env);
+        }
+        let ag = &state.agents[subject];
+        (ag.retired, ag.status, ag.last_lifecycle_event.clone())
+    }
+
+    /// Asserts that `first` and `second` -- the same events in two different
+    /// arrival orders -- derive one identical lifecycle, and that it is the
+    /// `expected` one.
+    fn assert_converges(
+        members: &[(&str, Role)],
+        subject: &Agent,
+        first: &[&Envelope],
+        second: &[&Envelope],
+        expected: (bool, LifecycleStatus, EventId),
+    ) {
+        let a_side = derive_lifecycle(members, first, subject);
+        let b_side = derive_lifecycle(members, second, subject);
+        assert_eq!(
+            a_side, b_side,
+            "two hosts that received the same events in different orders disagree about {subject}"
+        );
+        assert_eq!(a_side, expected, "converged, but not on the derived rule");
+    }
+
     fn apply_ok(state: &mut BusState, env: &Envelope) {
         apply_event(state, env).unwrap_or_else(|e| panic!("{}: {e}", env.id));
         state.kind_of_event_insert(env.id.clone(), &env.kind);
@@ -4437,93 +4545,326 @@ mod tests {
         );
     }
 
-    /// Round-4 adversarial review, Critical finding: two coordinators on
-    /// different hosts, neither observing the other, can each validly
-    /// retire the same silently-vanished target, each citing the same
-    /// `previous_lifecycle` -- exactly the "silent death" scenario
-    /// `agent.retired` exists for. The second one to reduce must be a
-    /// no-op, not a hard `Err` that (via `reduce()`'s bare `?`) would
-    /// permanently break reduction of the entire bus.
+    /// Two coordinators on different hosts, neither observing the other,
+    /// each validly retire the same silently-vanished target citing the same
+    /// `previous_lifecycle` -- the "silent death" scenario `agent.retired`
+    /// exists for (round-4 adversarial review, Critical).
+    ///
+    /// This test used to assert that whichever retirement reduced *first*
+    /// kept the chain head, and to justify it as "the second, stale
+    /// retirement must not have overwritten the already-recorded lifecycle
+    /// event." That claim was wrong, and it pinned bus issue c-agent:69 in
+    /// place: neither of the two is stale, since neither references the
+    /// other, so nothing makes one of them "first" except which host fetched
+    /// which stream sooner. Asserting the arrival-order outcome is exactly
+    /// the assertion a divergent implementation passes. The contract now is
+    /// that the outcome does not depend on arrival order at all: the group
+    /// competing for one predecessor resolves to its lowest identity, so
+    /// `coord-a` wins whichever way round the two events show up.
     #[test]
-    fn ignores_a_second_retirement_racing_against_the_first() {
+    fn two_retirements_racing_on_one_predecessor_converge_in_either_order() {
         let coord_a = a("coord-a");
         let coord_b = a("coord-b");
         let worker = a("worker1");
-        let mut state = empty_state(&[
+        let members: &[(&str, Role)] = &[
             ("coord-a", Role::Coordinator),
             ("coord-b", Role::Coordinator),
-        ]);
-        apply_ok(&mut state, &register(&coord_a, Role::Coordinator));
-        apply_ok(&mut state, &register(&coord_b, Role::Coordinator));
-        apply_ok(&mut state, &register(&worker, Role::Implementor));
-        let previous_lifecycle = EventId::new(&worker, 0);
+        ];
+        let reg_a = register(&coord_a, Role::Coordinator);
+        let reg_b = register(&coord_b, Role::Coordinator);
+        let reg_w = register(&worker, Role::Implementor);
+        let by_a = retire_env(&coord_a, &worker, &reg_w.id);
+        let by_b = retire_env(&coord_b, &worker, &reg_w.id);
 
-        let retire_data = |reason: &str| {
-            EventData::AgentRetired(AgentRetired {
-                target: worker.clone(),
-                previous_lifecycle: previous_lifecycle.clone(),
-                reason: text(reason),
-                user_authority: text("the user"),
-            })
-        };
-        let first_env = Envelope::new(&coord_a, 1, no_frontier(), &retire_data("silent"), []);
-        apply_ok(&mut state, &first_env);
-        assert!(state.agents[&worker].retired);
-        assert_eq!(state.agents[&worker].last_lifecycle_event, first_env.id);
-
-        let second_env = Envelope::new(&coord_b, 1, no_frontier(), &retire_data("silent"), []);
-        apply_ok(&mut state, &second_env);
-        // The second, stale retirement must not have overwritten the
-        // already-recorded lifecycle event.
-        assert_eq!(state.agents[&worker].last_lifecycle_event, first_env.id);
+        assert_converges(
+            members,
+            &worker,
+            &[&reg_a, &reg_b, &reg_w, &by_a, &by_b],
+            &[&reg_a, &reg_b, &reg_w, &by_b, &by_a],
+            (true, LifecycleStatus::Active, by_a.id.clone()),
+        );
     }
 
-    /// Companion to the above for `agent.resumed`: a returning agent's
-    /// self-published resumption, built against a `previous_lifecycle` that
-    /// a concurrent (unobserved) coordinator retirement has since moved
-    /// past, must be a no-op rather than fleet-wide-fatal.
+    /// Bus issue c-agent:69, severity High, and the reason the whole chain
+    /// is derived rather than applied as it goes.
+    ///
+    /// A returning identity's own `agent.resumed` and a coordinator's
+    /// `agent.retired` can cite the *same* `previous_lifecycle` -- again the
+    /// silent-death case. Neither references the other, so
+    /// `topological_order` gives them no edge and their relative position
+    /// comes down to agent-name ordering; before the fix, whichever reduced
+    /// first won outright and the other silently no-op'd, leaving one host
+    /// with `retired = true` and another with `retired = false` with no
+    /// error anywhere. Because `retired` gates publication authority through
+    /// `coordinator::verify_author_active`, the two hosts then disagreed
+    /// about whether this identity may publish at all.
+    ///
+    /// This test also pins that the winner really is the *lowest* identity
+    /// and not "the retirement, always" or "the resumption, always": the
+    /// same race is run twice with the names swapped end to end, and the two
+    /// runs must come out opposite ways.
     #[test]
-    fn ignores_a_resumption_against_a_stale_previous_lifecycle() {
+    fn a_resumption_racing_a_retirement_converges_in_either_order() {
+        // coord1 < worker1, so the retirement takes the position.
+        let coord1 = a("coord1");
+        let worker = a("worker1");
+        let reg_c = register(&coord1, Role::Coordinator);
+        let reg_w = register(&worker, Role::Implementor);
+        let retire = retire_env(&coord1, &worker, &reg_w.id);
+        let resume = resume_env(&worker, 1, &reg_w.id);
+        assert_converges(
+            &[("coord1", Role::Coordinator)],
+            &worker,
+            &[&reg_c, &reg_w, &retire, &resume],
+            &[&reg_c, &reg_w, &resume, &retire],
+            (true, LifecycleStatus::Active, retire.id.clone()),
+        );
+
+        // aworker < zcoord, so the resumption takes it instead -- same race,
+        // opposite outcome, and still the same one from either order.
+        let zcoord = a("zcoord");
+        let aworker = a("aworker");
+        let reg_zc = register(&zcoord, Role::Coordinator);
+        let reg_aw = register(&aworker, Role::Implementor);
+        let z_retire = retire_env(&zcoord, &aworker, &reg_aw.id);
+        let a_resume = resume_env(&aworker, 1, &reg_aw.id);
+        assert_converges(
+            &[("zcoord", Role::Coordinator)],
+            &aworker,
+            &[&reg_zc, &reg_aw, &z_retire, &a_resume],
+            &[&reg_zc, &reg_aw, &a_resume, &z_retire],
+            (false, LifecycleStatus::Active, a_resume.id.clone()),
+        );
+    }
+
+    /// The ordinary, genuinely sequential path, which the race fix must not
+    /// break: an identity that is retired and then resumes *citing that
+    /// retirement* is resumed, and its chain continues normally afterwards
+    /// -- a later `agent.status` extends the chain, and a later retirement
+    /// citing that status retires it again.
+    #[test]
+    fn a_sequential_lifecycle_chain_still_advances_step_by_step() {
         let coord1 = a("coord1");
         let worker = a("worker1");
         let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+        let reg_w = register(&worker, Role::Implementor);
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
-        apply_ok(&mut state, &register(&worker, Role::Implementor));
+        apply_ok(&mut state, &reg_w);
 
-        let retire_env = Envelope::new(
+        let first_status = status_env(&worker, 1, LifecycleStatus::Blocked);
+        apply_ok(&mut state, &first_status);
+        assert_eq!(
+            state.agents[&worker].last_lifecycle_event, first_status.id,
+            "`agent.status` is a lifecycle event and must remain citable as one"
+        );
+
+        let retire = retire_env(&coord1, &worker, &first_status.id);
+        apply_ok(&mut state, &retire);
+        assert!(state.agents[&worker].retired);
+        assert_eq!(state.agents[&worker].last_lifecycle_event, retire.id);
+
+        let resume = resume_env(&worker, 2, &retire.id);
+        apply_ok(&mut state, &resume);
+        assert!(
+            !state.agents[&worker].retired,
+            "a resumption citing the retirement it follows must still resume"
+        );
+        assert_eq!(state.agents[&worker].status, LifecycleStatus::Active);
+        assert_eq!(state.agents[&worker].last_lifecycle_event, resume.id);
+
+        let later_status = status_env(&worker, 3, LifecycleStatus::Paused);
+        apply_ok(&mut state, &later_status);
+        assert_eq!(state.agents[&worker].last_lifecycle_event, later_status.id);
+        assert!(!state.agents[&worker].retired);
+
+        // `retire_env` is fixed at sequence 1, and this is coord1's second.
+        let retire_again = Envelope::new(
             &coord1,
-            1,
-            no_frontier(),
+            2,
+            frontier_seeing(&[&later_status.id]),
             &EventData::AgentRetired(AgentRetired {
                 target: worker.clone(),
-                previous_lifecycle: EventId::new(&worker, 0),
-                reason: text("silent"),
-                user_authority: text("the user"),
+                previous_lifecycle: later_status.id.clone(),
+                reason: text("gone again"),
+                user_authority: text("operator"),
             }),
             [],
         );
-        apply_ok(&mut state, &retire_env);
+        apply_ok(&mut state, &retire_again);
         assert!(state.agents[&worker].retired);
+        assert_eq!(state.agents[&worker].last_lifecycle_event, retire_again.id);
+    }
 
-        // worker never observed the retirement and resumes against its own
-        // stale last-known lifecycle event.
-        let resume_env = Envelope::new(
+    /// A transition citing a predecessor that has already been *decided* --
+    /// not merely one that something else also claims -- changes nothing.
+    ///
+    /// `coord-a`'s retirement takes the position at the registration and the
+    /// identity then resumes off it, so the chain head has moved two steps
+    /// on. A second retirement arriving afterwards and still citing the
+    /// registration loses that group to `coord-a` (lower identity) and is
+    /// therefore orphaned: it must not retroactively re-retire an identity
+    /// that has since validly resumed. The late arrival is applied to one
+    /// host and withheld from the other, and both must agree regardless.
+    #[test]
+    fn a_transition_against_a_decided_predecessor_changes_nothing() {
+        let coord_a = a("coord-a");
+        let coord_b = a("coord-b");
+        let worker = a("worker1");
+        let members: &[(&str, Role)] = &[
+            ("coord-a", Role::Coordinator),
+            ("coord-b", Role::Coordinator),
+        ];
+        let reg_a = register(&coord_a, Role::Coordinator);
+        let reg_b = register(&coord_b, Role::Coordinator);
+        let reg_w = register(&worker, Role::Implementor);
+        let retire = retire_env(&coord_a, &worker, &reg_w.id);
+        let resume = resume_env(&worker, 1, &retire.id);
+        let stale = retire_env(&coord_b, &worker, &reg_w.id);
+
+        let settled = (false, LifecycleStatus::Active, resume.id.clone());
+        assert_eq!(
+            derive_lifecycle(
+                members,
+                &[&reg_a, &reg_b, &reg_w, &retire, &resume],
+                &worker
+            ),
+            settled,
+            "baseline: retired, then validly resumed"
+        );
+        assert_converges(
+            members,
             &worker,
-            1,
-            no_frontier(),
-            &EventData::AgentResumed(AgentResumed {
-                previous_lifecycle: EventId::new(&worker, 0),
-                reason: text("back online"),
-                user_authority: text("the user"),
-            }),
-            [],
+            &[&reg_a, &reg_b, &reg_w, &retire, &resume, &stale],
+            &[&reg_a, &reg_b, &reg_w, &stale, &retire, &resume],
+            settled,
         );
-        apply_ok(&mut state, &resume_env);
+    }
+
+    /// An `agent.status` concurrent with an `agent.retired` must not void
+    /// the retirement.
+    ///
+    /// The two can only ever claim one predecessor by being concurrent -- a
+    /// coordinator that had seen the status would have cited it -- and
+    /// `agent.status` carries no `previous_lifecycle` of its own, so its
+    /// chain position is inferred rather than claimed. If it competed on
+    /// equal terms, whether a user-authorized retirement survived would come
+    /// down to whether the target's name sorted below the coordinator's,
+    /// which is the same silent-divergence harm one layer along. Run with
+    /// the names both ways round: unlike the resume/retire race above, the
+    /// outcome must *not* flip.
+    #[test]
+    fn a_concurrent_status_cannot_void_a_retirement() {
+        for (coord_name, worker_name) in [("coord1", "worker1"), ("zcoord", "aworker")] {
+            let coord = a(coord_name);
+            let worker = a(worker_name);
+            let reg_c = register(&coord, Role::Coordinator);
+            let reg_w = register(&worker, Role::Implementor);
+            let status = status_env(&worker, 1, LifecycleStatus::Blocked);
+            let retire = retire_env(&coord, &worker, &reg_w.id);
+            assert_converges(
+                &[(coord_name, Role::Coordinator)],
+                &worker,
+                &[&reg_c, &reg_w, &status, &retire],
+                &[&reg_c, &reg_w, &retire, &status],
+                // The status event loses its chain position but its report
+                // is still recorded -- nothing it actually said is lost.
+                (true, LifecycleStatus::Blocked, retire.id.clone()),
+            );
+        }
+    }
+
+    /// Within one stream the causally earlier event must win its position,
+    /// and "earlier" is a sequence number, not a string.
+    ///
+    /// `EventId` is a validated `<agent>:<seq>` string whose own ordering
+    /// stops agreeing with sequence order at two digits (`"worker1:12" <
+    /// "worker1:4"`), so the chain compares `(agent, sequence)` instead. The
+    /// case that needs it: an identity publishes a status, then much later
+    /// resumes against a `previous_lifecycle` that status had already moved
+    /// past. Both claim one predecessor, both come off one single-writer
+    /// stream, and the status -- which really did happen first -- has to
+    /// keep the position, or a mistyped citation could reach back and
+    /// rewrite a chain its own author had already extended.
+    #[test]
+    fn one_streams_own_events_resolve_in_sequence_order_not_string_order() {
+        let worker = a("worker1");
+        let mut state = empty_state(&[]);
+        apply_ok(&mut state, &register(&worker, Role::Implementor));
+        for seq in 1..=11 {
+            apply_ok(
+                &mut state,
+                &status_env(&worker, seq, LifecycleStatus::Active),
+            );
+        }
+        let head_before = state.agents[&worker].last_lifecycle_event.clone();
+        assert_eq!(head_before, EventId::new(&worker, 11));
+
+        // Sequence 12, citing `worker1:3` -- which `worker1:4` took long
+        // ago, except that "worker1:12" sorts *below* "worker1:4" by raw
+        // string order, so anything comparing identities as strings hands
+        // this group to the resumption instead.
+        let stale_resume = resume_env(&worker, 12, &EventId::new(&worker, 3));
+        apply_ok(&mut state, &stale_resume);
+        assert_eq!(
+            state.agents[&worker].last_lifecycle_event, head_before,
+            "a stale citation must not displace the status that already took that position"
+        );
+    }
+
+    /// Gate 15 in the shape the defect actually took in the field.
+    ///
+    /// `reduce` cold-sorts the whole event set into one deterministic
+    /// topological order, while `reduce_onto` extends a state a host already
+    /// built with whatever it has since fetched. Those are two different
+    /// arrival orders over one event set, and every host runs both. With the
+    /// effect applied as it went, the cold path saw `coord1:1` before
+    /// `worker1:1` (name order) and retired the identity, while the host
+    /// that had already reduced the resumption saw the retirement cite a
+    /// superseded predecessor and dropped it -- same events, same host,
+    /// opposite answers about who may publish.
+    #[test]
+    fn cold_and_incremental_reduction_agree_on_a_lifecycle_race() {
+        let coord1 = a("coord1");
+        let worker = a("worker1");
+        let epoch = epoch_with(&[
+            ("coord1", Role::Coordinator),
+            ("worker1", Role::Implementor),
+        ]);
+        let mut known = BTreeMap::new();
+        known.insert(epoch.id.clone(), epoch.clone());
+
+        let reg_c = register(&coord1, Role::Coordinator);
+        let reg_w = register(&worker, Role::Implementor);
+        let retire = retire_env(&coord1, &worker, &reg_w.id);
+        let resume = resume_env(&worker, 1, &reg_w.id);
+
+        let mut streams: BTreeMap<Agent, Vec<Envelope>> = BTreeMap::new();
+        streams.insert(coord1.clone(), vec![reg_c.clone(), retire.clone()]);
+        streams.insert(worker.clone(), vec![reg_w.clone(), resume.clone()]);
+        let cold = reduce(config(), Some(epoch.clone()), known.clone(), &streams).unwrap();
+
+        let mut before_fetch = streams.clone();
+        before_fetch
+            .get_mut(&coord1)
+            .expect("coord1 stream")
+            .pop()
+            .expect("the retirement");
+        let partial = reduce(config(), Some(epoch), known, &before_fetch).unwrap();
+        let incremental = reduce_onto(partial, std::slice::from_ref(&retire)).unwrap();
+
+        let read = |s: &BusState| {
+            let ag = &s.agents[&worker];
+            (ag.retired, ag.status, ag.last_lifecycle_event.clone())
+        };
+        assert_eq!(
+            read(&cold),
+            read(&incremental),
+            "cold reduction and incremental reduction disagree about {worker}"
+        );
         assert!(
-            state.agents[&worker].retired,
-            "the stale resumption must not have undone the real retirement"
+            read(&cold).0,
+            "coord1 sorts below worker1, so the retirement takes the position"
         );
-        assert_eq!(state.agents[&worker].last_lifecycle_event, retire_env.id);
     }
 
     /// A genuine exclusive-transition race needs two *different* agents:
