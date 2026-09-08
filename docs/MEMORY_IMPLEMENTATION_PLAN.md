@@ -40,6 +40,53 @@ Not owned, but directly blocked on this plan:
 Not owned and not blocked on this plan: process scheduling, owned containers,
 instruction set architecture, platform profiles.
 
+## 0.1 Where this layer actually is
+
+Kept current because a plan that does not say what has landed is a schedule for work
+that may already be done. `e-auditor:25` reported this section missing.
+
+**On main.** The M1/M2/M3 baseline merged as `e-reviewer:159`, authorizing `c-mem:69`
+— author vocabulary, executable single-thread semantics, the loan and authority table,
+the byte store, shaped access, and the obligation delta. Co-authored with `c-agent`,
+who supplied the two audit import lines the new module needed; that co-authorship was
+itself a review finding (`e-reviewer:154`), because the branch carried a commit
+trailed to an agent the nomination had not declared.
+
+**Nominated and waiting.** `agent/c-mem/alias-provisional`: one docstring, marking
+`MemoryState.alias` as provisional non-consumable scaffolding per `g-design:185`. It
+is separate from everything else because the ruling binds now — until the door says it
+is not an interface, another owner can reasonably read it as one.
+
+**Green, unnominated, and superseded in its central idea.**
+`agent/c-mem/alias-offsets`. It gave the alias relation a signed offset and made
+`AuthorizedAt` consult it. `g-design:185` replaced that design. What survives is the
+part that was never about alias graphs and will be salvaged onto the replacement
+rather than merged: `AuthorizedAt` consulting `Live` rather than only `CurrentEpoch`,
+the after-teardown authority law `g-construct:76` asked for, and two defects the
+proofs exposed — a range shift that was not monotone, which would have let a split
+create authority, and authority surviving a teardown.
+
+**Not started, deliberately.** The `g-design:185` replacement, §4.2.2. Its foundation
+is where `StorageId` lives, which is `c-mem:72` and unanswered.
+`Grass/Core/Identifiers.lean` holds the other identity types and belongs to
+g-foundation, so putting it there unbidden is the pattern `e-auditor:5` reported;
+putting it under `Grass/Memory` is in this layer's lane but breaks the convention.
+Starting on an invented answer is the failure §4.2 now records this layer for having
+made once already.
+
+**Open to other owners, and none of it this layer's to move.** `g-design` on
+`c-mem:21`, `c-mem:28`, `c-mem:61` (whether §3.10 is a corpus rule — six
+repository-wide audit gates are parked behind it) and `c-mem:72`. `c-stdlib` on
+`c-mem:63`. `g-construct` on whether `StackScopeId` is theirs to mint. `g-auditor` on
+whether they accept `g-auditor:10` as closed.
+
+**Next, in order, once unblocked.** The §4.2.2 replacement as one changeover. Then the
+recorded M3 items §4.4.1 still carries: rights composition across grants, the
+unmintable `fence` kind, and §7.2's coherence rules. M4's frame lifetime discipline
+follows the replacement rather than preceding it, because a frame is a view onto
+backing storage under the new design and building it against the old shape would be
+work done twice.
+
 ## 1. Sequencing principle
 
 [DECISIONS.md](DECISIONS.md) explicitly rejects "bolting memory safety on after
@@ -133,7 +180,7 @@ Grass/Memory/Access.lean         AccessDescriptor, AccessOutcome, AccessResult
 Grass/Memory/Substep.lean        ordered substeps, commit prefix, fault visibility
 Grass/Memory/Event.lean          MemoryEvent, ContextId, ContextKind
 Grass/Memory/Audit.lean          AuditRecord, append-only AuditLedger
-Grass/Memory/Facet.lean          the operation-facing effect interfaces
+Grass/Op/Facets.lean             the operation-facing effect interfaces
 Grass/Memory/Profile.lean        MemoryProfile: the §10 package as a record type
 Grass/Obligation/Core.lean       ObligationId, kind, existential payload, Obligation
 Grass/Obligation/Disposition.lean  the five terminal dispositions
@@ -147,11 +194,17 @@ Grass/Resource/Axis.lean         ResourceAxisName, HasResourceAxis, HasResourceL
 including the concurrency fields, on day one. See §7 of this plan for why they
 are populated before the single-threaded semantics reads them.
 
-`Grass/Memory/Facet.lean` is the seam ISA authors implement. It provides
+`Grass/Op/Facets.lean` is the seam ISA authors implement. It provides
 separated conditional facets rather than one god class, per
-[INSTRUCTIONS.md](INSTRUCTIONS.md) §1, and a `MemoryProfileRequirements` value
-naming exactly which facets a given profile demands. A reachable operation
-missing a demanded facet is rejected; there is no default empty effect.
+[INSTRUCTIONS.md](INSTRUCTIONS.md) §1, and `StepPolicy.requiredFacets` names exactly
+which facets a given profile demands. A reachable operation missing a demanded facet is
+rejected; there is no default empty effect — `closes_iff_no_missing` is what says the
+gate deciding that is `OperationFacets.Closes`.
+
+This paragraph named a file that had been renamed and a `MemoryProfileRequirements`
+type that was never declared: three things a reader of the project's ISA-facing
+contract could not find. Review swept every backticked repo-relative path in the tree
+against the filesystem, which is how.
 
 `Grass/Memory/Profile.lean` ships the §10 required proof package as a record in
 M1 even though no instance closes until much later. ISA authors then see the
@@ -328,19 +381,20 @@ type, the docstring says so and names what does enforce it.
 
 ### 3.11 Closure properties for the freeze
 
-Nine properties are required before M1 is called frozen. Each names what enforces
+Ten properties are required before M1 is called frozen — the table below has ten rows
+  and the paragraph under it confirms the tenth is one of them. Each names what enforces
 it, per §3.10; where a type makes the failure unrepresentable that is recorded
 instead of a theorem, because it is the stronger form.
 
 | Property | Enforced by |
 |---|---|
 | step extends the violation ledger | `Op.step_extends_violations` |
-| step emits only well-formed events | `Op.step_events_wellFormed`, and `ValidMemoryEvent` makes a malformed trace unrepresentable |
-| denial prevents undeclared later effects | `Op.runAccesses_stops_at_refusal` |
+| step emits only well-formed events | `Op.step_events_wellFormed`, and `ValidMemoryEvent` makes a malformed trace unrepresentable: `mk` is private and `MemoryEvent.ofOutcome` is the only producer. As strong as its fields and no stronger — two went uncompared until review found an event whose status contradicted its own counts |
+| denial prevents undeclared later effects | `Op.runAccesses_stops_at_refusal` for the access list, `Op.runStep_stops_at_refusal` for the faulting branch. The second was missing and the branch was wrong: `runStep` performed the faulting substep's access whether or not a survivor had been refused, so a denial was followed by a committed write. Found by local adversarial review after the property had already been declared closed and merged; `Tests/Op/FakeIsa.lean`'s `denial_stops_the_operation_on_the_fault_path` is the regression. |
 | fault choices are structurally in range | `Op.FaultPlan` carries a `Fin`; the bad case is unrepresentable |
 | partial RMW retains its completed read | `Committed` counts reads and writes separately; `faulted_rmw_keeps_its_read` |
 | ledger mutation occurs iff the delta is applicable | `Op.obligations_unchanged_unless_committed`; `LedgerDelta.Applicable` requires a typed `ProtocolAuthority`, and `Op.LedgerEffectApplicable` checks each delta against the ledger the previous ones left |
-| a recorded fault is never discarded | `Op.runStep_records_the_fault`, with `Op.performAccess_preserves_faults` |
+| a fault the operation reached is never discarded | `Op.runStep_records_the_fault`, with `Op.performAccess_preserves_faults`. **The property is weaker than the row used to claim.** A fault reported for a substep the operation never reached, because an earlier one was denied, is not recorded: `Op.runStep_records_no_fault_after_refusal`. That is a semantic decision and it is provisional — see §4.3. |
 | failed ledger mutation is recorded and non-mutating | `Op.ledger_refusal_is_recorded`, `Op.refused_preserves_everything_but_the_ledger` |
 | every emitted violation class is declared | `Op.refusalOf_class_declared`, over `Op.AuthorityProvider.emittedClasses` — the set grows with the provider list, so an authority's own nominal class is covered too; `Tests/Op/FakeIsa.lean`'s `undeclared_provider_class_cannot_form_a_policy` and `custom_violation_class_is_usable` are the two sides |
 | external operation families require no Grass edits | `Tests/Op/FakeIsa.lean`, and reproduced independently by a reviewer building three families outside the repo |
@@ -462,12 +516,3864 @@ satisfying `WithinBound`, offset disjointness implies address non-aliasing.
 Without it every framing lemma proves something about offsets that no one has
 connected to memory.
 
+### 4.1 What is built
+
+Three of the four files above exist, under different names than the sketch.
+
+`Grass/Memory/Addressing.lean` proves the bridge arithmetic. `addressOf` places an
+offset in an allocation based at a `MachineAddress`, and
+`disjoint_ranges_do_not_alias` is the lemma the section above records as owed.
+It is wired now, and the section above's debt is discharged.
+`AllocationRecord.base` places an allocation, `MemoryState.addressAt?` reads the
+address of an offset, and `MemoryState.addressAt?_ne_of_disjoint` connects `Nat`
+disjointness to distinct machine addresses for a state the model builds. The base
+is optional because §7.5's logical spaces have allocations with no machine address.
+An earlier version of this sentence added "and it is not authority: `denialOf` reads
+none of it", which stopped being true when `denialOf` gained the `placementWraps` and
+`addressDisagreesWithPlacement` clauses — both read `record.base`. The half that is
+still true is narrower and is the half the model relies on: two allocations sharing a
+base are distinct storage unless `aliases` says otherwise, which is §2's
+provenance-not-address direction. The *converse* — same space, same address, therefore
+same bytes — has no counterpart anywhere in `Grass/Memory/`, and §4.4.1 records what
+review demonstrated with it. It is conditioned on `FitsAllocation`:
+the allocation's own bytes do not wrap. That is not a convenience — an allocation
+whose last byte wraps past `2^64` has two offsets at one address, so no
+disjointness argument about it could be sound, and a profile admitting one has
+already lost.
+
+`Grass/Memory/ByteStore.lean` is the store, and it is a journal: a write prepends
+a run, nothing is merged. Writes are constant time and framing is one case split.
+The cost is that reads scan runs and degrade over a long program, and **that cost
+is not paid off here.** What makes it acceptable rather than deferred forever is
+that every lemma is stated over `cellAt?`, never over `runs`, so a compacting
+store agreeing pointwise satisfies all of them unchanged. Compaction is owed.
+
+A run carries `initializes` as well as bytes. `AccessDescriptor.producesInitialized`
+lets a completed write decline to credit initialization, and a value-only store
+would have reported those bytes as initialized because it held values for them —
+the permissive direction [FOUNDATION.md](FOUNDATION.md) law 8 forbids.
+`not_initializedAt_write_false` is the theorem. Newest wins for initialization as
+it does for value, so a non-initializing write over initialized bytes leaves them
+uninitialized; the corpus does not settle that case, and this is the reading that
+cannot admit a program a stricter model would refuse.
+
+`AllocationRecord.initialized : List Nat` is gone. Initialization is read off the
+store, so `RangeInitialized` cannot drift from what was written.
+`MemoryState.write_preserves_metadata`, `write_preserves_other_allocation`,
+`rangeInitialized_write_of_other_allocation`, `rangeInitialized_write_of_disjoint`,
+and `rangeInitialized_write` are the state-level framing set.
+
+`Op.Oracle.ofMemory` is what fixtures now use; `Oracle.zeroed` remains, unused,
+because a profile may still want a machine that reads zeros. It and `Tests/Op/FakeIsa.lean` now
+runs the whole M1 seam over it unchanged, which is the evidence that the store
+did not cost a redesign. It takes what a store writes *and* what an indeterminate
+read observes as parameters. The second is the one worth naming: bytes that are
+not initialized have no value the model can read off the store, a profile that admits an
+indeterminate read owes what it observes. Defaulting it to zero would be law 8's permissive fallback wearing a
+plausible number.
+
+`Grass/Memory/Apply.lean` is `applyAccess`, total and executable, with the laws
+stated as equations over it rather than as claims about a transition's branches.
+It is not what `Grass/Op/Step.lean` calls — `performAccess` remains the
+transition's own path — but both write memory through `MemoryState.commit` and
+nothing else, so the framing results are results about the transition.
+`Op.performAccess_frames_untouched` and `Op.runAccesses_frames_untouched` state
+them for `performAccess` and `runAccesses`, and `Op.runStep_frames_untouched` and
+`Op.step_frames_untouched` for a whole operation. The last two were owed for
+several rounds while four documents claimed they existed; they quantify over
+`sequence.accesses` rather than the survivor list, because `visibleEffects?`
+excludes the faulting substep and framing over survivors alone would miss the byte
+that substep writes. An earlier version of this section said `applyAccess`
+had been factored out of `performAccess`; it had been written alongside it, with
+two write paths and framing proved about one. Review found it and `commit` is the
+repair.
+`applyAccess_refused_preserves_state` is §4's first required law.
+`applyAccess_frames_other_allocation` and `applyAccess_frames_disjoint_range` are
+the framing half of "reads and writes to disjoint ranges commute and frame";
+`applyAccess_comm` is the state half of commutation and `applyAccess_result_comm`
+the result half — the same access gets the same refusal decision and observes the
+same bytes on either side of a disjoint one. Both are for two accesses within one
+allocation. `applyAccess_comm_of_other_allocation` and
+`applyAccess_result_comm_of_other_allocation` are the cross-allocation pair, where
+disjointness is free: §2 makes distinct `AllocId`s distinct storage by
+construction, so coinciding offsets are not the same bytes.
+
+Commutation is stated as `MemoryState.AgreesOn` — agreement at every offset, in
+byte and in initialization — and not as state equality. That is forced rather than
+chosen: a journal records two writes in whichever order they arrived, so the two
+orders leave different write histories and no proof could make those states equal.
+`AgreesOn` compares cells rather than bytes because `denialOf` reads
+initialization: a values-only agreement would let two orders disagree about
+whether a later access is refused, which review demonstrated with a concrete pair
+before it was fixed.
+
+Commutation needed a second half that is easy to miss. Bytes agreeing is not
+enough if the *decision* can move: were a write elsewhere able to change whether
+an access is refused, one order could refuse what the other committed.
+`denialOf_write_of_disjoint` rules that out, and it rests on
+`ByteStore.initialized_write_iff_of_disjoint` being an `iff` — framing has to
+carry a lack of initialization across a write as well as its presence, or an
+`uninitializedRead` could be laundered by writing somewhere else.
+
+`Grass/Memory/Shape.lean` is the `Shape.lean` row, and it is deliberately only
+half of it. `StructLayout` is a `Std.Owned` facility per [STDLIB.md](STDLIB.md):
+it chooses field order, widths, alignment, and padding policy and carries an ABI
+profile, and none of that is the memory layer's. What the memory layer owes is
+the other side of the interface — given *some* aggregate's field ranges, what is
+true of the bytes — and a `Footprint` is exactly that and nothing more.
+
+The obligation is [STDLIB.md](STDLIB.md)'s: "Padding is never silently treated as
+initialized semantic data." `padding_uninitialized_after_writing_fields` is the
+theorem, proved for any list of the aggregate's fields in any order with any
+data, rather than for one convenient write schedule. The reason it matters is
+concrete: without it, writing every field of a struct would make the struct read
+as fully initialized when part of it was never written, and a typed shape could
+launder an `uninitializedRead` that `denialOf` catches on the raw bytes.
+
+The converse half is proved too — `byteAt?_writeField` for
+[STDLIB.md](STDLIB.md)'s serialization law and `initializedAt_writeField` for the
+field's own bytes — so the two together partition the aggregate rather than making
+a one-sided claim. `Tests/Memory/Padding.lean` applies both, and
+`cellAt?_writeField_of_other_field` besides, over a struct that pads for a real
+reason: a one-byte field followed by a four-byte field its alignment
+puts at offset four. Padding there holds no byte at all, not merely an
+uninitialized one, so a store that quietly zero-filled the gap would fail even if
+it kept the initialization flags right.
+
+The exit criterion is that the framing set discharges a straight-line block
+*without a bespoke local lemma*. `runBlock` runs a list of accesses in order and
+`byteAt?_write_survives_block` is the discharge: a store's bytes are still there
+at the end of a block, provided no later step's declared range covers them.
+Everything a caller checks is decidable from the descriptors, which is what
+`Touches` is for, so discharging a block is checking ranges rather than reasoning
+about the store.
+
+The hypothesis is each step's *declared* range rather than the bytes it actually
+wrote. That is deliberate: a caller knows ranges from descriptors and does not
+know how much data each store carried, and `applyAccess` only ever writes inside
+the declared range, so the stronger hypothesis would buy nothing and cost every
+caller an obligation.
+
+`Tests/Memory/StraightLineBlock.lean` is the check, and it is symbolic rather
+than concrete on purpose. A fixture that fixed the allocation, the data, and the
+offsets and closed everything by `decide` would prove the arithmetic and say
+nothing about the lemma set — the kernel would be doing the work the theorems are
+supposed to do. There the state is universally quantified, the data arbitrary,
+and every proof a single application of a named exported theorem. One local
+declaration exists and is a wrapper, not content.
+
+`Tests/Memory/Spike1Block.lean` runs that discharge on the Spike 1 descriptors.
+It runs `runBlock`, the memory-level executor, and not `Op.step`; the framing
+carries because both write through `MemoryState.commit`, but the sequence executed
+is not literally the one the machine executes. The instructions are: `mov transferred, 0`, then the two accesses inside
+`call [rip + __imp_WriteFile]`, then `mov eax, transferred`. The claim the
+spike's correctness argument turns on is that the reload observes what the store
+wrote, and the `call` in between reads a different allocation and writes a part of
+this one thirty-two bytes below.
+
+The split between what is decided and what is proved is the point. The side
+conditions — allocation live, epoch and space match, range in bounds, permission
+allows the write, no intervening declared range covers the slot — are `decide`d,
+because those are exactly what a front end computes and deciding them is their
+intended use. The framing is not decided: it is one application of
+`byteAt?_write_survives_block`. A proof that closed the whole thing by `decide`
+would compute the answer from that particular state and would still compile if
+every framing theorem were deleted.
+
+The file also carries the control the claim needs: the same reload *is* refused
+as an `uninitializedRead` against the state before the store, so
+`the_reload_is_not_refused` is evidence the initialization check ran rather than
+evidence it was skipped.
+
+One lemma fell out that is worth naming: `applyAccess_state_indep` and
+`runBlock_state_indep` say what memory looks like afterwards does not depend on
+what an indeterminate read would have observed. The `indeterminate` answer stays
+in the observation and never reaches memory, so a profile choosing differently
+changes what a program sees and never what it leaves behind.
+
+### 4.2 What M2 still owes
+
+- **The `ByteSeq` → `ByteArray := Vec Byte` migration is now due, and it is not one
+  edit.** §3.6 lists `ByteSeq` as provisional "until `Std.Logical` lands `Vec`", and the
+  merge of main at `b3f5470` landed it, so the condition is met.
+  `Grass/Std/Logical/Byte.lean` says the migration is "one edit in one place rather than
+  a change to every field that holds bytes"; that sentence was written when there was no
+  `Vec` to import and it is false in two ways review measured rather than estimated.
+
+  The abbrev cannot stay where it is: `Vec.lean` imports `Byte.lean`, so `Byte.lean`
+  cannot name `Vec`. It moves, and every consumer gains an import. And the fields are
+  the easy half — `Vec` supplies `length`, `take`, `GetElem?`, `Append`, `DecidableEq`
+  and `Repr`, so the declarations survive. What does not survive is the proof layer,
+  which discharges goals with `List.getElem?_eq_none`, `List.getElem?_eq_some_iff`,
+  `List.getElem?_eq_getElem` and `List.length_take` directly rather than through any
+  interface: twenty-five errors, in `ByteStore.lean` and `Event.lean`, with the build
+  never reaching `Apply.lean`, `State.lean`, `Grass/Op/Step.lean` or any test. One is a
+  *statement* rather than a proof — `observedBytes` builds its result as
+  `(List.range n).map`, a `List` constructor whose counterpart is `Vec.ofFn`.
+
+  The naming convention held: no module under this layer writes `List Byte`. It was
+  necessary and not sufficient, because the proofs depend on `ByteSeq`'s identity rather
+  than on a sequence interface. Reported to the owner as `c-mem:51`, correcting an
+  estimate `c-mem:50` gave them before it was measured.
+
+Recorded rather than implied, and expanded twice after adversarial review. The
+first round found three of these stated as done; the second found three more, and
+one outright defect that had already merged — see §3.11's denial row.
+
+- **Trace agreement between `runBlock` and `step`.** They agree on memory, through
+  `MemoryState.commit`. Nothing proves they agree on the recorded trace, so a
+  straight-line argument over `runBlock` is an argument about memory and not about
+  what a program's event log says.
+- **`MemoryProfile.vocabularyVersion` is never checked.** A profile states which
+  vocabulary version it assumes and nothing compares that to what the transition
+  implements. There is one version and no migration theorems, so there is nothing
+  yet to compare against; this becomes real when a second version exists.
+- **`AccessDescriptor.observations` is never read.** §3.13 recorded that
+  `ObservationLabel` has no registry, which understates it: the field has no reader
+  at all. §7.5's device completion and fence signals are what would consume it, and
+  those are causal edges in the event graph, so the consumer is plausibly M8 — but
+  no milestone in this plan claims it, which is why it stays here rather than being
+  reclassified.
+
+  `AccessIntent.isDevice` was in this list and is now **removed from the
+  vocabulary** rather than owed. Its docstring read "performed by, or targets, a
+  device rather than the CPU", which is two different facts in one `Bool` with
+  neither recoverable from it, and both are already carried by mechanisms that
+  *are* consulted: who performs an access is `ExecutionContext.kind`, which §7.1
+  requires every event to carry and which `step` checks against
+  `MachineState.contexts`; what it targets is its `AddressSpaceId`, which
+  `denialOf` checks and which §7.5 makes non-interchangeable precisely so the
+  identity carries the fact. A third, unconsulted source for a fact two consulted
+  ones already carry is the defect shape this branch has found eight times.
+- ~~**`InitializationDemand.permitsUninitialized`'s justification names nothing**~~
+  Closed together with `FaultVisibility.transactional`'s and
+  `FaultVisibility.profileSpecific`'s. `AdmittedVocabulary` carries
+  `initializationJustifications`, `atomicityJustifications` and
+  `faultVisibilityRules`; `Admits` requires the first and `step` requires the other
+  two (`onFaultRuleNotRegistered`). Three registries and not one, because a rule
+  permitting an uninitialized read is not a proof that a two-substep store is
+  all-or-nothing, and a shared namespace would let either name satisfy the other.
+
+  Registration is not discharge. A registered name says the profile owns the claim;
+  §10's package is where it is proved, and that remains M10's.
+- ~~**The operation-level `faults` facet is consumed by nothing.**~~ Closed.
+  `OperationFacets.supplied` read only `isSome`, so an operation declaring
+  `faults = some []` closed the facet and then page-faulted through a substep that
+  admitted one. `step` now cross-checks it in both directions before running
+  anything: every class a substep may raise must appear in the operation's list
+  (`operationFaultsIncomplete`), and every class the operation names must be
+  recognized by the vocabulary (`operationFaultNotRecognized`) — the third place a
+  fault class could be named and the only one no registry saw. Statically, on every
+  step rather than only on a faulting one, because two declarations that disagree
+  are refused rather than reconciled ([FOUNDATION.md](FOUNDATION.md) law 8).
+
+  An **absent** facet is still not a declaration of no faults; whether it may be
+  absent is `Closes`'s question. Eighteen of `Tests/Op/FakeIsa.lean`'s own
+  operations were inconsistent when the check went in, which is the measure of how
+  little a declaration nobody reads constrains.
+- **Ordering modes are checked against a registry; the refinement theorem is still
+  owed.** `AdmittedVocabulary` now carries `orderingModes` and `orderingScopes`, and
+  `Admits` requires a `profileSpecific` mode or scope to be a name the profile
+  registered (`AdmitsOrder`, `AdmitsScope`, and the two `not_admits_of_unregistered_*`
+  theorems). `MemoryOrder.IsPortable` gained its consumer in
+  `admitsOrder_of_isPortable`: a portable mode needs no entry, since
+  [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.1 fixes those five. Before this, an access
+  declaring `profileSpecific` with any name at all stepped and minted an event
+  carrying it.
+
+  What remains owed is §7.1's actual demand: an ordering request may be used "only
+  where it has a proved target meaning", and mapping a portable order onto an ISA or
+  API operation requires a refinement theorem. Registration says the profile owns
+  the name. It does not say the name means anything on a target, and nothing here
+  can — the refinement obligation belongs to an ISA owner, and the strength relation
+  it would be proved against is M8's `ConsistencyProfile`.
+- **`SubstepSequence.ClaimsAtomicity` still has no consumer.** The justification
+  *names* are registered now (above), but `RequiresJustification` and
+  `ClaimsAtomicity` exist so a §10 package can enumerate outstanding claims and
+  nothing under `Grass/` enumerates them. `StepPolicy.unregisteredOnFaultRule?`
+  consults the registries directly rather than through `RequiresJustification`.
+
+  This sentence continued "so that predicate's only consumer is
+  `unregisteredOnFaultRule?_priorEffectsVisible`, a theorem", and it is false on either
+  reading of "that predicate". `RequiresJustification` is what
+  `SubstepSequence.ClaimsAtomicity` is defined as, in three places in
+  `Grass/Memory/Substep.lean`; and `unregisteredOnFaultRule?` is called by `step`
+  itself. What is true is the sentence before it: nothing enumerates outstanding claims,
+  which is the M10 gap.
+- **§10's proof package is closable by triviality, and its docstring calls that the
+  mechanism.** ~~All eleven of~~ Eight of `RequiredProofPackage`'s fields are bare
+  `Prop`s the profile owner chooses; nothing relates such a field to the profile, to
+  its admitted operations, or to any theorem in the tree. `Holds` is the conjunction of
+  those eight, so a profile supplying `True` eight times closes what remains of §10 and
+  `Holds` is `trivial` —
+
+  This bullet said eleven, and said so after three of them had been given types this
+  layer states. §4.4.1a's table had the right number the whole time, so the document
+  contradicted itself; the entry below records the three that changed. —
+  `Tests/Op/FakeIsa.lean` does exactly that and says so, but the honesty is the
+  fixture's, not the type's. The docstring says a `MemoryProfile` "cannot be
+  constructed with one missing — which is the mechanical content of" §10's gate; what
+  is enforced is that eleven propositions are *named*.
+
+  This is the last gate between a profile and `VerifiedProgram`. Closing it means each
+  field's *statement* mentioning the profile — `accessDescriptorSoundness` quantifying
+  over what the vocabulary admits, and so on — which is corpus work spanning this
+  layer and `VerifiedProgram`'s, and it is a design question rather than a repair.
+  §4.2.1 considered `MemoryProfile.package` and answered a different question: who
+  consumes it. Nobody asked whether its content is constrained.
+- **§8's second conjunct is half-stated.** "`VerifiedProgram` proves the ledger
+  remains empty **and that only spec-allowed fault outcomes occur**."
+  `MachineState.FaultsRecognized` is the half this layer can state — every recorded
+  fault is of a class the profile declared — and it had no predicate at all until
+  review found that `MachineState.faults` was appended to by `runStep` and read by
+  nothing under `Grass/`. What "spec-allowed" means at a given point is
+  `docs/SEMANTICS.md`'s, not this layer's, and no milestone owns the rest.
+- **§7.1's `fence` event kind cannot be minted, and there is no fence intent.**
+  `kindOf` yields only read, write and read-modify-write; `ofOutcome` is the only
+  producer of a `ValidMemoryEvent`; and `AccessIntent` has no fence form, because an
+  intent that neither reads nor writes is refused by `WellFormedIn.notInert`. So
+  §7.4's "release establishes the profile's causal edge" has no event to carry the
+  edge. A theorem stated over `EventKind.fence` was consequently vacuous and is now
+  stated over `touchesMemory`.
+- **`Grass/Core/Generational.lean` is dead, and it makes law 22's second half look
+  discharged.** Nothing imports it; it builds only through the `Grass.+` glob. Every
+  identity in the tree — `AllocId`, `GrantId`, `EpochId`, `EventId`, `ContextId`,
+  `ObligationId` — is a bare `Uid`, never a `Generational`, so the externally-recycled
+  numeric case that module exists for is unaddressed. `ExecutionContext` carrying an
+  OS thread identity is the concrete instance.
+- **`FreshSupply` is fabricable, rewindable and observable through its recursor.**
+  Its docstring claimed the private constructor prevented all three; review compiled
+  all three from outside the module and re-minted an identity a rewound supply had
+  already issued. The docstring is corrected. What actually protects `never_reissued`
+  is its `Reachable` hypothesis, and nothing type-enforces that a caller mints from a
+  forward-reachable supply.
+- **`MemoryState.Exclusive` and `outstandingLoans` are defined on the raw entry
+  list**, which `Grass/Std/Logical/FiniteMap.lean` says is "never the right relation
+  to use" — two `Equiv` maps can differ under a filter. Unexploitable only because
+  `MemoryState.mk` and the `grants` field are private, so the map is only ever built
+  by `insert` and `erase`. That is an invariant holding because no code exercises the
+  case, protected by an unrelated privacy decision in another module with no theorem
+  linking the two.
+- ~~**A duty can be transferred to a context that names no live context**, after which
+  it can never be discharged, since discharge requires the actor to own it.
+  `LedgerDelta.Applicable`'s transfer clause ignores `newOwner` entirely.
+  `Grass/Op/Step.lean` has `MachineState.contexts` and could check it there.~~ Closed
+  the way this entry said to: `Applicable` takes the context set and the transfer
+  clause requires `newOwner ∈ contexts`, which `Grass/Op/Step.lean` supplies from
+  `MachineState.contexts.domain`.
+
+  **What the machine knows is what has executed.** `contexts` is populated by
+  `noteContext`, so a context that has never stepped is not a destination, and handing
+  a duty to a thread before it runs is refused. That is the conservative reading and
+  the cost is real; [FOUNDATION.md](FOUNDATION.md) law 8 prefers it to a permissive
+  default, and a profile needing the other behaviour has to say so. The two fixtures
+  are the pair: a transfer to a context the machine has never seen is refused and the
+  duty survives with its owner unchanged, and the same transfer to the device engine
+  goes through once the engine has stepped.
+- **`Grass/Memory/Shape.lean`'s `writeField` is unbounded by the allocation.** It
+  truncates to the field's size and checks nothing about `base + field.range.start`
+  against the extent, and `MemoryState.write` writes into an unbounded journal. Not
+  reachable today — `writeFields` has one caller, a padding fixture, and it is not
+  the access path — which is the point: it is a facility whose only safety is having
+  no users.
+- **`FacetName` is open nominal in shape and closed in effect.** It carries a `Name`,
+  so a profile may name a facet this layer has never heard of; `OperationFacets` is a
+  closed four-field record and `supplied` can only return those four. A profile-invented
+  name in `requiredFacets` therefore makes `Closes` unsatisfiable and rejects every
+  operation of every family. It fails safe, and §3.5's rationale for open nominal
+  names — extension without editing — is not true of this one.
+- **`MemoryState.Granted` is vacuously true on an empty range**, in every state, since
+  it quantifies over the range's bytes. `not_granted_empty` had to gain a
+  `¬ range.IsEmpty` hypothesis to stay true. Safety rests on
+  `AccessDescriptor.WellFormedIn.rangeNonEmpty` two layers up, and the invariant moved
+  out of the predicate without being written into it.
+- **`AdmittedVocabulary.admissibilityFailures` collapses `WellFormedIn`'s fourteen
+  named conditions into one anonymous `notWellFormedInSpace`.** The list exists so a
+  rejection says which clause failed, and `WellFormedIn` is a structure of named
+  fields so a failing condition names itself; the first clause throws both away. A
+  zero-length read and a write that under-declares its permission produce the
+  identical value.
+- **The layer cannot carry Spike 1, and the reason is not a missing convenience.**
+  `WriteFile` is a second execution context, and `Grass/Op/Step.lean`'s
+  `ConflictsWithHistory` refuses any cross-context access whose event conflicts with
+  an earlier one — `StepPolicy.compatible` defaults to refusing every pair, which the
+  comment there names as "the conservative direction" pending M8's happens-before.
+  Review built a Spike 1 `StepPolicy` and stepped it: the program's
+  `mov transferred, 0` runs clean, and the API agent's write to the slot it was lent
+  is refused and recorded, which [MEMORY_MODEL.md](MEMORY_MODEL.md) §8 requires to be
+  empty for a `VerifiedProgram`.
+
+  The conservative direction is right; what was not recorded is its consequence. M8
+  is scoped to Spike 4 in §5 and described as additive. It is not: the single-context
+  assumption is violated by the *first* acceptance program.
+
+  **Two things block M2's exit criterion, not one, and this entry said one until
+  review modelled the other.** The disjunction it used to offer — "M8's ordering or a
+  profile-supplied `compatible` relation" — is now a singleton: `compatibleIsAtomic`
+  requires a compatible pair to be atomic, and both of Spike 1's accesses are
+  `ordering := .plain`, so no relation a profile can construct exempts them. The
+  escape hatch this paragraph offered was closed by a later entry in this same
+  section, eleven bullets down, and the paragraph was not updated.
+
+  The second blocker is §6's loan. §3.2's table says `lea r9, transferred.addr` is
+  "taking the address of a frame slot for a callee, *and the loan that authorizes
+  it*", and no reference case carried one — `Spike1Policy` declared
+  `grantKinds := ⟨[.loan]⟩` for a loan nothing issued, which is the
+  registry-with-no-consumer shape this document condemns elsewhere. Modelling it
+  changes the milestone graph: `the_reload_is_refused_by_the_loan_rule` is the
+  program's *own* `mov eax, transferred` refused by §3's rule, at a clause `refusalOf`
+  reaches before `ConflictsWithHistory`, with `without_the_lend_the_reload_commits`
+  beside it as the control. What unblocks it is §6's conforming return — M4's — and
+  `the_conforming_return_unblocks_the_reload` steps that through the map door,
+  because no reference case carries a return: `callWithLoan` covers both of the call's
+  accesses in one sequence with no return point.
+
+  So M2's exit criterion waits on M8's happens-before **and** on M4's conforming
+  return. That is a larger claim than the one this entry made, and it is two theorems
+  rather than a design question.
+- ~~**Nothing steps the M1 reference instruction set.**~~ `Tests/Memory/Spike1Policy.lean`
+  does: a `MemoryProfile`, an `AdmittedVocabulary` populated from what the reference
+  descriptors actually name, and a `StepPolicy` adopting the standard loan rule. Every
+  program-thread reference case steps and records what it should — the store, the
+  implicit stack write, the `call`'s two events from one instruction, the three
+  effect-free operations, and the reload refused before the store and admitted after.
+
+  **The criterion is met for the program's instructions and not for Spike 1.** The
+  API agent's write to the slot the program lent it steps, records a violation, and
+  mints no event, because `ConflictsWithHistory` refuses every cross-context conflict
+  — `the_agent_write_is_refused` is that, stepped. So the M8 entry above is not a
+  worry about a future milestone; it is the reason this criterion cannot fully close,
+  stated as a theorem rather than as a claim in this document.
+- ~~**`Tests/Memory/Spike1Block.lean` proves the wrong data flow.**~~ Fixed. The
+  block now applies the API agent's write to the slot it was lent, between the `call`
+  and the reload, and `the_reload_observes_the_agents_count` is Spike 1's actual data
+  flow: `mov eax, transferred` reads the byte count `WriteFile` wrote, not the zero
+  the program stored. `the_agents_count_is_not_the_stored_zero` is the control, and
+  `the_initialization_came_from_the_agent` discharges `movEaxTransferred`'s declared
+  justification with the fact it declares rather than with the program's own store.
+
+  The agent's write appears in a `runBlock` fixture and not in a `Grass.Op.step` one,
+  and that is the M8 problem above rather than a choice: `runBlock` is the
+  `applyAccess`-level executor and asks no cross-context question, so it can say what
+  the program does while the transition cannot yet admit it.
+- ~~**`MEMORY_VOCABULARY.md` does not exist**~~ It does now, and it says what M1's
+  exit criterion asks: declaration by declaration, which shapes are frozen and which
+  are provisional. It reads "frozen" narrowly — a shape a consumer may depend on, not
+  a claim that the declaration is correct — and its closing section says the freeze
+  is stable in practice and not yet frozen by the process §3 describes, because two
+  of §9 risk 1's mandatory fixtures are still absent and the ISA agent's review has
+  therefore not happened.
+- ~~**Two of §9 risk 1's five mandatory pre-freeze fixtures are absent.**~~ Written:
+  `Tests/Memory/RiskOneCases.lean` has `rep movsb` and `lock cmpxchg16b`. Both are
+  expressible, and writing them found two things the frozen shape cannot say, which is
+  what risk 1 asked for.
+
+  **`rep movsb` is a family, not a descriptor.** The count is a runtime register and
+  `AccessDescriptor.range` is fixed, so `substeps` is a function of the operation
+  value — which `HasOperationFacets` already allows. The cost is that a proof about
+  `rep movsb` for all counts is an induction over that family, so the `decide`-based
+  side-condition idiom in `Tests/Memory/Spike1Block.lean` does not carry to it. The
+  zero-count branch is separate: `rangeNonEmpty` refuses an empty access, so a
+  zero-count string operation has no memory effect at all and an ISA model must
+  case-split.
+
+  **`lock cmpxchg16b` cannot say its write is conditional.** §3.13 said it "cannot
+  declare its compare and swap operands", and that turns out to be about *values*,
+  which this layer does not model. What it genuinely cannot express is that a failed
+  comparison writes nothing: `intent.writes` is `true` either way, and `Committed` is
+  about a *faulting* access's prefix, not a write that lawfully did not happen. Safe
+  for authority — the access demands write authority it may not use — and wrong for
+  §7.3's conflict rule, where a non-writing access does not conflict.
+
+  What remains of the criterion is the ISA agent's review of the freeze against this
+  list, which is that agent's and has not happened.
+- **Aliased allocations have independent byte stores.** `MemoryState.SharesBytes`
+  says two allocations name the same bytes, and the whole authority layer believes
+  it: `grantsOver`, `AuthorizedAt` and `MemoryEvent.Conflicts` all key on it. But
+  `MemoryState.write` writes `record.bytes` of the *named* allocation only, so a
+  store through a mapped view leaves the file's bytes unchanged and a read of the
+  file afterwards sees the old value. "Same storage" is an authority-level fiction
+  with no byte-level counterpart, which means `Tests/Op/StandardLoan.lean`'s
+  `a_loan_cannot_be_bypassed_through_an_alias` guards a relation the memory
+  semantics does not implement.
+
+  This is the largest thing on this list, and it is now visible in the test suite
+  as well as here: `Tests/Op/StandardLoan.lean`'s
+  `the_alias_is_not_yet_a_byte_level_fact` stores through the view and reads the old
+  value from the buffer.
+
+  Two shapes close it, and the choice is a design decision rather than a repair:
+
+  1. **`MemoryState.write` propagates across the alias set.** Smallest diff to the
+     data, largest to the proofs — every framing lemma keyed on `id ≠ other` becomes
+     keyed on `¬ SharesBytes id other`, in `Grass/Memory/State.lean`,
+     `Grass/Memory/Apply.lean` and `Grass/Op/Step.lean`. It also needs the offset
+     question below answered, because propagation has to know where to write.
+  2. **Allocations share one byte store by identity.** `AllocationRecord` carries a
+     storage identity rather than a `ByteStore`, and the stores live in a map beside
+     the allocations. Writes are shared because there is one store, `SharesBytes`
+     becomes equality of storage identity — decidable in one comparison instead of a
+     bounded transitive closure — and `SharesAfter`, `AliasHop` and the fuel bound
+     disappear. Larger diff to the data, and it makes the offset question explicit
+     rather than assumed, because a view onto a store at a non-zero offset has to say
+     so somewhere.
+
+  The second is the better shape. Neither should be taken without the design owner,
+  because both change `MemoryState`.
+
+  **`g-design:185` ruled for the second, and c-mem had built the first anyway.** That
+  is the part of this entry worth keeping: the sentence above says the choice belongs
+  to the design owner, and c-mem then spent a working session on
+  `agent/c-mem/alias-offsets` giving `MemoryState.aliases` a signed delta and making
+  `AuthorizedAt` consult it. The ruling arrived while that branch was green. Recording
+  the right answer and then not waiting for it is a failure mode this plan should name
+  rather than quietly correct.
+
+  The offset work is not discarded, and what survives is the part that was never about
+  alias graphs, and all of it is on that branch rather than here: `AuthorizedAt`
+  consulting `Live` rather than only `CurrentEpoch`, the after-teardown authority law
+  `g-construct:76` asked for, and two defects the proofs exposed —
+  a range shift that was not monotone, which would have let a split create authority,
+  and authority surviving a teardown. The delta-carrying edge graph itself goes.
+
+### 4.2.2 The replacement: one backing store, and views onto it
+
+`g-design:185`'s design, restated here as what this layer will build so that a
+reviewer can check the implementation against a statement rather than against an
+event.
+
+**One canonical `ByteStore` per backing storage identity.** `MemoryState` holds
+`backings : FiniteMap StorageId ByteStore` beside its allocations. Bytes live once.
+
+**An `AllocationRecord` becomes a typed view**: a backing `StorageId`, a nonnegative
+backing origin, its local extent, and the address space, source, placement,
+permission, epoch and ownership it already carries. A view is a window onto backing
+bytes, not an owner of them.
+
+**Reads and writes translate.** An allocation-local range becomes one checked span in
+the backing store — `origin + local.start`, bounded by the view's extent. Two views
+alias exactly where their translated spans overlap, which makes byte coherence
+definitional instead of propagated. There is no alias set to walk and no fuel bound.
+
+**Relative shifts are derived, not declared.** The signed offset relating two views is
+the difference of their origins. That is where the offset question this plan spent an
+entry on actually belongs: `MemoryState.aliases` recording a delta was the model
+carrying a fact it could have computed.
+
+**Mapping is a checked transition, not an update.** Allocation creates a fresh backing
+identity and its first view. Mapping creates a further view only through a transition
+that proves the backing relationship and the exact range, carries its mapping and
+unmapping obligations, and preserves the state invariant. Unmapping invalidates a view
+and its provenance without destroying backing bytes another live view still holds;
+tearing down backing storage has its own last-owner rule. `MemoryState.alias`'s
+unconditional prepend is exactly what this replaces.
+
+**Raw constructors stay private.** `MemoryState.mk` already is; the backing and view
+constructors will be, or explicitly test-only, so a fixture cannot fabricate a mapping
+the transitions would refuse.
+
+**Derived, not stored:** `SharesBytes` becomes same-backing plus overlapping translated
+spans; range overlap, `MemoryEvent.Conflicts` and grant coverage all key off backing
+identity and translated spans. `SharesAfter`, `AliasHop`, `AliasLinked`,
+`aliasNeighbours`, `aliasShift?` and the transitive-closure fuel bound all disappear.
+
+**Fixtures the ruling names, and this layer owes.** Negative: a fabricated mapping
+between unrelated storage; a view origin that is inconsistent or out of bounds; a
+stale or unmapped view; destroying backing storage while a live view holds it.
+Positive: a mapped view at a non-zero offset read-after-write **in both directions**,
+and unmapping one view leaving another's bytes intact.
+
+**Open, and asked of g-design rather than assumed.** Where `StorageId` lives —
+`Grass/Core/Identifiers.lean` holds the other identity types and is g-foundation's, so
+c-mem will not put it there unbidden; and whether the scaffolding rule forbids
+`SharesBytes`-consuming transitions outright before the replacement lands, or only
+forbids depending on a *declared* alias.
+- **`MemoryState.aliases` records no offset mapping.** `AuthorizedAt` compares a
+  grant's range to an *offset* with `Covers`, and `grantsOver` compares ranges with
+  `Meets`, across aliased allocations — which assumes aliased allocations agree offset
+  for offset. A view mapped at a non-zero file offset — the ordinary `MapViewOfFile`
+  case — does not.
+
+  This entry named `AuthorizedBy`, which nothing declares, and gave it operations the
+  real predicate does not perform. It is the record of this layer's largest open gap,
+  so a reader chasing it was sent to a name that does not exist.
+  `Tools/CitationAudit.py` cannot see a bare token with no dot and no underscore, and
+  its self-test asserts that blind spot as permanent — which is right as a limit and
+  is why three of this round's findings were prose no gate could reach.
+- ~~**`AccessDescriptor.WellFormedIn.rangeInProvenance` is self-certifying.**~~ Half
+  closed. `denialOf` compares `provenance.rootExtent` to the allocation record's
+  `extent` and records `provenanceExtentMismatch` when they differ, so a descriptor
+  no longer supplies the bound it is checked against. It remains a recorded violation
+  rather than a rejection, which is `denialOf`'s shape for every access-time failure.
+
+  Provenance `path` step extents are still unchecked: nothing requires a `field` step
+  at `⟨2048, 64⟩` to correspond to anything, and `Provenance.Nested` relates the
+  steps to each other and to `rootExtent` only.
+- **`ByteRange.Contains` and `ByteRange.Meets` disagree about one past the end.**
+  `Contains` places `empty r.stop` inside `r`, which is what a bounds check wants;
+  `Meets` places it outside, which is what an authority check wants. Both cite §5.1.
+  `AccessDescriptor.WellFormedIn.rangeNonEmpty` makes the position unreachable from
+  an access and therefore from `step`, but `denialOf` still returns `none` for a
+  zero-size descriptor, so a consumer on the `applyAccess` path — which
+  `Grass/Memory/Apply.lean` contemplates — still meets it. The predicates are not
+  reconciled; the access gate routes around them.
+- **No policy in the tree requires the `.ordering` facet**, so omitting it skips the
+  agreement check entirely. `Tests/Op/FakeIsa.lean`'s policy requires
+  `[.memoryEffects, .faults, .restartability]`. Whether a facet is required is
+  `OperationFacets.Closes`'s question and a profile's to answer, but the pressure the
+  strictness creates is toward not declaring, and nothing records which facets a
+  profile *should* require.
+- **`OperationFacets.ordering` is single-valued.** `step` now requires it to equal
+  every access substep's ordering, which is the only relation this layer can state:
+  `Grass/Memory/Ordering.lean` deliberately defines no strength order, because the
+  one that matters is M8's. An operation whose substeps genuinely differ in ordering
+  — a store with an implicit fence — cannot declare that and is refused. The facet
+  needs to become per-substep, or the check needs M8's relation.
+- **`InitializationDemand` is per-access.** §4 asks for initialization "tracked at
+  the granularity required to justify every read", and a struct copy with three
+  padding bytes must declare `permitsUninitialized` for the whole range, turning the
+  check off for every byte. The registry added for the justification name gates the
+  name and not the granularity, and §4 does not describe the escape at all.
+- **`AdmittedVocabulary.faultVisibilityRules` holds names, and the transition needs
+  an answer.** `SubstepSequence.visibleEffects?` returns `none` for
+  `FaultVisibility.profileSpecific` and `step` rejects, so registering a rule name
+  unblocks only the path on which the rule is never consulted — a sequence that does
+  not fault. `Tests/Memory/Spike1Reference.lean`'s `splitPageStore` is the corpus's
+  own example and an ordinary x86-64 event. The registry should map a name to a
+  survivor rule, not to nothing; the danger of leaving it is that someone later makes
+  `visibleEffects?` consult it, find a bare name, and fall back to
+  `priorEffectsVisible`, which `Grass/Memory/Substep.lean`'s module comment calls the
+  worst available behavior.
+- ~~**`SubstepSequence.ClaimsAtomicity` requires more than one substep.**~~ Closed;
+  the conjunct is gone. A single-access sequence declaring `transactional` says its
+  commit is all-or-nothing, which for a page-crossing store is a substantive claim
+  and false by default on x86-64, and calling it claimless meant a §10 package
+  enumerating outstanding claims would not have seen it while `step` required a
+  registered justification for it regardless.
+- **`WritableByAnother` is the only rights-sensitive predicate in `authorityOf`.** A
+  grant permitting `execute` but not `write` reads as read-only, and `AuthorityState`
+  has no state for execute-only sharing. Nothing exploits it today.
+- **`Restartability` is declared and never read.** A profile can require the facet
+  and a descriptor carries a value, but nothing in the transition consults it, so
+  [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.4's retry rules have no mechanism here.
+- **`runStep_records_the_fault`'s `hreached` has no abstract discharge.** A caller
+  can close it by `decide` on a concrete fixture. There is no lemma taking "no
+  survivor is refused" to it, because that has to thread state through the
+  `runAccesses` recursion. The theorem is not vacuous and is currently only usable
+  concretely.
+- **Byte-store compaction is partial.** `ByteStore.compact` drops runs a newer run
+  covers everywhere, which is the degenerate case, and `cellAt?_compact` proves it
+  answers every offset identically — so the "a compacting store is a drop-in"
+  argument the module was designed around is now discharged rather than promised.
+  It does not merge adjacent runs or clip partial overlaps, which needs splitting a
+  run against a range. Reads are bounded by distinct live regions plus
+  unnormalised overlaps rather than by write count. Nothing calls it automatically,
+  because calling it per write restores the cost it avoids; when to call it belongs
+  to whoever owns the allocation lifecycle.
+- **`ByteStore` structural equality observes the journal.** Every exported
+  *theorem* is representation-independent, but the derived `DecidableEq` is not:
+  two pointwise-identical stores built by different write sequences are provably
+  distinct. A compacting store is a drop-in for the theorems and not for `=`.
+  Nothing in the layer's reasoning depends on that equality — the framing and
+  commutation laws are over `AgreesOn` and `cellAt?` precisely because it does not
+  — but it is a limit rather than an oversight, and compaction will change it.
+
+
+One more defect this milestone found in already-merged code, recorded because a
+closure property depended on it. `FaultVisibility.transactional` declares "no step
+is visible unless all are". `visibleEffects?` returned `[]` for it, which answers
+for the substeps *before* the failure — and nothing answered for the faulting
+substep's own partial write, so `runStep` committed it. A transactional sequence
+therefore discarded its completed substeps and kept the faulting one's prefix,
+which is the reverse of what it declares.
+`Grass/Memory/Substep.lean`'s `faultingEffectVisible` is the missing question, and
+`Tests/Op/FakeIsa.lean`'s `transactional_exposes_nothing` is the regression. The
+fault is still recorded: nothing being visible is a claim about committed effects,
+not about whether the machine faulted.
+
+A fourth adversarial round, aimed at the fault model because both live defects
+so far were there, found four more and the same shape twice again — a property
+enforced for the substeps before a failure with the failing one exempt, or an
+input the transition took on trust.
+
+- **The reported fault class was checked against nothing.** `FaultPlan` carried a
+  `FaultClassId` that no registry saw: not `Substep.faults`, not
+  `AccessDescriptor.admittedFaults`, not `AdmittedVocabulary.faultClasses`. An
+  undeclared class was recorded into `RaisedFault` and into a `ValidMemoryEvent`'s
+  status, since `MemoryEvent.WellFormed` constrains counts and lengths but not
+  fault identity. This is `AuthorityProvider.violationClass`'s hole in a second
+  place, in a module claiming every registry is consulted.
+  `StepRejection.faultClassNotDeclared` closes it.
+- **Every completed load and store reported `partialCommit`.**
+  `AccessOutcome.status` demanded reads *and* writes both cover the range,
+  unconditionally on intent, and a write-only access has `readCount = 0` by
+  construction. So `AccessStatus.completed` was reachable only for a full-width
+  read-modify-write, and `IsComplete` — the predicate written to answer "did the
+  whole access take effect" — was false for every load and store. The test is
+  intent-relative now.
+- **A faulting read-modify-write could not keep its read without its write.**
+  `Committed` counts reads and writes separately and this document's own module
+  motivates that with an `xadd` that observed its operand and faulted before
+  storing. The transition truncated both lists by one shared count, so that
+  outcome was the one thing the fault path could not express, and the fixture
+  asserting the read survived never checked the write. `FaultPlan.before` carries
+  both counts now.
+- **A faulted access applied its obligation ledger effect in full**, at any commit
+  count including zero: a `reserve` that faulted having written nothing created its
+  duty, and a `release` that faulted having written nothing discharged one. The
+  second is a leak. The asymmetry review named is the sharp part: the alias check
+  treats a zero-byte faulted access as having touched nothing, while the ledger
+  treated the same access as fully performed, and both cannot be right. See §4.3.
+
+A fifth round, aimed at the fourth round's own fixes because they were new code
+written fast. Nine findings; three were live defects and two of those are on main.
+
+- **An access could declare a context other than the one running it.**
+  `MemoryEvent.ofOutcome` took the event's identity from
+  `AccessDescriptor.context` and its kind from `step`'s argument, and nothing
+  compared them. `ConflictsWithHistory` keys on that identity, so
+  [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.3's race rule was defeated by one field: a
+  device write naming the program thread aliased the thread's bytes and committed,
+  and the event it minted paired thread identity with engine kind, which §7.1
+  forbids. `StepRejection.contextMismatch` closes it.
+- **A `.compute` substep's fault classes were checked against no registry.** The
+  round-four fix closed the access case; a compute substep has no descriptor, so
+  `MemoryProfile.Admits` never saw it and the only thing checked about one was that
+  its fault list is non-empty. `faultClassNotDeclared` was validating a plan
+  against a list that was itself unvalidated — and `.compute` is the constructor
+  the `div` case exists for. `StepRejection.computeFaultNotRecognized` is the
+  sibling clause.
+- **The read/write separation stopped at `Committed`.** `AccessStatus` still
+  carried one number, the `max`, so the very outcome round four added — an `xadd`
+  that read eight bytes and wrote none — recorded `faulted 8`, `committedBytes`
+  answered eight for an access that wrote nothing, and `committedRange` mapped it
+  onto the whole range. `AccessStatus` carries both counts now and
+  `committedWriteRange` is named for what it means.
+- `FaultPlan`'s commit counts are bounded by `StepRejection.faultCommitOutOfRange`
+  rather than saturating silently, which is what `faultPointOutOfRange` did for the
+  index.
+- `faultWithUndeclaredLedgerEffect` fired on `transactional` sequences, where
+  `faultingEffectVisible` proves the faulting access is never performed and the
+  effect cannot apply. Now gated on it.
+
+A sixth round, on the fifth round's repairs and on a systematic field census.
+Four more live defects, two of them on main and two in the previous round's fixes.
+
+- **`MemoryState.SharesBytes` compared a single alias hop.**
+  [MEMORY_MODEL.md](MEMORY_MODEL.md) §7.5 makes mapping and sharing typed
+  transitions and those compose, so a file aliased to a view and that view to a
+  second view means all three name the same bytes. The two ends of such a chain
+  were declared non-conflicting and a cross-context write to the far end committed
+  — the same defect `SharesBytes` was introduced to fix, one hop out. It is the
+  bounded transitive closure now.
+- **`Obligation.owner` was consulted by nothing**, so any context could discharge
+  any duty. [OBLIGATIONS.md](OBLIGATIONS.md) opens by making an obligation a duty
+  of its holder. `LedgerDelta.Applicable` takes the acting context now and checks
+  ownership on every delta kind, including `create`, since a context may not
+  fabricate a duty in another's name either.
+- **The read/write split stopped at `AccessStatus.completed`**, which still
+  answered "the whole range" for both counts — and the intent-relative
+  completeness test means every ordinary load and store lands there. A completed
+  load claimed to have written its whole range. `completed` carries its counts now.
+- **`MemoryEvent.WellFormed` never related `status` to the counts**, so an event
+  saying it observed nothing while `readCommitted` said eight discharged every
+  clause and wrapped in a `ValidMemoryEvent`. Two records of one fact with nothing
+  tying them, inside the structure that exists to prevent that.
+- **The context *kind* was still unchecked** after `contextMismatch` closed the
+  identity half: one `ContextId` could be a thread in one step and a device engine
+  in the next. `MachineState.contexts` is the single source of truth now.
+- `faultCommitOutOfRange` bounded both counts by the range, so an impossible read
+  count on a write-only access was approximated to zero rather than refused, while
+  the same impossible claim on a compute substep was refused. The bound is
+  intent-relative now.
+
+### 4.2.1 A gate for the defect class, because review was not converging
+
+Six adversarial rounds found eight defects that had already passed a merge review.
+All but one had the same shape — the model carries a fact and nothing consults it
+— and rounds four, five and six each found defects in the immediately preceding
+round's repairs. A process that finds a fixed fraction of a population per pass,
+and adds to the population with each repair, is not converging, and running a
+seventh round would have been the same bet again.
+
+A field whose name is never projected is a *lexical* property, so
+`Tools/ConsultedAudit.py` checks that directly and CI runs it, with an allowlist
+where each entry states why a field is carried anyway. An unlisted one fails the
+build, so the judgement is made once rather than rediscovered.
+
+**It is a net, not a proof, and the difference matters** because this section used
+to present it as closing the class. It keys on the field name rather than the
+declaring structure, so two structures sharing a field name are indistinguishable
+without elaborating Lean. A clean run means no declared field name is entirely
+unprojected across `Grass/` and `Tests/` — not that every field is meaningfully
+consumed. Review corrected the overstatement, and also two false negatives it did
+have: comments and string literals are stripped before scanning, and a
+construction `name := value` no longer counts as a read. `--self-test` seeds each
+of those classes and fails if the scanner stops discriminating; it also asserts
+the same-named-field blind spot is still a blind spot, so that cannot quietly
+become a silent pass mistaken for coverage.
+
+It reported six fields six review rounds had not. **On inspection only two were
+gaps**, and the first version of this section called all six defects — the same
+overstatement the tool itself was corrected for, made in the paragraph announcing
+the tool. What the audit finds is a field nothing projects; deciding whether that
+is a defect still takes reading the corpus, and I skipped that step.
+
+Checked one at a time: `AddressSpace.memoryType` and `coherence` are **not** gaps,
+because §7.1 requires the *event* to carry address space and memory type and
+`MemoryEvent.space` does; the rules that would consume them are §7.2's
+`ConsistencyProfile`, which is M8's. `MemoryProfile.package` is not a gap either:
+§10 names `VerifiedProgram` as what the package gates, and that composition is
+outside this layer. `ProtocolAuthority.issuer` is already recorded in its own
+docstring as M10 profile-closure work. `TerminalOutcome`'s fields await the
+terminal-accounting mechanism, which is a later milestone.
+
+That leaves `vocabularyVersion`, `AccessDescriptor.observations` and
+`Restartability` — all three above rather than below — which have a corpus
+requirement, no consumer, and no milestone that owns them.
+
+This list named a fourth, `AccessIntent.isDevice`, which **does not exist**: §4.2 records
+seven hundred lines above that it was "removed from the vocabulary rather than owed", and
+`Grass/Memory/Rights.lean` says "There is no `isDevice`" in as many words. An inventory
+of unread fields that lists a field with nothing to read is the same class as the counts
+below it, one step worse: the number was not merely stale, the item was gone.
+
+Limits, stated rather than discovered later. It cannot see a field consumed by
+pattern matching rather than projection, so those are allowlisted structurally and
+it under-reports. It says nothing about whether a field *should* be read — that is
+what the allowlist reasons are for. And it was itself wrong on first run: an early
+version treated a field docstring as the end of a structure, saw almost no fields,
+and reported a clean tree. Probing it against a field already known to have no
+reader is what caught that, which is why the self-test exists.
+
+### 4.3 A semantic decision this milestone made and does not own
+
+Two questions, both forced by fixing defects and neither answerable from the
+corpus.
+
+**First: when a denial stops an operation before the substep the machine reported
+a fault at, is that fault recorded?**
+
+M2 answers *no*, on the reasoning that a denied substep did not complete, the
+model has declined to follow the execution past it, and attaching a fact about
+substep *n* to a state frozen at substep *k < n* would be inventing history. The
+opposite reading is arguable and was argued in review: a `RaisedFault` is
+diagnostic rather than an effect, keeping it commits nothing, and `FaultPlan` is
+documented as a fact the stepper is *given* rather than one it predicts, so
+discarding it is the model overruling its own input.
+
+**Second: what becomes of an obligation ledger effect when the access carrying it
+faults?** [OBLIGATIONS.md](OBLIGATIONS.md) §1 makes cancellation and fault
+behaviour part of an obligation's form and §2 requires a transition to state how
+it transforms the ledger; neither says what a partial or zero-byte faulted access
+does. The conservative answer differs by delta kind, which is why it cannot be
+guessed: applying a `create` is conservative, because a spurious duty causes a
+verification failure rather than an unsound accept, while applying a `discharge`
+is a leak. M2 refuses instead — `StepRejection.faultWithUndeclaredLedgerEffect` —
+because refusing is law 8's answer to a rule nobody wrote. That is strict: it
+rejects operations a ruling might well admit.
+
+This plan is tier four and cannot settle either. Both behaviours are implemented
+and tested, §3.11 is stated to match, and both are provisional until
+[MEMORY_MODEL.md](MEMORY_MODEL.md) §1, [OBLIGATIONS.md](OBLIGATIONS.md), or
+[DECISIONS.md](DECISIONS.md) rules. Raised with the design owner rather than left
+in code comments, which is where the first one sat when review found it.
+
 Exit criteria: the M1 reference instruction set steps end to end over a
 hand-built `MemState`; the framing lemma set is sufficient to discharge a
 straight-line Spike 1 block without a bespoke local lemma; and the bridge lemma
 above is proved.
 
 Unblocks: the `verify_assembly` owner, and Spike 1 block certificates.
+
+## 4.4 M3 begun: loans
+
+`Grass/Memory/Loan.lean` implements the part of [MEMORY_MODEL.md](MEMORY_MODEL.md)
+§3 that every later authority law rests on, and `Tests/Memory/Loans.lean` checks
+it.
+
+`AuthorityState` names **three and a half** of the five canonical states §3 lists.
+Closing it as a sum is this module's decision and **not** §3's requirement: §3 says
+the canonical states "include" these, which is an open enumeration, and an earlier
+version of the code and of this paragraph claimed otherwise.
+
+The closure is also **not** the safe direction, which the next sentence here used to
+claim while citing [FOUNDATION.md](FOUNDATION.md) law 8 for it. `authorityOf` is a
+total function into these four: a situation they do not describe is not rejected, it
+is classified as the nearest one, and law 8 demands rejection. The closure is kept
+because an open sum with a permissive default is worse and because extending means
+editing the module in the open with the laws re-proved — not because it fails
+loudly, which it does not. A new *kind* of authority remains a `GrantKind`, which is
+open nominal so that is the usual road, and `grantsOver` sees every kind so that
+road does not lead past the freeze.
+
+The half is §3's fifth entry, "transferred **or** unavailable authority":
+`unavailable` derives from liveness and epoch and covers the second half only.
+Nothing represents a transfer, and §4.4.1 records it. The count was "four of five"
+for one round, which read as coverage of a bullet half-delivered.
+
+§3's third entry, atomic shared access under an ordering profile, is **not** named.
+There was an `atomicShared` constructor and a theorem putting §3's "atomics do not
+grant ordinary non-atomic access" beyond it, and nothing built the constructor:
+`AuthorityGrant` carries `kind`, `holder`, `provenance`, `range` and `rights`, and
+no ordering. The theorem held of an unreachable case, which reads as coverage
+without being any. Both are deleted and §4.4.1 records the law as owed, with where
+it could bite today — the earlier claim that "the rule has nothing to constrain" was
+false, since `AccessIntent.isAtomic` and `OrderingDemand.atomicity` exist and
+`WellFormedIn.atomicityAgrees` ties them.
+
+Every remaining constructor is built by `authorityOf`: `sharedImmutable` and
+`unavailable` were built by nothing, so every theorem about them was vacuous.
+`authorityOf` derives all four from state that already exists — `unavailable` from
+liveness and epoch, `exclusive` and `frozen` from the grant map, and
+`sharedImmutable` from the rights on the outstanding grants, since §7.3 makes a
+conflict require a writer and §3 lists shared immutable access separately. Nothing
+*enforces* that every constructor stays reachable; four fixtures exhibit it and a
+future author must extend them, which §4.4.1 records.
+
+`PermitsIntent` is written out per constructor with no wildcard, so a fifth
+constructor fails to compile there. `permitsOrdinaryWrite_iff_exclusive` does
+**not** break under one — a wildcard would send the new case to `False` and the
+equivalence would still hold — and this paragraph claimed it did.
+
+Three laws are proved. A return consumes that exact identity, which
+`returning_one_of_two_leaves_the_other` earns by returning one of two loans
+identical in range, rights and holder — a map keyed by shape fails there and
+nothing else in the fixture would notice. Exclusivity is the emptiness of the
+relevant map, defined as that rather than checked against a stored number. And
+counts are derived: `outstandingLoans` computes from the map and no field records
+one, which is the discipline that removed `AllocationRecord.initialized` and
+`AccessIntent.isDevice` after each turned out to be a second source of truth.
+
+`authorityOf` is the freeze: while another context's write grant is outstanding the
+lender holds `AuthorityState.frozen`, and
+`not_permitsOrdinaryWrite_of_writableByAnother` is the borrow discipline that
+follows. It too is a function of the state, so lending freezes, returning thaws,
+freeing revokes and an epoch bump revokes, without a field to keep in step, and
+`lending_the_head_leaves_the_tail_writable` shows the freeze is per-fragment rather
+than per-allocation.
+
+It takes the context, and an earlier version did not — a context that had lent to
+itself was reported frozen while the loan provider let its write
+through, which is the two halves of the model contradicting each other.
+
+It reads **every kind of grant**, not only loans. §7.3's conflict is about
+authority, and filtering to `GrantKind.loan` meant a `.frame` grant — or one of a
+kind a profile invented, which `GrantKind` is open nominal to allow — carried write
+authority that froze nobody and conflicted with nothing (`a_frame_grant_freezes`).
+`loansOver` is that list narrowed to loans, for §3's laws, which really are about
+loans; `a_frame_grant_is_not_a_loan` is the two questions kept apart.
+
+It reads the **epoch**. §2 says address reuse never revives old pointers, and
+`Live` compared only the `live` flag, so a provenance minted before a
+free-and-reallocate was reported exclusive over the storage that replaced it, with
+an ordinary write permitted (`a_stale_provenance_is_unavailable`). The same
+blindness ran the other way: a grant issued under a defunct epoch froze the live one
+permanently. Both are now unreachable, because `MemoryState.allocate?` refuses the
+reallocation that would produce the state — `reallocating_under_a_loan_is_refused`.
+
+`Exclusive` is **not** authority, and `authorityOf` used to read it as though it
+were: over the empty state, which has an empty loan map and no allocations, it
+reported exclusive ownership to whoever asked. `AllocationRecord.live`'s own
+docstring says a dead allocation authorizes nothing whatever provenance is
+presented, so `Live` is now a conjunct of the exclusive case and
+`a_freed_allocation_is_exclusive_and_unavailable` holds both halves side by side.
+`permitsOrdinaryWrite_of_unheld` takes `¬ HeldByAnother` and not `Exclusive`, for
+the same reason.
+
+`loansOver` matches on `ByteRange.Meets`, not on `¬ Disjoint`. An empty range covers
+no offset, so every range is `Disjoint` from one — and asking what authority the
+owner held over offset 4 while `[0, 8)` was lent for writing returned exclusive,
+with an ordinary write permitted. §5.1 makes one-past-the-end and invalidated
+offsets meaningful as positions, so a query about a position has to be answered
+about one. `Meets` is asymmetric on purpose: the grant's range is the extent, the
+query is the position, so a loan over no bytes still freezes nothing
+(`a_grant_of_no_bytes_is_refused` (a zero-byte grant is refused at issue now, rather than issued and freezing nothing)) and one past the end of a loan is not frozen
+(`one_past_the_end_of_a_loan_is_not_frozen`).
+
+`MemoryState.issue?` refuses to *issue* conflicting authority — a reissued identity,
+or a grant conflicting with a live one — and `LoanConflicts` is §7.3's test at issue
+time. §7.3's rule is between *distinct* contexts, and a missing holder clause made a
+second grant to the same holder a conflict, which is exactly the "declare a loan to
+yourself" idiom the loan provider endorsed; the clause is there now
+(`a_second_loan_to_the_same_holder_is_accepted`).
+
+Issuing is not the guarantee, and a comment here said it was. `MemoryState.grant`
+installs a grant with no checks at all, and two grants that do not conflict when
+issued become conflicting when an alias is declared afterwards — §7.5 makes that a
+real transition and nothing re-examines what was already issued. Review reached both
+states and watched the write commit with no violation recorded.
+
+The loan provider *was* the rule as a provider a profile adopts rather
+than reinvents, and it has two halves. Lent bytes are reachable only through a loan
+— a holder test over the loan map. **And** the state `authorityOf` reports must
+permit the intent, which is the half that reads the map it is handed rather than
+trusting how the map was built, and which is what refuses both states above
+(`the_conflicting_pair_cannot_be_issued`,
+`an_alias_declared_after_issue_is_refused`).
+
+The two halves are not the same test and neither implies the other. Refusal is
+strictly wider than `frozen`: a context holding no covering loan is refused a read
+of bytes another context holds only a read loan over, while `authorityOf` calls that
+`sharedImmutable` and permits reads (`a_self_loan_bounds_its_holder`). An
+earlier version of this section cited `loan_refuses_only_the_frozen` as the bridge
+between the two; that theorem's statement mentioned neither `authorityOf` nor
+`frozen`, its proof was a projection of the provider's own definition, and the
+"exactly" was false in both directions. Three independent reviewers found it.
+`loan_refuses_the_frozen` was the direction that carries the guarantee, stated — and
+it is deleted with the provider it was about. The guarantee is `refusalOf`'s own
+`authorityOf` clause now, and `refusalOf_refuses_the_unauthorized` is the theorem,
+quantified over the policy.
+
+`returnLoan?` refuses a return by a context that does not hold the loan. §3 says
+which loan a return consumes, not who may return it, and the unchecked version let
+any context return any loan and then write the thawed bytes — an authority check
+defeated by calling the function that removes it
+(`a_stranger_cannot_return_the_loan`).
+`Tests/Op/StandardLoan.lean` drives it through `step`, which is the part that
+matters — a rule proved about a map the transition does not consult is the defect
+this branch has found repeatedly, so the fixture checks refusal and restoration
+end to end rather than at the map.
+
+Three of its cases exist because the obvious provider gets them wrong. A *read* of
+lent bytes is refused, not only a write, since "lending stops the owner writing" is
+the intuitive half and a provider enforcing only that would pass everything else.
+Lending the tail leaves the head reachable, so the freeze is per-fragment rather
+than per-allocation — without it, lending one field of a struct would lock the
+struct. And an unlent store commits, so the refusals are not a provider that
+refuses everything.
+
+### 4.4.1b What the Spike 1 reference set does not model
+
+Round thirteen audited the fixture against `Spikes/1_Hello_World/Program.lean` and
+`docs/SPIKE_1.md` rather than against this layer, which is the first round to do so.
+The loan it found is above, in §4.2, because it changes the milestone graph. These are
+the rest, and they are fidelity gaps rather than defects in the layer:
+
+- **The frame layout contradicts `docs/SPIKE_1.md`'s own table.** That table
+  (§"the frame") puts the shadow space at `+0`–`32`, the fifth argument at `+32`, the
+  `DWORD bytesWritten` at `+40`, and saved `r14`/`r13`/`r12` at `+48`/`+56`/`+64`. The
+  reference set has the frame at `⟨0, 64⟩`, `transferred` at `⟨32, 4⟩`, saved `r12` at
+  `⟨0, 8⟩` and the return address at `⟨24, 8⟩`. So `transferred` sits on the
+  `OVERLAPPED*` slot, the saved registers sit in the shadow space, and the frame
+  extent cannot contain the table's saved `r12` at all. The file disclaims x86
+  fidelity — "the ISA agent owns that" — but an offset this project's own spike
+  document specifies is not ISA modelling, and `push_and_call_share_storage` is stated
+  over these offsets.
+- **`arg WriteFile.overlapped, 0` has no counterpart.** It is an eight-byte stack
+  write at `+32` that the program performs, and the fixture's `transferred` write
+  lands on its low half. The 32 bytes of callee-writable shadow space are unmodelled
+  too, as is `WriteFile`'s *read* of the payload — the other half of what the API agent
+  does to memory.
+- Re-laying the frame to the table would move `transferred`, the saved registers and
+  the return address, and the return address belongs *below* the frame base rather
+  than inside it, so it cannot descend through the frame step at all. That is a
+  restructuring of the provenance paths and it is owed; the two facts above are
+  recorded rather than fixed for that reason.
+
+What the same round checked and found sound: every one of the fifty-nine declarations
+this section names exists; none of the ten closed claims it verified was vacuous; the
+`.join` actor rule's closure survives mutation; and no item recorded as open is in
+fact closed. The four stale sentences it found all pointed the other way — a closed
+thing described as open, or a count that had moved — and each is corrected in place
+with what it used to say.
+
+- ~~**Twelve of `WellFormedIn`'s fourteen clauses were untested.**~~ Review mutated
+  each clause's proposition to `True`, one at a time, and rebuilt: only
+  `rangeInProvenance` and `permissionSufficient` were caught. The other twelve could
+  be deleted and nothing in the tree would notice — including `notInert` and
+  `rangeNonEmpty`, which carry law-8 docstrings arguing at length for their existence,
+  and `atomicityAgrees`, which a fixture in `Tests/Memory/RiskOneCases.lean` names in
+  its prose while proving something that survives the clause's removal.
+
+  `Tests/Memory/WellFormedClauses.lean` is one baseline proved well formed and
+  fourteen neighbours differing in a single field. The pairing is the point: a
+  refusal alone would not distinguish "this clause caught it" from "some other clause
+  did". Spot-checked by mutation on four clauses; each turns four theorems red.
+
+  This was the weakest coverage in the layer and it was in the declaration-time seal
+  — the thing §1 asks for before any question of what the state permits.
+
+- ~~**`Provenance.source` has no counterpart in the state.**~~ `AllocationRecord`
+  recorded extent, epoch, space, permission, liveness, bytes and base — not where the
+  storage came from. The only consumer of `d.provenance.source` under `Grass/` was
+  `admissibilityFailures`, which checks the *name* against a registry, so the claim
+  was unfalsifiable: §2 requires a profile to distinguish `VirtualAlloc`, heap,
+  `malloc`, stack, mapped file and device memory, and two provenances differing only
+  in `source` were the same storage to every rule in the layer. The same shape as the
+  deleted `AccessIntent.isDevice`, and as `requiredPermission` before
+  `Permission.Grants` existed.
+
+  Closed by `AllocationRecord.source`, its entry in `AllocationRecord.Metadata` —
+  omitting it there would have made `denialOf_congr_of_agrees` false — and
+  `denialOf`'s clause, which reports the new `provenanceSourceMismatch` rather than
+  collapsing into `deadProvenance`. `Tests/Op/FakeIsa.lean`'s `.lyingSource` is the
+  negative, `the_lie_is_only_the_source` shows the descriptor differs from `.store`
+  in exactly that field, and `the_honest_extent_commits` is the positive control.
+  Mutation-verified: neutering the clause to `record.source ≠ record.source` flips
+  the fixture. The profile's `allocationSources` registry lists `.imageMapping`, so
+  the fixture is refused by the state and not by admissibility — the two checks are
+  different questions and this is the one that was missing.
+- ~~**`MemoryState.allocate?`, `allocateAll?` and `tearDown?` were outside the door
+  audit.**~~ §1's chokepoint sentence names bytes before authority — "raw mutation of
+  memory bytes, initialization, permissions, provenance, or race state outside that
+  interface is prohibited" — and `Tools/DoorAudit.py` guarded only the authority half.
+  The three allocation-table mutators are doors now, negative-tested.
+
+  `MemoryState.write` is deliberately not one, and the reason is the tool's documented
+  namespace blindness: `write` is also `ByteStore.write` and `.write` is an
+  `AccessIntent` constructor, so adding it produced twenty-six reports and none of
+  them was a call to the mutator. Guarding it needs elaboration rather than a regex.
+- **`AccessDescriptor.committedWriteRange` has no consumer**, and duplicates
+  `MemoryEvent.committedWriteRange`, which does — through `Conflicts`. Two Lean
+  encodings of one sentence in one layer is the law 11 objection this document raises
+  against `LoanConflicts`, with the dead one here. Kept for now because a proof
+  relating an event's committed range back to its descriptor would want this side of
+  the equation and `Grass/Op/Step.lean` has no such theorem; if M8's graph does not
+  want it, it should go. A fixture claiming "a later proof reads it" is corrected.
+- **The commutation results do not reach `step`.** `applyAccess_comm` and its
+  neighbours are about `applyAccess`; `refusalOf` reads the grant map, the aliases,
+  the obligations, the contexts and the event trace, and has no congruence theorem at
+  all. So §4's exit criterion — "reads and writes to disjoint ranges commute and
+  frame" — is discharged for the block evaluator and, for the transition, only its
+  framing half.
+
+- ~~**`AllocationRecord` records no owner**, so nothing can distinguish a legitimate
+  first loan from a seizure, or a lender's read of its own lent bytes from a
+  stranger's.~~ This was the layer's largest open gap and both halves are closed.
+
+  `AllocationRecord.owners : List ContextId` is what §3's "exclusive read/write
+  ownership" needed to name. A list, because §3's shared states and §7.4 both want
+  storage several contexts own outright; empty is legal and means storage reachable
+  only through grants. Not in `AllocationRecord.Metadata`, deliberately: `denialOf`
+  does not read it and must not, ownership being an authority question, and
+  `denialOf_congr_of_agrees` is that claim proved.
+
+  *Lending.* `MayLend`'s lender disjunct requires the lender to own the storage. It
+  gained a non-emptiness conjunct in the same change, because `List.all` on the empty
+  list is `true` and without it the disjunct readmitted every stranger the unheld
+  disjunct beside it had just refused; both that conjunct and that disjunct have since
+  been deleted, in the order recorded below. Evidence:
+  `Tests/Op/StandardLoan.lean`'s `the_stranger_may_not_seize_unheld_bytes` against
+  `an_owner_may_lend_the_same_unheld_bytes` — one state, two grants differing only in
+  the lender. The first of those replaces a theorem named
+  "the stranger refusal is the lender rule", which asserted the *opposite* -- that the
+  same seizure over unheld bytes was accepted -- and was true.
+
+  *Accessing.* `refusalOf`'s "something is held and you are not granted" clause
+  exempts an owner that holds no grant of its own, which is the over-refusal
+  `AnyGrantOver`'s docstring recorded: the lender of a read loan was refused its own
+  read alongside a stranger. `MemoryState.HeldBySelf` is the second half of the
+  exemption and is not decoration — a bare owner exemption was tried and
+  `a_self_loan_bounds_its_holder` flipped, because an owner holding a *narrower*
+  grant over its own bytes reaches that clause with `authorityOf` reporting
+  `exclusive`. Evidence, each a pair over one state:
+  `a_read_against_shared_immutable_access_is_refused` (a stranger, refused) against
+  `the_owner_may_read_what_it_lent_read_only`; and
+  `a_stranger_may_not_join_the_atomic_protocol` against
+  `an_owner_may_join_its_own_atomic_protocol`.
+
+  Both stranger fixtures had to move from `step` to `refusalOf` and from `thread₀` to
+  `engine₁`: `step` fixes the acting context and the facets name it, and `thread₀`
+  stood in for "a context holding nothing" only while lender and stranger were
+  indistinguishable. That substitution is the same defect class as the source gap — a
+  fixture whose subject was chosen when the distinction did not exist.
+
+  Still open: `MemoryState.HeldBySelf` is a *predicate over the range*, so an owner
+  holding a grant over one byte of a range is bound over all of it. That is the
+  conservative direction and is stated here rather than fixed.
+
+- ~~**Three of the fourteen declaration-time seal clauses were still untested**, in the
+  file written to close exactly that gap.~~ `Tests/Memory/WellFormedClauses.lean`'s
+  argument is that each neighbour is one field from a well-formed baseline, so the
+  refusal must be the clause the neighbour names. Three neighbours were two clauses
+  away, not one: the inert intent and the demandless read both also failed
+  `producesInitializedOnlyIfWrites`, because the baseline sets
+  `producesInitialized := true` and neither writes; the over-wide range also failed
+  `addressRepresentable`, because `0x1000` does not fit two bits either. Each of the
+  three theorems therefore held with the clause it names replaced by `True`, which
+  review demonstrated by rebuilding the tree three times.
+
+  The three now differ from the baseline in two fields and carry their own controls
+  (`the_writing_non_producer_is_well_formed`, `a_range_inside_the_space_is_admitted`,
+  `a_read_that_demands_initialization_is_admitted`), because the shared baseline can
+  no longer serve as the pairing for them. The commit that added the file claimed
+  four clauses were mutation-verified; one of the four was `notInert`, and it was not.
+  All fourteen are swept now rather than spot-checked.
+- ~~**`Tools/AxiomAudit.lean`'s namespace-gap check had a name-shaped hole with a false
+  reason attached.**~~ The check exists because review once appended a root-namespace
+  `axiom` to a `Grass/` module and both gates passed. Its exemption list matched
+the four generated-name prefixes as *prefixes* of the last name component, on
+  the stated grounds that "an authored declaration cannot have one, because the
+  elaborator reserves them". Lean reserves the numbered equation lemmas and the
+  definitional one, not the prefix on its own, and a theorem named "eq_of_mem" is
+  ordinary Lean. Review appended
+  `axiom List.eq_probeFalse` with a theorem using it: `lake build` passed and this
+  audit printed its clean line byte-identically, while the same axiom named
+  `probeFalseControl` was caught. The exemption is now the generated shape --
+  one of those four prefixes followed by digits and nothing else -- which still
+  passes the only two entries it silences in the real tree, the two `String` UTF-8
+  equation lemmas that `Grass/Std/Logical/Text.lean` pulls in.
+- ~~**`Tools/DoorAudit.py` was silenced on a real call by a binder named after a
+  tactic**, and the comment above the rule presented that rule as the fix for exactly
+  this.~~ The tactic-naming filter required only that the tactic appear *earlier on
+  the line* than the door, and a binder is earlier than the call that follows it, so
+  `def f (delta : AuthorityDelta) := s.applyAuthorityDelta? actor delta` reported
+  nothing -- the shape of `applyAuthorityDelta?`'s own signature. Review appended
+  three such definitions to a module allowed for no door and only the control was
+  reported. A tactic must now also be *in tactic position*: at the start of the line
+  or after `by`, `;`, `<;>`, a focus dot or a match bar. The tool's self-test seeds
+  the binder line, and neutering the position test turns it red.
+- ~~**The docstring audit's hedge list was justified as covering statements of
+  limitation and silences guarantees.**~~ Three examples, each naming nothing that
+  enforces it: "a table cannot answer with a space under the wrong name", "a protocol
+  cannot introduce a duty of a kind the target never declared", "holdings that cannot
+  coexist are charged at their maximum". All three are true; none was reportable. The
+  justification is corrected to what the entries are -- noise suppression -- and
+  `--hedged` now lists every claim sentence a hedge silences that names nothing, so
+  the tool's largest bypass is reviewable rather than invisible. Thirty-one today.
+- ~~**`Tools/DoorAudit.py`'s failure message named a structure the file does not
+  define.**~~ It told the reader to add the module to "ALLOWED_CALLERS"; the structure
+  is the door table. This is the second finding of that shape in the same file.
+
+- ~~**Six clauses of the obligation ledger were vacuous-safe**, and one of them was
+  recorded here as fixtured.~~ Review replaced each clause of `LedgerDelta.Applicable`
+  and `LedgerDelta.WellFormed` with a vacuous equivalent, one at a time, and rebuilt.
+  Six survived green: `create`'s protocol agreement, `split`'s owner and freshness
+  clauses, `join`'s owner clause, and both `Nodup` conditions. The controls in the
+  same sweep were caught — `discharge`'s three clauses, `create`'s freshness and
+  owner, both `kind` clauses, `join`'s freshness, `transfer`'s context clause and both
+  non-empty conditions — so the sweep discriminated and these six were the gap.
+
+  What each buys, in `docs/OBLIGATIONS.md` §2's words ("Dropping, duplicating, or
+  fabricating obligations is forbidden"): without `split`'s owner clause the engine
+  steps a split of the thread's live duty into duties it owns itself, which is §2's
+  transfer under another name with no violation; without either `Nodup` one duty is
+  claimed as two and `applyDelta`'s fold collapses it back to one row; without
+  `create`'s protocol clause a step holding one protocol's authority mints a duty
+  governed by another, which no protocol theorem is ever asked about.
+
+  Six pairs close them, each varying one thing. Where the varying thing is ownership
+  the *source* changes and the actor is held fixed, because an output's owner must
+  equal the actor too and varying the actor would move two clauses at once;
+  `the_ledger_three_sources_are_live` pins that the two sources differ in owner alone.
+- ~~**`denialOf`'s `addressDisagreesWithPlacement` clause had no fixture.**~~ It is
+  live and it repairs a demonstrated defect — its own docstring records that every
+  address in the Spike 1 fixtures contradicted the placement the same fixture built,
+  and that six of `Tests/Op/FakeIsa.lean`'s descriptors named an address belonging to
+  a different allocation. Deleting it left the tree green, so that repair could be
+  undone invisibly. `Tests/Memory/Placement.lean` has the pair now: the fixtures' own
+  placed allocation, accessed at the address its placement gives, and accessed at the
+  base of a different live allocation.
+- **`denialOf`'s bounds clause cannot fire on the transition path**, which is not the
+  same as being untested. `step` requires `Substep.WellFormedIn`, which supplies
+  `provenanceNested` and `rangeInProvenance`, and `denialOf`'s own earlier clause
+  forces `record.extent = d.provenance.rootExtent`; the three compose to
+  `record.extent.Contains d.range`. Review proved it in Lean and it is stated beside
+  the clause as `the_bounds_clause_cannot_fire`, so the fact is compiled rather than
+  argued.
+
+  ~~Two consequences are open.~~ Neither survived checking, and the second entry here
+  was false in the same way as the prose it was correcting.
+
+  "`applyAccess` has no application anywhere under `Grass/` or `Tests/`" was review's
+  observation, repeated here and into `Grass/Memory/Apply.lean` without checking.
+  `runBlock` calls it, and `Tests/Memory/Spike1Block.lean` and
+  `Tests/Memory/StraightLineBlock.lean` both run blocks and apply it directly. So the
+  block evaluator is a supported entry point, it asks `denialOf` with no
+  well-formedness hypothesis at all, and the bounds clause is the only thing between a
+  block descriptor and a write outside its allocation.
+  `Tests/Memory/Placement.lean`'s `a_block_access_out_of_bounds_is_refused` is that
+  case with its positive control and the state-preservation half; it is the only
+  fixture in the tree that reaches the branch, and `outOfBounds` had appeared nowhere
+  under `Tests/` except in a prose comment.
+
+  `AuditViolationClass.outOfBounds` therefore belongs in the declared set: this layer
+  emits it. What was wrong is `denialOf`'s ordering sentence, which reads as though
+  `step` bounds-checks the state; it does not, because `the_bounds_clause_cannot_fire`
+  says it cannot need to.
+
+  The lesson is the one this section keeps recording: a reviewer's observation is
+  evidence about where to look, not a fact to copy. This entry copied one, and it took
+  a `grep` to falsify.
+- ~~**`step`'s fault-plan commit-count gate was entirely untested**, including the
+  regression its own docstring records.~~ `AuditViolationClass.faultCommitOutOfRange`
+  appeared nowhere under `Tests/`. Review restored the pre-repair form of the bound —
+  the symmetric one that, in the docstring's words, "refused an impossible count on a
+  compute substep while approximating an impossible count on an access" — and the tree
+  stayed green; disabling the clause outright likewise. Nothing became unsound,
+  because `Committed.truncate` clamps by `List.take`, which is the point: an
+  impossible machine report was silently rewritten into a possible one, and
+  `docs/FOUNDATION.md` law 8 says reject rather than approximate.
+- ~~**`step`'s `requiredFacets` gate was untested and its one fixture could not
+  discriminate it.**~~ `docs/INSTRUCTIONS.md`: "All reachable operations must close
+  every facet required by their selected profile. Missing metadata is rejection, not a
+  default empty effect." Replacing the gate's predicate so it never rejects left the
+  tree green, because the fixture that reaches it asserts `.facetsNotClosed
+  .memoryEffects` and the *next* branch returns that identical value for the same
+  operation. The two other facets both fixture policies require were never exercised
+  as missing.
+- ~~**`OperationFacets.Closes` had no application under `Grass/`**, and two docstrings
+  in two modules named it as the check `step` performs.~~ This was the
+  `MemoryProfile.Admits` shape again, in the place §4.4.1 says no gate can see it: a
+  `def` under `Grass/` that nothing uses falls between `ConsultedAudit` and
+  `ReachabilityAudit`. `closes_iff_no_missing` is the missing step -- `step` uses
+  `find?` to *name* the failing facet, and the theorem says the answer `find?` gives is
+  `Closes`'s answer, so the two docstrings are claims about a theorem rather than about
+  a resemblance.
+- ~~**Two of `AdmittedVocabulary.WellFormed`'s three disjointness clauses were
+  unguarded.**~~ The pairwise-disjointness requirement is load-bearing because
+  `StepPolicy.vocabularyWellFormed` makes it a construction obligation, and only the
+  atomicity/fault-visibility pair had a fixture. The other two have siblings now.
+- ~~**`AddressSpace.repr` is a profile input that can only remove refusals**~~, and it
+  was the one input missing from §4.4.1a's table. A table declaring `cpu.virtual` paired
+  with `repr := .symbolic` — once, not as a duplicate — is well formed, so
+  `StepPolicy.vocabularyWellFormed` is dischargeable and the policy constructible.
+  Against that space a store of more than 2^64 bytes at a symbolic address with a 4096
+  alignment demand satisfies `AccessDescriptor.WellFormedIn` and `Substep.WellFormedIn`
+  both: `RangeFitsSpace` and `AlignmentSatisfied` are vacuous for a symbolic
+  representation. With `AllocationRecord.base = none`, itself a supported case, the two
+  `denialOf` placement clauses also skip, so a steppable profile runs with three
+  declaration-time guards off.
+
+  `AccessDescriptor.WellFormedIn`'s docstring names this attack and claims the seal:
+  the transition resolves the space through the profile's table and
+  `vocabularyWellFormed` rules out a table that answers ambiguously. That covers the
+  descriptor and the duplicate; it does not cover a table declaring the pairing once.
+  The tree's own fixture writes the value down and refuses it for the wrong reason —
+  `duplicate_space_vocabulary_is_rejected` refuses it as a `Nodup` duplicate.
+
+  Closed by `AddressSpaceId.requiredRepresentation` and
+  `AddressSpace.RepresentationMatchesIdentity`, which constrain the representations of
+  the identities this layer *names* — `cpu.virtual`, `cpu.physical`, the two device
+  identities and the four SPIR-V ones — and say nothing about any other.
+  `every_named_identity_constrains_its_representation` covers all eight, after review
+  mutated the rule down to two and found the tree still green: the repair had been
+  evidenced by a two-point check sold as universal, with the two device spaces §7.5
+  needs among the six unexercised.
+
+  The claim that came with it — "kind only, never width; how wide a CPU space is stays
+  a profile's answer" — was wrong within the day, and review found that too. See the
+  width entry below.
+
+  The fixture that stood in front of this had to change too.
+  `duplicate_space_vocabulary_is_rejected` wrote the hostile value down and refused it
+  as a `Nodup` duplicate; its two entries now differ in width rather than
+  representation, `each_duplicate_entry_is_well_formed_apart` says both are well formed
+  alone, and `a_symbolic_cpu_space_vocabulary_is_rejected` is the case that was
+  actually open. That is the third fixture this round whose subject was chosen when the
+  distinction did not exist.
+
+- ~~**`ContextKind` is an open nominal with no registry.**~~ Two reviewers raised it,
+  one round apart, and both judged it short of a finding on the grounds that the corpus
+  asks only that the event *carry* the kind, which it does. That reading was too narrow:
+  `step` takes the kind as an argument and `MachineState.noteContext` makes the first
+  one it sees that context's kind for the whole execution, so an invented kind was not
+  merely carried into an event — it became the state's own answer about what the
+  context is, and `contextKindMismatch` then enforced it against every later step.
+
+  `AdmittedVocabulary.contextKinds` closes it, on the same terms
+  `AdmittedVocabulary.orderingScopes` already struck for §7.1's scope list, which is the
+  same sentence one line further on. The registry is asked *before* the kind is compared
+  with the state's record, so an unseen context and an unregistered kind give the
+  registry's answer rather than a mismatch against a defaulted one; that ordering has
+  its own fixture.
+- **`EventCause.origin` is an open nominal with no registry**, and it reaches every
+  minted event as one of §7.1's required fields. ~~It is now the only one.~~ It is one of
+  five, and the claim that it was the only one is what stopped the next reviewer
+  attacking the list — which is precisely what §4.4.1a asks a reviewer to do, so an
+  exhaustiveness claim there is worse than a gap.
+
+  The others: `ObservationLabel` on `AccessDescriptor.observations`, which §4.2 already
+  records as having no reader *at all*, so the missing registry understates it;
+  `Restartability.profileSpecific`, which reaches an operation through
+  `OperationFacets.restartability` and is the only one of this layer's four
+  `profileSpecific` nominals that did not get a registry when `MemoryOrder`,
+  `MemoryScope` and `FaultVisibility` all did; and `Coherence.profileSpecific` and
+  `MemoryTypeId` on the address-space side. `Tools/ReachabilityAudit.py` is silent on
+  two of them through its own documented same-name blindness — its comment names
+  "two `profileSpecific` by the third".
+
+  `Restartability` is the one to close on `ContextKind`'s terms: a closed-enough list a
+  profile can write down, reaching an operation, with three siblings already registered.
+  The others need their own decision and §4.2 holds them. It has an allowlist
+  entry in `Tools/ConsultedAudit.py` instead, and nothing relates it to the
+  `SomeOperation` being stepped.
+
+  The `ContextKind` case above is the argument for closing it and the argument against
+  doing so the same way. A cause names the *operation*, so a registry would oblige a
+  profile to enumerate its instruction set by name in a second place — `ContextKind`'s
+  eight kinds are a closed-enough list that a profile can write them down, and an ISA's
+  opcodes are not. What would close it is relating the cause to the `SomeOperation`
+  being stepped, which needs an ISA owner. Recorded, with the reason the obvious repair
+  is wrong here.
+
+- **§10's proof package: three of eleven items stated, and the pattern for the rest.**
+  `RequiredProofPackage`'s fields were bare `Prop`s, so a profile chose the *sentence*
+  as well as the proof and `True` closed each item. It was the one input in §4.4.1a's
+  table with no constraint at all, and it is the last gate before `VerifiedProgram`.
+
+  `loanMapLaws`'s type is now `MemoryState.LoanMapLaws` — a proposition this layer
+  states, one conjunct per theorem, covering §10's "unique loan identity; split, join,
+  transfer, reclamation" — so a profile supplies a proof rather than a sentence.
+  `MemoryState.loanMapLaws` is that proof and is the same for every profile, which is
+  the right answer for laws about a map this layer owns: the item is discharged by
+  construction and cannot be weakened by the profile closing it. Both fixture profiles
+  supply it; `loanMapLaws := trivial` no longer typechecks.
+
+  `allocatorFreshnessTeardownEpoch` followed, as `MemoryState.AllocatorLaws`: an unused
+  identity can always be allocated, an identity whose *metadata would change* while
+  authority is outstanding over its bytes cannot (§5.1's precondition), teardown kills
+  every name it is given and moves no other, and a provenance in a superseded epoch or
+  over a dead allocation is not live — §2's "address reuse never revives old pointers"
+  as a refusal. `not_live_of_stale_epoch` and `not_live_of_dead` are new and are what
+  that last pair needed.
+
+  `rangeProvenanceInitializationPreservation` followed, as `PreservationLaws`, and it is
+  the first *partial* one: a refused access changes nothing and observes nothing, a
+  non-writing access changes nothing, no access moves any allocation's metadata, and the
+  three framing laws hold. Initialization is not a separate conjunct because it is read
+  off the bytes — `RangeInitialized` cannot drift from what was written, which is why
+  `AllocationRecord.initialized` was deleted.
+
+  `RequiredProofPackage.Holds` conjoins the eight that remain. Every item that gains this
+  treatment leaves that conjunction, and when it is empty §10 is closed by the type
+  rather than by a profile's word.
+
+  A field holding a proof is read by the elaborator and projected by nothing, so
+  `Tools/ConsultedAudit.py` reports it; `allocatorFreshnessTeardownEpoch` is allowlisted
+  with that reason. `loanMapLaws` is *not*, and the comment there says why: the theorem
+  `MemoryState.loanMapLaws` shares its final name component, so the field passes by
+  accident through the tool's documented same-name blind spot. An allowlist entry would
+  have been inert and `--inert` would have reported it, so the accident is recorded
+  instead of papered over.
+
+  The nine that remain are not statable yet and each is owed by the milestone that owns
+  its subject: `accessDescriptorSoundness` and `permissionEnforcementAndFaultFidelity`
+  need an ISA's declared effects; `consistencyGraphWellFormedness` and
+  `raceFreedomConsequences` need M8's happens-before graph;
+  `synchronizationAndObligationTransfer` needs M8 and §7.4; `callStackFrameLifetime`
+  needs M4's frames; `erasurePreservation` needs M9; `validationMetadata` is M10's.
+
+  **And doing the third one turned up a structural obstacle the first two hid.**
+  `PreservationLaws` covers `applyAccess` and not `step`, and that is not a missing
+  theorem: `Grass/Op/Step.lean` imports `Grass/Memory/Profile.lean`, so the package
+  cannot mention the transition at all. Every remaining item whose subject is the
+  transition — `accessDescriptorSoundness`, `permissionEnforcementAndFaultFidelity`,
+  the two M8 items, `synchronizationAndObligationTransfer` — is blocked on that as well
+  as on its milestone.
+
+  Two ways out, neither taken here. Move `MemoryProfile` below `Grass/Op/Step.lean`,
+  which means `StepPolicy` can no longer carry a profile in the shape it does. Or split
+  the record: the items a profile *names* stay where they are, and the items the layer
+  *states* move to a structure `StepPolicy` carries beside its profile. The second
+  looks right and is a change to what §10's gate means structurally, so it wants the
+  design owner rather than this document.
+
+  A partial statement is still worth more than a bare `Prop`: it has content, and a
+  profile cannot choose it. The docstring says which half, because the type cannot.
+
+  **A layering change came with it.** `Grass/Memory/State.lean` imported
+  `Grass/Memory/Profile.lean` and used nothing from it, which is why the dependency
+  could be reversed at all — the package could not mention a `MemoryState` while the
+  state depended on the package. `Profile.lean` now imports `State.lean` and
+  `Grass/Op/Step.lean` imports `Profile.lean` directly instead of inheriting it. The
+  unused import had been there since M1.
+
+- ~~**A numeric address space narrower than 64 bits was well formed, and every
+  placement check ran in the wrong modulus for it.**~~ `MachineAddress` is 64 bits and
+  `Grass/Memory/Addressing.lean`'s `FitsAllocation` compares against `2 ^ 64`, so for a
+  32-bit space an allocation based at `2 ^ 32 - 16` with a 64-byte extent satisfied
+  `FitsAllocation`, `placementWraps` did not fire, and `distinct_allocations_do_not_alias`
+  yielded distinct machine addresses for two offsets that are the same byte in the space
+  the profile declared. The bridge a profile is meant to cite was discharged in 64-bit
+  arithmetic for a space that is not 64 bits.
+
+  Latent rather than live: an access at that offset must declare an address
+  `addressRepresentable` rejects in a 32-bit space. Latent in the way `Addressing.lean`
+  exists to worry about, and introduced the same day —
+  the theorem asserting a narrow space well formed was written to show that constraining
+  representation did not constrain width, which was true and was the defect.
+
+  `AddressSpace.WellFormed` requires exactly 64 bits now, which §9's versioned-extension
+  route licenses and which the module's own paragraph already argued in the other
+  direction. The alternative — making `FitsAllocation` and the placement checks take
+  the space — is what a future vocabulary version does, and it needs the resolved
+  `AddressSpace` in `denialOf`'s hand, which it does not have.
+
+  Two fixtures had to move off a narrow space, and both had become
+  two-clauses-away neighbours because of it:
+  `Tests/Memory/WellFormedClauses.lean`'s `rangeFitsSpace` pair now reaches past
+  `2 ^ 64` in the ordinary space, and `duplicate_space_vocabulary_is_rejected`'s two
+  entries differ in memory type — a field nothing here constrains, which is what a
+  duplication fixture needs. That fixture has now been rewritten twice for this reason,
+  which is itself worth noticing: a fixture that keeps needing a field nobody checks is
+  telling you the checks are catching up with it.
+- ~~**`AuditViolationClass.misaligned` was mandatory for every profile and nothing could
+  emit it.**~~ `denialOf` deliberately has no alignment branch, `refusalOf` returns
+  `denialOf`'s classes plus four fixed ones plus the providers', and `performAccess` and
+  `runStep` emit four more; none is this one. Review deleted the entry from
+  `emittedByTransition` and the tree stayed green. Under §8 an empty ledger is supposed
+  to mean something, and it meant nothing about alignment either way. The class stays for
+  a profile whose alignment rule is stricter than the declared demand, reached through
+  that profile's `AuthorityProvider`, which puts its class in the declared set without
+  help from the list. This is the second finding of that shape and `outOfBounds` was the
+  first, so `emittedByTransition` is now what its docstring says it is.
+
+- ~~**Twelve of `Tools/ReachabilityAudit.py`'s thirty-seven allowlist entries suppressed
+  nothing, and two whole group reasons were false.**~~ This is the `ConsultedAudit`
+  finding verbatim, one tool over, in a file whose preamble records the same sweep being
+  run once already by hand and finding eight of twenty-one. Five of the twelve were
+  flatly contradicted by the tree — both `Restartability` constructors are a struct
+  field default plus a fixture, `Atomicity.nonAtomic` is a field default,
+  `Address.symbolic` and `AddressRepr.symbolic` are built — and the rest were silenced
+  by the tool's own same-name blindness. The twelve are gone, the two empty groups with
+  them, and `--inert` exists now so a hand sweep is not what stands between this and the
+  next regrowth.
+- ~~**Every line number `Tools/CitationAudit.py` reported for a `.lean` file was wrong,
+  and docstring citations were reported twice.**~~ Its comment extractor returned the block
+  comments concatenated with the line comments and every caller enumerated *that*
+  string, so the number was an index into a reconstruction: review appended one bad
+  citation at real line 433 of a 431-line file and was sent to lines 197 and 231, two
+  unrelated theorems. The double report came from the line-comment regex matching the
+  `--` inside a `/--` opener. `Tools/DoorAudit.py` had this defect and fixed it — its
+  note says "every line number from a real file was wrong" — and the sibling still had
+  it. Blanking rather than concatenating fixes both; the probe now reports 433 and 436,
+  once each.
+- ~~**The docstring audit's self-naming exemption pattern was still there**, one round
+  after the module docstring said it was deleted, with a comment above it describing an
+  exemption that was not in force.~~ The same shape as `MemoryProfile.Admits` and
+  `OperationFacets.Closes`, in `Tools/`, where no gate looks.
+- ~~**`Tools/AxiomAudit.lean`'s `generatedExact` exemption silenced nothing**, under a
+  comment describing what `generatedNumbered` does.~~ The two entries that comment names
+  are numbered equation lemmas; the ten-name list matched nothing in the environment
+  while widening the namespace-gap check to any authored declaration ending in one of
+  them — the generated-name prefix hole's shape, minus the exploit. Review bounded it: an
+  axiom whose last component was one of the ten escaped the namespace check but the axiom scan caught any
+  `Grass` declaration using it, so it was defence in depth. Deleted rather than kept
+  with a reason that describes a different rule; the probe is now reported.
+- ~~**`Tests/Memory/AtomicAuthority.lean`'s "stranger" was the allocation's sole
+  owner.**~~ `AllocationRecord.owners` arrived after that file, `counter`'s owner list
+  had to name somebody for `issue?` to accept the lend, and this context was the only
+  candidate — so the file's stranger became its owner while the prose went on calling it
+  a context that was never let in, and `Tests/Op/StandardLoan.lean` had by then moved
+  its own stranger fixtures to `engine₁` for exactly this reason. Two files, one word,
+  opposite sides of the distinction.
+
+  The theorems stayed true because they are about `authorityOf`, which is owner-blind.
+  What they could not say is who may *act*. The context is `lender` now, `outsider` is
+  the genuine stranger, and `the_outsider_reaches_the_same_state` pins the scope: the
+  authority state is the same for a context that owns the word and one that has never
+  touched it.
+
+  **This is the third fixture this branch has had to re-subject** — after the ownership
+  pair and the hostile address space — and the first one I caused: commit 34d75bb
+  patched this file to keep building while its sibling commit fixed the two fixtures
+  whose subjects the same change had invalidated. A fixture that needs a one-line patch
+  to survive a semantic change is a fixture whose subject the change may have moved.
+- ~~**`MemoryState.HeldBySelf`'s docstring claimed being wrong could only refuse
+  more.**~~ The exemption is `OwnedBy ∧ ¬ HeldBySelf`, so an answer that under-reports
+  makes an owner exempt from §3's loan clause and refuses *less* — which
+  `Grass/Op/Step.lean`'s own comment describes a few lines away. Review replaced the
+  body with a predicate that always under-reports and watched two fixtures flip. A
+  monotonicity claim of exactly the kind §4.4.1a's table is built out of, and the
+  sentence a future reviewer would have used to justify not testing the predicate.
+- ~~**`the_lender_may_lend_again`'s docstring named a fixture and a refusal that are not
+  there.**~~ It said `lentToThread`'s grant was refused on the conflict rule; the theorem
+  is over `readLentToThread`, whose grant is read-only, so `LoanConflicts` has no writer
+  and nothing is refused. The lend is accepted, which the theorem now says, and
+  `the_second_write_lend_is_refused_by_the_conflict_rule` is the case the sentence was
+  describing.
+
+- ~~**`allocate?` let any caller rewrite an allocation's owners, or its bytes, under an
+  outstanding grant.**~~ The guard was `existing.metadata ≠ record.metadata`, and
+  `AllocationRecord.Metadata` deliberately omits `owners` and `bytes` — `denialOf` reads
+  neither, and leaving them out is what makes `denialOf_congr_of_agrees` the stronger
+  statement. So the guard refused a change to extent, epoch, space, source, permission,
+  liveness and placement, and accepted a change to who owns the allocation or to what
+  its bytes say.
+
+  Both are authority. Review wrote a stranger into an owner list under somebody else's
+  outstanding loan and watched `a_stranger_may_not_join_the_atomic_protocol` and
+  `the_stranger_may_not_seize_unheld_bytes` both flip — the two fixtures that close the
+  ownership gap this document records above, defeated by one accepted call that changed
+  no metadata — and separately rewrote the first byte of a range frozen under a write
+  loan. The guard is the whole record now.
+
+  Two claims of the old `allocate?` docstring were false in opposite directions: a
+  permission or placement change under an outstanding grant was *refused*, not
+  accepted, and `owners` and `bytes` were accepted, not refused. The lesson is narrower
+  than "check the guard": a guard stated over a *view* of a record is only as wide as
+  the view, and this view was built for a different question.
+- ~~**`MayLend`'s owner disjunct bounded the lent rights by nothing.**~~ The second
+  disjunct bounds a sublet by `entry.2.rights.Grants grant.rights`; the first — the one
+  that issues every *first* grant — had no rights term, so the boldfaced "you cannot
+  lend what you do not have" was false of the path it is stated about. Review had an
+  owner lend `readWrite` over a read-only page it owns: `issue?` accepted it, and
+  `authorityOf` then reported the owner `frozen` over its own data and refused it even a
+  read, from a write authority the model had just certified nobody has. Over-refusal
+  rather than unsoundness, because `denialOf`'s permission clause still refuses the
+  holder's write — but three of `AuthorityState`'s five constructors were being derived
+  from rights that do not exist.
+- ~~**An issued grant's provenance escaped every check the same provenance gets on an
+  access.**~~ `AccessDescriptor.authorityEffect` lets an operation mint a grant, and a
+  grant carries a whole `Provenance`. `admissibilityFailures` projected `issuedKinds`
+  and nothing else, so law 8's registry gate stood on the grant's *kind* while the
+  address space, allocator and path steps beside it went unasked — and `issue?` compared
+  the root extent and neither the space nor the source, which are two of the comparisons
+  `denialOf` makes for an access.
+
+  Review minted a grant naming three undeclared names: the step ran, no violation, the
+  grant installed, and it was load-bearing — the program thread's next ordinary store to
+  those bytes was refused `authorityUnavailable`, byte-identical to the ledger after an
+  honest lend. `AuthorityEffect.issuedProvenances` and `MemoryState.RootIdentityAgrees`
+  are the two halves. This is the second finding of the same shape: `grantKinds` was
+  added *because* an operation can mint a grant, and the `Provenance` beside the kind
+  was left.
+- ~~**Two of law 8's twelve registry gates had neither a theorem nor a fixture.**~~
+  The allocator gate and the provenance-step-kind gate. Review replaced both with `True`
+  and the tree stayed green, and so did the realistic version — an empty registry
+  admitting everything, which is the permissive fallback `Grass/Memory/Profile.lean`'s
+  own comment quotes law 8 as forbidding, and which keeps the field projected so
+  `Tools/ConsultedAudit.py` does not see it either.
+- ~~**`PreservationLaws` claimed six conjuncts and had five.**~~ The disjoint-range
+  framing law follows from the uncovered-offset one by arithmetic alone; review proved
+  the implication rather than replacing the conjunct with `True`, which would have
+  proved nothing. It inflated the apparent content of the §10 item that landed most
+  recently, in a record whose whole argument is that a stated proposition has content a
+  bare `Prop` does not.
+- ~~**`Tools/CitationAudit.py` carried twelve inert allowlist entries and was the only
+  allowlist-bearing tool without `--inert`.**~~ Ten were structurally unreachable —
+  the tool drops anything rooted in Lean core, and any .toml suffix, before the
+  allowlist is consulted — and two sat in the group whose comment requires each entry to
+  have live sites. One of those two, `faultPointOutOfRange`, has no `_` and no `.`, so
+  the scanner has never adjudicated it at either of its live sites: an entry reading
+  "this dead citation is deliberate" for a citation the tool is structurally blind to.
+  All twelve deleted; `--inert` added. That makes three tools that grew this check after
+  being found with dead entries, which is an argument for it being the default shape.
+- ~~**`Tools/FixtureAudit.py`'s exemption named a consumer that cannot see the
+  fixtures**, and this document repeated it.~~ It said `Tools/AxiomAudit.lean` discovers
+  `VerifiedProgram` producers and names them in its output; that tool imports `Grass.*`
+  only, walks `Grass/` on disk, and prints one summary line naming no declaration. The
+  real consumer is `#audit_verified_programs`, which `Tests/Foundation.lean` runs at the
+  end of the file the fixtures live in. The exemptions were right and the pointer a
+  reviewer would follow to check them was not.
+- **A grant may be held by a context the machine has never seen, where a duty may not.**
+  `LedgerDelta.Applicable`'s transfer clause requires `newOwner ∈ contexts`, on the
+  argument its own module comment gives — "a duty could be handed to an identity no
+  context ever had … a way to strand a duty permanently" — and `issue?` and
+  `transferGrant?` have no counterpart. Review issued a grant to a context outside
+  `MachineState.contexts` and the map took it.
+
+  Weaker than the ledger case, and the asymmetry turns out to be right rather than
+  owed. §6's call hands authority to a callee *before* the callee runs, so at the moment
+  Spike 1's `callWithLoan` steps, `apiAgent` has never executed a Grass step and
+  `MachineState.contexts` does not contain it —
+  `the_loan_is_issued_to_a_context_not_yet_seen` pins exactly that. Requiring the holder
+  to be a known context would refuse the reference set's central case.
+
+  What makes the two different is what stranding costs. A grant's bytes are recoverable
+  by the lender: `returnGrant?` accepts the lender as well as the holder, and
+  `transferGrant?` preserves it, so a holder that never runs costs nothing permanent. A
+  duty has no lender, which is the whole of `LedgerDelta.Applicable`'s argument for
+  `newOwner ∈ contexts`.
+
+  The finding was the asymmetry being unexplained, and this is the explanation, in the
+  reference set rather than in prose. What remains genuinely open is narrower: nothing
+  stops a *chain* of transfers from moving a grant to a context that never runs while
+  the lender is a context that has already halted, and review did not construct such a
+  state either.
+
+- ~~**`MayLend`'s other two disjuncts bounded the lent rights by nothing either**, and
+  both were reachable through `step`.~~ Round seventeen gave the first disjunct a rights
+  bound and left the other two, which is the shape this document keeps recording: a
+  repair applied to the instance found rather than to the class.
+
+  The third disjunct — "every grant outstanding was lent by this lender, so whoever put
+  them out may put more out" — was written for an owner that has lent a fragment and
+  holds no grant of its own, and said neither. So an owner of a *read-only* page lent it
+  read-only and then lent itself `readWrite`, because by then every grant outstanding was
+  its own; and a read-only *borrower* sublet to itself, returned the original as holder,
+  and lent itself write authority, all three deltas in one access's declared effect.
+  Review stepped both. The disjunct now says what it was always about: ownership, and
+  the storage's own permission.
+
+  The rights bound there is the *storage's* and not the outstanding grants', on purpose.
+  An owner that lent read still holds write and may lend it, and §3 says an owner
+  retains what it did not lend; bounding by what is already out would refuse that, and
+  `the_owner_may_lend_write_before_the_sublet` is the case.
+- ~~**Atomic-only authority sublet as ordinary authority**, because `Permission.Grants`
+  does not compare `atomicOnly`.~~ Its own docstring says the field "is not compared: it
+  narrows what a *grant* conveys and a page has no such bit", and
+  `permits_of_grants_of_permits` takes the page's `atomicOnly = false` as a hypothesis
+  for that reason — so the relation is about a page and a demand. `MayLend`'s second
+  disjunct applied it with a grant's rights on the left, which is the case that
+  docstring excludes, and on that path there is no `Permits` companion the way there is
+  at `denialOf`.
+
+  Review lent a borrower `atomicReadWrite`, had it sublet itself `readWrite` in the same
+  access's authority effect, and stepped the ordinary write: `refusalOf` went from
+  `authorityUnavailable` to `none` and the page's owner went from `sharedImmutable` to
+  `frozen`. `LoanConflicts` does not see it — a sublet to oneself has no distinct holder
+  — and `denialOf` does not, because the page carries write. §3's "atomics do not grant
+  ordinary non-atomic access" was enforced at the access and not at the lend.
+
+  `Permission.GrantsAsGrant` is `Grants` with the comparison, for the one case where
+  both sides are grants, and both disjuncts use it now. A grant may narrow into
+  atomic-only and may not widen out of it.
+- ~~**§4.4.1a's `AddressSpace.repr` row was an overclaim**: "nothing about a space is a
+  profile's choice now except which identity it declares" was true of the eight
+  identities `requiredRepresentation` names and of no others.~~ Review declared a CPU
+  space under `win32.processHeap` — an allocator name Spike 1's own profile uses — with
+  `repr := .symbolic`, and walked the round-fifteen attack straight through: a store of
+  `2 ^ 70` bytes at a symbolic address demanding 4096-byte alignment passed the
+  descriptor seal and `Substep.WellFormedIn`, both numeric clauses vacuous, with
+  `base := none` skipping the two placement clauses as well.
+
+  The default is `numericallyAddressed` now and `RepresentationDemand` has two
+  constructors rather than three. A genuinely symbolic new space is added to
+  `requiredRepresentation` in the open, which is what law 8 asks of an unknown. The cost
+  is a vendor with a symbolic address model editing this layer, and that is the right
+  cost: every numeric guard in the seal is off for such a space.
+
+  The general lesson, third time it has been paid for: **a default arm is a profile
+  input.** `.anyRepresentation` read as "this module has nothing to say", and what it
+  said was "admit".
+- **§10's preservation item is stated over the metadata view, so it says nothing about
+  `owners`.** `PreservationLaws`' third conjunct quantifies `MemoryState.MetadataAt`,
+  and `AllocationRecord.Metadata` omits `owners` — which is the same view whose narrowness
+  was `allocate?`'s defect one round earlier, now load-bearing in the §10 item that
+  landed most recently. Review exhibited two states differing only in `owners`:
+  indistinguishable to everything that conjunct quantifies, and `MayLend` answers
+  oppositely.
+
+  Latent rather than live, because nothing on the `applyAccess` path can move `owners`
+  today; it stops being latent the moment §7.4's ownership transfer or M6's allocator
+  gives an operation a way to. Recorded rather than repaired because the right shape is
+  probably a single "everything but bytes" view used by both this conjunct and
+  `allocate?`'s guard, and introducing a second view beside `Metadata` without deciding
+  which one `denialOf_congr_of_agrees` should be stated over would leave three.
+
+- ~~**Four `denialOf` clauses that nothing discriminated**, producing two of the
+  fourteen classes `emittedByTransition` obliges every profile to declare.~~
+  `wrongAddressSpace` and `deadProvenance` appeared nowhere under `Tests/` at all, and
+  review switched off each of the four clauses — absent allocation, dead allocation,
+  stale epoch, wrong space — with the tree staying green.
+
+  They matter most on the block path, for the reason
+  `a_block_access_out_of_bounds_is_refused` already gave: `applyAccess` asks `denialOf`
+  with no well-formedness hypothesis, so these are the only thing between a block
+  descriptor and a committed write into storage the table does not hold, into a
+  torn-down allocation, or through a stale-epoch provenance — §2's "address reuse never
+  revives old pointers", as a write. The space clause is worse than untested: it is the
+  *only* comparison of an allocation record's space with a provenance's anywhere in the
+  layer, since `WellFormedIn.spaceAgrees` relates the descriptor to itself and
+  `authorityOf` reads neither.
+- ~~**`issue?`'s containment clause was indistinguishable from a root-extent bound.**~~
+  It reads `grant.provenance.extent` — what the *path* designates — and every grant in
+  the tree had an empty path, so review replaced it with `rootExtent` and the tree
+  stayed green. §3's sublet bound is the point: a grant claiming to descend from one
+  field of a struct may not cover the struct.
+- ~~**`LoanConflicts`'s overlap conjunct had neither a theorem nor a fixture.**~~ It is
+  what makes the freeze per-fragment rather than per-allocation — §4.4.1b's own argument
+  — and no fixture accepted a second grant *because* the ranges are disjoint. The
+  over-refusing direction, so a regression would have been silent.
+- ~~**`step`'s ordering gate is two clauses and only the order half had a fixture.**~~
+  The repair that added the operation-level check was made because "a `.compute`-only
+  operation declaring an unregistered profile-specific mode stepped", and the fixture
+  written for it leaves `scope` at its default, so the scope clause was never reached.
+- ~~**`AdmissibilityFailure.notWellFormedInSpace` cannot be reported through the
+  transition.**~~ `step` requires `Substep.WellFormedIn` before it asks
+  `whyNotAdmitted?`, and that predicate resolves the same space in the same table and
+  applies the same seal — so `substepsNotWellFormed` always answers first.
+  `no_space_failure_of_wellFormedIn` states it, on the model of
+  `the_bounds_clause_cannot_fire`; the branch is kept because
+  `AdmittedVocabulary.Admits` has callers that are not `step`.
+- ~~**`issue?`'s docstring miscounted its own refusals**, and the miscount hid a
+  finding.~~ It said "four of the five refusals are stated … the extent clause has no
+  theorem of its own". `issue?` has nine gates, eight are stated, and "the extent
+  clause" names the one that *does* have a theorem. The genuinely unstated gate is
+  containment — the entry two above — which the sentence never mentions, so a reviewer
+  following it checked the wrong clause.
+- ~~**`Tools/CitationAudit.py`'s section check never scanned Lean line comments**, and
+  reported the wrong line for the block comments it did scan.~~ The module docstring
+  claims it checks "every §N that follows a document name in the same sentence"; a wrong
+  section in a line comment passed. And the line-number fix that landed for the
+  declaration half did not land for this one, one round after the note saying it had —
+  a citation at real line 433 of a 431-line file was reported at line 36.
+- ~~**The docstring audit's hedge list was the fourth allowlist and had the
+  opposite half of the fix.**~~ `--hedged` lists the silenced *sentences*; what three
+  sibling tools grew was `--inert`, which lists the entries that have stopped silencing
+  anything. Twenty-two of forty-three were inert. Both halves now.
+- ~~**`Tools/DoorAudit.py` allowed the transition to call `applyAuthorityDelta?`**, on a
+  reason true only of its neighbour.~~ The transition applies the *effect* in five
+  places and the delta in none, so this was a widened permission granted for no caller
+  — on the door whose whole purpose is the actor check. Its self-test now asserts both
+  directions.
+- **A mutation that breaks the owning module's proof script is inconclusive, not
+  caught**, and this is the methodological finding of the round. Neutering a clause
+  that `Grass/Memory/State.lean` proves theorems about with `rw [if_neg …]` chains
+  fails inside that module before any fixture runs, so the sweep reports "caught" for
+  the proof and says nothing about the evidence. Review re-ran every such case with the
+  affected binders co-edited, and two of this round's findings came out of the re-run.
+  Sweeps recorded in this document before round eighteen should be read with that
+  caveat: the ones over `Tests/`-only clauses stand, the ones over clauses with
+  equation-lemma proofs may not.
+
+- ~~**Every clause of `MemoryEvent.WellFormed` was discriminated by nothing**, and the
+  one gate that could have said so was exempting it by name.~~ Thirteen clauses on the
+  seal that guards every event entering `MachineState.events`; each replaced by `True`,
+  with `ofOutcome`'s discharge co-edited so the producer's own proof is not what is
+  being tested, gave thirteen green builds. That is round eighteen's
+  `AccessDescriptor.WellFormedIn` result — twelve of fourteen — repeated in full on the
+  sibling seal no round had read.
+
+  `Tools/ConsultedAudit.py` skipped any structure whose name ends `WellFormed`, on the
+  argument that a proof obligation's purpose is that a constructor had to discharge it.
+  That argument is disproved *inside the module it exempted*:
+  `touchesMemory_ofOutcome` proves no event `ofOutcome` can mint fails
+  `noLocationWhenUntouched`, so discharging that clause proves nothing about it, and the
+  file says so in prose. `AccessDescriptor.WellFormedIn` was only ever in scope because
+  `endswith("WellFormed")` does not match it.
+
+  Three things landed together: the exemption narrowed to `Recognized` and `Laws`, where
+  discharge really is the point; a `Decidable` instance on the seal, which is the
+  mechanism that lets a fixture *name* a clause; and `Tests/Memory/EventClauses.lean`,
+  the thirteen-neighbour sweep the instance enables. All thirteen are caught now.
+
+  The lesson is the exemption's shape rather than its contents. **An exemption keyed on
+  a name pattern is a claim about every structure that will ever match it**, and this
+  one was written for two structures and inherited by a third that arrived later.
+- ~~**`RequiredProofPackage.loanMapLaws` escaped the unread-field report because the
+  theorem discharging it was named after the field.**~~
+  `loanMapLaws := MemoryState.loanMapLaws` carries `.loanMapLaws` on its right-hand
+  side, so a scan for a dotted projection read a construction as a reader — the one thing that
+  tool's own docstring says does not count. Its two sibling package fields, whose
+  theorems are named differently, were reported and allowlisted from the day they
+  landed. An eponymous discharge is not a reader.
+- **Two seals nothing requires, and one field awaiting M10.** Dropping the structure
+  exemption surfaced `Footprint.WellFormed`'s `namesUnique` and `fieldsContained` —
+  whose own docstring says neither is load-bearing and that the padding theorem
+  "deliberately does not require `WellFormed` at all", so unlike the event seal there is
+  no consumer to disappoint — and `ProtocolAuthority.issuer`, which records which
+  profile minted authority so a §10 package has something to check. All three are
+  allowlisted with those reasons rather than hidden by a pattern.
+- **`Grass/Semantics/Execution.lean` has five unprojected fields and belongs to another
+  owner.** Surfaced by the same change, allowlisted rather than silently skipped, and
+  owed to that owner as a report rather than decided here: whether an infinite
+  continuation's witness fields are meant to be read is their call.
+
+- ~~**Ten of `LedgerDelta.Applicable`'s twenty-four clauses were discriminated by
+  nothing.**~~ `.discharge` had a theorem for liveness, protocol and owner; `.split`,
+  `.join` and `.transfer` ask the same three questions and had none. `.transfer` was
+  worst — three of its four clauses inert, so applicability for a transfer was
+  effectively "the recipient is a known context", while §2's sentence covers all five
+  constructors equally. Ten `not_applicable_*` theorems on the `.discharge` template,
+  each swept.
+- ~~**`MemoryEvent.Conflicts` had no theorem for either of the two conjuncts §7.3 is
+  about.**~~ Four of its six had one; the missing pair were the committed ranges
+  overlapping and the compatible-atomic exemption. Without the first every pair of
+  accesses to shared storage with a writer is a race however far apart they are — the
+  over-refusing direction, and therefore silent. Without the second `atomicShared`
+  stops meaning anything at the event layer.
+- ~~**`step`'s fault-commit bound checked the read half and not the write half.**~~ Two
+  conjuncts, one fixture, and `writes ≤ writes` left the tree green. The fixture pair
+  that exercises it says in so many words that the asymmetry "cannot come back
+  unnoticed in either direction" — and it came back in the section written so that it
+  could not. The lesson generalises past the clause: **a fixture pair that names a
+  symmetry is evidence about the half it exercises**, and the other half needs its own.
+- ~~**`MayLend`'s non-emptiness conjunct had become logically inert.**~~ Added because
+  `List.all` on the empty list is `true`; superseded by the ownership conjunct that
+  arrived a round later, which refuses those strangers itself. Review *proved* the two
+  disjunctions pointwise equal rather than observing it, which is the standard this
+  branch set when it deleted `applyAccess_frames_disjoint_range` from
+  `PreservationLaws`.
+
+  **And the proof was of the converse of what the deletion needed**, which the round
+  after found. `¬ AnyGrantOver` unfolds to `grantsOver = []`, which makes the owner
+  disjunct's `.all` vacuous — so the unheld disjunct implied the owner disjunct, not
+  the other way round, and the dead clause was the *disjunct*, not the conjunct inside
+  the one that subsumed it. Deleting the conjunct left `MayLend` with three disjuncts
+  and two meanings, and a docstring arguing that the dead one was how every first
+  grant is issued. It is deleted now; `mayLend_of_unheld_of_owned` states that case
+  and proves it through the owner disjunct, `not_mayLend_of_unheld_of_unowned` lost an
+  arm from its `rintro`, and the `Decidable` instance lost a conjunct pattern.
+
+  **A redundancy between two clauses says one of them may go and never which one.**
+  Picking wrong is invisible to every gate on this branch: the definition keeps its
+  size, the tree stays green, the fixtures still pass — because a fixture that
+  satisfies the surviving clause satisfies the dead one too — and the docstring is
+  rewritten to argue that what is now unreachable is load-bearing. The direction of a
+  subsumption is the whole content of the claim, and it was asserted in the same
+  sentence that proved the equality it does not settle. This is the third repair on
+  this branch to be found defective by the round after it landed, and the second where
+  the defect was in the *argument* rather than the code.
+- ~~**Prose naming things that are not there**, in four places no gate can reach.~~
+  `AuthorizedBy` was cited three times as a live mechanism and nothing declares it —
+  including in the record of this layer's *largest open gap*, where it was also given
+  operations the real `AuthorizedAt` does not perform. §4.4.1's description of §10's
+  package said eleven bare `Prop`s after three had been given types this layer states,
+  contradicting §4.4.1a's table in the same document. Two counts were stale.
+  `Tests/Memory/WellFormedClauses.lean` said three of its neighbours were more than one
+  field from the baseline when five are, and named `readProducer` as a control when it
+  is a refused neighbour.
+
+  All of it is invisible to `Tools/CitationAudit.py` for one documented reason: a bare
+  backticked token with no dot and no underscore is not adjudicated, and the self-test
+  asserts that blind spot as permanent. That is right as a limit — the alternative is
+  a declaration set that cannot tell prose from code — and it means **prose accuracy in
+  this document rests on review rather than on a gate**, which is worth knowing when
+  reading the struck-through entries above.
+
+- ~~**Eight `DOORS` allowances permitted no caller**, five of them created at once by a
+  shared constant.~~ A shared owners set gave `Grass/Memory/Loan.lean` reach into four of
+  `State.lean`'s doors it never calls and `State.lean` reach into `Loan.lean`'s one door
+  it never calls. That is the same defect this file records finding for
+  `applyAuthorityDelta?` and `Grass/Op/Step.lean` one round earlier — a widened
+  permission granted for no caller — repeated five times by a constant, which is how one
+  decision became five.
+
+  The rule is per (door, module) now: a door's *declaring* module is always allowed,
+  because a door its own module may not call is not a door; a cross-module allowance
+  must have a caller. `--inert` reports one that does not, which made `DoorAudit` the
+  fifth allowlist-bearing gate to grow that check after being found with dead entries.
+  That is no longer a coincidence and it is the argument for building the check first
+  next time.
+
+  This said "the fifth **of five**", and there are seven allowlists across seven
+  gates: `FixtureAudit.py` and `SourceLocationAudit.py` had none, and `CitationAudit.py`
+  has two. The count was written from the list of gates that had been repaired rather
+  than from the list that exists, which is the same error one scale up as an
+  exemption written from the case that prompted it. All seven have the check now.
+- ~~**Eleven references to a module deleted four hundred commits earlier**, three of
+  them the reproduction steps justifying two `DoorAudit` entries.~~ So the negative
+  tests behind a gate could not be reproduced from the tree as documented. Alongside
+  them, the paragraph describing this project's ISA-facing contract named a renamed
+  seam and a `MemoryProfileRequirements` type that was never declared — three things a
+  reader of that paragraph could not find.
+
+  A backticked repo-relative path was adjudicated by nothing: the declaration check
+  drops anything ending `.lean`, `.md` or `.py`, and the link check resolves only
+  markdown link syntax. `CitationAudit` resolves them now, with an allowlist for
+  the illustrative names in a tool's own docstring and for one document another owner
+  has not written. Negative-tested against a real dead path in a real file.
+- **`MayLend`'s sublet disjunct keeps an epoch filter `grantsOver` deliberately
+  dropped, and the two are not in conflict.** Review found the conjunct discriminated by
+  nothing and asked which way it should go. `grantsOver` answers "which grants freeze
+  these bytes", where a stale grant must still count — dropping it there lifted a
+  freeze and let an unauthorized store commit. The sublet disjunct answers "may this
+  lender pass on what it holds", and a grant naming a defunct epoch authorizes nothing,
+  so sublending from it hands on authority that does not exist. Refusing is the
+  narrowing direction here and was the widening one there.
+
+  The honest limit, now written beside the conjunct: no reachable state exercises it,
+  because `allocate?_eq_none_of_outstanding` refuses a record change while authority is
+  outstanding and `tearDown?` goes through `allocate?`, so an outstanding grant's
+  provenance cannot go stale through any door.
+- ~~**`a_stranger_may_not_lend_what_another_lent` was over-determined at the door.**~~
+  A per-gate sweep over every `issue?` refusal fixture found exactly one where two gates
+  fire: `MayLend` and the conflict scan both refuse it, so its first conjunct said
+  nothing about the lender rule the theorem is named for. It carries the conflict fact
+  explicitly now, rather than leaving a reader to discover which rule did the work.
+
+- ~~**The fault-commit bound's no-descriptor arm had a fixture on one of its two
+  conjuncts.**~~ `Grass/Op/Step.lean`'s commit-count guard is a `match` on whether the
+  substep names a descriptor: the descriptor arm bounds `reads` and `writes` by what the
+  access covers and has a fixture on each conjunct; the no-descriptor arm requires both
+  to be zero and had one on the write conjunct alone. Review neutered `reads = 0` to
+  `reads = reads` with the whole tree green.
+  `a_read_count_on_a_compute_substep_is_refused` is the missing half.
+
+  This is round nineteen's finding four lines away from where round nineteen closed it,
+  and the generalisation that round recorded — *a fixture pair that names a symmetry is
+  evidence about the half it exercises* — was true, was written down, and did not reach
+  here, because the pair naming the symmetry was written for the **other branch of the
+  same `match`**. A guard with two arms is two guards, and a lesson stated about a guard
+  is about one arm of it.
+- ~~**`Tools/ConsultedAudit.py`'s proof-bundle exemption silenced eighteen fields by
+  structure name, and `--inert` was structurally unable to say so.**~~ `PROOF_BUNDLES`
+  exempted any structure whose name ended in `Recognized` or `Laws`, on the reason that
+  a structure whose fields are propositions bundles proof obligations nothing projects.
+  That reason had already been disproved for `WellFormed` in the same file — eleven of
+  `MemoryEvent.WellFormed`'s thirteen clauses were unprojected and each could be
+  replaced by `True` with the tree green — and the two survivors were kept as "whose
+  fields really are discharged-and-done" and never measured.
+
+  Measured: `Laws` matches exactly one structure and silenced seventeen of its twenty
+  fields, which are the same seventeen this section already records as never used by
+  anything; `Recognized` silenced one. So 94% of the exemption's work was on
+  `Grass/Resource/Algebra.lean`, the module this section calls the corner nobody
+  reviews, and the exemption is what kept it that way. All eighteen are individual
+  entries now, written **qualified** (`Structure.field`), and `PROOF_BUNDLES` is gone:
+  the tool has one exemption mechanism rather than two, `--inert` covers all eighteen
+  like every other entry, and `self_test` seeds both halves of the qualified form.
+
+  Three things generalise, and only the first was known. **An exemption keyed on a name
+  pattern is a claim about every structure that will ever match it** — recorded a round
+  earlier, from the same file, about a different pattern in it. **An `--inert` check
+  that sweeps one exemption mechanism reports nothing about the other**, so the check
+  added "so the same rot is visible without a reviewer" was blind to the larger of the
+  two mechanisms it was added to police. And **the blind-spot list is itself a claim
+  that needs sweeping**: this section lists what `ConsultedAudit` cannot see, and named
+  two narrower gaps than this one.
+- ~~**`Tools/DoorAudit.py` did not report a door applied in a tactic-mode
+  definition.**~~ Its stated coverage is "any application of one of the five doors from
+  a `Grass/` module other than the two that own the map". `exact` and `apply` were in
+  `NAMING_TACTIC`, the list of tactics that *name* a declaration without applying it, so
+  a definition written `:= by exact s.alias a b` was silent while the identical
+  term-mode definition beside it was reported. Review appended both to a real module
+  allowed for no door and got one report.
+
+  They are dropped, and nothing is lost: the naming forms those two tactics actually
+  take do not match the application pattern anyway, because `exact
+  MemoryState.issue?_eq_none_of_absent h` continues the name past the `?` and
+  `simp [MemoryState.issue?]` closes with a `]`. `self_test` seeds both directions,
+  because removing a name from that list widens and narrows the audit at once.
+
+  The two names were in the list because they can precede a declaration name. The list
+  is for tactics that *cannot apply* what they name, and `exact` and `apply` are the two
+  that do nothing else — an exemption assembled from a true observation about syntax
+  rather than from the property the exemption exists for.
+- ~~**`MemoryState.LoanConflicts` tried `Meets` in both directions and nothing said what
+  the second one adds.**~~ Review deleted the reverse disjunct with the whole tree
+  green. Three docstrings cite it — the definition's, `issue?_eq_none_of_empty`'s and a
+  fixture's — and each cites another of the three for why it exists, which is a circle
+  and not a reason.
+
+  `ByteRange.meets_comm_of_nonempty` is the fact none of them stated: on two non-empty
+  ranges the directions agree, because `Meets` is asymmetric only through its
+  empty-query disjunct and `Disjoint` is symmetric. So the reverse direction has exactly
+  one job — an *installed* grant of no bytes, inside the range a new grant claims — and
+  `issue?_eq_none_of_empty` is what makes that unreachable through the door.
+
+  Kept, not deleted, and that is the difference from `MayLend`'s dead disjunct above.
+  This is a safety rule: refusing is the narrowing direction, §7.3 is not a place to
+  widen on a reachability argument, and `LoanConflicts` takes both grants as arguments
+  rather than reading them out of the map, so the case is decidable at the predicate
+  even though no map holds it. `an_empty_installed_grant_still_conflicts` decides it,
+  with the forward direction shown false in the same theorem, and
+  `a_non_empty_installed_grant_conflicts_forwards` is the control.
+- ~~**`Tests/Memory/EventClauses.lean` decided every fixture against its own restatement
+  of the seal.**~~ `sealClauses` restates all eleven clause propositions, because a
+  field of a `Prop` structure cannot be projected from a value that does not satisfy it.
+  The commit that added it named the risk and argued it away: "if the two drift the
+  theorem below stops matching the `Decidable` instance and fails." That is an argument,
+  in a file whose entire subject is the difference between an argument and a check, one
+  commit after the same file was found asserting a property nothing decided.
+
+  `sealClauses_is_the_seal` is the check: `sealClauses e = [] ↔ e.WellFormed`, so a
+  weakening on either side breaks one direction of the proof. It does not fix the labels
+  — exchanging two names leaves both directions provable — and the file says so.
+- ~~**The read half of `AccessStatus.WellFormed` was consumed by nothing.**~~ Its
+  docstring argues for the pair ("a status that bounded only the larger of them would
+  let the other exceed the range unnoticed"), and the write half is consumed by
+  `AccessDescriptor.committedWriteRange_size` while the read half had no counterpart.
+  Review neutered `committedReads ≤ size` to `committedReads = committedReads`, with the
+  sole producer's three constructions co-edited so the mutation was not testing that
+  proof script, and the tree stayed green.
+
+  It is consumed now, by `MemoryEvent.readCommitted_le_size`, which arrived in the same
+  round for a different reason — it is what states the bound the two deleted seal
+  clauses used to assert. Re-running review's mutation against the current tree fails
+  inside that theorem. The residual asymmetry is real and stays: there is no
+  `AccessDescriptor.committedReadRange`, because §4's committed prefix is what marks
+  bytes initialized and a read initializes nothing, so the write half has a consumer at
+  the descriptor layer and the read half has one only at the event. That is a stated
+  design point rather than a missing mirror.
+
+- ~~**`Tools/ReachabilityAudit.py`'s `--inert` check reported every entry in its
+  allowlist, every run, for its whole life.**~~ It emptied the allowlist, ran the scan,
+  joined the reports into one string and looked for each entry name *inside backticks* —
+  and this tool's report format has no backticks. Nothing was ever found, so all
+  twenty-five entries were declared inert while each was suppressing exactly one report.
+
+  The comment above it argued for exact-name matching over a substring of the joined
+  report, because an entry that is a strict prefix of another reported name reads as
+  live. The observation is true and the version it replaced worked, because the report
+  text contains the names; the version it introduced matched a delimiter the format does
+  not use. In the same sentence it pointed at `ConsultedAudit.inert_entries` as "a real
+  leave-one-out". It is one now, and `self_test` seeds both directions, which it never
+  had.
+
+  **A check that reports everything reports nothing**, and this one failed in the
+  direction that looks like diligence: twenty-five lines of "delete these", under a
+  heading saying the allowlist had rotted, produced by a matcher that could not have said
+  anything else. `--inert` exits zero by design — an inert entry is news, not a
+  violation — so nothing forced a reader to notice that the news never changed. Three
+  gates on this branch grew an `--inert` check after being caught with dead entries, and
+  this is the first evidence that such a check needs its own falsifying test as much as
+  the gate does.
+
+  Repaired, it found exactly one real entry: `EventKind.fence`, which
+  `Tests/Memory/EventClauses.lean` now mints three of. Deleted, with the reason kept in
+  the comment, because §7.1's fence event still has no producer in the *transition* and
+  §4.2 records that.
+- ~~**`Tools/CitationAudit.py` could not adjudicate prose citing a tool's own
+  internals.**~~ Its declaration set was built from Lean sources, and its blind-spot list
+  said so: a Python file naming `applyAuthorityDelta?` is naming a door rather than citing
+  a theorem, and a Lean-only declaration set cannot tell the two apart. That reasoning is
+  about the `Tools/*.py` files as *citers* and was silently carried over to them as
+  *cited*, so §4.4.1 naming a constant inside one of these gates was unadjudicated in
+  either direction.
+
+  The declaration set now includes each Python file's module-level constants, functions
+  and classes, anchored at column zero — an indented name is a local, and prose citing one
+  names something a reader cannot find. Two thirds of round twenty's findings are in this
+  directory and the entries recording them name the constants that changed; without this
+  every such citation would have needed an allowlist entry, which is the shape this file
+  calls "a judgement somebody made and is not one". It reported one immediately: the
+  entries above cite the exemption constant they deleted, and that citation is in ALLOWED
+  under the group for names deliberately naming something gone.
+
+- ~~**`Tests/Memory/EventClauses.lean`'s index decided events the file did not
+  contain, and the commit message described repairs that never landed.**~~ Round twenty
+  added `each_neighbour_fails_exactly_one_clause` to close the defect that five of
+  thirteen neighbours failed two or three clauses each. It wrote its entries as **fresh
+  event terms** rather than over the neighbours the theorems above state — so for two
+  clauses it decided a repaired event the file did not have, for two more it decided
+  nothing at all, and the four other repairs the commit message claimed (two neighbour
+  values, two deleted theorems, the header's clause count, the pairing paragraph) were
+  never applied at all. The script that made them was written and not run, and the
+  commit message was written from the script.
+
+  Every neighbour is a `def` now, and both the refusal theorem and the index entry are
+  stated over that one name, so the two cannot drift. Twelve neighbours for eleven
+  clauses, four controls, and the two theorems naming deleted clauses are gone.
+
+  **An index that does not name the same terms as the thing it indexes is not an
+  index** — and it is worse than none, because it reads as the check. This is the third
+  round in a row in which a repair to this file was defective, and the second in which
+  the defect was that a mechanism and the thing it measures were quantified over
+  different objects. The generalisation for the commit message is narrower and harsher:
+  **a claim that a repair landed is a claim about the tree, not about the intent**, and
+  the tree was not read before the message was written.
+- ~~**`Grass/Op/Step.lean`'s fault-commit bound is six guards and four had fixtures.**~~
+  Each conjunct of the descriptor arm is itself an `if` on the intent, so the arm asks
+  four questions, and the no-descriptor arm asks two. Round nineteen closed one, round
+  twenty closed a second after finding the round-nineteen lesson had not crossed the
+  `match`, and round twenty-one found *both remaining cells of the descriptor arm*
+  surviving neutering: a read-only access could declare a committed write of up to
+  `range.size`, and a reading access's read count was bounded by nothing a fixture
+  defended. `Alpha.load` supplies the reading descriptor the four `store` fixtures could
+  not, and all six cells are exercised now.
+
+  Three rounds, one guard, the same shape each time. **A guard's arity is the product of
+  its branches, not the count of its conjuncts**, and a fixture pair that names a
+  symmetry is evidence about the two cells it lands in.
+- ~~**`MayLend`'s sublet disjunct bounded rights and asserted extent.**~~ Its docstring's
+  boldfaced claim is "you cannot lend what you do not have". That was proved of the
+  rights term — `an_atomic_grant_does_not_sublet_as_an_ordinary_one` and
+  `a_borrower_may_not_sublend_more_than_it_holds` — and nothing tested the byte term.
+  Review weakened `entry.2.range.Contains grant.range` to `Meets`, co-editing the one
+  place the module's own proof consumes it so the mutation tested the statement rather
+  than the script, and the whole tree stayed green: **a borrower of four bytes could
+  sublet eight**, and the sub-borrower was then authorized over bytes no grant in the
+  chain covers. Reachable, not merely expressible — two read-only grants do not conflict
+  and `LoanConflicts` needs a writer, so the conflict scan does not stop it.
+
+  `a_borrower_may_not_sublend_more_bytes_than_it_holds` is the fixture, with the sublet
+  at four bytes as its control and `the_door_refuses_the_oversized_sublet` saying the
+  door agrees with the predicate. This is authority created from nothing, in the
+  definition three rounds have been repairing, found by attacking the half of a
+  two-part claim that had no fixture rather than the half that did.
+- ~~**`LoanConflicts`'s *forward* `Meets` direction was pinned by nothing**, one round
+  after its reverse was.~~ Round twenty found the reverse direction discriminated by
+  nothing, proved what it adds, and pinned it with a fixture carrying
+  `¬ emptyLoan.range.Meets ⟨0,8⟩` explicitly. The control it wrote beside that fixture,
+  `a_non_empty_installed_grant_conflicts_forwards`, is a pair on which *both* directions
+  hold — so deleting the forward disjunct changed nothing and review deleted it green.
+  `an_empty_new_grant_still_conflicts` is the mirror: a *new* grant of no bytes inside a
+  live one, which the forward direction catches and the reverse does not, and which is
+  the case `issue?_eq_none_of_empty`'s docstring cites it for.
+
+  **A fixture on which both halves of a disjunction hold is evidence about neither.**
+  That is the same sentence as round nineteen's about symmetric conjuncts, in the
+  repair round twenty wrote *because* of round nineteen's, one direction over.
+- ~~**The event seal's location clause names two event kinds and was decided for
+  one.**~~ "A fence or control event has no location, so its range is empty" — and every
+  fixture deciding it was a fence, because `EventKind.control` was minted nowhere in the
+  tree. Review narrowed the clause's guard from `touchesMemory = false` to
+  `kind = .fence`, co-editing the `Decidable` instance, `sealClauses` and the producer's
+  discharge, and the whole tree stayed green with a control event carrying an eight-byte
+  range admitted by the seal. `Tests/Memory/EventClauses.lean` mints one now, with its
+  own control and its own index row, and `"EventKind.control"` is out of
+  `Tools/ReachabilityAudit.py`'s allowlist — the second entry that tool has lost to a
+  fixture rather than to a deletion.
+
+  The generalisation is about the allowlist rather than the clause. **A constructor
+  nothing builds is a constructor every clause about it is undecided for.** An entry
+  recording "a later milestone owns the producer" is also, silently, recording that
+  every rule quantifying over that type is exercised on a proper subset of it — a cost
+  the tool does not report and the entry did not mention.
+- ~~**Three `Tools/ConsultedAudit.py` allowlist entries claimed two structures each, and
+  `--inert` cannot see it.**~~ Round twenty replaced a structure-name *pattern* with
+  per-field entries, on the rule that "an exemption keyed on a name pattern is a claim
+  about every structure that will ever match it". It qualified the eighteen entries the
+  pattern had covered and left thirty-four bare — and a bare entry is a name pattern
+  with one element. `cause`, `origin` and `zero` each exempted a field on two
+  structures.
+
+  `origin` is the one that mattered: written for `EventCause.origin` under "diagnostic
+  identity, never dispatched on", it also silenced `DerivedDemandFamily.origin` in
+  `Grass/Core/Demand.lean` — the field carrying the proof that a derived demand descends
+  from a prior key with a membership witness, in another owner's module, of exactly the
+  kind this file's own later comment says must be *listed and reported* rather than
+  silenced. It is listed in that group now and reported as part of `c-mem:52`.
+
+  `overbroad_entries` is the check, and it **fails** rather than reporting, because
+  unlike an inert entry this does not become true on its own. `--inert` structurally
+  cannot find it: leave-one-out asks whether an entry suppresses something and never how
+  much. **A mechanism that asks the wrong question passes every instance of the class it
+  cannot ask about** — which is the third distinct way an allowlist check on this branch
+  has been found blind, after the wrong-mechanism one and the wrong-delimiter one.
+- ~~**A second allowlist nothing swept, two gates with no `--inert` at all, and a
+  misspelt flag that passed.**~~ Three findings, one shape. `Tools/CitationAudit.py`'s
+  `--inert` swept `ALLOWED` and not `ALLOWED_PATHS`, the second allowlist added in the
+  same round — which was already carrying a structurally unreachable entry,
+  `"../docs/FOUNDATION.md"`, that `PATH_CITATION`'s leading character class can never
+  emit. `Tools/FixtureAudit.py` and `Tools/SourceLocationAudit.py` had no `--inert`
+  mode. And every gate ignored unknown flags, so `--inert` on a gate that had never
+  implemented it ran the ordinary check and printed its success line at exit 0 —
+  review swept the modes across the seven gates and got seven green lines, one of which
+  was not the check it named.
+
+  All seven now reject an unknown option with exit 2, both new sweeps are real
+  leave-one-outs seeded in both directions, and `CitationAudit`'s self-test asserts the
+  property its sweep silently depends on — that every report format it reads puts the
+  cited name in backticks, which is precisely what `ReachabilityAudit`'s did not.
+
+  §4.4.1's own count was wrong too: it said "the fifth of five allowlist-bearing gates".
+  There are **eight** allowlists across seven gates, which the same bullet's own
+  premise says two sentences earlier — `CitationAudit.py` has two. **An exhaustiveness
+  claim about a set of gates is worth checking against the gates**, and this one was
+  written from the list
+  of gates that had been repaired rather than from the list that exists.
+- ~~**`Grass/Memory/Profile.lean`'s package docstring named a declaration that has never
+  existed.**~~ "`PackageHolds` below is the only thing that turns it into a claim: a
+  consumer that demands `PackageHolds` demands proofs of all eleven." Nothing declares
+  `PackageHolds`; the declaration is `RequiredProofPackage.Holds`, it conjoins eight and
+  its own docstring says eight, and three of the eleven fields are no longer `Prop`s a
+  profile names, so "every field set to `True`" does not typecheck. This is the
+  paragraph a reader is sent to for what the last gate before `VerifiedProgram`
+  guarantees, describing the record as it stood three repairs earlier.
+
+  Invisible to every gate: a backticked token with no dot and no underscore is what
+  `Tools/CitationAudit.py` documents as permanently unadjudicated. Same class as
+  `AuthorizedBy` a round earlier, in the module that owns §10.
+- ~~**`issue?`'s docstring kept naming the wrong clause as unstated, through the repair
+  of the sentence it sits in.**~~ "The extent clause has no theorem of its own; it is
+  checked and not stated." The extent clause is the one gate that *does* have a theorem
+  — `issue?_eq_none_of_wrong_extent` — and the containment clause is the one that does
+  not. §4.4.1 diagnosed exactly this a round earlier ("a reviewer following it checked
+  the wrong clause") and recorded it closed; only the count beside it had been repaired,
+  from "four of the five" to "eight of the nine", and the misnaming — the part that hid
+  a finding — survived verbatim. The enumeration is complete now rather than partial,
+  because **a list of four under a claim about eight leaves the reader to guess which
+  four are missing.**
+
+  Also closed: the last surviving ordinal reference to `MayLend`'s disjuncts, in
+  `Tests/Op/StandardLoan.lean`, which round twenty's rename missed and which had
+  additionally kept `Grants` after the bound moved to `GrantsAsGrant`.
+
+- ~~**A `sorry` in a tracked file passed all nine gates.**~~ `Tools/SourceLocationAudit.py`
+  exists because two scratch probes were once swept into commits by a `git add -A` and one
+  contained a `sorry`; its module docstring says so and calls the case "not hypothetical".
+  It reported strays and did not read the files it *exempted*. Review appended
+  `theorem seededProbe : False := by sorry` to a tracked file under `Spikes/` and every
+  gate passed: `lake build` does not elaborate that tree, `AxiomAudit` walks the
+  elaborated environment, and the seven Python gates read `Grass/` and `Tests/`. `False`
+  was provable inside the repository and nothing in the tree would ever have said so.
+
+  Every file the allowlist covers is scanned now for `sorry`, `axiom`, `native_decide`
+  and `unsafe`, comments and string literals stripped, and a hit fails. The seeded line
+  is reported at the right file and line while `lake build` and `AxiomAudit` stay
+  correctly silent, and `self_test` seeds both directions including the
+  token-in-a-comment case.
+
+  **An exemption's reason is scoped to the thing it exempts from.** "They import modules
+  that do not exist yet" justifies not *building* those files. It was read as justifying
+  not *checking* them, which is a different sentence nobody wrote. The gate closed this
+  hole for the repo root and left it open for its own allowlist — and the allowlist is
+  one prefix entry, so it covers every file that will ever be put under that directory.
+- ~~**`Tools/ConsultedAudit.py` could not see a field whose type begins on the next
+  line.**~~ `DECL` required a non-`=` character after the colon *on the same line*, so a
+  field whose proposition wraps — which is what a long clause naturally does — was not a
+  field to the tool at all: not reported, not allowlistable, and invisible to
+  `inert_entries` and `overbroad_entries`, which read the same scan. Five in-scope fields
+  are written that way, two of them clauses of the event seal. So dropping the
+  `WellFormed` structure exemption put **nine** of that seal's eleven clauses in scope and
+  the commit doing it said eleven.
+
+  Widened to the lookahead form `Tools/CitationAudit.py`'s `FIELD` already used. Six
+  fields entered scope and produced no new report, because all six are projected — which
+  is exactly why the gap was invisible: **a scanner's blind spot is silent in both
+  directions**, and a clean run over a set you cannot see reads the same as a clean run
+  over the set you meant.
+- ~~**Two of the event seal's clause labels could be exchanged with all nine gates
+  green.**~~ Disclosed rather than hidden: both docstrings in
+  `Tests/Memory/EventClauses.lean` said so. Review measured the disclosure — exchanging
+  two labels in `sealClauses` alone is caught by the index, and the *coordinated* exchange
+  in both places survived, leaving the file attesting that the neighbour whose status
+  disagrees about reads is caught by the write clause.
+
+  `each_label_names_its_clause` closes it: eleven biconditionals, one per label, tying a
+  string to the proposition it stands for. A third statement of each clause, and it earns
+  the place: the first says which events the seal admits, the second which clauses an
+  event fails, and only this one says what a clause is *called*.
+
+  **A disclosed gap is better than a hidden one and is not the same as a closed one.**
+  This file has carried that sentence in its own docstring for two rounds while the gap
+  stayed open, which is the honest version of the failure and still a failure.
+- ~~**`refusalOf` still recorded two rules under `authorityUnavailable`.**~~
+  `conflictingAccess`'s docstring records that three rules once shared that name and that
+  §7.3's race was split out. It then said the collapse "was broken once", past tense, while
+  the other two — the authority-*state* clause and the holder clause — were still sharing
+  it. They are independently reachable: a stranger reading bytes lent read-only has
+  `authorityOf = sharedImmutable`, which *permits* the read, so the state clause passes and
+  the holder clause refuses; an accessor over `frozen` bytes is refused before the holder
+  clause is reached.
+
+  `AuditViolationClass.authorityNotHeld` is the second split. Two fixtures that already
+  pinned `authorityOf` at a permitting state — and were therefore already carrying the
+  discriminating evidence — now name the right class, and
+  `a_frozen_stranger_is_refused_by_the_authority_state` is the contrast.
+
+  **A repair that closes one of three and reports the class closed** is the shape, and the
+  count sat in a sentence that was re-read every round without being re-counted.
+- ~~**`authorityOf`'s exhaustiveness claim was four of five, and described `frozen`
+  backwards.**~~ "Four cases, and every `AuthorityState` constructor is one of them — the
+  type says that is a standing requirement, and this is where it is met." There are five
+  branches and five constructors; the omitted one is `atomicShared`, which
+  `AuthorityState`'s own docstring records as *deleted once for being unreachable*. And
+  "another context able to write is `frozen`" leaves out the `NonAtomicHeldByAnother`
+  guard: a writable other holder whose grants are all atomic-only gives `atomicShared`,
+  which `Tests/Memory/AtomicAuthority.lean` had been deciding the whole time.
+
+  Nine rounds since the fifth branch landed. **The one place a type-level standing
+  requirement is claimed discharged is the last place an enumeration should go stale**,
+  and it was silent about precisely the constructor with a history of vacuity.
+- ~~**Three more enumerations short by one, and two counts contradicting the paragraph
+  beside them.**~~ `denialOf`'s order named seven of its eight clause groups, omitting the
+  provenance-source clause — the same defect repaired in `issue?` one commit earlier and
+  not looked for in the sibling. `RequiredProofPackage`'s *own* docstring still said all
+  eleven fields are `Prop`s and that ten are weak, after the module header seven hundred
+  lines above was repaired to say eight and three; that is a repair applied to the
+  instance. `Grass/Resource/Algebra.lean` said "every lifecycle and exhaustion constructor
+  is on `ReachabilityAudit`'s allowlist" — seven of nine, and the two `profileSpecific`
+  constructors are worse off than the seven, since they are on no allowlist and are
+  silenced by same-name blindness, which leaves no record at all. And a paragraph written
+  to record that a guard's arity had been miscounted gave the arity as four when it is six.
+
+  `conflictsWithHistory_of_not_atomic`'s docstring named the incoming access as the
+  non-atomic one when the hypothesis is about the earlier event, and
+  `LedgerEffect.claimedProtocols` re-encoded a five-case match its own projection
+  `LedgerDelta.claimedProtocol` already performs — leaving that projection with no caller
+  anywhere, which is the between-two-gates class §4.4.1 records: `FixtureAudit` scans
+  `Tests/` and `ReachabilityAudit` looks at constructors, so a `def` under `Grass/` that
+  nothing calls falls between them.
+- **`AuthorizedAt`'s grant-epoch conjunct is unreachable, and now says so.** Five of its
+  six conjuncts have a negative theorem or a decided fixture. `CurrentEpoch
+  grant.provenance` — the *grant's* epoch, not the access's — has neither, for the same
+  reason `MayLend`'s identical conjunct has neither: `issue?` requires the provenance live,
+  `allocate?_eq_none_of_outstanding` refuses a record change under an outstanding grant,
+  and `MemoryState.mk` is private, so neither a door nor a fixture can build the state.
+  Kept in the narrowing direction, as `MayLend`'s is. The difference was that `MayLend`
+  argued it out at length and this said nothing, so review had to reconstruct the argument
+  from the sibling to decide the conjunct was deliberate.
+
+- ~~**Three rules under `deadProvenance`, whose docstring named one.**~~ `denialOf`
+  returned that class for three independent conditions: the allocation table never held
+  the identity, the record is torn down, and the record is **live** and the access
+  presents an epoch it has moved past. The docstring said "provenance that is no longer
+  live", which is false of the first and false twice over of the third.
+
+  `provenanceNotAllocated` and `staleEpoch` are the split, and it is the third on this
+  branch after `conflictingAccess` and `authorityNotHeld`. §2's "address reuse never
+  revives old pointers" is the sentence that most needed its own class: reuse is legal
+  and is the entire reason epochs exist, so an epoch mismatch is the expected diagnosis
+  on a correct path and a teardown violation is not, and §8's ledger could not tell them
+  apart.
+
+  `Tests/Memory/Placement.lean` already had all three as separate fixtures with separate
+  docstrings, each asserting the same class — **the discriminating evidence was written
+  down and the class name was throwing it away**, which is the same shape as round
+  twenty-two's two `authorityNotHeld` fixtures. `the_freed_allocation_is_the_one_that_is_dead`
+  pins that the three states really are three conditions.
+- ~~**Four enumerations short by one and two counts nobody re-counted**, all in code the
+  previous commit touched.~~ Listed because the pattern is now the branch's most common
+  finding and the instances are individually small:
+
+  `authorityUnavailable`'s new docstring said `PermitsIntent` is false three ways and it
+  is four — the omitted one, `sharedImmutable` against a write, was live and fixtured,
+  and the fixture asserted only a *count*, which any earlier clause would have satisfied.
+  Its framing sentence, "a question about the storage rather than about the accessor",
+  was false and is what produced the short list: `authorityOf` takes the accessing
+  context precisely so that it is not, and the same bytes at the same range are
+  `exclusive` to the lender and `sharedImmutable` to everyone else.
+
+  `emittedByTransition`'s prose said `refusalOf` returns "four fixed ones" and the tail
+  "four more"; it is five and one, and was five and one before either split. `performAccess`
+  appends at four points, not three, and `transition_own_classes_declared` settled two —
+  the ledger branch arrived with this branch's ledger unification and the enumeration of
+  append sites was not extended; it is a third conjunct now.
+  `admissibilityFailures` listed eight of ten registries, missing the two most recently
+  added, while both fixtures pinning those two say "which is where every other undeclared
+  open name is caught". It is phrased over `AdmittedVocabulary`'s registries now rather
+  than spelled out. And the count of where the anti-collapse rule is stated said three
+  when it is five, four lines above the paragraph that says to re-read such counts.
+
+  **The instances are cheap and the class is not.** A count in prose is a claim with no
+  gate, no type and no fixture behind it, and this branch adds mechanisms faster than it
+  re-reads the sentences that count them. Where a list can be phrased over the structure
+  that generates it — "one clause per registry" rather than ten names — it should be.
+- ~~**`LedgerEffect.createdKinds` was the fourth sibling, and the repair that named the
+  class listed three.**~~ The previous commit made `claimedProtocols` delegate to
+  `LedgerDelta.claimedProtocol` and wrote "its three siblings — `consumes`, `produces`
+  and `reowns` — all delegate". There are four. `createdKinds` was the only remaining
+  inline per-delta match at the effect level, with no `LedgerDelta.createdKinds` to
+  delegate to, so both halves of that paragraph's argument applied to it verbatim: a
+  second encoding of one match to keep in step, and invisible to `FixtureAudit` and
+  `ReachabilityAudit` for the same reason. It has a projection now.
+
+  **A repair that names its own class and then enumerates the instances is a repair that
+  can miss one**, and the miss is invisible because the enumeration reads as a survey. Of
+  the five findings this round, four are a previous round's repair being one short.
+
+- ~~**`private axiom seededProbe : False` passed all nine gates**, one round after the
+  trust scan was added to stop exactly that.~~ `UNTRUSTED` anchored `axiom` and `unsafe`
+  at the start of a line with `^\s*`, so a single modifier keyword walked past it:
+  `private`, `protected` and `@[simp]` each did, and so did `private unsafe`. `Lean.sorryAx`
+  — what `sorry` elaborates to — escaped `\bsorry\b` because `A` is a word character. And
+  `strip` ran `BLOCK` before `STRING`, so `def a := "/-"` opened a comment in the
+  scanner's eyes and blanked every line to the next `-/`, hiding an `axiom` between them.
+  Four ways through, in the gate's own allowlisted directory, with `False` provable under
+  each.
+
+  The pattern steps over attributes and modifiers now, `sorryAx` is covered, `STRING`
+  runs first and cannot span lines, and **all eleven of review's probes are seeded in
+  `self_test` beside four negatives**.
+
+  That last part is the finding. The first version of that self-test seeded two cases: a
+  bare `sorry` is reported, and `sorry` in a comment or a string is not — which is
+  precisely the pair the pattern was written from, so it tested the author's model of the
+  pattern rather than the pattern. **A gate's self-test wants the cases somebody tried to
+  get through it, not the cases it was built from**, and the difference is invisible while
+  nobody is trying.
+- ~~**`issue?`'s containment clause was pinned in one direction.**~~ `ByteRange.Contains r s`
+  is `r.start ≤ s.start ∧ s.stop ≤ r.stop` — two claims in one call. The fixture pair
+  exercising it used a field at the *start* of the root, so its refused grant lay entirely
+  above the field and only the upper claim was tested. Review weakened the clause to
+  `¬ grant.range.stop ≤ grant.provenance.extent.stop`, co-editing the two case splits
+  in this module that branch on it so the mutation tested the statement, and the whole tree stayed
+  green: a grant under a path designating the *tail* installed over the head.
+
+  Misdescription rather than authority from nothing — `Nested` keeps the range inside the
+  allocation — but `grantsOver` reads no path at all, so such a grant freezes and
+  authorizes over bytes its path does not designate, and it is reachable through the
+  sublet chain. `a_grant_below_its_path_is_refused` is the missing half, with the same
+  grant at the field it designates as its control.
+
+  **A guard's arity is the product of its branches**, which §4.4.1 records three times
+  over `if`s and `match`es — and here the branching is inside the *definition* of a
+  predicate the clause calls, where counting the conjuncts of the clause finds one.
+- ~~**Every consistency theorem on the seal's labels raised the price of a mislabelling
+  and none anchored it.**~~ Round twenty-two closed a two-place label exchange with
+  `each_label_names_its_clause`. That theorem restates each clause proposition a third
+  time from scratch, so review carried the exchange through all three sites — the
+  function, the index and the new theorem — and every gate stayed green again, with the
+  file attesting that the neighbour whose status disagrees about reads is caught by the
+  clause called `statusAgreesWithWrites`.
+
+  Nothing inside Lean can tie a string literal to a *field name* without
+  metaprogramming, so the anchor is outside it: `Tools/ConsultedAudit.py`'s `seal_labels`
+  reads `sealClauses`' labels and `MemoryEvent.WellFormed`'s field names and fails if
+  they differ in order. It lives in that tool for the parser and not for the subject,
+  which its comment says. Defeating it now takes renaming the structure's fields, which
+  is a rename rather than a mislabelling.
+
+  **A consistency check between two copies is defeated by editing both copies.** Three
+  rounds each added one, each closing the previous round's exchange and admitting the
+  next; the sequence only terminates by leaving the language the copies are written in.
+- ~~**`Tools/ConsultedAudit.py`'s field pattern was one character too strict, again.**~~
+  `^\s{2,}` missed a field indented by a single space, which is valid Lean. The two-space
+  floor was doing nothing `STRUCTURE` and `fields_in`'s unindented-line terminator
+  do not already do. Latent — no field under `Grass/` is written that way — which is what
+  a blind spot looks like from inside, and is the second round running that this one
+  pattern has been found too strict.
+
+- ~~**`permissionDenied` covered two corpus sentences**, three lines from the split that
+  closed the last collapse.~~ `denialOf` asked `record.permission.Grants
+  d.requiredPermission` and then `record.permission.Permits d.intent` on adjacent lines
+  and returned one class for both. They are §4's least privilege and §3's "atomics do not
+  grant ordinary non-atomic access", and neither implies the other: a *reading* access
+  declaring `readWrite` against a read-only page fails `Grants` while `Permits` passes,
+  and an ordinary write to an atomic-only page passes `Grants` and fails `Permits`.
+  `AuditViolationClass.intentNotPermitted` is the fourth split of this kind on the branch.
+
+  `Tests/Memory/AtomicAuthority.lean`'s `the_page_grants_but_does_not_permit` had been
+  deciding both conjuncts separately while the theorem beside it asserted the shared
+  class — the third time in four rounds that **the discriminating evidence was already
+  written down and the class name was throwing it away**. It now has a read-only page
+  beside it so each clause is pinned by the class the other cannot produce.
+
+  Found by the round *after* the commit that split `deadProvenance` into three, which
+  edited the same `match` six lines above and ended "a repair that names its own class
+  and then enumerates the instances is a repair that can miss one". The adjacent instance
+  was the one it missed.
+- ~~**Four places said the grant map has two doors, or one. It has five.**~~
+  `Grass/Memory/State.lean` twice, `Grass/Memory/Loan.lean` once and
+  `docs/MEMORY_VOCABULARY.md` once: "the two operations that change it", "reachable only
+  through the two mutators", "`issue?` is the only one, and there is no fourth way in",
+  "grants enter through `issue?` and leave through `returnGrant?`, and nothing else".
+  `splitGrant?`, `joinGrants?` and `transferGrant?` all write the map, all reach it from
+  `step`, and `Tools/DoorAudit.py` — the gate written to guard exactly this — says five in
+  its own docstring, as does §4.4.1 and as does `State.lean` itself sixteen hundred lines
+  below the first of the four.
+
+  Not a hole: the three extra doors are checked and guarded. But this is the **seal
+  argument**, and `Loan.lean`'s version rested its conclusion on a false premise —
+  `splitGrant?` and `joinGrants?` put identities into the map that `issue?` never saw, so
+  "`issue?` refused the mixture" is not available as an argument. A reader auditing "who
+  can change `grants`" was told two, checked two, and stopped.
+- ~~**Fifteen stale counts and enumerations in one round**, and the mechanism that would
+  have caught them.~~ `emittedByTransition` called fifteen in one file and fourteen in
+  another when it is eighteen; `denialOf`'s record fields called five in a framing
+  theorem's justification when they are seven, so the stated justification did not
+  follow from what is proved; `AdmittedVocabulary`'s registries called ten when it carries
+  fourteen, in the half of the sentence claiming it no longer spelled anything out;
+  `RequiredProofPackage`'s weak fields called nine and ten when they are eight;
+  `Tools/DoorAudit.py`'s own door set called "the five plus the two" when `DOORS` has
+  thirteen; `RequirementKind` called a "ten-name closed vocabulary" when it declares
+  twelve and carries an open `extension` escape — **a count written from an allowlist
+  counts the allowlist**; the docstring audit calling itself one of four audits when
+  there are seven and saying it has no self-test 250 lines below its own; §4.4.1's own
+  "seven allowlists across seven gates" contradicted by that bullet's own premise two
+  sentences earlier; "nine properties" over a ten-row table; and an inventory of unread
+  fields listing `AccessIntent.isDevice`, which §4.2 records as *removed from the
+  vocabulary* seven hundred lines above and which `Grass/Memory/Rights.lean` says does not
+  exist.
+
+  Two mechanisms, because the class has produced findings in four consecutive rounds.
+  `AuditViolationClass.emittedByTransition_length` puts the number in a `by decide`
+  theorem, so adding a class breaks the build at the line the number lives on and every
+  sentence stating it cites the theorem instead of the digits.
+  `Tools/DoorAudit.py`'s `self_test` asserts `len(DOORS)`, which is the same trick where
+  the countable thing is a Python dict.
+
+  **`Tools/CitationAudit.py` resolves a cited *name*; nothing resolves a cited *number*,
+  and prose is where every count in this layer lives.** Where a count cannot be pinned by
+  a theorem or a self-test, the repair is to stop writing it: "one clause per registry an
+  access descriptor can name" is a rule, and "ten registries" is a number that will be
+  wrong again.
+- ~~**`grantsOver`'s one-line summary claimed an epoch filter its own docstring
+  retracts.**~~ "The grants outstanding over the same bytes as `provenance`, meeting
+  `range`, **in the epoch that provenance names**" — and twenty lines below, "**And no
+  epoch clause.** There was one, and it was wrong in the unsafe direction". The summary
+  also said three departures where there are four. `grantsOver` is what `AnyGrantOver`,
+  `LoanConflicts`, `WritableByAnother`, `NonAtomicHeldByAnother` and therefore
+  `authorityOf` and `refusalOf` all read, so a reader skimming the first line and
+  concluding "a stale grant is not in this list" reasons from the premise the deletion was
+  made against.
+- ~~**§4.4.1 carried an open bullet asserting the opposite of a struck one**, four
+  rounds.~~ "`MemoryEvent.WellFormed` has no consumer … nothing in the tree would notice
+  one becoming false" sat unstruck in the same section as the bullet ending "All thirteen
+  are caught now" and naming the file that closed it. §4.4.1's own text names the failure
+  three bullets earlier: "This bullet stayed on the owed list for two commits after the
+  work landed, which is the same failure as an overclaim pointing the other way."
+- **The authority applier checks no context set and the ledger applier does, and now says
+  why.** `LedgerDelta.Applicable` requires a transfer's `newOwner ∈ contexts`;
+  `applyAuthorityDelta?` requires nothing of a grant's holder or recipient. The stranding
+  argument does not carry across — a duty is discharged only by its owner, while
+  `returnGrant?` accepts the *lender*, and its docstring makes a non-stepping holder
+  deliberate. What is left is that the bytes stay frozen until the lender acts. Review
+  found the asymmetry rather than a consequence: two appliers written to be parallel
+  differed in a checked precondition with no sentence anywhere saying why.
+
+- ~~**Two of this round's findings were the previous round's repair applied to the
+  instance.**~~ Worth recording as one entry, because the pair is the point.
+
+  Round twenty-three repaired `Tools/SourceLocationAudit.py`'s comment stripper: a `/-`
+  inside a string literal opened a comment and blanked every line to the next `-/`. The
+  four siblings carried the identical three patterns and the identical defect
+  **mirrored** — they ran `STRING` before `LINE`, so a `"` in a *line comment* opened a
+  string and everything down to the next quote was erased. Review appended a real
+  `issue?` call to `Grass/Op/Step.lean` between two comments each carrying one quote and
+  **all nine gates stayed green**, in the gate whose entire subject is which modules may
+  reach the grant map. The same shape hid an unused fixture from `FixtureAudit`.
+
+  Round twenty-three also repaired `issue?`'s containment clause, pinned in one
+  direction because `ByteRange.Contains` is two inequalities and the fixture exercised
+  one. Three more `Contains` guards were in the same state: `denialOf`'s bounds clause,
+  `MayLend`'s sublet bound, and `AccessDescriptor.WellFormedIn.rangeInProvenance`.
+
+  Both are swept now rather than repaired again. All five gates share one stripper,
+  written once and commented once — `STRING` first and unable to span lines, then
+  `BLOCK`, then `LINE`, all line-preserving — which is the only arrangement where
+  neither construct can swallow the other. And every `Contains` guard has a fixture on
+  each inequality, each one asserting the *upper* bound holds so that the theorem names
+  which half does the work rather than leaving it to be re-derived.
+
+  **A repair that fixes the instance leaves the class, and the class is usually four
+  siblings wide.** This branch has recorded that sentence for exemptions, enumerations
+  and counts; it applies to code shared by copy.
+- ~~**`Tools/FixtureAudit.py` never printed a correct line number.**~~ `BLOCK.sub("",
+  source)` deleted block comments *including their newlines*, so every report was short
+  by the length of the docstrings above it — and in this tree every fixture carries a
+  docstring, so no number it could print was ever right. Off by 323 on the seeded case.
+  `Tools/DoorAudit.py` records finding and repairing this exact defect in itself; the
+  sibling was not checked.
+- ~~**Three declaration walkers skipped a whole line when a docstring shared it.**~~
+  `fields_in`, `constructors_in` and `FixtureAudit`'s `DEFINITION` each `continue`d on
+  any line opening a comment, so `/-- doc -/ | reclaimed` and `/-- doc -/ quarry : Nat`
+  and `/-- doc -/ def orphan := 1` — all legal Lean — were not merely unreported but
+  never examined. Review seeded an inductive, a structure field and a fixture written
+  that way; every gate stayed green.
+
+  This is the documented historical failure of `fields_in` — "an earlier version ended
+  the structure at the first `/--`, which meant it saw almost no fields and reported a
+  clean tree" — in a narrower form nobody re-tested. The hand-rolled skipper is gone in
+  all three; they blank comments with the shared stripper first, which leaves whatever
+  follows the `-/` where it was. `constructors_in` also missed a second constructor on a
+  line, the whole of `inductive Foo where | a | b`, and any capitalised constructor.
+- ~~**The trust scan let three more forms through.**~~ `open Nat in axiom seeded : False`,
+  `set_option maxRecDepth 2000 in axiom …`, and `axiom` at end of line with the
+  signature wrapped. All elaborate, all prove `False`, all were silent — the anchor
+  required the keyword to be the first token on its line and to be followed by
+  whitespace *on that line*. It admits a preceding `in` or `;` now and ends at a word
+  boundary, and stays anchored rather than becoming a bare `\baxiom\b` because
+  `Tools/AxiomAudit.lean` is itself an exempted file and is *about* axioms.
+
+  Second consecutive round that this scan has been walked past, and the second
+  consecutive round where the repair was to add the attacker's cases to a self-test that
+  had only the author's.
+- ~~**`LoanConflicts`' writer clause was pinned as a conjunct, not as a disjunction.**~~
+  §7.3 asks whether *either* grant may write. Every fixture put a write grant against a
+  write grant, so both alternatives were true and neither was tested: review replaced
+  `a.rights.write ∨ b.rights.write` with each side alone and the tree stayed green both
+  times. Under the first, a writer joins a reader over the same bytes through the only
+  door there is, and §7.3's "unique loans prevent conflicting authority from being
+  issued" is gone in that orientation.
+
+  Deleting the disjunct outright was already caught; **the arity was not.** Two fixtures
+  now, one per orientation, each with the other side read-only, and
+  `the_lender_may_lend_again` is the control for both. A disjunction is two guards, which
+  is the sentence §4.4.1 already records for `if` branches, `match` arms, and the two
+  inequalities of a predicate a clause calls.
+
+### 4.4.1c What merging main changed about the gates
+
+Two hundred and seventy-three commits of `origin/main` merged into this branch at once,
+tripling the tree: 193 build jobs where there were 70, 10,616 audited declarations where
+there were 4,220, three other owners' subtrees under globs written for this one. Four
+things came out of it that are about the gates rather than about the merge.
+
+**Main's docstring audit is strictly stronger and found eight claims this
+branch's version passed.** It resolves every backticked name against the real declaration
+set, printed by its declaration-name walk; the version here checked only that a claim-shaped
+sentence contained *some* backticked identifier. Merging took main's file wholesale and
+re-applied this branch's four additions on top — `__file__` anchoring, `--self-test`,
+`--hedged` and `--inert` — none of which main had.
+
+The eight are repaired by naming what each sentence is about rather than by widening the
+hedge list, which is the direction this branch spent a round pruning. Writing the
+self-test for the merged tool surfaced a ninth, in the self-test: a case asserting that a
+non-Lean-shaped unresolved name is a blind spot, when it is reported under a different
+message. **It was written from reading the pattern rather than from running it**, which is
+the mistake that file exists to catch in prose, made while repairing that file.
+
+**A fixture is enforcement, and the declaration set did not think so.** `DeclNames.lean`
+built its name set from `Grass/` alone, so three true citations of fixture theorems in
+this layer's docstrings read as naming nothing — §3.10 says "name the enforcing type or
+theorem", and in this layer the enforcement of a refusal is routinely a fixture.
+`Tools/CitationAudit.py` already resolved those names, which is how the disagreement
+surfaced: **two gates adjudicating the same citation and disagreeing is worth more than
+either verdict.** The set includes `Tests/` now, with a coverage guard mirroring the one
+for `Grass/`, excluding seven modules that define a `main` and cannot share an
+environment. That widens what the docstring audit accepts for every owner and is reported
+rather than assumed.
+
+**Four gates now have a stated scope, because they had an implied one.** `CitationAudit`,
+`ReachabilityAudit`, `FixtureAudit` and `ConsultedAudit` report a declaration, a
+constructor or a fixture as unread — and "unread" is a judgement only that code's owner
+can make. Over the merged tree they produced 219, 50, 8 and 92 findings, essentially all
+in `Grass/ISA`, `Grass/ABI`, `Grass/Process` and their fixtures. Every one may be true and
+none is this branch's to adjudicate: **an allowlist entry records that somebody read the
+corpus and decided, and nobody here has read theirs.** The scope is a named constant now,
+widening it is one edit, and the module docstrings say what is not covered.
+
+`DoorAudit` and `SourceLocationAudit` are deliberately *not* scoped. Their subjects — who
+may call this layer's doors, and whether a tracked `.lean` file is inside any gate — are
+tree-wide questions by construction.
+
+**And the merge widened one blind spot materially.** Six `ConsultedAudit` allowlist
+entries stopped suppressing anything, and not because the memory-layer field gained a
+reader: another tree now declares a field of the same name and projects *that*.
+`AccessDescriptor.observations` still has no reader; so does `PendingRender.observations`;
+one projection satisfies the scan for both. The entries are deleted, because an entry
+that suppresses nothing records nothing, and what they were covering is recorded here
+because the gate can no longer say it.
+
+The same-name blindness was a documented limitation with a handful of instances. Over a
+tree three times the size it is the ordinary case for any short field name, and **a
+lexical gate's precision falls with the square of the tree it scans while its stated
+coverage does not change.** That is the cost of the design, it was always going to arrive
+at integration rather than at authorship, and it is the strongest argument yet for the
+qualified-entry form this branch adopted two rounds ago: `Structure.field` says which
+structure, and the scan still cannot.
+
+Reported to their owners rather than decided here: the five new unread fields in
+`Grass/Semantics` and the twelfth `RequirementKind` constructor (g-foundation, extending
+`c-mem:52` and `c-mem:53`); twenty hedge entries in main's `DocstringAudit` that silence
+nothing in the merged tree; and the `Tests/` widening of `DeclNames.lean`.
+
+### 4.4.1d Round twenty-five: everything the merge commit got wrong
+
+Thirteen findings across two reviewers, and **every one is against the two commits that
+merged main and scoped the gates.** Nothing survived on the Lean side. That is the
+round's most useful result and it is why this section is separate: the model held, and
+the tooling built to police it did not.
+
+- ~~**The shared comment stripper was defeated in both directions**, and one defect
+  covered five gates.~~ Three regexes cannot express nesting and Lean nests block
+  comments. `/- outer /- inner -/ code -/` closed at the first `-/`, so `code` read as
+  source and a name used only inside a comment counted as a use. And `LINE` ran last, so
+  a `/-` inside a `--` comment opened a block that swallowed every line to the next `-/`
+  anywhere in the file — **review hid a real `MemoryState.alias` call behind one and all
+  nine gates stayed green**, which is the same demonstration that put `alias` in
+  `DOORS`.
+
+  Replaced with a depth-tracking scanner, written out in each of the five. Two rounds had
+  argued about which *order* to apply the three patterns in; both surviving orders were
+  wrong, which is what an argument about the order of a wrong mechanism looks like from
+  the outside.
+- ~~**`SCOPE` was a coverage claim with nothing behind it, and it was wrong in both
+  directions.**~~ Dropping one token switched three gates off for this layer while they
+  printed their success lines: no self-test reached `in_scope`, because every case writes
+  probes into a temporary directory and calls the scanner directly, and only total
+  emptiness was guarded, in three of six gates. And the hand-written list dropped three
+  of this branch's *own* pre-merge subtrees — `Grass/Certificate.lean`, `Grass/Verify/`,
+  `Tests/Foundation.lean` — which cost one live finding and made two allowlist entries
+  read as dead.
+
+  `SCOPE` is the pre-merge tree now, which is a fact rather than a recollection.
+  `in_scope` resolves relative to `ROOT` rather than scanning absolute components, which
+  also closes a checkout named `Grass` putting everything out of scope. Each self-test
+  asserts membership against four hard-coded paths.
+
+  **A floor derived from `SCOPE` cannot catch `SCOPE` shrinking** — deleting a token
+  deletes the check with it. The floor catches the globs or `in_scope` breaking under a
+  `SCOPE` that still names the subtree; the hard-coded self-test cases catch the rest,
+  and CI runs self-tests before gates. Saying which half is which is the whole content of
+  that paragraph, because the first version claimed both.
+- ~~**The four scoped gates said their coverage was stated in the module docstring, and
+  no docstring mentioned it.**~~ Three went further and asserted the *unscoped*
+  behaviour — "for each `inductive T` under `Grass/`", "for every `def` declared under
+  `Tests/`", "no declared field name is entirely absent from the sources". **A sentence
+  that delegates to text nobody wrote is worse than no sentence: it reads as a promise
+  kept.**
+
+  Also `CitationAudit`'s declaration set was narrowed along with its prose set, so a
+  memory docstring citing a real `Grass/ISA` theorem would have been reported as naming
+  nothing. Two lists now: the prose this gate adjudicates is scoped, and what a citation
+  may legitimately *name* is not.
+- ~~**Six allowlist entries were deleted under one explanation and they had three.**~~
+  Four went inert to same-name blindness. One — `ExecutionPrefix.initialGraph` — gained a
+  genuine reader in the merge, good news filed as a warning. And `ArtifactFormat.parseExact`
+  **never went inert at all**: it is declared once and constructed once in the whole
+  tree, and it stopped being reported because `Grass/Certificate.lean` fell out of
+  `SCOPE`. Deleting its entry turned a recorded, routed gap into one recorded nowhere.
+
+  **A cause read off a coincidence of timing is not a cause.** Six entries went quiet in
+  one commit and the note attributed all six to the mechanism that explained the first
+  one looked at.
+- ~~**The inert sweep was run on one gate of three.**~~ `ReachabilityAudit` had four dead
+  entries and `CitationAudit` one, unswept and unrecorded, in the commit whose own
+  subject is allowlist rot. `Disposition.transferred` is the one that costs something:
+  §3's terminal disposition vocabulary being unconstructed is a gap §4.4.1 records and
+  this gate can no longer state.
+
+  Five more `CitationAudit` entries went inert for the *good* reason — `Grass.ISA.X86`,
+  `Grass.ABI.Win64`, `Platform.Win32`, `Std.Process`, `ProcessSpec.Step` were "components
+  another owner will build" and those owners built them. That is the one way an entry in
+  that group is supposed to end, and it is worth distinguishing in the record from an
+  entry that went quiet because a lexical scan found a same-named declaration elsewhere.
+- ~~**`--inert` on `DocstringAudit` measured a substring where `HEDGE_RE` matches a
+  word.**~~ It reproduced, in the mode whose job is to police that list, the exact
+  substring bug the comment above `HEDGES` records fixing — review seeded a sentence
+  containing `XMM6` and watched `M6` stop being reported as inert while still silencing
+  nothing. It is a leave-one-out now, like every other gate's.
+
+  Writing it surfaced a second error of the same kind: the first version took its
+  baseline with hedges *disabled*, which makes every narrowed run a subset and every
+  entry read as inert — it reported all thirty-nine. A leave-one-out compares against the
+  run the gate actually makes.
+- ~~**The declaration-name walk's exclusion list: eight entries, six `main`s, two inert.**~~
+  `Tests` itself is never enumerated, and `Tests/Memory/Spike1Reference.lean` defines no
+  `main` — the grep that put it there matched `mainThread` — is not a generator but this
+  layer's M1 freeze evidence, and was in the name set anyway through two importers.
+  **An exclusion list written by grepping for a keyword is a list of what the grep
+  matched.** The guard's error message also named only `Grass/` while its `Tests/` half is
+  the half that fires, and a comment said the guard stayed scoped to `Grass/` four lines
+  above code that filtered both.
+- ~~**`NOT_IDENT` cannot fire**, and `SCOPE`'s siblings in stale counts.~~ `IDENT`'s
+  capture class contains no slash, section mark or space, so no string it produces can
+  match any alternation of the pattern filtering it. Kept, with the reason written down —
+  the shape it describes is real and what makes it unreachable is upstream — but the
+  file's own header treats `SELF_NAMING`, "defined and never used", as a finding, and the
+  difference between the two is worth stating rather than leaving to be rediscovered.
+
+  And the counts: `ConsultedAudit`'s whole-tree finding count is 92, not 4;
+  `FixtureAudit`'s allowlist has three entries, not two; the `Grass/Semantics` fields new
+  in the merge are five, not six; "hundreds of findings" is true of one of the four gates
+  that say it.
+
+### 4.4.1e Round twenty-six: the Lean does not come back clean
+
+Ten findings, **five of them in the Lean**, which is the round's most important
+result because it falsifies what §4.4.1d said. Round twenty-five returned nothing on
+the Lean side and this section was going to be about whether that replicated. It did
+not. **One clean round is not a fixpoint**, and treating it as one would have been
+the "disclosed gap treated as a closed one" defect applied to the review process
+rather than to the code.
+
+What *has* changed is the character of what survives. All five Lean findings are
+prose: a claim quantified over three fields and proved of one, two adjectives absent
+from their own definitions, a discharged obligation still written as owed, and two
+names that have never existed. None is a hole in a guard. Both mutations the reviewer
+ran either died against a purpose-built fixture or ran out of arity before reaching
+semantics, and every count re-counted — nine, ten, eleven, thirteen, fourteen,
+twenty, six, seven-of-nine — was right, one round after four were wrong. The
+mechanisms have converged; the sentences about them have not.
+
+- ~~**The floor added last round was weaker than its own sentence.**~~
+  `roots_are_covered` promised "a representative subtree from each owner" and
+  hard-coded six of fifteen. Nine could vanish with it green, and review ran it:
+  dropping `Grass/Std/Logical` and `Grass/Resource` took `--hedged` from 35 claim
+  sentences to 30 while the floor printed nothing and the gate printed its success
+  line. Two of the nine were this branch's own areas and one, `Grass/Std`, is a
+  distinct owner with its own normative document — so the list did not satisfy even
+  the sentence above it.
+
+  Derived from disk now, and falsified per subtree: **sixteen of sixteen caught,
+  against six before**. Writing that repair exposed a second defect underneath it —
+  the `is_dir()` guard dropped every top-level module, so `Grass/Certificate.lean`
+  stayed invisible even once `required` named it. **A floor that enumerates correctly
+  and then filters the enumeration is two chances to be wrong**, and the filter
+  silently undid the fix.
+- ~~**The shared scanner was defeated in two more ways, in all five gates.**~~ Lean
+  has **string gaps** — a backslash immediately before a newline continues the
+  literal — and the escape branch consumed the newline. Total length was preserved,
+  so the invariant the docstring advertises appeared to hold, while the line count
+  dropped and every finding below a gap was reported one line early; review measured
+  a door call on 195 reported as 194 against a gap-free control on 191 reported
+  correctly. The comment above that branch asserted Lean strings cannot span lines.
+
+  And a **char literal** `'"'` holds a bare quote, which opened a string and blanked
+  the rest of the line — two door calls either side of one, and the second vanished.
+  Same class as the `--`-in-a-line-comment defeat round twenty-five closed, in the
+  same function, in the hiding direction.
+
+  Neither branch had a self-test case: `BACKSLASH` appeared only in each file's own
+  comment, constant and single use, and no seed contained an apostrophe. Both are
+  seeded now in all five, with controls — a real string is still blanked, and `h'` as
+  a prime does not start a literal. The repairs were checked against the pre-fix code
+  at `f48cb9a`: **ten failures before, zero after**, and one seed was falsified by
+  reverting its branch and watching the self-test fail.
+- ~~**The consumer set was scoped over `Grass/` and not over `Tests/`.**~~
+  `ConsultedAudit` and `ReachabilityAudit` both built it as `DECLARED_IN + Tests/`,
+  so a declaration used only from `Grass/ISA` was reported unused while one used only
+  from `Tests/ISA` was not — same owner, same out-of-scope status, opposite verdict.
+  Review isolated it with one probe and three placements of its single consumer.
+
+  `CitationAudit` was given exactly this repair a round earlier and `FixtureAudit`
+  already had it: **two gates of four, which is the repair landing on the instance
+  instead of the class**, on the branch that names that class. It also silently
+  corrupted `--inert`, which reads the same narrowed window. `SCOPE` governs what a
+  gate *adjudicates*, never where it looks for a use.
+- ~~**A count broken by the commit under review.**~~ `ReachabilityAudit`'s
+  disposition group said "these two are named and unbuilt" over one entry and "the
+  other three" over four — `Disposition.transferred` was deleted by the same commit
+  that left the sentence standing. *A count nobody re-counts*, introduced by the
+  change whose own subject was allowlist accuracy, four bad counts having been round
+  twenty-five's closing item.
+- ~~**`Grass/Memory/Audit.lean:37` said M2 owed a proof it had already supplied.**~~
+  `Grass.Op.step_extends_violations` has existed since M2, and line 434 of the *same
+  file* cites it as done. The file contradicted itself about §8's central guarantee,
+  in the passage that is the authoritative prose for it — the one that correctly
+  concedes append-only is not a property of the type and relocates the guarantee to
+  the transition relation, then tells the reader the relocation is unproved.
+
+  **`DocstringAudit` cannot catch this and never could**: "owes" is in `HEDGES`, so a
+  stale open obligation is exempt by construction. That is a limit of the gate worth
+  recording next to the sentence it missed — a hedge admits a disclosure and cannot
+  tell one from an obligation that has since closed.
+- ~~**`isPortable_of_isPlain` claimed "every part" and proved one part.**~~ `IsPlain`
+  constrains `atomicity` and `order` and says nothing about `scope`, so a demand with
+  `scope := .profileSpecific ⟨"gpuWorkgroup"⟩` is plain, is not portable, and is not
+  expressible against a profile that has not registered the name. Review elaborated
+  the counterexample rather than arguing it. Nothing depends on the wider reading —
+  `Grass/Op/Step.lean` checks `AdmitsOrder` and `AdmitsScope` separately and directly,
+  and `IsPlain` has no caller under `Grass/`.
+
+  The sibling paragraph was worse: "the initial single-threaded profile admits only
+  plain accesses" is a gate nothing applies, and `Grass/Memory/Profile.lean`
+  discloses the opposite. **A disclosed gap written as a closed guarantee in a
+  different module is the hardest kind to find**, because the disclosure and the
+  claim never appear on the same screen.
+- ~~**Two names that have never existed, and one adjective pair that is not in the
+  definition.**~~ `Grass/Memory/Provenance.lean:283` cited `p.Designates root`;
+  nothing declares `Designates` and `descend` takes a step, not a root.
+  `Grass/Memory/ByteStore.lean:107` said `ByteStore.read` is where the
+  newest-wins-for-initialization reading is taken; there is no `ByteStore.read`, and
+  the reading is taken in `cellAt?`. `IsPlainRead`/`IsPlainWrite` were documented as
+  "aligned single-context" when alignment is `WellFormedIn`'s and "single-context"
+  would be the scope `IsPlain` does not constrain.
+
+  **Three citations, three different blind spots, none of them new.** `Designates`
+  exploits two documented limits at once — a space inside the backticks defeats
+  `CITATION`, and a lower-case head makes `worth_checking` read it as an expression
+  fragment. `ByteStore.read` is adjudicated and *passes*, on the disclosed
+  final-component fallback: `read` is declared as `AccessIntent.read`. **A citation
+  whose last component is a common word — `read`, `write`, `owner` — is unadjudicated
+  by construction, and this layer is full of such words.** And two dead `def`s in
+  `Grass/` are invisible to every gate, because `FixtureAudit` covers `Tests/` only.
+
+**The second reviewer, and the answer to the round's question.** 33 mutations, 31
+conclusive, **30 caught, one documented-closed survival, one new finding**. So the
+Lean layer does hold: round twenty-five's clean result was not an artefact of
+reviewers following the diff. Both reviewers agree on the shape — the mechanisms have
+converged and the sentences about them have not — and the disagreement is only about
+whether prose counts as "the Lean coming back clean". It does not, which is why this
+section is titled as it is.
+
+Settled by that round, and worth recording because a previous reviewer got it wrong:
+**`Grass/Obligation/Delta.lean`'s two kind clauses are verified.** They were flagged
+as unproved on the strength of a theorem census, and there is no `not_applicable_*`
+theorem for either — but deleting `.split`'s kind clause is caught at
+`Tests/Op/FakeIsa.lean:1721` and `.join`'s at `:1738`, both beside positive controls.
+**A census of theorem names is not a census of what is checked.** All twelve
+`denialOf` branches, all four `Rights.lean` guards, all four `Loan.lean` guards and
+five `MayLend`/`LoanConflicts` clauses were also deleted one at a time and every one
+was caught, four of them at statement level rather than by a tactic script.
+
+- ~~**The `SCOPE` self-test pinned one token of eleven.**~~ A leave-one-out over every
+  token in each of the four scoped gates found **36 of 44 (gate, token) pairs
+  silent** — token deleted, self-test green, gate green, success line printed. Seven
+  tokens were silent in all four, `Obligation` among them: dropping it took all three
+  `Grass/Obligation` files out of every gate while each printed success, which is
+  **precisely the failure §4.4.1d records as closed**, reproduced against the subtree
+  carrying `LedgerDelta.Applicable`.
+
+  §4.4.1d's own sentence is where the error lives — "the hard-coded self-test cases
+  catch the rest" was written about one case. The floor genuinely cannot cover this,
+  and that half of the sentence is right: a check derived from `SCOPE` is deleted
+  along with the token, so only a hard-coded name survives its removal. There is one
+  per token now, in all four gates.
+- ~~**The string-gap repair was half a repair, and the missing half was the unsafe
+  one.**~~ Fixing `\`+LF while leaving `\`+CRLF meant that on a CRLF checkout the
+  escape ate the backslash and the CR, the LF hit the top-of-loop reset, and the
+  scanner's in-string flag cleared **mid-literal** — so the string's own tail was scanned as source.
+  That is the hiding direction, and it is the same content failure that put `alias` in
+  `DOORS`, reached through a third lexical hole. What holds it off today is
+  `.gitattributes`' `* text=auto eol=lf`, which no gate consults, against a repo-local
+  `core.autocrlf=true`.
+
+  Both halves are now falsified against the pre-fix code: **ten failures before, zero
+  after**, LF and CRLF, with the string's tail asserted hidden and the following real
+  call asserted visible. Thirty-two lost newlines existed in four live files.
+- ~~**`Footprint.IsPadding`'s extent conjunct was checked by nothing.**~~ Deleting
+  `extent.Covers offset` — co-editing only the `Decidable` instance and the one
+  projection — left the whole tree green at 193 jobs. Nothing distinguished padding
+  from *any offset in the universe* no field covers.
+  `padding_uninitialized_after_writing_fields` survives the widening because
+  `writeFields` writes only field ranges, so it stays true of everything else too,
+  which is exactly why no case noticed. `Shape.lean:78` names this clause as the reason
+  `fieldsContained` is carried, so the clause the docstring leans on was the untested
+  one. `an_offset_outside_the_aggregate_is_not_padding` pins it.
+- ~~**The two gates disagree about whether a Lean docstring may cite a tool
+  function.**~~ `Tools/CitationAudit.py` scans `TOOL_FILES` and resolves
+  `worth_checking`; the docstring audit resolves against the **Lean build** and
+  reports it as naming nothing. A paragraph written this round to explain a
+  `CitationAudit` blind spot was itself reported by `DocstringAudit` for naming that
+  gate's internals. Rewritten to describe the limits without naming them, and the
+  disagreement is recorded here rather than resolved: neither gate is obviously right,
+  and picking one is a decision about what a Lean docstring is allowed to point at.
+- ~~**A merge left two copies of one paragraph, and a count went stale.**~~
+  `DocstringAudit`'s hedge-matching note appears twice back to back, main's wording
+  then this branch's — in the file §4.4.1c says was taken "wholesale" from main with
+  four additions re-applied. And §4.4.1c said eighteen inert hedge entries; `--inert`
+  reports **twenty**. Corrected by running it, not by re-reading it.
+
+**Owed to another owner, not acted on.** `Tests/ISA/X86/LedgerAudit.lean:476` prints
+on every build that 9 of 18 anchors are unconfirmed and names
+`[amd64-apm-40332-4.09]` as a release-blocker set under
+[VALIDATION.md](VALIDATION.md) §1. That is c-isa's, and it is a stated release
+blocker riding along in a green build.
+
+### 4.4.1a Which profile inputs can weaken a rule
+
+Four review rounds found the same shape and it is worth naming as a shape rather than
+as four incidents: **a field a profile fills in that makes a rule of the corpus not
+run.** Round ten found `StepPolicy.authorities`, which defaulted to the empty list and
+carried §3's whole loan rule. Round twelve found `StepPolicy.compatible`, which could
+exempt every pair from §7.3. Round fifteen found `AddressSpace.repr`, which could make
+both numeric clauses of the declaration-time seal vacuous for a space named
+`cpu.virtual`. All three are closed above, and all three the same way: the rule moved
+to where a profile cannot reach it, and what the profile supplies can now only *add*
+refusals.
+
+Round fifteen is the one to learn from, because the table below already existed and
+did not have a row for `repr`. Two of the entries it does have were written by reading
+the code; the input that turned out to be open was the one nobody thought to list.
+
+So here is every input a profile or a caller supplies, and what stops each from
+weakening a rule. The next reviewer should attack this table rather than rediscover
+its entries one at a time.
+
+| Input | Direction | What constrains it |
+| --- | --- | --- |
+| `StepPolicy.authorities` | adds refusals only | `AuthorityProvider.refuses` is consulted *after* the transition's own clauses and cannot remove one; `refusalOf_refuses_the_unauthorized` is quantified over the policy |
+| `AuthorityProvider.refuses` | adds refusals only | takes a `MemoryState`, not a `MachineState`, so refusal cannot depend on execution history — monotonicity and locality in the range are still open |
+| `StepPolicy.compatible` | can remove a §7.3 refusal | `compatibleIsAtomic` and `compatibleSymm` are proof fields; `conflicts_of_not_atomic` is quantified over the policy |
+| `AddressSpace.repr` | **could remove two refusals, then a third, then the same two again under a fresh identity** | `AccessDescriptor.WellFormedIn`'s `aligned` and `rangeFitsSpace` are both vacuous for a symbolic representation, and `Addressing.lean`'s placement bridge ran in 64-bit arithmetic for any numeric width. `RepresentationMatchesIdentity` fixes the kind, `WellFormed` fixes the width at exactly 64, and `requiredRepresentation`'s default arm is `numericallyAddressed` rather than "no opinion" — which is what let the first repair be walked around under an identity this layer does not name. A profile chooses the identity and nothing else |
+| `AddressSpace.memoryType`, `coherence`, `owner` | — | nothing reads them; §4.2 lists them among the facts the model carries and nothing consults |
+| `AdmittedVocabulary`'s thirteen registries | admit more names | a larger registry admits more, which is the profile's own claim about its target; a *smaller* one refuses more, which is the safe direction |
+| `AdmittedVocabulary.WellFormed` | — | the address-space table is checked and the three justification registries are pairwise disjoint; the other ten have no coherence condition and need none |
+| `StepPolicy.oracle` | can only fail *about commits* | `Oracle.answer` returns a proof-carrying `CompleteCommitted` or `none`, and `none` records `machineAnswerIncomplete`; it cannot claim a commit it cannot witness. "Can only fail" was an overclaim and review said so: it also supplies the bytes that land in memory and the values that reach the trace, and it takes a whole `MachineState` where `AuthorityProvider.refuses` was deliberately narrowed to a `MemoryState`. No repair is proposed because `writeData` has nowhere else to come from today |
+| `StepPolicy.requiredFacets` | demands more | a facet a profile requires and an operation does not supply is a rejection, and `closes_iff_no_missing` says the gate deciding that is `OperationFacets.Closes`. A profile requiring *nothing* still cannot step an operation with no memory-effect facet, because the branch after the gate refuses it |
+| `MemoryProfile.package` | **eight of eleven items still name their own sentence** | `loanMapLaws`, `allocatorFreshnessTeardownEpoch` and `rangeProvenanceInitializationPreservation` have types this layer states, so those items are proofs the profile supplies and cannot weaken — the third partially, covering `applyAccess` and not `step`. The other eight are bare `Prop`s and `True` closes each; `RequiredProofPackage.Holds` conjoins exactly those eight, so the conjunction shrinks as items are stated. Still the weakest input here, and the last gate before `VerifiedProgram` |
+| `faultAt`, the fault plan | adds paths | a `step` argument rather than a profile field; every plan it can name is checked against the sequence's own declarations |
+
+The pattern to apply to a new field: if a profile can fill it in so that a sentence of
+`docs/MEMORY_MODEL.md` stops being checked, the sentence belongs in the transition and
+the field belongs beside it as something that can only add.
+
+### 4.4.1 What M3 still owes
+
+- ~~**Split and join of loans**, which §3 requires and which the identity discipline
+  above is the foundation for.~~ Done. `MemoryState.splitGrant?` and
+  `MemoryState.joinGrants?` are the doors, in the module that owns the map, and three
+  decisions are worth recording.
+
+  **Binary, at an offset, with the parts derived rather than supplied.** A
+  list-of-parts door needs a predicate saying the parts cover the source's range and
+  lie inside it, and this branch has learned what a satisfaction condition with room
+  to be empty is worth — §10's proof package is closable by `True` eleven times. Two
+  parts either side of an offset need no coverage check: coverage is arithmetic, and
+  `AuthorityGrant.covered_by_part` is three lines of `omega`. An *n*-way split is
+  *n* − 1 of these.
+
+  **Neither door re-runs `issue?`, and a theorem says why that is safe.** Re-running
+  it would refuse correct splits, because `MayLend`'s lender disjunct requires the
+  lender to own the storage and every outstanding grant to be its own, and a split's
+  source is outstanding and often lent by a context that owns nothing. So the justification is
+  `splitGrant?_creates_no_authority` and `joinGrants?_creates_no_authority` — the
+  result authorizes nothing the sources did not — with
+  `splitGrant?_preserves_authority` and the two `joinGrants?_preserves_*_authority`
+  for the other direction. Every one is over an arbitrary state; the fixtures in
+  `Tests/Memory/Loans.lean` are the concrete round trip.
+
+  **The join compares whole grants.** `lowGrant = { highGrant with range := … }` is
+  one `decide` over `DecidableEq`, so a field added to `AuthorityGrant` later is
+  compared without this door being edited. A door listing the fields it cares about
+  is precisely the shape that let `LedgerDelta.Applicable` relabel a duty: it pinned
+  protocol and owner because those were the fields someone thought of. Adjacency is
+  checked for the same reason — a gap would join authority over bytes neither source
+  covered, and `joinGrants?_creates_no_authority` would be false without it.
+
+  What is *not* stated is an `↔` between the two maps' `Granted`, because `Granted`
+  ranges over the raw entry list and a map carrying a shadowed duplicate under the
+  source's identity would lose that duplicate to the `erase`. No such map can be
+  built, for the same privacy reason §4.4.1 records below for `Exclusive`, and that is
+  again an invariant with no theorem. Both directions above hold of every map,
+  shadowed or not.
+
+  `Grass/Std/Logical/FiniteMap.lean` gained `mem_of_mem_eraseKey`,
+  `mem_entries_insert` and `mem_entries_erase` for this: bounding a modified map's
+  entry list from above is what a no-new-authority theorem needs, and without them
+  the proof has to unfold the association list at the call site.
+- **Lifetime and conditions on a grant.** §3's map carries them and
+  `AuthorityGrant` does not. Adding fields nothing consults is the shape this layer
+  has been bitten by three times, so they wait for M4's frames, where a bounded
+  lifetime has something to mean.
+
+  **What the absence costs is larger than the missing fields**, and this bullet did
+  not say so. A sublet outlives the loan it was carved from: review had an owner lend
+  a range read-only, the borrower sublet the same range on, and the owner then return
+  its own identity as lender — which succeeds and erases it, leaving the sublet
+  outstanding, the owner at `sharedImmutable` with no write authority, no identity left
+  to return, and `tearDown?` refusing while a grant is out. The owner has consumed
+  every identity it lent and has no action that restores what it had.
+
+  That defeats the §6 sentence `returnGrant?` names as its own reason for existing:
+  "consumes the same loan identities to reconstruct local authority on a conforming
+  return". No rule anywhere relates a sublet's life to its source's, and each of the
+  three deltas is reachable as a declared `authorityEffect`. The mechanism is M4's — a
+  `derivedFrom : Option GrantId`, and a `returnGrant?` that refuses or cascades while a
+  derived grant is outstanding — and should not land here. Recorded so that the missing
+  field is not mistaken for the whole of the missing guarantee.
+- ~~**Atomic shared authority, and §3's rule that atomics do not grant ordinary
+  non-atomic access.**~~ Closed, after two wrong turns worth recording.
+
+  `AuthorityState.atomicShared (ordering : OrderingDemand)` and a theorem stating
+  §3's rule about it existed, and nothing built the constructor, so the theorem held
+  of an unreachable case. Both were deleted — right, because a vacuous theorem reads
+  as coverage. The reasoning given for the deletion was wrong: it said the rule had
+  nothing to constrain, and `Permission.Permits` is the sole rights gate on the
+  chain `MemoryState.AuthorizedAt` → `MemoryState.Granted` → `refusalOf` → `step`,
+  so the rule had a gate and no clause there. (This sentence named the deleted
+  `Authorizes` function and `MemoryState.GrantedOfKind` until review checked the
+  chain: the first is deleted and the second has no caller under `Grass/` at all —
+  the transition's clause asks kind-blind `Granted`, deliberately, because *any*
+  authority over the bytes freezes them and the kind distinction is a provider's
+  business. `Grass/Memory/Rights.lean` had already been corrected; this had not.) `Permission.atomicOnly` is that clause, and `authorityOf` derives
+  `atomicShared` from it. The constructor carries no ordering: that was a second
+  place to say what `AccessDescriptor.ordering` says.
+
+  The second wrong turn took minutes and is the reason to distrust a repair that
+  builds. `WritableByAnother` probed `rights.Permits AccessIntent.write`, which an
+  atomic-only grant fails, so a context updating a word atomically stopped freezing
+  another context's ordinary write. §7.3's "at least one writer" asks who may change
+  the bytes, so the probe is `rights.write`. A fixture written at the same time as
+  the field caught it.
+
+  §7.3's issuance sentence is "unique loans prevent **ordinary** conflicting
+  authority from being issued", and `LoanConflicts` had no ordinary/atomic
+  distinction, so `lend?` prevented all conflicting authority and two contexts could
+  not share a word atomically at all. It exempts two atomic-only grants now, and
+  only those.
+
+  What remains owed is §3's second clause: atomics "must follow the ISA/platform
+  ordering model". Nothing relates a grant to `AccessDescriptor.ordering`, and
+  nothing here can — that needs §7.1's refinement theorem, which an ISA owner owes,
+  and the strength relation M8's `ConsistencyProfile` induces.
+- ~~**The transition reads the authority map and never writes it.**~~ Closed by
+  `AuthorityDelta`, and this was the largest instance of this branch's own recurring
+  defect: `issue?`, `returnGrant?`, `splitGrant?`, `joinGrants?` and `transferGrant?`
+  were five checked doors whose only callers were fixtures, so every law proved about
+  them was a law about a map no transition changed. §6's ABI call lends buffer and
+  slot authorities and consumes the same identities on return, and §7.4's acquire
+  operations transfer authority; both are things an *operation* does, and nothing an
+  operation carried could do them.
+
+  An `AccessDescriptor` now carries an `authorityEffect` beside its `ledgerEffect`,
+  `refusalOf` refuses an access whose declared changes the map will not accept, and
+  the committing branch applies them. `Tests/Op/FakeIsa.lean` steps five of them,
+  including the pair that separates the two rules: the same `splitLoan` operation
+  lands from a state where the acting context holds the grant and is refused from one
+  where another context does.
+
+  **One function, not a predicate and an applier.** `applyAuthorityEffect?` returns
+  `Option`, and `refusalOf` decides applicability by running the very function the
+  commit branch runs. The obligation ledger is the other shape —
+  `LedgerDelta.Applicable` is a `Prop` and `applyDelta` is a separate function, with
+  nothing tying them together — and two sources of truth is how a clause gets added
+  to one and forgotten in the other. That is not hypothetical: `Applicable` was found
+  missing a clause twice on this branch, the output `kind` and then the transfer
+  destination, with `applyDelta` unaffected both times and neither miss caught by the
+  shape.
+
+  The ledger is unified now. `performAccess` installs `applyLedgerEffect?`'s result
+  and the unconditional fold is deleted, so there is no longer a third description of
+  what a delta does: `applyLedgerDelta?` gates `applyDelta` behind the very predicate
+  `refusalOf` asks about, and `ledgerEffectApplicable_iff_isSome` says the two are the
+  same rule. The `none` branch on the committing path is unreachable and recorded
+  rather than fallen back from, exactly as the authority effect's is, with
+  `ledger_effect_applies_when_nothing_refuses` as the proof.
+
+  **Authority is not data**, which the transition's framing law needs: the effect is
+  applied to the pre-access map and the bytes are written on top, so
+  `allocations_applyAuthorityEffect?` and `cellAt?_applyAuthorityEffect?` are what
+  keep `performAccess_frames_untouched` true. Every door changes `grants` and nothing
+  else, and now there is a theorem saying so rather than an inspection.
+
+  **The actor rules and the invariant checks are in different places**, because
+  `issue?` reads the lender from the grant it is given and has no actor. "The acting
+  context must be the lender it names" lives in `applyAuthorityDelta?`, as does "only
+  the holder may split or join", so a caller reaching `issue?` directly can still
+  name any lender: `MayLend` bounds what that named lender can lend, so nothing is
+  conjured out of nothing, but one context could strip another's exclusivity by
+  lending that other's bytes to itself.
+
+  The commit that introduced this said the fix was an `actor` parameter on `issue?`
+  and ninety-odd call sites, and that it was next. **That is wrong, and the reason is
+  worth keeping.** A caller of `issue?` holds the grant, so it can satisfy
+  `actor = grant.lender` by passing `grant.lender` — the parameter would be a gate
+  the caller closes with the thing being gated, which is the empty-satisfaction-
+  condition defect this document records against §10's proof package. An actor check
+  has content only where the actor comes from somewhere the caller does not choose,
+  and the only such place is the transition's `d.context`. That is where the check
+  is. So the rule holds on every path an operation can take, and `issue?`'s
+  unverified `lender` is a claim rather than a hole — a fixture asserting "I am
+  lending as this context" while building a state, which is what a fixture is for.
+  What was genuinely owed was narrower: nothing stopped a *future* non-fixture caller
+  under `Grass/` from reaching a door outside an authority effect. `Tools/DoorAudit.py`
+  is that guard — it fails on any application of one of the five doors from a
+  `Grass/` module other than the two that own the map, and it does not scan `Tests/`,
+  where calling a door directly is what a fixture is for. Negative-tested by adding a
+  real call added to a module that owns no door, and watching it fail, not only by its
+  own self-test.
+- ~~**`GrantKind` is an open nominal name with no registry.**~~ Closed by
+  `AdmittedVocabulary.grantKinds`, and the timing is the point: it did not matter
+  while only a fixture could mint a grant, and it mattered the moment
+  `AccessDescriptor.authorityEffect` let an *operation* mint one. Every other open
+  nominal name in this layer that reached an operation acquired a registry — fault
+  classes, allocation sources, provenance step kinds, obligation kinds, ordering
+  modes and scopes, and three justification registries — and this is the same shape.
+
+  What made it worth closing rather than recording is that `MemoryState.AnyGrantOver`
+  is kind-blind: every rule that asks whether anything is held over some bytes counts
+  a grant of any kind, so a grant of an invented kind freezes bytes while no
+  provider's `GrantedOfKind` can ever match it. The rejection is `accessNotAdmitted`
+  with `AdmissibilityFailure.grantKindNotRecognized`, before any question of whether
+  the map would accept the lend, and `an_invented_grant_kind_is_refused` is it
+  stepped, with a companion showing the declared kind runs.
+
+  Two things this cost, recorded because they are the kind of thing that gets left
+  out. Every profile must now declare its grant kinds, which is a breaking change to
+  `AdmittedVocabulary` — both fixture profiles gained a line, and Spike 1's says
+  `loan` only, because `frame` is M4's and its reference set models no frame grant.
+  And appending a clause to `admissibilityFailures` cost one `Or.inl` in each of
+  seven existing proofs, because the clause list is a left-associative `++` chain;
+  that is a real maintenance tax on adding the *next* clause, and the honest fix is a
+  `List (List AdmissibilityFailure)` joined once, which is not done here.
+- ~~**Three of `AuthorityDelta`'s five constructors were declared and never
+  built.**~~ `returnGrant`, `join` and `transfer` had no fixture two commits after
+  the type arrived, and `Tools/ReachabilityAudit.py` was silent on all three: it is
+  namespace-blind, so `LedgerDelta.join` and `LedgerDelta.transfer` satisfied two of
+  them, and `transferredHead.returnGrant? owner firstLoan` reads as a construction of
+  the third because the scan matches the name and not the `?`. Found by reading the
+  commit rather than by a gate, which is what that tool's docstring says to expect.
+  `Tests/Op/FakeIsa.lean` now steps all five, each with a refusal beside it.
+
+  The same reading found that every new step fixture is of the form
+  `∀ s, (step …).state? = some s → P s`, which `cases hs` closes vacuously when the
+  step is *rejected* — a trap this branch fell into once already.
+  `the_authority_effect_steps_run` asserts all eleven stepped states exist, which
+  closes the class rather than one instance.
+- ~~**§5's arena reset requires returning all live use loans, and there is no bulk
+  operation.**~~ `MemoryState.tearDown?` is the bulk operation, and the reason it is
+  one operation rather than a loop with a tidy name is the all-or-nothing fixture: a
+  loan over the buffer refuses a teardown that names the scratch block *first*, and
+  the scratch block is still live afterwards, because there is no afterwards. A
+  hand-written walk over `allocate?` would have torn the scratch block down and then
+  failed, leaving an arena half dead with no record that it had stopped.
+
+  The grant check is `allocate?`'s, which is the point of routing through it: a
+  teardown is a metadata change, so §5.1's precondition is the refusal it already
+  was. `tearDown?_kills_every_name` is the law a walk could not state — not "each
+  call succeeded" but "every allocation named is dead in the state that came out" —
+  and it needed `allocate?_lookup_self`, `allocate?_lookup_ne` and
+  `tearDown?_lookup_of_not_mem`, which are framing lemmas the layer lacked. An
+  identity the table does not hold refuses the teardown rather than counting as
+  already gone, and a repeated name is harmless.
+
+  **What is still owed is the arena itself.** The list comes from the caller, so
+  nothing knows it names *every* allocation of the arena being reset: a caller that
+  forgets one tears down the rest and leaves it live, and this operation cannot tell.
+  That needs an arena identity on `AllocationRecord`, and §5's model owes it. The
+  bulk operation does not close that gap and does not claim to.
+- ~~**Transferred authority.** §3's fifth entry is "transferred or unavailable";
+  `unavailable` derives from liveness and epoch and nothing represents a transfer.
+  §7.4 makes transfer real ("acquire operations may transfer protected memory
+  authority") and M3's own scope table in §5 lists `transfer` as a loan-map
+  operation.~~ `MemoryState.transferGrant?` is the door.
+
+  **The identity is kept, unlike a split's**, because §6 has the lender consuming the
+  identity it lent on a conforming return: a transfer that reissued under a fresh
+  identity would strand the lender's return. `the_transfer_keeps_the_lender` checks
+  the lender can still return it afterwards. A split consumes its source precisely
+  because what comes out is not the same authority.
+
+  **Only the holder may transfer**, which is what the `actor` parameter is for. The
+  lender's power over an outstanding grant is `returnGrant?`; nothing in §3 or §6
+  lets a lender redirect a live loan to a third party.
+
+  **The conflict re-check is the clause with content.** `LoanConflicts` requires
+  distinct holders, so one context may hold two write grants over the same bytes and
+  `issue?` is right to accept the second — a context does not conflict with itself.
+  Transfer either to a third context and that legal pair becomes a §7.3 conflict, so
+  a door that only asked whether the actor held the grant would create one.
+  `transferGrant?_leaves_no_conflict` is the guard read back out, and
+  `transferring_into_a_conflict_is_refused` is the state, with a companion showing
+  the same transfer out of a singly-held state is accepted.
+
+  What this does *not* add is an `AuthorityState` constructor. "Transferred" is not a
+  state of the bytes — after a transfer the bytes are lent exactly as before, to
+  somebody else — and a constructor for it would be a second encoding of the holder
+  field. `authorityOf` already answers "who holds this" from the map.
+  `transferGrant?_creates_no_authority` says a context that is not the recipient
+  gains nothing; it deliberately does not say the old holder *lost* the bytes, since
+  it may hold other grants over them, and `Tests/Memory/Loans.lean` has the concrete
+  case where it holds none and the authority really is gone.
+- **`LoanConflicts` is a second encoding of §7.3.** `MemoryEvent.Conflicts` is §7.3's
+  sentence with the atomic clause as a `compatible` parameter, and `step` consumes it
+  through `ConflictsWithHistory`. Two Lean encodings of one corpus sentence in one
+  layer is what [FOUNDATION.md](FOUNDATION.md) law 11 forbids. Stating `LoanConflicts`
+  through `MemoryEvent.Conflicts` would fix this and give the atomic clause above a
+  home in M3; it is not done, because the two currently differ in what they range
+  over (grants versus events) and reconciling that is a design question.
+- **"Registration is not discharge" is maintained in prose only.** Once
+  `onFaultRuleNotRegistered` passes, `SubstepSequence.visibleEffects?` gives a
+  `transactional` sequence full all-or-nothing semantics on the strength of a
+  registered string, and `denialOf` skips `uninitializedRead` for any
+  `permitsUninitialized _`. No type, predicate or theorem separates a claimed
+  justification from a discharged one — §10's package is where discharge would live
+  and nothing enumerates outstanding claims. `FaultVisibility.RequiresJustification`
+  and `SubstepSequence.ClaimsAtomicity` exist for that enumeration and have no
+  consumer under `Grass/`.
+- ~~**Three admissibility failures report one rejection.**~~ Closed.
+  `StepRejection.accessNotAdmitted` carries an `AdmittedVocabulary.AdmissibilityFailure`
+  with twelve distinct reasons, `Admits` is that failure list's emptiness so the two
+  cannot drift, and `the_three_refusals_are_distinguishable` is the fixture the old
+  shape could not have. This bullet stayed on the owed list for two commits after the
+  work landed, which is the same failure as an overclaim pointing the other way.
+- ~~**A context could lend bytes it neither held nor lent.**~~ Closed by
+  `MemoryState.MayLend`, and worth recording because of how long it survived. `issue?`
+  had grown seven checks — reissue, emptiness, liveness, nestedness, extent agreement,
+  containment, conflict — and not one of them related the *lender* to the storage,
+  while `LoanConflicts` requires distinct holders, so the first grant over any bytes
+  conflicted with nothing. Review had one context issue itself a whole-buffer write
+  loan over an allocation another exclusively owned: the owner went `frozen`, its
+  counter-grant was refused as conflicting, it could not return a grant it neither held
+  nor lent, and it could not free or re-epoch the allocation because a grant was
+  outstanding. Permanent seizure, in one accepted call, and reachable through `step`.
+
+  `MayLend` has two ways to be satisfied — the lender holds covering authority that
+  `Permission.GrantsAsGrant` what it is lending, or it owns the storage, the storage
+  carries the rights, and every grant over those bytes was lent by this lender — and
+  each is a fixture in `Tests/Op/StandardLoan.lean`. There was a third, for bytes
+  nothing is held over, and it admitted a claim for two milestones: seizing unheld
+  bytes was indistinguishable from a legitimate owner's first loan until
+  `AllocationRecord` recorded an owner. It is gone now, for the separate reason below
+  — an owner's first loan is the empty instance of the lender disjunct.
+- **Two live allocations may occupy the same machine address without being aliases.**
+  `allocate?` refuses a metadata change under an outstanding grant and checks nothing
+  about placement, and `AuthorizedAt` keys on `SharesBytes`, which is the declared
+  alias relation and has no placement input. Review added a seventh allocation to the
+  fixture state — same space, same extent, same `base := some 0x1000` as the buffer,
+  no alias declared — gave the engine an exclusive write loan over the buffer, and
+  proved all four of: the allocation is accepted; `addressAt?` agrees at offset 0 and
+  at offset 63; `SharesBytes` is false; and the thread's write through the other
+  identity is admitted, undenied, unrefused by the loan rule, with `authorityOf`
+  reporting `exclusive`.
+
+  Latent today, because only a fixture places allocations and M6 owns the allocator.
+  Latent is how the grant doors were before `authorityEffect` gave an operation a way
+  to reach them.
+
+  The fix is not a check in `allocate?`: two live allocations at one base is exactly
+  what an alias *is*, and the fixture state declares its alias after `allocateAll?`
+  runs, so an allocation-time refusal would reject the model's own legitimate states.
+  What is owed is a state-level coherence property — overlapping placement in one
+  space implies a declared alias — asserted where a profile builds its allocation
+  table, which is M6's shape rather than this milestone's.
+- ~~**`MemoryState.alias` was an unchecked mutator outside every gate.**~~ It changes
+  which allocations name the same bytes, which is an authority question — every rule
+  in the layer keys on `SharesBytes` — and `Tools/DoorAudit.py`'s first version left
+  it out. Review added a real definition calling it to a module that owns no door
+  and the audit printed its green line. It is a door now, negative-tested the same
+  way.
+
+  It stays unchecked, and that is a decision rather than an omission. Declaring an
+  alias can put two grants into conflict that did not conflict when issued, and the
+  tempting fix is to refuse such an alias — which would be a lie in the other
+  direction, because if the platform mapped two views of one file then the alias
+  exists and a model that cannot record it cannot describe the machine. What makes
+  the unchecked form safe is that both halves of §3's rule are asked at access time
+  now, so in the conflicting state each holder is frozen by the other: the state is
+  stuck rather than unsound.
+- **§7.5's unmapping has no representation.** `alias` adds a pair and nothing removes
+  one, so a mapping the platform tears down stays declared forever — and since the
+  conflicting state above is *stuck*, an arena that is unmapped and remapped cannot
+  recover the authority it had. M6 owns the allocator; this is owed with it.
+- ~~**`MemoryProfile.Admits` was dead and wrong about itself.**~~ Deleted. Its
+  docstring called it "deliberately not decidable" and the body was a list-emptiness
+  test with a `Decidable` instance three definitions above — review wrote the instance
+  in one line and decided a real case with it. It had no call site either: everything
+  that checks admissibility goes through `AdmittedVocabulary.whyNotAdmitted?` or
+  `StepPolicy.Admits`. Six docstrings across four modules named it as the thing that
+  enforces a rule, which is the part that bites: a reader auditing "who checks the
+  fault classes" was sent to a dead function that could drift from whatever actually
+  checks them. All six now name `AdmittedVocabulary.Admits`.
+
+  A `def` under `Grass/` that nothing uses falls between two gates —
+  `Tools/FixtureAudit.py` scans `Tests/` only and `Tools/ReachabilityAudit.py` looks
+  at inductive constructors — which is worth knowing and is not closed here.
+- **`AddressSpace.owner` is carried and unread**, and its docstring claimed the owner
+  is "part of the space's identity", which is false: `AddressSpaceTable.find?` matches
+  on `id` and `WellFormed` requires the ids to be `Nodup`, so two externally owned
+  buffers with different owners and one id are indistinguishable. Corrected in place.
+  `Tools/ConsultedAudit.py` could not have found it — `owner` is projected freely as
+  `Obligation.owner`, which is the same-name blind spot its own docstring documents.
+  Kept rather than deleted because §7.5's distinction is real and a device authority
+  will need it.
+- ~~**`AdmittedVocabulary.WellFormed` constrains the address-space table and nothing
+  else.**~~ The three justification registries are pairwise disjoint now. They are
+  split so that one name cannot satisfy another's claim — a rule permitting an
+  uninitialized read is not a proof that a two-substep store is all-or-nothing — and
+  nothing stopped a vocabulary listing one name in two of them, which re-created the
+  collapse at the profile level and made the split a convention rather than a
+  guarantee. It is load-bearing because `StepPolicy.vocabularyWellFormed` makes it a
+  construction obligation: a profile that conflates two claims under one name cannot
+  form a policy at all, and `a_confused_vocabulary_is_not_well_formed` is that
+  vocabulary refused.
+
+  Ten registries still have no coherence condition between them, and that is not a
+  gap of the same kind: nothing says a fault class and an allocation source may not
+  share a name, because nothing would go wrong if they did.
+- **A join of two independent duties halves the ledger, and one discharge ends
+  both.** `Applicable`'s join clause requires the sources to be live, to share the
+  claimed protocol, to be owned by the actor, and to carry the output's kind. Two
+  duties that are independent in every sense the model can express satisfy all four,
+  because `Obligation` carries no payload: nothing says *what* a duty covers, so
+  nothing can say an output covers what its sources covered. §2's join is "several
+  obligations become one, together covering the same duty", and "together covering" is
+  the part this layer cannot represent.
+
+  Review demonstrated it end to end. `a_join_of_two_duties_halves_the_ledger` is that
+  demonstration kept, so the gap is visible in compiled code and so that closing it —
+  which means giving `Obligation` a coverage payload — breaks a theorem rather than
+  passing unnoticed. Refusing multi-source joins outright was considered and rejected:
+  §2 requires join, and a `join` that accepts only one source is a mechanism whose
+  satisfaction condition has no content, which is the defect class this document
+  exists to record.
+- ~~**The join clause's freshness half had no fixture.**~~ Review deleted
+  `into.id ∉ live` from `Applicable` and the whole build stayed green, then joined
+  onto a live identity and watched `applyDelta`'s insert overwrite a duty — §2's
+  "dropping", silently, no violation. `a_join_onto_a_live_identity_is_refused` and its
+  positive control close it, and the mutation is caught now.
+
+  **"Its twin for split *was* fixtured" was false**, and stood here for a milestone.
+  The two fixtures it pointed at — `a_relabelling_split_is_refused` and
+  `a_relabelling_split_under_a_fresh_id_is_refused` — both give the outputs a `kind`
+  the source does not have, so both are refused by the kind clause and both stay green
+  with `∀ o ∈ into, o.id ∉ live` deleted. That is the discrimination problem §4.4.1b
+  names for the declaration-time seal, in the ledger: a refusal alone does not say
+  which clause caught it. See the entry below for the sweep that found it and the five
+  siblings it found beside it.
+- **Obligation identities are recycled.** `Grass/Obligation/Delta.lean` said outputs
+  must be fresh because "identities come from a supply that never reissues". There is
+  no obligation supply: `MachineState` carries an event supply and nothing else, and
+  `Applicable`'s create clause is `o.id ∉ live`, which is "not currently live" rather
+  than "never issued". Review stepped reserve, release, reserve and got the same
+  `ObligationId` carrying a second distinct duty. The sentence is corrected, and
+  `an_obligation_identity_is_reissued` keeps the demonstration so that adding a supply
+  breaks a theorem rather than passing unnoticed.
+
+  Latent, because `TerminalOutcome` is keyed by identity and terminal accounting is
+  M5's; it stops being latent the moment anything accounts across a duty's whole life.
+  Closing it means a `FreshSupply ObligationTag` on `MachineState` that a `create`
+  consumes — a transition-level change, and one that has to decide what a multi-create
+  effect consumes, which is why it is recorded rather than done.
+- **§3's terminal disposition has no theorem, and its vocabulary is unconstructed.**
+  `Disposition` and `TerminalOutcome` appear nowhere outside their declaring module
+  except one import. Two constructors are on `Tools/ReachabilityAudit.py`'s allowlist
+  with a reason review checked and found false — `Spikes/1_Hello_World` holds two
+  files and neither mentions an obligation — and the other three pass through that
+  tool's worst blind spot, a constructor named in a theorem about it. Both are
+  corrected in place.
+
+  Underneath is the structural gap: **nothing represents a terminal edge, a process
+  exit, or a context ceasing to execute.** `MachineState.contexts` is only ever
+  inserted into. So "what happens to duties held by a context that stops executing"
+  has no answer here, and `Applicable`'s transfer clause checks "has this identity
+  ever stepped", which is neither §3's *live* nor its *accepted*. M5 owns the theorem;
+  what was not disclosed anywhere is that the vocabulary M5 will use is currently
+  un-constructible.
+- **`Grass/Resource/Algebra.lean` is a facility whose only safety is having no
+  callers**, which is this branch's own recurring defect in the corner of the layer
+  nobody has been reviewing. Nothing under `Grass/` imports it. Of its twenty declared
+  laws, three are ever projected, all three inside one fixture. `ResourceModel`,
+  `HasResourceAxis`, `HasResourceLimit` and `ResourceLimit` have no values or
+  instances anywhere. The module's header already concedes the importer question; what
+  it does not say is that seventeen of its twenty laws have never been used by
+  anything and four of its six exported types have never been inhabited. Two audit
+  blind spots hide the extent: `ResourceAlgebra.compatible` is invisible because
+  `StepPolicy.compatible` satisfies the name, and every lifecycle and exhaustion
+  constructor is allowlisted as unbuilt.
+- ~~**Sixteen `ConsultedAudit.py` allowlist entries suppressed nothing**, two whole
+  groups of them with reasons that were false.~~ "Diagnostic identity, never
+  dispatched on" for `id` and `name`, which are projected twenty-nine and three times;
+  "structural payloads consumed by pattern matching, which this tool cannot see" for
+  seven fields every one of which is projected by name. Deleted, with the record of
+  what happened, and `--inert` reports the condition mechanically now so it cannot rot
+  back. An allowlist is a record of decisions, and an entry that suppresses nothing
+  records a decision about nothing.
+- ~~**`StepPolicy.compatible` could switch §7.3's race check off.**~~ Round twelve's
+  largest finding, and the loan rule's defect one field over: `compatible` is the only
+  field in `StepPolicy` that can *remove* a refusal, where `AuthorityProvider.refuses`
+  can only add one. Review set `compatible := fun _ _ => true` on the fixture's own
+  profile and the cross-context pair `aliased_cross_context_store_is_denied` denies
+  committed with an empty ledger.
+
+  Two distinct problems underneath. §7.3's sentence is "not both **compatible atomic**
+  accesses", and the atomicity half was enforced nowhere — `MemoryEvent.Conflicts`
+  never reads `ordering.atomicity` and the field had no conditions — so a profile could
+  exempt two plain stores, which is outside §7.3 rather than a weakening of it. And
+  `compatible` had no symmetry condition, so the verdict depended on interleaving
+  order: review's asymmetric relation gave two events and an empty ledger one way, one
+  event and a violation the other, for the same two accesses.
+
+  `compatibleIsAtomic` and `compatibleSymm` are proof fields now, in the shape
+  `vocabularyWellFormed` uses, so a policy that cannot discharge them cannot be
+  constructed; the default discharges both trivially because nothing is compatible.
+  `conflicts_of_not_atomic` and `conflictsWithHistory_of_not_atomic` are the theorems
+  quantified over `policy` — the analogue of `refusalOf_refuses_the_unauthorized` — and
+  `conflicts_symm` is `compatibleSymm`'s consumer. `Tests/Op/FakeIsa.lean` builds a
+  permissive profile that exempts every *atomic* pair, which §7.3 allows, and steps the
+  race under it: still denied.
+- ~~**A §7.3 race was recorded as `authorityUnavailable`.**~~ `refusalOf` recorded
+  three different rules under one class — §3's authority-state clause, §3's holder
+  clause, and the conflict check — and review demonstrated a race recorded that way
+  from a state where nothing was held, byte-identical in class to a genuine loan
+  violation. The rule against collapsing distinguishable failures is stated three
+  times in this layer and was broken once. `conflictingAccess` is its own class, and
+  `a_race_is_recorded_as_a_race` pins it with the nothing-is-held conjunct beside it.
+- ~~**`MemoryEvent.WellFormed` has no consumer.**~~ Closed, and this bullet asserted
+  the opposite of the struck bullet above it — the one ending "All thirteen are caught
+  now" and naming `Tests/Memory/EventClauses.lean` as what landed — for four rounds, in
+  the same section list. Two entries in §4.4.1 saying opposite things about one
+  predicate is the failure §4.4.1 names three bullets earlier: "This bullet stayed on
+  the owed list for two commits after the work landed, which is the same failure as an
+  overclaim pointing the other way."
+
+  The record above is the accurate one. The seal has eleven clauses now, not thirteen;
+  `sealClauses` restates each and `Tools/ConsultedAudit.py`'s `seal_labels` pins the
+  labels to the structure's field names from outside Lean.
+- ~~**`not_conflicts_of_untouched` was still vacuous, and its docstring said it was
+  not.**~~ The correction from `EventKind.fence` to `touchesMemory` moved the vacuity
+  rather than removing it: `kindOf` yields three kinds, all of which touch memory, and
+  `ofOutcome` is the only producer — so no event in any trace satisfies the
+  hypothesis. `touchesMemory_ofOutcome` states that as a theorem, the docstring says
+  what is true, and the theorem is kept as a fact about `Conflicts` over arbitrary
+  events rather than as coverage of anything the transition can produce.
+- ~~**The unbounded-violation-class gap was attributed to a component that cannot
+  reach it.**~~ `transition_own_classes_declared` recorded that
+  `AccessOutcome.violation?` "is supplied by the profile's machine oracle, so nothing
+  in this layer bounds its class". `Oracle.answer` returns a `CompleteCommitted`,
+  never an `AccessOutcome`, and `.denied` has no producer anywhere — so the branch is
+  dead code. What is owed is smaller than what was recorded: a producer for `.denied`,
+  or its deletion.
+- **Ten declarations in `Grass/Memory/Event.lean` have no consumer**, including the
+  whole published theory of `Conflicts` — `symm`, `not_conflicts_of_both_read`,
+  `not_conflicts_of_unshared`, the since-deleted space one,
+  `not_conflicts_of_untouched`, `atomicsAreNever` and its instance, `range_of_ofOutcome`,
+  `ofOutcome_denied`, `committed?_denied`. Review deleted all ten and the build stayed
+  green. `conflicts_symm` gives `symm` a consumer now; the rest are laws without
+  callers, which is not the same defect as a mechanism without content but is worth
+  knowing before M8 builds on them. `atomicsAreNever` is a second encoding of
+  `StepPolicy.compatible`'s default and has never been used as one.
+- **Nothing relates `eventSupply` to `events`.** `performAccess` mints from the supply
+  and consults the trace for nothing, and no theorem says identities in a trace are
+  distinct or that the supply dominates it. Review rewound the supply on a stepped
+  state and got one identity twice in one trace, with an empty ledger. The state is
+  fixture-built — `step` never rewinds — but `MachineState.mk` and `eventSupply` are
+  public, M8 keys sequenced-before and reads-from on `EventId`, and the graph builder
+  will be handed states it did not construct. The violation ledger has four theorems
+  for exactly this reason and `events` has none, while §7.2 says steps monotonically
+  extend it.
+- ~~**`MemoryState.SharesBytes` has no symmetry theorem.**~~ It has one, and getting
+  it found that the definition did not admit one. `SharesAfter` quantified its
+  intermediate over `allocations.domain`, so a one-hop path `a → b` required `b` to be
+  *allocated* while the reversed path required `a` to be: alias `(a, b)` with `a`
+  allocated and `b` not, and `SharesBytes b a` held while `SharesBytes a b` did not —
+  for a relation whose entire meaning is "these two name the same bytes".
+
+  Unreachable through `step`, because `denialOf` refuses an unallocated root and
+  `issue?` requires a live provenance, so both ends are allocated on every path an
+  operation can take. But a relation asymmetric anywhere cannot have a symmetry
+  theorem, and `conflicts_symm` wanted one.
+
+  `MemoryState.aliasIdentities` is the repair: the closure quantifies over the alias
+  graph's own vertices, which keeps it decidable, makes it symmetric, and is
+  conservative in the safe direction — an alias naming an unallocated identity now
+  propagates sharing rather than silently stopping, and more sharing means more
+  freezing. `sharesAfter_snoc`, `sharesAfter_symm` and `sharesBytes_symm` are the
+  proof, and `conflicts_symm_of_state` is conflict symmetry with nothing left for a
+  caller to supply. `sharesBytes_of_hop` lost a hypothesis in the process.
+- ~~**`ProtocolAuthority` was decorative.**~~ Round eleven's largest finding, and the
+  same shape as round ten's: a name every ledger delta carries, checked by nothing.
+  `ProtocolAuthority` is indexed by its protocol, so authority for one cannot be
+  *presented* for another — and `mintedBy` is public, total and unconditioned, so
+  authority for any protocol can be *minted* by anyone. Review built one from a string
+  in a module that owns nothing, put it in an operation's ledger effect, and
+  discharged a duty the ISA family had created under its own protocol: duty gone,
+  ledger clean, no violation. §2's "only through the owning protocol theorem" was
+  enforced by ownership alone.
+
+  `AdmittedVocabulary.protocols` is the registry, `protocolNotRecognized` the failure,
+  and `not_admits_of_undeclared_protocol` the theorem — exactly what `GrantKind` got
+  one round earlier, and for the same reason. `a_forged_protocol_is_refused` steps the
+  forged discharge and gets `accessNotAdmitted`, with a companion showing the declared
+  protocol still runs. `mintedBy` is in `Tools/DoorAudit.py` now, negative-tested.
+
+  This is not a capability, and the docstring says so twice: a profile can still
+  declare a protocol and then mint authority for it anywhere, and §2's theorem needs
+  something this layer cannot state. What changed is that the claim is declared rather
+  than unchecked.
+- ~~**The loan rule was a provider a profile could decline to list.**~~ The largest
+  finding of round ten, and the same shape as the round before it one level up.
+  `StepPolicy.authorities` defaults to `[]`; the grant map was read by
+  `AuthorityProvider.loan` and by nothing else — `denialOf` reads the allocation
+  table and never `grants` — so a profile that declared no providers got no authority
+  enforcement at all. Review took the fixture profile, changed that one field to the
+  structure's own default, and stepped the fixture's own operations: `lendSlot` minted
+  a grant *through `step`*, and the next ordinary store walked over it with an event
+  minted, no violation, and the byte overwritten. Every law in
+  `Grass/Memory/Loan.lean` was conditioned on a policy field a profile author gets
+  wrong by writing nothing.
+
+  §3's rule is `refusalOf`'s now, ahead of the provider search, so no provider list
+  can remove it and a provider may only add its own refusals.
+  `refusalOf_refuses_the_unauthorized` is the law and it quantifies over `policy`,
+  which is the point; `refusalOf_allows_the_unheld` is the companion that stops it
+  refusing everything. `Tests/Op/StandardLoan.lean` steps the whole path under a
+  policy listing no providers at all: a store to lent bytes refused, a grant minted by
+  one operation enforced against the next, and an unlent store still committing.
+
+  **The first version of this fix carried only half the rule, and the commit message
+  claimed it carried all of it.** It moved the holder question — is anything held
+  here that you are not authorized for — and said `AuthorityProvider.loan` was now "a
+  strict subset of the transition's own refusal". That was wrong, and the case that
+  breaks it is one this document already describes: two grants that did not conflict
+  when issued, made to conflict by an alias declared afterwards. In that state each
+  holder is `Granted` by its own grant, so the holder clause passes for both. Only
+  `authorityOf` sees the other holder, and it reports `frozen`. A probe written while
+  closing the *next* finding stepped `aliasedAfterIssue` under a policy with no
+  providers and watched the thread's write commit over bytes the engine held.
+
+  Both halves are in `refusalOf` now, in the provider's own order, and
+  `an_alias_declared_after_issue_is_refused_without_a_provider` is that state with the
+  second half in place. The lesson is the one this branch keeps relearning: a repair
+  that builds is not a repair, and a claim that one check subsumes another is a
+  theorem, not an observation — stated as an observation, it was false within the
+  hour.
+
+  `AuthorityProvider.loan` is deleted, with the module that held it. Both its
+  clauses were in `refusalOf` verbatim, which is two encodings of one rule and
+  [FOUNDATION.md](FOUNDATION.md) law 11 forbids it; nineteen citations across eight
+  files are repointed at `refusalOf`, and `Tests/Op/StandardLoan.lean` — which existed
+  to drive the standard provider — now drives a policy with *no* providers, which is
+  a better demonstration than the one it replaced: every theorem in it holds for a
+  profile that asked for nothing.
+
+  Its seven theorems went with it. They were about a provider's `refuses` returning
+  `true`; what replaced them is `refusalOf_refuses_the_unauthorized`, which is
+  quantified over the policy and so says something the seven could not.
+
+  The deeper half of review's finding is half closed. `refuses` took a whole
+  `MachineState` — events, faults, the violation ledger, the obligation table — so a
+  provider keyed on `state.events.length` was well formed, and refusal that depends on
+  execution history is the ambient authority law 6 forbids. It takes a `MemoryState`
+  now, which makes that unrepresentable rather than merely unwise; all three providers
+  in the fixture read `state.memory` and nothing else, so nothing was lost.
+
+  What remains open is the rest of it: a provider may still refuse arbitrarily as a
+  function of the memory state — refuse everything, or key on an unrelated allocation
+  — and `StepPolicy` still proves things about a provider's class and nothing about
+  its behaviour. Monotonicity, and locality to the bytes the access names, are design
+  questions this branch has not answered.
+- ~~**A faulting substep applied its whole authority effect.**~~ The first real
+  soundness defect an adversarial round found in the authority-effect work, and it
+  was a gate that was not extended rather than a rule nobody wrote.
+  `StepRejection.faultWithUndeclaredLedgerEffect` refuses a fault on a substep
+  carrying an obligation effect, because the corpus does not say what becomes of that
+  effect; `AccessDescriptor.authorityEffect` arrived a milestone later and the gate
+  beside it was not extended. `performAccess` applies the authority effect in full on
+  the committing branch however little the access committed, so review drove a store
+  that wrote *zero bytes* to lend the buffer's head to the device engine, a faulting
+  return to consume its identity, and a faulting transfer to move a grant.
+  `faultWithUndeclaredAuthorityEffect` is the second gate, a separate constructor
+  rather than a rename because which effect was undeclared is the useful half of the
+  report, and three fixtures step the lend, the return and the transfer.
+- **The `refusalOf` clause for the authority effect is not what refuses.** Review
+  deleted it and the whole build stayed green. Both paths refuse — `performAccess`'s
+  "unreachable" branch records `authorityEffectRefused` and commits nothing — so this
+  is not a hole, but the commit that introduced it framed the branch as the
+  unreachable one and the clause as the gate, and that is backwards. What the clause
+  buys is *ordering*: the class is recorded ahead of an `AuthorityProvider`'s and
+  ahead of `ConflictsWithHistory`, which `refusalOf`'s own docstring promises
+  ("the recorded class names the first thing that was wrong"). No fixture pins that
+  ordering, and constructing one needs an access that fails two rules at once.
+
+  What review's deletion did expose is real and is closed: the fallback branch sits
+  outside `refusalOf_class_declared`'s reach, so nothing said the class it records is
+  one the profile declared. `transition_own_classes_declared` says it for that class
+  and for `wrongAddressSpace`. The third append site is neither
+  covered nor reachable: `AccessOutcome.denied` has no producer anywhere, so the
+  branch that reads `outcome.violation?` is dead code. An earlier version of this
+  entry attributed the gap to the profile's machine oracle, which returns a
+  `CompleteCommitted` and cannot produce an `AccessOutcome` at all — the correction is
+  the entry further down this section, and this one contradicted it for a round.
+- ~~**The `.join` actor rule had no fixture.**~~ Removing "only the holder may join"
+  from `applyAuthorityDelta?` left the whole build green, while its `.split` twin is
+  caught immediately. `a_non_holder_may_not_join` is the fixture, and it is stated on
+  the map rather than through `step` for a reason worth recording: the actor of an
+  authority effect is the descriptor's context, and a descriptor whose context is not
+  the stepping context is rejected by `contextMismatch` before the actor rule is
+  reached. A fixture on this branch was once written that way and proved the wrong
+  thing. The discriminating shape is a triple — the door accepts, the actor rule
+  refuses, the holder succeeds — and `a_non_holder_may_not_split` and
+  `the_forged_lend_is_refused_on_the_map` now have it too.
+- ~~**`Tools/DoorAudit.py` did not guard the function its own failure message names.**~~
+  The argument that an `actor` parameter on `issue?` is worthless applies verbatim to
+  `applyAuthorityDelta?`'s `actor`, which is caller-chosen everywhere except the one
+  `performAccess` site. Review added three real map-changing definitions to
+  a module that owns no door, one routed through the applier, and the audit printed
+  its green line. Both appliers are doors now, with the transition as an allowed
+  caller.
+
+  Four scanner defects came with it, each now covered by a seeded case: reports
+  numbered the *stripped* source, so every line number from a real file was wrong;
+  `unfold X at h` was reported as a call, which the docstring denied; a `|>` call and
+  a call whose arguments wrap were both missed. And the first repair for the third
+  introduced a fifth — matching a naming tactic anywhere on the line let an argument
+  named `delta` silence a real call — caught by the self-test the same minute.
+- ~~**Nothing said the authority map changes only by declaration.**~~
+  `performAccess_preserves_authority_of_no_effect` and
+  `runAccesses_preserves_authority_of_no_effects` say it, over an arbitrary policy,
+  state, descriptor and outcome. [FOUNDATION.md](FOUNDATION.md) law 6 forbids ambient
+  provider choice and this is the same reading applied to authority: a grant may not
+  appear or disappear because an access happened, only because an access said it
+  would. Every other fact about the authority effect was a point check through a
+  fixture's `step`, which is exactly what `e-reviewer:18` asks reviewers not to accept
+  as domain coverage.
+
+  It needed `MemoryState.grantEntries_write` and `grantEntries_commit` — the other
+  half of "authority is not data", since the committing branch applies the effect and
+  then writes bytes on top.
+
+  `runStep` is covered too, once the missing lemma was written. Its faulting branches
+  run `SubstepSequence.visibleEffects?`, and nothing related a survivor list to the
+  sequence's own accesses, so the hypothesis could not be discharged for the surviving
+  prefix. `mem_accesses_of_mem_visibleEffects?` is that relation — both branches are
+  `⊆`, since `priorEffectsVisible` takes a prefix and `transactional` takes nothing —
+  and `mem_accesses_of_substep` is its companion for the faulting substep's own
+  descriptor, which the branch that commits a partial write needs.
+  `runStep_preserves_authority_of_no_effects` holds for every fault plan: no plan, a
+  profile-owned visibility rule where the step does nothing, survivors that stop at a
+  denial, and a faulting substep that commits.
+- ~~**A fixture could outlive the claim it was built for.**~~ `Tools/FixtureAudit.py`
+  is the eighth gate, over the one place `ConsultedAudit.py` and
+  `ReachabilityAudit.py` do not look: a `def` under `Tests/` that nothing uses. Two
+  existed — `lentThenReused`, a state built by reallocating under an outstanding loan
+  from before that reallocation was refused, whose `.getD` silently returned the
+  *unreallocated* state; and `currentProv` from the same commit. Both are deleted.
+
+  Its `ALLOWED` list has three entries and two of them are the interesting part:
+  `Tests/Foundation.lean`'s `aliasedVerified` and `inferredVerified` are consumed by
+  an environment-walking audit rather than by name, so no lexical scan can see their
+  consumer.
+- ~~**`denialOf`'s `Permits` clause is unreachable for every page this layer can
+  describe.**~~ **That entry was wrong, and wrong in the direction that invites
+  deleting a live rule.** It argued from
+  `Permission.permits_of_grants_of_permits` — which is conditioned on
+  `page.atomicOnly = false`, and `Grants` deliberately does not compare `atomicOnly`.
+  So a page whose permission is `atomicReadWrite` grants an ordinary write's declared
+  permission and does not permit its intent, and the `Permits` clause is what refuses
+  it. Review built the page and stepped it.
+
+  That clause is the only enforcement of §3's "atomics do not grant ordinary
+  non-atomic access" on this path, which `Grass/Memory/Rights.lean` states in as many
+  words — so the entry named a load-bearing check as dead code.
+  `the_ordinary_write_to_an_atomic_page_is_denied` is it, with the grants-but-does-not-permit
+  pair beside it and the atomic access admitted as the control.
+
+  The lesson generalises past this entry: "unreachable" is a claim about every input,
+  and this one was made by reading a theorem's conclusion without its hypothesis.
+- **`MemoryEvent.ofOutcome`'s space guard cannot fail from `step`.** `ofOutcome`
+  refuses to mint an event whose `AddressSpace` disagrees with the descriptor's
+  `provenance.space`, which is `ValidMemoryEvent.WellFormed`'s
+  `spaceAgreesWithProvenance` at the door. `step` resolves the space *from* the
+  provenance, so the two never disagree there, and the refusal is reachable only for a
+  direct caller of `ofOutcome`. That makes the guard a door-check on an unreachable
+  path rather than a demonstrated rejection, and it is the shape this branch has
+  learned to distrust: a mismatch becomes a silent absence of an event rather than a
+  violation. Making it a rejection means `runStep` distinguishing "no event because
+  nothing to record" from "no event because minting failed", which is `Grass/Op/`
+  work.
+- ~~**The `AuthorizedAt` negatives yield no `¬ Granted`.**~~ Closed.
+  `not_authorizedAt_of_other_holder` and its three siblings say a specific grant does
+  not authorize a specific byte; `Granted` quantifies existentially over
+  `grantEntries`, so refuting it needs every entry refuted, and nothing composed the
+  two. `granted_of_covering` had the same shape from the other side: its
+  `entry ∈ grantEntries` hypothesis was discharged by `decide` for a concrete map and
+  by nothing for an abstract one, because `Grass/Std/Logical/FiniteMap.lean` had no
+  lemma taking `lookup id = some v` to `(id, v) ∈ entries`. Every fixture in `Tests/`
+  is concrete, which is exactly why the gap was invisible: the lemmas had a use, and it
+  was the only one they had.
+
+  `FiniteMap.mem_entries_of_lookup` is the missing step, `MemoryState.granted_of_grantAt`
+  the bridge from an identity, and `MemoryState.not_granted_of_no_authorizing_entry`
+  the composition of the negatives — whose `¬ range.IsEmpty` hypothesis is where
+  `Granted`'s vacuity on an empty range becomes visible in a signature.
+  `Tests/Memory/Loans.lean` states both over an arbitrary state with no `decide` in
+  sight, since a fixture that could `decide` it would not be testing the bridge.
+- ~~**The lender of a read-only loan is refused the read of its own bytes.**~~ Closed
+  by `AllocationRecord.owners`, two milestones after this bullet said closing it needed
+  an owner §5's arena model owed. The holder clause of `refusalOf` now exempts an owner
+  that holds no grant of its own; `MemoryState.HeldBySelf` is the second half, because a
+  bare owner exemption would unbind an owner that took a *narrower* grant over its own
+  bytes. The four fixtures are named in §4.4's *Accessing.* paragraph above.
+
+  This bullet is the stale half of a repair that landed: the over-refusal it records
+  was gone, and it still read "`AllocationRecord` records no owner" — a document
+  stating a field does not exist five hundred lines below the paragraph describing the
+  field. `Tools/CitationAudit.py` adjudicates whether a cited *name* resolves and cannot
+  adjudicate a sentence in the present tense about what a resolving name does not have.
+  What is still open is narrower and is stated above: `HeldBySelf` is a predicate over
+  the whole range, so an owner holding a grant over one byte of it is bound over all
+  of it.
+- **An unplaced allocation opts out of the address check.** `denialOf` compares the
+  declared address to the placement only when the allocation has a base, which is
+  right for a logical address space — §7.5's SPIR-V `Private` storage class has no
+  machine addresses — and wrong for an allocation in a numerically addressed space
+  that simply forgot to say where it sits. `denialOf` reads the space's *identity*
+  and not its representation, so it cannot tell the two apart; the check belongs
+  where the `AddressSpace` is in hand.
+- **`MemoryState.Granted` composes grants byte by byte, and nothing composes their
+  *rights*.** A context holding a read grant and a write grant over the same byte is
+  authorized for a read-modify-write only if one grant permits both. That is the safe
+  direction and it is not stated anywhere.
+- ~~**A stale-epoch grant freezes the next epoch's storage and only its holder or
+  lender can clear it.**~~ Closed at the source. `MemoryState.allocate?` refuses to
+  replace an existing record while any grant is outstanding over that storage, which
+  is §5.1's "reallocation requires the return of all live use loans" as a refusal
+  rather than a sentence. A fresh identity is always accepted, and so is re-writing a
+  record it already has, so an idempotent registration still works —
+  `allocate?_isSome_of_same_record` is that, and
+  `allocate?_isSome_of_nothing_outstanding` is the other half.
+
+  This said "the metadata it already has" and named a theorem about metadata that was
+  renamed when the guard widened to the whole record. Both halves of the sentence
+  described the repaired-away version.
+
+  An earlier version of this refusal, and of this paragraph, limited it to an epoch
+  change or a teardown and said in as many words that "a permission, liveness or
+  placement change is not a reallocation". Review took the sentence at its word:
+  narrowing the buffer's `extent` under a live grant left the grant's range outside
+  the allocation it was issued against, and moving its `base` left the grant naming
+  bytes that had moved — both while the holder kept authority the record no longer
+  supported. Any difference in the record is now the refusal, because the property that
+  matters is that the record a grant was checked against is still the record in the
+  table. This sentence said "any *metadata* difference", and named
+  `AllocationRecord.Metadata` as exactly the part `denialOf` reads — which is true of
+  `Metadata` and was the reason the guard stated over it let `owners` and `bytes`
+  through, two paragraphs after this bullet says the guard is the whole record now.
+
+  The state that skipping it produced was the one three rounds kept circling — a
+  grant that freezes the storage that replaced it, authorizes nothing, and blocks a
+  replacement grant — and removing the state is better than accommodating it.
+- ~~**Nothing enforces that every `AuthorityState` constructor stays reachable.**~~
+  Closed by `Tools/ReachabilityAudit.py`, which reports any inductive constructor
+  nothing outside its own declaration appears to build. It is lexical, like the other
+  three, and its docstring says what it cannot see — namespace-blind dot notation, a
+  construction in dead code, a constructor produced by a generic function. On its
+  first run it named ten deliberate cases, each now in an allowlist with the
+  milestone that owes the builder: `EventKind.control`, the two terminal
+  `Disposition` constructors §5 needs, and the seven resource-policy constructors
+  built ahead of M7 and M9.
 
 ## 5. M3–M5 — The Spike 1 acceptance path
 
@@ -495,7 +4401,7 @@ Unblocks: `Std.Owned` slice loans, and M4.
 ```text
 Grass/Memory/Frame.lean       stack reservation provenance, frame create/destroy,
                               frame-loan resolution before destruction
-Grass/Memory/CallFrame.lean   the reusable ABI call-framing theorem of §6: lend
+Grass/Memory/CallFrame.lean   (M4, not yet written) the reusable ABI call-framing theorem of §6: lend
                               exact slot authority, retain disjoint residual,
                               construct the pending frontier state and completion
                               obligation, and consume the same loan identities on

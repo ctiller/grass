@@ -31,12 +31,20 @@ empty range covers no offset. `Contains` is deliberately **not**: it compares
 extents, so `⟨0,4⟩.Contains (empty 999)` is false while `⟨0,4⟩.Contains (empty 4)`
 is true.
 
-That distinction is load-bearing rather than fussy. `docs/MEMORY_MODEL.md` §5.1
-requires one-past-the-end and invalidated offsets to remain non-dereferenceable
-but still meaningful as positions, which is exactly a zero-size range whose
-`start` is the whole point. Had `Contains` been defined as "covers every offset
-`s` covers", every empty range would be contained in every range, and
-`WithinBound.of_contains` below would be false.
+That distinction is load-bearing rather than fussy. A zero-size range whose
+`start` is the whole point is how this module represents a *position*, and had
+`Contains` been defined as "covers every offset `s` covers", every empty range
+would be contained in every range and `WithinBound.of_contains` below would be
+false.
+
+Do not read `docs/MEMORY_MODEL.md` §5.1 as the authority for that. An earlier
+version of this comment cited it as requiring such offsets "to remain
+non-dereferenceable but still meaningful as positions", and the second half of that
+is not in the corpus: §5.1's sentence is "It never revives an old pointer, and
+one-past/end or invalidated offsets remain non-dereferenceable", which is a
+restriction, and it is about offsets past an *allocation*. Representing positions
+as empty ranges is this module's choice. The corpus authority for a position inside
+a lent range being frozen is §3's frozen-fragment bullet, not §5.1.
 -/
 
 namespace Grass.Memory
@@ -90,6 +98,26 @@ Extent containment, not offset containment: see the module comment. An empty
 range is contained only where it actually sits, one-past-the-end included.
 -/
 def Contains (r s : ByteRange) : Prop := r.start ≤ s.start ∧ s.stop ≤ r.stop
+
+/--
+`r.Meets s` holds when `s` is not wholly outside `r`.
+
+Overlap, plus the case `Overlaps` is deliberately blind to. An empty range covers
+no offset, so `⟨0,8⟩.Overlaps (empty 4)` is false although offset 4 is squarely
+inside `[0,8)` — and a consumer asking "what is outstanding over this position"
+with an empty range got the answer "nothing". Review demonstrated that against the
+loan map, where it read as exclusive authority over a borrowed byte.
+
+Asymmetric on purpose, and the argument order is load-bearing. `r` is the extent
+that owns bytes; `s` is the query. An empty `r` meets nothing, because a range
+covering no bytes constrains no position — so an empty grant does not freeze a
+live one.
+
+A position one past the end of `r` is *not* met, which `not_meets_stop` states.
+It is not a byte of `r`, which is the whole reason; freezing it would freeze the
+byte after every grant.
+-/
+def Meets (r s : ByteRange) : Prop := ¬ r.Disjoint s ∨ (s.IsEmpty ∧ r.Covers s.start)
 
 /--
 `r.WithinBound limit` holds when `r` does not reach past `limit`.
@@ -151,6 +179,9 @@ instance (r : ByteRange) : Decidable r.IsEmpty :=
 instance (r : ByteRange) (limit : Nat) : Decidable (r.WithinBound limit) :=
   decidable_of_iff _ (withinBound_def r limit).symm
 
+instance (r s : ByteRange) : Decidable (r.Meets s) :=
+  inferInstanceAs (Decidable (¬ _ ∨ (_ ∧ _)))
+
 @[simp] theorem stop_mk (start size : Nat) :
     (ByteRange.mk start size).stop = start + size := rfl
 
@@ -185,6 +216,67 @@ theorem isEmpty_iff_no_cover {r : ByteRange} : r.IsEmpty ↔ ∀ offset, ¬ r.Co
     rw [isEmpty_def]
     omega
 
+/-! ### Meeting a position
+
+`Meets` exists because `Disjoint` answers the wrong question about an empty range.
+The six below are what a consumer reasons through. `meets_interior_position` and
+`disjoint_interior_position` are the pair that motivated it — the case a consumer
+got wrong. `not_meets_stop` and `not_meets_of_isEmpty` are the guards against
+over-freezing, which is the other way to get it wrong.
+-/
+
+/-- Anything that overlaps, meets. -/
+theorem meets_of_not_disjoint {r s : ByteRange} (h : ¬ r.Disjoint s) : r.Meets s :=
+  Or.inl h
+
+/-- **A range meets exactly the positions it covers.**
+
+`Meets` is asymmetric and its argument order is load-bearing, so the sentence is
+about `r` meeting the position and not the reverse: `(empty offset).Meets r` is
+false for every `r`, by `not_meets_of_isEmpty`. -/
+@[simp] theorem meets_empty_iff (r : ByteRange) (offset : Nat) :
+    r.Meets (empty offset) ↔ r.Covers offset := by
+  constructor
+  · rintro (hnd | ⟨-, hc⟩)
+    · exact absurd (Or.inr (Or.inl rfl)) hnd
+    · exact hc
+  · intro hc
+    exact Or.inr ⟨rfl, hc⟩
+
+/-- **A range meets a position inside it, though it does not overlap it.** The
+concrete case review used: offset 4 inside `[0, 8)`. -/
+theorem meets_interior_position : (ByteRange.mk 0 8).Meets (empty 4) := by
+  simp [covers_def]
+
+/-- And the same pair is `Disjoint`, which is why `Meets` had to be written rather
+than the loan map reusing `Disjoint`. -/
+theorem disjoint_interior_position : (ByteRange.mk 0 8).Disjoint (empty 4) :=
+  Or.inr (Or.inl rfl)
+
+/-- **One past the end is not met.** It is not a byte of `r`, and treating it as
+one would freeze the byte after every loan.
+
+`Contains` answers the other way — `contains_empty_iff` puts `empty r.stop` inside
+`r` — and the disagreement is deliberate: `Contains` compares extents, which is
+what a bounds check wants, and `Meets` asks which bytes a grant covers, which is
+what an authority check wants. The position where they differ is now unreachable
+from an access, because `AccessDescriptor.WellFormedIn.rangeNonEmpty` refuses a
+zero-size access. -/
+@[simp] theorem not_meets_stop (r : ByteRange) : ¬ r.Meets (empty r.stop) := by
+  simp [covers_def, stop]
+
+/-- **An empty range meets nothing**, whatever `s` is. A grant over no bytes
+therefore constrains no position, which is what stops `Meets` turning a zero-byte
+grant into a way to freeze live storage — `Tests/Memory/Loans.lean`'s
+`a_grant_of_no_bytes_is_refused` is the stronger consequence: such a grant is
+refused at issue, because a grant that freezes nothing is decoration. -/
+theorem not_meets_of_isEmpty {r s : ByteRange} (h : r.IsEmpty) : ¬ r.Meets s := by
+  rw [isEmpty_def] at h
+  rintro (hnd | ⟨-, hc⟩)
+  · exact hnd (Or.inl h)
+  · rw [covers_def] at hc
+    omega
+
 theorem disjoint_iff_not_overlaps {r s : ByteRange} : r.Disjoint s ↔ ¬ r.Overlaps s := by
   constructor
   · intro hd ⟨offset, hr, hs⟩
@@ -216,6 +308,31 @@ theorem Disjoint.symm {r s : ByteRange} (h : r.Disjoint s) : s.Disjoint r := by
   omega
 
 /--
+**`Meets` is symmetric on non-empty ranges**, so a consumer that tries both
+directions is asking one question of two non-empty ranges and a second question of
+an empty one.
+
+`Meets` is asymmetric only through its second disjunct, which is about an empty
+query, and `Disjoint` is symmetric — `Disjoint.symm`. So the whole content of trying
+`s.Meets r` after `r.Meets s` is the case this theorem's hypotheses exclude: `s`
+covers no bytes and sits inside `r`.
+
+`MemoryState.LoanConflicts` tries both, and its docstring said "`Meets` is asymmetric
+and neither grant is the query here" — true, and not a statement of what the second
+direction adds. This is that statement, so the redundancy is a theorem with a stated
+boundary rather than a sentence about asymmetry in general.
+-/
+theorem meets_comm_of_nonempty {r s : ByteRange} (hr : ¬ r.IsEmpty) (hs : ¬ s.IsEmpty) :
+    r.Meets s ↔ s.Meets r := by
+  constructor
+  · rintro (h | ⟨he, _⟩)
+    · exact meets_of_not_disjoint (fun hd => h hd.symm)
+    · exact absurd he hs
+  · rintro (h | ⟨he, _⟩)
+    · exact meets_of_not_disjoint (fun hd => h hd.symm)
+    · exact absurd he hr
+
+/--
 The framing law. An offset inside one of two disjoint ranges is outside the other,
 so an update confined to `s` leaves every byte of `r` alone.
 -/
@@ -228,6 +345,19 @@ theorem Disjoint.not_covers {r s : ByteRange} (h : r.Disjoint s) {offset : Nat}
 
 @[simp] theorem disjoint_empty_right (r : ByteRange) (start : Nat) :
     r.Disjoint (empty start) := .inr (.inl rfl)
+
+/-- **A container of a non-empty range meets it.** The bridge between the two
+relations, in the one direction that holds: `Contains` compares extents and `Meets`
+asks about positions, so it needs the contained range to have a position to offer.
+Without the hypothesis it is false -- `⟨0,4⟩.Contains (empty 4)` while
+`¬ ⟨0,4⟩.Meets (empty 4)`, which is `not_meets_stop`. -/
+theorem meets_of_contains {r s : ByteRange} (hc : r.Contains s) (hne : ¬ s.IsEmpty) :
+    r.Meets s := by
+  refine meets_of_not_disjoint ?_
+  obtain ⟨hs, hst⟩ := hc
+  have hsize : 0 < s.size := Nat.pos_of_ne_zero (by simpa [IsEmpty] using hne)
+  intro hdisj
+  rcases hdisj with h | h <;> simp [ByteRange.stop] at * <;> omega
 
 theorem Contains.refl (r : ByteRange) : r.Contains r := ⟨Nat.le_refl _, Nat.le_refl _⟩
 

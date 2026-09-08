@@ -73,7 +73,8 @@ structurally references.
   lifecycle state.
 - `succeed` -- takes over `--target`'s stream custody (gate 19); refused
   unless the caller is `--target`'s pre-authorized standby or an existing
-  coordinator.
+  coordinator. This is also the only operation that moves a binding from a
+  wrong host to a right one -- see *Hosts and custody* below.
 - `outbox` -- prints `--agent`'s local outbox state (pending, urgent-first,
   plus every durable rejection receipt); purely local, no network round trip
   (gate 18).
@@ -89,6 +90,37 @@ structurally references.
   every commit that doesn't correlate exactly with a real authorization and
   merge receipt -- the only mechanism that can catch a hand-pushed or
   otherwise out-of-protocol commit after it has already landed.
+
+### Hosts and custody
+
+Every registry binding names the host whose coordinator may advance that
+agent's stream, plus that host's custody epoch
+(AGENT_COORDINATION_EVOLUTION.md sections 2.1 and 2.4). `coordinate` refuses
+any caller whose `--host`/`--custody-epoch` do not match the binding, so a
+binding that names the wrong host cannot be published for truthfully.
+
+Two things follow, and both matter for the live fleet, whose migrated
+bindings still carry the placeholder host `migration` that the v1→v2 replay
+stamped:
+
+- **`succeed` is the repair.** Section 2.1 lists registration, retirement,
+  reassignment, and coordinator succession as the epoch transitions;
+  succession is the one that moves custody, and section 2.4 gives it to the
+  taker: "the standby or an authorized coordinator on another host proposes
+  the registry succession by compare-and-swap." So the coordinator on the
+  host where the agent actually runs proposes, `--host` is that coordinator's
+  own host, and the custody epoch advances by one. Adding a host is the same
+  two steps: `register` a coordinator bound to the new host from that host's
+  own checkout, then `succeed` for each agent that moves to it.
+
+- **An agent cannot fix its own binding.** Custody is not the agent's to
+  move: only its pre-authorized standby (`register --standby`) or an
+  existing coordinator may propose. There is deliberately no agent-side
+  command for it.
+
+Which agent runs on which host is not derivable from the bus -- `status`
+reports what the registry says, not where a process is -- so the mapping has
+to come from whoever operates the fleet.
 
 Every command whose output depends on a bus snapshot states the freshness
 envelope AGENT_COORDINATION_EVOLUTION.md section 2.4 requires (`snapshot_
