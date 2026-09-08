@@ -102,28 +102,37 @@ theorem ntHeaders_end_le_firstRawOffset (peOffset sectionCount fileAlignment : N
 /-- One requested section paired with its absolute raw-data span. -/
 structure PlacedSection where
   source : RawSection
+  /-- Loader-relative virtual extent, measured as an RVA from the image base. -/
+  virtualSpan : FileSpan
+  /-- Complete-file raw extent, including file-alignment padding. -/
   rawSpan : FileSpan
 deriving DecidableEq
 
-/-- Place section payloads in request order, aligning each start and advancing
-by the unpadded payload length. -/
-def placeSectionsFrom (cursor fileAlignment : Nat) : List RawSection → List PlacedSection
+/-- Place section payloads in request order while advancing the virtual and raw
+coordinate chains independently. -/
+def placeSectionsFrom (virtualCursor rawCursor sectionAlignment fileAlignment : Nat) :
+    List RawSection → List PlacedSection
   | [] => []
   | source :: tail =>
-      let start := alignUp cursor fileAlignment
+      let virtualStart := alignUp virtualCursor sectionAlignment
+      let rawStart := alignUp rawCursor fileAlignment
       let placed : PlacedSection :=
         { source
-          rawSpan := ⟨start, alignUp source.contents.length fileAlignment⟩ }
-      placed :: placeSectionsFrom placed.rawSpan.endOffset fileAlignment tail
+          virtualSpan := ⟨virtualStart, source.contents.length⟩
+          rawSpan := ⟨rawStart, alignUp source.contents.length fileAlignment⟩ }
+      placed :: placeSectionsFrom placed.virtualSpan.endOffset placed.rawSpan.endOffset
+        sectionAlignment fileAlignment tail
 
-@[simp] theorem placeSectionsFrom_length (cursor fileAlignment : Nat)
+@[simp] theorem placeSectionsFrom_length
+    (virtualCursor rawCursor sectionAlignment fileAlignment : Nat)
     (sections : List RawSection) :
-    (placeSectionsFrom cursor fileAlignment sections).length = sections.length := by
-  induction sections generalizing cursor with
+    (placeSectionsFrom virtualCursor rawCursor sectionAlignment fileAlignment sections).length =
+      sections.length := by
+  induction sections generalizing virtualCursor rawCursor with
   | nil => rfl
   | cons source tail ih =>
       simp only [placeSectionsFrom, List.length_cons]
-      exact congrArg Nat.succ (ih _)
+      exact congrArg Nat.succ (ih _ _)
 
 /-- Raw payload bytes followed by the zero padding declared by `rawSpan`. -/
 def PlacedSection.paddedContents (placed : PlacedSection) : Std.Logical.ByteArray :=
@@ -139,31 +148,38 @@ theorem PlacedSection.length_paddedContents (placed : PlacedSection)
   omega
 
 /-- Every placement produced by `placeSectionsFrom` contains its source bytes. -/
-theorem placed_rawSize_ge (cursor fileAlignment : Nat) (sections : List RawSection) :
-    ∀ placed ∈ placeSectionsFrom cursor fileAlignment sections,
+theorem placed_rawSize_ge
+    (virtualCursor rawCursor sectionAlignment fileAlignment : Nat)
+    (sections : List RawSection) :
+    ∀ placed ∈ placeSectionsFrom virtualCursor rawCursor sectionAlignment fileAlignment sections,
       placed.source.contents.length ≤ placed.rawSpan.size := by
-  induction sections generalizing cursor with
+  induction sections generalizing virtualCursor rawCursor with
   | nil => simp [placeSectionsFrom]
   | cons source tail ih =>
       intro placed member
       simp only [placeSectionsFrom, List.mem_cons] at member
       rcases member with rfl | member
       · exact le_alignUp _ _
-      · exact ih _ placed member
+      · exact ih _ _ placed member
 
-/-- Place all requested raw sections after the complete canonical NT-header
-region. This function consumes `ExecutableImageDescription` without learning
-how any section's bytes were encoded. -/
-def placeRawSections (description : ExecutableImageDescription)
-    (fileAlignment : Nat) : Vec PlacedSection :=
-  Vec.fromList <| placeSectionsFrom
-    (firstRawOffset canonicalPeOffset description.sections.length fileAlignment)
-    fileAlignment description.sections.toList
+/-- Conventional PE32+ image section alignment used by the executable adapter. -/
+def canonicalSectionAlignment : Nat := 4096
 
-/-- `placeRawSections` preserves the requested number of sections. -/
-@[simp] theorem placeRawSections_length (description : ExecutableImageDescription)
-    (fileAlignment : Nat) :
-    (placeRawSections description fileAlignment).length = description.sections.length := by
-  simp [placeRawSections, Vec.length]
+/-- Conventional PE32+ file alignment used by the executable adapter. -/
+def canonicalFileAlignment : Nat := 512
+
+/-- Place all requested sections after the complete canonical NT-header region
+and one virtual section-alignment unit from the image base. This function
+consumes `ExecutableImageDescription` without learning how any section's bytes
+were encoded. -/
+def placeImageSections (description : ExecutableImageDescription) : Vec PlacedSection :=
+  Vec.fromList <| placeSectionsFrom canonicalSectionAlignment
+    (firstRawOffset canonicalPeOffset description.sections.length canonicalFileAlignment)
+    canonicalSectionAlignment canonicalFileAlignment description.sections.toList
+
+/-- `placeImageSections` preserves the requested number of sections. -/
+@[simp] theorem placeImageSections_length (description : ExecutableImageDescription) :
+    (placeImageSections description).length = description.sections.length := by
+  simp [placeImageSections, Vec.length]
 
 end Grass.Artifact.PE

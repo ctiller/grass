@@ -34,12 +34,18 @@ theorem fragment_local_disjoint_but_absolute_overlaps :
     ¬ (FileSpan.Disjoint (ntHeadersSpan 128 1) ⟨304, 64⟩) := by
   decide
 
-example : (placeRawSections twoSectionImage 512).length = 2 := by decide
+example : (placeImageSections twoSectionImage).length = 2 := by decide
 
-example : ((placeRawSections twoSectionImage 512).get? 0).map (·.rawSpan) = some ⟨512, 512⟩ := by
+example : ((placeImageSections twoSectionImage).get? 0).map (·.rawSpan) = some ⟨512, 512⟩ := by
   decide
 
-example : ((placeRawSections twoSectionImage 512).get? 1).map (·.rawSpan) = some ⟨1024, 512⟩ := by
+example : ((placeImageSections twoSectionImage).get? 1).map (·.rawSpan) = some ⟨1024, 512⟩ := by
+  decide
+
+example : ((placeImageSections twoSectionImage).get? 0).map (·.virtualSpan) = some ⟨4096, 2⟩ := by
+  decide
+
+example : ((placeImageSections twoSectionImage).get? 1).map (·.virtualSpan) = some ⟨8192, 3⟩ := by
   decide
 
 end Grass.Tests.Artifact.PE.Layout
