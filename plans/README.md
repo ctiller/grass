@@ -27,18 +27,20 @@ consumer milestone, and consequence of delay. It does not silently assign A or
 let B assume the work will appear. A answers directly by adding or reprioritizing
 the work, declining it, or naming another provider; B then updates its own plan.
 Those events converge through the ordinary agent-to-agent eventual-consistency
-model. The host coordinator transports publications but does not inspect plans,
-mediate the exchange, or sit on this scheduling path. Finding these mismatches
-early is one of the roadmap system's primary throughput benefits.
+model. No coordinator participates in dependency discovery, routing, agreement,
+or acknowledgement. A host coordinator may batch or relay replication as an
+optional transport optimization, but either agent can publish and later learn
+the other's event without it. Finding these mismatches early is one of the
+roadmap system's primary throughput benefits.
 
 An active implementor updates that roadmap whenever the active milestone,
 dependency, risk, or delivery expectation materially changes, and at least once
 in every twelve-hour period while it claims active work. Silence caused by an
-exhausted model or dead host is exactly why the record matters: the host
-peers that depend on it report the stale dependency and can request the existing
+exhausted model or dead host is exactly why the record matters: agents that
+depend on it report the stale dependency and can request the existing
 succession/reassignment process. Staleness is evidence that coordination needs
 repair; it does not invalidate source, proofs, reviews, or already published
-events. The host coordinator does not poll or judge roadmap freshness.
+events. No coordinator polls or judges roadmap freshness.
 
 Larger ledgers in this directory are updated when their rebuild-relevant state
 changes. They retain current milestones, live defects, adopted decisions,
