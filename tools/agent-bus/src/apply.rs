@@ -1929,26 +1929,49 @@ fn apply_finding_disposition(
     let chain = state
         .review_chain(nomination)
         .ok_or_else(|| invalid(format!("{}: unknown nomination {nomination}", env.id)))?;
-    // Authority belongs to the reviewer of the chain's *current* nomination
-    // link specifically -- a reviewer who has since been superseded by a
-    // reassignment must not retain disposal authority merely by citing
-    // their own now-stale nomination id, even though that id's own
-    // nomination_reviewer entry never gets removed (it stays as a durable
-    // record of who accepted that particular link). See the identical
-    // comment in `apply_review_accept` for why this is a no-op rather than
-    // an `Err`: a hard failure here would permanently break reduction of
-    // the entire bus, not just this chain.
-    if chain.current_nomination != *nomination {
-        return Ok(());
-    }
+    // Judged against the nomination link this event *names*, never against
+    // whichever link is current at reduction time.
+    //
+    // This used to read `if chain.current_nomination != *nomination { return
+    // Ok(()); }`, which is the halfway state `apply_review_accept` was
+    // rescued from and describes at length: it stopped the outage an `Err`
+    // here would cause and introduced a quieter fault in its place.
+    // `current_nomination` is moved by an author's `review.reassigned`,
+    // which a disposition neither references nor need have observed, so
+    // whether the finding was recorded as disposed at all depended on which
+    // of two unordered events a host replayed first. Reassignment first and
+    // the disposition silently vanished; disposition first and it stuck.
+    // Same events, same bus, two permanently different answers, and nothing
+    // reports anything wrong -- which is strictly worse than a loud failure,
+    // because no error message will ever surface it.
+    //
+    // Found by `multihost_proptest`'s confluence oracle, which re-reduces
+    // the published log under several valid replay orders and requires them
+    // to agree byte for byte; `a_disposal_racing_a_reassignment_is_recorded_
+    // the_same_way_in_both_orders` pins it deterministically.
+    //
+    // Both facts this now reads instead are refs-reachable or same-stream,
+    // so neither can move underneath a replay: `nomination_reviewer` is
+    // append-only and keyed by the link `nomination` names (which is in this
+    // event's own `refs`), and the acceptance it asks about is the same
+    // reviewer's own earlier event, which `topological_order` orders by the
+    // stream's predecessor edge on every host.
+    //
+    // The policy this drops -- "a reviewer superseded by a reassignment must
+    // not retain disposal authority" -- is a currency question, and it is
+    // answered where currency has one answer: `coordinator::drain_outbox`
+    // reduces this host's fully-fetched view before it will publish
+    // anything, and `merge_ready::check_merge_ready` re-reads the still-open
+    // findings live at the pre-merge gate. Reduction's own job is to say
+    // what happened, and the disposal did happen.
     let reviewer = chain.nomination_reviewer.get(nomination).cloned();
     if reviewer.as_ref() != Some(&env.agent) {
         return Err(invalid(format!(
-            "{}: only the accepting reviewer for the current nomination may dispose of findings",
+            "{}: only the reviewer named by nomination {nomination} may dispose of its findings",
             env.id
         )));
     }
-    if !chain.accepted() {
+    if !chain.accepted_nominations.contains(nomination) {
         return Err(invalid(format!(
             "{}: the named reviewer must accept the nomination before disposing of findings",
             env.id
@@ -9099,10 +9122,128 @@ mod tests {
         );
         let err = apply_event(&mut state, &cleared_env).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("only the accepting reviewer for the current nomination may dispose"),
+            err.to_string().contains("may dispose of its findings"),
             "{err}"
         );
+    }
+
+    /// A disposition racing a reassignment must be recorded the same way
+    /// whichever order a host replays the two in.
+    ///
+    /// `apply_finding_disposition` used to return `Ok(())` -- a silent
+    /// no-op -- whenever the chain's `current_nomination` had moved past the
+    /// link the disposition names. That reads as harmless and is not: a
+    /// reassignment is on an *author's* stream, which a disposition neither
+    /// references nor need have observed, so the two are causally unordered
+    /// and `topological_order` may walk them either way. One order recorded
+    /// the disposal, the other dropped it, and both hosts reported success.
+    ///
+    /// This drives the identical two events in both orders and requires the
+    /// same answer, which is the property the no-op broke and the reason a
+    /// "reduction never errors" oracle alone would have blessed it.
+    #[test]
+    fn a_disposal_racing_a_reassignment_is_recorded_the_same_way_in_both_orders() {
+        let alice = a("alice");
+        let bob = a("bob");
+        let carol = a("carol");
+
+        // One chain: alice nominates bob, bob accepts and files a finding.
+        // Then, concurrently, bob clears the finding and alice reassigns the
+        // review away to carol. Neither event references the other.
+        let build = || {
+            let mut state = empty_state(&[]);
+            apply_ok(&mut state, &register(&alice, Role::Implementor));
+            apply_ok(&mut state, &register(&bob, Role::Reviewer));
+            apply_ok(&mut state, &register(&carol, Role::Reviewer));
+            let (nominate_env, _accept_env) = nominate_and_accept(&mut state, &alice, 1, &bob, 1);
+            let changes_env = Envelope::new(
+                &bob,
+                2,
+                frontier_seeing(&[&nominate_env.id]),
+                &EventData::ReviewChangesRequested(ReviewChangesRequested {
+                    nomination: nominate_env.id.clone(),
+                    reviewed_commit: hash(3),
+                    findings: vec![finding("f1")],
+                    evidence: StringSet::default(),
+                }),
+                [],
+            );
+            apply_ok(&mut state, &changes_env);
+            let cleared_env = Envelope::new(
+                &bob,
+                3,
+                frontier_seeing(&[&nominate_env.id, &changes_env.id]),
+                &EventData::ReviewFindingsCleared(ReviewFindingsCleared {
+                    nomination: nominate_env.id.clone(),
+                    changes_event: changes_env.id.clone(),
+                    finding_id: short("f1"),
+                    resolved_commit: hash(4),
+                    summary: text("fixed"),
+                }),
+                [],
+            );
+            let EventData::ReviewNominated(request) =
+                nominate_env.typed_data().expect("well-formed")
+            else {
+                panic!("the nomination is a review.nominated");
+            };
+            let reassign_env = Envelope::new(
+                &alice,
+                2,
+                frontier_seeing(&[&nominate_env.id]),
+                &EventData::ReviewReassigned(ReviewReassigned {
+                    authors: request.authors.clone(),
+                    product_branch: request.product_branch.clone(),
+                    reviewer: carol.clone(),
+                    required_checks: request.required_checks.clone(),
+                    review_scope: request.review_scope.clone(),
+                    summary: request.summary.clone(),
+                    target_branch: request.target_branch.clone(),
+                    evidence: request.evidence.clone(),
+                    replaces: nominate_env.id.clone(),
+                    reason: text("round-robin"),
+                    inherited_findings: vec![],
+                }),
+                [],
+            );
+            (state, changes_env, cleared_env, reassign_env)
+        };
+
+        let disposition_of = |state: &BusState, changes: &EventId| {
+            state
+                .reviews
+                .values()
+                .next()
+                .expect("one chain")
+                .findings
+                .get(&(changes.clone(), "f1".to_string()))
+                .expect("the finding was filed")
+                .disposition
+                .clone()
+        };
+
+        let (mut a_first, changes_env, cleared_env, reassign_env) = build();
+        apply_ok(&mut a_first, &cleared_env);
+        apply_ok(&mut a_first, &reassign_env);
+
+        let (mut b_first, changes_env2, cleared_env2, reassign_env2) = build();
+        apply_ok(&mut b_first, &reassign_env2);
+        apply_ok(&mut b_first, &cleared_env2);
+
+        assert_eq!(
+            disposition_of(&a_first, &changes_env.id),
+            disposition_of(&b_first, &changes_env2.id),
+            "the same two unordered events reduced to different finding dispositions depending \
+             on which one a host replayed first"
+        );
+        assert!(
+            matches!(
+                disposition_of(&a_first, &changes_env.id),
+                FindingDisposition::Cleared { .. }
+            ),
+            "and the answer both orders agree on is that the disposal happened"
+        );
+        let _ = (cleared_env, reassign_env, cleared_env2, reassign_env2);
     }
 
     #[test]
@@ -9144,17 +9285,38 @@ mod tests {
         assert!(err.to_string().contains("unknown finding"), "{err}");
     }
 
-    /// Round-3 adversarial review, Critical finding: a `Err` here would
+    /// Round-3 adversarial review, Critical finding: an `Err` here would
     /// propagate via `reduce()`'s bare `?` with no per-event isolation,
     /// permanently breaking reduction of the *entire* bus for every host
     /// that has fetched both streams -- not merely this one review chain --
     /// the moment a genuinely concurrent disposal and reassignment (two
     /// independently-published, single-writer streams, neither observing
-    /// the other) are reduced together. The fix is a no-op: bob's stale
-    /// disposal simply does not apply, and the finding stays exactly as the
-    /// reassignment (which inherited it) left it.
+    /// the other) are reduced together. That much still holds, and is what
+    /// this test guards.
+    ///
+    /// What it used to *additionally* claim was wrong. It asserted that the
+    /// stale disposal "simply does not apply", leaving the finding `Open` --
+    /// and that was true only because this order happens to reduce the
+    /// reassignment first. The two events are causally unordered (a
+    /// disposition neither references nor need have observed an author's
+    /// reassignment), so `topological_order` may walk them either way, and
+    /// the other order recorded the disposal. Two hosts, same events, two
+    /// permanently different answers, neither reporting anything wrong.
+    /// `multihost_proptest`'s confluence oracle found it;
+    /// `a_disposal_racing_a_reassignment_is_recorded_the_same_way_in_both_orders`
+    /// pins the general property, and this test now asserts the half it can
+    /// see: no `Err`, and the disposal is *recorded*, because that is the
+    /// fact that is true regardless of order.
+    ///
+    /// The policy the old assertion was reaching for -- a superseded
+    /// reviewer must not still dispose of findings -- is a currency question
+    /// and is answered where currency has one answer:
+    /// `coordinator::drain_outbox` validates against this host's
+    /// fully-fetched, fully-reduced view before publishing, and
+    /// `merge_ready::check_merge_ready` re-reads the still-open findings
+    /// live at the pre-merge gate.
     #[test]
-    fn ignores_finding_disposal_against_a_stale_nomination() {
+    fn a_finding_disposal_racing_a_reassignment_is_recorded_rather_than_silently_dropped() {
         let mut state = empty_state(&[]);
         let alice = a("alice");
         let bob = a("bob");
@@ -9222,8 +9384,12 @@ mod tests {
         let key = (changes_env.id.clone(), "f1".to_string());
         assert_eq!(
             state.reviews[&root].findings[&key].disposition,
-            FindingDisposition::Open,
-            "bob's stale disposal must not have taken effect"
+            FindingDisposition::Cleared {
+                by_event: cleared_env.id.clone()
+            },
+            "the disposal is recorded, because that is the fact that is true in both replay \
+             orders; whether bob still *had* authority is a currency question answered at \
+             publication"
         );
     }
 

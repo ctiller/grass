@@ -1212,7 +1212,7 @@ fn requires_complete_frontier(data: &crate::events::EventData) -> bool {
 /// existing assignment can accept a reassignment that is actually already
 /// stale -- the identical failure mode a fresh cut is meant to close, just
 /// on a different validation path.
-fn requires_synced_snapshot(data: &crate::events::EventData) -> bool {
+pub(crate) fn requires_synced_snapshot(data: &crate::events::EventData) -> bool {
     use crate::events::EventData;
     // A broadcast whose audience resolves against `subscribed_topics` or
     // `scope` is currency-sensitive whatever its acknowledgement setting.
