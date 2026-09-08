@@ -92,19 +92,19 @@ example : checkManifestHierarchy disconnectedDag
     (Vec.fromList [.leaf (leaf leafA), .leaf (leaf leafB)]) = none := by decide
 
 example :
-    (checkHierarchyEvidence fixtureDag manifests scenarioChanges
-      completeCampaign).isSome = true := by decide
+    (checkHierarchyStructure fixtureDag manifests completeCampaign).isSome = true :=
+  by decide
 
 example :
-    checkHierarchyEvidence fixtureDag wrongChildren scenarioChanges
-      completeCampaign = none := by decide
+    checkHierarchyStructure fixtureDag wrongChildren completeCampaign = none :=
+  by decide
 
 example :
-    checkHierarchyEvidence fixtureDag manifests scenarioChanges
-      incompleteCampaign = none := by decide
+    checkHierarchyStructure fixtureDag manifests incompleteCampaign = none :=
+  by decide
 
 example :
-    checkHierarchyEvidence fixtureDag manifests scenarioChanges
-      overRebuildCampaign = none := by decide
+    checkHierarchyStructure fixtureDag manifests overRebuildCampaign = none :=
+  by decide
 
 end Grass.Tests.Build.Manifest.Hierarchy

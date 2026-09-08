@@ -2,68 +2,62 @@ import Grass.Build.Manifest.Campaign
 import Grass.Build.Manifest.Rooted
 
 /-!
-# Joint manifest and measurement admission
+# Joint manifest and structural-report admission
 
-`CheckedManifestEvidence` admits measured campaign metadata only together with
-a structurally checked dependency DAG. This closes the gap between independent
-graph validation and exact rebuild-cone campaign validation.
+`CheckedManifestStructure` admits caller-supplied campaign data only together
+with a structurally checked dependency DAG. It establishes internal graph and
+cone consistency, not that an external build process produced the observations.
 -/
 
 namespace Grass.Build.Manifest
 
-/-- A checked manifest DAG paired with a complete, exact measurement campaign. -/
-structure CheckedManifestEvidence (fanout : Nat)
-    (changes : ScenarioChangePlan) where
+/-- A checked manifest DAG paired with a complete, structurally exact campaign. -/
+structure CheckedManifestStructure (fanout : Nat) where
   dag : RootedManifestDag fanout
-  campaign : CheckedMeasurementCampaign dag.graph changes
+  campaign : CheckedStructuralCampaign dag.graph
 
-/-- Jointly validate generated graph shape and its measured campaign. -/
-def checkManifestEvidence {fanout : Nat} (dag : ManifestDag fanout)
-    (changes : ScenarioChangePlan) (campaign : MeasurementCampaign) :
-    Option (CheckedManifestEvidence fanout changes) :=
+/-- Jointly validate graph shape and caller-supplied campaign structure. -/
+def checkManifestStructure {fanout : Nat} (dag : ManifestDag fanout)
+    (campaign : StructuralCampaign) : Option (CheckedManifestStructure fanout) :=
   match checkRootedManifestDag dag with
   | none => none
   | some checkedDag =>
-    match checkMeasurementCampaign checkedDag.graph changes campaign with
+    match checkStructuralCampaign checkedDag.graph campaign with
     | none => none
     | some checkedCampaign => some ⟨checkedDag, checkedCampaign⟩
 
-/-- `checkManifestEvidence_isSome_iff` characterizes joint admission exactly. -/
-theorem checkManifestEvidence_isSome_iff {fanout : Nat}
-    (dag : ManifestDag fanout) (changes : ScenarioChangePlan)
-    (campaign : MeasurementCampaign) :
-    (checkManifestEvidence dag changes campaign).isSome = true ↔
-      dag.Rooted ∧ campaign.Complete ∧ campaign.ExactFor dag changes := by
+/-- `checkManifestStructure_isSome_iff` characterizes joint admission exactly. -/
+theorem checkManifestStructure_isSome_iff {fanout : Nat}
+    (dag : ManifestDag fanout) (campaign : StructuralCampaign) :
+    (checkManifestStructure dag campaign).isSome = true ↔
+      dag.Rooted ∧ campaign.Complete ∧ campaign.ExactFor dag := by
   by_cases rooted : dag.Rooted
   · by_cases complete : campaign.Complete
-    · by_cases exact : campaign.ExactFor dag changes
-      · simp [checkManifestEvidence, checkRootedManifestDag,
-          checkMeasurementCampaign, rooted, complete, exact]
-      · simp [checkManifestEvidence, checkRootedManifestDag,
-          checkMeasurementCampaign, rooted, complete, exact]
-    · simp [checkManifestEvidence, checkRootedManifestDag,
-        checkMeasurementCampaign, rooted, complete]
-  · simp [checkManifestEvidence, checkRootedManifestDag, rooted]
+    · by_cases exact : campaign.ExactFor dag
+      · simp [checkManifestStructure, checkRootedManifestDag,
+          checkStructuralCampaign, rooted, complete, exact]
+      · simp [checkManifestStructure, checkRootedManifestDag,
+          checkStructuralCampaign, rooted, complete, exact]
+    · simp [checkManifestStructure, checkRootedManifestDag,
+        checkStructuralCampaign, rooted, complete]
+  · simp [checkManifestStructure, checkRootedManifestDag, rooted]
 
 /-- Successful joint admission exposes the checked graph ordering invariant. -/
-theorem CheckedManifestEvidence.dagWellFormed {fanout : Nat}
-    {changes : ScenarioChangePlan}
-    (evidence : CheckedManifestEvidence fanout changes) :
-    evidence.dag.graph.WellFormed :=
-  evidence.dag.wellFormed
+theorem CheckedManifestStructure.dagWellFormed {fanout : Nat}
+    (checked : CheckedManifestStructure fanout) :
+    checked.dag.graph.WellFormed :=
+  checked.dag.wellFormed
 
 /-- Successful joint admission exposes complete scenario coverage. -/
-theorem CheckedManifestEvidence.campaignComplete {fanout : Nat}
-    {changes : ScenarioChangePlan}
-    (evidence : CheckedManifestEvidence fanout changes) :
-    evidence.campaign.campaign.Complete :=
-  evidence.campaign.complete
+theorem CheckedManifestStructure.campaignComplete {fanout : Nat}
+    (checked : CheckedManifestStructure fanout) :
+    checked.campaign.campaign.Complete :=
+  checked.campaign.complete
 
 /-- Successful joint admission exposes exact per-run rebuild cones. -/
-theorem CheckedManifestEvidence.campaignExact {fanout : Nat}
-    {changes : ScenarioChangePlan}
-    (evidence : CheckedManifestEvidence fanout changes) :
-    evidence.campaign.campaign.ExactFor evidence.dag.graph changes :=
-  evidence.campaign.exact
+theorem CheckedManifestStructure.campaignExact {fanout : Nat}
+    (checked : CheckedManifestStructure fanout) :
+    checked.campaign.campaign.ExactFor checked.dag.graph :=
+  checked.campaign.exact
 
 end Grass.Build.Manifest

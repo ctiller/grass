@@ -77,21 +77,22 @@ theorem ManifestHierarchy.nodes_exact {hasher : MerkleHasher} {fanout : Nat}
       hierarchy.dag.graph.nodes :=
   hierarchy.nodesExact
 
-/-- A concrete rooted hierarchy paired with complete exact build measurements. -/
-structure CheckedHierarchyEvidence (hasher : MerkleHasher) (fanout : Nat)
-    (changes : ScenarioChangePlan) where
+/-- A concrete rooted hierarchy paired with a complete structurally exact
+caller-supplied campaign. This type makes no empirical-authenticity claim. -/
+structure CheckedHierarchyStructure (hasher : MerkleHasher) (fanout : Nat) where
   hierarchy : ManifestHierarchy hasher fanout
-  campaign : CheckedMeasurementCampaign hierarchy.dag.graph changes
+  campaign : CheckedStructuralCampaign hierarchy.dag.graph
 
-/-- Jointly admit concrete manifests, their rooted DAG, and measured rebuilds. -/
-def checkHierarchyEvidence {hasher : MerkleHasher} {fanout : Nat}
+/-- Jointly admit concrete manifests, their rooted DAG, and structurally
+consistent caller-supplied reports. -/
+def checkHierarchyStructure {hasher : MerkleHasher} {fanout : Nat}
     (dag : ManifestDag fanout) (manifests : Vec (ManifestNode hasher fanout))
-    (changes : ScenarioChangePlan) (campaign : MeasurementCampaign) :
-    Option (CheckedHierarchyEvidence hasher fanout changes) :=
+    (campaign : StructuralCampaign) :
+    Option (CheckedHierarchyStructure hasher fanout) :=
   if rooted : dag.Rooted then
     if nodesExact : manifests.map ManifestNode.toDependencyNode = dag.nodes then
       if complete : campaign.Complete then
-        if exact : campaign.ExactFor dag changes then
+        if exact : campaign.ExactFor dag then
           some {
             hierarchy := ⟨⟨dag, rooted⟩, manifests, nodesExact⟩
             campaign := ⟨campaign, complete, exact⟩ }
@@ -100,22 +101,22 @@ def checkHierarchyEvidence {hasher : MerkleHasher} {fanout : Nat}
     else none
   else none
 
-/-- `checkHierarchyEvidence_isSome_iff` characterizes full hierarchy evidence. -/
-theorem checkHierarchyEvidence_isSome_iff {hasher : MerkleHasher} {fanout : Nat}
+/-- `checkHierarchyStructure_isSome_iff` characterizes full structural admission. -/
+theorem checkHierarchyStructure_isSome_iff {hasher : MerkleHasher} {fanout : Nat}
     (dag : ManifestDag fanout) (manifests : Vec (ManifestNode hasher fanout))
-    (changes : ScenarioChangePlan) (campaign : MeasurementCampaign) :
-    (checkHierarchyEvidence dag manifests changes campaign).isSome = true ↔
+    (campaign : StructuralCampaign) :
+    (checkHierarchyStructure dag manifests campaign).isSome = true ↔
       dag.Rooted ∧ manifests.map ManifestNode.toDependencyNode = dag.nodes ∧
-        campaign.Complete ∧ campaign.ExactFor dag changes := by
+        campaign.Complete ∧ campaign.ExactFor dag := by
   by_cases rooted : dag.Rooted
   · by_cases nodesExact :
         manifests.map ManifestNode.toDependencyNode = dag.nodes
     · by_cases complete : campaign.Complete
-      · by_cases exact : campaign.ExactFor dag changes
-        · simp [checkHierarchyEvidence, rooted, nodesExact, complete, exact]
-        · simp [checkHierarchyEvidence, rooted, nodesExact, complete, exact]
-      · simp [checkHierarchyEvidence, rooted, nodesExact, complete]
-    · simp [checkHierarchyEvidence, rooted, nodesExact]
-  · simp [checkHierarchyEvidence, rooted]
+      · by_cases exact : campaign.ExactFor dag
+        · simp [checkHierarchyStructure, rooted, nodesExact, complete, exact]
+        · simp [checkHierarchyStructure, rooted, nodesExact, complete, exact]
+      · simp [checkHierarchyStructure, rooted, nodesExact, complete]
+    · simp [checkHierarchyStructure, rooted, nodesExact]
+  · simp [checkHierarchyStructure, rooted]
 
 end Grass.Build.Manifest
