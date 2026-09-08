@@ -155,6 +155,10 @@ alignments from selected object representations and ordinary struct placement.
 separation, while lookup theorems recover concrete placements from nominal field
 membership. Empty, packed, overlay, bitfield, and flexible-tail representations
 remain separate constructors rather than exceptions to the ordinary checker.
+`Grass.Construct.Layout.Bitfield` records named logical bit ranges within an
+explicit byte-sized storage unit. Proposition-level range validity and pairwise
+separation, symmetric disjointness, exact lookup, and per-field storage-bound
+theorems remain independent of the target profile's physical bit numbering.
 
 Build layout and placement values under `Grass/Construct/`:
 
