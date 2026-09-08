@@ -25,13 +25,12 @@ It sits in `Grass.Specification` rather than in `Grass.Process` because
 `Grass.Semantics` and `Grass.Process`, and a scope identity is used on both
 sides of that diamond.
 
-## Provisional placement
+## Placement
 
-`docs/MODULES.md` gives identifiers to `Grass.Core`, and this may belong there
-once that layer has an owner and a `Uid` discipline to relate it to. It is here
-rather than there because `Grass.Core` is currently `c-mem`'s temporary custody
-and this plan does not intend to grow it. The decision is cheap to revisit: the
-type has no dependencies and one field.
+This is a specification namespace, not a generative execution identity.
+Keeping it beside `RequirementKey` makes that distinction explicit while
+preserving the neutral dependency layer required by the Process/Semantics
+diamond.
 -/
 
 namespace Grass.Specification
