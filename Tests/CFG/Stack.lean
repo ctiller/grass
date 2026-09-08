@@ -47,6 +47,16 @@ example : ¬ callAligned16.accepts ⟨32, []⟩ := by decide
 example : ¬ (StackAlignment.mk 0 0).wellFormed := by decide
 example : ¬ (StackAlignment.mk 8 8).wellFormed := by decide
 
+example (h : callAligned16.accepts ⟨40, []⟩) : callAligned16.wellFormed :=
+  StackAlignment.wellFormed_of_accepts callAligned16 ⟨40, []⟩ h
+
+example (h : callAligned16.accepts ⟨40, []⟩) : 40 % 16 = 8 :=
+  StackAlignment.depth_mod_eq_of_accepts callAligned16 ⟨40, []⟩ h
+
+example :
+    callAligned16.accepts ⟨40, []⟩ ↔ 0 < 16 ∧ 8 < 16 ∧ 40 % 16 = 8 := by
+  simp [callAligned16]
+
 def withLocal : StackShape := ⟨32, [localScope]⟩
 def withNested : StackShape := ⟨32, [nested, localScope]⟩
 
