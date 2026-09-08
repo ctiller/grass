@@ -72,7 +72,7 @@
 //! # An audit of nothing is not a clean audit
 //!
 //! `audit-trust.ps1` could report success having audited no executable test module
-//! at all. Its last line reads "Trust audit passed for 57 declaration(s) and 0
+//! at all. Its last line reads "Trust audit passed for 64 declaration(s) and 0
 //! executable test module(s)", and it prints exactly that -- exit 0 -- whenever
 //! `Tests/` yields no module whose source matches [`TOP_LEVEL_MAIN_PATTERN`]. An
 //! emptied test tree, a test root pointed at the wrong directory (the script took
@@ -152,6 +152,11 @@ const ALLOWED_AXIOMS: &[&str] = &["propext", "Classical.choice", "Quot.sound"];
 const DECLARATIONS: &[&str] = &[
     "Grass.StableId.render_of_empty_namespace",
     "Grass.RequirementKind.extension_injective",
+    "Grass.DemandFamily.identity_mem_identities",
+    "Grass.DemandFamily.identities_nodup",
+    "Grass.DerivedDemandFamily.prior_mem_allKeys",
+    "Grass.DerivedDemandFamily.identity_mem_allKeys",
+    "Grass.DerivedDemandFamily.allKeys_nodup",
     "Grass.DemandCertificateFamily.get",
     "Grass.ObservationProjection.ext",
     "Grass.ObservationProjection.identity_project",
@@ -179,6 +184,8 @@ const DECLARATIONS: &[&str] = &[
     "Grass.BehaviorRefinement.trans_assoc",
     "Grass.BehaviorRefinement.mapSteps",
     "Grass.BehaviorRefinement.mapInfinite",
+    "Grass.BehaviorRefinement.mapInfinite_prefixEvents",
+    "Grass.BehaviorRefinement.mapInfinite_prefixSteps",
     "Grass.BehaviorRefinement.mapInfinite_refl",
     "Grass.BehaviorRefinement.mapInfinite_trans",
     "Grass.BehaviorRefinement.mapCompletion",
@@ -1251,7 +1258,7 @@ mod tests {
         // take. The count is asserted so that removing a root is a visible change,
         // and uniqueness because a repeated name would inflate the expected report
         // count without auditing anything more.
-        assert_eq!(DECLARATIONS.len(), 57);
+        assert_eq!(DECLARATIONS.len(), 64);
         let unique: std::collections::BTreeSet<&str> = DECLARATIONS.iter().copied().collect();
         assert_eq!(unique.len(), DECLARATIONS.len());
     }
@@ -1507,8 +1514,8 @@ mod tests {
     #[test]
     fn the_passing_line_is_the_sentence_the_original_printed() {
         assert_eq!(
-            passing_line(57, 6),
-            "Trust audit passed for 57 declaration(s) and 6 executable test module(s)."
+            passing_line(64, 6),
+            "Trust audit passed for 64 declaration(s) and 6 executable test module(s)."
         );
     }
 
@@ -1537,7 +1544,7 @@ mod tests {
     //
     // This is the bug `audit-trust.ps1` shipped, and it is the reason these tests
     // assert on a *status* rather than on the passing sentence. The script printed
-    // "Trust audit passed for 57 declaration(s) and 6 executable test module(s)."
+    // "Trust audit passed for 64 declaration(s) and 6 executable test module(s)."
     // and exited non-zero, every run, for 39 runs. A test that read the message
     // would have been green throughout.
 
@@ -1620,7 +1627,7 @@ mod tests {
     /// entries as "this probe's whole point is that Lean rejected it".
     fn a_passing_script(entrypoints: usize) -> Vec<(bool, Vec<String>)> {
         let mut script = vec![
-            // aggregate: the marker and the 57 reports are synthesised by the fake.
+            // aggregate: the marker and the 64 reports are synthesised by the fake.
             (true, vec![]),
         ];
         // entrypoints: one elaboration each, marker synthesised.
@@ -1732,8 +1739,8 @@ mod tests {
         );
         assert_eq!(
             result.as_deref(),
-            Ok("Trust audit passed for 57 declaration(s) and 2 executable test module(s)."),
-            "the 57 `#print axioms` reports were all counted"
+            Ok("Trust audit passed for 64 declaration(s) and 2 executable test module(s)."),
+            "the 64 `#print axioms` reports were all counted"
         );
         assert!(
             lean.exhausted(),
@@ -1759,7 +1766,7 @@ mod tests {
         // of quietly shrinking it. Lean prints nothing for a `#print axioms` it
         // could not resolve beyond a diagnostic, which `classify_axiom_line`
         // reads as `Other` and passes through -- so the count is the only thing
-        // that notices. Without it, an audit of 56 of the 57 roots reports the
+        // that notices. Without it, an audit of 63 of the 64 roots reports the
         // same clean line as an audit of all of them.
         struct OneShort;
         impl LeanDriver for OneShort {
@@ -1798,8 +1805,8 @@ mod tests {
         let result = audit(&OneShort, Path::new("."), &a_populated_scan());
         let message = result
             .as_ref()
-            .expect_err("56 reports for 57 roots is not a complete audit");
-        assert_eq!(message, "Expected 57 axiom reports, received 56.");
+            .expect_err("63 reports for 64 roots is not a complete audit");
+        assert_eq!(message, "Expected 64 axiom reports, received 63.");
         assert_eq!(exit_status(&result), 1);
     }
 
@@ -1845,7 +1852,7 @@ mod tests {
 
     #[test]
     fn the_exit_status_is_a_function_of_the_verdict_alone() {
-        assert_eq!(exit_status(&Ok("Trust audit passed for 57".to_string())), 0);
+        assert_eq!(exit_status(&Ok("Trust audit passed for 64".to_string())), 0);
         assert_eq!(exit_status(&Err("Rejected axiom sorryAx".to_string())), 1);
     }
 }
