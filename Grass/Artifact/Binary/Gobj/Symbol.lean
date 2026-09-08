@@ -1,3 +1,4 @@
+import Grass.Artifact.Binary.Gobj.ImportManifest
 import Grass.Artifact.Binary.Gobj.Section
 
 /-!
@@ -34,9 +35,8 @@ def readGobjSymbolBinding (bits : Byte) : Except ParseError GobjSymbolBinding :=
     readGobjSymbolBinding binding.toByte = .ok binding := by
   cases binding <;> rfl
 
-/-- A named, section-relative symbol with an overflow-safe half-open extent. -/
-structure GobjSymbol where
-  name : U32LengthPrefixedBytes
+/-- Section-relative definition carried only by a defined symbol. -/
+structure GobjDefinedSymbol where
   binding : GobjSymbolBinding
   sectionIndex : BitVec 32
   offset : BitVec 64
@@ -44,53 +44,71 @@ structure GobjSymbol where
   extentFits : offset.toNat + size.toNat ≤ 2 ^ 64
 deriving DecidableEq, Repr
 
+/-- A symbol is either section-defined or an index into the import manifest. -/
+inductive GobjSymbolBody where
+  | defined (definition : GobjDefinedSymbol)
+  | imported (importIndex : BitVec 32)
+deriving DecidableEq, Repr
+
+/-- One uniformly indexed relocation target. -/
+structure GobjSymbol where
+  name : GobjNominalId
+  body : GobjSymbolBody
+deriving DecidableEq, Repr
+
 /-- Serialize one canonical symbol entry. -/
 def writeGobjSymbol (entry : GobjSymbol) : Std.Logical.ByteArray :=
-  writeU32LengthPrefixedBytes entry.name ++
-  writeByte entry.binding.toByte ++
-  writeLittleEndian (count := 3) (0 : BitVec 24) ++
-  writeLittleEndian (count := 4) entry.sectionIndex ++
-  writeLittleEndian (count := 8) entry.offset ++
-  writeLittleEndian (count := 8) entry.size
+  writeGobjNominalId entry.name ++ (match entry.body with
+  | .defined definition =>
+    writeByte definition.binding.toByte ++
+    writeLittleEndian (count := 3) (0 : BitVec 24) ++
+    writeLittleEndian (count := 4) definition.sectionIndex ++
+    writeLittleEndian (count := 8) definition.offset ++
+    writeLittleEndian (count := 8) definition.size
+  | .imported importIndex =>
+    writeByte 2 ++ writeLittleEndian (count := 3) (0 : BitVec 24) ++
+      writeLittleEndian (count := 4) importIndex)
 
 /-- Parse one symbol entry while retaining the exact unconsumed suffix. -/
 def readGobjSymbol (input : Std.Logical.ByteArray) : ParseResult GobjSymbol :=
-  match readU32LengthPrefixedBytes input with
+  match readGobjNominalId input with
   | .done name afterName =>
     match takeByte afterName with
     | .done bindingBits afterBinding =>
-      match readGobjSymbolBinding bindingBits with
-      | .ok binding =>
-        match takeLittleEndian 3 afterBinding with
-        | .done reserved afterReserved =>
-          if _reservedOk : reserved = 0 then
+      match takeLittleEndian 3 afterBinding with
+      | .done reserved afterReserved =>
+        if _reservedOk : reserved = 0 then
+          if bindingBits = 2 then
             match takeLittleEndian 4 afterReserved with
-            | .done sectionIndex afterSectionIndex =>
-              match takeLittleEndian 8 afterSectionIndex with
-              | .done offset afterOffset =>
-                match takeLittleEndian 8 afterOffset with
-                | .done size suffix =>
-                  if extentFits : offset.toNat + size.toNat ≤ 2 ^ 64 then
-                    .done {
-                      name := name
-                      binding := binding
-                      sectionIndex := sectionIndex
-                      offset := offset
-                      size := size
-                      extentFits := extentFits } suffix
-                  else
-                    .invalid (.malformed ".gobj symbol extent overflows 64 bits")
+            | .done importIndex suffix =>
+              .done { name, body := .imported importIndex } suffix
+            | .needMore hint => .needMore hint
+            | .invalid error => .invalid error
+          else
+            match readGobjSymbolBinding bindingBits with
+            | .ok binding =>
+              match takeLittleEndian 4 afterReserved with
+              | .done sectionIndex afterSectionIndex =>
+                match takeLittleEndian 8 afterSectionIndex with
+                | .done offset afterOffset =>
+                  match takeLittleEndian 8 afterOffset with
+                  | .done size suffix =>
+                    if extentFits : offset.toNat + size.toNat ≤ 2 ^ 64 then
+                      .done { name, body := .defined {
+                        binding, sectionIndex, offset, size, extentFits } } suffix
+                    else
+                      .invalid (.malformed
+                        ".gobj symbol extent overflows 64 bits")
+                  | .needMore hint => .needMore hint
+                  | .invalid error => .invalid error
                 | .needMore hint => .needMore hint
                 | .invalid error => .invalid error
               | .needMore hint => .needMore hint
               | .invalid error => .invalid error
-            | .needMore hint => .needMore hint
-            | .invalid error => .invalid error
-          else
-            .invalid (.malformed "nonzero .gobj symbol reserved field")
-        | .needMore hint => .needMore hint
-        | .invalid error => .invalid error
-      | .error error => .invalid error
+            | .error error => .invalid error
+        else .invalid (.malformed "nonzero .gobj symbol reserved field")
+      | .needMore hint => .needMore hint
+      | .invalid error => .invalid error
     | .needMore hint => .needMore hint
     | .invalid error => .invalid error
   | .needMore hint => .needMore hint
@@ -98,9 +116,12 @@ def readGobjSymbol (input : Std.Logical.ByteArray) : ParseResult GobjSymbol :=
 
 /-- `length_writeGobjSymbol` gives the exact symbol-entry width. -/
 @[simp] theorem length_writeGobjSymbol (entry : GobjSymbol) :
-    (writeGobjSymbol entry).length = 28 + entry.name.bytes.length := by
-  simp [writeGobjSymbol, writeByte]
-  omega
+    (writeGobjSymbol entry).length = (writeGobjNominalId entry.name).length +
+      match entry.body with | .defined _ => 24 | .imported _ => 8 := by
+  cases entry with
+  | mk name body =>
+      cases body <;> simp [writeGobjSymbol, writeGobjNominalId, writeByte] <;>
+        omega
 
 /-- `readGobjSymbol_write_append` parses one canonical symbol exactly and
 preserves every following suffix. -/
@@ -108,20 +129,36 @@ preserves every following suffix. -/
     (suffix : Std.Logical.ByteArray) :
     readGobjSymbol (writeGobjSymbol entry ++ suffix) = .done entry suffix := by
   unfold readGobjSymbol writeGobjSymbol
-  simp only [Vec.append_assoc]
-  rw [readU32LengthPrefixedBytes_write_append]
-  simp only
-  rw [takeByte_writeByte_append]
-  simp only [readGobjSymbolBinding_toByte]
-  rw [takeLittleEndian_writeLittleEndian_append]
-  simp only [dite_true]
-  rw [takeLittleEndian_writeLittleEndian_append]
-  simp only
-  rw [takeLittleEndian_writeLittleEndian_append]
-  simp only
-  rw [takeLittleEndian_writeLittleEndian_append]
-  simp only
-  rw [dif_pos entry.extentFits]
+  cases entry with
+  | mk name body =>
+    cases body with
+    | defined definition =>
+        simp only [Vec.append_assoc]
+        rw [readGobjNominalId_write_append]
+        simp only
+        rw [takeByte_writeByte_append]
+        simp only
+        rw [takeLittleEndian_writeLittleEndian_append]
+        simp only [dite_true]
+        rw [if_neg (by cases definition.binding <;> decide :
+          definition.binding.toByte ≠ 2)]
+        simp only [readGobjSymbolBinding_toByte]
+        rw [takeLittleEndian_writeLittleEndian_append]
+        simp only
+        rw [takeLittleEndian_writeLittleEndian_append]
+        simp only
+        rw [takeLittleEndian_writeLittleEndian_append]
+        simp only
+        rw [dif_pos definition.extentFits]
+    | imported importIndex =>
+        simp only [Vec.append_assoc]
+        rw [readGobjNominalId_write_append]
+        simp only
+        rw [takeByte_writeByte_append]
+        simp only
+        rw [takeLittleEndian_writeLittleEndian_append]
+        simp only [dite_true, ite_true]
+        rw [takeLittleEndian_writeLittleEndian_append]
 
 /-- `readGobjSymbol_write` is the complete-input symbol round trip. -/
 @[simp] theorem readGobjSymbol_write (entry : GobjSymbol) :
@@ -137,7 +174,9 @@ def writeGobjSymbolList : List GobjSymbol → Std.Logical.ByteArray
 def gobjSymbolListLength : List GobjSymbol → Nat
   | [] => 0
   | entry :: entries =>
-    28 + entry.name.bytes.length + gobjSymbolListLength entries
+    (writeGobjNominalId entry.name).length +
+      (match entry.body with | .defined _ => 24 | .imported _ => 8) +
+      gobjSymbolListLength entries
 
 /-- The recursive symbol-list writer has its exact declared width. -/
 @[simp] theorem length_writeGobjSymbolList (entries : List GobjSymbol) :
@@ -147,14 +186,15 @@ def gobjSymbolListLength : List GobjSymbol → Nat
   | cons entry entries ih =>
       simp [writeGobjSymbolList, gobjSymbolListLength, ih]
 
-/-- `minLength_gobjSymbolList` bounds each encoded symbol by 28 bytes. -/
+/-- `minLength_gobjSymbolList` bounds each encoded symbol by 16 bytes. -/
 theorem minLength_gobjSymbolList (entries : List GobjSymbol) :
-    28 * entries.length ≤ gobjSymbolListLength entries := by
+    16 * entries.length ≤ gobjSymbolListLength entries := by
   induction entries with
   | nil => simp [gobjSymbolListLength]
   | cons entry entries ih =>
       simp only [List.length_cons, gobjSymbolListLength]
-      omega
+      have nameMinimum := minLength_writeGobjNominalId entry.name
+      cases entry.body <;> simp_all <;> omega
 
 /-- Parse exactly `count` consecutive symbol entries. -/
 def readGobjSymbolList : Nat → Std.Logical.ByteArray →
@@ -189,7 +229,7 @@ and preserves an arbitrary suffix. -/
 structure GobjSymbolTable where
   entries : Vec GobjSymbol
   countFits : entries.length < 2 ^ 32
-  namesUnique : (entries.toList.map fun entry => entry.name.bytes).Nodup
+  namesUnique : (entries.toList.map fun entry => entry.name).Nodup
 deriving DecidableEq, Repr
 
 /-- Serialize a symbol count and all canonical entries. -/
@@ -202,11 +242,11 @@ def readGobjSymbolTable (input : Std.Logical.ByteArray) :
     ParseResult GobjSymbolTable :=
   match takeLittleEndian 4 input with
   | .done count rest =>
-    if _minimumFits : 28 * count.toNat ≤ rest.length then
+    if _minimumFits : 16 * count.toNat ≤ rest.length then
       match readGobjSymbolList count.toNat rest with
       | .done entries suffix =>
         if countExact : entries.length = count.toNat then
-          if namesUnique : (entries.map fun entry => entry.name.bytes).Nodup then
+          if namesUnique : (entries.map fun entry => entry.name).Nodup then
             .done {
               entries := Vec.fromList entries
               countFits := by
@@ -220,7 +260,7 @@ def readGobjSymbolTable (input : Std.Logical.ByteArray) :
       | .needMore hint => .needMore hint
       | .invalid error => .invalid error
     else
-      .needMore (some (28 * count.toNat - rest.length))
+      .needMore (some (16 * count.toNat - rest.length))
   | .needMore hint => .needMore hint
   | .invalid error => .invalid error
 
@@ -240,10 +280,10 @@ exactly and preserves every following suffix. -/
       table.entries.length := by
     rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt table.countFits]
   have minimumFits :
-      28 * (BitVec.ofNat 32 table.entries.length).toNat ≤
+      16 * (BitVec.ofNat 32 table.entries.length).toNat ≤
         (writeGobjSymbolList table.entries.toList ++ suffix).length := by
     rw [countEq, Vec.length_append, length_writeGobjSymbolList]
-    change 28 * table.entries.toList.length ≤
+    change 16 * table.entries.toList.length ≤
       gobjSymbolListLength table.entries.toList + suffix.length
     exact Nat.le_trans (minLength_gobjSymbolList table.entries.toList)
       (Nat.le_add_right _ _)

@@ -56,18 +56,21 @@ def sections : GobjSectionTable :=
 def symbolName : U32LengthPrefixedBytes :=
   ⟨Vec.fromList [0x73], by decide⟩
 
+def symbolNominalName : GobjNominalId := ⟨emptyBody, symbolName⟩
+
 def symbolEntry (offset : BitVec 64) : GobjSymbol where
-  name := symbolName
-  binding := .local
-  sectionIndex := 0
-  offset := offset
-  size := 0
-  extentFits := by
-    simpa using Nat.le_of_lt (BitVec.isLt offset)
+  name := symbolNominalName
+  body := .defined {
+    binding := .local
+    sectionIndex := 0
+    offset := offset
+    size := 0
+    extentFits := by
+      simpa using Nat.le_of_lt (BitVec.isLt offset) }
 
 def symbols : GobjSymbolTable where
   entries := Vec.fromList [symbolEntry 0, { symbolEntry 1 with
-    name := ⟨Vec.fromList [0x74], by decide⟩ }]
+    name := ⟨emptyBody, ⟨Vec.fromList [0x74], by decide⟩⟩ }]
   countFits := by decide
   namesUnique := by decide
 

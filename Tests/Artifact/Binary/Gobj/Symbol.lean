@@ -8,19 +8,22 @@ open Grass.Artifact.Binary Grass.Artifact.Binary.Gobj Grass.Grammar
   Grass.Std.Logical
 
 def nameBytes : Std.Logical.ByteArray := Vec.fromList [0x6d, 0x61, 0x69, 0x6e]
-def name : U32LengthPrefixedBytes := ⟨nameBytes, by decide⟩
+def namePart : U32LengthPrefixedBytes := ⟨nameBytes, by decide⟩
+def emptyPart : U32LengthPrefixedBytes := ⟨Vec.empty, by decide⟩
+def name : GobjNominalId := ⟨emptyPart, namePart⟩
 
 def entry : GobjSymbol where
   name := name
-  binding := .exported
-  sectionIndex := 2
-  offset := 16
-  size := 32
-  extentFits := by decide
+  body := .defined {
+    binding := .exported
+    sectionIndex := 2
+    offset := 16
+    size := 32
+    extentFits := by decide }
 
 def suffix : Std.Logical.ByteArray := Vec.fromList [0xaa, 0xbb]
 
-example : (writeGobjSymbol entry).length = 32 := by
+example : (writeGobjSymbol entry).length = 36 := by
   rw [length_writeGobjSymbol]
   decide
 
@@ -28,14 +31,17 @@ example : readGobjSymbol (writeGobjSymbol entry ++ suffix) =
     .done entry suffix := by
   exact readGobjSymbol_write_append entry suffix
 
-example : readGobjSymbol (Vec.fromList [0, 0, 0, 0, 2]) =
+example : readGobjSymbol
+    (Vec.fromList [0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0]) =
     .invalid (.malformed "invalid .gobj symbol binding") := by rfl
 
-example : readGobjSymbol (Vec.fromList [0, 0, 0, 0, 0, 1, 0, 0]) =
+example : readGobjSymbol
+    (Vec.fromList [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]) =
     .invalid (.malformed "nonzero .gobj symbol reserved field") := by rfl
 
 def overflowBytes : Std.Logical.ByteArray :=
   Vec.fromList ([0, 0, 0, 0, 0, 0, 0, 0] ++
+    [0, 0, 0, 0] ++
     [0, 0, 0, 0] ++
     [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff] ++
     [2, 0, 0, 0, 0, 0, 0, 0])
@@ -48,7 +54,7 @@ def table : GobjSymbolTable where
   countFits := by decide
   namesUnique := by decide
 
-example : (writeGobjSymbolTable table).length = 36 := by
+example : (writeGobjSymbolTable table).length = 40 := by
   rw [length_writeGobjSymbolTable]
   decide
 
@@ -57,7 +63,7 @@ example : readGobjSymbolTable (writeGobjSymbolTable table ++ suffix) =
   exact readGobjSymbolTable_write_append table suffix
 
 example : readGobjSymbolTable (Vec.fromList [2, 0, 0, 0]) =
-    .needMore (some 56) := by rfl
+    .needMore (some 32) := by rfl
 
 def duplicateBytes : Std.Logical.ByteArray :=
   writeLittleEndian (count := 4) (2 : BitVec 32) ++
@@ -70,7 +76,7 @@ example : readGobjSymbolTable duplicateBytes =
   simp only [Vec.append_assoc]
   rw [takeLittleEndian_writeLittleEndian_append]
   simp only
-  rw [dif_pos (by decide : 28 * (2 : BitVec 32).toNat ≤
+  rw [dif_pos (by decide : 16 * (2 : BitVec 32).toNat ≤
     (writeGobjSymbol entry ++ writeGobjSymbol entry).length)]
   have countEq : (2 : BitVec 32).toNat = 2 := by decide
   simp only [countEq, readGobjSymbolList]
@@ -80,7 +86,7 @@ example : readGobjSymbolTable duplicateBytes =
   simp only
   rw [dif_pos (by decide : [entry, entry].length = 2)]
   rw [dif_neg (by simp : ¬ ([entry, entry].map
-    fun entry => entry.name.bytes).Nodup)]
+    fun entry => entry.name).Nodup)]
 
 theorem table_lengthFits : (writeGobjSymbolTable table).length < 2 ^ 32 := by
   rw [length_writeGobjSymbolTable]
