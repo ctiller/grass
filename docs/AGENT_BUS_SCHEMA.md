@@ -768,6 +768,12 @@ to that meaning or to the protected classes, and the agent-bus implementor owns
 the checked reader. Selecting only `previous_main` is monotone at landing time:
 a path that became protected after source approval cannot be classified away by
 the author or reviewer.
+
+Registry globs match the `/`-separated path bytes stored in the selected Git
+tree, byte-for-byte and case-sensitively. They never match a host filesystem's
+case-folded spelling. A helper running on a filesystem that cannot represent two
+tracked paths differing only by case must read the Git trees directly or refuse
+the operation; it must not infer protection from the collapsed worktree path.
 The registry must exist before successor activation and contain a class matching
 its own path and the checked registry reader, so a candidate cannot weaken the
 mechanism that selects its landing checks.
