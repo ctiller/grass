@@ -2612,6 +2612,28 @@ pub fn resolve_audience(
 /// containing each named identity." Two independent triggers, either one
 /// requiring completeness: the selector is `AllActive`, or it's a derived
 /// (non-explicit-list) selector on a required-ack broadcast.
+/// True when the selector resolves against state any agent may change at
+/// any time -- `subscribed_topics` (via `subscription.set`) or `scope` (via
+/// `scope.set`).
+///
+/// `Agents`, `Roles` and `AllActive` read only the pinned `audience_epoch`,
+/// which is immutable once known, so resolving them against a cached cut
+/// gives the same answer as resolving them against a fresh one. The other
+/// two do not, and gate 12's exactness is checked at publication
+/// (`coordinator::verify_broadcast_published`) because reduction has no
+/// sound way to ask it. That makes such a broadcast currency-sensitive:
+/// verified against a stale cut, the gate can accept a snapshot that omits a
+/// subscriber who has already published remotely, or refuse a correct one
+/// that includes them -- and since reduction now deliberately trusts the
+/// published snapshot, no later synchronization repairs a wrong verdict.
+pub fn broadcast_audience_reads_mutable_state(d: &BroadcastPublished) -> bool {
+    use crate::common::AudienceSelector as Sel;
+    matches!(
+        &d.audience_selector,
+        Sel::TopicSubscribers(_) | Sel::InterfaceDependents(_)
+    )
+}
+
 pub fn broadcast_requires_complete_frontier(d: &BroadcastPublished) -> bool {
     use crate::common::AudienceSelector as Sel;
     match &d.audience_selector {
