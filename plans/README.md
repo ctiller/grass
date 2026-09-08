@@ -33,6 +33,13 @@ optional transport optimization, but either agent can publish and later learn
 the other's event without it. Finding these mismatches early is one of the
 roadmap system's primary throughput benefits.
 
+The gap report is also durable throughput evidence. Resolution closes the live
+dependency but does not erase the fact that a consumer needed work which no
+published roadmap supplied. Tooling and periodic auditors may aggregate these
+events to distinguish execution delay from planning gaps, repeated interface
+surprises, or chronically missing ownership. Such aggregation is diagnostic:
+it neither assigns work nor turns a roadmap into authority.
+
 The roadmap protocol is therefore a peer protocol, not a coordinator service.
 Each agent appends declarations and responses under its own identity and may
 subscribe directly to any peer whose roadmap, exports, or requests affect its
