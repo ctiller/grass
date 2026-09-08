@@ -148,10 +148,10 @@ metadata: the tables underneath that vocabulary, not the vocabulary. A single
 have looked like a fix without being one.
 
 The consequence for this plan is sharper than section 6's P2 first recorded.
-Spike 1 needs three of the target-side owners, not one. Two are registered:
-c-x86, whose half is committed and partly built, and `g-construct`, which took
-construction and lowering at `g-construct:1` and is the recipient of the
-`Grass.Assembly.X86` obligation `g-design:71` assigns it. The third, the
+Spike 1 needs three of the target-side owners, not one, and all three are
+registered: c-x86, whose half is committed and partly built; `g-construct`,
+which took construction and lowering at `g-construct:1` and is the recipient
+of the `Grass.Assembly.X86` obligation `g-design:71` assigns it. The third, the
 artifact owner that `g-design:71` assigns `Grass.Emit`, is g-build, whose latest
 published scope `g-build:16` claims `Grass/Emit.lean` exclusively along with
 `Grass/Artifact/PE/**`, `Grass/Artifact/COFF/**`, `Grass/Build/Manifest/**` and
@@ -409,8 +409,11 @@ P2, P3 and P4 are now unblocked and independent of one another; they should run
 in parallel across their owning agents, and the spike order inside P4 is what
 serializes. P1 follows P2 by necessity rather than by choice, since a spike
 cannot enter a build target before it can compile. The critical path is
-therefore P2, which is also the only phase whose owners are not yet
-registered.
+therefore P2 -- not because it lacks owners, since all three of its workstreams
+are registered (`c-x86:1`, `g-construct:1`, `g-build:1`), but because every
+spike waits on a target-side authoring surface none of them has written yet.
+The routing gap that remains is in P3, where the resource and console contract
+families still have no owner.
 
 ### P0 — Reconcile the surface — DONE
 
@@ -444,7 +447,7 @@ provide.
 
 ### P2 — The target side (blocking every spike)
 
-Owner: routed by `coord1:43` into three workstreams, of which two have
+Owner: routed by `coord1:43` into three workstreams, all of which have
 registered. The bus registry is authoritative for who owns what; what follows
 records the split and the obligations, not a running census.
 
@@ -489,10 +492,12 @@ rather than one owner: machine and platform authority (`ISA/X86`, `ABI/Win64`,
 `Unsafe`) consuming the first, and artifact and build (`Grammar`, `Artifact/*`,
 `Build/*`). Registration of these workstreams had been held until the agent-bus
 contention work landed, since a bus then taking minutes per publish would not
-have survived fifteen concurrent pushers. That work has landed and the first two
-registered on the strength of it; the artifact and build owner has not yet.
-Two things coord1 flagged rather than decided: `Effect` and `Weave` are not target-side at
-all and may belong with g-foundation, and `Programs/` is unassigned on purpose,
+have survived fifteen concurrent pushers. That work has landed and all three
+registered on the strength of it, the artifact and build owner at `g-build:1`.
+Two things coord1 flagged rather than decided: `Effect` and `Weave` are not
+target-side at all and may belong with g-foundation -- `Grass/Weave/**` has
+since become g-foundation's under `g-foundation:69` while `Effect` remains
+unrouted -- and `Programs/` is unassigned on purpose,
 since `HelloWin64` and its siblings are the productionized form of exactly the
 end-to-end demonstrations c-spike owns -- whether that makes them c-spike's is a
 question for the user.
