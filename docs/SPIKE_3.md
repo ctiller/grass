@@ -1403,8 +1403,9 @@ requires a feature-specific realization plus its own citations and probes.
 ## Exact authored source snapshot
 
 This snapshot is the exact comment-free source maintained under
-`Spikes/3_Gzip/`. Run `./check-spike-sources.ps1 -Spike 3` to check the
-normalized cross-view equality and block classifications.
+`Spikes/3_Gzip/`. Run
+`./tools/grass-tools/target/release/spike-sources 3` to check the normalized
+cross-view equality and block classifications.
 
 ### `Assembly.lean`
 

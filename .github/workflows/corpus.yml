@@ -10,20 +10,30 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      # Built once, so a tool that fails to compile fails the job before either
+      # check has had a chance to report a misleading pass.
+      - name: Build the corpus tools
+        run: cargo build --release --locked --manifest-path tools/grass-tools/Cargo.toml --bin spike-sources --bin doc-links
+
+      # Both checks below used to run under `shell: pwsh`. Neither needed
+      # PowerShell for anything -- they read files and compare strings -- and
+      # requiring it meant a contributor on a Linux host could not run the
+      # repository's own corpus gates at all. `doc-links` is a required_check on
+      # review nominations (docs/AGENT_REVIEW.md), so being able to run it
+      # locally is what lets an author check before nominating rather than
+      # after.
       - name: Check spike source views
-        shell: pwsh
-        run: ./check-spike-sources.ps1
+        run: ./tools/grass-tools/target/release/spike-sources
 
       - name: Check local documentation links
-        shell: pwsh
-        run: ./check-doc-links.ps1
+        run: ./tools/grass-tools/target/release/doc-links
 
       # This job is where cross-file references are kept honest, so the retired
       # tool paths belong here too.

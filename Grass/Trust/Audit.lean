@@ -254,7 +254,7 @@ elab "#audit_runtime_dependencies " declaration:ident : command => do
 
 /-- Audit every project declaration and report closed `VerifiedProgram` roots.
 
-`audit-trust.ps1` invokes `auditVerifiedPrograms` from a nonce-named local
+The `trust-audit` tool invokes `auditVerifiedPrograms` from a nonce-named local
 command declared after importing the modules under inspection, then requires
 that command's nonce marker instead of trusting the public syntax spelling. -/
 def auditVerifiedPrograms : CommandElabM Unit := do

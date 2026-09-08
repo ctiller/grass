@@ -1444,8 +1444,9 @@ must be listed in the source register with their theorem owners.
 ## Exact authored source snapshot
 
 This snapshot is the exact comment-free source maintained under
-`Spikes/2_Sort/`. Run `./check-spike-sources.ps1 -Spike 2` to check the
-normalized cross-view equality and block classifications.
+`Spikes/2_Sort/`. Run
+`./tools/grass-tools/target/release/spike-sources 2` to check the normalized
+cross-view equality and block classifications.
 
 ### `Assembly.lean`
 

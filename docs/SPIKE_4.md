@@ -1181,8 +1181,9 @@ the eventual libraries should let an author maintain.
 ## Exact authored source snapshot
 
 This snapshot is the exact comment-free source maintained under
-`Spikes/4_Web_Server/`. Run `./check-spike-sources.ps1 -Spike 4` to check the
-normalized cross-view equality and block classifications.
+`Spikes/4_Web_Server/`. Run
+`./tools/grass-tools/target/release/spike-sources 4` to check the normalized
+cross-view equality and block classifications.
 
 ### `Assembly.lean`
 

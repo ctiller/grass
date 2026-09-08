@@ -30,23 +30,27 @@ both the annotated document and its comment-free authored source.
 
 Run the repository's current consistency check from its root:
 
-```powershell
+```sh
 lake build
 lake build Tests
-pwsh ./audit-trust.ps1
-pwsh ./check-spike-sources.ps1
-pwsh ./check-doc-links.ps1
+cargo build --release --locked --manifest-path tools/grass-tools/Cargo.toml
+./tools/grass-tools/target/release/trust-audit
+./tools/grass-tools/target/release/spike-sources
+./tools/grass-tools/target/release/doc-links
 ```
 
-The Lake commands compile the Lean libraries, and the trust command audits
-project declarations and named public roots for rejected transitive axioms, then
-rejects unverified `implemented_by` and `extern` replacements in the verified
-runtime dependency closure. Participating module cohorts and persisted non-meta
+The Lake commands compile the Lean libraries, the `cargo build` compiles the
+validation tools in `tools/grass-tools/` (once per checkout, not once per
+check), and the trust command audits project declarations and named public roots
+for rejected transitive axioms, then rejects unverified `implemented_by` and
+`extern` replacements in the verified runtime dependency closure. Participating module cohorts and persisted non-meta
 compiler dependency modules keep scoped `csimp` substitutions covered after
 their attribute state expires.
 The last two commands classify spike code, compare authored blocks with their
-files under `Spikes/`, and check relative documentation targets. None of these
-commands is an end-to-end proof of the eventual assembler or executable.
+files under `Spikes/`, and check relative documentation targets. Every one of
+them must be run from the repository root, and each fails rather than reporting
+success when it finds nothing to examine. None of these commands is an
+end-to-end proof of the eventual assembler or executable.
 
 ## Review
 

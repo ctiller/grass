@@ -204,11 +204,11 @@ nondeterministic build metadata has an explicit whitelist and normalization
 theorem.
 
 Before the library exists, the expansion laws are review obligations.
-`./check-spike-sources.ps1` currently proves only the normalized authored-source
+The `spike-sources` tool currently proves only the normalized authored-source
 snapshot equality; it must never be cited as evidence for expansion,
-certificate, or artifact reproducibility. The script accepts `-Spike N` for a
-focused check. Once implementation begins, CI also runs clean-output generation
-and enforces every phase independently.
+certificate, or artifact reproducibility. It accepts spike numbers as
+arguments for a focused check. Once implementation begins, CI also runs
+clean-output generation and enforces every phase independently.
 
 ### Pre-implementation design fixpoint
 

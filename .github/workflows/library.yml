@@ -10,6 +10,16 @@ name: Library build
 # reviewed logical-foundation constants are permitted, and `sorryAx` or any
 # dependency-declared axiom fails the gate.
 #
+# The trust-closure audit asks the larger version of that question: whether the
+# path from a VerifiedProgram certificate to the emitted bytes is closed, which
+# includes the @[implemented_by], @[extern] and @[csimp] routes by which the
+# compiled definition can differ from the proved one - none of which produces an
+# axiom, a warning or an unsafe marker for anything else here to notice. It
+# carries ten adversarial probes that each construct a way past it and require it
+# to object, so the audit is falsified on every run. Until now it was
+# audit-trust.ps1 under `shell: pwsh`, the one step in this workflow a contributor
+# on Linux could not reproduce locally. It is the trust-audit tool now.
+#
 # A third check is about prose. Four adversarial review rounds each found a
 # docstring asserting a property the code did not have, including one naming a
 # theorem that did not exist. The docstring-audit tool requires a strong claim in
@@ -124,8 +134,7 @@ jobs:
         run: ./tools/grass-tools/target/release/axiom-audit
 
       - name: Audit verified-program trust closure
-        shell: pwsh
-        run: ./audit-trust.ps1
+        run: ./tools/grass-tools/target/release/trust-audit
 
       - name: Audit docstring claims
         run: ./tools/grass-tools/target/release/docstring-audit

@@ -35,7 +35,7 @@ schema version. It exits nonzero if its certificate phase fails or if its output
 cannot be written atomically. JSON is a review projection; the referenced
 kernel-checked declaration and verified object remain proof authority.
 
-`mirror` may be implemented first by `check-spike-sources.ps1`, but the eventual
+`mirror` may be implemented first by the `spike-sources` tool, but the eventual
 command must emit the same classified manifest rather than merely print a pass
 line.
 

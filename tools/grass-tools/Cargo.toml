@@ -16,6 +16,14 @@ description = "Grass validation and audit tools: differential checks against ind
 # `lake env lean`, and does the judging here. `docstring-audit` obtains its
 # declaration-name oracle the same way, which is what retires
 # `Tools/DeclNames.lean`.
+#
+# `trust-audit`, `spike-sources` and `doc-links` replace the three root
+# PowerShell scripts. Those were the repository's only remaining verification
+# entrypoints that could not run without PowerShell, which made `lake build`
+# plus `pwsh ./audit-trust.ps1` -- the pair README.md documents as the primary
+# validation command -- unrunnable on a Linux developer host. `trust-audit`
+# generates Lean the same way `axiom-audit` does, for the same reason; the
+# other two are pure file and text work that never needed a shell.
 
 [[bin]]
 name = "x86-nasm-differential"
@@ -52,6 +60,18 @@ path = "src/bin/axiom_audit.rs"
 [[bin]]
 name = "coverage-audit"
 path = "src/bin/coverage_audit.rs"
+
+[[bin]]
+name = "trust-audit"
+path = "src/bin/trust_audit.rs"
+
+[[bin]]
+name = "spike-sources"
+path = "src/bin/spike_sources.rs"
+
+[[bin]]
+name = "doc-links"
+path = "src/bin/doc_links.rs"
 
 [dependencies]
 anyhow = "1"
