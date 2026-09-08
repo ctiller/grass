@@ -89,8 +89,8 @@ Two earlier versions of the paragraph above gave reasons that do not entail it โ
 the index-versus-field distinction, and then the absence of `ProcessRunState`
 from `Grass/Process/Acceptance.lean`, which is true and about the wrong type,
 since the segmentation is an index of `Reachable` rather than a field of the run
-state. What does entail it is what that paragraph now says: no clause of
-`ProcessAcceptance` takes a `Segmented`.
+state. What does entail it is `TraceAccepts`'s type, as that paragraph now
+says: the only clause that could take a segmentation takes the flat trace.
 ยง10.137.
 
 **What index-versus-field does decide** is whether the segmentation is part of

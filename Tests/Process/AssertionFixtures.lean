@@ -11,9 +11,10 @@ fixture checks them.
 * `framed` bounds what an assertion may read. `understated_footprint_impossible`
   is that: no assertion with an empty footprint can read `acceptCount`.
 * `agreesGlue` excludes the degenerate *equality* agreement, and more besides —
-  `orderedComponentwise_is_not_equality` exhibits a non-equality agreement it
-  also rejects, so "and no more than that", which an earlier version of this
-  bullet said, is wrong in the other direction. `fixtureAgreement` discharges it,
+  `orderedComponentwise_is_not_equality` exhibits an agreement that is not
+  equality and `orderedComponentwise_has_no_glue` is the law rejecting it, so
+  "and no more than that", which an earlier version of this bullet said, is wrong
+  in the other direction. `fixtureAgreement` discharges it,
   and `separate_fragments_are_independent` shows the payoff — two worlds agreeing
   on one fragment and differing on another, which the equality agreement could
   not exhibit. What the law does not do is make the footprint a bound in general:
@@ -415,9 +416,9 @@ def blindAgreement {World : Type fixtureWorld} :
 
 Two genuinely distinct components tied by an inequality — not an aliasing
 witness. The earlier fixture here was a TangledWorld whose two components were
-pinned *equal*, which round eight of local adversarial review showed made every
-determining agreement over it an instance of the equality degeneracy
-`WorldAgreement.subsingleton_of_forced_equality` already covered. This one
+pinned *equal*, which made every determining agreement over it an instance of the
+equality degeneracy `WorldAgreement.subsingleton_of_forced_equality` already
+covered. §10.137 records the round that found it. This one
 carries the same direction and is not that. §10.137. -/
 structure OrderedWorld where
   /-- The lower component. -/
@@ -480,13 +481,33 @@ theorem orderedComponentwise_has_no_glue :
   ordered_no_glue_general orderedComponentwise (fun _ _ agreed => agreed)
     (fun _ _ agreed => agreed)
 
+/-- Reflexive. -/
+theorem orderedComponentwise_refl (fragment : NetworkFragment serverTopology)
+    (world : OrderedWorld) : orderedComponentwise fragment world world := by
+  cases fragment <;> simp [orderedComponentwise]
+
+/-- Symmetric. -/
+theorem orderedComponentwise_symm (fragment : NetworkFragment serverTopology)
+    (left right : OrderedWorld) (agreed : orderedComponentwise fragment left right) :
+    orderedComponentwise fragment right left := by
+  cases fragment <;> simp_all [orderedComponentwise]
+
+/-- And transitive — so it is a candidate agreement in every respect but the
+gluing law, which is what makes the next theorem say something. -/
+theorem orderedComponentwise_trans (fragment : NetworkFragment serverTopology)
+    (a b c : OrderedWorld) (first : orderedComponentwise fragment a b)
+    (second : orderedComponentwise fragment b c) :
+    orderedComponentwise fragment a c := by
+  cases fragment <;> simp_all [orderedComponentwise]
+
 /-- **So `agreesGlue` excludes more than the equality agreement.**
 
-`orderedComponentwise` is reflexive, symmetric and transitive, it is *not*
-equality — two worlds differing in `high` agree at `.obligations` — and
-`agreesGlue` rejects it all the same. An earlier version of this file's header
-said the law excludes the equality agreement "and no more than that", which this
-refutes. §10.137. -/
+`orderedComponentwise` satisfies the other three laws — the three theorems above,
+which an earlier version of this docstring asserted in prose in a file whose
+subject is prose asserted without checking — it is *not* equality, since two
+worlds differing in `high` agree at `.obligations`, and `agreesGlue` rejects it
+all the same. An earlier version of this file's header said the law excludes the
+equality agreement "and no more than that", which this refutes. §10.137. -/
 theorem orderedComponentwise_is_not_equality :
     orderedComponentwise .obligations ⟨0, 5, by omega⟩ ⟨0, 7, by omega⟩ ∧
       (⟨0, 5, by omega⟩ : OrderedWorld) ≠ ⟨0, 7, by omega⟩ := by
@@ -512,8 +533,9 @@ outside; it does not need one that copies a component from each. A coarsening ha
 the slack to do that — here `2 * (right.high / 2) + left.low % 2` — and this
 agreement reads distinct components at distinct fragments in the plainest sense.
 
-So a world carrying a cross-fragment invariant loses agreements that pin its
-components apart, and keeps ones that only look at them. §10.137. -/
+The pair `orderedComponentwise` (pins, no glue) and this one (looks, glues) is
+half the picture; `boundedAgreement` and `mirrorLooks` below are the other half,
+and together they show neither property implies the other. §10.137. -/
 def orderedSplitAgreement : WorldAgreement serverTopology OrderedWorld where
   Agrees := orderedSplitAgrees
   agreesRefl := by
@@ -567,6 +589,172 @@ def orderedSplitAgreement : WorldAgreement serverTopology OrderedWorld where
             | exact absurd isInside observationsInside
       · intro f _
         cases f <;> simp [orderedSplitAgrees]
+
+/-! ## The four corners
+
+Five rounds of local adversarial review each produced a class-level sentence of
+the form "a world like *this* has no agreement like *that*", and each was refuted
+by compiling a witness. The sentences narrowed every time -- componentwise, then
+separating, then determining -- and the fifth round refuted the last one twice
+over, in the quantifier nobody had looked at: the one over *worlds*.
+
+So this section stops asserting a class-level claim and exhibits the four corners
+instead. Two properties are in play, and the fixtures below show all four
+combinations are inhabited, which is exactly why no implication between them
+holds:
+
+* the world carries a cross-fragment invariant as a field, or does not;
+* the agreement's clauses determine the two components, or only look at them.
+
+What actually decides whether `agreesGlue` holds is neither: it is whether the
+mixture the law asks for exists, and that is a fact about the pair together. It
+does not reduce to a property of the world alone or of the agreement alone.
+§10.137. -/
+
+/-- **Corner one: an invariant, a determining agreement, and no glue.**
+
+`OrderedWorld`'s `low ≤ high` is not a product on the two components -- taking
+`low` from one world and `high` from another can cross the bound -- so an
+agreement pinning both cannot mix. This is `ordered_no_glue_general` above, and
+for five rounds it was mistaken for the general case. -/
+theorem corner_invariant_determining_no_glue :
+    ¬ (∀ (inside : NetworkFragment serverTopology → Prop) (left right : OrderedWorld),
+        ∃ mixed, (∀ fragment, inside fragment → orderedComponentwise fragment mixed left) ∧
+          (∀ fragment, ¬ inside fragment → orderedComponentwise fragment mixed right)) :=
+  orderedComponentwise_has_no_glue
+
+/-- **Corner two: an invariant, a determining agreement, and glue anyway.**
+
+`tie` is a genuine cross-fragment field. It is also *implied* by the two
+per-component bounds, so every mixture satisfies it and the determining
+agreement mixes freely. Carrying a cross-fragment invariant is therefore not
+what costs a world its determining agreements, which four rounds of this
+section's prose asserted. -/
+structure BoundedTiedWorld where
+  /-- Bounded above by three. -/
+  low : Nat
+  /-- Bounded below by four. -/
+  high : Nat
+  /-- Per-component, not cross-fragment. -/
+  lowSmall : low ≤ 3
+  /-- Likewise. -/
+  highBig : 4 ≤ high
+  /-- And the cross-fragment invariant, carried as a field. -/
+  tie : low < high
+
+/-- Pins `low` at `.obligations` and `high` at `.observations`. -/
+def boundedComponentwise :
+    NetworkFragment serverTopology → BoundedTiedWorld → BoundedTiedWorld → Prop
+  | .obligations, a, b => a.low = b.low
+  | .observations, a, b => a.high = b.high
+  | _, _, _ => True
+
+open Classical in
+/-- **And it is a `WorldAgreement`**, so it glues. -/
+def boundedAgreement : WorldAgreement serverTopology BoundedTiedWorld where
+  Agrees := boundedComponentwise
+  agreesRefl := by intro fragment _; cases fragment <;> simp [boundedComponentwise]
+  agreesSymm := by
+    intro fragment a b agreed
+    cases fragment <;> simp_all [boundedComponentwise]
+  agreesTrans := by
+    intro fragment a b c first second
+    cases fragment <;> simp_all [boundedComponentwise]
+  agreesGlue := by
+    intro inside left right
+    refine ⟨⟨if inside .obligations then left.low else right.low,
+             if inside .observations then left.high else right.high,
+             by by_cases picked : inside .obligations <;>
+                simp [picked] <;> first | exact left.lowSmall | exact right.lowSmall,
+             by by_cases picked : inside .observations <;>
+                simp [picked] <;> first | exact left.highBig | exact right.highBig,
+             by
+               have small : (if inside .obligations then left.low else right.low) ≤ 3 := by
+                 by_cases picked : inside .obligations <;>
+                   simp [picked] <;> first | exact left.lowSmall | exact right.lowSmall
+               have big : 4 ≤ (if inside .observations then left.high else right.high) := by
+                 by_cases picked : inside .observations <;>
+                   simp [picked] <;> first | exact left.highBig | exact right.highBig
+               omega⟩, ?_, ?_⟩
+    · intro fragment isInside
+      cases fragment <;> simp [boundedComponentwise, isInside]
+    · intro fragment isOutside
+      cases fragment <;> simp [boundedComponentwise, isOutside]
+
+/-- It determines `low`. -/
+theorem bounded_determines_low (left right : BoundedTiedWorld)
+    (agreed : boundedAgreement.Agrees .obligations left right) : left.low = right.low :=
+  agreed
+
+/-- And `high`. So it satisfies `ordered_no_glue_general`'s hypothesis pair
+exactly, over a world with a cross-fragment invariant, and glues. -/
+theorem bounded_determines_high (left right : BoundedTiedWorld)
+    (agreed : boundedAgreement.Agrees .observations left right) : left.high = right.high :=
+  agreed
+
+/-- And the world is not a subsingleton, so neither is the observation. -/
+theorem bounded_is_not_trivial :
+    (⟨0, 4, by omega, by omega, by omega⟩ : BoundedTiedWorld)
+      ≠ ⟨3, 9, by omega, by omega, by omega⟩ := by
+  intro same
+  have projected := congrArg BoundedTiedWorld.low same
+  simp at projected
+
+/-- **Corner three: an invariant, an agreement that only looks, and no glue.**
+
+Two components pinned equal, and an agreement reading nothing but their
+parities. It determines neither component -- `mirror_does_not_determine_low` --
+and it still has no mixture, because the parities have to come from opposite
+sides of the split and `tie` refuses that. So "a world keeps the agreements that
+only look at its components" is false too, which is the other half of what the
+fifth round refuted. -/
+structure MirrorWorld where
+  /-- One component. -/
+  low : Nat
+  /-- The other. -/
+  high : Nat
+  /-- Pinned equal. -/
+  tie : low = high
+
+/-- Parities only, at two fragments. -/
+def mirrorLooks :
+    NetworkFragment serverTopology → MirrorWorld → MirrorWorld → Prop
+  | .obligations, a, b => a.low % 2 = b.low % 2
+  | .observations, a, b => a.high % 2 = b.high % 2
+  | _, _, _ => True
+
+/-- It reads `low` without determining it. -/
+theorem mirror_does_not_determine_low :
+    mirrorLooks .obligations ⟨0, 0, rfl⟩ ⟨2, 2, rfl⟩ ∧
+      (⟨0, 0, rfl⟩ : MirrorWorld).low ≠ (⟨2, 2, rfl⟩ : MirrorWorld).low := by
+  refine ⟨rfl, ?_⟩
+  simp
+
+/-- **And it has no glue all the same.** -/
+theorem mirror_looks_but_has_no_glue :
+    ¬ (∀ (inside : NetworkFragment serverTopology → Prop) (left right : MirrorWorld),
+        ∃ mixed, (∀ fragment, inside fragment → mirrorLooks fragment mixed left) ∧
+          (∀ fragment, ¬ inside fragment → mirrorLooks fragment mixed right)) := by
+  intro glue
+  obtain ⟨mixed, inside, outside⟩ :=
+    glue (fun fragment => fragment = .obligations) ⟨0, 0, rfl⟩ ⟨1, 1, rfl⟩
+  have fromLow : mixed.low % 2 = 0 := inside .obligations rfl
+  have fromHigh : mixed.high % 2 = 1 :=
+    outside .observations (by intro same; cases same)
+  have tie := mixed.tie
+  omega
+
+/-- **Corner four: an invariant, an agreement that only looks, and glue.**
+
+`orderedSplitAgreement` above. The coarsening has enough slack to satisfy both
+sides of any split, which is why it survives where `mirrorLooks` does not: the
+difference is `low ≤ high` against `low = high`, a fact about the world and the
+agreement together and about neither alone. -/
+theorem corner_invariant_looking_glue :
+    ∀ (inside : NetworkFragment serverTopology → Prop) (left right : OrderedWorld),
+      ∃ mixed, (∀ fragment, inside fragment → orderedSplitAgreement.Agrees fragment mixed left) ∧
+        (∀ fragment, ¬ inside fragment → orderedSplitAgreement.Agrees fragment mixed right) :=
+  orderedSplitAgreement.agreesGlue
 
 open Classical in
 /--

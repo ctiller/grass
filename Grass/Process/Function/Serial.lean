@@ -196,7 +196,12 @@ structure SerialFunctionContract (State : Type w) : Type (w + 1) where
   the footprint that separates nothing, which `agreesGlue` permits —
   `Tests/Process/AssertionFixtures.lean`'s `blindAgreement` is that agreement and
   satisfies the law. `agreesGlue` rules out the equality agreement, which this
-  permits. Neither forces the declared footprint to be the real one; §10.137. Doing better needs the footprint
+  permits wherever `State` has two inhabitants -- at a subsingleton `State`
+  `footprintSeparates` is unsatisfiable outright, which is `agent-bus`
+  `g-design:152`'s finding against this very field. Neither forces the declared
+  footprint to be the real one; §10.137.
+
+  Doing better needs the footprint
   to range over *fragments* of the state rather than over the state as a whole,
   which this layer cannot express — see
   `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.31.

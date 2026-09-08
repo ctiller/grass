@@ -5096,7 +5096,10 @@ over and this repair had broken.
 **And acceptance cannot see the segmentation whatever carries it.**
 `Grass/Process/Run.lean` said the segmentation is an index rather than a field
 "so that an acceptance relation, which sees only `ProcessRunState.history`,
-cannot branch on it". The "so that" does not follow. `Grass/Process/Acceptance.lean` does not mention `Segmented` anywhere, so no
+cannot branch on it". The "so that" does not follow. What does follow is
+structural and was not the reason given: `ProcessAcceptance.TraceAccepts` takes
+the flat `Trace p.Observation`, so the one clause that could see a segmentation
+cannot be handed one. `Grass/Process/Acceptance.lean` does not mention `Segmented` anywhere, so no
 clause of `ProcessAcceptance` takes one, whether it is carried as an index or as
 a field.
 
@@ -5207,6 +5210,45 @@ admissible at all.
 And the file's title said "The footprint is a bound, not a label" for all five
 rounds, three lines above a bullet the third round corrected and in the file that
 now contains `leakyLeak`, whose footprint *is* a label.
+
+**The sixth round, and the quantifier nobody had looked at.** Three rounds
+narrowed the predicate on the *agreement* -- componentwise, separating,
+determining. None touched the quantifier over *worlds*, and that is where the
+claim was false, in both directions at once.
+
+"A world carrying a cross-fragment invariant has no determining agreement" is
+refuted by `boundedAgreement`: `BoundedTiedWorld` carries `low < high` as a
+field, the agreement pins `low` at one fragment and `high` at another, and it
+glues -- because that tie is *implied* by the per-component bounds, so every
+mixture satisfies it. And "such a world keeps the agreements that only look at
+its components" is refuted by `mirrorLooks`, which determines neither component
+of a world pinned `low = high` and has no mixture either.
+
+So this section stops trying. There is no implication between "the world carries
+a cross-fragment invariant" and "the agreement has no glue", in either direction,
+and the fixture now exhibits all four combinations rather than asserting a fifth
+narrowing of a sentence that had been wrong five times. What decides `agreesGlue`
+is whether the mixture exists, which is a fact about the world and the agreement
+together and reduces to neither.
+
+That is the real lesson of §10.137 and it took six rounds to reach: the
+temptation each time was to keep the sentence's shape and adjust one word. The
+shape was the defect. A claim that no witness can be built is not the kind of
+claim a docstring should make at all unless something in the tree tries to build
+one.
+
+Smaller, and all in the previous round's fix again: `Grass/Process/Run.lean`
+demoted the file-level grep fact to corroboration in one paragraph and named it
+as the entailing reason fifteen lines later; `orderedComponentwise` was asserted
+reflexive, symmetric and transitive without proof, in the file whose subject is
+claims asserted without checking; the header bullet cited the theorem that
+exhibits a non-equality agreement rather than the one showing the law rejects it;
+`Grass/Process/Network/Assertion.lean` cited
+`gluing_does_not_bound_the_footprint` where the refutation is `leakyLeak` and
+`leaky_footprint_reads_outside_it`; `orderedAgreement` had no consumer at all;
+`Grass/Process/Observation.lean` carried two consecutive sentences pointing at
+the same note; and one event was dated by two incompatible round numberings, this
+entry's and the fixture's.
 
 **On the script, which an earlier version of this entry overclaimed.** It said
 the sweep "has to be a script ... the script is what the next round is

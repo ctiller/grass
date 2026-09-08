@@ -116,8 +116,7 @@ it is an index. The one clause that could conceivably see a segmentation,
 `ProcessAcceptance.TraceAccepts`, takes the flat `Trace p.Observation` and so
 structurally cannot; and no clause of `ProcessAcceptance` mentions `Segmented`
 today, however it is carried. `Grass/Process/Run.lean`'s module note has both
-halves.
-`Grass/Process/Run.lean`'s module note has the argument. §10.137.
+halves. §10.137.
 -/
 
 /--

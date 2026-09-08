@@ -69,23 +69,25 @@ product with one component per fragment family, which is why
 `logicalWorldAgreement` glues componentwise and the law is easy to discharge
 there — but ease is not demand.
 `Tests/Process/AssertionFixtures.lean`'s `blindAgreement` discharges it at a
-world of any shape, including one carrying a cross-fragment invariant as a
-field.
+world of any shape, and `orderedAgreement` is it instantiated at one carrying a
+cross-fragment invariant as a field.
 
-What a badly shaped world costs is not this law, and it is narrower than two
-earlier versions of this paragraph said. It is that no agreement *determining*
-distinct tied components at distinct fragments is available — where determining
-means the clause at that fragment pins the component, so that agreeing there
-fixes its value.
+**What a badly shaped world costs is not stated here**, because five attempts
+to state it were all refuted by somebody compiling a witness, and the fifth was
+refuted in both directions at once.
 
-Determining, not reading, and the difference is the whole of it.
-`Tests/Process/AssertionFixtures.lean`'s `orderedSplitAgreement` reads one
-component at one fragment and the other at another — parity here, halves there —
-and glues, because gluing needs a mixture that *agrees* with each argument on its
-side of the split and not one that copies a component from each, and a coarsening
-has the slack for that. What has no glue is `orderedComponentwise`, whose clauses
-pin both. The assertions a determining agreement would frame have to be framed
-some other way. §10.137.
+The attempts went: such a world has no componentwise agreement; no *separating*
+one; no *determining* one. All false. Carrying a cross-fragment invariant as a
+field costs a world nothing by itself — `Tests/Process/AssertionFixtures.lean`'s
+`boundedAgreement` determines two components of such a world at two fragments and
+glues — and an agreement that merely looks at two components is not thereby safe,
+since `mirrorLooks` determines neither and has no glue.
+
+What decides `agreesGlue` is whether the mixture it asks for exists, which is a
+fact about the world and the agreement *together*. That file's four corners
+exhibit all four combinations, which is why no implication between the two
+properties holds. Where a mixture does not exist, the assertions that agreement
+would frame have to be framed some other way. §10.137.
 
 ## The world is abstract on purpose
 
@@ -231,9 +233,11 @@ module supports.
 The first three laws are what a framing argument uses. `agreesGlue` excludes
 the *equality* agreement, under which framing would say nothing at all. It does
 not make a footprint a bound in general —
-`Tests/Process/AssertionFixtures.lean`'s `gluing_does_not_bound_the_footprint`
-refutes that, and an earlier version of this sentence asserted it. See the module
-note. §10.137.
+`Tests/Process/AssertionFixtures.lean`'s `leakyLeak` is an assertion framed by a
+footprint it reads past, and `leaky_footprint_reads_outside_it` is the
+consequence. An earlier version of this sentence asserted the bound, and a later
+one cited `gluing_does_not_bound_the_footprint`, which is the lemma those two
+rest on rather than the refutation itself. See the module note. §10.137.
 -/
 structure WorldAgreement {registry : ProtocolRegistry.{u, w, v}}
     {boundary : DriverBoundary.{u}}
