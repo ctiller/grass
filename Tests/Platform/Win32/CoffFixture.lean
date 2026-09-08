@@ -5,6 +5,7 @@ import Grass.Platform.Win32.CoffXdata
 import Grass.Platform.Win32.CoffAux
 import Grass.Platform.Win32.CoffWellFormed
 import Grass.Platform.Win32.CoffText
+import Grass.Platform.Win32.CoffProgram
 
 /-!
 # COFF records, against a real object file
@@ -870,6 +871,138 @@ change to either has to be a change to both. -/
 theorem derived_site_is_first_measured :
     movMemImmInsn.map (fun i => siteForInsn 0 i 13)
       = immediateSites.head? := by
+  decide
+
+/-! ## A program assembled end to end
+
+`alpha` and `beta` from the two-function object, handed to `objectFor` as
+units. Every index and offset in the result is computed: nothing below states a
+number that was also written by hand somewhere else.
+-/
+
+/-- `alpha`: five bytes, one pushed register, no displacement sites. -/
+def alphaUnit : FunctionUnit where
+  name := [0x61, 0x6c, 0x70, 0x68, 0x61]
+  code := [0x55, 0x33, 0xc0, 0x5d, 0xc3]
+  unwind := alphaUnwind
+  sites := []
+
+/-- `beta`: seven bytes, two pushed registers. -/
+def betaUnit : FunctionUnit where
+  name := [0x62, 0x65, 0x74, 0x61]
+  code := [0x55, 0x53, 0x33, 0xc0, 0x5b, 0x5d, 0xc3]
+  unwind := betaUnwind
+  sites := []
+
+/-- The assembled object. -/
+def demoProgram : Option Object := objectFor [alphaUnit, betaUnit]
+
+/-- **It assembles.** -/
+theorem demoProgram_builds : demoProgram.isSome := by decide
+
+/--
+**Three sections and eight symbol records.**
+
+Six records of section symbols -- three symbols each with an auxiliary
+record -- then one per function. That six is what every function's symbol index
+is measured from. -/
+theorem demoProgram_shape :
+    demoProgram.map (fun o => (o.sections.length, symbolRecordCount o.symbols))
+      = some (3, 8) := by
+  decide
+
+/--
+**`.text` and `.xdata` are the bytes the two functions contribute.**
+
+Twelve bytes of code, five then seven; sixteen of unwind data, eight and eight.
+Both match the sections `ml64` produced for the same two functions. -/
+theorem demoProgram_section_bytes :
+    demoProgram.map (fun o => (o.sections.map Section.data))
+      = some [ [0x55, 0x33, 0xc0, 0x5d, 0xc3,
+                0x55, 0x53, 0x33, 0xc0, 0x5b, 0x5d, 0xc3]
+             , pdataBytes (programPdataEntries [alphaUnit, betaUnit])
+             , [0x01, 0x01, 0x01, 0x00, 0x01, 0x50, 0x00, 0x00,
+                0x01, 0x02, 0x02, 0x00, 0x02, 0x30, 0x01, 0x50] ] := by
+  decide
+
+/--
+**The `.pdata` entries carry the indices and offsets the layout implies.**
+
+`alpha` is symbol record 6 and `beta` is 7 -- the first two after the six
+section records. Both name record 4, the `.xdata` section symbol, and are told
+apart by the unwind offset: zero and eight, which is where `xdataOffsets` put
+their blocks.
+
+This is the arithmetic that has no diagnostic if it is wrong. An index one
+short resolves against a section symbol and the object still links. -/
+theorem demoProgram_pdata_entries :
+    programPdataEntries [alphaUnit, betaUnit] =
+      [ { functionSymbol := 6, unwindSymbol := 4
+          functionLength := 5, unwindOffset := 0 }
+      , { functionSymbol := 7, unwindSymbol := 4
+          functionLength := 7, unwindOffset := 8 } ] := by
+  decide
+
+/--
+The assembled object itself.
+
+`getD` with an empty object as the default, which `demoProgram_builds` shows is
+never taken -- `objectFor` returned `some`. Naming it concretely is what lets
+the well-formedness check below be evaluated rather than argued. -/
+def demoProgramObject : Object :=
+  demoProgram.getD ⟨.amd64, [], [], []⟩
+
+/--
+**And the whole thing is internally consistent.**
+
+Every relocation names a record the table has, every symbol names a section
+that exists, and every auxiliary record describes a section of this object --
+on a file whose every number was computed rather than written down. -/
+theorem demoProgramObject_wellFormed : Object.WellFormed demoProgramObject := by
+  refine ⟨?_, ?_, ?_⟩ <;> decide
+
+/-! ## The two things the measured program could not test
+
+Mutation found both, and both are the same trap: a fixture in which every unit
+carries the same value cannot exercise the term that reads it.
+
+`alpha` and `beta` both have eight-byte unwind blocks, which are already
+four-aligned, so `xdataBlock` is the identity on them and dropping the padding
+from `unwindOffsets` changed nothing. And neither has displacement sites, so
+`codeOffsets` fed only the symbol `value` fields -- which nothing checked.
+-/
+
+/--
+**Each function symbol records where its code starts.**
+
+`alpha` at zero and `beta` at five. This is the only consumer of `codeOffsets`
+in a program with no displacement sites, and without it a mutation making code
+offsets never advance passes every other theorem here.
+
+The value matters to a debugger and to any relocation naming the function: a
+symbol whose value is wrong points into the middle of another function. -/
+theorem demoProgram_symbol_values :
+    (demoProgramObject.symbols.map (fun e => e.symbol.value))
+      = [0, 0, 0, 0, 5] := by
+  decide
+
+/--
+**An unwind block that is not four-aligned pushes the next one further.**
+
+`alpha` and `beta` produce eight-byte blocks, so the measured program cannot
+show this. A six-byte block pads to eight, which is where the second block
+starts -- and an `unwindOffsets` that used the unpadded length would say six,
+aiming the second function's `UnwindInfoAddress` two bytes into the first
+block's code array.
+
+Synthetic, and labelled as such: no `UNWIND_INFO` this profile emits has an odd
+slot count, so the case is reachable only through a caller supplying bytes from
+elsewhere -- which `CoffXdata.lean` pads for exactly this reason. -/
+theorem unaligned_unwind_shifts_the_next :
+    unwindOffsets 0
+        [ { name := [], code := [], unwind := List.replicate 6 0, sites := [] }
+        , { name := [], code := [], unwind := List.replicate 8 0, sites := [] } ]
+      = [0, 8] := by
   decide
 
 end Grass.Tests.Platform.Win32.Coff

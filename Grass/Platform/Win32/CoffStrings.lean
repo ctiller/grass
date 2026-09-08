@@ -102,6 +102,12 @@ def stringOffsets (start : Nat) : List ByteSeq → List Nat
   | [] => []
   | n :: rest => start :: stringOffsets (start + n.length + 1) rest
 
+/-- **There is one string offset per name.** -/
+@[simp] theorem length_stringOffsets (start : Nat) (names : List ByteSeq) :
+    (stringOffsets start names).length = names.length := by
+  induction names generalizing start with
+  | nil => rfl
+  | cons n rest ih => simp [stringOffsets, ih]
 /-- **Every offset is at least four, so none of them is offset zero.**
 
 Offset zero addresses the size field. A symbol whose name field is four zero

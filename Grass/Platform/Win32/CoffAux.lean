@@ -200,6 +200,51 @@ def symbolTableBytes (entries : List SymbolEntry) : ByteSeq :=
 def symbolRecordCount (entries : List SymbolEntry) : Nat :=
   (entries.map SymbolEntry.count).sum
 
+/-- **Record counts add over a concatenation of entries.** -/
+theorem symbolRecordCount_append (a b : List SymbolEntry) :
+    symbolRecordCount (a ++ b) = symbolRecordCount a + symbolRecordCount b := by
+  induction a with
+  | nil => simp [symbolRecordCount]
+  | cons e rest ih => simp [symbolRecordCount] at *; omega
+
+/--
+**Entries with no auxiliary record contribute one each.**
+
+The assumption every symbol-index calculation makes: a function symbol advances
+the table by one. A symbol that acquired an auxiliary record would break every
+index after it, so this is stated rather than relied on. -/
+theorem symbolRecordCount_of_no_aux (l : List SymbolEntry)
+    (h : ∀ e ∈ l, e.aux = none) : symbolRecordCount l = l.length := by
+  induction l with
+  | nil => rfl
+  | cons e rest ih =>
+      have he : e.aux = none := h e List.mem_cons_self
+      have hrest : ∀ x ∈ rest, x.aux = none :=
+        fun x hx => h x (List.mem_cons_of_mem _ hx)
+      simp only [symbolRecordCount, List.map_cons, List.sum_cons,
+                 SymbolEntry.count, he, List.length_cons]
+      have := ih hrest
+      simp only [symbolRecordCount] at this
+      omega
+
+/--
+**Entries built by a function that never attaches an auxiliary record
+contribute one each.**
+
+The form the object assembler needs: it maps functions to symbols, and every
+one of those carries no auxiliary record, so the table grows by exactly the
+number of functions. -/
+theorem symbolRecordCount_map_none {α : Type} (l : List α) (f : α → SymbolEntry)
+    (h : ∀ x, (f x).aux = none) :
+    symbolRecordCount (l.map f) = l.length := by
+  rw [symbolRecordCount_of_no_aux]
+  · simp
+  · intro e he
+    simp only [List.mem_map] at he
+    obtain ⟨x, _, hx⟩ := he
+    subst hx
+    exact h x
+
 /--
 **The table is eighteen bytes per reported record.**
 

@@ -14,6 +14,7 @@ import Grass.Platform.Win32.CoffXdata
 import Grass.Platform.Win32.CoffAux
 import Grass.Platform.Win32.CoffWellFormed
 import Grass.Platform.Win32.CoffText
+import Grass.Platform.Win32.CoffProgram
 
 /-!
 # Ledger coverage gate
@@ -107,7 +108,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.CoffXdata,
    `Grass.Platform.Win32.CoffAux,
    `Grass.Platform.Win32.CoffWellFormed,
-   `Grass.Platform.Win32.CoffText]
+   `Grass.Platform.Win32.CoffText,
+   `Grass.Platform.Win32.CoffProgram]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -121,7 +123,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 140
+def owedBaseline : Nat := 143
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -143,7 +145,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 83
+def notBehaviourBaseline : Nat := 95
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -414,7 +416,25 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.Coff.dotText,
     -- Assembles a site from the two rows above plus a placement and a symbol;
     -- asserts nothing either of them does not.
-    `Grass.Platform.Win32.Coff.siteForInsn ]
+    `Grass.Platform.Win32.Coff.siteForInsn,
+    -- Assembling an object from functions. Every one of these is this
+    -- profile's layout rather than the format's: how many section symbols it
+    -- emits, therefore where the first function symbol lands, therefore what
+    -- index a `.pdata` entry carries. A different assembler makes different
+    -- choices and produces an equally valid object, which is precisely why
+    -- `Object.WellFormed` checks the result rather than the reasoning.
+    `Grass.Platform.Win32.Coff.sectionSymbolRecords,
+    `Grass.Platform.Win32.Coff.symbolIndexOf,
+    `Grass.Platform.Win32.Coff.xdataSymbolIndex,
+    `Grass.Platform.Win32.Coff.sectionSymbolFor,
+    `Grass.Platform.Win32.Coff.codeOffsets,
+    `Grass.Platform.Win32.Coff.unwindOffsets,
+    `Grass.Platform.Win32.Coff.nameOffsets,
+    `Grass.Platform.Win32.Coff.programCode,
+    `Grass.Platform.Win32.Coff.programUnwind,
+    `Grass.Platform.Win32.Coff.programSites,
+    `Grass.Platform.Win32.Coff.programPdataEntries,
+    `Grass.Platform.Win32.Coff.objectFor ]
 
 /--
 Declarations that genuinely model external behaviour and have no citation yet.
@@ -675,7 +695,15 @@ def owed : List Name :=
     -- recover either from the byte string, which does not say where one field
     -- ends and the next begins.
     `Grass.ISA.X86.InsnEncoding.dispOffset,
-    `Grass.ISA.X86.InsnEncoding.dispTrailing ]
+    `Grass.ISA.X86.InsnEncoding.dispTrailing,
+    -- The three section names. These are not this profile's choice: a linker
+    -- gathers unwind data from sections called `.pdata` and `.xdata` and code
+    -- from `.text`, so an object using different names is one whose functions
+    -- have no discoverable unwind information -- which fails at the first
+    -- exception rather than at link time.
+    `Grass.Platform.Win32.Coff.textName,
+    `Grass.Platform.Win32.Coff.pdataSectionName,
+    `Grass.Platform.Win32.Coff.xdataSectionName ]
 
 /-- The declarations this gate holds the ledger responsible for. -/
 def modeledDeclarations : MetaM (Array Name) := do
