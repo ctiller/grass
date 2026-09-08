@@ -81,13 +81,12 @@ segment of each observation to be *retained* through "later weaving, flattening,
 serialization, machine simulation, and projection". Carrying it as an index of
 `Reachable` is what keeps it, and `Reachable.observationCausality` reads it.
 
-What keeps it out of acceptance is what `ProcessAcceptance`'s clauses are stated
-over: `Grass/Process/Acceptance.lean` never mentions `Segmented`, so no clause of
-it takes one, and a field of the run state would be no more readable than an
-index is. Two earlier versions of this paragraph gave reasons that do not entail
-it — the index-versus-field distinction, and then the absence of
-`ProcessRunState` from that file, which is true and about the wrong type, since
-the segmentation is an index of `Reachable` rather than a field of the run state.
+Two earlier versions of the paragraph above gave reasons that do not entail it —
+the index-versus-field distinction, and then the absence of `ProcessRunState`
+from `Grass/Process/Acceptance.lean`, which is true and about the wrong type,
+since the segmentation is an index of `Reachable` rather than a field of the run
+state. What does entail it is what that paragraph now says: no clause of
+`ProcessAcceptance` takes a `Segmented`.
 §10.137.
 
 **What index-versus-field does decide** is whether the segmentation is part of

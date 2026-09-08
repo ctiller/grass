@@ -103,9 +103,10 @@ region rather than all shared state, one session's escrow rather than the whole
 ledger, one session's cursor rather than every session's. (An earlier version of
 this paragraph said seven and three. It predates the trace split; it does *not*
 predate the `session` fragment, which arrived in the same commit as the paragraph
-— a claims audit checked, after an earlier correction guessed.) `NetworkFragment` closes the list of *names*, and adding a
-constructor is a deliberate edit to this inductive rather than something a mixin
-author can do from outside.
+— a claims audit checked, after an earlier correction guessed.)
+`NetworkFragment` closes the list of *names*, and adding a constructor is a
+deliberate edit to this inductive rather than something a mixin author can do
+from outside.
 
 **What it does not close is what an assertion may depend on**, and an earlier
 version of this paragraph said it did. Local adversarial review refuted that by

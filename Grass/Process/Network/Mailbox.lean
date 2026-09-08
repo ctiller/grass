@@ -49,7 +49,7 @@ one transition, in a serial call or in the machine realization, and the
 finite-internal-work clause is discharged there". `MeetsProcessProgress` does not
 supply that bound: its clauses are about a successor transition existing and
 about a rank over `(State, Bag Demand)` decreasing across transitions, neither of
-which costs a single one.
+which bounds what handling one costs.
 
 What this layer does instead is record the cost exactly and leave it unbounded:
 `SelectiveReceive.scanWork` with `scanWorkExact` pins it to the skipped prefix's

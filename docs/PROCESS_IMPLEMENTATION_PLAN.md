@@ -5111,6 +5111,44 @@ hundred lines down, or in another file. Grepping the claim's wording finds the
 first kind. It does not find this kind, because the premise is phrased as a
 different claim.
 
+**Third round, and the paragraph above was describing the wrong failure.** The
+sentence "Grepping the claim's wording finds the first kind" is true. What it
+implies — that the first kind had therefore been found — was not. A cold
+reviewer ran `grep -rn "product over" Grass/ Tests/ docs/`, got exactly one hit
+in the whole tree, and it was a site I had reported sweeping: `fixtureAgreement`'s
+docstring, still saying the mixed world is writable "because the world is a
+product over the fragments, which is the point of the law". That is the refuted
+claim verbatim, and it is the twin of the sentence in
+`Grass/Process/Network/World.lean` that the same correction did fix. Two more
+beside it: `FixtureWorld`'s docstring pointing at a module note for "why this
+shape is forced rather than chosen", which the note no longer says, and the file
+header's bullet "`agreesGlue` makes the bound mean something", which
+`gluing_does_not_bound_the_footprint` refutes three hundred and sixty lines
+below it in the same file.
+
+All three were in the file the correction edited. None of them was found,
+because I searched for `agreesGlue` and for the declarations, and the sentences
+that say the refuted thing do not always name it.
+
+So the rule that comes out of the third round is not another sentence about
+grepping. It is that the sweep has to be a script that outputs every hit for
+reading, rather than a search I remember to run and report having run. The
+phrasings go in the script when the claim is refuted, not afterwards from
+memory; the script is what the next round is answerable to.
+
+**And the fixtures were carrying only the easy half.** `blindAgreement` shows the
+law does not constrain the world's shape — one line, `Agrees := True`. The
+replacement claim, stated at four sites, is that what a badly shaped world costs
+is a *componentwise* agreement rather than the law. Nothing checked it, in a file
+whose stated purpose is checking claims about what its types reject. It is now
+`tangled_componentwise_has_no_glue`: gluing `tangledComponentwise` at
+`{.obligations}` would need a world taking `left` from one argument and `right`
+from the other, and `TangledWorld.tied` forbids exactly that. `tangledAgreement`
+stays, relabelled as the instantiation it is rather than the consumer it claimed
+to be — `blindAgreement` is polymorphic, so it carries nothing the elaborator had
+not already checked. `blindAgreement` is now universe-polymorphic too, which the
+prose around it had been assuming.
+
 ## 11. The authoring facade
 
 `docs/DECISIONS.md` decision 134, ruling `c-spike:4`'s third question and the
