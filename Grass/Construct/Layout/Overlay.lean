@@ -23,6 +23,8 @@ deriving Repr, DecidableEq
 
 namespace OverlayLayout
 
+universe u₁ u₂
+
 variable {profile : LayoutProfile}
 
 /-- Overlay member names in declaration order. -/
@@ -150,6 +152,79 @@ theorem memberWellFormed_of_wellFormed (layout : OverlayLayout profile)
     (h : layout.WellFormed) (member : FieldSpec profile)
     (memberOf : member ∈ layout.members) : layout.MemberWellFormed member :=
   layout.membersWellFormed_of_wellFormed h member memberOf
+
+/-- Every declared member of a valid overlay has positive extent. -/
+theorem memberSizePositive_of_wellFormed (layout : OverlayLayout profile)
+    (h : layout.WellFormed) (member : FieldSpec profile)
+    (memberOf : member ∈ layout.members) : 0 < member.repr.size :=
+  (layout.memberWellFormed_of_wellFormed h member memberOf).1
+
+/-- Every declared member of a valid overlay has a valid representation. -/
+theorem memberReprWellFormed_of_wellFormed (layout : OverlayLayout profile)
+    (h : layout.WellFormed) (member : FieldSpec profile)
+    (memberOf : member ∈ layout.members) : member.repr.WellFormed :=
+  (layout.memberWellFormed_of_wellFormed h member memberOf).2.1
+
+/-- Every declared overlay-member range fits within aggregate storage. -/
+theorem memberRangeWithinStorage_of_wellFormed
+    (layout : OverlayLayout profile) (h : layout.WellFormed)
+    (member : FieldSpec profile) (memberOf : member ∈ layout.members) :
+    (memberRange member).WithinBound layout.size :=
+  (layout.memberWellFormed_of_wellFormed h member memberOf).2.2.1
+
+private theorem eq_of_mem_of_mem_of_map_nodup
+    {α : Type u₁} {β : Type u₂} (key : α → β)
+    {items : List α} {left right : α}
+    (unique : (items.map key).Nodup)
+    (leftMem : left ∈ items) (rightMem : right ∈ items)
+    (sameKey : key left = key right) : left = right := by
+  induction items with
+  | nil => simp at leftMem
+  | cons head tail ih =>
+      rw [List.map_cons, List.nodup_cons] at unique
+      rw [List.mem_cons] at leftMem rightMem
+      rcases leftMem with rfl | leftMem
+      · rcases rightMem with rfl | rightMem
+        · rfl
+        · exfalso
+          apply unique.1
+          rw [sameKey]
+          exact List.mem_map.mpr ⟨right, rightMem, rfl⟩
+      · rcases rightMem with rfl | rightMem
+        · exfalso
+          apply unique.1
+          rw [← sameKey]
+          exact List.mem_map.mpr ⟨left, leftMem, rfl⟩
+        · exact ih unique.2 leftMem rightMem
+
+/-- Two declared members of a valid overlay with the same name are the same
+authored member representation. -/
+theorem member_eq_of_mem_of_mem_of_name_eq
+    (layout : OverlayLayout profile) (left right : FieldSpec profile)
+    (closed : layout.WellFormed)
+    (leftMem : left ∈ layout.members) (rightMem : right ∈ layout.members)
+    (sameName : left.name = right.name) : left = right := by
+  exact eq_of_mem_of_mem_of_map_nodup FieldSpec.name
+    (by simpa [memberNames] using layout.memberNamesNodup_of_wellFormed closed)
+    leftMem rightMem sameName
+
+/-- Under `OverlayLayout.WellFormed`, nominal lookup returns the exact authored
+member already held by the caller. -/
+theorem lookup?_eq_some_of_mem
+    (layout : OverlayLayout profile) (name : Name)
+    (member : FieldSpec profile) (closed : layout.WellFormed)
+    (memberOf : member ∈ layout.members) (hasName : member.name = name) :
+    layout.lookup? name = some member := by
+  have nameMember : name ∈ layout.memberNames := by
+    simp [memberNames]
+    exact ⟨member, memberOf, hasName⟩
+  obtain ⟨found, foundLookup⟩ := layout.memberForName name nameMember
+  have foundMem := mem_of_lookup? foundLookup
+  have foundName := name_of_lookup? foundLookup
+  have foundEq : found = member :=
+    layout.member_eq_of_mem_of_mem_of_name_eq found member closed
+      foundMem memberOf (foundName.trans hasName.symm)
+  simpa [foundEq] using foundLookup
 
 end OverlayLayout
 

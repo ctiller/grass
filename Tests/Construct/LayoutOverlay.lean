@@ -30,6 +30,21 @@ example : valid.memberNames.Nodup := valid.memberNamesNodup_of_wellFormed (by na
 example : valid.MembersWellFormed := valid.membersWellFormed_of_wellFormed (by native_decide)
 example : valid.MemberWellFormed payload :=
   valid.memberWellFormed_of_wellFormed (by native_decide) payload (by native_decide)
+example : 0 < payload.repr.size :=
+  valid.memberSizePositive_of_wellFormed (by native_decide) payload (by native_decide)
+example : payload.repr.WellFormed :=
+  valid.memberReprWellFormed_of_wellFormed (by native_decide) payload (by native_decide)
+example : (OverlayLayout.memberRange payload).WithinBound valid.size :=
+  valid.memberRangeWithinStorage_of_wellFormed
+    (by native_decide) payload (by native_decide)
+example : valid.lookup? payload.name = some payload :=
+  valid.lookup?_eq_some_of_mem payload.name payload
+    (by native_decide) (by native_decide) rfl
+example (left right : FieldSpec profile)
+    (leftMem : left ∈ valid.members) (rightMem : right ∈ valid.members)
+    (sameName : left.name = right.name) : left = right :=
+  valid.member_eq_of_mem_of_mem_of_name_eq left right
+    (by native_decide) leftMem rightMem sameName
 example : Grass.Memory.IsAligned valid.size valid.alignment :=
   valid.sizeAligned_of_wellFormed (by native_decide)
 
