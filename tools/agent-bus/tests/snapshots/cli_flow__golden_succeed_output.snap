@@ -17,6 +17,7 @@ expression: out
   },
   "registry_rejected": [],
   "resumed_events": [],
+  "resumed_held": [],
   "resumed_rejected": [],
   "roster_epoch": "[hash]",
   "snapshot_receipt": {
