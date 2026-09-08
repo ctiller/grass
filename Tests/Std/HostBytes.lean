@@ -98,6 +98,13 @@ stopped, with `simp` reporting no progress on a statement true by definition.
 Found by writing the goal a consumer writes rather than by reading the module,
 which is the method `docs/STDLIB_IMPLEMENTATION_PLAN.md` §3.13 argues for and the
 same one that found `Vec.get?_push`.
+
+**Both laws were measured load-bearing rather than assumed to be.** Deleting
+`@[simp]` from either one and rebuilding this module breaks it; the two were
+checked separately, since a fixture that only exercises one of a pair is the
+ordinary way a base case stays half-missing. §3.13 calls that the crudest form of
+mutation testing, and it is the form that applies to a law whose statement is
+`rfl` and cannot be perturbed without ceasing to typecheck.
 -/
 
 example : Vec.toHostBytes (Vec.empty : Vec Byte) = _root_.ByteArray.empty := by simp
