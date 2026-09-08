@@ -182,6 +182,63 @@ theorem handle_distinguishable {v : BitVec 64} (h : (handle v).WellFormed) :
   ⟨h.1, h.2⟩
 
 /--
+Which results `GetStdHandle` may return for a given identifier.
+
+The permitted-result relation this module lacked for two thirds of its surface.
+It is deliberately weak, and the weakness is the claim: **nothing documented
+makes the permitted results depend on which standard handle was asked for.**
+Any of the three identifiers may yield a usable handle, may yield `NULL` when
+the process has no such device, and may yield `INVALID_HANDLE_VALUE` on error.
+
+So this says only that the result is well formed -- which is not nothing. It
+excludes `handle 0` and `handle INVALID_HANDLE_VALUE`, the two values a caller
+would misclassify with the `test rax, rax` and `cmp rax, -1` that
+`Spikes/1_Hello_World/Program.lean` actually performs.
+
+Stating a weak relation is better than stating none, but only because the
+weakness is asserted rather than left as an absence. An earlier version of this
+module had no relation here at all, and a reviewer noted that the too-narrow
+and too-wide analysis done for `WriteFile.Allowed` was simply missing for the
+other two calls. This makes the missing half a claim that can be attacked: if
+the permitted set *is* id-dependent in some documented way, `permitted_id_
+independent` below is false and should be refuted rather than quietly widened.
+-/
+def Permitted (_ : StdHandleId) (r : GetStdHandleResult) : Prop := r.WellFormed
+
+instance (i : StdHandleId) (r : GetStdHandleResult) : Decidable (Permitted i r) :=
+  inferInstanceAs (Decidable r.WellFormed)
+
+/--
+**The permitted set does not depend on the identifier.**
+
+The content of `Permitted`, stated so it can be contradicted. Any documented
+behaviour that made one identifier's permitted results differ from another's
+would refute this. -/
+theorem permitted_id_independent (a b : StdHandleId)
+    (r : GetStdHandleResult) : Permitted a r ↔ Permitted b r := Iff.rfl
+
+/--
+**A colliding handle is not permitted, for any identifier.**
+
+The half of `Permitted` that is not vacuous: the two values whose return value
+a caller cannot tell from a sentinel are excluded. Without this the relation
+would accept every result and say nothing. -/
+theorem colliding_handle_not_permitted (i : StdHandleId) :
+    ¬ Permitted i (.handle 0)
+    ∧ ¬ Permitted i (.handle GetStdHandleResult.invalidHandleValue) :=
+  ⟨fun h => h.1 rfl, fun h => h.2 rfl⟩
+
+/--
+**Every sentinel is permitted, for any identifier.**
+
+The other half, and the reason `Permitted` is weak rather than wrong: a
+process legitimately has no console, and `GetStdHandle` legitimately fails. A
+relation that refused either would be too narrow, which is the error the
+`WriteFile` analysis was careful to avoid in the other direction. -/
+theorem sentinels_permitted (i : StdHandleId) :
+    Permitted i .null ∧ Permitted i .invalid := ⟨trivial, trivial⟩
+
+/--
 The three results `handle 0` collides with, kept as theorems.
 
 `WellFormed` was a predicate nobody had to satisfy: `handle 0` is freely
@@ -242,13 +299,21 @@ end UsableHandle
 ## What this module does not model
 
 `docs/PLATFORM_ABI.md` §2 asks each API operation to declare which responses are
-permitted, and only `WriteFile` has one here: `Allowed`, with `writeAdequate`
-and `excess_not_allowed` around it. A reviewer pointed out that `GetStdHandle`
-and process exit have no such relation at all -- nothing in this module says
-which results are permitted for which `StdHandleId`, so the too-narrow and
-too-wide analysis performed for `WriteFile` is simply absent for the other two
-thirds of the surface. That is an open obligation, not a claim that any result
-is permitted.
+permitted, and `WriteFile` was long the only call here with one: `Allowed`,
+with `writeAdequate` and `excess_not_allowed` around it. A reviewer pointed out
+that `GetStdHandle` and process exit had no such relation at all, so the
+too-narrow and too-wide analysis performed for `WriteFile` was simply absent
+for the other two thirds of the surface.
+
+`GetStdHandle` now has one. `Permitted` is deliberately weak -- it says the
+result is well formed and nothing more -- but its weakness is asserted rather
+than left implicit: `permitted_id_independent` claims that nothing documented
+makes the permitted set depend on which identifier was asked for, which is a
+statement that can be refuted. `colliding_handle_not_permitted` is the half
+with content and `sentinels_permitted` is the half that keeps it from being too
+narrow, since a process legitimately has no console.
+
+Process exit still has no relation, and that remains the open obligation.
 
 `StdHandleId.value` used to be pinned only by `value_injective`, which says the
 three identifiers are mutually distinct and nothing about which is which. A

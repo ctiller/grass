@@ -145,7 +145,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 95
+def notBehaviourBaseline : Nat := 96
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -322,6 +322,13 @@ def notBehaviour : List Name :=
     `Grass.ABI.Win64.spike1Prologue, `Grass.ABI.Win64.spike1Layout,
     `Grass.ABI.Win64.spike1UnwindInfo, `Grass.ABI.Win64.framePointerLayout,
     `Grass.Platform.Win32.GetStdHandleResult.WellFormed,
+    -- Which results GetStdHandle may return, which is definitionally
+    -- `WellFormed` above and carries no fact that row does not. Its content is
+    -- in the theorems beside it rather than in the definition: that the
+    -- permitted set does not depend on which identifier was asked for, which
+    -- is a claim about the API and can be refuted, and that both sentinels are
+    -- permitted while a handle colliding with either is not.
+    `Grass.Platform.Win32.GetStdHandleResult.Permitted,
     `Grass.Platform.Win32.UsableHandle.mk?,
     `Grass.Platform.Win32.ExcessWriteCount,
  -- Enumerations of Grass's own types. `Gpr.all` is a list of Grass
