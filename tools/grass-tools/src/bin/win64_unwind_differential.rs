@@ -150,7 +150,12 @@ mod sha256 {
         }
         msg.extend_from_slice(&bit_len.to_be_bytes());
 
-        for chunk in msg.chunks_exact(64) {
+        // `as_chunks` rather than `chunks_exact`: the block size is a
+        // constant, so this yields `&[u8; 64]` and the indexing below needs no
+        // bounds check. `msg` was padded to a multiple of 64 just above, so the
+        // remainder is empty by construction.
+        let (blocks, _remainder) = msg.as_chunks::<64>();
+        for chunk in blocks {
             let mut w = [0u32; 64];
             for (i, word) in w.iter_mut().enumerate().take(16) {
                 let b = &chunk[i * 4..i * 4 + 4];
