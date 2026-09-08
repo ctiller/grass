@@ -43,13 +43,14 @@ two would be reported by `--inert` as suppressing nothing, so they are named her
 instead. This sentence said "every", which counted the constructors that leave a trace
 and not the two that do not.
 
-## Reconciling two sketches
+## One law bundle at both boundaries
 
-The corpus displays this idea twice with different shapes.
-`docs/SEMANTICS.md` shows `OrderedPartialCommutativeResourceLaws combine le`;
-`docs/PROCESS.md` shows `OrderedCommutativeResourceAlgebra (Value axis)
-(combine axis) (zero axis) (le axis)`, with a zero and a different name. They are
-sketches of one thing, and this module unifies them rather than shipping both.
+`docs/SEMANTICS.md` and `docs/PROCESS.md` now select this same five-argument
+`OrderedPartialCommutativeResourceLaws` bundle. Semantics uses it to state a
+resource model independently of a weave; Process adds network holdings and
+requires `compatible` before applying the parallel-composition equation. This
+module owns the checked declaration. The documents show boundary projections of
+that declaration rather than competing algebra sketches.
 
 ## Two compositions, not one
 

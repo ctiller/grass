@@ -2355,17 +2355,20 @@ structure ResourceMetric (plan : ProcessPlan registry boundary) where
   Axis : Type
   Value : Axis -> Type
   zero : forall axis, Value axis
+  compatible : forall axis, Value axis -> Value axis -> Prop
   combine : forall axis, Value axis -> Value axis -> Value axis
+  alternative : forall axis, Value axis -> Value axis -> Value axis
   le : forall axis, Value axis -> Value axis -> Prop
   valuation : forall axis, NetworkResourceState plan -> Value axis
   laws : forall axis,
-    OrderedCommutativeResourceAlgebra
-      (Value axis) (combine axis) (zero axis) (le axis)
+    OrderedPartialCommutativeResourceLaws
+      (compatible axis) (combine axis) (alternative axis) (zero axis) (le axis)
   empty : forall axis, valuation axis EmptyNetworkResourceState = zero axis
   monotone : forall axis left right,
     OwnedSubstate left right -> le axis (valuation axis left) (valuation axis right)
   disjointUnion : forall axis left right,
     OwnedDisjoint left right ->
+    compatible axis (valuation axis left) (valuation axis right) ->
     valuation axis (left ∪ᵣ right) =
       combine axis (valuation axis left) (valuation axis right)
   attribution : SharedAttributionValuationLaw valuation
