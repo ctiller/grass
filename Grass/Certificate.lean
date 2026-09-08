@@ -178,6 +178,39 @@ def mapInfinite (refinement : BehaviorRefinement concrete abstract)
   step index := refinement.step (execution.step index)
   consistent := refinement.infiniteConsistency execution.consistent
 
+/-- `BehaviorRefinement.mapInfinite_prefixEvents` states that mapping an
+infinite continuation preserves every finite observable event prefix exactly. -/
+@[simp]
+theorem mapInfinite_prefixEvents
+    (refinement : BehaviorRefinement concrete abstract)
+    {state : concrete.system.State} {graph : concrete.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    (execution : concrete.system.InfiniteContinuation state graph priorEvents)
+    (length : Nat) :
+    (refinement.mapInfinite execution).prefixEvents length =
+      execution.prefixEvents length := by
+  induction length with
+  | zero => rfl
+  | succ length inductionHypothesis =>
+      rw [RelationalSystem.InfiniteContinuation.prefixEvents,
+        RelationalSystem.InfiniteContinuation.prefixEvents,
+        inductionHypothesis]
+      rfl
+
+/-- Mapping a finite restriction of an infinite continuation yields an exact
+abstract `Steps` witness at the corresponding mapped frontier. -/
+theorem mapInfinite_prefixSteps
+    (refinement : BehaviorRefinement concrete abstract)
+    {state : concrete.system.State} {graph : concrete.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    (execution : concrete.system.InfiniteContinuation state graph priorEvents)
+    (length : Nat) :
+    abstract.system.Steps (refinement.mapState state)
+      (refinement.mapGraph graph) (execution.prefixEvents length)
+      (refinement.mapState (execution.stateAt length))
+      (refinement.mapGraph (execution.graphAt length)) :=
+  refinement.mapSteps (execution.prefixSteps length)
+
 /-- Reflexive refinement leaves every infinite continuation unchanged. -/
 theorem mapInfinite_refl (behavior : ProgramBehavior spec)
     {state : behavior.system.State} {graph : behavior.system.Graph}
