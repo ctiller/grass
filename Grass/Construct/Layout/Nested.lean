@@ -48,7 +48,8 @@ theorem contained (base parentSize : Nat) (range : ByteRange)
   · simp [translateRange, ByteRange.stop] at h ⊢
     omega
 
-/-- Translation by a common base preserves containment exactly. -/
+/-- `translateRange.contains` proves that translation by a common base
+preserves containment exactly. -/
 theorem contains (base : Nat) {outer inner : ByteRange}
     (h : outer.Contains inner) :
     (translateRange base outer).Contains (translateRange base inner) := by
@@ -56,7 +57,8 @@ theorem contains (base : Nat) {outer inner : ByteRange}
   · exact Nat.add_le_add_left h.1 base
   · simpa only [stop] using Nat.add_le_add_left h.2 base
 
-/-- Translation by a common base preserves separation of sibling ranges. -/
+/-- `translateRange.disjoint` proves that translation by a common base
+preserves separation of sibling ranges. -/
 theorem disjoint (base : Nat) {left right : ByteRange}
     (h : left.Disjoint right) :
     (translateRange base left).Disjoint (translateRange base right) := by
