@@ -86,6 +86,43 @@ def value : StdHandleId → BitVec 32
 theorem value_injective {a b : StdHandleId} (h : a.value = b.value) : a = b := by
   revert h; cases a <;> cases b <;> decide
 
+/--
+**Each identifier has the value the API documents, not merely a distinct one.**
+
+`value_injective` says the three are mutually distinct and nothing about which
+is which -- a reviewer showed that shifting all three consistently, input to
+-11 and output to -12 and error to -13, satisfies it and every other theorem in
+this file. That freedom is not harmless: `GetStdHandle` would then return the
+console's output handle for a request meant for input, and a program writing
+its results would read them back instead.
+
+So the three constants are stated individually. `STD_INPUT_HANDLE` is
+`(DWORD)-10`, `STD_OUTPUT_HANDLE` is `-11` and `STD_ERROR_HANDLE` is `-12`, and
+as unsigned thirty-two bit patterns those are `0xFFFFFFF6`, `0xFFFFFFF5` and
+`0xFFFFFFF4`. A shift now contradicts this rather than passing it.
+
+This closes the second of the two obligations this module's header recorded.
+The first -- narrowing `WriteResult.Allowed` to the statuses the API
+documents -- remains open. -/
+theorem value_pinned :
+    StdHandleId.input.value = 0xFFFFFFF6
+    ∧ StdHandleId.output.value = 0xFFFFFFF5
+    ∧ StdHandleId.error.value = 0xFFFFFFF4 := by
+  refine ⟨?_, ?_, ?_⟩ <;> decide
+
+/--
+**The values are consecutive descending, which is why a shift looked plausible.**
+
+Stated because it is the pattern that makes the three easy to mis-remember as a
+block: they differ by one, so any consistent renumbering preserves every
+relation between them. It is `value_pinned` and not this that rules a shift
+out; this records why the shift was a tempting mistake rather than an obvious
+one. -/
+theorem value_consecutive :
+    StdHandleId.input.value = StdHandleId.output.value + 1
+    ∧ StdHandleId.output.value = StdHandleId.error.value + 1 := by
+  refine ⟨?_, ?_⟩ <;> decide
+
 end StdHandleId
 
 /--
@@ -213,10 +250,14 @@ too-wide analysis performed for `WriteFile` is simply absent for the other two
 thirds of the surface. That is an open obligation, not a claim that any result
 is permitted.
 
-`StdHandleId.value` is likewise pinned only by `value_injective`, which says the
+`StdHandleId.value` used to be pinned only by `value_injective`, which says the
 three identifiers are mutually distinct and nothing about which is which. A
 consistent shift of all three -- input to -11, output to -12, error to -13 --
-satisfies every theorem here and every gate in the tree; the reviewer checked.
+satisfied every theorem here and every gate in the tree; the reviewer checked.
+`value_pinned` closes that: each constant is now stated individually, so a
+shift is contradicted rather than tolerated. It was not a harmless freedom --
+`GetStdHandle` would have returned the output handle for an input request, and
+a program writing its results would read them back.
 The constants are right, and the reason they are right is that they were read
 off the SDK, not that anything mechanical would notice if they were not.
 
