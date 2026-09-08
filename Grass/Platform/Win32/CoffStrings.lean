@@ -27,7 +27,7 @@ zero addresses the size field itself and can never be a name -- which is
 precisely why `SymbolName.short?` refuses a field of four zero bytes: such a
 field is read as a long-form reference to offset zero, and offset zero is not a
 string. The two rules are the same rule seen from opposite ends, and
-`offsets_ge_four` is this end of it.
+`stringOffsets_ge_four` is this end of it.
 
 ## Not modelled
 
@@ -68,7 +68,7 @@ def stringEntriesSize (names : List ByteSeq) : Nat :=
 The table: a four-byte self-inclusive size, then the entries.
 
 The four is not a magic number appearing twice by coincidence -- it is the
-width of the size field, and it is why `offsets_ge_four` holds. -/
+width of the size field, and it is why `stringOffsets_ge_four` holds. -/
 def stringTableBytes (names : List ByteSeq) : ByteSeq :=
   le32 (BitVec.ofNat 32 (4 + stringEntriesSize names)) ++ stringEntries names
 

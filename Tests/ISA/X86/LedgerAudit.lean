@@ -23,7 +23,7 @@ import Grass.Platform.Win32.CoffProgram
 citation. The ledger's own `Covers` theorem did not check that, and could not:
 it compared a hand-written list against the ledger built from the same nine
 constants, so `Rules.Subject.modeled = commonProfileLedger.commonSubjects` was
-true by `rfl`. `commonProfileLedger_covers` was `∀ x ∈ L, x ∈ L`.
+true by `rfl`. commonProfileLedger_covers was `∀ x ∈ L, x ∈ L`.
 
 `Grass/ISA/X86/Ledger.lean` names the failure mode exactly — "deriving it would
 let the ledger define its own obligation and always discharge it" — and then

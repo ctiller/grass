@@ -111,7 +111,7 @@ deriving DecidableEq, Repr, Inhabited
 The sixteen-bit type code.
 
 The `REL32` family is consecutive: `REL32` is 4 and `REL32_n` is `4 + n`. That
-is not a coincidence worth exploiting silently -- `rel32Trailing_code` states
+is not a coincidence worth exploiting silently -- `ripRelative_code` states
 it, and `ripRelative?` is what keeps `trailing` in the range where it holds. -/
 def RelocationType.code : RelocationType → BitVec 16
   | .addr64 => 0x0001

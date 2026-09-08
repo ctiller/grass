@@ -580,7 +580,7 @@ theorem demoObject_symbolTable :
 **The long symbol name resolves to a real string.**
 
 The second symbol carries offset four, and offset four in this object's string
-table is `beta_long`. That is the whole promise of a `SymbolName.long`, checked
+table is the name "beta_long". That is the whole promise of a `SymbolName.long`, checked
 on a concrete file rather than as a quantified statement. -/
 theorem demoObject_long_name_resolves :
     ((stringTableBytes demoObject.strings).drop 4).take 9
