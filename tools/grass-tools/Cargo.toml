@@ -2,17 +2,18 @@
 name = "grass-tools"
 version = "0.1.0"
 edition = "2021"
-description = "Grass validation and audit tools: the docstring, trust, documentation-link, spike-source and source-liveness audits, and the Win64 unwind differential"
+description = "Grass validation and audit tools: the docstring, trust, documentation-link, spike-source, observation-coverage and source-liveness audits, and the Win64 unwind differential"
 
 # Each tool is a self-contained binary with no shared library. The scripts these
 # replace were self-contained too, and each is invoked independently by
 # `.github/workflows/library.yml`; keeping them separate means a change to one
 # cannot silently alter another's verdict.
 #
-# `docstring-audit` still needs Lean, because the set of names the build knows
-# has no reading outside the environment. It generates the meta-program it needs
-# into a temporary file, elaborates it with `lake env lean`, and does the judging
-# here. That is what retires the checked-in Lean file it used to shell out to.
+# `docstring-audit` and `coverage-audit` still need Lean, because what the build
+# knows -- the set of declaration names, and every theorem's statement -- has no
+# reading outside the environment. Each generates the meta-program it needs into
+# a temporary file, elaborates it with `lake env lean`, and does the judging
+# here. That is what retires the checked-in Lean files they replace.
 #
 # `trust-audit` needs Lean for the same reason, and for a second one: two thirds
 # of it is ten adversarial probes that each construct a way to smuggle an
@@ -29,25 +30,33 @@ description = "Grass validation and audit tools: the docstring, trust, documenta
 # own work before nominating it.
 #
 # This crate is where the remaining validation tools land as they are ported and
-# their equivalence against the originals is demonstrated. It carries six
+# their equivalence against the originals is demonstrated. It carries seven
 # binaries rather than a placeholder for nine, because a `[[bin]]` entry for a
 # tool nobody has verified is a claim this file cannot back.
 #
-# The four x86 tools that shell out to NASM, NDISASM, or a wrapper NASM
-# assembles are deliberately not among them and are not going to be ported
-# here. Neither assembler is installed on the development host, so no
-# differential against the Python original could be run, and a port nobody can
-# validate is worse than none. They are being deleted instead, and restoring
-# that verification in a supportable form is tracked against `c-x86`, which owns
-# the domain. That is a real loss and is recorded as one: the x86 differentials
+# The four x86 tools that shell out to NASM or NDISASM are deliberately not
+# among them. They have been deleted, and restoring that verification is
+# tracked against `c-x86`, which owns the domain.
+#
+# The reason is shape, not capability, and an earlier version of this comment
+# said otherwise. It claimed neither assembler could be run here. That was
+# wrong: NASM and NDISASM are installed, and the Python tools being replaced
+# named the directory themselves, because the Windows installer deliberately
+# leaves itself off PATH and `command -v` therefore misses it. The ports were in
+# fact validated -- 24 of 24 cases byte-identical against the real oracle,
+# including eight injected faults and four oracle-absent refusals.
+#
+# What is wrong with them is that a differential belongs beside the thing it
+# checks. These corpora are already Lean, under `Tests/ISA/X86/**`; the checker
+# was a separate program in a separate language wired in by a bespoke CI step,
+# so it ran by a different mechanism from every other test and belonged to
+# whoever owned the tooling tree rather than to x86. As Lean tests they run
+# under `lake build` with everything else.
+#
+# The loss in the meantime is real and is recorded as one: the x86 differentials
 # check something no Lean theorem can, because every theorem in
 # `Grass/ISA/X86/**` relates Grass's own definitions to each other, so an
 # encoder and decoder wrong in the same way satisfy all of them.
-#
-# `win64-unwind-differential` and `source-liveness` are the two whose oracles
-# could be run: `ml64.exe` ships with the MSVC build tools, and a probe against
-# an HTTP server is a probe whether the server is a publisher or a loopback
-# socket.
 
 [[bin]]
 name = "docstring-audit"
@@ -64,6 +73,10 @@ path = "src/bin/doc_links.rs"
 [[bin]]
 name = "spike-sources"
 path = "src/bin/spike_sources.rs"
+
+[[bin]]
+name = "coverage-audit"
+path = "src/bin/coverage_audit.rs"
 
 [[bin]]
 name = "source-liveness"

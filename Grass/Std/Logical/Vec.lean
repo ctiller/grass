@@ -1357,17 +1357,26 @@ would not edit it before the handoff landed, so merging the two declarations was
 and the merge did not happen.
 
 What actually stands in the way is the import direction, which no handoff
-changes.
-`Vec.lean` imports `Byte.lean`, so declaring `ByteArray` beside `Byte` would
-need `Byte.lean` to import `Vec` — a cycle. Breaking the cycle means this module
+changes. `Vec.lean` imports `Byte.lean`, so declaring `ByteArray` beside `Byte`
+would need `Byte.lean` to import `Vec` — a cycle. Breaking it means this module
 dropping its `Byte` import, which is defensible on its own terms, since `Vec α`
-is generic and uses nothing from `Byte` except to state this one abbreviation.
-The cost is that every module reaching `Byte` only through `Vec` then needs its
-own import, and those modules are not all this owner's: `g-build:83` already
-authorized the one in `Grass/Build/Cache/Key.lean` when this was last attempted.
+is generic and uses nothing from `Byte` except to state that one abbreviation.
 
-So it is a cross-owner change with no consumer asking for it, which is why it is
-an open item in `docs/STDLIB_IMPLEMENTATION_PLAN.md` rather than a pending edit.
+**The cost of doing so is measured rather than estimated, because two earlier
+estimates of it were both wrong.** Running the move — drop this module's import,
+declare `ByteArray` in `Byte.lean` above `ByteSeq`, rebuild until green — costs
+one `import Grass.Std.Logical.Byte` line in exactly five modules:
+`Grass/Std/Logical/HostBytes.lean`, `Tests/Std/Chunking.lean`,
+`Tests/Std/PartialWrite.lean`, `Tests/Std/VecVocabulary.lean`, and
+`Grass/Build/Cache/Key.lean`. Four are this owner's; the fifth is `g-build`'s and
+`g-build:83` has already authorized an edit there for exactly this. Nothing else
+in the tree notices, and the result builds green.
+
+So it is not expensive and it is not blocked. What it is, is unasked for: no
+consumer has said the split costs it anything, which puts it in §1's band 3 and
+leaves it an open item in `docs/STDLIB_IMPLEMENTATION_PLAN.md` rather than a
+pending edit. Recording the measurement means the decision, whenever someone
+wants to take it, does not need the experiment run a third time.
 -/
 
 /--
@@ -1384,10 +1393,13 @@ whether to pay it is the naming question this module's owner has put to the owne
 of `docs/STDLIB.md` rather than deciding unilaterally. `Tests/Std/VecVocabulary.lean`
 pins both halves: a `List Byte` is rejected here, and so is a host `_root_.ByteArray`.
 
-`ByteSeq` in `Grass/Std/Logical/Byte.lean` is the placeholder this retires. It is
-still the type the memory layer's fields use; migrating those uses is a change to
-`Grass/Memory/**`, which belongs to `c-mem`, so the two names coexist until that
-migration is agreed rather than one being deleted from under its consumers.
+`ByteSeq` in `Grass/Std/Logical/Byte.lean` is the placeholder this retires, and
+retiring it is not this module's to schedule. `ByteSeq` is written under
+`Grass/Memory`, `Grass/ISA`, `Grass/ABI` and `Grass/Op`, so the migration crosses
+several owners, and `c-mem:51` measured its own share at twenty-five errors
+concentrated in the proof layer rather than in the field declarations. The two
+names coexist until that is arranged, rather than either being deleted from under
+its consumers; `docs/STDLIB_IMPLEMENTATION_PLAN.md` §4.0 carries the costing.
 -/
 abbrev ByteArray := Vec Byte
 

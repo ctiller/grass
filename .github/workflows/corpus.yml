@@ -53,10 +53,14 @@ jobs:
       # This job is where cross-file references are kept honest, so the retired
       # tool paths belong here too.
       #
-      # Four entry points have been retired into `tools/grass-tools` binaries:
-      # the Python docstring auditor with the Lean declaration-name dump it
-      # shelled out to, the Python source-liveness probe, and the Python Win64
-      # unwind differential. The pattern below is the only place their old paths
+      # Nine entry points have been retired. Five became `tools/grass-tools`
+      # binaries: the Python docstring auditor with the Lean declaration-name
+      # dump it shelled out to, the Lean observation-coverage audit, the Python
+      # source-liveness probe, and the Python Win64 unwind differential. The
+      # other four -- the Python x86 assembler, disassembler and decoder
+      # differentials, and the machine probe -- were deleted on 2026-09-08 with
+      # no replacement yet, pending Lean tests under `Tests/ISA/X86/**` owned by
+      # c-x86 (c-agent:78). The pattern below is the only place their old paths
       # are written, because this comment is in the gate's own scope. A leftover
       # reference to any of them is worse than a broken link, which is why it
       # gets a gate rather than a note: docs/STDLIB_IMPLEMENTATION_PLAN.md
@@ -73,22 +77,18 @@ jobs:
       # otherwise. This comment is itself in the gate's scope, which is why it
       # quotes no dead path either.
       #
-      # `tools/grass-tools` is exempt: the port's source compares itself against
-      # the tools it replaces on purpose, and those sentences are about what the
-      # port changed rather than instructions to run anything.
+      # `tools/grass-tools` is exempt: the ports' sources compare themselves
+      # against the tools they replace on purpose, and those sentences are about
+      # what the ports changed rather than instructions to run anything.
       #
-      # The remaining entry points under `Tools/` have not been ported yet, so
-      # this gate names four paths rather than the directory. It grows as they
-      # land; a gate over the whole directory today would fail on the tools that
-      # are still there and still correct to reference. The four that are still
-      # Python all shell out to NASM or NDISASM, and no port of one lands until
-      # its output has been compared against the original's with that oracle
-      # actually present.
+      # This gate names nine paths rather than the directory because one entry
+      # point is still live there and still correct to reference: the Lean axiom
+      # audit. A gate over the whole directory would fail on it.
       - name: Check no reference to a retired tool entry point
         shell: bash
         run: |
-          if git grep -nEi 'Tools/(DocstringAudit\.py|DeclNames\.lean|source-liveness\.py|win64-unwind-differential\.py)' -- . ':(exclude)tools/grass-tools'; then
-            echo "::error::The lines above name a path under Tools/ that no longer exists. That entry point is now a binary in tools/grass-tools. Name the binary the sentence depends on, or write the sentence as history without the dead path."
+          if git grep -nEi 'Tools/(DocstringAudit\.py|DeclNames\.lean|CoverageAudit\.lean|source-liveness\.py|win64-unwind-differential\.py|x86-nasm-differential\.py|x86-ndisasm-differential\.py|x86-decode-differential\.py|x86-machine-probe\.py)' -- . ':(exclude)tools/grass-tools'; then
+            echo "::error::The lines above name a path under Tools/ that no longer exists. Five of these entry points are now binaries in tools/grass-tools; the four x86 ones were deleted with no replacement yet. Name the binary the sentence depends on, or write the sentence as history without the dead path -- and if the sentence claimed a check that no longer runs, say so rather than naming a script nobody can run."
             exit 1
           fi
 

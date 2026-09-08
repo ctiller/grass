@@ -20,17 +20,16 @@ name: Library build
 # a law computing its get?. That rule was stated in prose three times and
 # violated in the same commit that stated it each time - most recently by
 # Vec.sum, on the right-hand side of a law consumers apply. lake build says
-# nothing about it: an operation with no law compiles. Tools/CoverageAudit.lean
+# nothing about it: an operation with no law compiles. The coverage-audit tool
 # is what says something.
 #
-# The x86 differentials check something no Lean theorem can. Every theorem in
-# Grass/ISA/X86/** relates Grass's own definitions to each other, so an encoder
-# and decoder that are wrong in the same way satisfy all of them while emitting
-# instructions no processor executes -- a reviewer demonstrated exactly that
-# with a consistent RIP-relative/absolute swap that closed every proof
-# unchanged. NASM and NDISASM are the only things in the repository that can
-# notice. They ran by hand until now, which meant the claim they support could
-# rot with nothing to say so.
+# The x86 differentials that ran here were removed on 2026-09-08. They checked
+# something no Lean theorem can: every theorem in Grass/ISA/X86/** relates
+# Grass's own definitions to each other, so an encoder and decoder wrong in the
+# same way satisfy all of them, and NASM and NDISASM were the only things that
+# noticed. That coverage is deliberately absent, pending a replacement of a
+# different shape -- Lean tests under Tests/ISA/X86/**, owned by c-x86. See
+# c-agent:78.
 #
 # The `unwind` job exists because that argument applies again, and the second
 # time it was not hypothetical. Win64 `.xdata` is a Microsoft format, and
@@ -66,10 +65,11 @@ jobs:
 
       # The tool crate first: it needs no Lean toolchain, so a broken tool is
       # reported in a minute rather than after a library build. The unit tests
-      # are the safety case for the port from the Python original -- a safety
-      # case nothing runs decays into a comment -- and `cargo build` exiting 0
-      # says nothing about whether the empty-scan refusal or the record-set
-      # truncation check still work.
+      # are the safety case for the ports from the originals -- a safety case
+      # nothing runs decays into a comment -- and `cargo build` exiting 0 says
+      # nothing about whether the empty-scan refusals, the record-set truncation
+      # checks, or the coverage audit's cross-check against its own census still
+      # work.
       - name: Check the validation tools' formatting
         run: cargo fmt --manifest-path tools/grass-tools/Cargo.toml --all -- --check
 
@@ -128,25 +128,7 @@ jobs:
         run: lake env lean Tests/ISA/X86/LedgerAudit.lean
 
       - name: Audit observation coverage
-        run: lake env lean Tools/CoverageAudit.lean
-
-      - name: Install NASM
-        run: sudo apt-get update && sudo apt-get install -y nasm
-
-      - name: Differential against NASM
-        run: |
-          lake env lean --run Tests/ISA/X86/NasmCorpus.lean > "$RUNNER_TEMP/corpus.txt"
-          python3 Tools/x86-nasm-differential.py "$RUNNER_TEMP/corpus.txt"
-
-      - name: Differential against NDISASM
-        run: |
-          lake env lean --run Tests/ISA/X86/RipCorpus.lean > "$RUNNER_TEMP/rip.txt"
-          python3 Tools/x86-ndisasm-differential.py "$RUNNER_TEMP/rip.txt"
-
-      - name: Decoder differential against NDISASM
-        run: |
-          lake env lean --run Tests/ISA/X86/DecodeCorpus.lean > "$RUNNER_TEMP/decode.txt"
-          python3 Tools/x86-decode-differential.py "$RUNNER_TEMP/decode.txt"
+        run: ./tools/grass-tools/target/release/coverage-audit
   unwind:
     runs-on: windows-latest
     timeout-minutes: 30

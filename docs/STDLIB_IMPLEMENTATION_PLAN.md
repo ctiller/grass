@@ -304,7 +304,7 @@ absence is a band-3 item under §1 with a named blocker, not an oversight:
 | lexicographic comparison | an ordering vocabulary, likewise undemanded. |
 | indexing laws for `insertAt`/`eraseAt` | a consumer that indexes across an insertion. The operations and their length laws are present; the index-shifting laws are large and are better written against a real proof than guessed at. |
 | ~~`Vec.filter`~~ | **Withdrawn by the consumer who asked for it.** A review called its absence "startling" in round 1, then wrote six client modules and never once needed it. Recorded because a retracted demand is as useful as a demand, and because band 3 was right. |
-| ~~`reverse`, `takeWhile`, `extract`, `foldlM`, `head?`, `tail`, a `Sorted`/sort~~ | Same review, same verdict: never reached for. `Pairwise` plus decidability covered every ordering need including `insertSorted`; `Spikes/2_Sort` specifies sortedness and does not ask this library to perform one. `head?`/`tail` were subsumed by `Vec.recOnCons` — what was wanted was the induction principle, not the accessors. |
+| ~~`reverse`, `takeWhile`, `extract`, `foldlM`, `head?`, `tail`, a `Sorted`/sort~~ | Same review, same verdict: never reached for. `Pairwise` plus decidability covered every ordering need including `insertSorted`; `Spikes/2_Sort` specifies sortedness and does not ask this library to perform one. `head?`/`tail` were subsumed by `Vec.recOnCons` — what was wanted was the induction principle, not the accessors. **That last clause holds only while `ByteSeq` is a `List`:** §4.0 records that `Grass/ISA/X86/Decode.lean` consumes a byte sequence with cons patterns, which `recOnCons` does not replace, because a recursor proves and does not compute. The verdict stands today and would not survive the `ByteSeq` migration. |
 | ~~`Vec` iterators~~ | **Supplied.** §3 lists iteration among the observations and this library had none; adversarial review found that neither the absence list nor the instances fixture had caught it. `Vec` now has `ForIn`, so `for x in v do …` works. |
 | fold/map/traverse *fusion* laws beyond `map_map` | a consumer. §5 asks for fusion "where their premises hold"; only `map` fusion exists, and there is no `foldl_map`, `foldr_map`, `foldl_append`, or `foldr_append`. Found by adversarial review; this row is the correction. |
 | pure immutable views/subsequences | a consumer. §3 lists them; `take`/`drop` copy instead. Also found by review, also previously unlisted. |
@@ -701,69 +701,95 @@ Nothing in S2 is urgent and nothing in it blocks another agent; it is scheduled
 second because it is cheap and because leaving ownership split invites a fourth
 agent to add a fourth piece.
 
-### 4.0 The `ByteSeq` migration, costed
+### 4.0 The `ByteSeq` migration, costed three times
 
-A cross-agent review ran this migration against `c-mem`'s real branches rather
-than reasoning about it, and its headline finding inverts what §4.1 assumed.
+This section has been re-costed twice since it was written, and each measurement
+came out larger than the one before. The history is kept rather than overwritten,
+because the pattern in *how* the estimates were wrong is more useful than the
+current number: every one of them generalized from the layer that happened to be
+measured first.
 
-**Do not retype the use sites to `ByteArray`.** Every `Grass/Memory/*.lean` opens
-`Grass.Std.Logical`, and `ByteArray` is ambiguous there against the prelude's, so
-retyping ~83 fields produces ~83 elaboration errors. The migration `Byte.lean`'s
-docstring actually promised is **one line** — `abbrev ByteSeq := Vec Byte` — after
-which no field or parameter changes at all. Whether `ByteSeq` is later retired in
-favour of a qualified name is a separate cosmetic pass and a naming question for
-§3.12's owner.
+**What holds, and is not in dispute.**
 
-**Size: one line plus about twenty-two edits, a single sitting.**
-`agent/c-mem/memory-obligation-resource` is one line and zero proofs;
-`memory-semantics` is ~7 value-level edits (mostly `List.replicate` →
-`Vec.replicate`) and ~15 proof steps, of which 12 are mechanical name
-substitution. The other ~76 `ByteSeq` mentions are types that do not change.
+- *Do not retype the use sites to `ByteArray`.* Every `Grass/Memory/*.lean` opens
+  `Grass.Std.Logical`, and `ByteArray` is ambiguous there against the prelude's,
+  so retyping ~83 fields produces ~83 elaboration errors. Whether `ByteSeq` is
+  later retired in favour of a qualified name is a separate cosmetic pass and a
+  naming question for §3.12's owner.
+- *The field declarations survive the change.* `Vec` supplies `length`, `take`,
+  `GetElem?`, `Append`, `DecidableEq` and `Repr`, so a field or parameter typed
+  `ByteSeq` keeps compiling. Every estimate below was built on this, and it is
+  the true part of all of them.
+- *`Byte.lean`'s naming instruction worked.* No module under the memory layer
+  writes `List Byte`. That was necessary and, as the measurements show, not
+  sufficient.
 
-**Why it is that cheap, which is not obvious from the site count:** the memory
-layer already treats byte sequences abstractly. Across ~95 lines there are zero
-pattern matches on a byte sequence, zero concatenations, and only four operations
-used — `length`, `take`, `[i]?`, `replicate`. `Byte.lean`'s original instruction,
-"write `ByteSeq`, not `List Byte`", was followed, and it worked.
+**Estimate 1, refuted: "one line, in `Byte.lean`".** This section used to say the
+migration is "one line — `abbrev ByteSeq := Vec Byte` — after which no field or
+parameter changes at all". That line does not compile where it was proposed: it
+names `Vec`, and `Vec.lean` imports `Byte.lean`, so writing it there is an import
+cycle. The abbreviation has to move, or `ByteArray`'s siting has to be resolved
+first — §4.1 costs the latter and it is small. Found by `c-mem:51`, which ran the
+migration instead of reasoning about it, and reported it to this owner on
+2026-09-07.
 
-**What this library owed first, now supplied.** The review found two genuine gaps
-and both are in: `Vec.ofFn` with `length_ofFn`, `get?_ofFn`, and `ofFn_congr`,
-without which `Grass/Memory/Apply.lean`'s `observedBytes` has no `Vec` spelling
-that a reviewer should accept; and `Vec.get?_eq_some_iff` with
-`Vec.lt_of_get?_eq_some`, the missing half of the `get?` characterisation — the
-module stated the `none` case both ways and the `some` case only in the direction
-that builds one, which is a real asymmetry rather than a stylistic one.
+**Estimate 2, refuted: "about twenty-two edits, a single sitting".** That figure
+counted `agent/c-mem/memory-obligation-resource` as one line and zero proofs and
+`memory-semantics` as ~7 value-level edits and ~15 proof steps. `c-mem:51`
+rebuilt after making the change: **twenty-five errors**, with the build never
+reaching `Apply.lean`, `State.lean`, `Grass/Op/Step.lean` or any test. What does
+not survive is the proof layer, which discharges goals with
+`List.getElem?_eq_none`, `List.getElem?_eq_some_iff`, `List.getElem?_eq_getElem`
+and `List.length_take` directly rather than through any interface. One site is a
+*statement* rather than a proof: `Apply.lean`'s `observedBytes` builds its result
+as `(List.range n).map`, whose counterpart is `Vec.ofFn`.
 
-**THE COSTING ABOVE MEASURED ONE OWNER'S BRANCHES AND STATED A CONCLUSION ABOUT
-EVERY OWNER'S.** It is right about `Grass/Memory/**` and wrong as a size for the
-migration, and the two are consistent because the memory layer is the one place
-`ByteSeq` is used abstractly. Its own explanation says so: "zero pattern matches
-on a byte sequence, zero concatenations, and only four operations used". A layer
-with that profile is exactly the layer where `abbrev ByteSeq := Vec Byte` costs
-one line — and exactly the wrong sample to generalize from.
-
-The x86 and Win64 layers build byte sequences *concretely*, and there `ByteSeq`
-is not a type they pass through but a `List` they construct and destructure:
+**Estimate 3, refuted: that the memory layer is a representative sample.** Both
+measurements above were taken against `Grass/Memory/**`, and the reason given for
+the low cost was that "the memory layer already treats byte sequences
+abstractly — zero pattern matches on a byte sequence, zero concatenations, and
+only four operations used". That is true, and it is exactly what makes it the
+wrong layer to generalize from: it is the one place `ByteSeq` is used through an
+interface rather than as a `List`. The x86 and Win64 layers build byte sequences
+concretely.
 
 - **List literals as `ByteSeq` values.** `Grass/ISA/X86/Bytes.lean` writes
   `le32`, `le64` and `le16` as bracketed literals of extracted bit slices, and
   `rexBytes`, `escapeBytes`, `modrmBytes` and `sibBytes` as `[b]` or `[]`;
   `Grass/ABI/Win64/UnwindBytes.lean` writes `padding` as `[0, 0]` or `[]`. Under
   `Vec` none of these elaborate, because `Vec` has no literal syntax. **That is
-  §3.5, which this section is therefore coupled to and did not know it was.** The
-  repair is `Vec.fromList [...]` at every such site, or the scoped notation §3.5
-  measures — which is a decision, not a substitution.
+  §3.5, so this migration is coupled to that open question and neither section
+  knew it.** The repair is `Vec.fromList [...]` at every such site, or the scoped
+  notation §3.5 measures — which is a decision, not a substitution.
 - **Cons patterns as `ByteSeq` consumers.** `Grass/ISA/X86/Decode.lean` reads
   with `| b :: rest =>` and, in `takeLe64`, an eight-deep
   `| a :: b :: c :: d :: e :: f :: g :: h :: rest =>`. `Vec` is a structure, so
-  no cons pattern applies to it at all. These become `Vec.pop?` chains or
-  `Vec.recOnCons`, and the eight-deep one has no direct spelling.
+  no cons pattern applies to it at all — **and this library has nothing to offer
+  in their place.** `Vec.pop?` is the wrong end: it inverts `push` and returns
+  the *last* element. `head?` and `tail` are struck out in §3.4 as "never reached
+  for", subsumed by `Vec.recOnCons` — which is true for *proving* by induction
+  and false for *writing* a function that consumes a prefix. So the decoder
+  becomes `v.get? 0` paired with `v.drop 1`, and `takeLe64` becomes a length
+  check plus eight indexed reads related back to the suffix by hand.
 
-Neither is hard. Both are edits in `c-x86`'s exclusive scope, of a shape the
-memory-layer measurement never saw, and they mean the migration is a coordinated
-change across at least two owners rather than "a single sitting". Reproduce with
-`git grep -n ByteSeq -- Grass/ISA Grass/ABI` and read the bodies, not the
+  That makes the decoder the strongest band-2 case this plan has seen: a named
+  consumer, a named use, and an operation §3.4 retired on the ground that no such
+  consumer existed. It is not scheduled, because `c-x86` has not asked and the
+  migration that would force it is not scheduled either. If `c-x86` does, the
+  front-uncons operation and its laws are written before the rewrite rather than
+  after.
+
+Both are in `c-x86`'s exclusive scope. Reproduce with
+`git grep -n ByteSeq -- Grass/ISA Grass/ABI` and read the bodies rather than the
 signatures: the signatures are what made this look uniform.
+
+**What this library owed first, now supplied.** The `c-mem` review found two
+genuine gaps and both are in: `Vec.ofFn` with `length_ofFn`, `get?_ofFn`, and
+`ofFn_congr`, without which `observedBytes` has no `Vec` spelling a reviewer
+should accept; and `Vec.get?_eq_some_iff` with `Vec.lt_of_get?_eq_some`, the
+missing half of the `get?` characterisation — the module stated the `none` case
+both ways and the `some` case only in the direction that builds one, which is a
+real asymmetry rather than a stylistic one.
 
 **One trap to hand over with it.** `Vec`'s `GetElem?` is definitionally
 `v.toList[i]?`, so `List` lemmas *unify* against a `Vec` and then leave goals
@@ -772,6 +798,10 @@ proof does not fail with a type error; it fails with a nonsense arithmetic goal.
 Adding `Vec.getElem?_eq_get?` to the normalising `simp` set turns the whole class
 into mechanical substitution. Note also that this repository has no mathlib, so
 `by_contra` is unavailable and contrapositives need `Nat.lt_or_ge`.
+
+**Status: unscheduled, and no fourth estimate is offered.** The remaining unknown
+is `c-x86`'s share, which only `c-x86` can measure the way `c-mem:51` measured
+its own. This section will not guess it.
 
 ### 4.1 `Byte.lean`
 
@@ -788,15 +818,27 @@ prevented it. `Vec.lean` imports `Byte.lean`, so declaring `ByteArray` beside
 
 Breaking the cycle is possible and is defensible on its own terms: `Vec α` is
 generic and needs nothing from `Byte` except to state that one abbreviation, so
-`Vec.lean` could drop the import. The cost lands on every module that reaches
-`Byte` only through `Vec`, each needing its own import line, and those modules
-are not all this owner's — `g-build:83` authorized the one in
-`Grass/Build/Cache/Key.lean` when this was last attempted, which is evidence of
-the shape of the change rather than of its size.
+`Vec.lean` could drop the import.
 
-It is therefore a cross-owner change that no consumer has asked for, which puts
-it in §1's band 3. It stays open, with the reason now recorded as the import
-graph rather than as a custody boundary that no longer exists.
+**Its cost is measured, not estimated, because §4.0 records what estimating this
+family of changes has been worth.** Running it — drop the import, declare
+`ByteArray` in `Byte.lean` above `ByteSeq`, rebuild until green — costs one
+`import Grass.Std.Logical.Byte` line in exactly five modules:
+`Grass/Std/Logical/HostBytes.lean`, `Tests/Std/Chunking.lean`,
+`Tests/Std/PartialWrite.lean`, `Tests/Std/VecVocabulary.lean`, and
+`Grass/Build/Cache/Key.lean`. Four are this owner's, the fifth is `g-build`'s and
+`g-build:83` has already authorized an edit there for exactly this, and the tree
+builds green.
+
+**An earlier claim of this owner's said no consumer gains an import at all.**
+`c-stdlib:24` told `c-mem` that, on a tree of 54 build jobs; the tree is 204 now
+and five modules gain one. The claim was not re-checked when the tree grew, which
+is the same failure §4.0 documents in the other direction.
+
+So the change is cheap and unblocked. What it is not is asked for: no consumer
+has said the split costs it anything, which puts it in §1's band 3 and leaves it
+open, with the reason now recorded as the import graph rather than as a custody
+boundary that no longer exists.
 
 `ByteSeq` also does not disappear at acceptance, and §4.0 above costs that
 migration and corrects its own first estimate. The two names coexist until it is
@@ -953,10 +995,11 @@ reader will want a reason for:
    plan's, and it is adopted because it survives the attack that killed the
    previous two.
 
-   **And it is now checked by a program.** `Tools/CoverageAudit.lean` walks the
-   environment for every `def` in `Grass.Std.Logical.Vec` returning a `Vec` and
-   reports any without both laws; it runs in CI beside the axiom and docstring
-   audits. That is the response to the deepest point review made about the rule:
+   **And it is now checked by a program.** The `coverage-audit` binary in
+   `tools/grass-tools` walks the environment for every `def` in
+   `Grass.Std.Logical.Vec` returning a `Vec` and reports any without both laws;
+   it runs in CI beside the axiom and docstring audits. That is the response to
+   the deepest point review made about the rule:
    it had been rewritten three times, and each version was violated in the very
    commit that stated it — the coverage rule itself shipped alongside `Vec.sum`
    and `Vec.count`, both lawless, with `sum` on the right-hand side of
