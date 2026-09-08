@@ -36,8 +36,35 @@ example : objectDescription.header = layoutHeader := by decide
 
 example : objectDescription.Writable = true := by decide
 
-example : writeObjectDescription objectDescription = .ok objectDescription.bytes := by
+example : (writeSectionDescription textDescription).length =
+    textDescription.byteLength := by
+  exact length_writeSectionDescription textDescription
+
+example : objectDescription.sectionLayout.2 =
+    20 + 40 * objectDescription.sections.length +
+      objectDescription.sectionsByteLength := by
+  exact objectDescription.end_sectionLayout
+
+example : objectDescription.bytes.length = objectDescription.byteLength := by
+  exact objectDescription.length_bytes
+
+theorem writeObjectDescription_objectDescription :
+    writeObjectDescription objectDescription = .ok objectDescription.bytes := by
+  have widths : objectDescription.widthsFit = true := by decide
+  have symbols : objectDescription.symbols =
+      .present (Vec.singleton mainCell) longNames := by rfl
+  have auxiliary : validAuxLayoutScan 1 [mainCell] = true := by rfl
+  have names : validPrimaryNamesScan 1 [mainCell] longNames = true := by rfl
+  simp only [writeObjectDescription, widths, if_true, symbols]
   rfl
+
+example : objectDescription.Writable = true :=
+  (writeObjectDescription_ok_iff objectDescription).mp
+    writeObjectDescription_objectDescription
+
+example : objectDescription.bytes.length = objectDescription.byteLength ∧
+    objectDescription.byteLength < 2 ^ 32 :=
+  writeObjectDescription_ok_length writeObjectDescription_objectDescription
 
 theorem objectDescription_bytes : objectDescription.bytes = encodedObject := by
   unfold ObjectDescription.bytes
