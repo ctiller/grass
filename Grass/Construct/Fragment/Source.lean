@@ -85,6 +85,11 @@ private def expandLocatedAux : Source Instruction → List FragmentId → List N
 def expandLocated (source : Source Instruction) : List (LocatedInstruction Instruction) :=
   expandLocatedAux source [] []
 
+/-- Select the structural source location at one flat expansion index. -/
+def locatedInstructionAt? (source : Source Instruction) (index : Nat) :
+    Option (LocatedInstruction Instruction) :=
+  source.expandLocated[index]?
+
 /-- Exact flat instruction expansion in structural source order. -/
 def expand (source : Source Instruction) : List Instruction :=
   source.expandRaw
@@ -114,6 +119,21 @@ theorem expand_eq_map_located (source : Source Instruction) :
     source.expand = source.expandLocated.map LocatedInstruction.instruction := by
   exact expandRaw_eq_map_expandLocatedAux source [] []
 
+/-- `Source.expandLocated_length` proves that the source map has exactly one
+entry for every expanded instruction. -/
+theorem expandLocated_length (source : Source Instruction) :
+    source.expandLocated.length = source.expand.length := by
+  rw [source.expand_eq_map_located, List.length_map]
+
+/-- `Source.instruction_of_locatedInstructionAt?` proves that indexed source
+lookup projects to the instruction at the same flat expansion index. -/
+theorem instruction_of_locatedInstructionAt? (source : Source Instruction)
+    (index : Nat) :
+    (source.locatedInstructionAt? index).map LocatedInstruction.instruction =
+      source.expand[index]? := by
+  rw [source.expand_eq_map_located]
+  simp [locatedInstructionAt?]
+
 /-- Number of literal leaves in the hierarchy. -/
 def leafCount : Source Instruction → Nat
   | .empty => 0
@@ -123,6 +143,12 @@ def leafCount : Source Instruction → Nat
 
 /-- Number of instructions in the exact expansion. -/
 def instructionCount (source : Source Instruction) : Nat := source.expand.length
+
+@[simp] theorem locatedInstructionAt?_isSome_iff
+    (source : Source Instruction) (index : Nat) :
+    (source.locatedInstructionAt? index).isSome = true ↔
+      index < source.instructionCount := by
+  simp [locatedInstructionAt?, instructionCount, source.expandLocated_length]
 
 @[simp] theorem expand_literal (instructions : List Instruction) :
     (Source.literal instructions).expand = instructions := by
@@ -152,7 +178,12 @@ def instructionCount (source : Source Instruction) : Nat := source.expand.length
 
 @[simp] theorem leafCount_sequence (children : List (Source Instruction)) :
     (Source.sequence children).leafCount = (children.map leafCount).sum := by
-  simp [leafCount]
+  induction children with
+  | nil => simp [sequence, leafCount]
+  | cons child rest ih =>
+      change child.leafCount + (sequence rest).leafCount =
+        child.leafCount + (rest.map leafCount).sum
+      rw [ih]
 
 @[simp] theorem instructionCount_literal (instructions : List Instruction) :
     (Source.literal instructions).instructionCount = instructions.length := by

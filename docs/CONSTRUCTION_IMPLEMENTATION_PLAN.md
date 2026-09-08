@@ -215,6 +215,13 @@ counts, and all-exit classification without treating generator evaluation as
 proof authority. Structural source locations, composition, and registry closure
 remain separate successor slices so each can be reviewed against one invariant.
 
+The source-location successor replaces the n-ary representation with a binary
+hierarchical core plus a derived `sequence` helper. `Source.expandLocated`
+derives generator ancestry, child paths, and literal indices from that same
+tree; `Source.expand_eq_map_located`, `Source.expandLocated_length`, and
+`Source.instruction_of_locatedInstructionAt?` make total one-for-one coverage
+and indexed projection explicit.
+
 ### C4 — Authored source and checked lowering
 
 Implement the stable term-level surface before adding punctuation-saving

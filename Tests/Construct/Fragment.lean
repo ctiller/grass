@@ -90,6 +90,12 @@ example : locatedSource.expandLocated = [
 example : locatedSource.expand =
     locatedSource.expandLocated.map LocatedInstruction.instruction :=
   Source.expand_eq_map_located locatedSource
+example : locatedSource.expandLocated.length = locatedSource.expand.length :=
+  Source.expandLocated_length locatedSource
+example : (locatedSource.locatedInstructionAt? 2).map
+    LocatedInstruction.instruction = locatedSource.expand[2]? :=
+  Source.instruction_of_locatedInstructionAt? locatedSource 2
+example : (locatedSource.locatedInstructionAt? 3).isSome = false := by decide
 
 example : (generator.generate 7).instructionCount = 1 := by
   simp [generator, VerifiedFragment.instructionCount, addFragment,
