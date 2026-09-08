@@ -172,14 +172,29 @@ structure ProcessPresentation (spec : SpecProcess resources) where
     TransportedProcessRequirements network trace denotationExact =
       spec.requirements
 
-structure ProcessBehaviorBridge
+structure ProcessContractCorrespondence
     (p : ProcessSpec) (contract : BehaviorContract resources) where
+  requests : ProcessRequestsMapIntoContractBoundary p contract
+  terminalResults : ProcessTerminalResultsMapIntoContractBoundary p contract
+  observations : ProcessObservationsMapIntoContractBoundary p contract
+  demands : ProcessDemandsMapIntoContractRequirements p contract
+  states : ProcessStatesRepresentContractPrefixes p contract requests
+  views : ProcessViewsRepresentContractObservations
+    p contract states observations
+  executionsExact : ProcessExecutionsAreExactlyContractExecutions
+    p contract requests terminalResults observations demands states views
+
+structure ProcessBehaviorBridge
+    (spec : SpecProcess resources)
+    (p : ProcessSpec) (contract : BehaviorContract resources) where
+  contractExact : contract = spec.contract
+  correspondence : ProcessContractCorrespondence p contract
   acceptance : ProcessAcceptance p
   projectionsExact : AcceptanceProjectionsAreExactlyBehaviorContract
-    p contract acceptance
+    p contract correspondence acceptance
 
 def ProcessAcceptance.fromBehaviorContract
-    (bridge : ProcessBehaviorBridge p contract) : ProcessAcceptance p :=
+    (bridge : ProcessBehaviorBridge spec p contract) : ProcessAcceptance p :=
   bridge.acceptance
 
 structure StagedProcessPresentation
@@ -311,11 +326,19 @@ def PartialProcessRealization.close
     ClosedBlend partial complete coherent
 ```
 
-`ProcessBehaviorBridge` proves each acceptance projection is the corresponding
-projection of the precious `BehaviorContract`; it does not accept arbitrary
-predicates followed by proofs that the process happens to satisfy them. The
-bridge belongs here because Refinement sees both the precious behavior and the
-replaceable process arm.
+`ProcessBehaviorBridge.contractExact` ties the selected contract to the precious
+`SpecProcess`; an author cannot substitute a more convenient behavior contract
+and retain a contract-derived acceptance. `ProcessContractCorrespondence`
+supplies the explicit request, terminal-result, observation, demand,
+state-to-prefix, and rendered-view interpretation needed to relate the process
+vocabulary to the contract vocabulary. Its execution theorem proves that this
+interpretation is exact, and `projectionsExact` is indexed by that same
+correspondence. Thus the
+bridge proves each acceptance projection is the corresponding projection of the
+precious `BehaviorContract`; it does not hide an author-chosen correspondence
+inside an arbitrary acceptance predicate followed by a proof that the process
+happens to satisfy it. The bridge belongs here because Refinement sees both the
+precious behavior and the replaceable process arm.
 
 `RoleSchema` is finite static syntax; its `Instance` family may be infinite.
 Thus one connection-session schema has a proof polymorphic in

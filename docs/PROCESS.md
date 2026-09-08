@@ -1633,6 +1633,13 @@ structure ProcessPlanRealizes {R : Type u} [ResourceModel R]
   resources : ResourceAxisRealizationFamily spec plan
 ```
 
+Because this version of `ProcessSpec.Step` is request-blind, `terminalNoStep`
+applies only to a state proved terminal for **every** request; it deliberately
+proves nothing about a state terminal only for one request. The rationale and
+the discriminating `upto` counterexample are recorded in
+`Grass/Process/Correct.lean`; request-indexing `Step` is the direct way to
+recover the stronger request-local law.
+
 `ProcessAcceptance` is trusted specification input when supplied directly. The
 preferred product path derives it from the precious `BehaviorContract`; a
 standalone protocol suite may supply it directly only as an adequacy-reviewed
