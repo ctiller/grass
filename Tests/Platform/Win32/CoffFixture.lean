@@ -1005,4 +1005,40 @@ theorem unaligned_unwind_shifts_the_next :
       = [0, 8] := by
   decide
 
+/-! ### The fixed relocation codes, at their specification values
+
+`RelocationType.fixed_code_injective` says the three are pairwise distinct,
+which is the property that catches a transposition between `addr32nb` and
+`rel32` -- the failure its docstring names, where the object links and runs with
+every address computed against the wrong base.
+
+Distinctness is not enough on its own, and a mutation run showed where the gap
+was. Moving `addr64` from 1 to 2 keeps all three distinct, so the theorem stays
+true, and nothing anywhere in the repository noticed: `addr64` has no producer,
+because every relocation Grass emits today is `addr32nb` or a `REL32` form. A
+constant with no producer and no pin is a value nothing at all depends on, which
+is exactly when it drifts.
+
+These pin the values. All three together rather than only the unchecked one,
+because they are one fact from one table and a reader should not have to know
+which of them happened to be covered elsewhere. -/
+
+/-- `IMAGE_REL_AMD64_ADDR64`. -/
+example : RelocationType.addr64.code = 0x0001 := rfl
+
+/-- `IMAGE_REL_AMD64_ADDR32NB`, the one every `Grass/ABI/Win64/**` structure
+needs. -/
+example : RelocationType.addr32nb.code = 0x0003 := rfl
+
+/-- `IMAGE_REL_AMD64_REL32`. -/
+example : RelocationType.rel32.code = 0x0004 := rfl
+
+/-- `IMAGE_REL_AMD64_ADDR32` is 2, and is deliberately not modeled -- a
+non-image-relative 32-bit address is not something this profile emits. Pinned as
+the value the three above must stay clear of, so "distinct" is anchored to the
+real table rather than only to each other. -/
+example : RelocationType.addr64.code ≠ 2 ∧ RelocationType.addr32nb.code ≠ 2
+    ∧ RelocationType.rel32.code ≠ 2 := by decide
+
+
 end Grass.Tests.Platform.Win32.Coff
