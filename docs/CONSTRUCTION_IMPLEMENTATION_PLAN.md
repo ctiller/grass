@@ -154,6 +154,14 @@ and successful enter, leave, and delta operations preserve
 `StackShape.WellFormed`. ABI alignment and prologue selection remain parameters
 consumed by later layers rather than choices made by this module.
 
+`Grass.CFG.Call` makes each local or external call's complete outcome family
+explicit. A well-formed call contract has a valid entry shape, distinct outcome
+tags, and valid per-outcome stack shapes; a well-formed call site must reproduce
+those tags in contract order and present the exact entry shape. Named projection
+theorems expose each obligation without requiring downstream certificate code to
+unfold the executable checks. ABI-specific outcome families and state predicates
+remain provider inputs.
+
 ### C2 — Logical placement and static layouts
 
 Build layout and placement values under `Grass/Construct/`:
