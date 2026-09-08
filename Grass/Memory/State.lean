@@ -3386,6 +3386,18 @@ theorem initializedAt_write_of_covers (state : MemoryState) {id : AllocId} {star
     exact absurd (List.getElem?_eq_none_iff.mp hb) (by simp at h ⊢; omega)
   | some b => simp
 
+/-- A write moves no allocation, so it cannot change who shares bytes with whom.
+
+Sharing is a fact about the allocation table -- which records name which backing --
+and a write touches only `MemoryState.backings`. Callers need this because
+`SharesBytes` is state-relative, so a hypothesis about `state` has to survive into
+the written state to be usable there. -/
+@[simp] theorem sharesBytes_write (state : MemoryState) (id : AllocId) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) (a b : AllocId) :
+    (state.write id start bytes initializes).SharesBytes a b ↔ state.SharesBytes a b := by
+  unfold SharesBytes backingOf?
+  rw [allocations_write]
+
 /-- **A write frames every cell it did not write**: byte and initialization
 together, so a framing argument can carry a lack of initialization across a write
 as well as its presence.
@@ -3433,6 +3445,25 @@ theorem cellAt?_write_of_not_covers (state : MemoryState) (id : AllocId) {start 
         unfold ByteRange.Covers ByteRange.stop at hout ⊢
         simp only [] at hout ⊢
         omega
+
+/-- **A write to storage that shares no bytes with `other` leaves `other`'s
+initialization alone.**
+
+The range-level companion to `cellAt?_write_of_not_covers`, and what `denialOf`
+framing needs: `denialOf` reads initialization, so an argument that a write does not
+change a refusal has to say the write cannot reach the bytes that refusal reads.
+Under the previous design that followed from the identities differing; it does not
+now, and this is the hypothesis that replaces it. -/
+theorem rangeInitialized_write_of_not_shares (state : MemoryState) {id other : AllocId}
+    (h : ¬ state.SharesBytes other id) (start : Nat) (bytes : ByteSeq)
+    (initializes : Bool) (range : ByteRange) :
+    (state.write id start bytes initializes).RangeInitialized other range ↔
+      state.RangeInitialized other range := by
+  rw [rangeInitialized_iff, rangeInitialized_iff, allocations_write]
+  constructor <;> rintro ⟨hp, hall⟩ <;> refine ⟨hp, fun o hc => ?_⟩ <;>
+    have hcell := hall o hc <;> unfold InitializedAt at hcell ⊢
+  · rwa [cellAt?_write_of_not_covers state id (Or.inl h)] at hcell
+  · rwa [cellAt?_write_of_not_covers state id (Or.inl h)]
 
 /-- The initialization half of `cellAt?_write_of_not_covers`, in the shape a
 padding argument uses. -/

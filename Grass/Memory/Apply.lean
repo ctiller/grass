@@ -276,20 +276,24 @@ actually written by it.
 -/
 theorem cellAt?_commit_of_untouched (state : MemoryState) (d : AccessDescriptor)
     {written : Option ByteSeq} (hfits : WrittenFits d written) {id : AllocId} {offset : Nat}
-    (h : ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
+    (h : ¬ state.SharesBytes id d.provenance.root ∨
+      (id = d.provenance.root ∧ ¬ d.range.Covers offset)) :
     (state.commit d written).cellAt? id offset = state.cellAt? id offset := by
   unfold MemoryState.commit
   cases hw : written with
   | none => rfl
   | some bytes =>
     refine MemoryState.cellAt?_write_of_not_covers state d.provenance.root ?_
-    by_cases hid : id = d.provenance.root
-    · subst hid
-      refine Or.inr fun hin => h ⟨rfl, ?_⟩
+    cases h with
+    | inl hshare => exact Or.inl hshare
+    | inr hsame =>
+      obtain ⟨hid, hout⟩ := hsame
+      refine Or.inr ⟨hid, fun hin => hout ?_⟩
+      -- `WrittenFits` bounds what was written by the declared range, so covering
+      -- the written run covers the declaration.
       have hlen := hfits bytes hw
       simp only [ByteRange.covers_def] at hin ⊢
       omega
-    · exact Or.inl hid
 
 /--
 Apply one access to memory.
@@ -374,13 +378,13 @@ storage by construction, which is what `docs/MEMORY_MODEL.md` §2 means by makin
 provenance rather than address the authority. -/
 theorem applyAccess_frames_other_allocation (state : MemoryState) (d : AccessDescriptor)
     (writeData : ByteSeq) (indeterminate : Nat → Byte) {other : AllocId}
-    (hne : other ≠ d.provenance.root) (offset : Nat) :
+    (hne : ¬ state.SharesBytes other d.provenance.root) (offset : Nat) :
     (applyAccess state d writeData indeterminate).2.byteAt? other offset =
       state.byteAt? other offset := by
   rw [applyAccess_state]
   split
-  · unfold MemoryState.byteAt?
-    rw [MemoryState.write_preserves_other_allocation state hne]
+  · simp only [MemoryState.byteAt?_eq_map_cellAt?,
+      MemoryState.cellAt?_write_of_not_covers state d.provenance.root (Or.inl hne)]
   · rfl
 
 /-- **An access frames every range in its own allocation that it did not write.**
@@ -394,14 +398,9 @@ theorem applyAccess_frames_uncovered_offset (state : MemoryState) (d : AccessDes
       state.byteAt? d.provenance.root offset := by
   rw [applyAccess_state]
   split
-  · cases hfound : state.allocations.lookup d.provenance.root with
-    | none => rw [MemoryState.write_of_missing state _ _ _ hfound]
-    | some record =>
-      rw [MemoryState.byteAt?_write_self _ _ _ _ hfound]
-      unfold MemoryState.byteAt?
-      rw [hfound]
-      simp only [Option.bind_some]
-      exact ByteStore.byteAt?_write_of_not_covers record.bytes hout
+  · simp only [MemoryState.byteAt?_eq_map_cellAt?,
+      MemoryState.cellAt?_write_of_not_covers state d.provenance.root
+        (Or.inr ⟨rfl, hout⟩)]
   · rfl
 
 /-- The range-level framing law, which is the one a disjointness argument states:
@@ -479,13 +478,12 @@ theorem denialOf_congr_of_agrees {a b : MemoryState} {d : AccessDescriptor}
 
 /-- A write to another allocation does not change whether `d` is refused. -/
 theorem denialOf_write_of_other_allocation (state : MemoryState) (d : AccessDescriptor)
-    {id : AllocId} (hne : d.provenance.root ≠ id) (start : Nat) (bytes : ByteSeq)
-    (initializes : Bool) :
+    {id : AllocId} (hne : ¬ state.SharesBytes d.provenance.root id) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) :
     denialOf (state.write id start bytes initializes) d = denialOf state d := by
   unfold denialOf
-  simp only [MemoryState.write_preserves_other_allocation state hne,
-    MemoryState.rangeInitialized_congr_of_lookup
-      (MemoryState.write_preserves_other_allocation state hne start bytes initializes)]
+  simp only [MemoryState.allocations_write,
+    MemoryState.rangeInitialized_write_of_not_shares state hne start bytes initializes]
 
 /-- **A write to a disjoint range does not change whether `d` is refused.**
 
@@ -645,7 +643,7 @@ decision half; here they are. -/
 /-- An access to another allocation does not change whether `d` is refused. -/
 theorem denialOf_applyAccess_of_other_allocation (state : MemoryState)
     (dA dB : AccessDescriptor) (writeData : ByteSeq) (indeterminate : Nat → Byte)
-    (hne : dB.provenance.root ≠ dA.provenance.root) :
+    (hne : ¬ state.SharesBytes dB.provenance.root dA.provenance.root) :
     denialOf (applyAccess state dA writeData indeterminate).2 dB = denialOf state dB := by
   rw [applyAccess_state]
   split
@@ -655,12 +653,13 @@ theorem denialOf_applyAccess_of_other_allocation (state : MemoryState)
 /-- **Accesses in different allocations commute**, in the resulting state. -/
 theorem applyAccess_comm_of_other_allocation (state : MemoryState) (dA dB : AccessDescriptor)
     (writeA writeB : ByteSeq) (indetA indetB : Nat → Byte)
-    (hne : dA.provenance.root ≠ dB.provenance.root) :
+    (hne : ¬ state.SharesBytes dA.provenance.root dB.provenance.root) :
     (applyAccess (applyAccess state dA writeA indetA).2 dB writeB indetB).2.AgreesOn
       (applyAccess (applyAccess state dB writeB indetB).2 dA writeA indetA).2 := by
   rw [applyAccess_state (applyAccess state dA writeA indetA).2 dB writeB indetB,
     applyAccess_state (applyAccess state dB writeB indetB).2 dA writeA indetA,
-    denialOf_applyAccess_of_other_allocation state dA dB writeA indetA (Ne.symm hne),
+    denialOf_applyAccess_of_other_allocation state dA dB writeA indetA
+      (fun hs => hne (MemoryState.sharesBytes_symm hs)),
     denialOf_applyAccess_of_other_allocation state dB dA writeB indetB hne,
     applyAccess_state state dA writeA indetA, applyAccess_state state dB writeB indetB]
   by_cases hA : denialOf state dA = Option.none ∧ dA.intent.writes = true
@@ -679,7 +678,7 @@ theorem applyAccess_comm_of_other_allocation (state : MemoryState) (dA dB : Acce
 the same bytes on either side of an access to a different allocation. -/
 theorem applyAccess_result_comm_of_other_allocation (state : MemoryState)
     (dA dB : AccessDescriptor) (writeA writeB : ByteSeq) (indetA indetB : Nat → Byte)
-    (hne : dA.provenance.root ≠ dB.provenance.root) :
+    (hne : ¬ state.SharesBytes dA.provenance.root dB.provenance.root) :
     (applyAccess (applyAccess state dB writeB indetB).2 dA writeA indetA).1 =
       (applyAccess state dA writeA indetA).1 := by
   have hobs : observedBytes (applyAccess state dB writeB indetB).2 dA indetA =
@@ -761,7 +760,7 @@ def PreservationLaws : Prop :=
         state.MetadataAt other) ∧
   (∀ (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSeq)
       (indeterminate : Nat → Byte) (other : AllocId),
-      other ≠ d.provenance.root → ∀ (offset : Nat),
+      ¬ state.SharesBytes other d.provenance.root → ∀ (offset : Nat),
         (applyAccess state d writeData indeterminate).2.byteAt? other offset =
           state.byteAt? other offset) ∧
   (∀ (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSeq)
@@ -811,7 +810,15 @@ theorem applyAccess_state_indep (state : MemoryState) (d : AccessDescriptor)
   rw [applyAccess_state, applyAccess_state]
 
 /-- `step.Touches id offset` holds when this step's declared range covers that
-byte of that allocation. Everything else the step provably leaves alone. -/
+byte of that allocation.
+
+**Identity-level, and deliberately state-free.** It used to be the whole story --
+"everything else the step provably leaves alone" -- because distinct `AllocId`s were
+distinct storage. Under `g-design:185` a step can reach bytes it does not `Touch`,
+through a second view onto the same backing, so the framing laws below carry a
+sharing side-condition rather than resting on this alone. Deciding sharing needs the
+state, which `Touches` does not have and should not: a caller who knows its
+allocations are unrelated discharges the side-condition once. -/
 def Touches (step : AccessDescriptor × ByteSeq) (id : AllocId) (offset : Nat) : Prop :=
   step.1.provenance.root = id ∧ step.1.range.Covers offset
 
@@ -822,6 +829,7 @@ instance (step : AccessDescriptor × ByteSeq) (id : AllocId) (offset : Nat) :
 together. The cell-level form the block law is built from. -/
 theorem cellAt?_applyAccess_of_untouched (state : MemoryState) (d : AccessDescriptor)
     (writeData : ByteSeq) (indeterminate : Nat → Byte) {id : AllocId} {offset : Nat}
+    (hshare : id ≠ d.provenance.root → ¬ state.SharesBytes id d.provenance.root)
     (h : ¬ Touches (d, writeData) id offset) :
     (applyAccess state d writeData indeterminate).2.cellAt? id offset =
       state.cellAt? id offset := by
@@ -830,29 +838,54 @@ theorem cellAt?_applyAccess_of_untouched (state : MemoryState) (d : AccessDescri
   · refine MemoryState.cellAt?_write_of_not_covers state d.provenance.root ?_
     by_cases hid : id = d.provenance.root
     · subst hid
-      refine Or.inr fun hin => h ⟨rfl, ?_⟩
+      refine Or.inr ⟨rfl, fun hin => h ⟨rfl, ?_⟩⟩
       simp only [ByteRange.covers_def, List.length_take] at hin ⊢
       omega
-    · exact Or.inl hid
+    · exact Or.inl (hshare hid)
   · rfl
+
+/-- An access moves no allocation, so it cannot change who shares bytes with whom.
+
+The block law needs this: its hypothesis is about the state the block starts in, and
+its induction hands each step a state some prefix of the block has already run. -/
+@[simp] theorem sharesBytes_applyAccess (state : MemoryState) (d : AccessDescriptor)
+    (writeData : ByteSeq) (ind : Nat → Byte) (a b : AllocId) :
+    (applyAccess state d writeData ind).2.SharesBytes a b ↔ state.SharesBytes a b := by
+  rw [applyAccess_state]
+  split
+  · exact MemoryState.sharesBytes_write _ _ _ _ _ _ _
+  · exact Iff.rfl
 
 /--
 **A straight-line block frames every cell no step of it touches.**
 
 The exit criterion's lemma. A caller discharges a block by checking each step's
 declared range against the bytes it cares about — which is decidable, and is what
-`Touches` is for — and needs nothing else about what the block did.
+`Touches` is for.
+
+The second hypothesis is the `g-design:185` side-condition: `Touches` is
+identity-level, so a step can reach `id` through a second view onto one backing
+without touching it. A caller whose allocations are unrelated discharges it once for
+the whole block, and it is stated about the *starting* state because
+`sharesBytes_applyAccess` carries it forward.
 -/
 theorem cellAt?_runBlock_of_untouched (indeterminate : Nat → Byte) :
     ∀ (block : List (AccessDescriptor × ByteSeq)) (state : MemoryState) {id : AllocId}
-      {offset : Nat}, (∀ step ∈ block, ¬ Touches step id offset) →
+      {offset : Nat},
+      (∀ step ∈ block, id ≠ step.1.provenance.root →
+        ¬ state.SharesBytes id step.1.provenance.root) →
+      (∀ step ∈ block, ¬ Touches step id offset) →
       (runBlock state indeterminate block).2.cellAt? id offset = state.cellAt? id offset
-  | [], _, _, _, _ => rfl
-  | (d, writeData) :: rest, state, id, offset, hall => by
+  | [], _, _, _, _, _ => rfl
+  | (d, writeData) :: rest, state, id, offset, hshare, hall => by
     rw [runBlock,
       cellAt?_runBlock_of_untouched indeterminate rest _
+        (fun step hstep hid => by
+          rw [sharesBytes_applyAccess]
+          exact hshare step (List.mem_cons_of_mem _ hstep) hid)
         (fun step hstep => hall step (List.mem_cons_of_mem _ hstep)),
       cellAt?_applyAccess_of_untouched state d writeData indeterminate
+        (hshare (d, writeData) List.mem_cons_self)
         (hall (d, writeData) List.mem_cons_self)]
 
 /-- The same independence for a whole block. -/
@@ -867,19 +900,28 @@ theorem runBlock_state_indep (ind ind' : Nat → Byte) :
 /-- The byte form, which is what a load's observation is read through. -/
 theorem byteAt?_runBlock_of_untouched (indeterminate : Nat → Byte)
     (block : List (AccessDescriptor × ByteSeq)) (state : MemoryState) {id : AllocId}
-    {offset : Nat} (hall : ∀ step ∈ block, ¬ Touches step id offset) :
+    {offset : Nat}
+    (hshare : ∀ step ∈ block, id ≠ step.1.provenance.root →
+      ¬ state.SharesBytes id step.1.provenance.root)
+    (hall : ∀ step ∈ block, ¬ Touches step id offset) :
     (runBlock state indeterminate block).2.byteAt? id offset = state.byteAt? id offset := by
   rw [MemoryState.byteAt?_eq_map_cellAt?, MemoryState.byteAt?_eq_map_cellAt?,
-    cellAt?_runBlock_of_untouched indeterminate block state hall]
+    cellAt?_runBlock_of_untouched indeterminate block state hshare hall]
 
 /--
 **What a step wrote survives the rest of the block.**
 
 `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4's exit criterion, stated as one theorem: a
 store's bytes are still there at the end of a straight-line block, provided no
-later step's declared range covers them. Everything a caller must check is
-decidable from the descriptors — `Touches` is — so discharging a block is
-checking ranges rather than reasoning about the store.
+later step's declared range covers them.
+
+The range half is decidable from the descriptors alone — `Touches` is — so that part
+of discharging a block is checking ranges rather than reasoning about the store. It
+is no longer the whole check: under `g-design:185` a later step can reach these bytes
+through a second view onto the same backing without touching this allocation, so the
+caller also states that no step of the block shares bytes with it. That half is not
+decidable from descriptors, because sharing is a fact about the state; a caller whose
+allocations are unrelated discharges it once for the block.
 -/
 theorem byteAt?_write_survives_block (state : MemoryState) (d : AccessDescriptor)
     (writeData : ByteSeq) (indeterminate : Nat → Byte)
@@ -888,12 +930,18 @@ theorem byteAt?_write_survives_block (state : MemoryState) (d : AccessDescriptor
     (hden : denialOf state d = Option.none) (hwrites : d.intent.writes = true)
     {offset : Nat}
     (hcov : (ByteRange.mk d.range.start (writeData.take d.range.size).length).Covers offset)
+    (hshare : ∀ step ∈ block, d.provenance.root ≠ step.1.provenance.root →
+      ¬ state.SharesBytes d.provenance.root step.1.provenance.root)
     (hall : ∀ step ∈ block, ¬ Touches step d.provenance.root offset) :
     (runBlock (applyAccess state d writeData indeterminate).2 indeterminate
         block).2.byteAt? d.provenance.root offset =
       (writeData.take d.range.size)[offset - d.range.start]? := by
-  rw [byteAt?_runBlock_of_untouched indeterminate block _ hall, applyAccess_state,
-    if_pos (And.intro hden hwrites)]
+  rw [byteAt?_runBlock_of_untouched indeterminate block _
+      (fun step hstep hid => by
+        rw [sharesBytes_applyAccess]
+        exact hshare step hstep hid)
+      hall,
+    applyAccess_state, if_pos (And.intro hden hwrites)]
   exact MemoryState.byteAt?_write_of_covers _ hfound hcov
 
 end Grass.Memory
