@@ -86,6 +86,47 @@ def importedSummariesTree (imports : Vec ImportedSummary) : MerkleTree :=
         rest)
     (.leaf .noMoreImports)
 
+/--
+PROBE ONLY, and not c-stdlib's file to change. The docstring above claims
+`importedSummariesTree` retains import order and distinguishes extension from
+final-entry replacement. This is that claim, proved.
+
+It needs `Vec.foldr_cons`, which did not exist until
+`refs/heads/agent/c-stdlib/fold-cons`: `Vec.recOnCons` had no fold law to run
+with, so cons-inducting a `Vec.foldr` goal fell through to raw `List.foldr` and
+the proof continued in `List`. Nothing else here is new.
+-/
+theorem importedSummariesTree_injective :
+    ∀ v w : Vec ImportedSummary,
+      importedSummariesTree v = importedSummariesTree w → v = w := by
+  intro v
+  induction v using Vec.recOnCons with
+  | empty =>
+    intro w
+    induction w using Vec.recOnCons with
+    | empty => intro _; rfl
+    | cons b u _ => intro h; simp [importedSummariesTree] at h
+  | cons a t ih =>
+    intro w
+    induction w using Vec.recOnCons with
+    | empty => intro h; simp [importedSummariesTree] at h
+    | cons b u _ =>
+      intro h
+      obtain ⟨sa, ma⟩ := a
+      obtain ⟨sb, mb⟩ := b
+      simp only [importedSummariesTree, Vec.foldr_cons, MerkleTree.branch.injEq,
+        MerkleTree.leaf.injEq, MerkleAtom.importScope.injEq,
+        MerkleAtom.importSummary.injEq] at h
+      obtain ⟨⟨hs, hm⟩, hrest⟩ := h
+      have ht : t = u := ih u (by simpa [importedSummariesTree] using hrest)
+      subst ht; subst hs; subst hm; rfl
+
+/-- The extension case the docstring names, as a corollary. -/
+theorem importedSummariesTree_extension_ne
+    {v w : Vec ImportedSummary} (h : v ≠ w) :
+    importedSummariesTree v ≠ importedSummariesTree w :=
+  fun e => h (importedSummariesTree_injective v w e)
+
 /-- Canonical tree shape for every semantic-environment component. -/
 def SemanticEnvironment.merkleTree (environment : SemanticEnvironment) : MerkleTree :=
   let audit := .leaf (.auditPolicy environment.auditPolicy)
