@@ -504,4 +504,317 @@ mod tests {
             format!("agent-candidate/bob/{}", hash(7))
         );
     }
+    // ------------------------------------- validating a candidate nobody rebuilds
+    //
+    // `verify_candidate_object` replaced a comparison against a locally
+    // reconstructed merge (g-design:249). Every property the comparison used
+    // to imply, and that does not need the merge engine, is asserted here
+    // directly -- one test per property, each with a fixture that differs
+    // from the accepted one in exactly that property.
+
+    /// A repository holding `previous_main`, a `reviewed_commit` branched
+    /// from it, and the real candidate merging the two.
+    fn candidate_fixture() -> (tempfile::TempDir, String, String, String, Agent) {
+        let reviewer = a("bob");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        git(path, &["init", "--quiet", "-b", "main"]);
+        git(path, &["config", "user.email", "test@example.com"]);
+        git(path, &["config", "user.name", "Test"]);
+        std::fs::write(path.join("base.txt"), "base\n").unwrap();
+        git(path, &["add", "base.txt"]);
+        git(path, &["commit", "-q", "-m", "base"]);
+        let previous_main = crate::gitrepo::rev_parse(path, "HEAD").unwrap();
+
+        std::fs::write(path.join("feature.txt"), "feature\n").unwrap();
+        git(path, &["add", "feature.txt"]);
+        git(
+            path,
+            &[
+                "commit",
+                "-q",
+                "-m",
+                "add feature\n\nAgent-Bus-Agent: alice\n",
+            ],
+        );
+        let reviewed_commit = crate::gitrepo::rev_parse(path, "HEAD").unwrap();
+        git(path, &["checkout", "--quiet", &previous_main]);
+
+        let candidate =
+            reconstruct_candidate(path, &previous_main, &reviewed_commit, &reviewer).unwrap();
+        (dir, previous_main, reviewed_commit, candidate, reviewer)
+    }
+
+    /// Builds a commit directly, bypassing `reconstruct_candidate`, so a
+    /// test can vary exactly one property of a candidate.
+    fn forge(dir: &std::path::Path, tree_of: &str, parents: &[&str], message: &str) -> String {
+        use crate::gitobjects::{HistoryReader, ObjectWriter};
+        let g = crate::gitobjects::Libgit2Reader::open(dir).unwrap();
+        let tree = g
+            .resolve_rev(&format!("{tree_of}^{{tree}}"))
+            .unwrap()
+            .unwrap();
+        let resolved: Vec<crate::scalars::ObjectId> = parents
+            .iter()
+            .map(|p| g.resolve_rev(p).unwrap().unwrap())
+            .collect();
+        let refs: Vec<&crate::scalars::ObjectId> = resolved.iter().collect();
+        g.create_commit(&tree, &refs, message)
+            .unwrap()
+            .into_string()
+    }
+
+    #[test]
+    fn verify_candidate_object_accepts_the_real_candidate() {
+        let (dir, previous_main, reviewed_commit, candidate, reviewer) = candidate_fixture();
+        verify_candidate_object(
+            dir.path(),
+            &reviewer,
+            &previous_main,
+            &reviewed_commit,
+            &candidate,
+        )
+        .expect("the candidate `prepare-merge` actually built must validate");
+    }
+
+    /// AGENT_REVIEW.md section 7, "It requires one merge base" -- the one
+    /// property this shares with `reconstruct_candidate`, and the reason it
+    /// is asked here too rather than left behind with the rebuild.
+    #[test]
+    fn verify_candidate_object_rejects_a_pair_without_exactly_one_merge_base() {
+        let (dir, previous_main, _reviewed, candidate, reviewer) = candidate_fixture();
+        git(dir.path(), &["checkout", "--quiet", "--orphan", "other"]);
+        std::fs::write(dir.path().join("other.txt"), "other\n").unwrap();
+        git(dir.path(), &["add", "other.txt"]);
+        git(dir.path(), &["commit", "-q", "-m", "unrelated root"]);
+        let unrelated = crate::gitrepo::rev_parse(dir.path(), "HEAD").unwrap();
+
+        let err = verify_candidate_object(
+            dir.path(),
+            &reviewer,
+            &previous_main,
+            &unrelated,
+            &candidate,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("do not have exactly one merge base"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn verify_candidate_object_rejects_parents_in_the_wrong_order() {
+        let (dir, previous_main, reviewed_commit, _real, reviewer) = candidate_fixture();
+        let forged = forge(
+            dir.path(),
+            &reviewed_commit,
+            &[&reviewed_commit, &previous_main],
+            &candidate_message(&reviewer),
+        );
+        let err = verify_candidate_object(
+            dir.path(),
+            &reviewer,
+            &previous_main,
+            &reviewed_commit,
+            &forged,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("candidate parents do not match"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn verify_candidate_object_rejects_a_trailer_naming_another_reviewer() {
+        let (dir, previous_main, reviewed_commit, _real, reviewer) = candidate_fixture();
+        let forged = forge(
+            dir.path(),
+            &reviewed_commit,
+            &[&previous_main, &reviewed_commit],
+            "agent-bus candidate\n\nAgent-Bus-Reviewer: carol\n",
+        );
+        let err = verify_candidate_object(
+            dir.path(),
+            &reviewer,
+            &previous_main,
+            &reviewed_commit,
+            &forged,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("exactly one matching Agent-Bus-Reviewer trailer"),
+            "{err}"
+        );
+    }
+
+    /// Two `Agent-Bus-Reviewer` trailers, the second of which is this
+    /// reviewer. A check that merely looked for the expected trailer
+    /// somewhere would accept this; "exactly one" is the rule.
+    #[test]
+    fn verify_candidate_object_rejects_a_second_reviewer_trailer() {
+        let (dir, previous_main, reviewed_commit, _real, reviewer) = candidate_fixture();
+        let forged = forge(
+            dir.path(),
+            &reviewed_commit,
+            &[&previous_main, &reviewed_commit],
+            "agent-bus candidate\n\nAgent-Bus-Reviewer: carol\nAgent-Bus-Reviewer: bob\n",
+        );
+        let err = verify_candidate_object(
+            dir.path(),
+            &reviewer,
+            &previous_main,
+            &reviewed_commit,
+            &forged,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("exactly one matching Agent-Bus-Reviewer trailer"),
+            "{err}"
+        );
+    }
+
+    /// The right trailer, and nothing else right about the message. Reading
+    /// trailers back is not enough on its own: a candidate may carry exactly
+    /// the expected `Agent-Bus-Reviewer` line and still smuggle other
+    /// content, including trailers of other kinds, past a validator that
+    /// only looks for what it expects.
+    #[test]
+    fn verify_candidate_object_rejects_a_message_that_is_not_the_candidate_message() {
+        let (dir, previous_main, reviewed_commit, _real, reviewer) = candidate_fixture();
+        let forged = forge(
+            dir.path(),
+            &reviewed_commit,
+            &[&previous_main, &reviewed_commit],
+            "agent-bus candidate\n\nAgent-Bus-Reviewer: bob\nAgent-Bus-Agent: mallory\n",
+        );
+        let err = verify_candidate_object(
+            dir.path(),
+            &reviewer,
+            &previous_main,
+            &reviewed_commit,
+            &forged,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("does not carry the exact candidate message"),
+            "{err}"
+        );
+    }
+
+    // ---------------------------------------------------------------- scope
+
+    fn claims(paths: &[&str]) -> Vec<crate::scalars::PathClaim> {
+        paths
+            .iter()
+            .map(|p| crate::scalars::PathClaim::parse(p.to_string()).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn verify_candidate_scope_accepts_a_candidate_inside_its_scope() {
+        let (dir, previous_main, _reviewed, candidate, _reviewer) = candidate_fixture();
+        verify_candidate_scope(
+            dir.path(),
+            &previous_main,
+            &candidate,
+            &claims(&["feature.txt"]),
+        )
+        .expect("the only changed path is the reviewed one");
+    }
+
+    #[test]
+    fn verify_candidate_scope_rejects_a_path_the_nomination_never_covered() {
+        let (dir, previous_main, _reviewed, candidate, _reviewer) = candidate_fixture();
+        let err = verify_candidate_scope(
+            dir.path(),
+            &previous_main,
+            &candidate,
+            &claims(&["other.txt"]),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("changed path feature.txt is outside reviewed_scope"),
+            "{err}"
+        );
+    }
+
+    /// An empty scope refuses everything that changed, rather than
+    /// vacuously accepting it.
+    #[test]
+    fn verify_candidate_scope_rejects_everything_when_the_scope_is_empty() {
+        let (dir, previous_main, _reviewed, candidate, _reviewer) = candidate_fixture();
+        let err = verify_candidate_scope(dir.path(), &previous_main, &candidate, &[]).unwrap_err();
+        assert!(err.to_string().contains("outside reviewed_scope"), "{err}");
+    }
+
+    // ------------------------------------------------------------ fetching
+
+    /// A candidate no remote has, on a host that does not have it either.
+    /// The message has to say what to do: the raw "bad object" a downstream
+    /// git command would otherwise surface first names nothing a reviewer
+    /// can act on.
+    #[test]
+    fn fetch_candidate_tag_reports_an_unfetchable_candidate() {
+        let (dir, _previous_main, _reviewed, _candidate, reviewer) = candidate_fixture();
+        let empty_remote = tempfile::tempdir().unwrap();
+        git(empty_remote.path(), &["init", "--quiet", "--bare"]);
+        let missing = format!("{:040x}", 0xdead_beefu64);
+        let err = fetch_candidate_tag(
+            dir.path(),
+            &empty_remote.path().to_string_lossy(),
+            &reviewer,
+            &missing,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("is not fetchable in this checkout")
+                && err.to_string().contains(&missing),
+            "{err}"
+        );
+    }
+
+    /// The other side: a candidate this checkout does not have but the
+    /// remote does. Fetching the immutable tag is how a validator that never
+    /// ran `prepare-merge` gets the object at all -- the whole mechanism
+    /// that replaced rebuilding it.
+    #[test]
+    fn fetch_candidate_tag_retrieves_a_candidate_this_checkout_never_had() {
+        let (source, previous_main, reviewed_commit, candidate, reviewer) = candidate_fixture();
+        let tag = candidate_tag_name(&reviewer, &candidate);
+        crate::gitrepo::tag_lightweight(source.path(), &tag, &candidate).unwrap();
+
+        // A second checkout that has only `main`, exactly like a coordinator
+        // draining from somewhere else.
+        let other = tempfile::tempdir().unwrap();
+        git(other.path(), &["init", "--quiet", "-b", "main"]);
+        git(other.path(), &["config", "user.email", "o@example.com"]);
+        git(other.path(), &["config", "user.name", "Other"]);
+        let remote = source.path().to_string_lossy().to_string();
+        assert!(
+            crate::gitrepo::rev_parse_opt(other.path(), &candidate)
+                .unwrap()
+                .is_none(),
+            "the fixture must start without the candidate"
+        );
+
+        fetch_candidate_tag(other.path(), &remote, &reviewer, &candidate)
+            .expect("the immutable tag is how another host gets the candidate");
+        // And now it can validate it, without ever running the merge engine.
+        verify_candidate_object(
+            other.path(),
+            &reviewer,
+            &previous_main,
+            &reviewed_commit,
+            &candidate,
+        )
+        .expect("a fetched candidate validates on a host that never built it");
+    }
 }
