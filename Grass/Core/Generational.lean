@@ -21,8 +21,6 @@ occurrences of the same number in different generations are then unequal, so a
 stale reference simply fails to match — no comparison against a liveness table,
 and no reasoning about whether the number "looks current".
 
-**Custody note.** `Grass.Core` is not owned by the memory agent. This module is
-temporary custody under `docs/MEMORY_IMPLEMENTATION_PLAN.md` §2.
 -/
 
 namespace Grass.Core
