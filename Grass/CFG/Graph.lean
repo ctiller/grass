@@ -11,7 +11,7 @@ separately authored edge or predecessor manifest.
 
 namespace Grass.CFG
 
-universe u v
+universe u v u₁ u₂
 
 /-- A CFG edge either enters another block or reaches a caller-supplied
 terminal disposition. -/
@@ -335,6 +335,85 @@ theorem blockClosed_of_wellFormed
     (block : Block State Terminal) (member : block ∈ graph.blocks) :
     BlockStructurallyClosed block :=
   (graph.wellFormed_iff.mp closed).1.2 block member
+
+private theorem eq_of_mem_of_mem_of_map_nodup
+    {α : Type u₁} {β : Type u₂} (key : α → β)
+    {items : List α} {left right : α}
+    (unique : (items.map key).Nodup)
+    (leftMem : left ∈ items) (rightMem : right ∈ items)
+    (sameKey : key left = key right) : left = right := by
+  induction items with
+  | nil => simp at leftMem
+  | cons head tail ih =>
+      rw [List.map_cons, List.nodup_cons] at unique
+      rw [List.mem_cons] at leftMem rightMem
+      rcases leftMem with rfl | leftMem
+      · rcases rightMem with rfl | rightMem
+        · rfl
+        · exfalso
+          apply unique.1
+          rw [sameKey]
+          exact List.mem_map.mpr ⟨right, rightMem, rfl⟩
+      · rcases rightMem with rfl | rightMem
+        · exfalso
+          apply unique.1
+          rw [← sameKey]
+          exact List.mem_map.mpr ⟨left, leftMem, rfl⟩
+        · exact ih unique.2 leftMem rightMem
+
+/-- `Graph.locatedEdge_eq_of_mem_of_mem_of_key_eq` proves that two structural
+edges of a well-formed graph with the same canonical key are the same located
+edge. -/
+theorem locatedEdge_eq_of_mem_of_mem_of_key_eq
+    (graph : Graph State Terminal) (left right : LocatedEdge Terminal)
+    (closed : graph.WellFormed)
+    (leftMem : left ∈ graph.locatedEdges)
+    (rightMem : right ∈ graph.locatedEdges)
+    (sameKey : left.key = right.key) : left = right := by
+  have sameSource : left.source = right.source := by
+    simpa [LocatedEdge.key] using congrArg EdgeKey.source sameKey
+  have sameExit : left.edge.exit = right.edge.exit := by
+    simpa [LocatedEdge.key] using congrArg EdgeKey.exit sameKey
+  rcases (graph.mem_locatedEdges_iff left.source left.edge).mp leftMem with
+    ⟨leftBlock, leftBlockMem, leftSource, leftEdgeMem⟩
+  rcases (graph.mem_locatedEdges_iff right.source right.edge).mp rightMem with
+    ⟨rightBlock, rightBlockMem, rightSource, rightEdgeMem⟩
+  have sameBlockId : leftBlock.id = rightBlock.id :=
+    leftSource.trans (sameSource.trans rightSource.symm)
+  have blocksUnique : (graph.blocks.map Block.id).Nodup := by
+    simpa [blockIds] using graph.blockIdsNodup_of_wellFormed closed
+  have sameBlock : leftBlock = rightBlock :=
+    eq_of_mem_of_mem_of_map_nodup Block.id
+      blocksUnique
+      leftBlockMem rightBlockMem sameBlockId
+  subst rightBlock
+  have outgoingUnique : (leftBlock.outgoing.map Edge.exit).Nodup :=
+    (graph.blockClosed_of_wellFormed closed leftBlock leftBlockMem).1.1.2
+  have sameEdge : left.edge = right.edge :=
+    eq_of_mem_of_mem_of_map_nodup Edge.exit outgoingUnique
+      leftEdgeMem rightEdgeMem sameExit
+  cases left
+  cases right
+  cases sameSource
+  cases sameEdge
+  rfl
+
+/-- Under `Graph.WellFormed`, `Graph.findEdge?_eq_some_of_mem` returns the exact
+structural edge already held by the caller, not merely some same-key edge. -/
+theorem findEdge?_eq_some_of_mem
+    (graph : Graph State Terminal) (key : EdgeKey)
+    (located : LocatedEdge Terminal) (closed : graph.WellFormed)
+    (member : located ∈ graph.locatedEdges) (hasKey : located.key = key) :
+    graph.findEdge? key = some located := by
+  have keyMember : key ∈ graph.edgeKeys := by
+    simp [edgeKeys]
+    exact ⟨located, member, hasKey⟩
+  obtain ⟨found, foundLookup⟩ := graph.edgeForKey key keyMember
+  have foundFacts := graph.findEdge?_sound key found foundLookup
+  have foundEq : found = located :=
+    graph.locatedEdge_eq_of_mem_of_mem_of_key_eq found located closed
+      foundFacts.1 member (foundFacts.2.trans hasKey.symm)
+  simpa [foundEq] using foundLookup
 
 /-- `Graph.targetsResolved_of_wellFormed` projects proposition-level target
 closure for every structural edge. -/

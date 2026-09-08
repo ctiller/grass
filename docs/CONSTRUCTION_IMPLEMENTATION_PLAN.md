@@ -138,6 +138,10 @@ edge identity directly from nested source blocks. Their membership, soundness,
 and existence theorems keep edge lookup proof-bearing even for raw malformed
 graphs with repeated block identities; graph well-formedness eliminates those
 duplicates rather than making lookup partial or block-first.
+`Graph.locatedEdge_eq_of_mem_of_mem_of_key_eq` makes that elimination explicit:
+under `Graph.WellFormed`, two structural edges with one canonical key are equal.
+Consequently `Graph.findEdge?_eq_some_of_mem` returns the exact structural edge
+already held by a consumer rather than only some same-key occurrence.
 
 ### C1 — Joins, loops, calls, and stack shapes
 

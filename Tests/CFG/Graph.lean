@@ -84,6 +84,9 @@ example (id : BlockId) (member : id ∈ good.blockIds) :
 
 def entryNormalKey : EdgeKey := ⟨blockId "entry", exitTag "normal"⟩
 
+def entryNormalLocated : LocatedEdge Terminal :=
+  ⟨blockId "entry", ⟨exitTag "normal", .block (blockId "return")⟩⟩
+
 example : good.edgeKeys = [
     entryNormalKey,
     ⟨blockId "entry", exitTag "failed"⟩,
@@ -111,6 +114,16 @@ example (located : LocatedEdge Terminal)
 
 example : ∃ located, good.findEdge? entryNormalKey = some located :=
   good.edgeForKey entryNormalKey (by decide)
+
+example : good.findEdge? entryNormalKey = some entryNormalLocated :=
+  good.findEdge?_eq_some_of_mem entryNormalKey entryNormalLocated
+    (by decide) (by decide) (by decide)
+
+example (left right : LocatedEdge Terminal)
+    (leftMem : left ∈ good.locatedEdges) (rightMem : right ∈ good.locatedEdges)
+    (sameKey : left.key = right.key) : left = right :=
+  good.locatedEdge_eq_of_mem_of_mem_of_key_eq left right (by decide)
+    leftMem rightMem sameKey
 
 example : (good.findEdge? ⟨blockId "missing", exitTag "normal"⟩).isNone = true :=
   by decide
@@ -181,6 +194,18 @@ def duplicateExitDestination : Graph Nat Terminal where
   ] }, returnBlock]
 
 example : ¬ duplicateExitDestination.WellFormed := by decide
+
+def duplicateDirectLocated : LocatedEdge Terminal :=
+  ⟨blockId "entry", ⟨exitTag "normal", .block (blockId "return")⟩⟩
+
+def duplicateTerminalLocated : LocatedEdge Terminal :=
+  ⟨blockId "entry", ⟨exitTag "normal", .terminal .returned⟩⟩
+
+example : duplicateDirectLocated ∈ duplicateExitDestination.locatedEdges ∧
+    duplicateTerminalLocated ∈ duplicateExitDestination.locatedEdges ∧
+    duplicateDirectLocated.key = duplicateTerminalLocated.key := by decide
+
+example : duplicateDirectLocated ≠ duplicateTerminalLocated := by decide
 
 def duplicateContractExit : Graph Nat Terminal where
   entry := blockId "entry"
