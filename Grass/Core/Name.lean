@@ -16,8 +16,6 @@ registration property of the profile that declares a name, not a property of
 this type. `docs/FOUNDATION.md` law 8 still applies to consumers, so an
 unrecognized name is rejected rather than approximated.
 
-**Custody note.** `Grass.Core` is not owned by the memory agent. This module is
-temporary custody under `docs/MEMORY_IMPLEMENTATION_PLAN.md` §2.
 -/
 
 namespace Grass.Core
