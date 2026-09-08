@@ -567,6 +567,28 @@ theorem requiring disjoint ownership, noninterference, and obligation
 preservation. Progress measures/frontier laws require dedicated refinement and
 are not transported by ordinary consequence.
 
+The checked seam from those local region certificates into Foundation is
+`BehaviorRefinement.segment`. A `RefinementLens` selects the exact abstract
+audit segment, preserves concatenation, and proves the selected functional
+observation exact. Zero abstract steps may represent finite internal work; one
+or several abstract steps may represent a lowering boundary. This is not a
+license for silent spinning: `InfiniteRefinement` requires every abstract
+prefix to occur within a projected concrete segment and every complete concrete
+boundary to match an abstract boundary exactly. Thus a zero-denotation SCC needs
+a well-founded exit argument or a genuinely matched abstract divergence.
+`BehaviorRefinement.lockstep` remains the convenient derived constructor for
+already aligned transition systems.
+
+Functional hiding never discharges a safety claim.
+`SpecProcess.evidenceRelevant` keys relevant audit occurrences by stable,
+open-world requirement identity (including derived stages), and
+`RefinementLens.evidenceNonErasing` retains their order and
+multiplicity even when `RefinementLens.observationExact` proves that the
+functional view legitimately omits them. Assembly tooling may generate CFG
+path/SCC coverage and local summaries, but those tools do not become a proof
+kernel; Lean checks the resulting segment, terminal, infinite, and evidence
+witnesses.
+
 Phase one of `asm_source` emits syntax/source identities only; it cannot claim a
 semantic boundary identity before the exact process/platform contract exists.
 Phase two computes stable alpha-normalized boundary facets and emits each block
