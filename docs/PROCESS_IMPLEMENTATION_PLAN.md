@@ -5133,7 +5133,8 @@ written to refuse two others.
 `UnkilledRootAt`'s death clause was first written as
 `∀ (reason) (sameKind : incarnation.kind = kind), (sameKind ▸ incarnation.lifecycle) ≠ .died reason`.
 `LogicalProcessNetworkCore.instances` returns a `ProcessInstance` whose `kind`
-field is tied to the slot by nothing short of `WellFormed.slotsAgree`, so at a
+field is tied to the slot by nothing short of
+`LogicalProcessNetworkCore.WellFormed.slotsAgree`, so at a
 world storing an incarnation of the wrong kind the guard is uninhabited and the
 clause says nothing. Local adversarial review built that world and proved
 `UnkilledRootAt` held at one whose root slot contained a corpse.
@@ -5269,10 +5270,60 @@ declaration's hypotheses. It was one binder further in.
 round one. What is wrong, every round, is the prose -- and increasingly the prose
 written by the previous round's fix. A correction is a new claim, made in a hurry,
 about code that has just changed underneath it, and it gets the same scrutiny the
-original never had only because somebody reads it cold afterwards. Rounds
-fourteen through sixteen produced eleven corrections and nine new defects between
-them. The rate is not obviously falling, and the honest reading is that a fix
-should be reviewed as a change rather than trusted as a repair.
+original never had only because somebody reads it cold afterwards. Across rounds
+fourteen through seventeen, most of what each round found was in the previous
+round's fix -- stated without a number, because the set is open and this
+section's own first rule says a count is safe only over something closed. An
+earlier version of this paragraph gave two, and neither could be reconstructed
+from the tree. The rate is not obviously falling, and the honest reading is that
+a fix should be reviewed as a change rather than trusted as a repair.
+
+**Round seventeen, and the gate cannot see the rule this section asks for.**
+This section's own bullet says to resolve every backticked name *prefix
+included*. Round seventeen found `ProcessPlan.parentless_slot_survives` in a
+docstring; the declaration is inside `namespace NetworkTransition`, so its name
+is `ProcessPlan.NetworkTransition.parentless_slot_survives` and the citation
+resolves to nothing. The docstring audit passed it, because that gate matches a
+name's last component. Every wrong prefix over a real declaration is invisible to
+it, and the bullet was being followed by eye.
+
+It is now followed by Lean. Generating one `#check @Name` per distinct dotted
+citation on the branch's added lines and elaborating the file is authoritative in
+a way grep is not, and it found a second one this section had carried since
+§10.134 was written: `WellFormed.slotsAgree`, where the field belongs to
+`LogicalProcessNetworkCore.WellFormed`. The harness lives outside the repository
+for the reason §10.137 records about its sibling, and `agent-bus` `c-process:106`
+has the mechanical half with the gate's owner. What is worth saying here is the
+shape: a rule stated in prose, believed to be enforced, and enforced by nothing.
+
+The other four findings are the same class as round sixteen's -- all in text
+round sixteen wrote.
+
+*"`serverPlan` is a plan whose restart relation is empty everywhere"* is false.
+`Tests/Process/RestartFixtures.lean`'s `a_supervised_restart` inhabits it at a
+connection slot. What was proved is `no_restart_at_the_root_slot`, at one slot,
+and the sentence generalised it to the plan -- the scope-word defect this section
+says nothing mechanical catches, committed in the paragraph that cites the rule.
+
+*"the only way a parentless slot loses its instance"* names an event that never
+happens: `Restarts.nowLive` puts an incarnation there, so no transition empties
+the slot. The theorem says a restart is the only way it stops holding a
+*parentless* instance, and the same file states it correctly thirteen hundred
+lines later.
+
+*"no field of `Restarts` refuses one at a parentless slot"* was inferred from one
+of ten fields. `wasEnded` does constrain the old incarnation, so the conclusion
+holds only once the root has ended -- which the preceding sentence assumes and
+this one did not carry.
+
+*"the five ending branches that carry one"* -- six carry one. The sixth is
+`childDied`, whose ending is literally `.died reason` and which closes through
+`wasChild` with no cast, which is the more interesting half of the observation
+and was lost to a wrong count.
+
+And `dying_was_supervised_or_untouched`'s headline was still
+`dying_was_supervised`'s statement, one artefact over from where round fifteen
+found the same mismatch.
 
 ### 10.135 A role that may write no region owes nothing
 

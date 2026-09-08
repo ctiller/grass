@@ -1190,20 +1190,27 @@ structure Restarts (before after : plan.LogicalProcessNetwork)
 
   The intended reading is that if a root ends the program is over, and starting
   again is a new run — `ExactInitialNetwork`, not a transition. Nothing in this
-  family enforces that, and the argument is structural: `restartsAChild` above
-  constrains only the new incarnation, so no field of `Restarts` refuses one at a
-  parentless slot. `ProcessPlan.parentless_slot_survives` is the separate fact
-  that such a restart is the *only* way a parentless slot loses its instance,
-  which is why `ProcessPlan.execution_holds_an_unkilled_root` takes its absence
-  as a hypothesis rather than deriving it.
+  family enforces that, and the argument is structural: of the ten fields,
+  `wasEnded` asks only that the old incarnation had ended, and no other mentions
+  it at all. So once a root ends, no field of `Restarts` refuses a restart at its
+  slot. `NetworkTransition.parentless_slot_survives` is the separate fact that
+  such a restart is the *only* way a parentless slot stops holding a *parentless*
+  instance — it never stops holding an instance at all, since `nowLive` puts one
+  there — which is why `ProcessPlan.execution_holds_an_unkilled_root` takes its
+  absence as a hypothesis rather than deriving it.
 
-  An earlier version of this paragraph cited `parentless_slot_survives` for the
-  first claim as well, which it cannot carry: a disjunction is not an inhabitance
-  proof of its right disjunct, and that theorem holds just as well at a plan
-  whose restart relation is empty everywhere. `serverPlan` is such a plan --
+  Two earlier versions of this paragraph were wrong in ways worth keeping. One
+  cited `parentless_slot_survives` for the first claim, which it cannot carry: a
+  disjunction is not an inhabitance proof of its right disjunct, and that theorem
+  holds just as well at a plan admitting no restart at that slot. The other said
+  `serverPlan` is a plan whose restart relation is empty *everywhere*, which is
+  false, and is the scope-word defect §10.134 says nothing mechanical catches.
   `Tests/Process/PreservationFixtures.lean`'s `no_restart_at_the_root_slot`
-  refutes the relation there -- and no witness of a root restart exists anywhere
-  in the corpus. `agent-bus` `g-design:167` is the open question.
+  refutes the relation at the listener's slot;
+  `Tests/Process/RestartFixtures.lean`'s `a_supervised_restart` inhabits it at a
+  connection slot. What is true, and all the argument needs, is that no witness
+  of a restart at a *root's* slot exists anywhere in the corpus. `agent-bus`
+  `g-design:167` is the open question.
 
   Found by working `ProcessPlan.wellFormed_preserved` clause by clause and asking
   which constructor could break each. `Spawns` was fixed in the same pass and
@@ -2247,7 +2254,8 @@ theorem moving_the_ledger_ends_an_instance (transition : plan.NetworkTransition 
   | detach _ _ step => exact absurd (step.onlyThatSlot.scope .obligations (by simp)) moved
 
 /--
-**A step that kills an instance found it recording a current parent.**
+**A slot found dead after a step either recorded a current parent, or was already
+dead of that reason and the step did not touch it.**
 
 `docs/PROCESS.md` §3's supervision half, stated over the whole family rather than
 over one constructor: `.died` is written by `childDied` alone and `childDied`
@@ -2308,10 +2316,12 @@ form in two lines, and every consumer takes that one.
 Note that `dead` and the disjuncts are stated at the *incarnation's* own kind.
 `ProcessInstance.lifecycle` is indexed by the incarnation's `kind`, not the
 slot's; what needs `ProcessLifecycle.died_cast` is `EndsInstance.nowEnded`, whose
-`ending` argument is at the slot's kind, in the five ending branches that carry
-one. It is inside the proof and does not reach the statement. An earlier version
-of this sentence also named `Detaches.identityPreserved`; the `detach` branch
-goes through `wasAttached` and uses no cast at all. §10.134.
+`ending` argument is at the slot's kind, in five of the six ending branches. It
+is inside the proof and does not reach the statement. Two earlier versions of
+this sentence were wrong about which branches: one named
+`Detaches.identityPreserved`, and `detach` goes through `wasAttached` with no
+cast; the other said five branches carry an ending, where six do and `childDied`
+is the sixth, closing through `wasChild` for the same reason. §10.134.
 -/
 theorem dying_was_supervised_or_untouched (transition : plan.NetworkTransition before after)
     {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
