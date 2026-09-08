@@ -12,7 +12,7 @@ def constantHasher : MerkleHasher where
   leaf := fun _ => digest
   branch := fun _ _ => digest
 
-def environment (sourceValue : Nat) : SemanticEnvironment where
+def metadata (sourceValue : Nat) : SemanticEnvironmentMetadata where
   source := ⟨Vec.singleton (BitVec.ofNat 8 sourceValue)⟩
   importedSummaries := Vec.empty
   semanticProfile := digest
@@ -22,34 +22,37 @@ def environment (sourceValue : Nat) : SemanticEnvironment where
   options := digest
   auditPolicy := digest
 
-def Certificate (_ : SemanticEnvironment) := Unit
+def Certificate (_ : Nat) := Unit
 
-def entry (sourceValue : Nat) : CertifiedCacheEntry constantHasher Certificate where
+def entry (sourceValue : Nat) : CertifiedCacheEntry constantHasher Nat metadata
+    Certificate where
+  exactEnvironment := sourceValue
   record := {
-    environment := environment sourceValue
+    metadata := metadata sourceValue
     key := digest
     keyExact := rfl
   }
+  metadataExact := rfl
   certificate := ()
 
-def collidingStore : CacheStore constantHasher Certificate where
+def collidingStore : CacheStore constantHasher Nat metadata Certificate where
   entries := Vec.singleton (entry 1) ++ Vec.singleton (entry 2)
 
-example : (collidingStore.candidatesFor (environment 2)).length = 2 := by
+example : (collidingStore.candidatesFor 2).length = 2 := by
   decide
 
 /-- The first digest collision is skipped and the later exact entry replays. -/
-example : (replayFromStore? (environment 2) collidingStore).isSome = true := by
+example : (replayFromStore? 2 collidingStore).isSome = true := by
   decide
 
 /-- Digest agreement without an exact environment never authorizes replay. -/
-example : replayFromStore? (environment 3) collidingStore = none := by
+example : replayFromStore? 3 collidingStore = none := by
   decide
 
 example :
-    (replayFromStore? (environment 2) collidingStore).isSome = true ↔
-      ∃ candidate ∈ collidingStore.candidatesFor (environment 2),
-        ReplayEligible (environment 2) candidate.record :=
+    (replayFromStore? 2 collidingStore).isSome = true ↔
+      ∃ candidate ∈ collidingStore.candidatesFor 2,
+        ReplayEligible 2 candidate :=
   replayFromStore?_isSome_iff ..
 
 end Grass.Tests.Build.Cache.Store

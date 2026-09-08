@@ -14,7 +14,7 @@ def constantHasher : MerkleHasher where
   leaf _ := emptyDigest
   branch _ _ := emptyDigest
 
-def environmentA : SemanticEnvironment where
+def environmentA : SemanticEnvironmentMetadata where
   source := ⟨Vec.singleton 0⟩
   importedSummaries := Vec.empty
   semanticProfile := emptyDigest
@@ -24,7 +24,7 @@ def environmentA : SemanticEnvironment where
   options := emptyDigest
   auditPolicy := emptyDigest
 
-def environmentB : SemanticEnvironment :=
+def environmentB : SemanticEnvironmentMetadata :=
   { environmentA with source := ⟨Vec.singleton 1⟩ }
 
 example : cacheKey constantHasher environmentA = cacheKey constantHasher environmentB := rfl
@@ -32,14 +32,8 @@ example : cacheKey constantHasher environmentA = cacheKey constantHasher environ
 example : environmentA ≠ environmentB := by decide
 
 def recordA : CacheRecord constantHasher where
-  environment := environmentA
+  metadata := environmentA
   key := cacheKey constantHasher environmentA
   keyExact := rfl
-
-example : ¬ReplayEligible environmentB recordA := by
-  unfold ReplayEligible recordA
-  decide
-
-example : ReplayEligible environmentA recordA := rfl
 
 end Grass.Tests.Build.Cache

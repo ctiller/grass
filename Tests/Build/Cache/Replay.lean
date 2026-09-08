@@ -16,7 +16,7 @@ def constantHasher : MerkleHasher where
   leaf _ := emptyDigest
   branch _ _ := emptyDigest
 
-def environmentA : SemanticEnvironment where
+def sharedMetadata : SemanticEnvironmentMetadata where
   source := ⟨Vec.singleton 0⟩
   importedSummaries := Vec.empty
   semanticProfile := emptyDigest
@@ -26,27 +26,43 @@ def environmentA : SemanticEnvironment where
   options := emptyDigest
   auditPolicy := emptyDigest
 
-def environmentB : SemanticEnvironment :=
-  { environmentA with source := ⟨Vec.singleton 1⟩ }
+inductive ActualSource where
+  | a
+  | b
+  deriving DecidableEq, Repr
 
-structure ExactCertificate (environment : SemanticEnvironment) : Type where
-  exact : environment = environmentA
+def metadataOf (_ : ActualSource) : SemanticEnvironmentMetadata :=
+  sharedMetadata
 
-def entryA : CertifiedCacheEntry constantHasher ExactCertificate where
+structure ExactCertificate (source : ActualSource) : Type where
+  exact : source = .a
+
+def entryA : CertifiedCacheEntry constantHasher ActualSource metadataOf
+    ExactCertificate where
+  exactEnvironment := .a
   record :=
-    { environment := environmentA
-      key := cacheKey constantHasher environmentA
+    { metadata := sharedMetadata
+      key := cacheKey constantHasher sharedMetadata
       keyExact := rfl }
+  metadataExact := rfl
   certificate := ⟨rfl⟩
 
-example : cacheKey constantHasher environmentA = cacheKey constantHasher environmentB := rfl
+example : ActualSource.a ≠ ActualSource.b := by decide
 
-example : (replay? environmentA entryA).isSome = true := by
-  exact (replay?_isSome_iff environmentA entryA).2 rfl
+example : metadataOf .a = metadataOf .b := rfl
 
-example : replay? environmentB entryA = none := by
-  apply (replay?_eq_none_iff environmentB entryA).2
-  unfold ReplayEligible entryA
+example : cacheKey constantHasher (metadataOf .a) =
+    cacheKey constantHasher (metadataOf .b) := rfl
+
+example : (replay? ActualSource.a entryA).isSome = true := by
+  exact (replay?_isSome_iff ActualSource.a entryA).2 rfl
+
+example : ExactCertificate ActualSource.a :=
+  replayExact entryA rfl
+
+example : replay? ActualSource.b entryA = none := by
+  apply (replay?_eq_none_iff ActualSource.b entryA).2
+  unfold ReplayEligible
   decide
 
 end ReplayFixture

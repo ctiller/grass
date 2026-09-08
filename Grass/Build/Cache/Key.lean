@@ -4,9 +4,9 @@ import Grass.Std.Logical.Vec
 /-!
 # Semantic-environment cache keys
 
-Cache digests are lookup aids, never proof authority. This module therefore
-keeps the exact semantic environment beside its Merkle key and defines replay
-eligibility by environment equality, not digest equality.
+Cache digests and their structured metadata are lookup aids, never proof
+authority. Exact proof indices are retained separately by `CertifiedCacheEntry`
+in `Grass.Build.Cache.Replay`.
 -/
 
 namespace Grass.Build.Cache
@@ -26,9 +26,9 @@ structure ImportedSummary where
   summary : Digest
   deriving DecidableEq, Repr
 
-/-- Every semantic input which may change a cached proof or artifact. The import
-sequence is retained rather than replaced by its root digest. -/
-structure SemanticEnvironment where
+/-- Digest metadata for every semantic input which may change a cached proof or
+artifact. This is a lookup/invalidation preimage, not an exact proof index. -/
+structure SemanticEnvironmentMetadata where
   source : Digest
   importedSummaries : Vec ImportedSummary
   semanticProfile : Digest
@@ -87,7 +87,8 @@ def importedSummariesTree (imports : Vec ImportedSummary) : MerkleTree :=
     (.leaf .noMoreImports)
 
 /-- Canonical tree shape for every semantic-environment component. -/
-def SemanticEnvironment.merkleTree (environment : SemanticEnvironment) : MerkleTree :=
+def SemanticEnvironmentMetadata.merkleTree
+    (environment : SemanticEnvironmentMetadata) : MerkleTree :=
   let audit := .leaf (.auditPolicy environment.auditPolicy)
   let options := .branch (.leaf (.options environment.options)) audit
   let generator := .branch (.leaf (.generator environment.generator)) options
@@ -98,28 +99,15 @@ def SemanticEnvironment.merkleTree (environment : SemanticEnvironment) : MerkleT
   .branch (.leaf (.source environment.source)) imports
 
 /-- The lookup key produced from the complete semantic environment. -/
-def cacheKey (hasher : MerkleHasher) (environment : SemanticEnvironment) : Digest :=
+def cacheKey (hasher : MerkleHasher)
+    (environment : SemanticEnvironmentMetadata) : Digest :=
   environment.merkleTree.digest hasher
 
-/-- A cache index entry retains the exact environment whose digest it stores. -/
+/-- A cache index record retains the complete digest metadata behind its key.
+Neither this record nor equality of its fields authorizes proof transport. -/
 structure CacheRecord (hasher : MerkleHasher) where
-  environment : SemanticEnvironment
+  metadata : SemanticEnvironmentMetadata
   key : Digest
-  keyExact : cacheKey hasher environment = key
-
-/-- Replay is eligible only for the exact reconstructed semantic environment.
-The cached digest is deliberately absent from this predicate. -/
-def ReplayEligible {hasher : MerkleHasher}
-    (requested : SemanticEnvironment) (record : CacheRecord hasher) : Prop :=
-  requested = record.environment
-
-/-- Exact environment reconstruction implies that the stored lookup key is the
-key of the requested environment. The converse is intentionally unavailable. -/
-theorem ReplayEligible.key_matches {hasher : MerkleHasher}
-    {requested : SemanticEnvironment} {record : CacheRecord hasher}
-    (eligible : ReplayEligible requested record) :
-    record.key = cacheKey hasher requested := by
-  subst requested
-  exact record.keyExact.symm
+  keyExact : cacheKey hasher metadata = key
 
 end Grass.Build.Cache
