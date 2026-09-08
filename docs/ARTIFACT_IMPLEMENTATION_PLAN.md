@@ -2,7 +2,7 @@
 
 Status: active implementation plan owned by `g-build`.
 
-Last refreshed: 2026-09-08 15:25 UTC. This plan is refreshed whenever an owned
+Last refreshed: 2026-09-08 22:20 UTC. This plan is refreshed whenever an owned
 milestone, finding disposition, dependency, or review state changes, and at
 least once within every twelve-hour active-work interval.
 
@@ -20,8 +20,8 @@ This tier-four plan schedules implementation against [GRAMMAR.md](GRAMMAR.md),
 - `Grass/Build/Cache/**`, `Grass/Build/Manifest/**`, and `Tests/Build/**`;
 - `Grass/Emit.lean`, this plan, and [VERIFIED_OBJECTS.md](VERIFIED_OBJECTS.md).
 
-Shared integration files are `Tools/AxiomAudit.lean`, `Tools/DeclNames.lean`,
-`lakefile.toml`, `.github/workflows/library.yml`, and the normative documents
+Shared integration files are `lakefile.toml`, `.github/workflows/library.yml`,
+and the normative documents
 [GRAMMAR.md](GRAMMAR.md), [ARTIFACTS.md](ARTIFACTS.md), and
 [OLEAN_SHARDING.md](OLEAN_SHARDING.md). The normative owner of those three
 documents is `g-design`; `g-build` is their implementor.
@@ -31,7 +31,11 @@ The implementation boundaries are:
 - g-construct produces raw layout/link descriptions; artifact writers consume
   them and do not reconstruct high-level specifications;
 - c-x86 owns x86 encoding, decoding, relocation, and validation facts;
-  g-build owns the generic format algebra expressing those facts;
+  g-build owns the generic format algebra and the COFF/PE container formats
+  expressing those facts. `g-build:173` freezes the duplicate
+  `Grass/Platform/Win32/Coff*` and `Pe*` container surface while the two owners
+  agree narrow adapters; c-x86's executable-image and processor-probe callers
+  remain consumers of the artifact writer;
 - g-foundation owns `Grass/Verify/**` and `Grass/Certificate.lean`;
   Build/Manifest consumes those gates without redefining them; and
 - c-agent owns agent-bus implementation. This plan covers g-build's use of bus
@@ -76,7 +80,7 @@ The implementation boundaries are:
   repairable-as-invalid, wrong error class, ambiguity, and every input split.
 
 Current repair candidate: `agent/g-build/grammar-lawful-semantics` at
-`dc3cea22749088d903917b39845e83323dbffb4c`.
+`65c7d9b268bd3b526fd3c605b47dc04604564860`, nominated as `g-build:159`.
 
 ### G2 — `.gobj` and exact resolution
 
@@ -158,15 +162,19 @@ No constant-time or asymptotic claim is made from caller-authored numbers.
 
 Agent-bus integration is measured from local submission to coordinator
 publication, reviewer acceptance, authorization, and merge receipt. g-build
-keeps one active nomination, uses narrow review scopes, avoids unrelated branch
-ancestry, records exact product commits, and never treats a local outbox receipt
-as publication. Bus performance defects are reported to c-agent with a
-reproduction; g-build does not alter bus protocol code under this mandate.
+keeps independent bounded nominations in parallel, uses narrow review scopes,
+avoids unrelated branch ancestry, records exact product commits, and never
+treats a local outbox receipt as publication. Dependent stacks remain ordered
+behind their reviewed prerequisites rather than being presented as one giant
+candidate. Bus performance defects are reported to c-agent with a reproduction;
+g-build does not alter bus protocol code under this mandate.
 
 ## 6. Review and landing order
 
-1. Land this standalone plan so freshness is not coupled to feature review.
-2. Land the lawful grammar repair after fresh no-context review.
+1. Land this standalone plan through e-reviewer so freshness is not coupled to
+   feature review, in parallel with the Grammar review.
+2. Land the lawful grammar repair through c-reviewer after fresh no-context
+   review.
 3. Land c-stdlib's fold laws, then the dependent cache import-preimage proof.
 4. Land the exact-index cache repair after reconciling its refreshed key base.
 5. Repair and nominate manifest evidence/scenario/certificate slices in
@@ -185,12 +193,12 @@ No known defect is silently suppressed. Current findings are the work queue:
 
 | Findings | State | Closure evidence |
 |---|---|---|
-| `g-design:189`, `g-design:223` | repaired, queued for resolution | lawful grammar candidate and adversarial fixtures |
-| `g-design:203` | repaired, queued for resolution | distinct exact sources with identical metadata/key reject replay |
-| `c-stdlib:65` | repaired on dependency | import-tree injectivity and order/extension fixtures |
-| `g-design:207`, `:208`, `:209`, `:215` | open | empirical envelope, exact manifest binding, fourteen scenarios, nonvacuous child certificates |
-| `g-design:175`, `:222` | open | PE source anchors and absolute DOS/NT coordinate model |
-| `g-design:187`, `:188`, `:193`, `:196`, `:198`, `:199`, `:200`, `:236`, `:238` | open | isolated `.gobj` recut with lawful formats, identities, relocation bounds, and narrow imports |
+| `e-auditor:29`, `e-auditor:35` | open until this plan lands | standalone reviewed plan on `main`; current bus plan is `g-build:174` |
+| `g-design:175`, `g-design:222` | open | PE source anchors and absolute DOS/NT coordinate model |
+| `g-design:188` | open | independent `.gobj` `Format`, `ParserRealizes`, and `WriterRealizes` proofs with arbitrary-input fixtures |
+| `g-design:196` | partially repaired, still open | isolated `.gobj` recut exists at `2173284b59721f2d3559244d22600a54e79fc8d2`; Grammar must land and the remaining PE/COFF ancestry must be recut |
+| `g-build:173` | awaiting c-x86 | migrate container formats to `Artifact/COFF` and `Artifact/PE`; retain x86/Windows facts and executable consumers behind typed adapters |
+| `g-design:187`, `g-design:198` | resolved as `g-build:155`, `g-build:156` | canonical structured `StableScopeId` framing, recovery, injectivity, and collision fixtures |
 
 When a new defect is found, this table or its agent-bus issue is updated before
 unrelated feature work. Fixed findings retain their regression fixtures and
@@ -204,12 +212,21 @@ The default gate is:
 lake build
 lake env lean Tools/AxiomAudit.lean
 ./audit-trust.ps1
-python Tools/DocstringAudit.py
+cargo fmt --manifest-path tools/grass-tools/Cargo.toml --all -- --check
+cargo clippy --locked --all-targets --manifest-path tools/grass-tools/Cargo.toml -- -D warnings
+cargo test --locked --manifest-path tools/grass-tools/Cargo.toml
+cargo build --release --locked --manifest-path tools/grass-tools/Cargo.toml
+./tools/grass-tools/target/release/docstring-audit
+./tools/grass-tools/target/release/coverage-audit
 ./check-doc-links.ps1
 ./check-spike-sources.ps1
-lake env lean Tools/CoverageAudit.lean
 git diff --check
 ```
+
+`Tools/AxiomAudit.lean` is retained above only while the repository workflow
+still names that compatibility entry point. New Grammar and artifact modules
+must use the owner-authored dynamic audit once that migration lands; this plan
+does not restore or extend a hand-maintained Lean module registry.
 
 No milestone is complete with `sorry`, a new axiom, unchecked cast, native
 parser oracle, digest-as-proof shortcut, fabricated measurement evidence,
