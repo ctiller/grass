@@ -1,0 +1,2279 @@
+import Grass.Process.Network.Plan
+
+/-!
+# What one step of a logical process network is
+
+`docs/PROCESS.md` §3 declares `NetworkTransition` with twenty-three constructors
+and then says what the enumeration is for:
+
+> Each constructor carries exact pre/post worlds, endpoint incarnations, the
+> demand/channel embedding, occurrence and resolve token, lifecycle authority,
+> and obligation equation. Routing coverage proves every endpoint input/output
+> enters through exactly one constructor: no fabrication, bypass, or
+> unclassified death is possible.
+
+and, about freshness:
+
+> `allocatedNominals` is definitionally empty for nonallocating transitions and
+> contains every new process generation, channel epoch, local/child/message
+> occurrence, restart identity, and coalesced replacement for allocating ones.
+> Thus freshness is a fact about the exact before/after transition and every
+> other step preserves history by `historyExact`; no ambient predicate can
+> reinterpret it as current-live freshness.
+
+## Every constructor names its scope
+
+The organising idea here is not in §3's declaration but is what makes it
+checkable: **each constructor carries the set of fragments it may change**, and
+a proof that it changed nothing else. `TouchesOnly` below is that, stated over
+`LogicalProcessNetworkCore.Agrees` — the same relation
+`Grass/Process/Network/Assertion.lean`'s framing is stated over.
+
+That is what §8's `WeaveInvariantMixin` means by `TransitionScope step`, and it
+is what turns `Grass/Process/Network/Channel.lean`'s
+`escrow_survives_unrelated_steps` from a theorem with a hypothesis into a
+theorem about *steps*: a mixin whose assertion avoids a transition's scope is
+preserved by it, and the scope is now something a transition supplies rather
+than something a caller asserts.
+
+## The escrow resolutions share a shape, and four of them have outgrown it
+
+`acknowledgeCancel`, `timeout`, `senderDeath`, `receiverDeath`, `drop` and
+`coalesce` all do the same thing to the world: they take one outstanding
+occurrence on one session and write one `ChannelResolution` for it.
+`ResolvesEscrow` is that shape, and those six share it.
+
+Four no longer do, and each moved out for a reason a consumer found.
+`receive` is a `Delivers` because it advances the receiver's session cursor;
+`channelClose` a `ClosesSession` and `channelDeath` a `KillsSession` because
+they move the session's *status*, which nothing could produce while they were
+bare resolutions; and `reroute` a `Reroutes` because it has to write the
+destination's ledger, which `ResolvesEscrow`'s scope forbade.
+
+They stay separate constructors rather than one `resolve` carrying a
+`ChannelResolution`, because §3's routing-coverage claim is about constructors:
+"every endpoint input and output enters through exactly one constructor". A
+single constructor would make the claim vacuous — everything enters through the
+one — and would lose the property `resolution_is_exact` proves, that a
+constructor determines which resolution was written.
+
+The same argument is why `childLifecycle` was split into `childCancelled` and
+`childDied`: taking an arbitrary `ProcessLifecycle` it subsumed `interrupt`,
+`fault`, `environmentViolation` and `processTermination`, so "exactly one
+constructor" was false on the instance-ending side.
+
+## What is not here
+
+`allocatedNominals` is `Grass/Process/Nominal.lean`'s `Allocation`, and the
+freshness law is `NominalHistory.Admissible` — both already existed, so
+`NetworkStep` is thin. `Spawns.allocatesTheGeneration` and
+`Restarts.allocatesTheGeneration` now do check that the allocation contains the
+generation the instance carries, which closes what
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.18 recorded.
+
+What is still not checked is the other direction: `send`, `coalesce` and
+`reroute` create message occurrences and are declared non-allocating, against
+§3's list of what `allocatedNominals` contains. §10.36 records it.
+-/
+
+namespace Grass.Process
+
+open Grass.Specification
+
+universe u w v r m o
+
+variable {registry : ProtocolRegistry.{u, w, v}} {boundary : DriverBoundary.{u}}
+  {Obligations : Type o}
+
+namespace ProcessPlan
+
+variable (plan : ProcessPlan.{u, w, v, r, m, o} registry boundary Obligations)
+
+/--
+A step changed nothing outside these fragments.
+
+The scope `docs/PROCESS.md` §8 quantifies over when it says a mixin frames past
+a transition whose scope is disjoint from its own. Stated over the canonical
+agreement, so it composes directly with
+`Grass/Process/Network/Assertion.lean`'s frame rule.
+-/
+def TouchesOnly (before after : plan.LogicalProcessNetwork)
+    (scope : NetworkFragment plan.topology → Prop) : Prop :=
+  ∀ fragment, ¬ scope fragment →
+    LogicalProcessNetworkCore.Agrees fragment before after
+
+/-- Nothing changed at all. -/
+theorem touchesOnly_refl (network : plan.LogicalProcessNetwork)
+    (scope : NetworkFragment plan.topology → Prop) :
+    plan.TouchesOnly network network scope :=
+  fun fragment _ => LogicalProcessNetworkCore.agrees_refl fragment network
+
+/-- A smaller scope is a stronger claim. -/
+theorem touchesOnly_mono {before after : plan.LogicalProcessNetwork}
+    {narrow wide : NetworkFragment plan.topology → Prop}
+    (contained : ∀ fragment, narrow fragment → wide fragment)
+    (touched : plan.TouchesOnly before after narrow) :
+    plan.TouchesOnly before after wide :=
+  fun fragment outside => touched fragment (fun inNarrow => outside (contained fragment inNarrow))
+
+/--
+One occurrence on one session stops being in flight.
+
+The shape shared by every ending in `Grass/Process/Network/Escrow.lean`'s
+`ChannelResolution`. The `resolution` parameter is what distinguishes the ten
+constructors that use it.
+-/
+structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (occurrence : EdgeOccurrence plan.topology plan.message edge)
+    (resolution : ChannelResolution
+      (EdgeOccurrence plan.topology plan.message edge)
+      (plan.topology.ChannelId edge)) : Prop where
+  /--
+  **And it is this session's occurrence.**
+
+  `session` and `occurrence` are independent parameters, and an
+  `EdgeOccurrence` carries its own `ChannelId` — so without this a resolution
+  could be recorded against a session the message was never on.
+
+  That is not untidiness. `docs/PROCESS.md` §3 puts an affine resolve token
+  inside `Escrow`, and `EscrowLedger.atMostOneRecordedEnding` enforces it *per
+  ledger*: one occurrence can therefore be resolved once on each of two
+  sessions and neither ledger notices. Local adversarial review built the
+  two-step program — reroute an occurrence from `wire` to `away`, where
+  `Reroutes.arrives` lets the destination acquire the occurrence itself, then
+  drop it there — and read out two `ChannelResolution`s for one occurrence at
+  one world. `ResolvesEscrow.cannot_resolve_twice` and `resolution_is_exact` are
+  both about one ledger and were both evaded.
+
+  `Delivers` has carried this field since it was written; the reviewer's point
+  was that its five siblings did not.
+  -/
+  onItsSession : occurrence.2.1 = session
+  /-- It was in flight. -/
+  wasOutstanding : (before.inFlight edge session).Outstanding occurrence
+  /-- It is now ended, by exactly this resolution. -/
+  nowResolved : (after.inFlight edge session).resolution occurrence = some resolution
+  /-- The ledger only moved forward: nothing erased, nothing reordered. -/
+  ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
+  /--
+  **And it resolves nothing else in this ledger.**
+
+  `ledgerExtends` forbids erasing; it does not forbid *adding*. Local
+  construction built a `drop` that appends an unrelated occurrence and resolves
+  it `.rerouted` to a session it never touches, breaking
+  `LogicalProcessNetworkCore.ReroutesLand` with every other field discharged.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.87.
+
+  This was briefly widened to `ResolvesOnlyAs`, on the reasoning that
+  `ChannelResolution.coalesced` "merges a carrier's fellow sources, plural" and so
+  one step must be able to end several. That conflated two things, and a reviewer
+  separated them: the *carrier* collects several sources, and each source is
+  consumed by its own `coalesce` step. §3's disposition acts on "that exact reply
+  occurrence", and the reviewer compiled a `drop` that disposes of two messages
+  while naming one — after which `NetworkTransition.drop`'s occurrence parameter
+  no longer determines what the step did. §10.95.
+
+  `ClosesSession` and `KillsSession` are the constructors that genuinely end a
+  whole session at once, and `ResolvesOnlyAs` is theirs.
+  -/
+  resolvesNothingElse : ResolvesNothingElse
+    (before.inFlight edge session) (after.inFlight edge session) occurrence
+  /-- **And it requests no cancellation**; see `EscrowLedger.RequestsNothing`. -/
+  requestsNothing : RequestsNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /--
+  **And an endpoint death is a death of that endpoint.**
+
+  `senderDeath` and `receiverDeath` are bare `ResolvesEscrow`s whose scope is one
+  session's escrow, and until this field they mentioned **no process at all**. A
+  reviewer ran two of them from `quiet` and read the result back: one session's
+  ledger recording that its sender died *and* that its receiver died, in a world
+  where neither incarnation has ever existed, with the session still `.open` to
+  further sends. `senderDeath`, `receiverDeath` and `drop` were the same relation
+  up to the tag written into the ledger — so the stored classification that
+  `docs/DECISIONS.md` decision 129 exists to make readable off network state was
+  fiction. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.114.
+
+  Every *instance*-ending constructor was made to earn its ending —
+  `Joins.wasTerminated`, `childCancelled`'s `wasChild`,
+  `EndsInstance.endingIsEarned`. The two escrow constructors that name a process
+  death were not, and the reference is right there in the `ChannelId`, so this
+  was a missing field rather than a layering boundary.
+
+  **Three things it has to say, and the first version said one.** §10.117.
+
+  * The incarnation **died**, and did not merely stop being `Live`.
+    `ProcessLifecycle.Live` is `running` and nothing else, so `¬ Live` is
+    satisfied by `.terminated` — a process that *finished its protocol* — as well
+    as by `.cancelled`, `.interrupted`, `.faulted` and `.violated`.
+    `ProcessDeathReason` is documented as why a process stopped "without
+    finishing", and `Grass/Process/Network/Death.lean` is explicit that a
+    terminated process did not die. A reviewer compiled the well-formed world
+    recording both.
+  * **For this reason.** The bound `reason` appeared nowhere in the first
+    version's conclusion, so `.senderDied .providerLost` could be written against
+    an incarnation that died `.supervised`. Decision 129's stored classification
+    is only readable off network state if the two agree.
+  * **And this incarnation.** The first version read the *slot* and never compared
+    generations, so a restarted incarnation satisfied a death recorded against its
+    predecessor's reference — the reviewer built that too. `ProcessRef` splits
+    `instanceId` from `generation` exactly so a stale reference fails, and
+    `EndsInstance.identityPreserved` and `Spawns.slotAgrees` are the siblings that
+    already check it.
+  -/
+  endpointDeathIsEarned :
+    (∀ reason, resolution = .senderDied reason →
+      ∃ incarnation,
+        before.instances (plan.topology.endpoints edge).1 session.sender.instanceId
+          = some incarnation ∧
+        incarnation.ref.generation = session.sender.generation ∧
+        incarnation.lifecycle = .died reason) ∧
+    (∀ reason, resolution = .receiverDied reason →
+      ∃ incarnation,
+        before.instances (plan.topology.endpoints edge).2 session.receiver.instanceId
+          = some incarnation ∧
+        incarnation.ref.generation = session.receiver.generation ∧
+        incarnation.lifecycle = .died reason)
+  /--
+  **And it creates nothing.**
+
+  Every carrier field this structure used to carry is gone, and so is the one
+  exception to "a resolution creates nothing". `ResolvesEscrow` was the coalesce
+  constructor's structure as well as the other five resolutions', so it had to
+  permit a step that adds a carrier to the ledger, and it carried
+  `carrierOnItsSession`, `carrierIsOutstanding`, `carrierIsPermitted` and a
+  `createsOnlyTheCarrier` that were vacuous at every resolution but `.coalesced`.
+
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.131 moved the coalesce to
+  `ProcessPlan.Coalesces`, which takes its whole source family in one step.
+  Nothing that remains here can create, so the bound is the simple one and the
+  four fields only a coalesce could satisfy are where they belong.
+
+  Four vacuous fields at five of six constructors is the shape §10.105 calls out —
+  a structure earning its generality by making most of its instances discharge
+  obligations that cannot fail — and `createsNothing` is what is left once the
+  one instance that needed them has its own structure.
+  -/
+  createsNothing : CreatesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- And nothing outside this session's escrow changed. -/
+  scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
+
+/--
+The receiver consumes an occurrence and advances its own cursor.
+
+A separate structure from `ResolvesEscrow` rather than a use of it, because its
+*scope is wider*: a delivery moves the escrow ledger **and** the session cursor.
+
+That distinction is the whole reason this exists. With `receive` built on
+`ResolvesEscrow` alone, no constructor of `NetworkTransition` named `.session`
+in its scope at all — so by `touchesOnly` a session's `delivered` count and its
+status could never move, for any step of any program. `ChannelSession.delivered`
+was provably constant, and a weave mixin about a session cursor framed past
+every step in the program, vacuously. `Grass/Process/Weave/Lens.lean`'s review
+is what surfaced it; the same defect for shared regions is recorded on
+`StepsLocally` below.
+
+`statusUnchanged` is what keeps the widening honest: a delivery advances the
+cursor and does not close a channel, so a caller reading the status still learns
+something from it.
+
+`contractual` was missing for four review passes, and its absence was the whole
+receive half of `Grass/Process/Network/Plan.lean`'s promised tie between a plan's
+contracts and its transitions. `SendsEscrow` had it; `ChannelSteps.Receive` was
+mentioned by no structure in this file, so `ChannelContract.receive` — §3's
+`ReceiverPre * Escrow ⊢ ReceiverPost` — was spent by nothing, and a `receive`
+transition could deliver an occurrence the plan's own relation forbids,
+including one whose `ReceiverPre` is false. Local adversarial review found it by
+grepping for the one place `plan.steps` was used and noticing there was only one.
+-/
+structure Delivers (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (occurrence : EdgeOccurrence plan.topology plan.message edge) : Prop where
+  /-- The edge's own receive relation admits this step. -/
+  contractual : (plan.steps edge).Receive occurrence.1 occurrence.2 before after
+  /--
+  **And it is this session's occurrence.**
+
+  `session` and `occurrence` were independent parameters, so a delivery could
+  read one session's ledger and advance another's cursor. Every other field is
+  stated at `session` and the occurrence carries its own, which is exactly the
+  shape `Spawns.slotAgrees` was added to close for instances.
+  -/
+  onItsSession : occurrence.2.1 = session
+  /-- It was in flight. -/
+  wasOutstanding : (before.inFlight edge session).Outstanding occurrence
+  /-- It is now received. -/
+  nowResolved : (after.inFlight edge session).resolution occurrence = some .received
+  /-- The ledger only moved forward. -/
+  ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
+  /--
+  **And it resolves nothing else in this ledger.**
+
+  The narrow form, and here it is the right one: `cursorAdvances` says the
+  receiver consumed *exactly one* message, so a delivery that also recorded a
+  second occurrence `.received` would be recording a delivery that did not
+  happen. See `ResolvesEscrow.resolvesOnlyAs` for why the siblings need the wider form.
+  -/
+  resolvesNothingElse : ResolvesNothingElse
+    (before.inFlight edge session) (after.inFlight edge session) occurrence
+  /-- **And it escrows nothing new**: a delivery consumes, it does not send. -/
+  createsNothing : CreatesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- **And it requests no cancellation.** -/
+  requestsNothing : RequestsNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- **The receiver's cursor advances by exactly one.** -/
+  cursorAdvances : (after.sessions edge session).delivered =
+    (before.sessions edge session).delivered + 1
+  /-- And the session is not closed by being read from. -/
+  statusUnchanged : (after.sessions edge session).status = (before.sessions edge session).status
+  /-- This session's escrow and this session's cursor, and nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session)
+
+namespace Delivers
+
+variable {plan}
+
+/--
+**A delivery establishes the receiver's postcondition.**
+
+`docs/PROCESS.md` §3: receive "consumes `ReceiverPre * Escrow` and establishes
+`ReceiverPost`; the sender never fabricates receiver state." The counterpart of
+`SendsEscrow.establishes_escrow`, and the theorem `contractual` exists for: until
+that field, `ChannelContract.receive` was a law about a relation no transition
+invoked.
+-/
+theorem establishes_receiverPost {before after edge session occurrence}
+    (delivered : plan.Delivers before after edge session occurrence)
+    (receiverPre : ((plan.channel edge).ReceiverPre occurrence.1 occurrence.2).holds before)
+    (escrowed : ((plan.channel edge).Escrow occurrence.1 occurrence.2).holds before) :
+    ((plan.channel edge).ReceiverPost occurrence.1 occurrence.2).holds after :=
+  (plan.channel edge).receive occurrence.1 occurrence.2 before after
+    delivered.contractual receiverPre escrowed
+
+end Delivers
+
+/--
+A channel is closed in the ordinary way.
+
+Like `Delivers`, wider than `ResolvesEscrow` because it moves the session's
+status. `docs/PROCESS.md` §3's `SessionStatus` has a `closed` constructor, and
+before this nothing could ever produce one.
+-/
+structure ClosesSession (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (occurrence : EdgeOccurrence plan.topology plan.message edge) : Prop where
+  /-- **And it is this session's occurrence**; see `ResolvesEscrow.onItsSession`
+  for the two-step program that field refuses. -/
+  onItsSession : occurrence.2.1 = session
+  /-- It was in flight. -/
+  wasOutstanding : (before.inFlight edge session).Outstanding occurrence
+  /-- The ledger only moved forward. -/
+  ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
+  /--
+  **And it ends everything that was in flight here, as a closure.**
+
+  `ChannelResolution.channelClosed` exists because "an occurrence in flight at an
+  ordinary close has no ending, and would either strand live forever or have to
+  be misrecorded as a death". Until this field, the close it enables did not
+  happen. A close names *one* occurrence, and local adversarial review built an
+  ordinary two-send world in which the second message is left `Outstanding` on a
+  `.closed` session — with no later close or death possible, since both demand
+  `wasOpen` — so it strands, or a `drop` misrecords it. That is precisely the
+  disjunction this resolution was added to break.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.90.
+
+  **The `other.2.1 = session` guard is `ResolvesEscrow.onItsSession`'s, and it was
+  missing here for one review round.** Without it this field *mandates* the very
+  defect that one refuses: a reviewer built a reroute whose destination acquires
+  the source session's own occurrence, after which every close of the destination
+  is obliged to write a second `ChannelResolution` for it while the first still
+  stands. §10.96.
+  -/
+  closesEverything : ∀ other, other.2.1 = session →
+    (before.inFlight edge session).Outstanding other →
+    (after.inFlight edge session).resolution other = some .channelClosed
+  /-- **And every occurrence it ends, it ends as a closure**; see `ResolvesEscrow.resolvesOnlyAs`. -/
+  resolvesOnlyAs : ResolvesOnlyAs
+    (before.inFlight edge session) (after.inFlight edge session) .channelClosed
+  /-- **And it escrows nothing new**: a close ends, it does not send. -/
+  createsNothing : CreatesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- **And it requests no cancellation.** -/
+  requestsNothing : RequestsNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- It was open; a channel is not closed twice, and not un-died. -/
+  wasOpen : (before.sessions edge session).status = .open
+  /-- **And the session is closed.** -/
+  nowClosed : (after.sessions edge session).status = .closed
+  /-- A close delivers nothing, so the cursor does not move. -/
+  cursorUnchanged : (after.sessions edge session).delivered =
+    (before.sessions edge session).delivered
+  /-- This session's escrow and this session's cursor, and nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session)
+
+namespace ResolvesEscrow
+
+variable {plan}
+
+/-- The resolution a step wrote is the one its constructor names. -/
+theorem resolution_is_exact {before after edge session occurrence resolution}
+    (resolved : plan.ResolvesEscrow before after edge session occurrence resolution)
+    {other} (alsoResolved :
+      (after.inFlight edge session).resolution occurrence = some other) :
+    resolution = other :=
+  (after.inFlight edge session).atMostOneRecordedEnding resolved.nowResolved alsoResolved
+
+/-- An occurrence that was already ended cannot be ended again, which is
+`cannot_resolve_twice`. -/
+theorem cannot_resolve_twice {before after edge session occurrence resolution}
+    (resolved : plan.ResolvesEscrow before after edge session occurrence resolution)
+    {earlier} (alreadyEnded :
+      (before.inFlight edge session).resolution occurrence = some earlier) : False := by
+  rw [resolved.wasOutstanding.2] at alreadyEnded
+  exact absurd alreadyEnded (by simp)
+
+/-- Every other session's escrow is untouched, so buffered delay elsewhere is sound. -/
+theorem other_sessions_untouched {before after edge session occurrence resolution}
+    (resolved : plan.ResolvesEscrow before after edge session occurrence resolution)
+    {otherEdge : plan.topology.ChannelKind}
+    {otherSession : plan.topology.ChannelId otherEdge}
+    (different : NetworkFragment.escrow otherEdge otherSession
+      ≠ NetworkFragment.escrow edge session) :
+    before.inFlight otherEdge otherSession = after.inFlight otherEdge otherSession :=
+  resolved.scope (.escrow otherEdge otherSession) different
+
+/-- And so is every instance, region, obligation and observation. -/
+theorem observations_untouched {before after edge session occurrence resolution}
+    (resolved : plan.ResolvesEscrow before after edge session occurrence resolution) :
+    before.observations = after.observations :=
+  resolved.scope .observations (by simp)
+
+end ResolvesEscrow
+
+/--
+**A coalesce: one step, the whole source family, one fresh carrier.**
+
+`docs/PROCESS.md` §3 says "coalescing consumes every source token and creates one
+fresh occurrence" — one transition — and `agent-bus` ruling `g-design:83` is
+explicit about what that means at this layer: "at the logical level the coalesce
+consumes all named sources and creates one fresh carrier atomically ... thus no
+intermediate partially coalesced logical world is observable". A concrete
+implementation may still realise it as finite silent steps under refinement.
+
+**Why this is a structure of its own, which is `docs/PROCESS_IMPLEMENTATION_PLAN.md`
+§10.131.** A coalesce used to be a `ResolvesEscrow` at resolution
+`.coalesced carrier`, and `ResolvesEscrow.resolvesNothingElse` lets a step resolve
+exactly the occurrence it names. So a merge of several sources was necessarily a
+*sequence* of steps into one carrier, and every intermediate world — carrier
+outstanding, some sources merged, others not — was a legal world of the plan.
+§10.104 recorded that and asked whether §3 requires atomicity; the ruling says it
+does, and §10.104 predicted the consequence exactly: "coalesce needs its own
+structure taking a list of sources".
+
+`carrierIsPermitted` on the old field did *not* close it, and a docstring saying
+it did reached `main`. It constrained each step's family to be exactly what that
+*step's* after-ledger recorded, which says nothing about what a later step adds.
+`Tests/Process/MergeFixtures.lean` built the half-merged world and is what caught
+it. §10.131.
+-/
+structure Coalesces (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (sources : List (EdgeOccurrence plan.topology plan.message edge))
+    (carrier : EdgeOccurrence plan.topology plan.message edge) : Prop where
+  /-- **A merge merges something.** A carrier with no sources is a fabrication,
+  which is `SendsEscrow`'s job and not this one. -/
+  sourcesNonempty : sources ≠ []
+  /-- Every source is on the session whose ledger holds it — `onItsSession` for a
+  family. -/
+  sourcesOnItsSession : ∀ source ∈ sources, source.2.1 = session
+  /-- And every one of them was in flight before the step. -/
+  wereOutstanding : ∀ source ∈ sources, (before.inFlight edge session).Outstanding source
+  /--
+  **And all of them are merged by this one step.**
+
+  The atomicity clause. `nowResolved` for a family rather than for the one
+  occurrence a `ResolvesEscrow` names, and it is what makes the intermediate
+  world unconstructible: there is no step of this family that leaves part of it
+  outstanding, because the step's own field says every member is resolved after
+  it.
+  -/
+  nowResolved : ∀ source ∈ sources,
+    (after.inFlight edge session).resolution source = some (.coalesced carrier)
+  /-- **And nothing outside the family is touched.** `ResolvesNothingElse` for a
+  family. -/
+  resolvesNothingElse : ∀ other, other ∉ sources →
+    (after.inFlight edge session).resolution other
+      = (before.inFlight edge session).resolution other
+  /--
+  **And the family is everything this carrier collects.**
+
+  The other half of atomicity, and the half that has to be said separately: a
+  step could otherwise resolve *more* occurrences into the same carrier than it
+  declared, and satisfy the channel's policy against the smaller family. With
+  this, `sources` is exactly the carrier's collection in the after-ledger.
+  -/
+  consumesExactly : ∀ other,
+    (after.inFlight edge session).resolution other = some (.coalesced carrier) →
+    other ∈ sources
+  /-- The ledger only moved forward. -/
+  ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
+  /-- The carrier belongs to this session — §10.100. -/
+  carrierOnItsSession : carrier.2.1 = session
+  /-- And is in flight afterwards, which is what stops a merge being a disguised
+  drop — §10.113. -/
+  carrierIsOutstanding : (after.inFlight edge session).Outstanding carrier
+  /-- **And the merge is one the channel permits** — `ProcessPlan.coalescing`,
+  over the whole family at once rather than per prefix. §10.127. -/
+  permitted : plan.coalescing edge sources carrier
+  /-- It escrows nothing but the carrier. -/
+  createsOnlyTheCarrier : ∀ other, other ∈ (after.inFlight edge session).created →
+    other ∉ (before.inFlight edge session).created → other = carrier
+  /-- Whose identity is new to this ledger — §10.115. -/
+  createdIdentityIsFresh : ∀ other, other ∈ (before.inFlight edge session).created →
+    other.2.2.id ≠ carrier.2.2.id
+  /-- **And it requests no cancellation**; see `EscrowLedger.RequestsNothing`. -/
+  requestsNothing : RequestsNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- And nothing outside this session's escrow changed. -/
+  scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
+
+/--
+A send: one occurrence joins a session's escrow.
+
+The counterpart of `ResolvesEscrow`, and the only transition that adds to a
+ledger. `contractual` is what ties it to the plan: the step is one the edge's
+own `ChannelSteps.Send` admits, so a send that no contract governs is not a
+`SendsEscrow`.
+-/
+structure SendsEscrow (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (message : plan.message edge)
+    (occurrence : plan.topology.ChannelOccurrence edge message) : Prop where
+  /-- The edge's own send relation admits this step. -/
+  contractual : (plan.steps edge).Send message occurrence before after
+  /--
+  **And the sender the session names is the live incarnation in its slot.**
+
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.119, ruled by `agent-bus`
+  `g-design:83`. `ChannelContract.sendOnOpenSession` asks only that the *session*
+  be open, and `ResolvesEscrow`'s scope is the escrow ledger alone, so a
+  `senderDeath` cannot move the session status. From the world
+  `Tests/Process/ChannelStepFixtures.lean`'s `the_sender_death` reaches — sender
+  present and dead, its death recorded against the session, session still
+  `.open` — a reviewer built an ordinary send of a second occurrence.
+
+  **Both halves are load-bearing.** The `instances` lookup alone would accept
+  *some* incarnation in the sender's slot, which a restart makes a different one;
+  `sameRef` pins it to the exact incarnation `ChannelId.sender` names, generation
+  included, so a stale session cannot be revived by whoever holds the slot now.
+
+  **Why this rather than making a death close the session.** The ruling is
+  explicit: an endpoint death must not generically kill or close the session,
+  because some channels permit buffered drain or half-close and `SessionStatus`
+  has no half-closed state to express the difference. Whether a death ends the
+  session belongs to an explicit channel or session policy. What this field says
+  is narrower and is true of every channel: a *send* needs a live sender.
+
+  It is transition-certificate evidence, which is where the ruling puts the cost:
+  a constructor or macro that emits a send derives it from the world it is
+  already stepping, and an ordinary `ProcessSpec` author writes nothing. The
+  fixtures pay for it because a fixture builds its world by hand.
+  -/
+  senderIsLive : ∃ incarnation,
+    before.instances (plan.topology.endpoints edge).1 occurrence.1.sender.instanceId
+        = some incarnation ∧
+      (∃ sameKind : incarnation.kind = (plan.topology.endpoints edge).1,
+        sameKind ▸ incarnation.ref = occurrence.1.sender) ∧
+      incarnation.Live
+  /--
+  **Its occurrence identity was not escrowed before.**
+
+  Freshness of the *identity*, not of the pair. `EdgeOccurrence` is a message
+  together with a `MessageOccurrence`, and `docs/PROCESS.md` §3 says the
+  occurrence "carries only its nominal identity" — so two sends of *different*
+  messages under one nominal are two distinct pairs, and asking freshness of the
+  pair let both into one ledger.
+
+  `EscrowLedger.rankOrdersCreated`'s docstring claimed that could not happen —
+  "an occurrence escrowed twice would be a fabricated identity, and here it would
+  need a rank strictly below itself" — and it was false, because `rank` is
+  unconstrained between two entries that are not equal. A reviewer built it with
+  two ordinary sends and then dropped one, producing a nominal that is
+  simultaneously `.dropped` and `Outstanding` three steps from the initial
+  network. `EscrowLedger.atMostOneRecordedEnding` and `outstanding_xor_settled`
+  are keyed on the pair; §3's affine resolve token is keyed on the identity.
+
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.115, which records what is still owed:
+  this closes the *cause* at the one constructor that escrows a new occurrence
+  from outside, and there is no network-level clause saying identities are
+  distinct.
+  -/
+  identityIsFresh : ∀ other, other ∈ (before.inFlight edge occurrence.1).created →
+    other.2.2.id ≠ occurrence.2.id
+  /-- It is escrowed now. -/
+  nowEscrowed : (after.inFlight edge occurrence.1).Outstanding ⟨message, occurrence⟩
+  /-- The ledger only moved forward. -/
+  ledgerExtends :
+    LedgerExtends (before.inFlight edge occurrence.1) (after.inFlight edge occurrence.1)
+  /-- **And it resolves nothing at all**; a send escrows, it does not end
+  anything. See `ResolvesEscrow.resolvesOnlyAs`. -/
+  resolvesNothing : ResolvesNothing
+    (before.inFlight edge occurrence.1) (after.inFlight edge occurrence.1)
+  /--
+  **And it escrows nothing but the message it is sending.**
+
+  The one constructor that may create, bounded to what it names. See `ResolvesEscrow.createsOnlyTheCarrier` and `CreatesNothing`.
+  -/
+  createsOnlyTheMessage : ∀ other, other ∈ (after.inFlight edge occurrence.1).created →
+    other ∉ (before.inFlight edge occurrence.1).created → other = ⟨message, occurrence⟩
+  /-- **And it requests no cancellation**: a send sends. -/
+  requestsNothing : RequestsNothing
+    (before.inFlight edge occurrence.1) (after.inFlight edge occurrence.1)
+  /-- And nothing outside this session's escrow changed. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .escrow edge occurrence.1)
+
+namespace SendsEscrow
+
+variable {plan}
+
+/-- And so the occurrence itself was not escrowed before, which is what
+`identityIsFresh` replaced and what `LedgerExtends` reasoning wants. -/
+theorem wasFresh {before after edge message occurrence}
+    (sent : plan.SendsEscrow before after edge message occurrence) :
+    (⟨message, occurrence⟩ : EdgeOccurrence plan.topology plan.message edge)
+      ∉ (before.inFlight edge occurrence.1).created :=
+  fun held => sent.identityIsFresh _ held rfl
+
+/-- A send establishes the edge contract's escrow assertion. -/
+theorem establishes_escrow {before after edge message occurrence}
+    (sent : plan.SendsEscrow before after edge message occurrence)
+    (sendPre : ((plan.channel edge).SendPre message).holds before) :
+    ((plan.channel edge).Escrow message occurrence).holds after :=
+  ((plan.channel edge).send_needs_an_open_session message occurrence
+    sent.contractual sendPre).2
+
+/-- And it happened on an open session, which the contract demands rather than assumes. -/
+theorem on_an_open_session {before after edge message occurrence}
+    (sent : plan.SendsEscrow before after edge message occurrence) :
+    ((plan.channel edge).SessionOpen occurrence.1).holds before :=
+  (plan.channel edge).sendOnOpenSession message occurrence before after sent.contractual
+
+end SendsEscrow
+
+/--
+One instance slot changed, and nothing else did.
+
+Once shared by every transition acting on a process; now `Detaches` alone uses
+it. `EndsInstance` outgrew it when the obligation ledger became reachable, and
+`Joins` when a live incarnation turned out to be able to vanish through it
+unclassified.
+-/
+structure ChangesOneInstance (before after : plan.LogicalProcessNetwork)
+    (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind) : Prop where
+  /-- Nothing outside that slot changed. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .instanceState kind slot)
+
+/--
+A transition that ends one instance, storing the exact ending.
+
+`docs/DECISIONS.md` decision 129: the ending is stored, so an audit reads it
+from the network rather than replaying the parent's transition. This structure
+is what writes it.
+-/
+structure EndsInstance (before after : plan.LogicalProcessNetwork)
+    (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+    (ending : ProcessLifecycle (plan.topology.protocol kind))
+    (custody : Bag (plan.topology.protocol kind).Demand →
+      Obligations → Obligations → Prop) : Prop where
+  /--
+  **The ending really ends it.**
+
+  Without this `EndsInstance` accepted `ending := .running`, so a step could move
+  the obligation ledger while the process it "ended" was still stepping — and
+  `moving_the_ledger_ends_an_instance` reported that as an ending. Local
+  adversarial review built one at a plan with two obligation values.
+
+  `not_live_after` was guarded by the same condition as a hypothesis, which is
+  the tell: the guard belonged in the structure.
+  -/
+  notRunning : ending ≠ .running
+  /-- It was live. -/
+  wasLive : ∃ incarnation, before.instances kind slot = some incarnation ∧
+    incarnation.Live
+  /-- It now carries exactly this ending. -/
+  nowEnded : ∃ incarnation, after.instances kind slot = some incarnation ∧
+    ∃ sameKind : incarnation.kind = kind, sameKind ▸ incarnation.lifecycle = ending
+  /--
+  **And it is the same incarnation, ended.**
+
+  `nowEnded` constrains the lifecycle and nothing else, so an ending could swap
+  the incarnation's generation, re-parent it, or change the request it was
+  started with — the same hole `StepsLocally.protocolStep` had, with the same
+  consequence: a non-allocating step installing a generation nothing allocated,
+  against `docs/FOUNDATION.md` law 22.
+
+  `outstanding` is deliberately left free: disposing of it is what an ending
+  *does*, and §2's three-way partition of it is
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.33.
+  -/
+  identityPreserved : ∃ (fromInstance toInstance : ProcessInstance plan.topology)
+      (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
+    before.instances kind slot = some fromInstance ∧
+    after.instances kind slot = some toInstance ∧
+    toKind ▸ toInstance.ref = fromKind ▸ fromInstance.ref ∧
+    toKind ▸ toInstance.parentage = fromKind ▸ fromInstance.parentage ∧
+    toKind ▸ toInstance.request = fromKind ▸ fromInstance.request ∧
+    toKind ▸ toInstance.localState = fromKind ▸ fromInstance.localState
+  /--
+  **And an ending the protocol can justify is justified.**
+
+  `nowEnded` stores a `ProcessLifecycle` and nothing checked that the value
+  stored corresponds to anything that happened, so a plan could record
+  `.terminated` for an instance whose protocol calls it nowhere near finished,
+  or `.interrupted` for one holding no outstanding demand to abandon.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.51 recorded it as needing a ruling
+  on whether the transition family carries enough history to check a stored
+  classification. For two of the six endings it does, and this is those two.
+
+  `.terminated result` is checkable against `ProcessSpec.Terminal`, which is the
+  specification's own word for finished. `.interrupted demand reason` is
+  checkable against the outstanding bag: `docs/PROCESS.md` §2 calls an
+  interruption "an outstanding demand of its own was abandoned", and the
+  ending now names *which* demand.
+
+  **That name is what demand-indexing bought here.** The field used to say only
+  `outstanding ≠ 0` -- a process holding something may abandon something -- and
+  under a flat `InterruptReason` that was all it could say, because the ending
+  carried no demand to compare against the bag. An instance holding a `Sleep`
+  could therefore be recorded as having abandoned a `WriteFile` it never issued.
+  Since `ProcessVocabulary.InterruptReason` is indexed by the demand abandoned
+  (`agent-bus` ruling `g-design:67`), the ending carries the demand and the
+  check is membership: the demand abandoned was one this instance actually held.
+
+  The other four remain unchecked and are a different problem in each case.
+  `.cancelled` wants a prior cancellation request, and no instance records one —
+  `Grass/Process/Network/Escrow.lean`'s `cancelRequested` is per *occurrence* on
+  a channel, not per instance. `.faulted` and `.violated` carry a reason from
+  the protocol's own vocabulary, so an empty vocabulary already excludes them
+  and a non-empty one has nothing here to check against. `.died` is the
+  supervisor's word and §3 gives the supervisor that authority.
+  -/
+  endingIsEarned : ∃ (fromInstance : ProcessInstance plan.topology)
+      (fromKind : fromInstance.kind = kind),
+    before.instances kind slot = some fromInstance ∧
+    (∀ result, ending = .terminated result →
+      (plan.topology.protocol kind).Terminal (fromKind ▸ fromInstance.request)
+        (fromKind ▸ fromInstance.localState) result) ∧
+    (∀ demand reason, ending = .interrupted demand reason →
+      demand ∈ (fromKind ▸ fromInstance.outstanding))
+  /--
+  **And the obligation ledger moves exactly as this ending declared.**
+
+  `docs/PROCESS.md` §2: "termination explicitly resolves, transfers, or permits
+  pending". `custody` is a parameter rather than a field, so it is the
+  *constructor* that names the transfer and a reader of the transition sees it —
+  the same trade as `emitted` on `Commits`.
+
+  **Indexed by the bag being disposed of.** An earlier version took only the two
+  ledgers, so the transfer said nothing about *what* was being transferred and
+  §2's "pending" had no referent at the network: three outstanding demands could
+  vanish at a termination with nothing accounting for them. It still does not
+  carry §2's three-way *partition* — that wants the specification's
+  `TerminalRemainderLaw`, which a `ProcessPlan` does not hold; see
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.33.
+
+  Before this existed, no constructor of `NetworkTransition` named
+  `.obligations` in its scope, so by `touchesOnly` the ledger
+  `Grass/Process/Network/World.lean` deliberately parameterises could never move
+  in any program at all. A weave mixin about obligations framed past every step
+  vacuously, and §7's `DisjointOrCommutingObligations` was satisfied by the
+  whole family for free.
+
+  The second conjunct of `custodyDeclared` is what stops
+  `custody := fun _ _ _ => True`: requiring the declared relation to be
+  single-valued at the before-state turns it from a claim the author can make
+  vacuously into one that pins the outcome, which is the same move
+  `Grass/Process/Function/Serial.lean` makes with
+  `SerialFunctionRealizes.converse`. At any plan whose `Obligations` has two
+  values, `True` is refuted.
+  -/
+  custodyDeclared : ∃ incarnation, before.instances kind slot = some incarnation ∧
+    ∃ sameKind : incarnation.kind = kind,
+      custody (sameKind ▸ incarnation.outstanding) before.obligations after.obligations ∧
+      ∀ other, custody (sameKind ▸ incarnation.outstanding) before.obligations other →
+        other = after.obligations
+  /--
+  That slot, and the ledger if the ledger moved.
+
+  The guard is the *actual* change rather than a flag the author sets, which is
+  what keeps the scope exact: a step that transferred nothing does not declare
+  the ledger, so a mixin about obligations frames past it, correctly. The
+  observation-trace scope above learned this the hard way — a scope that is too
+  wide is invisible to every test the producing module can write and defeats
+  every scheduling argument downstream.
+  -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .instanceState kind slot ∨
+      (before.obligations ≠ after.obligations ∧ fragment = .obligations))
+
+namespace EndsInstance
+
+variable {plan}
+
+/-- An ended instance is not live afterwards, whatever the ending was. -/
+theorem not_live_after {before after kind slot ending custody}
+    (ended : plan.EndsInstance before after kind slot ending custody) :
+    ∃ incarnation, after.instances kind slot = some incarnation ∧ ¬ incarnation.Live := by
+  obtain ⟨incarnation, found, sameKind, carries⟩ := ended.nowEnded
+  refine ⟨incarnation, found, ?_⟩
+  intro live
+  have running := ProcessLifecycle.live_iff_running.mp live
+  cases sameKind
+  rw [running] at carries
+  exact ended.notRunning carries.symm
+
+end EndsInstance
+
+
+/--
+How one instance's outstanding demand bag moves across one event.
+
+`docs/PROCESS.md` §2's run relation, at the network. `ProcessEvent.settles`
+splits the five events into the two that answer an outstanding demand and the
+three that do not, and this is the same split: an answering event removes
+exactly one `cons` before the issued bag is added, and a non-answering one adds
+without removing.
+
+Stated once here rather than inline in `StepsLocally`, because it is the same
+equation `Grass/Process/Run.lean` proves the four linearity clauses about — no
+fabrication, no replay, no joint consumption, no silent loss — and a second
+spelling would be a second thing to keep in step.
+-/
+def SettlesDemands {kind : plan.topology.ProcessKind}
+    (event : (plan.topology.protocol kind).Event)
+    (issued before after : Bag (plan.topology.protocol kind).Demand) : Prop :=
+  match event.settles with
+  | none => after = before + issued
+  | some demand => ∃ remainder,
+      Bag.ConsumeExactlyOneMatching before demand remainder ∧ after = remainder + issued
+
+/--
+One instance takes a protocol step.
+
+Its private state moves by the protocol's own `Step` relation, observations may
+be appended, and it may write the shared regions its role has write access to —
+which is why the scope is three families of fragment rather than one.
+
+Two earlier drafts got this wrong in the same direction. The first scoped it to
+the instance slot alone, which is false of any step that emits. The second added
+observations and stopped, which is false of any step that writes shared state —
+and that one was invisible until `Grass/Process/Weave/Mixin.lean` tried to state
+an invariant about a shared region and found that *no constructor in this family
+could touch one*. A weave mixin about shared state would have framed past every
+step in the program, vacuously and wrongly.
+
+`writesPermitted` is what keeps the widening honest: a step may only name
+regions its own role may write, so `ProcessGraph.sharedAccess` still decides who
+touches what.
+-/
+structure StepsLocally (before after : plan.LogicalProcessNetwork)
+    (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+    (event : (plan.topology.protocol kind).Event)
+    (emitted : Trace boundary.Observation)
+    (issued : Bag (plan.topology.protocol kind).Demand)
+    (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation) :
+    Prop where
+  /-- It was live, and this is the state it stepped from. -/
+  from' : ∃ incarnation, before.instances kind slot = some incarnation ∧
+    incarnation.Live ∧ incarnation.kind = kind
+  /-- It is still live afterwards; a step that ends a process is a different
+  constructor. -/
+  stillLive : ∃ incarnation, after.instances kind slot = some incarnation ∧
+    incarnation.Live
+  /--
+  **And its private state moves by the protocol's own `Step` relation.**
+
+  The field this structure spent four revisions without, while its docstring
+  claimed it. `event` was a parameter used nowhere, `issued` did not exist, and
+  the instance's new state was arbitrary as long as it was live — so a
+  `processStep` was not a protocol step at all, and no fixture in the corpus ever
+  constructed one to notice.
+
+  With it, five things §3 requires of a local step are here: the protocol admits
+  the transition, the demands it issues are the protocol's own, the observation
+  segment is the one the protocol emitted, the issued bag reaches the instance's
+  outstanding demands by §2's linear equation (`SettlesDemands`) rather than
+  being discarded, and **the incarnation stays the same incarnation**.
+
+  The last clause was the second thing missing here. `ProcessInstance` has seven
+  fields and this constrained two, so one tick could move an instance to a
+  different generation and re-parent it under another role — installing a
+  generation nothing allocated, which is `docs/FOUNDATION.md` law 22, while
+  `allocatedNominals` said the step allocated nothing. Local adversarial review
+  built exactly that step and proved the network after it fails
+  `NominalsAllocated` and `ParentageValid`.
+  -/
+  protocolStep : ∃ (fromInstance toInstance : ProcessInstance plan.topology)
+      (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
+    before.instances kind slot = some fromInstance ∧
+    after.instances kind slot = some toInstance ∧
+    (plan.topology.protocol kind).Step (fromKind ▸ fromInstance.localState) event
+      (toKind ▸ toInstance.localState) issued localEmitted ∧
+    plan.SettlesDemands event issued (fromKind ▸ fromInstance.outstanding)
+      (toKind ▸ toInstance.outstanding) ∧
+    toKind ▸ toInstance.ref = fromKind ▸ fromInstance.ref ∧
+    toKind ▸ toInstance.parentage = fromKind ▸ fromInstance.parentage ∧
+    toKind ▸ toInstance.request = fromKind ▸ fromInstance.request
+  /--
+  **And what reaches the network trace is the projection of what it observed.**
+
+  `ProcessGraph.observeAt` is the declaration; this is where it is spent. Before
+  it, `emitted` was an arbitrary boundary segment: a step could append anything
+  to the program's trace regardless of what the role observed.
+  -/
+  emittedIsProjected : emitted = localEmitted.filterMap (plan.topology.observeAt kind)
+  /--
+  **What it produced joins the pending trace, and the committed trace does not
+  move.**
+
+  `docs/PROCESS.md` §6: "step emissions name only portable logical observations",
+  and "a driver commit is the sole transition allowed to … append a committed
+  external observation". A step produces; only `Commits` publishes. Until
+  `NetworkFragment.pending` existed both appended to one trace, which left
+  `Commits` with nothing to be about — see that structure.
+  -/
+  producesPending : after.pending = before.pending ++ emitted
+  /--
+  **And every region it actually changed is one its role may write.**
+
+  `docs/PROCESS.md` §3: shared logical state is "named separately with
+  read/write/atomic capabilities", and this is where that capability is spent
+  rather than merely declared.
+
+  Quantified over the regions that *moved* rather than over a `written`
+  predicate the author supplied. The declared form was the same widening the
+  observation scope had: a step could name a region it may write and did not
+  write, and `Grass/Process/Trace/Independence.lean` reads independence off
+  exactly these predicates, so two steps touching nothing in common would fail
+  to commute because one of them said it might.
+  -/
+  writesPermitted : ∀ region, before.shared region ≠ after.shared region →
+    (plan.topology.sharedAccess kind region).mayWrite = true
+  /--
+  **And what it wrote is what the plan admits it to write.**
+
+  `writesPermitted` above bounds *which* regions may move.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.128 is the gap that leaves: nothing
+  bounded the *value*, so a `processStep` could set any writable region to
+  anything at all, unrelated to the event it was handling. `ProcessSpec.Step`
+  cannot close it — it never mentions `shared`, and `agent-bus` ruling
+  `g-design:84` is explicit that it must not, since a root specification
+  prescribing a state partition is what `docs/FOUNDATION.md` law 15 forbids.
+
+  So the bound is `ProcessPlan.sharedUpdate`, indexed by this step's own kind,
+  event, local states, issued bag and observed segment. Quantified over the
+  regions that *moved*, for the same reason `writesPermitted` is: a step that
+  names a region it did not write would make two disjoint steps fail to commute
+  in `Grass/Process/Trace/Independence.lean`.
+
+  A kind with no writable region owes nothing here — see
+  `sharedWritesAdmitted_of_no_writes`, which derives the whole field from
+  `writesPermitted`.
+  -/
+  sharedWritesAdmitted : ∀ region, before.shared region ≠ after.shared region →
+    ∀ (fromInstance toInstance : ProcessInstance plan.topology)
+      (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
+      before.instances kind slot = some fromInstance →
+      after.instances kind slot = some toInstance →
+      plan.sharedUpdate kind event (fromKind ▸ fromInstance.localState)
+        (toKind ▸ toInstance.localState) issued localEmitted region
+        (before.shared region) (after.shared region)
+  /--
+  Its slot, the regions it wrote, the observation trace **if it actually
+  emitted**, and nothing else.
+
+  The `emitted ≠ []` guard is the third correction to this scope and the one a
+  consumer found. Declaring `.observations` unconditionally is *sound* — the
+  step really does touch nothing else — but it makes every process step
+  non-independent of every other, because
+  `Grass/Process/Trace/Independence.lean` reads independence off exactly these
+  predicates. Two steps on unrelated instances that emit nothing would then
+  never commute, and `docs/PROCESS.md` §7's Mazurkiewicz congruence would be the
+  identity.
+
+  A scope that is too *wide* costs nothing the producing module can see and
+  everything a scheduling argument needs, which is the mirror of the too-narrow
+  failure recorded above.
+  -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .instanceState kind slot ∨
+      (emitted ≠ [] ∧ fragment = .pending) ∨
+      ∃ region, before.shared region ≠ after.shared region ∧ fragment = .region region)
+
+/--
+A new incarnation appears in a slot that was empty.
+
+`allocation` is what `docs/PROCESS.md` §3 calls the transition's
+`allocatedNominals`, and `allocatesTheGeneration` is the correspondence §10.18
+records as missing everywhere else: the identity the spawned instance carries is
+one this step allocated, so the history cannot omit it.
+-/
+structure Spawns (before after : plan.LogicalProcessNetwork)
+    (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+    (allocation : Allocation plan.topology.Carrier)
+    (emitted : Trace boundary.Observation)
+    (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation) :
+    Prop where
+  /-- The slot was empty. -/
+  wasEmpty : before.instances kind slot = none
+  /-- It now holds a live incarnation of the right kind. -/
+  nowLive : ∃ incarnation, after.instances kind slot = some incarnation ∧
+    incarnation.Live ∧ incarnation.kind = kind
+  /--
+  **And it has a parent at all.**
+
+  `docs/PROCESS.md` §3's spawn is a parent creating a child, and without this
+  field it was not: `authorized` reads the permitted-parent law off the new
+  incarnation's own `knownParent`, so an incarnation recording *no* parent
+  discharged it vacuously and a spawn could install a **root**.
+
+  Two things that makes wrong. A root is what a run *begins* with —
+  `Grass/Process/Network/Initial.lean`'s `ExactInitialNetwork` — and beginning is
+  not a transition; and `LogicalProcessNetworkCore.RootUnique` is a
+  well-formedness law that a second root breaks, so a spawn could take a
+  well-formed network to an ill-formed one, which is the shape `slotAgrees` was
+  added to close.
+
+  `currentParent` rather than `knownParent`, so a spawn cannot install a child
+  already *detached* from a parent that never held it — the same predicate
+  `Detaches.wasAttached` and `Joins.wasChild` ask, and for the same reason.
+  -/
+  spawnsAChild : ∀ incarnation, after.instances kind slot = some incarnation →
+    incarnation.parentage.currentParent ≠ none
+  /-- Whose parent the topology permits. -/
+  authorized : ∀ incarnation, after.instances kind slot = some incarnation →
+    ∀ parentKind parent, incarnation.parentage.knownParent = some ⟨parentKind, parent⟩ →
+      plan.topology.maySpawn parentKind incarnation.kind
+  /-- And whose generation this step allocated. -/
+  allocatesTheGeneration : ∀ incarnation, after.instances kind slot = some incarnation →
+    incarnation.ref.generation ∈ allocation.entries
+  /--
+  **And it is stored where its own reference says it is.**
+
+  `ProcessRef` has an `instanceId` as well as a generation, and
+  `allocatesTheGeneration` constrains only the second — so a spawn could install
+  an incarnation naming slot 3 into slot 7 and take a well-formed network to one
+  failing `WellFormed.SlotsAgree`. Local adversarial review built exactly that
+  step, with the before-network well formed and the after-network not.
+  -/
+  slotAgrees : ∀ incarnation, after.instances kind slot = some incarnation →
+    ∃ sameKind : incarnation.kind = kind, sameKind ▸ incarnation.ref.instanceId = slot
+  /--
+  **And it starts where its own protocol says a start is.**
+
+  The field that was missing, and the hole it left was the one `SettlesDemands`
+  closes at every *step*: with no tie to `ProcessSpec.Initial`, an instance could
+  be spawned already holding demands it never issued, and answer them later
+  perfectly legally. Local adversarial review spawned one holding three.
+
+  All four of `Initial`'s arguments at once, for the same reason `Initial`
+  relates all four: a spawn that placed a permitted state while inventing the
+  request or the outstanding bag would satisfy a weaker clause and be wrong.
+  -/
+  startsInitial : ∀ incarnation, after.instances kind slot = some incarnation →
+    ∃ sameKind : incarnation.kind = kind,
+      (plan.topology.protocol kind).Initial (sameKind ▸ incarnation.request)
+        (sameKind ▸ incarnation.localState) (sameKind ▸ incarnation.outstanding) localEmitted
+  /-- And what reaches the network trace is the projection of what it observed. -/
+  emittedIsProjected : emitted = localEmitted.filterMap (plan.topology.observeAt kind)
+  /-- What it produced joins the pending trace; see `StepsLocally`. -/
+  producesPending : after.pending = before.pending ++ emitted
+  /-- That slot, the nominal history, the pending trace if it produced, and
+  nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals ∨
+      (emitted ≠ [] ∧ fragment = .pending))
+
+/--
+A supervisor restarts a slot whose incarnation ended.
+
+Distinct from `Spawns`, which demands the slot was *empty*. Until this existed
+`restart` was a `Spawns` under a second name — the two constructors were
+definitionally interchangeable — and since `EndsInstance` leaves the ended
+incarnation in its slot, no restart could ever follow a death. The supervision
+path `docs/PROCESS.md` §3 describes did not exist.
+
+`wasEnded` is what distinguishes it, and it is also what makes `restart` a
+different fact about the world than `spawn`: an audit reading the transition
+learns that a previous incarnation ended here.
+-/
+structure Restarts (before after : plan.LogicalProcessNetwork)
+    (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+    (allocation : Allocation plan.topology.Carrier)
+    (emitted : Trace boundary.Observation)
+    (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation) :
+    Prop where
+  /-- **The slot held an incarnation that had ended.** -/
+  wasEnded : ∃ incarnation, before.instances kind slot = some incarnation ∧
+    ¬ incarnation.Live
+  /-- It now holds a live incarnation of the right kind. -/
+  nowLive : ∃ incarnation, after.instances kind slot = some incarnation ∧
+    incarnation.Live ∧ incarnation.kind = kind
+  /--
+  **Whose parent the topology permits.**
+
+  `Spawns` has had this since it was written; `Restarts` did not, so a restart
+  could install a role claiming a parent the graph forbids. Local adversarial
+  review built one and proved the network after it fails `ParentageValid`.
+  -/
+  restartsAChild : ∀ incarnation, after.instances kind slot = some incarnation →
+    incarnation.parentage.currentParent ≠ none
+  /--
+  **Whose parent the topology permits** — and it has one.
+
+  `restartsAChild` above is `Spawns.spawnsAChild`, for the same reason and with
+  the same consequence. `authorized` is vacuous for an incarnation recording no
+  parent, so without it a restart could install a **root**, and
+  `LogicalProcessNetworkCore.RootUnique` is a well-formedness law a second root
+  breaks.
+
+  Restarting the root is not a network step under any reading: a supervisor
+  restarts a child, and a root has no supervisor. If a root ends the program is
+  over, and starting again is a new run — `ExactInitialNetwork`, not a
+  transition.
+
+  Found by working `ProcessPlan.wellFormed_preserved` clause by clause and asking
+  which constructor could break each. `Spawns` was fixed in the same pass and
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.72 recorded this half as needing a
+  ruling; the `RootUnique` argument is what settled it.
+  -/
+  authorized : ∀ incarnation, after.instances kind slot = some incarnation →
+    ∀ parentKind parent, incarnation.parentage.knownParent = some ⟨parentKind, parent⟩ →
+      plan.topology.maySpawn parentKind incarnation.kind
+  /-- Whose generation this step allocated — a restart is a new incarnation. -/
+  allocatesTheGeneration : ∀ incarnation, after.instances kind slot = some incarnation →
+    incarnation.ref.generation ∈ allocation.entries
+  /--
+  **And it is stored where its own reference says it is.**
+
+  `ProcessRef` has an `instanceId` as well as a generation, and
+  `allocatesTheGeneration` constrains only the second — so a spawn could install
+  an incarnation naming slot 3 into slot 7 and take a well-formed network to one
+  failing `WellFormed.SlotsAgree`. Local adversarial review built exactly that
+  step, with the before-network well formed and the after-network not.
+  -/
+  slotAgrees : ∀ incarnation, after.instances kind slot = some incarnation →
+    ∃ sameKind : incarnation.kind = kind, sameKind ▸ incarnation.ref.instanceId = slot
+  /--
+  **And it starts where its own protocol says a start is.**
+
+  The field that was missing, and the hole it left was the one `SettlesDemands`
+  closes at every *step*: with no tie to `ProcessSpec.Initial`, an instance could
+  be spawned already holding demands it never issued, and answer them later
+  perfectly legally. Local adversarial review spawned one holding three.
+
+  All four of `Initial`'s arguments at once, for the same reason `Initial`
+  relates all four: a spawn that placed a permitted state while inventing the
+  request or the outstanding bag would satisfy a weaker clause and be wrong.
+  -/
+  startsInitial : ∀ incarnation, after.instances kind slot = some incarnation →
+    ∃ sameKind : incarnation.kind = kind,
+      (plan.topology.protocol kind).Initial (sameKind ▸ incarnation.request)
+        (sameKind ▸ incarnation.localState) (sameKind ▸ incarnation.outstanding) localEmitted
+  /-- And what reaches the network trace is the projection of what it observed. -/
+  emittedIsProjected : emitted = localEmitted.filterMap (plan.topology.observeAt kind)
+  /-- What it produced joins the pending trace; see `StepsLocally`. -/
+  producesPending : after.pending = before.pending ++ emitted
+  /-- That slot, the nominal history, the pending trace if it produced, and
+  nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals ∨
+      (emitted ≠ [] ∧ fragment = .pending))
+
+/--
+A parent collects a terminated child and frees its slot.
+
+`ChangesOneInstance` used to be the whole of `join`, and `ChangesOneInstance`
+has exactly one field: the scope. So `join kind slot` was definitionally "any
+two worlds differing in one slot" — a live incarnation could vanish with no
+stored ending, no custody transfer and no lifecycle, which is the unclassified
+death `docs/PROCESS.md` §3 says is impossible and the exact obligation
+`docs/DECISIONS.md` decision 129 exists to enforce. Local adversarial review
+built one at the M2 fixture plan.
+
+`wasTerminated` is the fix: only a child that reached a terminal state of its
+protocol may be joined, and the result it reached is the constructor's argument.
+-/
+structure Joins (before after : plan.LogicalProcessNetwork)
+    (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+    (result : (plan.topology.protocol kind).TerminalResult) : Prop where
+  /-- **The child had terminated, with exactly this result.** -/
+  wasTerminated : ∃ incarnation, before.instances kind slot = some incarnation ∧
+    ∃ sameKind : incarnation.kind = kind,
+      sameKind ▸ incarnation.lifecycle = ProcessLifecycle.terminated result
+  /--
+  **And it was somebody's child.**
+
+  The docstring said "a parent collects a terminated child" and nothing required
+  a parent: local adversarial review joined the *root*, which is a program
+  exiting by being collected by nobody. `Detaches` has carried `wasAttached`
+  since it was written; this is the same field.
+
+  **And it is the same field, which it was not at first.** The first version said
+  `¬ IsRoot`, and a *detached* incarnation is not a root — so it passed while
+  having no parent at all, which is the same "collected by nobody" one parentage
+  constructor over. A second reviewer built the orphan. `currentParent ≠ none` is
+  what `Detaches.wasAttached` says and what §3's "the parent no longer holds any
+  authority" means: a detached child is not joined, it is gone.
+  -/
+  wasChild : ∀ incarnation, before.instances kind slot = some incarnation →
+    incarnation.parentage.currentParent ≠ none
+  /-- And the slot is now free, so a restart may take it. -/
+  nowFree : after.instances kind slot = none
+  /-- That slot, and nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .instanceState kind slot)
+
+/--
+An occurrence is rerouted to another session, and arrives there.
+
+`ResolvesEscrow`'s scope is the *source* session's escrow alone, so a `reroute`
+built on it could write `rerouted destination` into one ledger and was forbidden
+from touching the destination's. `WellFormed.ReroutesLand` then degenerated: it
+could only hold at a destination that was already non-empty before the step, and
+the reroute itself could never make one so. A reroute was a drop with a
+forwarding address.
+
+`arrives` is stated with exactly the predicate `ReroutesLand` uses, so
+discharging it discharges the well-formedness clause rather than something
+adjacent to it. Its weakness — that "an arrival exists" does not say the arrival
+*carries this payload* — is `Grass/Process/Network/Escrow.lean`'s and is
+recorded there.
+-/
+structure Reroutes (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (occurrence : EdgeOccurrence plan.topology plan.message edge)
+    (destination : plan.topology.ChannelId edge) : Prop where
+  /-- **And it is this session's occurrence**; see `ResolvesEscrow.onItsSession`
+  for the two-step program that field refuses. -/
+  onItsSession : occurrence.2.1 = session
+  /-- It was in flight here. -/
+  wasOutstanding : (before.inFlight edge session).Outstanding occurrence
+  /-- It is now resolved as rerouted, to exactly this destination. -/
+  nowResolved : (after.inFlight edge session).resolution occurrence =
+    some (.rerouted destination)
+  /-- This ledger only moved forward. -/
+  ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
+  /--
+  **And it resolves nothing else in this ledger.**
+
+  The narrow form, as for `Delivers`, and for the same kind of reason: `arrives`
+  witnesses *one* arrival, for the occurrence this step names. Under the wider
+  `ResolvesOnlyAs` a reroute could mark several occurrences `.rerouted` to one
+  destination while delivering only one of them, and
+  `LogicalProcessNetworkCore.ReroutesLand` — which since
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.94 asks the arrival to carry the
+  rerouted occurrence's message — would be false for the rest.
+  -/
+  resolvesNothingElse : ResolvesNothingElse
+    (before.inFlight edge session) (after.inFlight edge session) occurrence
+  /-- **And it escrows nothing new here**: what a reroute creates, it creates at
+  the destination. -/
+  createsNothing : CreatesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /--
+  **And the payload arrives at the destination.**
+
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.34 asked for "a field putting the
+  arrival in the destination", and the first attempt at it was
+  `∃ arrival, arrival ∈ (after.inFlight edge destination).created` — which says
+  only that the destination's ledger is non-empty afterwards. A destination that
+  was already non-empty satisfied it with its ledger bit-for-bit unchanged, so a
+  reroute really was "a drop with a forwarding address": local adversarial
+  review built one that delivers nothing and showed the after-world still
+  satisfies `LogicalProcessNetworkCore.ReroutesLand`.
+
+  What it says now is that the destination *gained* something it did not have,
+  and that what it gained carries this occurrence's message. That is as close to
+  "the payload" as this layer can get without a notion of identity across
+  sessions: an occurrence's `ChannelOccurrence` is indexed by its session, so
+  the arrival is necessarily a *different* occurrence, and `onItsSession` above
+  is what stops the "different occurrence" being the same one.
+  -/
+  arrives : ∃ arrival, arrival ∉ (before.inFlight edge destination).created ∧
+    arrival ∈ (after.inFlight edge destination).created ∧
+    arrival.1 = occurrence.1 ∧ arrival.2.1 = destination ∧
+    ∀ other, other ∈ (after.inFlight edge destination).created →
+      other ∉ (before.inFlight edge destination).created → other = arrival
+  /--
+  **And the arrival's identity is new to the destination's ledger.**
+
+  `arrives` says the destination gained exactly one entry and pins its message and
+  its session; it says nothing about the nominal. So a reroute could land a
+  payload under an identity the destination is already holding — the same alias
+  `ResolvesEscrow.createdIdentityIsFresh` and `SendsEscrow.identityIsFresh` close
+  at the other two ways into a ledger.
+  `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.115.
+  -/
+  arrivalIdentityIsFresh : ∀ arrival,
+    arrival ∈ (after.inFlight edge destination).created →
+    arrival ∉ (before.inFlight edge destination).created →
+    ∀ other, other ∈ (before.inFlight edge destination).created →
+      other.2.2.id ≠ arrival.2.2.id
+  /-- Whose ledger also only moved forward. -/
+  destinationExtends :
+    LedgerExtends (before.inFlight edge destination) (after.inFlight edge destination)
+  /-- **And it resolves nothing at the destination**: the arrival lands in
+  flight, not already ended. See `ResolvesEscrow.resolvesOnlyAs`. -/
+  destinationResolvesNothing : ResolvesNothing
+    (before.inFlight edge destination) (after.inFlight edge destination)
+  /-- **And it requests no cancellation here.** -/
+  requestsNothing : RequestsNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- **And it requests no cancellation at the destination.** -/
+  destinationRequestsNothing : RequestsNothing
+    (before.inFlight edge destination) (after.inFlight edge destination)
+  /--
+  **And the destination is open.**
+
+  A reroute puts a live payload into a session, which is what a send does, and
+  `SendsEscrow.sendOnOpenSession` has guarded a send since `ChannelContract`
+  acquired the law. `Reroutes` had no such guard: its scope names two escrow
+  fragments and no field of it mentioned `sessions` at all, so a reviewer
+  compiled a complete reroute delivering into a session already `.closed` — after
+  which no close or death of that session is possible either, since both demand
+  `wasOpen`. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.101.
+
+  Reading the *status* is not writing it, so this needs nothing from `scope`.
+  -/
+  destinationWasOpen : (before.sessions edge destination).status = .open
+  /-- Both sessions' escrow, and nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .escrow edge session ∨ fragment = .escrow edge destination)
+
+namespace ResolvesEscrow
+
+variable {plan}
+
+/--
+**And an acknowledgement acknowledges a request that was already made.**
+
+`EscrowLedger.acknowledgedWasRequested` is a law of one ledger — an
+acknowledgement in it needs a request in it — and says nothing about *when* the
+request arrived. Local adversarial review compiled an `acknowledgeCancel` from a
+world where nothing was requested at all: the step wrote the request and the
+acknowledgement together, bypassing `RequestsCancel` entirely.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.97.
+
+**This was a field for one round, and did not need to be.** §10.97 closed the
+hole with two mechanisms — this and `requestsNothing` — and `requestsNothing`
+alone is enough: it carries the after-ledger's own `acknowledgedWasRequested`
+back across the step. A reviewer deleted the field and rebuilt it in three lines.
+§10.107.
+-/
+theorem acknowledgesARequest {before after edge session occurrence reason}
+    (acknowledged : plan.ResolvesEscrow before after edge session occurrence
+      (.cancelAcknowledged reason)) :
+    (before.inFlight edge session).cancelRequested occurrence = true := by
+  rw [← acknowledged.requestsNothing occurrence]
+  exact (after.inFlight edge session).acknowledgedWasRequested occurrence reason
+    acknowledged.nowResolved
+
+end ResolvesEscrow
+
+namespace ClosesSession
+
+variable {plan}
+
+/--
+**And the occurrence it names is closed.**
+
+**A field until §10.105, when a reviewer deleted it and nothing broke.**
+
+`closesEverything` — §10.90's addition — plus §10.96's on-session guard already
+says this, at `onItsSession` and `wasOutstanding`. The same shape as
+`Reroutes.elsewhere` in §10.92, and found by the same check: after adding a
+field, try deleting the ones beside it.
+-/
+theorem nowResolved {before after edge session occurrence}
+    (closed : plan.ClosesSession before after edge session occurrence) :
+    (after.inFlight edge session).resolution occurrence = some .channelClosed :=
+  closed.closesEverything occurrence closed.onItsSession closed.wasOutstanding
+
+end ClosesSession
+
+namespace Reroutes
+
+variable {plan}
+
+/--
+**A reroute goes somewhere else.**
+
+This was a field, `elsewhere`, and local adversarial review showed it is a
+theorem: `wasOutstanding` says the occurrence is unresolved here,
+`destinationResolvesNothing` says the destination's ledger resolves nothing this
+step, and `nowResolved` says it *is* resolved here afterwards. A reroute to its
+own session would need all three at once.
+
+The field's docstring claimed something else — that without it "resolving an
+occurrence as `.rerouted` to the session it is already on would satisfy `arrives`
+from the ledger it is leaving". That was true of an earlier `Reroutes`; it stopped
+being true when `destinationResolvesNothing` went in, and nothing noticed.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.92.
+-/
+theorem elsewhere {before after edge session occurrence destination}
+    (rerouted : plan.Reroutes before after edge session occurrence destination) :
+    destination ≠ session := by
+  intro same
+  subst same
+  have unresolved : (after.inFlight edge destination).resolution occurrence = none := by
+    rw [rerouted.destinationResolvesNothing occurrence]
+    exact rerouted.wasOutstanding.2
+  rw [rerouted.nowResolved] at unresolved
+  exact absurd unresolved (by intro equal; cases equal)
+
+end Reroutes
+
+/--
+A channel dies, taking its session with it.
+
+The sibling of `ClosesSession`, and it was missing for the same reason: with
+`channelDeath` built on `ResolvesEscrow` alone, `SessionStatus.died` was
+producible by nothing, and a channel that had died kept whatever status it had.
+
+Producing `.died` is not by itself a closure of the channel to further sends:
+`ChannelContract.SessionOpen` is an assertion whose footprint is bounded to the
+session fragment, and nothing ties its `holds` to `sessions.status`. That tie is
+`Channel.lean`'s to make, and until it does, a dead session and an open one are
+distinguishable by this field and not by that contract.
+-/
+structure KillsSession (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (occurrence : EdgeOccurrence plan.topology plan.message edge) : Prop where
+  /-- **And it is this session's occurrence**; see `ResolvesEscrow.onItsSession`
+  for the two-step program that field refuses. -/
+  onItsSession : occurrence.2.1 = session
+  /-- It was in flight. -/
+  wasOutstanding : (before.inFlight edge session).Outstanding occurrence
+  /-- The ledger only moved forward. -/
+  ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
+  /--
+  **And it ends everything that was in flight here, as a death.**
+
+  The sibling of `ClosesSession.closesEverything`, refusing the same strand.
+  -/
+  killsEverything : ∀ other, other.2.1 = session →
+    (before.inFlight edge session).Outstanding other →
+    (after.inFlight edge session).resolution other = some .channelDied
+  /-- **And every occurrence it ends, it ends as a death**; see `ResolvesEscrow.resolvesOnlyAs`. -/
+  resolvesOnlyAs : ResolvesOnlyAs
+    (before.inFlight edge session) (after.inFlight edge session) .channelDied
+  /-- **And it escrows nothing new**: a death ends, it does not send. -/
+  createsNothing : CreatesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- **And it requests no cancellation.** -/
+  requestsNothing : RequestsNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- It was open; a dead channel is not re-killed, and a closed one not un-closed. -/
+  wasOpen : (before.sessions edge session).status = .open
+  /-- **And the session is dead.** -/
+  nowDied : (after.sessions edge session).status = .died
+  /-- A death delivers nothing, so the cursor does not move. -/
+  cursorUnchanged : (after.sessions edge session).delivered =
+    (before.sessions edge session).delivered
+  /-- This session's escrow and this session's cursor, and nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session)
+
+/--
+A cancellation is requested against an in-flight occurrence.
+
+It does *not* resolve the escrow, which is the whole point:
+`docs/PROCESS.md` §3 says "requesting cancellation does not reclaim escrow", and
+`stillOutstanding` is that stated as a field rather than left to the reader.
+-/
+structure RequestsCancel (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (occurrence : EdgeOccurrence plan.topology plan.message edge) : Prop where
+  /-- **And it is this session's occurrence**; see `ResolvesEscrow.onItsSession`
+  for the two-step program that field refuses. -/
+  onItsSession : occurrence.2.1 = session
+  /-- It was in flight. -/
+  wasOutstanding : (before.inFlight edge session).Outstanding occurrence
+  /--
+  **And no cancellation had been requested against it yet.**
+
+  Without this every field held with `after = before` at any network where a
+  cancellation was already recorded — reachable by one prior `requestCancel` —
+  so `requestCancel` was a step that changed nothing. That is the `commit []`
+  defect one constructor over, and it has the same consequence: a one-step
+  silent cycle forces every `NetworkProgressMeasure` to declare that network at
+  a frontier. Local adversarial review built it.
+
+  Requesting a cancellation twice is not a second transition; `docs/PROCESS.md`
+  §3's summary is that a request is recorded, and it is recorded once.
+  -/
+  wasNotRequested : (before.inFlight edge session).cancelRequested occurrence = false
+  /-- The request is recorded. -/
+  nowRequested : (after.inFlight edge session).cancelRequested occurrence = true
+  /--
+  **And the ledger only moved forward.**
+
+  Every other constructor that touches an escrow ledger carries this —
+  `SendsEscrow`, `ResolvesEscrow`, `Delivers`, `ClosesSession`, `KillsSession`,
+  `Reroutes` all do — and this one did not, while its scope licensed it to
+  rewrite the whole session's ledger.
+
+  Local adversarial review built the step: two occurrences in flight, the
+  "request" records the cancellation on the first and *deletes the second from
+  `created`*. An in-flight message destroyed with no `ChannelResolution`
+  recorded, which is the unclassified death §3 forbids, evading
+  `resolution_is_exact` and `cannot_resolve_twice` because no resolution was
+  ever written. The same gap also permitted un-requesting another occurrence's
+  cancellation, against `LedgerExtends.cancelRequestMonotone`, whose own
+  docstring calls that law 7.
+  -/
+  ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
+  /-- **And it resolves nothing at all**: a request records, it does not end.
+  See `ResolvesEscrow.resolvesOnlyAs`. -/
+  resolvesNothing : ResolvesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /-- **And it escrows nothing new**: a request records, it does not send. -/
+  createsNothing : CreatesNothing
+    (before.inFlight edge session) (after.inFlight edge session)
+  /--
+  **And it requests the cancellation of this occurrence and no other.**
+
+  The affine half. Without it a request could prime every occurrence on the
+  session for a later acknowledgement, which is the same gap
+  `ResolvesEscrow.acknowledgesARequest` closes from the other end. §10.97.
+  -/
+  requestsNothingElse : RequestsNothingElse
+    (before.inFlight edge session) (after.inFlight edge session) occurrence
+  /-- That session's escrow, and nothing else. -/
+  scope : plan.TouchesOnly before after (fun fragment => fragment = .escrow edge session)
+
+namespace KillsSession
+
+variable {plan}
+
+/--
+**And the occurrence it names is resolved by the death.**
+
+A field until §10.105, when a reviewer deleted it and nothing broke:
+`killsEverything` plus the on-session guard already says it, at `onItsSession`
+and `wasOutstanding`. `ClosesSession.nowResolved` is the same story.
+-/
+theorem nowResolved {before after edge session occurrence}
+    (killed : plan.KillsSession before after edge session occurrence) :
+    (after.inFlight edge session).resolution occurrence = some .channelDied :=
+  killed.killsEverything occurrence killed.onItsSession killed.wasOutstanding
+
+end KillsSession
+
+namespace RequestsCancel
+
+variable {plan}
+
+/--
+**And the occurrence is still in flight.**
+
+`docs/PROCESS.md` §3 is explicit that requesting a cancellation is not resolving
+one: the payload stays escrowed until an acknowledgement, a timeout or a death
+ends it.
+
+This was a field, and stopped needing to be one when `ledgerExtends` and
+`resolvesNothing` went in beside it — §10.87's round and §10.97's. A reviewer
+deleted it and rebuilt it in one line. §10.105.
+-/
+theorem stillOutstanding {before after edge session occurrence}
+    (requested : plan.RequestsCancel before after edge session occurrence) :
+    (after.inFlight edge session).Outstanding occurrence :=
+  ⟨requested.ledgerExtends.createdPrefix.subset requested.wasOutstanding.1,
+    (requested.resolvesNothing occurrence).trans requested.wasOutstanding.2⟩
+
+end RequestsCancel
+
+/--
+A commit appends to the observation trace, and may only append what a live
+process could have produced.
+
+`docs/PROCESS.md` §6's transition, at the only fragment it touches. Appending
+rather than replacing is the content: a trace that could be rewritten would let
+a reconciler drop an observation a specification demanded.
+
+`earned` is the second half, and it was missing for five review passes.
+`Commits` constrained the trace and nothing else, so nothing tied `emitted` to
+anything a process observed — and a commit of an arbitrary observation was a
+legal step of **every** network of every plan with an inhabited
+`boundary.Observation`. Local adversarial review proved it generically
+— the step was constructible at every network — and drew the consequence: since
+`.commit` is not
+`DrivenByEntropy`, the `frontierIsExternal` *field* `NetworkProgressMeasure`
+carried at the time then forbade any network from being at a frontier, §7's
+"remain at a declared external frontier" escape was unreachable, and every
+theorem in `Grass/Process/Network/Progress.lean` was vacuous. That field is gone
+— §10.68 replaced it with the `AtFrontier` definition — so this records the
+argument as it was made, not a chain a reader can still follow to a live field.
+
+The tie is `NetworkFragment.pending`: a step produces into it and a commit
+publishes a prefix of it, so a commit can only publish what is pending, in the
+order it became pending, once.
+
+**Read that as exactly what it says.** `earned` relates two fields of the world
+and says nothing about how `pending` came to hold what it holds. `pending` is a
+plain field of `LogicalProcessNetworkCore`, so a commit is still a legal step of
+*every* network whose `pending` is non-empty, and nothing anywhere states that a
+non-empty `pending` is something a process produced. A second reviewer proved
+both, generically. That is a much smaller residual than the old one — the old
+`Commits` was enabled at every network, full stop, which made
+`NetworkProgressMeasure.AtFrontier` empty — but it is a residual, and
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.66 is what would close it: an invariant
+that `observations ++ pending` is what the run's steps emitted, which is a
+statement about executions and not about a world.
+-/
+structure Commits (before after : plan.LogicalProcessNetwork)
+    (emitted : Trace boundary.Observation) : Prop where
+  /--
+  **What is committed is the front of what processes produced, and it stops
+  being pending.**
+
+  The provenance field, and the whole reason `NetworkFragment.pending` exists. A
+  commit can publish only what some step actually emitted, in the order it was
+  emitted, and can publish it once.
+  -/
+  earned : before.pending = emitted ++ after.pending
+  /-- The committed trace grew by exactly that much. -/
+  appended : after.observations = before.observations ++ emitted
+  /--
+  **And it grew.**
+
+  `docs/PROCESS.md` §6 says a commit "appends to the observation trace";
+  appending nothing is not a commit. Without this field `commit []` is a
+  transition whose scope is empty and which changes nothing at all — a genuine
+  no-op step, at every network, in every plan.
+
+  That is worse than untidy. It is a one-step silent cycle, so
+  `Grass/Process/Network/Progress.lean`'s `no_silent_cycle` would force every
+  `NetworkProgressMeasure` to declare *every* network at a frontier, and §7's
+  progress theorem would be vacuous everywhere. It is also the one thing
+  `Grass/Process/Trace/Independence.lean`'s `self_independent_iff_scopeless`
+  calls out as degenerate: a step independent of itself.
+
+  Found by trying to build a progress measure at the M2 fixture plan and
+  discovering the measure could not exist. Trying again found that `nonempty`
+  alone does not save it — see `earned` — which is the second finding this field
+  produced.
+  -/
+  nonempty : emitted ≠ []
+  /-- The two traces **if it actually appended**, and nothing else. -/
+  scope : plan.TouchesOnly before after
+    (fun fragment => emitted ≠ [] ∧ (fragment = .observations ∨ fragment = .pending))
+
+/--
+A parent lets a child go.
+
+`docs/DECISIONS.md` decision 130's detach, at the network: the parentage moves
+from `attached` to `detached` with the same reference, so authority is gone and
+the history is not.
+-/
+structure Detaches (before after : plan.LogicalProcessNetwork)
+    (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind) : Prop where
+  /-- It had a parent with authority. -/
+  wasAttached : ∃ incarnation, before.instances kind slot = some incarnation ∧
+    incarnation.parentage.currentParent ≠ none
+  /--
+  **And afterwards it is exactly the detachment of what it was, and nothing else
+  about it moved.**
+
+  A detach removes authority; it is not a place to change generation, request,
+  private state, *which parent is remembered*, or *whether the process is still
+  alive*.
+
+  Three earlier versions of this were wrong and each was found the same way, by
+  building the attack rather than by reading. The first let generation, request
+  and state move. The second pinned those and stated the parentage as a separate
+  `nowDetached` field — "some detached incarnation with some remembered parent" —
+  which is satisfied by a *different* detachment than the one `wasAttached`
+  found: local adversarial review built a step that reparented a child onto a
+  fabricated ancestor, taking a `ParentageValid` network to one that is not, and
+  making `Grass/Process/Network/Child.lean`'s `NonReturningReason.detached`
+  checkable against a forged history. The third omitted `lifecycle` from the
+  seven `ProcessInstance` fields, and the same attack ended a live incarnation
+  with no `EndsInstance`, no custody partition and no stored classification — the
+  unclassified death §3 forbids, in the constructor next to the one
+  `Joins.wasTerminated` was added to protect.
+
+  Stating it as `parentage.detach` rather than as a predicate is what closes all
+  three at once: `Grass/Process/Network/Instance.lean` already defines the
+  transition §3 describes — "changes only `.attached parent` to `.detached
+  parent`, proves the references identical" — and it was used by nothing.
+  -/
+  identityPreserved : ∃ (fromInstance toInstance : ProcessInstance plan.topology)
+      (fromKind : fromInstance.kind = kind) (toKind : toInstance.kind = kind),
+    before.instances kind slot = some fromInstance ∧
+    after.instances kind slot = some toInstance ∧
+    toKind ▸ toInstance.parentage = (fromKind ▸ fromInstance.parentage).detach ∧
+    toKind ▸ toInstance.lifecycle = fromKind ▸ fromInstance.lifecycle ∧
+    toKind ▸ toInstance.ref = fromKind ▸ fromInstance.ref ∧
+    toKind ▸ toInstance.request = fromKind ▸ fromInstance.request ∧
+    toKind ▸ toInstance.localState = fromKind ▸ fromInstance.localState ∧
+    toKind ▸ toInstance.outstanding = fromKind ▸ fromInstance.outstanding
+  /-- That slot, and nothing else. -/
+  onlyThatSlot : plan.ChangesOneInstance before after kind slot
+
+namespace Detaches
+
+variable {plan}
+
+/--
+**It really is detached afterwards.**
+
+Was a field; is now a consequence, because `wasAttached` says the parentage had
+authority and `identityPreserved` says the new one is that parentage's `detach`.
+
+Worth the change rather than the redundancy. The old field's second conjunct,
+`knownParent ≠ none`, was implied by its first — `IsDetached` means
+`.detached _ _`, whose `knownParent` is `some` by definition — so the structure
+paid for a projection of a redundancy and did not buy the claim a reader takes
+from "remembers which". That claim is the next theorem.
+-/
+theorem is_detached_afterwards {before after kind slot}
+    (detached : plan.Detaches before after kind slot) :
+    ∃ (incarnation : ProcessInstance plan.topology) (isKind : incarnation.kind = kind),
+      after.instances kind slot = some incarnation ∧
+        (isKind ▸ incarnation.parentage : ProcessParentage plan.topology kind).IsDetached := by
+  obtain ⟨was, foundWas, hadAuthority⟩ := detached.wasAttached
+  obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter,
+    isDetach, _⟩ := detached.identityPreserved
+  refine ⟨toInstance, toKind, foundAfter, ?_⟩
+  rw [isDetach]
+  refine ProcessParentage.detach_isDetached ?_
+  have same : was = fromInstance := Option.some.inj (foundWas ▸ foundBefore)
+  subst same
+  cases fromKind
+  exact hadAuthority
+
+/--
+**And it is still whatever it was — running, if it was running.**
+
+`identityPreserved`'s `lifecycle` component, in the form a consumer wants. A
+detach removes authority and is not an ending; the two are separate constructors
+because §3 requires an ending to carry a custody partition and a stored
+classification, and this one carries neither.
+
+Local adversarial review built the step this refutes: a "detach" that leaves the
+child `.died .parentDied`. Every field of the structure held, because `lifecycle`
+was one of the three `ProcessInstance` fields `identityPreserved` did not
+mention. `Tests/Process/DetachFixtures.lean`'s `a_detach_may_not_kill` is the
+attack, kept.
+-/
+theorem the_child_survives {before after kind slot}
+    (detached : plan.Detaches before after kind slot) :
+    ∃ (fromInstance toInstance : ProcessInstance plan.topology),
+      before.instances kind slot = some fromInstance ∧
+        after.instances kind slot = some toInstance ∧
+        (toInstance.Live ↔ fromInstance.Live) := by
+  obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter,
+    _, sameLifecycle, _⟩ := detached.identityPreserved
+  refine ⟨fromInstance, toInstance, foundBefore, foundAfter, ?_⟩
+  show toInstance.lifecycle.Live ↔ fromInstance.lifecycle.Live
+  rw [← ProcessLifecycle.live_cast toKind toInstance.lifecycle,
+    ← ProcessLifecycle.live_cast fromKind fromInstance.lifecycle, sameLifecycle]
+
+/--
+**And the parent it remembers is the one it was attached to.**
+
+`docs/PROCESS.md` §3: the detach "proves the references identical". The old
+field said only that *some* reference was recorded, and local adversarial review
+built the step that records a different one — a forged ancestor, against which
+`Grass/Process/Network/Child.lean`'s `NonReturningReason.detached` would then
+check out.
+-/
+theorem former_parent_is_the_one_it_had {before after kind slot}
+    (detached : plan.Detaches before after kind slot) :
+    ∃ (fromInstance toInstance : ProcessInstance plan.topology),
+      before.instances kind slot = some fromInstance ∧
+        after.instances kind slot = some toInstance ∧
+        toInstance.parentage.knownParent = fromInstance.parentage.knownParent := by
+  obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter,
+    isDetach, _⟩ := detached.identityPreserved
+  refine ⟨fromInstance, toInstance, foundBefore, foundAfter, ?_⟩
+  rw [← ProcessParentage.knownParent_cast toKind toInstance.parentage,
+    ← ProcessParentage.knownParent_cast fromKind fromInstance.parentage, isDetach,
+    ProcessParentage.detach_preserves_knownParent]
+
+end Detaches
+
+/--
+**One step of a logical process network.**
+
+`docs/PROCESS.md` §3's constructors, twenty-four after `childLifecycle` was
+split. Six of them are competing escrow resolutions sharing `ResolvesEscrow`,
+distinguished by the resolution each writes; four more resolve escrow *and*
+something else, and have their own structures for it; the rest carry the shape
+their own effect needs. See the module note.
+
+Every constructor determines a scope, and `touchesOnly` below proves each one
+respects it. That is what §3's routing coverage means here: there is no
+transition without a scope, so there is no way for a step to change a fragment
+it did not declare, and §8's framing quantifies over the family rather than over
+a hypothesis a caller supplies.
+-/
+inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (max u w v r m o)
+  /-- One instance takes a protocol step. -/
+  | processStep (kind : plan.topology.ProcessKind)
+      (slot : plan.topology.InstanceId kind)
+      (event : (plan.topology.protocol kind).Event)
+      (emitted : Trace boundary.Observation)
+      (issued : Bag (plan.topology.protocol kind).Demand)
+      (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation)
+      (step : plan.StepsLocally before after kind slot event emitted issued localEmitted)
+  /-- A new incarnation appears. -/
+  | spawn (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+      (allocation : Allocation plan.topology.Carrier)
+      (emitted : Trace boundary.Observation)
+      (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation)
+      (step : plan.Spawns before after kind slot allocation emitted localEmitted)
+  /-- A message enters escrow. -/
+  | send (edge : plan.topology.ChannelKind) (message : plan.message edge)
+      (occurrence : plan.topology.ChannelOccurrence edge message)
+      (step : plan.SendsEscrow before after edge message occurrence)
+  /-- The receiver consumes it, advancing its cursor. -/
+  | receive (edge session occurrence)
+      (step : plan.Delivers before after edge session occurrence)
+  /-- Observations processes produced are committed. -/
+  | commit (emitted : Trace boundary.Observation)
+      (step : plan.Commits before after emitted)
+  /-- A cancellation is requested. Escrow is untouched. -/
+  | requestCancel (edge session occurrence)
+      (step : plan.RequestsCancel before after edge session occurrence)
+  /-- And acknowledged, which resolves it. -/
+  | acknowledgeCancel (edge session occurrence) (reason : CancelReason)
+      (step : plan.ResolvesEscrow before after edge session occurrence
+        (.cancelAcknowledged reason))
+  /-- It timed out. -/
+  | timeout (edge session occurrence)
+      (step : plan.ResolvesEscrow before after edge session occurrence .timedOut)
+  /-- An instance's outstanding demand was abandoned. -/
+  | interrupt (kind slot) (demand : (plan.topology.protocol kind).Demand)
+      (reason : (plan.topology.protocol kind).InterruptReason demand)
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop)
+      (step : plan.EndsInstance before after kind slot (.interrupted demand reason) custody)
+  /-- An instance faulted. -/
+  | fault (kind slot) (fault : (plan.topology.protocol kind).LogicalFault)
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop)
+      (step : plan.EndsInstance before after kind slot (.faulted fault) custody)
+  /-- Its environment broke a contract. -/
+  | environmentViolation (kind slot)
+      (violation : (plan.topology.protocol kind).EnvironmentViolation)
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop)
+      (step : plan.EndsInstance before after kind slot (.violated violation) custody)
+  /--
+  A **child** acknowledged a cancellation, at this point.
+
+  `wasChild` is the same field `Joins` carries and for the same reason. Without
+  it the name is decoration: local adversarial review cancelled the *root*
+  through this constructor while building a minimal plan, which is a program
+  being stopped by a supervisor it does not have. Its first version said
+  `¬ IsRoot`, which a *detached* incarnation also satisfies while having no
+  parent; a second reviewer built that orphan, and the field now asks what
+  `Detaches.wasAttached` asks.
+
+  **What this does not close**, and an earlier version of this docstring claimed
+  it did: `interrupt`, `fault` and `environmentViolation` take the same
+  `EndsInstance` and carry no `wasChild`, because none of them is a supervisor's
+  act — a process interrupts, faults and is failed by its environment on its own
+  account, root or not. So "any live network can be ended by a step that is not
+  entropy-driven" remains true of any plan whose protocol has an inhabited
+  `InterruptReason`, `LogicalFault` or `EnvironmentViolation`, which is what
+  `Tests/Process/FrontierFixtures.lean` has to make empty before a network of it
+  is ever waiting.
+  -/
+  | childCancelled (kind slot) (reason : CancelReason)
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop)
+      (wasChild : ∀ incarnation, before.instances kind slot = some incarnation →
+        incarnation.parentage.currentParent ≠ none)
+      (step : plan.EndsInstance before after kind slot (.cancelled reason) custody)
+  /-- A **child** stopped existing without finishing. `wasChild` as above. -/
+  | childDied (kind slot) (reason : ProcessDeathReason)
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop)
+      (wasChild : ∀ incarnation, before.instances kind slot = some incarnation →
+        incarnation.parentage.currentParent ≠ none)
+      (step : plan.EndsInstance before after kind slot (.died reason) custody)
+  /--
+  An instance reached a terminal state of its protocol.
+
+  Unrestricted, and the docstring used to say "a non-child instance" — which is
+  wrong, because `Joins.wasTerminated` requires a child to be *already*
+  terminated and nothing else can terminate one. A child terminates here and is
+  then collected by `join`; the root terminates here and is collected by nobody.
+  -/
+  | processTermination (kind slot)
+      (result : (plan.topology.protocol kind).TerminalResult)
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop)
+      (step : plan.EndsInstance before after kind slot (.terminated result) custody)
+  /-- The session was closed in the ordinary way. -/
+  | channelClose (edge session occurrence)
+      (step : plan.ClosesSession before after edge session occurrence)
+  /-- The sender died. -/
+  | senderDeath (edge session occurrence) (reason : ProcessDeathReason)
+      (step : plan.ResolvesEscrow before after edge session occurrence (.senderDied reason))
+  /-- The receiver died. -/
+  | receiverDeath (edge session occurrence) (reason : ProcessDeathReason)
+      (step : plan.ResolvesEscrow before after edge session occurrence
+        (.receiverDied reason))
+  /-- The session died. -/
+  | channelDeath (edge session occurrence)
+      (step : plan.KillsSession before after edge session occurrence)
+  /-- An explicit disposition dropped it. -/
+  | drop (edge session occurrence)
+      (step : plan.ResolvesEscrow before after edge session occurrence .dropped)
+  /-- It moved to another session. -/
+  | reroute (edge session occurrence) (destination : plan.topology.ChannelId edge)
+      (step : plan.Reroutes before after edge session occurrence destination)
+  /-- It merged into another occurrence. -/
+  | coalesce (edge session)
+      (sources : List (EdgeOccurrence plan.topology plan.message edge))
+      (carrier : EdgeOccurrence plan.topology plan.message edge)
+      (step : plan.Coalesces before after edge session sources carrier)
+  /-- A parent joined a finished child. -/
+  | join (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+      (result : (plan.topology.protocol kind).TerminalResult)
+      (step : plan.Joins before after kind slot result)
+  /-- A parent let a child go. -/
+  | detach (kind slot) (step : plan.Detaches before after kind slot)
+  /-- A supervisor started a fresh incarnation. -/
+  | restart (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+      (allocation : Allocation plan.topology.Carrier)
+      (emitted : Trace boundary.Observation)
+      (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation)
+      (step : plan.Restarts before after kind slot allocation emitted localEmitted)
+
+namespace NetworkTransition
+
+variable {plan} {before after : plan.LogicalProcessNetwork}
+
+/--
+The fragments a step may have changed.
+
+`docs/PROCESS.md` §8's `TransitionScope step`. Total by construction: the match
+is exhaustive over the family, so there is no transition whose scope is
+undefined and none that can change a fragment without declaring it.
+-/
+def scope : plan.NetworkTransition before after → NetworkFragment plan.topology → Prop
+  | .processStep kind slot _ emitted _ _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (emitted ≠ [] ∧ fragment = .pending) ∨
+        ∃ region, before.shared region ≠ after.shared region ∧ fragment = .region region
+  | .spawn kind slot _ emitted _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals ∨
+        (emitted ≠ [] ∧ fragment = .pending)
+  | .restart kind slot _ emitted _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨ fragment = .nominals ∨
+        (emitted ≠ [] ∧ fragment = .pending)
+  | .send edge _ occurrence _ => fun fragment => fragment = .escrow edge occurrence.1
+  | .commit emitted _ =>
+      fun fragment => emitted ≠ [] ∧ (fragment = .observations ∨ fragment = .pending)
+  | .receive edge session _ _ =>
+      fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session
+  | .requestCancel edge session _ _ => fun fragment => fragment = .escrow edge session
+  | .acknowledgeCancel edge session _ _ _ => fun fragment => fragment = .escrow edge session
+  | .timeout edge session _ _ => fun fragment => fragment = .escrow edge session
+  | .channelClose edge session _ _ =>
+      fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session
+  | .senderDeath edge session _ _ _ => fun fragment => fragment = .escrow edge session
+  | .receiverDeath edge session _ _ _ => fun fragment => fragment = .escrow edge session
+  | .channelDeath edge session _ _ =>
+      fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session
+  | .drop edge session _ _ => fun fragment => fragment = .escrow edge session
+  | .reroute edge session _ destination _ =>
+      fun fragment => fragment = .escrow edge session ∨ fragment = .escrow edge destination
+  | .coalesce edge session _ _ _ => fun fragment => fragment = .escrow edge session
+  | .interrupt kind slot _ _ _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (before.obligations ≠ after.obligations ∧ fragment = .obligations)
+  | .fault kind slot _ _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (before.obligations ≠ after.obligations ∧ fragment = .obligations)
+  | .environmentViolation kind slot _ _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (before.obligations ≠ after.obligations ∧ fragment = .obligations)
+  | .childCancelled kind slot _ _ _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (before.obligations ≠ after.obligations ∧ fragment = .obligations)
+  | .childDied kind slot _ _ _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (before.obligations ≠ after.obligations ∧ fragment = .obligations)
+  | .processTermination kind slot _ _ _ =>
+      fun fragment => fragment = .instanceState kind slot ∨
+        (before.obligations ≠ after.obligations ∧ fragment = .obligations)
+  | .join kind slot _ _ => fun fragment => fragment = .instanceState kind slot
+  | .detach kind slot _ => fun fragment => fragment = .instanceState kind slot
+
+/--
+A step driven by entropy from outside the program.
+
+`ProcessEvent.externalEntropy` lifted to a transition, and the distinction
+`Grass/Process/Network/Progress.lean` needs to tell a network *waiting* on the
+environment from one *spinning*: a frontier is a place only the outside world
+can move you off.
+
+A `processStep` qualifies when its event *arrived from outside* — entropy, or a
+result to a demand the process is waiting on — and a `timeout` qualifies
+outright. Three drafts of that clause were wrong, in three different directions.
+
+**It was too narrow.** §7 asks a plan to "reach a law-bearing
+external/**demand-result** frontier", and the step that leaves a demand-result
+frontier is a `processStep` on `.result`, whose `externalEntropy` is `none`. So
+a network blocked on a boundary demand could not be declared at a frontier at
+all, and a reactive plan that services requests forever without emitting a
+demanded observation had no `NetworkProgressMeasure` — the measure was
+unconstructible rather than merely hard.
+
+**And too wide.** `environmentViolation` was in the list.
+`Grass/Process/Vocabulary.lean` proves
+`(ProcessEvent.environmentViolation v).externalEntropy = none`, and
+`Grass/Process/Progress.lean`'s `silent_nonentropy_step_decreases` says the
+per-process layer changed from `settles` to `externalEntropy` precisely so that
+faults and environment violations stop buying progress for free. Handing it back
+at the network was inconsistent with that, and internally inconsistent too: a
+`processStep` carrying `.environmentViolation` was not entropy-driven while the
+`environmentViolation` *constructor* was — the same occurrence classified two
+ways by which constructor a plan routed it through.
+
+**And too wide again, in the repair.** The fix for the first was
+`event.settles ≠ none`, and `settles` is `some` for `.interrupted` as well as
+for `.result`. An interruption is a process abandoning *its own* outstanding
+demand, which §2 calls an internal decision — so the repair reintroduced exactly
+the defect the paragraph above removes, one constructor over: a `processStep`
+carrying `.interrupted` was entropy-driven while `NetworkTransition.interrupt`,
+which records the same abandonment as an ending, was not. At `countdown` it had
+teeth, because `Step` on `.interrupted` decrements the counter — a network could
+grind its own state down through steps a frontier excuses.
+
+`ProcessEvent.arrivesFromOutside` is the split that is actually wanted, and it is
+neither of the two the vocabulary already had. All three were found by local
+adversarial review, each after the previous repair landed.
+
+What remains open: a `.result` may be answered by a child rather than by the
+driver, and this cannot tell them apart — `rootLocalDemandProjection` exists only
+for the root's protocol. That makes the predicate slightly wider than "the
+outside must act", and `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.44 records it.
+-/
+def DrivenByEntropy : plan.NetworkTransition before after → Prop
+  | .processStep _ _ event _ _ _ _ => event.arrivesFromOutside
+  | .timeout _ _ _ _ => True
+  | _ => False
+
+/--
+**Routing coverage: every step respects the scope it declares.**
+
+`docs/PROCESS.md` §3's "no fabrication, bypass, or unclassified death is
+possible", in the form this layer can state: a transition is a constructor, every
+constructor determines a `scope`, and every one of them changed nothing outside
+it. There is no path through the family that reaches a fragment without
+declaring it, because the proof is by cases over the whole family and each case
+is the step's own scope field.
+
+This is what makes `Grass/Process/Network/Channel.lean`'s framing usable at a
+weave: `docs/PROCESS.md` §8's `Disjoint (TransitionScope step) Scope` now has a
+`TransitionScope` to be disjoint from.
+-/
+theorem touchesOnly (transition : plan.NetworkTransition before after) :
+    plan.TouchesOnly before after transition.scope := by
+  cases transition with
+  | processStep _ _ _ _ _ _ step => exact step.scope
+  | spawn _ _ _ _ _ step => exact step.scope
+  | restart _ _ _ _ _ step => exact step.scope
+  | send _ _ _ step => exact step.scope
+  | commit _ step => exact step.scope
+  | receive _ _ _ step => exact step.scope
+  | requestCancel _ _ _ step => exact step.scope
+  | acknowledgeCancel _ _ _ _ step => exact step.scope
+  | timeout _ _ _ step => exact step.scope
+  | channelClose _ _ _ step => exact step.scope
+  | senderDeath _ _ _ _ step => exact step.scope
+  | receiverDeath _ _ _ _ step => exact step.scope
+  | channelDeath _ _ _ step => exact step.scope
+  | drop _ _ _ step => exact step.scope
+  | reroute _ _ _ _ step => exact step.scope
+  | coalesce _ _ _ _ step => exact step.scope
+  | interrupt _ _ _ _ _ step => exact step.scope
+  | fault _ _ _ _ step => exact step.scope
+  | environmentViolation _ _ _ _ step => exact step.scope
+  | childCancelled _ _ _ _ _ step => exact step.scope
+  | childDied _ _ _ _ _ step => exact step.scope
+  | processTermination _ _ _ _ step => exact step.scope
+  | join _ _ _ step => exact step.scope
+  | detach _ _ step => exact step.onlyThatSlot.scope
+
+/--
+**The obligation ledger moves only where a process ends.**
+
+`docs/PROCESS.md` §2: "termination explicitly resolves, transfers, or permits
+pending". This is that as a fact about every execution rather than about one
+transition: a step that changed the ledger was an `EndsInstance`, and the ending
+is not `.running`.
+
+The `EndsInstance` witness carries the rest — `custodyDeclared` says the ending's
+declared custody admits the new ledger, admits nothing else, and is indexed by
+the bag the ending was holding. Those are read off the witness rather than
+restated here, because an earlier version *did* restate them and the restatement
+was weaker than the fields: it existentially quantified a custody relation, and
+`fun _ _ => True` satisfies an existential for any movement whatsoever.
+
+`ending ≠ .running` is likewise the field rather than a derivation. Without it
+this theorem reported a still-live process as having ended, which local
+adversarial review demonstrated at a plan with two obligation values.
+
+The proof is by cases over the whole family and the eighteen non-ending cases
+are all the same: `.obligations` is not in their scope, so `touchesOnly` gives
+equality and contradicts the hypothesis.
+
+Worth noting what this replaced. Until `EndsInstance` carried a custody
+parameter, *no* constructor named `.obligations` in its scope, so the ledger
+`Grass/Process/Network/World.lean` deliberately parameterises could never move
+at all — and this theorem would have been true for the wrong reason, with an
+unsatisfiable hypothesis. `docs/FOUNDATION.md` law 7 had nothing to bite on.
+-/
+theorem moving_the_ledger_ends_an_instance (transition : plan.NetworkTransition before after)
+    (moved : before.obligations ≠ after.obligations) :
+    ∃ (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+      (ending : ProcessLifecycle (plan.topology.protocol kind))
+      (custody : Bag (plan.topology.protocol kind).Demand →
+        Obligations → Obligations → Prop),
+      plan.EndsInstance before after kind slot ending custody ∧ ending ≠ .running := by
+  cases transition with
+  | interrupt kind slot _ _ custody step =>
+    exact ⟨kind, slot, _, custody, step, step.notRunning⟩
+  | fault kind slot _ custody step =>
+    exact ⟨kind, slot, _, custody, step, step.notRunning⟩
+  | environmentViolation kind slot _ custody step =>
+    exact ⟨kind, slot, _, custody, step, step.notRunning⟩
+  | childCancelled kind slot _ custody _ step =>
+    exact ⟨kind, slot, _, custody, step, step.notRunning⟩
+  | childDied kind slot _ custody _ step =>
+    exact ⟨kind, slot, _, custody, step, step.notRunning⟩
+  | processTermination kind slot _ custody step =>
+    exact ⟨kind, slot, _, custody, step, step.notRunning⟩
+  | processStep _ _ _ _ _ _ step =>
+    exact absurd (step.scope .obligations (by simp)) moved
+  | spawn _ _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | restart _ _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | send _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | commit _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | receive _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | requestCancel _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | acknowledgeCancel _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | timeout _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | channelClose _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | senderDeath _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | receiverDeath _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | channelDeath _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | drop _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | reroute _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | coalesce _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | join _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | detach _ _ step => exact absurd (step.onlyThatSlot.scope .obligations (by simp)) moved
+
+/--
+The nominals a step allocates.
+
+`docs/PROCESS.md` §3: "definitionally empty for nonallocating transitions". Two
+constructors allocate — `spawn` and `restart` — and both carry the allocation
+whose entries `Spawns.allocatesTheGeneration` requires to contain the new
+incarnation's generation. Every other case is `Allocation.empty` by definition,
+not by a proof.
+-/
+def allocatedNominals :
+    plan.NetworkTransition before after → Allocation plan.topology.Carrier
+  | .spawn _ _ allocation _ _ _ => allocation
+  | .restart _ _ allocation _ _ _ => allocation
+  | _ => Allocation.empty
+
+@[simp] theorem allocatedNominals_receive {edge session occurrence step} :
+    (NetworkTransition.receive (plan := plan) (before := before) (after := after)
+      edge session occurrence step).allocatedNominals = Allocation.empty := rfl
+
+@[simp] theorem allocatedNominals_commit {emitted step} :
+    (NetworkTransition.commit (plan := plan) (before := before) (after := after)
+      emitted step).allocatedNominals = Allocation.empty := rfl
+
+end NetworkTransition
+
+/--
+**A step of an execution: a transition, plus the freshness law.**
+
+`docs/PROCESS.md` §3's `NetworkStep`. `admissible` is its `fresh` — every
+allocated identity was absent from the monotone history, which
+`Grass/Process/Nominal.lean` defines as absence from `used` and not from a live
+set — and `historyExact` is its union equation.
+
+`Grass/Process/Nominal.lean` already carried `Allocation`, `Fresh`, `Admissible`
+and `extend`, so this is thin. What makes it more than a wrapper is
+`Spawns.allocatesTheGeneration`: without it a spawn could allocate nothing while
+installing a fresh generation, and the freshness law would range over an
+allocation unrelated to what the step introduced.
+-/
+structure NetworkStep (before after : plan.LogicalProcessNetwork) where
+  /-- Which step. -/
+  transition : plan.NetworkTransition before after
+  /-- Everything it allocates was fresh. -/
+  admissible : before.usedNominals.Admissible transition.allocatedNominals
+  /-- And the history afterwards is exactly the union. -/
+  historyExact :
+    after.usedNominals = before.usedNominals.extend transition.allocatedNominals admissible
+
+namespace NetworkStep
+
+variable {plan} {before after : plan.LogicalProcessNetwork}
+
+/-- A step changed nothing outside its transition's scope. -/
+theorem touchesOnly (step : plan.NetworkStep before after) :
+    plan.TouchesOnly before after step.transition.scope :=
+  step.transition.touchesOnly
+
+/--
+**An identity allocated by this step was never allocated before it.**
+
+Law 22 at the step: freshness is absence from the history, so an identity this
+step introduces cannot be one a resolved or tombstoned occurrence already used —
+`allocations_were_fresh`.
+-/
+theorem allocations_were_fresh (step : plan.NetworkStep before after)
+    {nominal} (allocated : nominal ∈ step.transition.allocatedNominals.entries) :
+    before.usedNominals.Fresh nominal :=
+  step.admissible nominal allocated
+
+/-- And it is in the history afterwards, so no later step can allocate it again. -/
+theorem allocations_are_recorded (step : plan.NetworkStep before after)
+    {nominal} (allocated : nominal ∈ step.transition.allocatedNominals.entries) :
+    nominal ∈ after.usedNominals.used := by
+  rw [step.historyExact]
+  exact NominalHistory.mem_extend.mpr (Or.inl allocated)
+
+/-- A non-allocating step leaves the history exactly as it was. -/
+theorem nonallocating_preserves_history (step : plan.NetworkStep before after)
+    (nothing : step.transition.allocatedNominals = Allocation.empty) :
+    after.usedNominals = before.usedNominals := by
+  rw [step.historyExact]
+  simp [nothing]
+
+end NetworkStep
+
+end ProcessPlan
+
+end Grass.Process

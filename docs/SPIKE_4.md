@@ -2634,7 +2634,7 @@ end Grass.Spikes.WebServer
 <!-- grass-block: authored file=Process.lean -->
 ```lean
 import Grass.Process
-import Grass.Platform.Win10.X64
+import Grass.Platform.Win32
 import Grass.Std.Protocol.Http2
 import Grass.Std.Process.Network
 import Grass.Std.Process.Supervision
