@@ -7,6 +7,7 @@ import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Profile
 import Grass.Platform.Win32.Coff
 import Grass.Platform.Win32.CoffLayout
+import Grass.Platform.Win32.CoffSymbol
 
 /-!
 # Ledger coverage gate
@@ -93,7 +94,8 @@ def auditedModules : List Name :=
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
    `Grass.Platform.Win32.Profile, `Grass.Platform.Win32.Coff,
-   `Grass.Platform.Win32.CoffLayout]
+   `Grass.Platform.Win32.CoffLayout,
+   `Grass.Platform.Win32.CoffSymbol]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -107,7 +109,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 118
+def owedBaseline : Nat := 123
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -512,7 +514,27 @@ def owed : List Name :=
     `Grass.Platform.Win32.Coff.Object.toBytes,
     `Grass.Platform.Win32.Coff.Object.fileHeader,
     `Grass.Platform.Win32.Coff.Object.sectionHeaders,
-    `Grass.Platform.Win32.Coff.Section.relocationSize ]
+    `Grass.Platform.Win32.Coff.Section.relocationSize,
+    -- The symbol table records, and every one of these is the format speaking
+    -- rather than this model choosing. `Symbol.toBytes` is the eighteen-byte
+    -- record and its field order. `SectionNumber.code` carries the three
+    -- reserved values -- zero for undefined, -1 absolute, -2 debug -- which are
+    -- meanings the format assigns, not encodings this profile picked.
+    -- `SymbolName.toBytes` is the two readings of one eight-byte field, and
+    -- `leadingZeros` is the format's own discriminator between them: four zero
+    -- bytes means string-table offset. `short?` refuses the names that would be
+    -- misread, which is a consequence of that same rule.
+    --
+    -- Checked against a real object -- see
+    -- `Tests/Platform/Win32/CoffFixture.lean`, which holds three eighteen-byte
+    -- records `ml64` wrote, covering both name forms and two of the three
+    -- reserved section numbers -- so the debt is a missing citation rather than
+    -- a missing measurement.
+    `Grass.Platform.Win32.Coff.Symbol.toBytes,
+    `Grass.Platform.Win32.Coff.SectionNumber.code,
+    `Grass.Platform.Win32.Coff.SymbolName.toBytes,
+    `Grass.Platform.Win32.Coff.SymbolName.leadingZeros,
+    `Grass.Platform.Win32.Coff.SymbolName.short? ]
 
 /-- The declarations this gate holds the ledger responsible for. -/
 def modeledDeclarations : MetaM (Array Name) := do

@@ -1,4 +1,5 @@
 import Grass.Platform.Win32.Coff
+import Grass.Platform.Win32.CoffSymbol
 
 /-!
 # COFF records, against a real object file
@@ -12,27 +13,29 @@ code, one handler, five sections.
 ## Why a fixture and not a differential
 
 A differential re-runs the assembler on every build, which is what you want
-against an oracle that moves. These three records do not move: the COFF file
-header has had this field order and this width since the format was published,
-and a build that reproduced these bytes yesterday reproduces them tomorrow. What
-the model can still get wrong is field order, field width and padding, and a
-recorded measurement catches that exactly as well as a re-run would -- without a
-harness for anyone to own.
+against an oracle that moves. These records do not move: COFF has had these
+field orders and widths since the format was published, and a build that
+reproduced these bytes yesterday reproduces them tomorrow. What the model can
+still get wrong is field order, field width and padding, and a recorded
+measurement catches that exactly as well as a re-run would -- without a harness
+for anyone to own.
 
 So the measurement is kept and the script that made it is not. The prologue
 above is enough to reproduce the object if these ever need re-measuring.
 
 ## What this establishes, and what it does not
 
-It establishes that `FileHeader.toBytes`, `SectionHeader.toBytes` and
-`Relocation.toBytes` agree with a real assembler on field order, width and
-padding, which is the whole content of those three definitions.
+It establishes that `FileHeader.toBytes`, `SectionHeader.toBytes`,
+`Relocation.toBytes` and `Symbol.toBytes` agree with a real assembler on field
+order, width and padding, which is the whole content of those definitions.
 
 It does not establish that this profile can write a linkable object file.
-Nothing here emits a symbol table, and the section header below points at raw
-data this model does not lay out. It also says nothing about `.pdata`'s
-*contents*: the relocations are checked as records, not as a correct
-`RUNTIME_FUNCTION` table.
+`CoffLayout.lean` still emits no symbol table -- the records are modelled here,
+but nothing places them in a file or fills in `pointerToSymbolTable`. There is
+no string table either, so a `SymbolName.long` offset points into something that
+does not exist yet. And nothing here says anything about `.pdata`'s *contents*:
+the relocations are checked as records, not as a correct `RUNTIME_FUNCTION`
+table.
 -/
 
 namespace Grass.Tests.Platform.Win32.Coff
@@ -151,6 +154,97 @@ property a reader relies on and the one a wrong record size would break. -/
 theorem measuredPdataRelocations_stride :
     (measuredPdataRelocations.map Relocation.toBytes).flatten.length
       = 10 * measuredPdataRelocations.length := by
+  decide
+
+/-! ## Symbols
+
+The same object carried fifteen symbols. Three are recorded here, chosen because
+between them they exercise both name forms and two of the three reserved section
+numbers.
+
+These check the eighteen-byte record only. Five of the object's symbols declare
+`numberOfAuxSymbols = 1` and are followed by an auxiliary record this profile
+does not model; the field is written so a reader skips correctly, but the
+auxiliary record itself is absent, so a fixture over the following bytes would
+fail and should.
+-/
+
+/-- The `.pdata` section symbol: inline name, a real section, one auxiliary
+record following. -/
+def measuredPdataSymbol : Symbol where
+  name := .short pdataName
+  value := 0
+  sectionNumber := .section_ 3
+  type := 0
+  storageClass := 3
+  numberOfAuxSymbols := 1
+
+/-- **The eighteen bytes `ml64` wrote for the `.pdata` section symbol.** -/
+theorem measuredPdataSymbol_bytes :
+    measuredPdataSymbol.toBytes =
+      [0x2e, 0x70, 0x64, 0x61, 0x74, 0x61, 0x00, 0x00,
+       0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x03, 0x01] := by
+  decide
+
+/--
+`grasshandler`: the external the prologue named.
+
+Its name is twelve bytes, so it takes the long form -- four zero bytes then an
+offset of four into the string table. Its section number is zero, which is not
+section zero but `undefined`: the symbol is resolved by another object, which is
+what an `EXTERN` in the source becomes.
+
+It is symbol 12, and it is *not* what the `.pdata` relocations point at -- those
+name symbol 13, `grassprobe`, for both `BeginAddress` and `EndAddress`.
+`grasshandler` is referenced from `.xdata` instead, by the handler field. An
+earlier version of this sentence said symbol 13 and claimed the `.pdata`
+relocations reached it, which was wrong twice over in a docstring written from
+the same measurement that refutes it. -/
+def measuredHandlerSymbol : Symbol where
+  name := .long 4
+  value := 0
+  sectionNumber := .undefined
+  type := 0
+  storageClass := 2
+  numberOfAuxSymbols := 0
+
+/-- **The eighteen bytes `ml64` wrote for `grasshandler`.** -/
+theorem measuredHandlerSymbol_bytes :
+    measuredHandlerSymbol.toBytes =
+      [0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00] := by
+  decide
+
+/--
+`grassprobe`: the function itself.
+
+Long form again, offset seventeen. Section one, and a type of `0x0020`, which is
+the complex type `DTYPE_FUNCTION` -- the field that tells a linker this symbol
+is code rather than data. -/
+def measuredProbeSymbol : Symbol where
+  name := .long 17
+  value := 0
+  sectionNumber := .section_ 1
+  type := 0x0020
+  storageClass := 2
+  numberOfAuxSymbols := 0
+
+/-- **The eighteen bytes `ml64` wrote for `grassprobe`.** -/
+theorem measuredProbeSymbol_bytes :
+    measuredProbeSymbol.toBytes =
+      [0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00,
+       0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x20, 0x00, 0x02, 0x00] := by
+  decide
+
+/--
+**`grassprobe`'s name cannot be written inline, and the model refuses to try.**
+
+Ten bytes, so `short?` turns it away and the long form is the only option --
+which is why `ml64` used it. The refusal here is the length bound rather than
+the leading-NUL rule. -/
+theorem probe_name_too_long :
+    SymbolName.short?
+      [0x67, 0x72, 0x61, 0x73, 0x73, 0x70, 0x72, 0x6f, 0x62, 0x65] = none := by
   decide
 
 end Grass.Tests.Platform.Win32.Coff
