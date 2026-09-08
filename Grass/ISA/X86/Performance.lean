@@ -727,6 +727,58 @@ def portPressure (uops : List Uop) (id : PortId) : Nat :=
     !u.eligiblePorts.isEmpty && u.eligiblePorts.all (· == id)).length
 
 /--
+The ports `unfusedSlotLowerBound` folds over are exactly the ports the profile
+has.
+
+Trivial to prove and worth naming, because two claims lean on it. The theorem
+below is about a *valid* port, and applies to the fold only if the fold visits
+valid ports. And `Routable` is stated in terms of `ValidPort` while the fold is
+written in terms of `List.range p.portCount`, so without this they are two
+spellings of one set.
+
+A mutation folding over `p.portCount + 1` survives, and correctly: a uop
+contributing pressure at that port would have it as its only eligible port,
+which `Routable` already excludes. The extra step reads zero. That makes the
+fold's exact upper limit an implementation choice rather than a fact to pin --
+what matters is this correspondence, not the literal.
+-/
+theorem mem_range_portCount_iff (p : MicroarchProfile) (id : PortId) :
+    id ∈ List.range p.portCount ↔ p.ValidPort id := by
+  simp [MicroarchProfile.ValidPort]
+
+/--
+A uop that cannot reach any port this profile has adds nothing to the pressure
+on a port it does have.
+
+Half of `unfusedSlotLowerBound`'s open obligation, and the half that is a
+theorem rather than an argument. The header there says such a uop "contributes
+nothing to `portPressure`, so the maximum below ignores it" -- this is that
+sentence, and the fold in `unfusedSlotLowerBound` visits only
+`List.range p.portCount`, which is exactly the valid ports.
+
+What is not provable here is the rest of the sentence: that ignoring it makes
+the result an underestimate *of slots*. The uop is still counted by `byIssue`,
+which divides the whole list length by the issue width, so it is not simply
+dropped. Whether the bound is then too low depends on what a slot is, and this
+module has no model of that.
+-/
+theorem unroutable_uop_adds_no_portPressure {p : MicroarchProfile} {u : Uop}
+    (hu : ∀ i ∈ u.eligiblePorts, ¬ p.ValidPort i)
+    {id : PortId} (hid : p.ValidPort id) (uops : List Uop) :
+    portPressure (u :: uops) id = portPressure uops id := by
+  cases hep : u.eligiblePorts with
+  | nil => simp [portPressure, hep]
+  | cons hd tl =>
+      by_cases hall : ((hd :: tl).all (· == id)) = true
+      · exfalso
+        have hhd : hd ∈ u.eligiblePorts := by rw [hep]; simp
+        have : hd = id := by
+          simp only [List.all_eq_true, beq_iff_eq] at hall
+          exact hall hd (by simp)
+        exact hu hd hhd (this ▸ hid)
+      · simp [portPressure, hep, hall]
+
+/--
 A lower bound on the **unfused issue slots** a block of uops occupies.
 
 Not a lower bound on cycles, and the difference matters enough to be in the
@@ -758,12 +810,22 @@ uops and nothing related the report to the condition, so a caller held a
 `Prop` with no route to it and a `List` whose emptiness meant nothing in
 particular.
 
-What the precondition buys is unchanged, and is still an **open obligation**:
-a uop whose only eligible ports do not exist on `p` contributes nothing to
-`portPressure`, so the maximum below ignores it and the result is an
-underestimate even of slots. That sentence is an argument rather than a
-theorem, and proving it needs a model of what a slot is, which this module
-does not have. The obligation is narrower than it was, not gone.
+What the precondition buys was one sentence, and it has two halves that are not
+the same kind of claim.
+
+The first is now a theorem. `unroutable_uop_adds_no_portPressure` says a uop
+whose only eligible ports do not exist on `p` adds nothing to the pressure on
+a port `p` does have, and the fold below visits `List.range p.portCount`, which
+is exactly those ports.
+
+The second is still an **open obligation**, and stating it accurately narrows
+it further than it was written. The sentence said the maximum "ignores it and
+the result is an underestimate even of slots", which reads as though the uop
+drops out of the computation. It does not: `byIssue` divides the whole list
+length by the issue width, so an unroutable uop still raises that term. Only
+the `byPort` term ignores it. Whether the maximum of the two is then too low
+depends on what a slot is, and this module has no model of that -- which is the
+obligation, and it is smaller than the original sentence implied.
 -/
 def unfusedSlotLowerBound (p : MicroarchProfile) (uops : List Uop) : Nat :=
   let byIssue := if p.issueWidth = 0 then uops.length
