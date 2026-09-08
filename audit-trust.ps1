@@ -548,6 +548,68 @@ try {
         throw "Trust audit ignored a scoped csimp replacement after its attribute state expired."
     }
 
+    # Project-wide coverage must not depend on a declaration reaching a
+    # VerifiedProgram. Compile a Grass-owned module whose disconnected value is
+    # compiled under a local csimp substitution from an external module, then
+    # import it after the local attribute state has expired. The complete audit
+    # must recover the replacement through the project module/runtime closure.
+    $disconnectedCSimpSource = @(
+        "namespace ExternalDisconnectedCSimpSource",
+        "def identityBytes (bytes : ByteArray) : ByteArray := bytes",
+        "end ExternalDisconnectedCSimpSource"
+    )
+    [System.IO.File]::WriteAllLines($runtimeProbePath, $disconnectedCSimpSource)
+    $runtimeBuildOutput = @(& lake env lean $runtimeProbePath -o $runtimeProbeOlean 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $runtimeBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the disconnected project-csimp source probe."
+    }
+    $disconnectedCSimpReplacement = @(
+        "import $runtimeProbeModule",
+        "namespace ExternalDisconnectedCSimpReplacement",
+        "unsafe def runtimeReplacement (_ : ByteArray) : ByteArray := ByteArray.empty",
+        "@[implemented_by runtimeReplacement]",
+        "def replacement (bytes : ByteArray) : ByteArray := bytes",
+        "theorem replacement_eq : ExternalDisconnectedCSimpSource.identityBytes = replacement := rfl",
+        "end ExternalDisconnectedCSimpReplacement"
+    )
+    [System.IO.File]::WriteAllLines($csimpProbePath, $disconnectedCSimpReplacement)
+    $runtimeBuildOutput = @(& lake env lean $csimpProbePath -o $csimpProbeOlean 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $runtimeBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the disconnected project-csimp replacement probe."
+    }
+    $disconnectedProjectCSimp = @(
+        "import $runtimeProbeModule",
+        "import $csimpProbeModule",
+        "namespace $moduleOwnershipProbeModule",
+        "section",
+        "attribute [local csimp] ExternalDisconnectedCSimpReplacement.replacement_eq",
+        "def disconnectedBytes : ByteArray := ExternalDisconnectedCSimpSource.identityBytes ByteArray.empty",
+        "end",
+        "end $moduleOwnershipProbeModule"
+    )
+    [System.IO.File]::WriteAllLines($moduleOwnershipProbePath, $disconnectedProjectCSimp)
+    $moduleOwnershipBuildOutput = @(
+        & lake env lean $moduleOwnershipProbePath -o $moduleOwnershipProbeOlean 2>&1
+    )
+    if ($LASTEXITCODE -ne 0) {
+        $moduleOwnershipBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the disconnected project-csimp owner probe."
+    }
+    $disconnectedProjectCSimpAudit = @(
+        "import Tests.Foundation",
+        "import $moduleOwnershipProbeModule",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $disconnectedProjectCSimpAudit)
+    $runtimeConsumerOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($runtimeConsumerOutput -match "ExternalDisconnectedCSimpReplacement.(replacement.*implemented_by.*runtimeReplacement|runtimeReplacement.*unsafe)")) {
+        $runtimeConsumerOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit ignored a disconnected project-scoped csimp replacement."
+    }
+
     Write-Host "Trust audit passed for $reported declaration(s) and $($entrypointModuleNames.Count) executable test module(s)."
 }
 finally {
