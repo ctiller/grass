@@ -270,6 +270,13 @@ changes were also applied one at a time against the whole 204-job tree before th
 next, because adding a law to the `simp` set can break a proof that closed
 without it — `Vec.ofHostBytes_append` did exactly that to its own module and the
 docstring there records it.
+
+A note for anyone reading an axiom-audit delta as a count of laws added: it is
+not one. Measured across this change, `Tools/AxiomAudit.lean` reports 13802 at
+the branch point, 13805 with `Vec.get?_isSome_iff` alone, and 13806 with the two
+`@[simp]` attributes as well. One theorem accounts for three of the four, because
+Lean generates auxiliary declarations for a simp lemma and the audit counts every
+declaration rather than every law.
 -/
 
 section ReadingWithABound
