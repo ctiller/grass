@@ -195,7 +195,7 @@ After the successful push, the reviewer emits:
 ```text
 review.integrated = {
   acceptance : EventId,
-  previous_main : ObjectId,
+  first_parent : ObjectId,
   main_commit : ObjectId,
   product_branch : Branch,
   reviewed_commit : ObjectId,
@@ -206,9 +206,11 @@ review.integrated = {
 ```
 
 The receipt records a completed product fact; it does not retroactively grant
-authority. `main_commit` is the actual two-parent first-parent-history child of
-`previous_main`. Linked validation and `audit-main` reconstruct its tree using
-that actual parent, the accepted `reviewed_commit`, and the named engine. They
+authority. `first_parent` is the actual first parent of `main_commit`; for the
+second or later member of one integration train it need not have previously
+been the value of `refs/heads/main`. Linked validation and `audit-main` check
+that first-parent reading and reconstruct the tree using that actual parent,
+the accepted `reviewed_commit`, and the named engine. They
 verify commit metadata, source authorship, scope, all source and integration
 checks, and the absence of injected content.
 
@@ -216,6 +218,24 @@ If the reviewer disappears after the push, a bootstrap-authorized coordinator
 may emit `review.integration_reconciled` only when product history and the prior
 snapshot acceptance already prove every field. Reconciliation cannot construct
 a missing acceptance or excuse a failed integration check.
+
+```text
+review.integration_reconciled = {
+  acceptance : EventId,
+  first_parent : ObjectId,
+  main_commit : ObjectId,
+  product_branch : Branch,
+  reviewed_commit : ObjectId,
+  merge_engine_epoch : EventId,
+  integration_checks : List<ScopedCheckResult>,
+  summary : Text
+}
+```
+
+Its fields have exactly the same meaning and validation as `review.integrated`.
+Only a bootstrap-authorized coordinator emits it, and only for an already
+present product-history commit whose exact facts make the payload unique. The
+coordinator records evidence; it does not act as reviewer or recreate a verdict.
 
 ## 7. Concurrency and trains
 
@@ -241,7 +261,8 @@ This is a schema successor, not an in-place reinterpretation of
 `review.merge_authorized`:
 
 1. implement dual readers and reducers for historical authorization/receipt and
-   new acceptance/integration chains;
+   the new `review.snapshot_accepted`, `review.snapshot_withdrawn`,
+   `review.integrated`, and `review.integration_reconciled` chains;
 2. add linked validation, audit, query, and crash-recovery support;
 3. run old and new acceptance corpora plus the fixtures below;
 4. activate the successor at one exact schema epoch;

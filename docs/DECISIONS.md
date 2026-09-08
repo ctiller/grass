@@ -576,8 +576,10 @@ to imitate compiler-selected storage or CFG structure.
     authority implicitly. An author or bootstrap-authorized coordinator may emit
     `review.reassigned`, preserving the request and its open findings and
     requiring a different reviewer to accept. Only that reviewer may clear or
-    explicitly supersede inherited findings. A published merge
-    acceptance implicitly. Under the review successor an exact snapshot
+    explicitly supersede inherited findings. Under the live protocol, a
+    published merge authorization remains an immutable candidate-specific
+    verdict and can only win or lose its pinned product compare-and-swap; it
+    never transfers implicitly. Under the review successor an exact snapshot
     acceptance remains owned by its accepting reviewer; reassignment requires a
     fresh acceptance. If a reviewer disappears after a valid push but before its
     receipt, a bootstrap-authorized coordinator may reconcile only the already
