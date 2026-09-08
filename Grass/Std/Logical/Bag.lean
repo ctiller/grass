@@ -116,6 +116,38 @@ protected def empty : Bag α := ofList []
 instance : EmptyCollection (Bag α) := ⟨Bag.empty⟩
 instance : Zero (Bag α) := ⟨Bag.empty⟩
 
+/--
+`Bag.empty` and `0` are the same multiset, oriented towards `0`.
+
+Stated as `simp` because every law in this module about the empty multiset is
+written with `0` — `zero_add`, `add_zero`, `card_zero`, `mem_zero`, `map_zero`,
+and `ofList_nil`'s right-hand side. Without this, a goal naming the definition
+rather than the numeral reaches none of them: `simp` does not unfold `Bag.empty`
+to the `Zero` instance's value, so `b + Bag.empty = b` makes no progress at all
+while `b + 0 = b` closes.
+
+That is the worse half of the same gap `Vec.emptyCollection_eq_empty` closes,
+because `Bag.empty` is this module's *own* name for the value. A consumer writing
+the obvious thing got the answer that nothing applies.
+-/
+@[simp] theorem empty_eq_zero : (Bag.empty : Bag α) = 0 := rfl
+
+/--
+`∅` and `0` are the same multiset.
+
+The `EmptyCollection` instance above makes the notation typecheck without making
+it rewrite, so this is the same one-line bridge as `Bag.empty_eq_zero` for the
+other spelling. Both orient towards `0` rather than towards `Bag.empty`, because
+`0` is what the laws are stated about; the direction is chosen by where the
+theorems already are, not by which name reads better.
+
+Note this module normalises to `0` while `Grass/Std/Logical/Vec.lean` and
+`Grass/Std/Logical/FiniteMap.lean` normalise to `empty`. That is deliberate and
+not an inconsistency to fix: `Bag` carries `Zero` and an additive theory in which
+`0` is the unit, and the other two carry neither.
+-/
+@[simp] theorem emptyCollection_eq_zero : (∅ : Bag α) = 0 := rfl
+
 /-- The multiset containing `element` once. -/
 def singleton (element : α) : Bag α := ofList [element]
 
@@ -126,7 +158,21 @@ def cons (element : α) (rest : Bag α) : Bag α :=
   Quotient.liftOn rest (fun elements => ofList (element :: elements))
     (fun _ _ equivalent => Quotient.sound (equivalent.cons element))
 
-/-- Multiset union: multiplicities add. Written `+`. -/
+/--
+Multiset union: multiplicities add. Written `+`, and `protected` so that `+` is
+the spelling a consumer arrives at.
+
+Every law about this operation is stated over `+` -- `card_add`, `mem_add`,
+`map_add`, `add_zero`, `zero_add`, `add_comm`, `add_assoc` -- and a goal written
+as `Bag.append x y` reaches none of them, because `simp` sees the application and
+not the instance. That is a naming observation rather than a missing law: the laws
+cover the operation as consumers write it. `protected` is what keeps the second
+spelling out of reach of an `open Bag`, so the observation stays true instead of
+depending on nobody happening to write it.
+
+`Grass/Std/Logical/Vec.lean`'s `append` is the same shape with `++`, and the
+observation-coverage audit exempts it on exactly this ground.
+-/
 protected def append (left right : Bag α) : Bag α :=
   Quotient.liftOn₂ left right (fun l r => ofList (l ++ r))
     (fun _ _ _ _ leftEquivalent rightEquivalent =>
@@ -135,6 +181,8 @@ protected def append (left right : Bag α) : Bag α :=
 -- `+` only. An `Append` instance would give the same function a second head,
 -- and every law below is stated with `+`, so a `++` goal would be unreachable
 -- for `simp`. `docs/PROCESS.md` §2 writes the run's bag composition with `+`.
+-- The bare name is a second head by the other route, which is why `Bag.append`
+-- is `protected`; `Bag.Mem` already was, and the two were inconsistent.
 instance : Add (Bag α) := ⟨Bag.append⟩
 
 /--
@@ -213,6 +261,12 @@ theorem add_comm (a b : Bag α) : a + b = b + a := by
     | _ y => exact Quotient.sound List.perm_append_comm
 
 @[simp] theorem card_zero : card (0 : Bag α) = 0 := rfl
+
+/-- A singleton has one element. One line from `singleton_eq` and `card_ofList`,
+and absent until a probe asked `simp` for it and got no progress: the module had
+`card_zero`, `card_cons`, `card_add`, `card_ofList` and `card_map`, so the gap was
+the one arity nothing else reached. -/
+@[simp] theorem card_singleton (element : α) : card ({element} : Bag α) = 1 := rfl
 
 @[simp] theorem card_cons (element : α) (rest : Bag α) :
     card (cons element rest) = card rest + 1 := by

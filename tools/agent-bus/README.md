@@ -16,6 +16,17 @@ linear `agent-bus` branch. It is not wire- or CLI-compatible with v1.
 cargo build --release
 ```
 
+**Windows: keep `CARGO_TARGET_DIR` short.** `libgit2-sys` vendors libgit2,
+whose pcre2 object files sit about 90 characters below the target directory
+(`debug/build/libgit2-sys-<hash>/out/build/<hash>-pcre2_compile_cgroup.o`).
+A target directory beyond roughly 165 characters pushes them past Windows'
+260-character `MAX_PATH`, and `cl.exe` then fails with no message of its own
+-- cc-rs reports only `command did not execute successfully (status code
+exit code: 1)` with the whole command line, and nothing in it points at the
+path length. Building into a deep scratch directory (a per-session temp path,
+a nested worktree) is the usual way to hit it. Set `CARGO_TARGET_DIR` to
+something short, e.g. `C:\ab-target`, and it builds.
+
 ## One-time repository setup
 
 ```sh

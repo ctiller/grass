@@ -403,6 +403,42 @@ theorem get?_push_lt (v : Vec α) (a : α) {i : Nat} (h : i < v.length) :
 @[simp] theorem get?_push_self (v : Vec α) (a : α) : (v.push a).get? v.length = some a := by
   simp [get?, push, length]
 
+/--
+Reading *any* index of a pushed sequence.
+
+`Vec.get?_push_self` reads the top and `Vec.get?_push_lt` reads below it, and
+between them they cover the cases — but neither is usable on a sequence pushed
+more than once, which is the shape a consumer that *builds* a sequence actually
+has.
+
+The reason is the interaction of two `simp` laws rather than a missing case.
+`Vec.length_push` normalises `(v.push a).length` to `v.length + 1`, so a goal
+about `((v.push a).push b).get? i` arrives with `i` as `v.length + 1`, while
+`get?_push_self`'s left side wants the unnormalised `(v.push a).length`. `simp`
+will never produce that shape, so the law cannot fire. Measured before this was
+written: of six read-after-push goals, `simp` closed only the single-push read at
+the top. Two pushes reading the top, two pushes reading below it, and both
+concrete indices into a two-element sequence built from `Vec.empty` all reported
+no progress.
+
+This states the case split instead, so the index never has to match a
+denormalised form. `Tests/Std/VecInstances.lean` pins all six.
+
+`get?_push_self` is kept rather than removed. It is subsumed — dropping its
+`@[simp]` breaks no fixture once this exists — but it is the cleaner one-step
+rewrite for the goal it names, the two agree wherever both apply, and removing a
+public `simp` law is a change for consumers this module cannot see.
+-/
+@[simp] theorem get?_push (v : Vec α) (a : α) (i : Nat) :
+    (v.push a).get? i =
+      if i < v.length then v.get? i else if i = v.length then some a else none := by
+  rcases Nat.lt_trichotomy i v.length with h | h | h
+  · rw [get?_push_lt v a h, if_pos h]
+  · subst h; rw [get?_push_self, if_neg (Nat.lt_irrefl _), if_pos rfl]
+  · rw [if_neg (Nat.not_lt.mpr (Nat.le_of_lt h)), if_neg (Nat.ne_of_gt h)]
+    simp only [get?, push, toList_fromList, length] at *
+    exact List.getElem?_eq_none (by simp; omega)
+
 @[simp] theorem pop?_empty : (empty : Vec α).pop? = none := rfl
 
 /-- `pop?` inverts `push`. -/
@@ -1309,11 +1345,38 @@ end Vec
 ## Bytes
 
 `docs/STDLIB.md` §1 fixes `ByteArray := Vec Byte`. `Byte` itself is defined in
-`Grass/Std/Logical/Byte.lean`, and §1 groups the two; the name is sited here
-rather than there only because that module is still under `c-mem`'s declared
-temporary custody (`c-mem:1`), and this module's owner does not edit it before
-the handoff lands. Merging the two declarations is part of accepting that
-handoff and is tracked in `docs/STDLIB_IMPLEMENTATION_PLAN.md`.
+`Grass/Std/Logical/Byte.lean`, and §1 groups the two, so siting the name here
+splits a pair the specification writes together.
+
+**The reason this section used to give for that split is spent, and it was never
+the binding one.** It said the name is sited here because `Byte.lean` was under
+`c-mem`'s declared temporary custody (`c-mem:1`) and that this module's owner
+would not edit it before the handoff landed, so merging the two declarations was
+"part of accepting that handoff". The handoff landed on 2026-09-07 — offered as
+`c-mem:47`, accepted as `c-stdlib:19` — both modules have had one owner since,
+and the merge did not happen.
+
+What actually stands in the way is the import direction, which no handoff
+changes. `Vec.lean` imports `Byte.lean`, so declaring `ByteArray` beside `Byte`
+would need `Byte.lean` to import `Vec` — a cycle. Breaking it means this module
+dropping its `Byte` import, which is defensible on its own terms, since `Vec α`
+is generic and uses nothing from `Byte` except to state that one abbreviation.
+
+**The cost of doing so is measured rather than estimated, because two earlier
+estimates of it were both wrong.** Running the move — drop this module's import,
+declare `ByteArray` in `Byte.lean` above `ByteSeq`, rebuild until green — costs
+one `import Grass.Std.Logical.Byte` line in exactly five modules:
+`Grass/Std/Logical/HostBytes.lean`, `Tests/Std/Chunking.lean`,
+`Tests/Std/PartialWrite.lean`, `Tests/Std/VecVocabulary.lean`, and
+`Grass/Build/Cache/Key.lean`. Four are this owner's; the fifth is `g-build`'s and
+`g-build:83` has already authorized an edit there for exactly this. Nothing else
+in the tree notices, and the result builds green.
+
+So it is not expensive and it is not blocked. What it is, is unasked for: no
+consumer has said the split costs it anything, which puts it in §1's band 3 and
+leaves it an open item in `docs/STDLIB_IMPLEMENTATION_PLAN.md` rather than a
+pending edit. Recording the measurement means the decision, whenever someone
+wants to take it, does not need the experiment run a third time.
 -/
 
 /--
@@ -1330,10 +1393,13 @@ whether to pay it is the naming question this module's owner has put to the owne
 of `docs/STDLIB.md` rather than deciding unilaterally. `Tests/Std/VecVocabulary.lean`
 pins both halves: a `List Byte` is rejected here, and so is a host `_root_.ByteArray`.
 
-`ByteSeq` in `Grass/Std/Logical/Byte.lean` is the placeholder this retires. It is
-still the type the memory layer's fields use; migrating those uses is a change to
-`Grass/Memory/**`, which belongs to `c-mem`, so the two names coexist until that
-migration is agreed rather than one being deleted from under its consumers.
+`ByteSeq` in `Grass/Std/Logical/Byte.lean` is the placeholder this retires, and
+retiring it is not this module's to schedule. `ByteSeq` is written under
+`Grass/Memory`, `Grass/ISA`, `Grass/ABI` and `Grass/Op`, so the migration crosses
+several owners, and `c-mem:51` measured its own share at twenty-five errors
+concentrated in the proof layer rather than in the field declarations. The two
+names coexist until that is arranged, rather than either being deleted from under
+its consumers; `docs/STDLIB_IMPLEMENTATION_PLAN.md` §4.0 carries the costing.
 -/
 abbrev ByteArray := Vec Byte
 
