@@ -47,7 +47,7 @@ example : readGobj
 
 example : readGobj
     (Vec.fromList [0x47, 0x4f, 0x42, 0x4a, 0x01, 0x00, 0x00, 0x00,
-      0x02]) = .invalid (.malformed "noncanonical .gobj scope length") := by rfl
+      0x02]) = .invalid (.malformed "noncanonical unary natural") := by rfl
 
 example : readGobj
     (Vec.fromList [0x47, 0x4f, 0x42, 0x4a, 0x01, 0x00, 0x00, 0x00]) =

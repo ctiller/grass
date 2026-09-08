@@ -1,4 +1,5 @@
 import Grass.Artifact.Binary.Gobj.Framing
+import Grass.Artifact.Binary.Unary
 import Grass.Core.Identifiers
 import Grass.Std.Logical.Text
 
@@ -19,59 +20,9 @@ open Grass.Artifact.Binary Grass.Grammar Grass.Std.Logical
 /-- Stable scope identity is the foundation's structured nominal identifier. -/
 abbrev StableScopeId := Grass.StableId
 
-/-- Total, canonical framing of a logical natural number. -/
-def writeUnaryLength (count : Nat) : Std.Logical.ByteArray :=
-  Vec.replicate count 1 ++ Vec.singleton 0
-
-/-- Read the canonical unary length prefix, rejecting every other byte. -/
-def readUnaryLengthList : List Byte → Nat → ParseResult Nat
-  | [], count => .needMore (some (count + 1))
-  | byte :: rest, count =>
-      if byte = 1 then
-        readUnaryLengthList rest (count + 1)
-      else if byte = 0 then
-        .done count (Vec.fromList rest)
-      else
-        .invalid (.malformed "noncanonical .gobj scope length")
-
-/-- Read a unary length from the front of the logical byte sequence. -/
-def readUnaryLength (input : Std.Logical.ByteArray) : ParseResult Nat :=
-  readUnaryLengthList input.toList 0
-
-/-- Unary framing costs exactly one terminator beyond its represented value. -/
-@[simp] theorem length_writeUnaryLength (count : Nat) :
-    (writeUnaryLength count).length = count + 1 := by
-  simp [writeUnaryLength]
-
-@[simp] theorem readUnaryLengthList_replicate (count offset : Nat)
-    (suffix : List Byte) :
-    readUnaryLengthList (List.replicate count 1 ++ 0 :: suffix) offset =
-      .done (offset + count) (Vec.fromList suffix) := by
-  induction count generalizing offset with
-  | zero => simp [readUnaryLengthList]
-  | succ count ih =>
-      simp only [List.replicate_succ, List.cons_append, readUnaryLengthList,
-        if_pos]
-      rw [ih]
-      simp [Nat.add_comm, Nat.add_left_comm]
-
-/-- `readUnaryLength_write_append` decodes a canonical unary length exactly
-and preserves its suffix. -/
-@[simp] theorem readUnaryLength_write_append (count : Nat)
-    (suffix : Std.Logical.ByteArray) :
-    readUnaryLength (writeUnaryLength count ++ suffix) = .done count suffix := by
-  cases suffix with
-  | fromList bytes =>
-      unfold readUnaryLength writeUnaryLength
-      rw [Vec.toList_append, Vec.toList_append]
-      change readUnaryLengthList
-        (List.replicate count 1 ++ [0] ++ bytes) 0 =
-          .done count (Vec.fromList bytes)
-      simpa using readUnaryLengthList_replicate count 0 bytes
-
 /-- Canonical serialization of one UTF-8 string component. -/
 def writeScopeComponent (value : String) : Std.Logical.ByteArray :=
-  writeUnaryLength (Text.utf8 value).length ++ Text.utf8 value
+  writeUnaryNat (Text.utf8 value).length ++ Text.utf8 value
 
 /-- A component carries its bytes once plus an equally long unary prefix. -/
 @[simp] theorem length_writeScopeComponent (value : String) :
@@ -81,7 +32,7 @@ def writeScopeComponent (value : String) : Std.Logical.ByteArray :=
 
 /-- Parse one canonical UTF-8 string component. -/
 def readScopeComponent (input : Std.Logical.ByteArray) : ParseResult String :=
-  match readUnaryLength input with
+  match readUnaryNat input with
   | .done count afterLength =>
       match takeExact count afterLength with
       | .done bytes suffix =>
@@ -90,7 +41,7 @@ def readScopeComponent (input : Std.Logical.ByteArray) : ParseResult String :=
           | none => .invalid (.malformed "invalid UTF-8 in .gobj scope")
       | .needMore hint => .needMore hint
       | .invalid error => .invalid error
-  | .needMore hint => .needMore hint
+  | .needMore _ => .needMore (some (input.length + 1))
   | .invalid error => .invalid error
 
 /-- `readScopeComponent_write_append` proves canonical component recovery with
@@ -100,7 +51,7 @@ every suffix preserved. -/
     readScopeComponent (writeScopeComponent value ++ suffix) =
       .done value suffix := by
   unfold readScopeComponent writeScopeComponent
-  rw [Vec.append_assoc, readUnaryLength_write_append]
+  rw [Vec.append_assoc, readUnaryNat_write_append]
   simp only
   rw [takeExact_append (by rfl)]
   simp [Text.decode?_utf8]

@@ -80,6 +80,7 @@ inductive Format : Type → Type 1 where
   | seq {α β : Type} (left : Format α) (right : α → Format β) : Format (α × β)
   | choice {α : Type} (left right : Format α) : Format α
   | repeat {α : Type} (count : Nat) (item : Format α) : Format (Vec α)
+  | unaryNat (more stop : Byte) (distinct : more ≠ stop) : Format Nat
   | refine {α : Type} (inner : Format α) (accepts : α → Prop) : Format α
   | lift {α β : Type} (inner : Format α) (forget : β → α) : Format β
   | iso {α β : Type} (inner : Format α)
@@ -111,6 +112,14 @@ inductive Derives : {α : Type} → Format α → Std.Logical.ByteArray → α �
       (head : Derives item input value middle)
       (tail : Derives (.repeat count item) middle values rest) :
       Derives (.repeat (Nat.succ count) item) input (Vec.singleton value ++ values) rest
+  | unaryZero (more stop : Byte) (distinct : more ≠ stop)
+      (rest : Std.Logical.ByteArray) :
+      Derives (.unaryNat more stop distinct) (Vec.singleton stop ++ rest) 0 rest
+  | unarySucc {more stop : Byte} {distinct : more ≠ stop}
+      {input rest : Std.Logical.ByteArray} {value : Nat}
+      (tail : Derives (.unaryNat more stop distinct) input value rest) :
+      Derives (.unaryNat more stop distinct)
+        (Vec.singleton more ++ input) (Nat.succ value) rest
   | refine {α : Type} {inner : Format α} {predicate : α → Prop}
       {input rest : Std.Logical.ByteArray} {value : α}
       (derivation : Derives inner input value rest) (accepted : predicate value) :
@@ -136,8 +145,14 @@ theorem outerShape {α : Type} {format : Format α}
     match format with
     | .byte accepts =>
         input = Vec.singleton value ++ rest ∧ accepts value
+    | .unaryNat more stop _ =>
+        input = Vec.replicate value more ++ Vec.singleton stop ++ rest
     | _ => True := by
-  induction derivation <;> simp_all
+  induction derivation <;>
+    simp_all [Vec.replicate, Vec.singleton, List.replicate_succ]
+  all_goals
+    apply Vec.toList_injective
+    simp_all
 
 /-- A byte-format derivation consumes exactly its leading byte. -/
 theorem byteInput {accepts : Byte → Prop} {input : Std.Logical.ByteArray}
@@ -172,6 +187,11 @@ theorem consumesPrefix {α : Type} {format : Format α}
       rcases headPrefix with ⟨headBytes, rfl⟩
       rcases tailPrefix with ⟨tailBytes, rfl⟩
       exact ⟨headBytes ++ tailBytes, by simp [Vec.append_assoc]⟩
+  | unaryZero more stop distinct rest =>
+      exact ⟨Vec.singleton stop, rfl⟩
+  | @unarySucc more stop distinct input rest value tail tailPrefix =>
+      rcases tailPrefix with ⟨tailBytes, rfl⟩
+      exact ⟨Vec.singleton more ++ tailBytes, by simp [Vec.append_assoc]⟩
   | refine derivation accepted refinedPrefix => exact refinedPrefix
   | lift derivation liftedPrefix => exact liftedPrefix
   | iso derivation mappedPrefix => exact mappedPrefix
@@ -202,6 +222,8 @@ theorem repeatConsumedLengthShape {α : Type} {format : Format α}
       have remainingLength := tailLength itemWidth itemLength
       rw [Nat.succ_mul]
       omega
+  | unaryZero => trivial
+  | unarySucc => trivial
   | refine => trivial
   | lift => trivial
   | iso => trivial
@@ -279,6 +301,11 @@ theorem appendSuffix {α : Type} {format : Format α}
   | repeatZero item input => exact Derives.repeatZero item (input ++ suffix)
   | repeatSucc head tail headSuffix tailSuffix =>
       exact Derives.repeatSucc headSuffix tailSuffix
+  | unaryZero more stop distinct rest =>
+      simpa [Vec.append_assoc] using
+        Derives.unaryZero more stop distinct (rest ++ suffix)
+  | unarySucc tail tailSuffix =>
+      simpa [Vec.append_assoc] using Derives.unarySucc tailSuffix
   | refine derivation accepted derivationSuffix =>
       exact Derives.refine derivationSuffix accepted
   | lift derivation derivationSuffix =>

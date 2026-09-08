@@ -19,4 +19,14 @@ example (input : Std.Logical.ByteArray) (short : input.length < 4) :
       (some (4 - input.length)) :=
   ⟨short, rfl⟩
 
+example (suffix : Std.Logical.ByteArray) :
+    Derives unaryNatFormat
+      (Vec.replicate 3 1 ++ Vec.singleton 0 ++ suffix) 3 suffix :=
+  unaryNat_derives 3 suffix
+
+example {input rest : Std.Logical.ByteArray} {value : Nat}
+    (derivation : Derives unaryNatFormat input value rest) :
+    input = Vec.replicate value 1 ++ Vec.singleton 0 ++ rest :=
+  derives_unaryNatFormat_iff.mp derivation
+
 end Grass.Tests.Grammar

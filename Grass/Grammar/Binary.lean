@@ -50,6 +50,47 @@ def repeatedBytesFormat (count : Nat) : Format Std.Logical.ByteArray :=
 def fixedBytesFormat (count : Nat) : Format (SizedByteArray count) :=
   (repeatedBytesFormat count).refineValue fun value => value.length = count
 
+/-- Canonical unbounded natural-number prefix used by self-delimiting binary
+fields: `count` continuation bytes followed by one distinct terminator. -/
+theorem unaryNatMarkersDistinct : (1 : Byte) ≠ 0 := by decide
+
+/-- The standard unary natural-number format uses byte one as continuation and
+byte zero as terminator. -/
+def unaryNatFormat : Format Nat :=
+  .unaryNat 1 0 unaryNatMarkersDistinct
+
+/-- The independent unary grammar derives its canonical prefix in front of
+every suffix. -/
+theorem unaryNat_derives (count : Nat) (suffix : Std.Logical.ByteArray) :
+    Derives unaryNatFormat
+      (Vec.replicate count 1 ++ Vec.singleton 0 ++ suffix) count suffix := by
+  induction count with
+  | zero =>
+      change Derives unaryNatFormat (Vec.singleton 0 ++ suffix) 0 suffix
+      exact Derives.unaryZero 1 0 unaryNatMarkersDistinct suffix
+  | succ count ih =>
+      have replicateEq : Vec.replicate (Nat.succ count) (1 : Byte) =
+          Vec.singleton 1 ++ Vec.replicate count 1 := by
+        apply Vec.toList_injective
+        simp [Vec.replicate, Vec.singleton, List.replicate_succ]
+      rw [replicateEq]
+      simp only [Vec.append_assoc]
+      simpa only [unaryNatFormat, Vec.append_assoc, Nat.succ_eq_add_one] using
+        Derives.unarySucc ih
+
+/-- The unary derivation relation is exactly its marker-delimited byte shape;
+this statement is independent of any executable reader. -/
+theorem derives_unaryNatFormat_iff {input : Std.Logical.ByteArray}
+    {value : Nat} {rest : Std.Logical.ByteArray} :
+    Derives unaryNatFormat input value rest ↔
+      input = Vec.replicate value 1 ++ Vec.singleton 0 ++ rest := by
+  constructor
+  · intro derivation
+    exact derivation.outerShape
+  · intro shape
+    rw [shape]
+    exact unaryNat_derives value rest
+
 /-- The sized format derives exactly when its underlying repeated-byte format
 derives the same logical byte vector. -/
 theorem derives_fixedBytes_iff {count : Nat} {input rest : Std.Logical.ByteArray}
