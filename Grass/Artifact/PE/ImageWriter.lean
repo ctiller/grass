@@ -12,7 +12,7 @@ high-level program specification.
 
 namespace Grass.Artifact.PE
 
-open Grass.Artifact.COFF Grass.Grammar Grass.Std.Logical
+open Grass.Artifact.Binary Grass.Artifact.COFF Grass.Grammar Grass.Std.Logical
 
 /-- Round `value` upward to the next `alignment` boundary. A zero alignment is
 left unchanged and is rejected by `ImageDescription.Writable`. -/
@@ -108,6 +108,68 @@ def ImageSectionDescription.headerAt
   rw [ImageSectionDescription.paddedRawData, length_padBytes] at lengthFits ⊢
   simp [ImageSectionDescription.headerAt, BitVec.toNat_ofNat,
     Nat.mod_eq_of_lt lengthFits]
+
+/-- A representable synthesized section header has coherent PE-only pointer
+fields, including the canonical zero pointer for an empty payload. -/
+theorem ImageSectionDescription.headerAt_imageSectionPointersCoherent
+    (description : ImageSectionDescription) (alignment offset : Nat)
+    (offsetPositive : 0 < offset)
+    (lengthFits : alignUp description.rawData.length alignment < 2 ^ 32)
+    (extentFits : alignUp description.rawData.length alignment = 0 ∨
+      offset + alignUp description.rawData.length alignment < 2 ^ 32) :
+    imageSectionPointersCoherent (description.headerAt alignment offset) := by
+  let length := alignUp description.rawData.length alignment
+  unfold imageSectionPointersCoherent SectionHeader.rawDataSpan
+    ByteSpan.PointerCoherent
+  simp only [ImageSectionDescription.headerAt]
+  change
+    ((rawDataPointer offset length).toNat = 0 ↔
+      (BitVec.ofNat 32 length).toNat = 0) ∧
+    (0 : BitVec 32).toNat = 0 ∧
+    (0 : BitVec 16).toNat = 0 ∧
+    (0 : BitVec 32).toNat = 0 ∧
+    (0 : BitVec 16).toNat = 0
+  rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt lengthFits]
+  unfold rawDataPointer
+  split
+  next empty => simpa [length] using empty
+  next nonempty =>
+    have offsetFits : offset < 2 ^ 32 := by
+      rcases extentFits with empty | fits
+      · contradiction
+      · omega
+    have offsetNonzero : offset ≠ 0 := by omega
+    have lengthNonzero :
+        alignUp description.rawData.length alignment ≠ 0 := by
+      simpa [length] using nonempty
+    rw [BitVec.toNat_ofNat, Nat.mod_eq_of_lt offsetFits]
+    simp [offsetNonzero, lengthNonzero]
+
+/-- The raw-data span of a representable synthesized header is its assigned
+interval, with the canonical zero span for an empty payload. -/
+theorem ImageSectionDescription.headerAt_rawDataSpan
+    (description : ImageSectionDescription) (alignment offset : Nat)
+    (lengthFits : alignUp description.rawData.length alignment < 2 ^ 32)
+    (extentFits : alignUp description.rawData.length alignment = 0 ∨
+      offset + alignUp description.rawData.length alignment < 2 ^ 32) :
+    (description.headerAt alignment offset).rawDataSpan =
+      if alignUp description.rawData.length alignment = 0 then
+        { offset := 0, length := 0 }
+      else
+        { offset := offset,
+          length := alignUp description.rawData.length alignment } := by
+  unfold SectionHeader.rawDataSpan ImageSectionDescription.headerAt
+  split
+  next empty =>
+    simp [rawDataPointer, empty]
+  next nonempty =>
+    have offsetFits : offset < 2 ^ 32 := by
+      rcases extentFits with empty | fits
+      · contradiction
+      · omega
+    congr 1 <;>
+      simp [rawDataPointer, nonempty, BitVec.toNat_ofNat,
+        Nat.mod_eq_of_lt offsetFits, Nat.mod_eq_of_lt lengthFits]
 
 /-- Lay out section headers consecutively from an aligned starting offset. -/
 def layoutImageSectionList (alignment : Nat) :
