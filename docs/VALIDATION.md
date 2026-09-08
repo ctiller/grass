@@ -123,5 +123,13 @@ failure even if the full rebuild eventually succeeds.
 Periodic clean uncached and differential reconstructions verify the incremental
 engine's reuse claims and cache-key sufficiency.
 
+Cache validation deliberately supplies separate constant hash functions for the
+outer lookup key and for each fingerprinted input domain. For the latter test,
+two distinct exact source/profile values receive the same digest and replay must
+still be rejected. The test fails if an alleged exact environment retains only
+those digests, because then the distinct values have already been erased before
+the replay predicate runs. Kernel-checked certificate indices or parsed exact
+artifact equality, never collision tests alone, provide reuse authority.
+
 Published-corpus lint also rejects audience/workstation idioms used as evidence,
 including “worked on my machine,” in addition to literal private topology.

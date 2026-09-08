@@ -90,6 +90,47 @@ equals the exact payload retained by the imported opaque certificate. Cache
 hashes and digests locate artifacts; they are never accepted as proof of
 correctness. [VERIFIED_OBJECTS.md](VERIFIED_OBJECTS.md) owns this bridge.
 
+That rule applies recursively to cache inputs themselves. A record containing
+`source : Digest`, `profile : Digest`, and similar fields is a fingerprint, not
+an exact semantic environment. Structural equality of such a record is still
+only digest equality and cannot authorize dependent transport. The generic
+in-kernel replay shape is instead:
+
+```lean
+structure CachedCertificate
+    (ExactInput : Type) (Certificate : ExactInput -> Type) where
+  lookupKey : Digest
+  exactInput : ExactInput
+  certificate : Certificate exactInput
+
+def replay?
+    {ExactInput : Type} {Certificate : ExactInput -> Type}
+    [DecidableEq ExactInput]
+    (requested : ExactInput)
+    (entry : CachedCertificate ExactInput Certificate) :
+    Option (Certificate requested) :=
+  if h : requested = entry.exactInput then
+    some (h.symm ▸ entry.certificate)
+  else
+    none
+```
+
+`ExactInput` is the bounded shard-local source value, exact imported public
+summaries, and exact semantic/profile values which occur in the certificate's
+theorem index. Toolchain, generator, audit-policy, and option fingerprints may
+conservatively reject a cache candidate, but equality of those fingerprints
+cannot create `requested = entry.exactInput`. If an exact input has no suitable
+decidable equality, replay imports/re-elaborates the opaque declaration and lets
+the Lean kernel check its exact theorem type; it does not fall back to hash
+equality. Artifact caches separately parse bytes and prove equality to the
+payload owned by that already checked certificate.
+
+Collision testing has two independent levels. An outer-key collision must scan
+past an ineligible candidate. More importantly, a deliberately colliding
+*source or profile fingerprint* must leave two distinct `ExactInput` values and
+must not replay. A fixture which changes the bytes stored in a `Digest` tests
+ordinary record inequality, not this second requirement.
+
 ## 2. Import discipline
 
 The central rule is:
