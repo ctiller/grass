@@ -108,6 +108,14 @@ theorem block_mem_of_resolution
   cases resolution with
   | direct member => exact member
 
+/-- Direct resolution evidence identifies a concrete structural CFG block. -/
+theorem block_of_direct_resolution
+    {State : Type u} {Terminal : Type v}
+    {policy : TargetPolicy State Terminal} {block : BlockId}
+    (resolution : ResolvedControlTarget policy (.direct block)) :
+    ∃ targetBlock, policy.graph.findBlock? block = some targetBlock :=
+  policy.graph.blockForId block (block_mem_of_resolution resolution)
+
 /-- Indirect resolution evidence exposes the exact selected finite evidence. -/
 theorem indirectEvidence_of_resolution
     {State : Type u} {Terminal : Type v}
@@ -415,6 +423,21 @@ def controlTargetEvidence
     TargetPolicy.ResolvedControlTarget program.policy target :=
   program.policy.resolutionOf target
     (program.controlTargetResolved instruction hinstruction target htarget)
+
+/-- Every accepted directly reported target identifies a concrete structural
+block in the retained CFG. -/
+theorem directTargetBlock
+    {State : Type u} {Terminal : Type v} {Byte : Type w}
+    {Instruction : Type x}
+    (program : ImportedProgram State Terminal Byte Instruction)
+    (instruction : ImportedInstruction Byte Instruction)
+    (hinstruction : instruction ∈ program.instructions)
+    (block : BlockId) (htarget : ControlTarget.direct block ∈
+      instruction.controlTargets) :
+    ∃ targetBlock, program.policy.graph.findBlock? block = some targetBlock :=
+  TargetPolicy.block_of_direct_resolution
+    (program.controlTargetEvidence instruction hinstruction (.direct block)
+      htarget)
 
 /-- Every accepted imported instruction owns a nonempty source-byte slice. -/
 theorem instructionBytesNonempty

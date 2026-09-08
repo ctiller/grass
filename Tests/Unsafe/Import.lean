@@ -93,6 +93,9 @@ example (reported : ControlTarget) (resolved : policy.resolves reported = true) 
 example (resolution : TargetPolicy.ResolvedControlTarget policy (.direct target)) :
     target ∈ policy.graph.blockIds :=
   TargetPolicy.block_mem_of_resolution resolution
+example (resolution : TargetPolicy.ResolvedControlTarget policy (.direct target)) :
+    ∃ targetBlock, policy.graph.findBlock? target = some targetBlock :=
+  TargetPolicy.block_of_direct_resolution resolution
 example (resolution : TargetPolicy.ResolvedControlTarget policy (.indirect indirectSite)) :
     ∃ evidence, policy.indirectEvidence? indirectSite = some evidence :=
   TargetPolicy.indirectEvidence_of_resolution resolution
@@ -171,6 +174,12 @@ example (imported : ImportedProgram Nat String Nat Instruction)
     (reported : ControlTarget) (hreported : reported ∈ instruction.controlTargets) :
     TargetPolicy.ResolvedControlTarget imported.policy reported :=
   imported.controlTargetEvidence instruction hinstruction reported hreported
+example (imported : ImportedProgram Nat String Nat Instruction)
+    (instruction : ImportedInstruction Nat Instruction)
+    (hinstruction : instruction ∈ imported.instructions)
+    (hreported : ControlTarget.direct target ∈ instruction.controlTargets) :
+    ∃ targetBlock, imported.policy.graph.findBlock? target = some targetBlock :=
+  imported.directTargetBlock instruction hinstruction target hreported
 
 example : (importBytes decoder policy [1, 1]).map (fun _ => ()) =
     .error (.unresolvedControlTarget 0 (.direct missing)) := by rfl

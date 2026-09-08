@@ -443,9 +443,10 @@ decoder or policy search.
 accepted indirect site; its lookup theorems retain requested-site identity and
 prove every enumerated target belongs to the selected CFG.
 `TargetPolicy.resolution?` converts target admission into a proof-bearing
-`ResolvedControlTarget`: direct evidence exposes graph-block membership and
-indirect evidence exposes the exact selected finite target set. Its success is
-proved equivalent to `TargetPolicy.resolves`; `resolutionOf` and
+`ResolvedControlTarget`: direct evidence exposes graph-block membership and a
+concrete structural block lookup, while indirect evidence exposes the exact
+selected finite target set. Its success is proved equivalent to
+`TargetPolicy.resolves`; `resolutionOf` and
 `ImportedProgram.controlTargetEvidence` recover the checked evidence value
 without repeating decoder or policy validation.
 
