@@ -309,6 +309,21 @@ def argumentRegister (index : Nat) : Option Gpr :=
 /-- The registers used for integer arguments, in order. -/
 def argumentRegisters : List Gpr := [.rcx, .rdx, .r8, .r9]
 
+/--
+The function and the list are the same mapping.
+
+`argumentRegister` and `argumentRegisters` both say which register carries which
+integer argument, and they said it separately. Two spellings of one fact, which
+is the arrangement this module complains about elsewhere for a duplicated ABI
+number -- and here it is a whole ordered mapping rather than a single value, so
+there is more of it to drift.
+-/
+theorem argumentRegister_eq_argumentRegisters (i : Nat) :
+    argumentRegister i = argumentRegisters[i]? := by
+  match i with
+  | 0 | 1 | 2 | 3 => rfl
+  | _ + 4 => simp [argumentRegister, argumentRegisters]
+
 /-- How many arguments are passed in registers. -/
 def registerArgumentCount : Nat := 4
 
