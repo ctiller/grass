@@ -827,6 +827,22 @@ to imitate compiler-selected storage or CFG structure.
     of every `Grass/Process/**` module. This resolves the three-way
     spike/foundation/module mismatch raised by `c-spike` while retaining the
     process layer's no-import-all invariant.
+135. Spike drafts are reviewed authoring baselines, not frozen specifications
+    or permanent library interfaces. Adequacy evidence may change precious
+    product meaning; real consumer evidence may rebuild replaceable proof,
+    assembly, and library shapes. The first credited proof-economy milestone is
+    the smallest compiling Spike 1 path from its exact specification through
+    authored assembly to its exact emitted-artifact theorem, measuring all
+    program-specific proofs, annotations, adapters, invariants, layouts, build
+    wiring, residual goals, and edit cones separately from reusable library
+    work. Reuse earns credit only when another real consumer uses the boundary
+    without bespoke repair. An unconsumed public helper must be justified as a
+    necessary foundation constructor with a named future gate, kept private, or
+    deleted when the consumer exposes the wrong abstraction. Similar local
+    induction machinery is not generalized merely because its source looks
+    alike; its semantic carrier and invalidation boundary must also coincide.
+    This is a design priority and evidence rule, not a line-count quota or a
+    weakening of proof demands. In Grass, rebuild is the verb.
 
 ## Explicitly rejected shortcuts
 
