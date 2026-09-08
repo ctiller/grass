@@ -796,6 +796,29 @@ theorem encodeMemInsn_wellFormed {escape : Bool} {opcode : Byte} {w : Bool}
     simp
 
 /--
+Any well-formed encoding whose shape the table agrees with round-trips.
+
+The general form. `specShapeFor` is asked about `i`'s own fields, so this says
+nothing about how `i` was built and applies to an encoder with or without a
+`ModR/M` byte.
+-/
+theorem decodes_of_specShape {i : InsnEncoding}
+    (hshape : specShapeFor i.escape i.opcode i.modrm.isSome i.imm.sizeOf = true)
+    (hwf : i.WellFormed) (rest : ByteSeq) :
+    decodeInsn (i.toBytes ++ rest) = .ok (i, rest) := by
+  simp only [specShapeFor] at hshape
+  match hf : findSpec i.escape i.opcode with
+  | Option.none => rw [hf] at hshape; exact absurd hshape (by simp)
+  | some spec =>
+      rw [hf] at hshape
+      simp only [Bool.and_eq_true, beq_iff_eq] at hshape
+      obtain ⟨⟨hmod, hprom⟩, himm⟩ := hshape
+      obtain ⟨hesc, hop⟩ := findSpec_escape_opcode hf
+      refine decodeInsn_toBytes (s := spec) rest hf ⟨hesc, hop, hmod, ?_⟩ hwf
+      rw [OpcodeSpec.immSizeFor_not_promoted hprom]
+      exact himm
+
+/--
 **The writer's round-trip, for a memory-operand encoder.**
 
 Instantiating `decodeInsn_toBytes` at everything `encodeMemInsn` produces. The
@@ -809,21 +832,10 @@ theorem encodeMemInsn_decodes {escape : Bool} {opcode : Byte} {w : Bool}
     (rest : ByteSeq) :
     decodeInsn (i.toBytes ++ rest) = .ok (i, rest) := by
   have hwf := encodeMemInsn_wellFormed henc
-  simp only [encodeMemInsn, Option.map_eq_some_iff] at henc
-  obtain ⟨e, _, rfl⟩ := henc
-  simp only [specShapeFor] at hshape
-  match hf : findSpec escape opcode with
-  | Option.none => rw [hf] at hshape; exact absurd hshape (by simp)
-  | some spec =>
-      rw [hf] at hshape
-      simp only [Bool.and_eq_true, beq_iff_eq] at hshape
-      obtain ⟨⟨hmod, hprom⟩, himm⟩ := hshape
-      obtain ⟨hesc, hop⟩ := findSpec_escape_opcode hf
-      refine decodeInsn_toBytes (s := spec) rest hf ?_ hwf
-      refine ⟨hesc, hop, ?_, ?_⟩
-      · simpa using hmod
-      · rw [OpcodeSpec.immSizeFor_not_promoted hprom]
-        exact himm
+  have hi := henc
+  simp only [encodeMemInsn, Option.map_eq_some_iff] at hi
+  obtain ⟨e, _, rfl⟩ := hi
+  exact decodes_of_specShape (by simpa using hshape) hwf rest
 
 /-- `LEA r64, m` round-trips through its bytes. -/
 theorem leaR64_decodes {dst : Gpr} {m : MemOperand} {i : InsnEncoding}
@@ -848,5 +860,51 @@ theorem movMem64Imm32_decodes {m : MemOperand} {v : BitVec 32} {i : InsnEncoding
     (h : movMem64Imm32 m v = some i) (rest : ByteSeq) :
     decodeInsn (i.toBytes ++ rest) = .ok (i, rest) :=
   encodeMemInsn_decodes h rfl rest
+
+
+/-! ### The round-trip for the opcode-embedded and register-direct encoders
+
+`encodeMemInsn_decodes` covers everything built through `encodeMemInsn`, which
+is every encoder that takes a memory operand. The prologue encoders take none:
+`pushR64` carries its register in the opcode and has no `ModR/M` byte at all,
+and the two `SUB` forms build a register-direct `ModR/M` byte directly. So they
+were the encoders sitting outside the theorem's reach that the section above
+was written to empty, and leaving them there would have re-created the gap it
+closed.
+
+They go through `decodes_of_specShape` above, which asks the table about the
+record's own shape rather than assuming a `ModR/M` byte is present. Writing
+it turned `encodeMemInsn_decodes` into a two-line corollary of it, so the
+proof that reads the table row exists once rather than twice. -/
+
+
+/--
+`PUSH r64` round-trips through its bytes, for every register.
+
+The case split is on the register and not a convenience: `pushR64` puts the
+register in the opcode, so each of the sixteen names a different table row, and
+`0x50+rd` is only correct if all sixteen rows are present with the right shape.
+A `plusRegRows` call that generated seven rows instead of eight would leave this
+unprovable for exactly one register.
+-/
+theorem pushR64_decodes (r : Gpr) (rest : ByteSeq) :
+    decodeInsn ((pushR64 r).toBytes ++ rest) = .ok (pushR64 r, rest) := by
+  cases r <;> exact decodes_of_specShape (by rfl) (pushR64_wellFormed _) rest
+
+/-- `SUB r64, imm8` round-trips through its bytes. No case split: the register
+sits in the `ModR/M` byte, which the table row constrains only by presence, so
+the row is the same for all sixteen. -/
+theorem subR64Imm8_decodes (r : Gpr) (v : BitVec 8) (rest : ByteSeq) :
+    decodeInsn ((subR64Imm8 r v).toBytes ++ rest) = .ok (subR64Imm8 r v, rest) :=
+  decodes_of_specShape (by rfl) (subR64Imm8_wellFormed r v) rest
+
+/-- `SUB r64, imm32` round-trips through its bytes.
+
+That this and `subR64Imm8_decodes` are separate theorems is the point: `81` and
+`83` are different rows with different immediate widths, and a decoder that read
+`83` as taking four bytes would resume three bytes into the next instruction. -/
+theorem subR64Imm32_decodes (r : Gpr) (v : BitVec 32) (rest : ByteSeq) :
+    decodeInsn ((subR64Imm32 r v).toBytes ++ rest) = .ok (subR64Imm32 r v, rest) :=
+  decodes_of_specShape (by rfl) (subR64Imm32_wellFormed r v) rest
 
 end Grass.ISA.X86
