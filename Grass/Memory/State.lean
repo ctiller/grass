@@ -36,6 +36,92 @@ namespace Grass.Memory
 
 open Grass.Core Grass.Obligation Grass.Std.Logical
 
+/-! ## Membership bounds on the grant map
+
+Five theorems that were added to `Grass/Std/Logical/FiniteMap.lean`, which is
+c-stdlib's module. `coord1:245` says implementors work within their assigned roles,
+`e-auditor:5` reported this branch not doing so, and `e-reviewer:121` gave the two
+ways out: c-stdlib's explicit agreement, or moving them here. This is the second.
+
+Specialised to `GrantId`/`AuthorityGrant` rather than carried over polymorphic. They
+were written for one caller and generality was never the point; stating them at the
+type they are used at also keeps them out of the way of whatever c-stdlib may want
+`FiniteMap`'s membership API to look like. A sixth, `entries_eq_nil_of_isEmpty`, was
+added at the same time and used by nothing; it is dropped rather than moved.
+
+`findValue`, `eraseKey` and `findValue_cons_self` are
+c-stdlib's and already on main, so proving these here asks nothing of that module.
+-/
+
+/-- A found value is one of the entries.
+
+Proved by induction on the entry list, which is why `findValue` operates on
+the raw list rather than on the map. -/
+theorem mem_of_findValue {entries : List (GrantId × AuthorityGrant)} {key : GrantId}
+    {value : AuthorityGrant} (h : findValue entries key = some value) :
+    (key, value) ∈ entries := by
+  induction entries with
+  | nil => simp [findValue] at h
+  | cons entry rest ih =>
+    obtain ⟨k, v⟩ := entry
+    by_cases hk : k = key
+    · subst hk
+      rw [findValue_cons_self] at h
+      cases h
+      exact List.mem_cons_self
+    · rw [findValue, if_neg hk] at h
+      exact List.mem_cons_of_mem _ (ih h)
+
+/-- Erasing removes entries and adds none. -/
+theorem mem_of_mem_eraseKey {entries : List (GrantId × AuthorityGrant)} {key : GrantId}
+    {entry : GrantId × AuthorityGrant}
+    (h : entry ∈ eraseKey entries key) : entry ∈ entries := by
+  induction entries with
+  | nil => simp [eraseKey] at h
+  | cons e rest ih =>
+    obtain ⟨k, v⟩ := e
+    by_cases hk : k = key
+    · rw [eraseKey, if_pos hk] at h
+      exact List.mem_cons_of_mem _ (ih h)
+    · rw [eraseKey, if_neg hk] at h
+      rcases List.mem_cons.mp h with h | h
+      · exact h ▸ List.mem_cons_self
+      · exact List.mem_cons_of_mem _ (ih h)
+
+/-- A binding is one of the entries.
+
+The missing half of a bridge review found broken: `granted_of_covering` takes an
+`entry ∈ state.grantEntries` hypothesis, which `decide` discharges for a concrete map
+and nothing discharged for an abstract one, so no general theorem about authority
+could be stated from a `lookup`. The converse fails on a map with shadowed
+duplicates, which is why this direction only. -/
+theorem mem_entries_of_lookup {m : FiniteMap GrantId AuthorityGrant} {key : GrantId}
+    {value : AuthorityGrant} (h : m.lookup key = some value) :
+    (key, value) ∈ m.entries :=
+  mem_of_findValue h
+
+/-- The entries of a map after an insert, bounded from above.
+
+`mem_entries_of_lookup` says what a map holds; this and `mem_entries_erase` say what
+it does *not* hold, which is what a no-new-authority theorem needs: every entry of
+the new map is the one just inserted or an entry of the old map. Without them a
+theorem about a modified map has to unfold the association list at the call site. -/
+theorem mem_entries_insert {m : FiniteMap GrantId AuthorityGrant} {key : GrantId}
+    {value : AuthorityGrant} {entry : GrantId × AuthorityGrant}
+    (h : entry ∈ (m.insert key value).entries) :
+    entry = (key, value) ∨ entry ∈ m.entries := by
+  rcases List.mem_cons.mp
+    (show entry ∈ (key, value) :: eraseKey m.entries key from h) with h | h
+  · exact Or.inl h
+  · exact Or.inr (mem_of_mem_eraseKey h)
+
+/-- And after an erase. -/
+theorem mem_entries_erase {m : FiniteMap GrantId AuthorityGrant} {key : GrantId}
+    {entry : GrantId × AuthorityGrant}
+    (h : entry ∈ (m.erase key).entries) : entry ∈ m.entries :=
+  mem_of_mem_eraseKey h
+
+
 /-- What the state records about one allocation. -/
 structure AllocationRecord where
   /-- The allocation's extent, in bytes. -/
@@ -2198,7 +2284,7 @@ The same bridge from an identity rather than from a membership.
 `granted_of_covering`'s `entry ∈ grantEntries` hypothesis is what a concrete fixture
 has and a symbolic caller does not — review found that every fixture in `Tests/`
 discharges it by `decide`, so the bridge had never been used the way a general
-theorem would use it. `Grass/Std/Logical/FiniteMap.lean`'s `mem_entries_of_lookup`
+theorem would use it. `mem_entries_of_lookup` above
 supplies the step, and this is the form to reach for: it takes the `grantAt?` a caller
 holding a grant identity actually has.
 -/
@@ -2213,7 +2299,7 @@ theorem granted_of_grantAt {state : MemoryState} {context : ContextId}
     (hrights : grant.rights.Permits intent) :
     state.Granted context provenance range intent :=
   granted_of_covering (entry := (id, grant))
-    (Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hat)
+    (mem_entries_of_lookup hat)
     hcover hholder hshares hgrant haccess hrights
 
 /--
@@ -2279,10 +2365,10 @@ theorem splitGrant?_preserves_authority {state next : MemoryState} {id low high 
     exact (currentEpoch_grants state _ _).mpr haccess
   rcases AuthorityGrant.covered_by_part (boundary := boundary) hcovers with hpart | hpart
   · exact ⟨(low, grant.lowPart boundary),
-      Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hlowat,
+      mem_entries_of_lookup hlowat,
       hholder, hshares', hgrant', haccess', hpart, hrights⟩
   · exact ⟨(high, grant.highPart boundary),
-      Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hhighat,
+      mem_entries_of_lookup hhighat,
       hholder, hshares', hgrant', haccess', hpart, hrights⟩
 
 /--
@@ -2291,7 +2377,7 @@ theorem splitGrant?_preserves_authority {state next : MemoryState} {id low high 
 The other direction, and the one that justifies not re-running `issue?`: every entry
 of the split state is one of the two parts or an entry the state already had, and
 each part's range lies inside the source's, so an offset a part authorizes is one the
-source authorized. `Grass/Std/Logical/FiniteMap.lean`'s `mem_entries_insert` and
+source authorized. `mem_entries_insert` and
 `mem_entries_erase` are what bound the new entry list from above; without them a
 theorem about a modified map has to unfold the association list here.
 -/
@@ -2307,17 +2393,17 @@ theorem splitGrant?_creates_no_authority {state next : MemoryState}
   intro i hi
   obtain ⟨entry, hmem, hauth⟩ := hgranted i hi
   have hsource : (id, grant) ∈ state.grantEntries :=
-    Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hat
+    mem_entries_of_lookup hat
   have hmem' : entry = (high, grant.highPart boundary) ∨
       entry = (low, grant.lowPart boundary) ∨ entry ∈ state.grantEntries := by
     have hlist : entry ∈ (state.splitMap id low high boundary grant).entries := by
       subst hnext; exact hmem
     unfold splitMap at hlist
-    rcases Grass.Std.Logical.FiniteMap.mem_entries_insert hlist with hcase | hcase
+    rcases mem_entries_insert hlist with hcase | hcase
     · exact Or.inl hcase
-    · rcases Grass.Std.Logical.FiniteMap.mem_entries_insert hcase with hcase | hcase
+    · rcases mem_entries_insert hcase with hcase | hcase
       · exact Or.inr (Or.inl hcase)
-      · exact Or.inr (Or.inr (Grass.Std.Logical.FiniteMap.mem_entries_erase hcase))
+      · exact Or.inr (Or.inr (mem_entries_erase hcase))
   obtain ⟨hholder, hshares, hgrantepoch, haccess, hcovers, hrights⟩ := hauth
   have hshares' : state.SharesBytes entry.2.provenance.root provenance.root := by
     subst hnext
@@ -2382,7 +2468,7 @@ theorem joinGrants?_preserves_low_authority {state next : MemoryState}
     subst hnext
     exact (currentEpoch_grants state _ _).mpr haccess
   refine ⟨(into, lowGrant.joined highGrant),
-    Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hintoat,
+    mem_entries_of_lookup hintoat,
     hholder, hshares', hgrant', haccess', ⟨?_, ?_⟩, hrights⟩
   · show lowGrant.range.start ≤ range.start + i
     omega
@@ -2436,7 +2522,7 @@ theorem joinGrants?_preserves_high_authority {state next : MemoryState}
     subst hnext
     exact (currentEpoch_grants state _ _).mpr haccess
   refine ⟨(into, lowGrant.joined highGrant),
-    Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hintoat,
+    mem_entries_of_lookup hintoat,
     hholder', hshares', hgrant', haccess', ⟨?_, ?_⟩, hrights'⟩
   · show lowGrant.range.start ≤ range.start + i
     omega
@@ -2469,10 +2555,10 @@ theorem joinGrants?_creates_no_authority {state next : MemoryState}
         (lowGrant.joined highGrant)).entries := by
       subst hnext; exact hmem
     unfold joinMap at hlist
-    rcases Grass.Std.Logical.FiniteMap.mem_entries_insert hlist with hcase | hcase
+    rcases mem_entries_insert hlist with hcase | hcase
     · exact Or.inl hcase
-    · exact Or.inr (Grass.Std.Logical.FiniteMap.mem_entries_erase
-        (Grass.Std.Logical.FiniteMap.mem_entries_erase hcase))
+    · exact Or.inr (mem_entries_erase
+        (mem_entries_erase hcase))
   obtain ⟨hholder, hshares, hgrantepoch, haccess, hcovers, hrights⟩ := hauth
   have hshares' : state.SharesBytes entry.2.provenance.root provenance.root := by
     subst hnext
@@ -2492,7 +2578,7 @@ theorem joinGrants?_creates_no_authority {state next : MemoryState}
           lowGrant.range.start + (lowGrant.range.size + highGrant.range.size) := hcovers
     rcases Nat.lt_or_ge (range.start + i) (lowGrant.range.start + lowGrant.range.size) with
       hlt | hge
-    · refine ⟨(low, lowGrant), Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hlow,
+    · refine ⟨(low, lowGrant), mem_entries_of_lookup hlow,
         ?_, ?_, ?_, haccess', ⟨hc1, ?_⟩, ?_⟩
       · show lowGrant.holder = context
         exact hholder
@@ -2504,7 +2590,7 @@ theorem joinGrants?_creates_no_authority {state next : MemoryState}
         omega
       · show lowGrant.rights.Permits intent
         exact hrights
-    · refine ⟨(high, highGrant), Grass.Std.Logical.FiniteMap.mem_entries_of_lookup hhigh,
+    · refine ⟨(high, highGrant), mem_entries_of_lookup hhigh,
         ?_, ?_, ?_, haccess', ⟨?_, ?_⟩, ?_⟩
       · show highGrant.holder = context
         rw [← show lowGrant.holder = highGrant.holder from by rw [hmatch]]
@@ -2578,7 +2664,7 @@ theorem transferGrant?_creates_no_authority {state next : MemoryState} {actor : 
       entry ∈ state.grantEntries := by
     have hlist : entry ∈ (state.grants.insert id { grant with holder := recipient }).entries := by
       subst hnext; exact hmem
-    exact Grass.Std.Logical.FiniteMap.mem_entries_insert hlist
+    exact mem_entries_insert hlist
   obtain ⟨hholder, hshares, hgrantepoch, haccess, hcovers, hrights⟩ := hauth
   have hshares' : state.SharesBytes entry.2.provenance.root provenance.root := by
     subst hnext
