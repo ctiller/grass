@@ -542,4 +542,62 @@ conflicts is not blocked by a disagreement about offsets. -/
 theorem sharing_is_still_decided :
     contradictory.SharesBytes placed viewAt2048 := by decide
 
+/-! ### Authority across a mapped view
+
+`MemoryState.AuthorizedAt` compared a grant's range to an access offset directly,
+having checked only that the two allocations share bytes. A grant's range is in its
+own allocation's coordinates and the offset is in the access's, so that comparison is
+right exactly when the two agree offset for offset -- which is what an alias with a
+non-zero delta denies.
+
+These are the two states where the old check and the new one disagree, in both
+directions. `mapped` relates `placed` to `viewAt2048` at `+2048`, so offset `i` in
+`placed` is offset `i + 2048` in the view, and the view's own offset 0 is 2048 bytes
+*before* the buffer starts.
+-/
+
+/-- Provenance rooted at the buffer. -/
+def placedProv : Provenance :=
+  { space := .cpuVirtual, root := placed, epoch := epoch, source := .virtualAlloc
+    rootExtent := ⟨0, 4096⟩, path := [] }
+
+/-- The same storage named through the view. -/
+def viewProv : Provenance := { placedProv with root := viewAt2048 }
+
+/-- Four bytes at the view's own offset zero. -/
+def grantAtViewZero : AuthorityGrant :=
+  { kind := .loan, holder := someContext, lender := someContext, provenance := viewProv
+    range := ⟨0, 4⟩, rights := .readWrite }
+
+/-- Four bytes at the view's offset 2048, which is where the buffer begins. -/
+def grantAtViewOffset : AuthorityGrant := { grantAtViewZero with range := ⟨2048, 4⟩ }
+
+/-- **The old comparison would have admitted this**, and that is the bug. A plain
+`Covers` says the grant's range holds offset 0, because both are the number zero. -/
+theorem the_plain_range_check_admits_the_wrong_grant :
+    grantAtViewZero.range.Covers 0 := by decide
+
+/-- And the alias-aware check refuses it. The view's offset 0 is 2048 bytes before
+the buffer starts, so this grant covers no byte of `placed` at all. -/
+theorem authority_does_not_carry_across_the_offset :
+    ¬ mapped.AuthorizedAt grantAtViewZero someContext placedProv 0 .read := by decide
+
+/-- The other direction, and the half a purely stricter check would have lost: the
+grant that *does* reach the buffer's first byte is the one at the view's offset 2048,
+and the old comparison refused it. -/
+theorem the_grant_at_the_mapped_offset_does_carry :
+    mapped.AuthorizedAt grantAtViewOffset someContext placedProv 0 .read := by decide
+
+/-- The old comparison on that same grant. Both theorems above are needed: a change
+that only refused more could have been achieved by refusing everything. -/
+theorem the_plain_range_check_refuses_the_right_grant :
+    ¬ grantAtViewOffset.range.Covers 0 := by decide
+
+/-- Sharing is not what separates them. Both grants are over storage that `placed`
+shares; the offset is the whole of the difference, which is why the fix belongs in
+the coverage clause and not in the sharing one. -/
+theorem both_grants_are_over_shared_storage :
+    mapped.SharesBytes grantAtViewZero.provenance.root placedProv.root ∧
+    mapped.SharesBytes grantAtViewOffset.provenance.root placedProv.root := by decide
+
 end Tests.Memory.Placement
