@@ -13,12 +13,13 @@ not guess roots from source syntax: it discovers closed `VerifiedProgram`
 values from their types, follows the transitive dependency closure of all
 certificate-bearing and emission-consuming declarations across imported
 modules, and audits every declaration originating in a Grass library or test
-module. It also follows downstream runtime dependencies and rejects unverified
-`implemented_by` or `extern` replacements outside the declared upstream
-toolchain boundary. Module cohorts and recorded regular compiler dependencies
-make scoped `csimp` substitutions part of that audit even after their attribute
-state expires. A wrapper cannot escape merely because its own result type is not
-headed by `VerifiedProgram` or its module uses an unrelated namespace.
+module. It follows runtime dependencies from both the certificate-sensitive cone
+and the complete project declaration set, rejecting unverified `implemented_by`
+or `extern` replacements outside the declared upstream toolchain boundary.
+Module cohorts and recorded regular compiler dependencies make scoped `csimp`
+substitutions part of both passes even after their attribute state expires. A
+wrapper cannot escape merely because its own result type is not headed by
+`VerifiedProgram` or its module uses an unrelated namespace.
 -/
 
 namespace Grass.Trust
@@ -298,8 +299,9 @@ def auditVerifiedPrograms : CommandElabM Unit := do
     unless rejected.isEmpty do
       throwError "certificate-sensitive declaration '{name}' uses rejected axioms: \
         {rejected.toList}"
-  let runtimeDependencies ←
-    auditRuntimeDependencies environment declarations sensitive
+  let trustedModules := trustedToolchainModules environment
+  let runtimeDependencies :=
+    runtimeDependencyDeclarations environment declarations sensitive trustedModules
   let projectDeclarations := declarations.filter fun candidate =>
     isProjectDeclaration environment candidate.1
   for (name, info) in projectDeclarations do
@@ -312,10 +314,15 @@ def auditVerifiedPrograms : CommandElabM Unit := do
     let rejected := axioms.filter fun axiomName => !allowedAxiom axiomName
     unless rejected.isEmpty do
       throwError "project declaration '{name}' uses rejected axioms: {rejected.toList}"
+  let projectSeeds := projectDeclarations.foldl (init := sensitive)
+    fun seeds declaration => seeds.insert declaration.1
+  let projectRuntimeDependencies ←
+    auditRuntimeDependencies environment declarations projectSeeds
   logInfo m!"VerifiedProgram trust audit passed for {roots.size} concrete root(s), \
     {sensitive.size} certificate-sensitive declaration(s), \
     {runtimeDependencies.size} downstream runtime dependency declaration(s), and \
-    {projectDeclarations.size} project declaration(s): \
+    {projectDeclarations.size} project declaration(s) with \
+    {projectRuntimeDependencies.size} runtime dependency declaration(s): \
     {roots.map (fun root => root.1) |>.toList}"
 
 /-- Run the complete `VerifiedProgram` and project-declaration trust audit. -/
