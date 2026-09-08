@@ -3115,7 +3115,9 @@ framing fact proved for cells is immediately a framing fact for bytes. -/
   unfold byteAt? cellAt? ByteStore.byteAt?
   cases state.allocations.lookup id with
   | none => rfl
-  | some record => cases state.backings.lookup record.backing <;> rfl
+  | some record =>
+    simp only [Option.bind_some]
+    cases state.backings.lookup record.backing <;> rfl
 
 /-- `state.InitializedAt id offset` holds when that byte is initialized. The
 pointwise form of `RangeInitialized`, which a padding argument needs because
@@ -3160,6 +3162,20 @@ is identity-distinctness can only conclude something about the allocation table 
 never about bytes. `Grass/Memory/Backing.lean`'s `write_of_other_backing` is the
 byte-level half. -/
 
+/-- **A write does not touch the allocation table.**
+
+The single fact several framing proofs below were each rediscovering. Under the
+previous design a write replaced the record, because the bytes were in it; now it
+replaces a store in `MemoryState.backings` and the table is untouched for every
+identity at once. -/
+@[simp] theorem allocations_write (state : MemoryState) (id : AllocId) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) :
+    (state.write id start bytes initializes).allocations = state.allocations := by
+  unfold write
+  split
+  · rfl
+  · split <;> rfl
+
 /-- **A write never changes the allocation table.**
 
 Stronger than the theorem this replaces, and true for every identity rather than
@@ -3174,10 +3190,7 @@ theorem write_preserves_other_allocation (state : MemoryState) {id other : Alloc
     (_hne : other ≠ id) (start : Nat) (bytes : ByteSeq) (initializes : Bool) :
     (state.write id start bytes initializes).allocations.lookup other =
       state.allocations.lookup other := by
-  unfold write
-  split
-  · rfl
-  · split <;> rfl
+  rw [allocations_write]
 
 /--
 Two memory states agree when every allocation holds the same *cell* — byte and
@@ -3233,9 +3246,8 @@ theorem lookup_write_self (state : MemoryState) {id : AllocId} (start : Nat)
     (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
     (h : state.allocations.lookup id = some record) :
     (state.write id start bytes initializes).allocations.lookup id = some record := by
-  unfold write
-  rw [h]
-  split <;> exact h
+  rw [allocations_write]
+  exact h
 
 /-- The store a write leaves under the written allocation's backing. -/
 theorem backings_write_self (state : MemoryState) {id : AllocId} (start : Nat)
@@ -3245,8 +3257,27 @@ theorem backings_write_self (state : MemoryState) {id : AllocId} (start : Nat)
     (state.write id start bytes initializes).backings.lookup record.backing =
       some (store.write (record.origin + start) bytes initializes) := by
   unfold write
-  rw [h, hs]
+  simp only [h, hs]
   exact FiniteMap.lookup_insert_self _ _ _
+
+/-- **A write changes the store of exactly one backing.**
+
+The byte-level framing fact, and the one that replaces "a write to another
+allocation changes nothing". It is stated over backings rather than identities
+because that is where the truth now lives. -/
+theorem backings_write_of_ne (state : MemoryState) (id : AllocId) (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) {b : StorageId}
+    (h : ∀ record, state.allocations.lookup id = some record → b ≠ record.backing) :
+    (state.write id start bytes initializes).backings.lookup b =
+      state.backings.lookup b := by
+  unfold write
+  cases hfound : state.allocations.lookup id with
+  | none => rfl
+  | some record =>
+    simp only []
+    cases hs : state.backings.lookup record.backing with
+    | none => rfl
+    | some store => exact FiniteMap.lookup_insert_ne _ (h record hfound) _
 
 /-- The cell a write leaves at an offset, in terms of the store's own law. -/
 theorem cellAt?_write_self (state : MemoryState) {id : AllocId} (start : Nat)
@@ -3257,8 +3288,9 @@ theorem cellAt?_write_self (state : MemoryState) {id : AllocId} (start : Nat)
       (store.write (record.origin + start) bytes initializes).cellAt?
         (record.origin + offset) := by
   unfold cellAt?
-  rw [lookup_write_self state start bytes initializes h,
-    backings_write_self state start bytes initializes h hs]
+  rw [lookup_write_self state start bytes initializes h]
+  simp only [Option.bind_some]
+  rw [backings_write_self state start bytes initializes h hs]
   rfl
 
 /-- The byte a write leaves at an offset, in terms of the store's own law. -/
@@ -3270,8 +3302,9 @@ theorem byteAt?_write_self (state : MemoryState) {id : AllocId} (start : Nat)
       (store.write (record.origin + start) bytes initializes).byteAt?
         (record.origin + offset) := by
   unfold byteAt?
-  rw [lookup_write_self state start bytes initializes h,
-    backings_write_self state start bytes initializes h hs]
+  rw [lookup_write_self state start bytes initializes h]
+  simp only [Option.bind_some]
+  rw [backings_write_self state start bytes initializes h hs]
   rfl
 
 /-- Two states whose allocation records agree at `id`, and whose stores agree,
@@ -3301,11 +3334,13 @@ theorem rangeInitialized_write_iff_of_disjoint (state : MemoryState) {id : Alloc
   | none => rw [write_of_missing state _ _ _ hfound, hfound]
   | some record =>
     rw [lookup_write_self state start bytes initializes hfound]
+    simp only []
     cases hs : state.backings.lookup record.backing with
     | none =>
-      -- No store, so the write changed nothing at all.
-      unfold write
-      rw [hfound, hs, hfound, hs]
+      -- No store under this backing, so the write changed nothing at all.
+      have hnop : state.write id start bytes initializes = state := by
+        unfold write; simp only [hfound, hs]
+      rw [hnop]
     | some store =>
       rw [backings_write_self state start bytes initializes hfound hs]
       -- The write and the range are disjoint in the view's own coordinates, so
@@ -3327,8 +3362,8 @@ theorem cellAt?_write_of_covers (state : MemoryState) {id : AllocId} {start : Na
     unfold ByteRange.Covers ByteRange.stop at h ⊢
     simp only [] at h ⊢
     omega
-  have := ByteStore.cellAt?_write_of_covers store h'
-  simpa using this
+  have := ByteStore.cellAt?_write_of_covers (initializes := initializes) store h'
+  simpa [Nat.add_sub_add_left] using this
 
 /-- The byte a write leaves inside its own range. -/
 theorem byteAt?_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}
@@ -3342,46 +3377,78 @@ theorem byteAt?_write_of_covers (state : MemoryState) {id : AllocId} {start : Na
 
 /-- An initializing write initializes each byte it covered. -/
 theorem initializedAt_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}
-    {bytes : ByteSeq} {record : AllocationRecord}
-    (hfound : state.allocations.lookup id = some record) {offset : Nat}
+    {bytes : ByteSeq} {record : AllocationRecord} {store : ByteStore}
+    (hfound : state.allocations.lookup id = some record)
+    (hs : state.backings.lookup record.backing = some store) {offset : Nat}
     (h : (ByteRange.mk start bytes.length).Covers offset) :
     (state.write id start bytes true).InitializedAt id offset := by
   unfold InitializedAt
-  rw [cellAt?_write_of_covers state hfound h]
+  rw [cellAt?_write_of_covers state hfound hs h]
   cases hb : bytes[offset - start]? with
   | none =>
     rw [ByteRange.covers_def] at h
     exact absurd (List.getElem?_eq_none_iff.mp hb) (by simp at h ⊢; omega)
   | some b => simp
 
-/-- **A write frames every cell it did not write**, in the same allocation or in
-another: byte and initialization together, so a framing argument can carry a lack
-of initialization across a write as well as its presence. -/
+/-- **A write frames every cell it did not write**: byte and initialization
+together, so a framing argument can carry a lack of initialization across a write
+as well as its presence.
+
+**Both disjuncts changed with `g-design:185`, and the first one had to.** It used to
+read `other ≠ id`, on the reasoning that distinct identities were distinct storage.
+That is exactly what the backing model denies: two views onto one backing are
+distinct `AllocId`s over the same bytes, and a write through one is visible through
+the other. The hypothesis is now `¬ SharesBytes`, which is the predicate that
+question has always belonged to.
+
+The second disjunct is subtler and was unsound for a different reason. `¬ Covers` is
+stated in the *writing* view's coordinates; a second view onto the same backing at a
+different origin reads a different backing offset, so "not covered over there" says
+nothing about what this view sees. It is sound exactly when the two identities are
+the same, and it now carries that condition rather than relying on the caller to
+have meant it. -/
 theorem cellAt?_write_of_not_covers (state : MemoryState) (id : AllocId) {start : Nat}
     {bytes : ByteSeq} {initializes : Bool} {other : AllocId} {offset : Nat}
-    (h : other ≠ id ∨ ¬ (ByteRange.mk start bytes.length).Covers offset) :
+    (h : ¬ state.SharesBytes other id ∨
+      (other = id ∧ ¬ (ByteRange.mk start bytes.length).Covers offset)) :
     (state.write id start bytes initializes).cellAt? other offset =
       state.cellAt? other offset := by
   unfold cellAt?
+  rw [allocations_write]
   cases h with
-  | inl hne => rw [write_preserves_other_allocation state hne]
-  | inr hout =>
-    by_cases hid : other = id
-    · subst hid
-      cases hfound : state.allocations.lookup other with
+  | inl hshare =>
+    cases hother : state.allocations.lookup other with
+    | none => rfl
+    | some ro =>
+      simp only [Option.bind_some]
+      rw [backings_write_of_ne state id start bytes initializes]
+      intro ri hri hbe
+      exact hshare (sharesBytes_of_backing_eq hother hri hbe)
+  | inr hsame =>
+    obtain ⟨rfl, hout⟩ := hsame
+    cases hfound : state.allocations.lookup other with
+    | none => rfl
+    | some record =>
+      simp only [Option.bind_some]
+      cases hs : state.backings.lookup record.backing with
       | none =>
-        rw [write_of_missing state start bytes initializes hfound, hfound]
-      | some record =>
-        rw [lookup_write_self state start bytes initializes hfound]
+        have hnop : state.write other start bytes initializes = state := by
+          unfold write; simp only [hfound, hs]
+        rw [hnop]
+      | some store =>
+        rw [backings_write_self state start bytes initializes hfound hs]
         simp only [Option.bind_some]
-        exact ByteStore.cellAt?_write_of_not_covers record.bytes hout
-    · rw [write_preserves_other_allocation state hid]
+        refine ByteStore.cellAt?_write_of_not_covers store ?_
+        unfold ByteRange.Covers ByteRange.stop at hout ⊢
+        simp only [] at hout ⊢
+        omega
 
 /-- The initialization half of `cellAt?_write_of_not_covers`, in the shape a
 padding argument uses. -/
 theorem initializedAt_write_iff_of_not_covers (state : MemoryState) (id : AllocId)
     {start : Nat} {bytes : ByteSeq} {initializes : Bool} {other : AllocId} {offset : Nat}
-    (h : other ≠ id ∨ ¬ (ByteRange.mk start bytes.length).Covers offset) :
+    (h : ¬ state.SharesBytes other id ∨
+      (other = id ∧ ¬ (ByteRange.mk start bytes.length).Covers offset)) :
     (state.write id start bytes initializes).InitializedAt other offset ↔
       state.InitializedAt other offset := by
   unfold InitializedAt
@@ -3396,15 +3463,8 @@ later access is decided the same way. The bytes are exactly what it does move. -
 @[simp] theorem metadataAt_write (state : MemoryState) (id : AllocId) (start : Nat)
     (bytes : ByteSeq) (initializes : Bool) (other : AllocId) :
     (state.write id start bytes initializes).MetadataAt other = state.MetadataAt other := by
-  unfold MetadataAt write
-  cases hfound : state.allocations.lookup id with
-  | none => rfl
-  | some record =>
-    by_cases hid : other = id
-    · subst hid
-      rw [FiniteMap.lookup_insert_self, hfound]
-      rfl
-    · rw [FiniteMap.lookup_insert_ne _ hid]
+  unfold MetadataAt
+  rw [allocations_write]
 
 /-- An allocation is present exactly when its metadata is. -/
 theorem isSome_metadataAt (state : MemoryState) (id : AllocId) :
