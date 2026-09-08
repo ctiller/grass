@@ -156,7 +156,7 @@ operating system, or hardware. Those dependencies enter the per-profile trust
 ledger in section 6 at an exact selected revision, with their validation evidence
 and downstream dependence stated explicitly. If Grass wraps one behind a
 specified public boundary, that wrapper becomes correctness-critical under the
-output-use rule below; the external implementation beneath the boundary remains
+output-use rule above; the external implementation beneath the boundary remains
 a declared assumption until a separately reviewed trust transition removes it.
 
 The strongest downstream use fixes the assurance floor. Review or nomination
