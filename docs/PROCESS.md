@@ -2029,9 +2029,16 @@ adapter is expensive, its representation/caching is defective. That is not a
 reason to introduce a second execution, safety, liveness, or obligation
 semantics.
 
-Before flattening, the graph supplies a stronger partial-order theorem:
+Before flattening, the graph supplies a stronger partial-order theorem.
+Schematic Lean:
 
 ```lean
+def BoundaryObservationsCommute
+    (left right : EnabledTransition plan world) : Prop :=
+  ∀ (leftThenRight rightThenLeft : TwoOrderExecution plan world left right),
+    ProjectBoundaryObservations leftThenRight.observations =
+      ProjectBoundaryObservations rightThenLeft.observations
+
 def Independent (world : LogicalProcessNetwork plan)
     (left right : EnabledTransition plan world) : Prop :=
   DisjointLocalInstances left right ∧
@@ -2054,6 +2061,15 @@ theorem syscall_linearizations_equivalent
     (sameOrder : LinearizeSameProcessPartialOrder a.syscalls b.syscalls) :
   StrongObservedExecutionEquivalence a b
 ```
+
+`TwoOrderExecution` carries the two legal executions of exactly these enabled
+transitions, including transported second steps; the projection uses the
+precious observation filter at the process boundary. Thus the predicate is
+false when swapping two operations changes ordered output, even if their memory
+footprints are disjoint. It is discharged for hidden/stuttering observations,
+for equal projected segments, or by a domain law that proves the two segments
+observationally commute. The linearization layer may conservatively make such a
+pair non-independent, but it may not treat this conjunct as content-free.
 
 `ProviderEffectsCommute` is proved from the exact provider operation footprints,
 handles/session identities, result dependencies, interruption laws, and
