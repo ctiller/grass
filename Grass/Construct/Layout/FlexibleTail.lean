@@ -56,6 +56,16 @@ def selectCount? (layout : FlexibleTailLayout profile) (count : Nat) :
       index < layout.selectedCount := by
   simp [elementRange?]
 
+/-- Element lookup returns precisely the indexed range and proves the index is
+inside the selected prefix. -/
+@[simp] theorem elementRange?_eq_some_iff
+    (layout : FlexibleTailLayout profile) (index : Nat) (range : ByteRange) :
+    layout.elementRange? index = some range ↔
+      index < layout.selectedCount ∧
+      range = ⟨layout.tailOffset + index * layout.element.size,
+        layout.element.size⟩ := by
+  simp [elementRange?, eq_comm]
+
 @[simp] theorem selectCount?_eq_some_iff
     (layout selected : FlexibleTailLayout profile) (count : Nat) :
     layout.selectCount? count = some selected ↔
@@ -106,6 +116,46 @@ theorem selectedCountWithinCapacity_of_wellFormed
     layout.selectedCount ≤ layout.maxCount := by
   exact (wellFormed_iff layout).mp h |>.1.1.1.1.1.1.2
 
+theorem headWellFormed_of_wellFormed
+    (layout : FlexibleTailLayout profile) (h : layout.WellFormed) :
+    layout.head.WellFormed :=
+  (wellFormed_iff layout).mp h |>.1.1.1.1.1.1.1.1.1.1.1
+
+theorem elementSizePositive_of_wellFormed
+    (layout : FlexibleTailLayout profile) (h : layout.WellFormed) :
+    0 < layout.element.size :=
+  (wellFormed_iff layout).mp h |>.1.1.1.1.1.1.1.1.1.1.2
+
+theorem elementWellFormed_of_wellFormed
+    (layout : FlexibleTailLayout profile) (h : layout.WellFormed) :
+    layout.element.WellFormed :=
+  (wellFormed_iff layout).mp h |>.1.1.1.1.1.1.1.1.1.2
+
+theorem headBeforeTail_of_wellFormed
+    (layout : FlexibleTailLayout profile) (h : layout.WellFormed) :
+    layout.head.size ≤ layout.tailOffset :=
+  (wellFormed_iff layout).mp h |>.1.1.1.1.1.1.1.1.2
+
+theorem tailOffsetAligned_of_wellFormed
+    (layout : FlexibleTailLayout profile) (h : layout.WellFormed) :
+    IsAligned layout.tailOffset layout.element.alignment :=
+  (wellFormed_iff layout).mp h |>.1.1.1.1.1.1.1.2
+
+theorem aggregateAlignmentPositive_of_wellFormed
+    (layout : FlexibleTailLayout profile) (h : layout.WellFormed) :
+    0 < layout.alignment :=
+  (wellFormed_iff layout).mp h |>.1.1.1.1.1.2
+
+theorem profileAcceptsAlignment_of_wellFormed
+    (layout : FlexibleTailLayout profile) (h : layout.WellFormed) :
+    profile.acceptsAlignment layout.alignment = true :=
+  (wellFormed_iff layout).mp h |>.1.1.1.1.2
+
+theorem sizeAligned_of_wellFormed
+    (layout : FlexibleTailLayout profile) (h : layout.WellFormed) :
+    IsAligned layout.size layout.alignment :=
+  (wellFormed_iff layout).mp h |>.2
+
 theorem extentExact_of_wellFormed
     (layout : FlexibleTailLayout profile) (h : layout.WellFormed) :
     layout.size = layout.reservedRange.stop := by
@@ -137,22 +187,18 @@ theorem elementRange?_within_selectedRange
     (layout : FlexibleTailLayout profile) {index : Nat} {range : ByteRange}
     (selected : layout.elementRange? index = some range) :
     layout.selectedRange.Contains range := by
-  have inBounds : index < layout.selectedCount :=
-    (layout.elementRange?_isSome_iff index).mp (by simp [selected])
-  simp only [elementRange?] at selected
-  split at selected
-  · cases selected
-    constructor
-    · simp [selectedRange]
-    · simp only [selectedRange, ByteRange.stop]
-      rw [Nat.add_assoc]
-      apply Nat.add_le_add_left
-      calc
-        index * layout.element.size + layout.element.size =
-            (index + 1) * layout.element.size := by simp [Nat.add_mul]
-        _ ≤ layout.selectedCount * layout.element.size :=
-          Nat.mul_le_mul_right layout.element.size (Nat.succ_le_iff.mpr inBounds)
-  · contradiction
+  rcases (layout.elementRange?_eq_some_iff index range).mp selected with
+    ⟨inBounds, rfl⟩
+  constructor
+  · simp [selectedRange]
+  · simp only [selectedRange, ByteRange.stop]
+    rw [Nat.add_assoc]
+    apply Nat.add_le_add_left
+    calc
+      index * layout.element.size + layout.element.size =
+          (index + 1) * layout.element.size := by simp [Nat.add_mul]
+      _ ≤ layout.selectedCount * layout.element.size :=
+        Nat.mul_le_mul_right layout.element.size (Nat.succ_le_iff.mpr inBounds)
 
 /-- `FlexibleTailLayout.selectCount?_wellFormed` proves that successful count
 selection preserves well-formedness and capacity. -/
