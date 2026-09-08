@@ -234,6 +234,23 @@ pub fn drain_outbox(
                 continue;
             }
         }
+        // AGENT_BUS_SCHEMA.md section 8's "inherited_findings equals every
+        // still-open finding". `apply` checks only that no finding is named
+        // twice, which is all it can soundly do -- the chain's open set is
+        // moved by other agents' events that a reassignment neither
+        // references nor need have observed, so holding a published event to
+        // it during replay took the fleet down. Here `state` is this host's
+        // fully-reduced view and the publisher is claiming a set it computed
+        // from exactly this view moments ago.
+        if let Err(e) = verify_review_reassignment_inherits_open_findings(&state, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
         if let Err(e) = verify_object_ids_resolve(repo, &data) {
             let reason = e.to_string();
             reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
@@ -682,6 +699,56 @@ fn verify_review_merge_reconciled(
 /// `base_code_commit`/`code_commit` are lower-stakes (correctable by a
 /// follow-up `scope.set`, or merely evidence rather than a binding field
 /// respectively) but the same silent-typo failure mode applies to both.
+/// AGENT_BUS_SCHEMA.md section 8: a `review.reassigned` must inherit every
+/// finding still open on the chain, exactly once.
+///
+/// Asked here rather than in `apply` because the chain's open set is not
+/// something a published event can be held to forever. It moves whenever
+/// another agent files or disposes of a finding, on a stream the
+/// reassignment neither references nor need have observed, so an event that
+/// was correct when it published becomes "wrong" later. Reduction has no
+/// per-event isolation, so answering that with an `Err` stops every agent
+/// reading the bus -- which is exactly what happened.
+///
+/// `Ok(())` when the chain does not resolve: that is an ordinary validation
+/// failure `apply::dry_run` reports moments later with a clearer message.
+fn verify_review_reassignment_inherits_open_findings(
+    state: &crate::state::BusState,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    let crate::events::EventData::ReviewReassigned(d) = data else {
+        return Ok(());
+    };
+    let Some(chain) = state.review_chain(&d.replaces) else {
+        return Ok(());
+    };
+    let still_open: std::collections::BTreeSet<(EventId, String)> = chain
+        .findings
+        .iter()
+        .filter(|(_, f)| f.disposition == crate::state::FindingDisposition::Open)
+        .map(|(k, _)| k.clone())
+        .collect();
+    let inherited: std::collections::BTreeSet<(EventId, String)> = d
+        .inherited_findings
+        .iter()
+        .map(|f| (f.changes_event.clone(), f.finding_id.as_str().to_string()))
+        .collect();
+    if inherited != still_open {
+        let missing: Vec<String> = still_open
+            .difference(&inherited)
+            .map(|(e, f)| format!("{e}/{f}"))
+            .collect();
+        let extra: Vec<String> = inherited
+            .difference(&still_open)
+            .map(|(e, f)| format!("{e}/{f}"))
+            .collect();
+        return Err(invalid(format!(
+            "inherited_findings must equal every still-open finding on this chain: missing {missing:?}, unexpected {extra:?}"
+        )));
+    }
+    Ok(())
+}
+
 fn verify_object_ids_resolve(repo: &Path, data: &crate::events::EventData) -> AbResult<()> {
     let candidates: Vec<(&str, &crate::scalars::ObjectId)> = match data {
         crate::events::EventData::AgentRegistered(d) => {
