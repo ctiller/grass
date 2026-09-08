@@ -97,6 +97,9 @@ a review candidate until its protocol support is implemented and activated.
   command, report, mutation, and first-failure contract without claiming that
   the deliberately deferred library or outputs exist.
 - [REVIEW.md](REVIEW.md) is the adversarial review protocol and sign-off form.
+- [PROCESS_HISTORY_AUDIT.md](PROCESS_HISTORY_AUDIT.md) records the design
+  steward's narrow disposition of historical process-document changes without
+  becoming a second owner of process semantics.
 - [DECISIONS.md](DECISIONS.md) records settled choices and rejected shortcuts.
 - [REFERENCES.md](REFERENCES.md) is the initial source and design-lineage register.
 - [GLOSSARY.md](GLOSSARY.md) fixes vocabulary used across the corpus.
