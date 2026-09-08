@@ -115,10 +115,20 @@ or it needs to index by position rather than by element. Raised with the corpus'
 owner as `c-stdlib:28` rather than patched here, because `Spikes/**` is authored
 surface and not this library's to edit.
 
-That sentence previously read "raised as an open item against the spike surface",
-which was true of this library's own plan and false of anything `c-spike` could
-see. It stood for three days while the only record was a document its subject had
-no reason to read.
+**That is settled, and `c-spike` fixed it.** `47da3f8` on `main` rewrote
+`stableSorted`, and took neither of the two repairs offered above: it keys the
+stability conjunct on `ordinal` rather than on input position. The reasoning was
+that `SPIKE_2.md`'s prose, immediately below the block, already stated the
+ordinal-indexed rule, so the code and its document had drifted apart and there was
+no specification decision left to take. It also found two further defects in the
+same three lines that this fixture had not: `findIdx?` took a predicate where a
+value was passed, so the line did not typecheck, and `.get!` panicked on exactly
+the `none` case a wrong sort produces.
+
+So `StableSorted` below deliberately mirrors the *pre-`47da3f8`* shape, keyed on
+`i < j`. It is a guard against that shape returning, not a model of what
+`Spikes/2_Sort/Spec.lean` says today. Anything reading this fixture for the
+current specification should read the spike.
 -/
 
 /-- Two occurrences identical in both fields: a degenerate input a real parser
@@ -201,14 +211,18 @@ example (i o : Vec Occurrence) (h : StableSorted i o)
     Occurrence.le (o.get a ha) (o.get b hb) :=
   (Vec.pairwise_iff_get o).mp h.2.1 a b ha hb hab
 
-/-! ## The repair, demonstrated rather than preferred
+/-! ## An alternative that was considered and not taken
 
-`c-stdlib:28` reports the unsatisfiability above to `c-spike`, who owns
-`Spikes/**`, and offers two repairs: state the well-formedness hypothesis that
-occurrences are distinct, or index the stability conjunct by *position* rather
-than by element. Saying which one this library prefers is worth little; showing
-that one of them works is worth more, so the second is written out here and the
-two properties that matter are proved of it.
+This section was written while `c-stdlib:28` was open, to show that *some* repair
+works rather than to argue for one. The question has since closed the other way:
+`47da3f8` keys stability on `ordinal`, and that gets what position-indexing was
+wanted for without a new construction, because on the counterexample both
+occurrences carry ordinal `0`, so neither has the smaller one, the hypothesis is
+false, and the conjunct is vacuous rather than contradictory.
+
+It stays because the proofs below are about a shape nothing else in the tree
+states, and because a rejected alternative that was actually built is a more
+useful record than one that was only described. What follows is not a proposal.
 
 The difference is where the output position comes from. `StableSorted` asks
 `idxOf?` to find it *by element*, which collapses when two occurrences are equal.
