@@ -185,6 +185,16 @@ example : readObject objectDescription.bytes = .done expectedObject Vec.empty :=
   rw [objectDescription_bytes]
   exact readObject_encodedObject
 
+example : readObject objectDescription.bytes =
+    .done (objectDescription.object (by decide)) Vec.empty := by
+  exact objectDescription.readObject_bytes (by decide)
+
+example : ∃ writable : objectDescription.Writable = true,
+    readObject objectDescription.bytes =
+      .done (objectDescription.object writable) Vec.empty := by
+  exact writeObjectDescription_readObject
+    writeObjectDescription_objectDescription
+
 def absentDescription : ObjectDescription :=
   { objectDescription with symbols := .absent }
 
@@ -200,6 +210,11 @@ example : DeclaredObjectLayoutValid absentDescription.header
 
 example : writeObjectDescription absentDescription = .ok noSymbolsObject := by
   rfl
+
+example : ∃ writable : absentDescription.Writable = true,
+    readObject noSymbolsObject =
+      .done (absentDescription.object writable) Vec.empty := by
+  exact writeObjectDescription_readObject (by rfl)
 
 def invalidAuxDescription : ObjectDescription :=
   { objectDescription with

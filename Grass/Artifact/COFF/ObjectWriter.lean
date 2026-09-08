@@ -1540,6 +1540,65 @@ theorem ObjectDescription.readSectionContentsList_bytes
     ObjectDescription.contents, Vec.toList_fromList, Vec.append_assoc] using
     parsed
 
+/-- Complete proof-indexed COFF object represented by a writable canonical
+description. `ObjectDescription.readObject_bytes` proves that the public parser
+recovers this value from the synthesized bytes. -/
+def ObjectDescription.object (description : ObjectDescription)
+    (writable : description.Writable = true) : Object :=
+  let widths := ObjectDescription.Writable.widthsFit description writable
+  { bytes := description.bytes
+    table := description.sectionTable
+      (description.widthsFit_sectionCount widths)
+    contents := description.contents widths
+    contentHeaders := description.contents_headers widths
+    symbols := description.symbolTail writable
+    layoutValid := description.layoutValid writable }
+
+/-- The public whole-object reader recovers the exact proof-indexed object
+synthesized by every writable canonical description. -/
+theorem ObjectDescription.readObject_bytes (description : ObjectDescription)
+    (writable : description.Writable = true) :
+    readObject description.bytes =
+      .done (description.object writable) Vec.empty := by
+  have widths := ObjectDescription.Writable.widthsFit description writable
+  have sectionCountFits := description.widthsFit_sectionCount widths
+  have sectionCount : description.sectionLayout.1.length =
+      description.header.numberOfSections.toNat := by
+    rw [description.length_sectionLayout]
+    symm
+    exact description.header_numberOfSections sectionCountFits
+  let rest := writeSectionDescriptionList description.sections.toList ++
+    writeSymbolDescription description.symbols
+  have parsedSections :
+      readSectionHeaders description.header.numberOfSections.toNat
+          (writeSectionHeaders description.sectionLayout.1 ++ rest) =
+        .done description.sectionLayout.1 rest := by
+    simpa only [← sectionCount] using
+      readSectionHeaders_writeSectionHeaders_append
+        description.sectionLayout.1 rest
+  have tableFits : 40 * description.header.numberOfSections.toNat ≤
+      (writeSectionHeaders description.sectionLayout.1 ++ rest).length := by
+    simp [length_writeSectionHeaders, sectionCount]
+  have parsedHeader : readHeader description.bytes =
+      .done description.header
+        (writeSectionHeaders description.sectionLayout.1 ++ rest) := by
+    simpa only [ObjectDescription.bytes, Vec.append_assoc] using
+      readHeader_writeHeader_append description.header
+        (writeSectionHeaders description.sectionLayout.1 ++ rest)
+  have parsedContents := description.readSectionContentsList_bytes widths
+  have parsedSymbols := description.readSymbolTail_bytes writable
+  have valid := description.layoutValid writable
+  unfold readObject
+  rw [parsedHeader]
+  simp only
+  rw [dif_pos description.header_sizeOfOptionalHeader]
+  rw [if_pos tableFits]
+  rw [parsedSections]
+  simp only
+  rw [dif_pos sectionCount]
+  split <;> simp_all [ObjectDescription.object]
+  congr
+
 /-- Emit canonical object bytes or reject an unrepresentable raw description. -/
 def writeObjectDescription (description : ObjectDescription) :
     Except ParseError Std.Logical.ByteArray :=
@@ -1593,6 +1652,24 @@ theorem writeObjectDescription_ok_iff (description : ObjectDescription) :
         | true =>
           simp [writeObjectDescription, ObjectDescription.Writable, widths,
             symbols, auxiliary, names]
+
+/-- Every successful canonical write is accepted by the public whole-object
+reader as the exact proof-indexed object synthesized from its description. -/
+theorem writeObjectDescription_readObject {description : ObjectDescription}
+    {bytes : Std.Logical.ByteArray}
+    (success : writeObjectDescription description = .ok bytes) :
+    ∃ writable : description.Writable = true,
+      readObject bytes = .done (description.object writable) Vec.empty := by
+  have bytesEq := writeObjectDescription_ok success
+  have canonicalSuccess :
+      writeObjectDescription description = .ok description.bytes := by
+    rw [← bytesEq]
+    exact success
+  have writable :=
+    (writeObjectDescription_ok_iff description).mp canonicalSuccess
+  refine ⟨writable, ?_⟩
+  rw [bytesEq]
+  exact description.readObject_bytes writable
 
 /-- Successful canonical output has the declared length and fits 32-bit offsets. -/
 theorem writeObjectDescription_ok_length {description : ObjectDescription}
