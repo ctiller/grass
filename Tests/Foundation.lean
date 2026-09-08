@@ -2,6 +2,15 @@ import Grass.Trust.Audit
 
 namespace Grass.Tests.Foundation
 
+universe v
+
+/-- The behavior contract preserves the universe chosen by its authored
+interface instead of collapsing every specification to `Type`. -/
+def contractAtAnyUniverse (interface : BehaviorInterface.{v})
+    (behavior : ProgramBehavior interface) : BehaviorContract.{v} where
+  interface := interface
+  behavior := behavior
+
 inductive NoDemand
 
 def noDemands : DemandFamily where
@@ -61,12 +70,13 @@ def noDerivedDemands : DerivedDemandFamily noDemands.identities where
   fresh := fun derived => nomatch derived
 
 def spec : SpecProcess where
-  Input := Bool
-  AuditEvent := Bool
-  Observation := Bool
-  admits := fun _ => True
-  observationProjection := .identity Bool
-  accepts := fun _ _ => True
+  interface :=
+    { Input := Bool
+      AuditEvent := Bool
+      Observation := Bool
+      admits := fun _ => True
+      observationProjection := .identity Bool
+      accepts := fun _ _ => True }
   requirements := noDemands
 
 namespace ObservationProjectionFixture
@@ -126,6 +136,22 @@ theorem behaviorAdequate : behavior.Adequate where
 
 def behaviorRefinesItself : BehaviorRefinement behavior behavior :=
   .refl behavior
+
+def behaviorEquivalentToItself : BehaviorEquivalent behavior behavior :=
+  .refl behavior
+
+def contract : BehaviorContract where
+  interface := spec.interface
+  behavior := behavior
+
+example : contract.behavior = behavior := rfl
+
+example : behaviorEquivalentToItself.symm = behaviorEquivalentToItself := by
+  rfl
+
+example : behaviorEquivalentToItself.trans behaviorEquivalentToItself =
+    behaviorEquivalentToItself := by
+  rfl
 
 def finiteCompletion (input : Bool) : system.Completion
     (initialExecution input).state (initialExecution input).graph
