@@ -303,7 +303,11 @@ must not confuse them:
   attributes are declared once in that module; documentation does not restate
   them as an independently authoritative shadow declaration. A not-yet-defined
   function type or theorem proposition may be exported there as a closed
-  signature alias which the later declaration must inhabit exactly. The module
+  signature alias. The later declaration is typed by that alias directly, or
+  the signature or test module contains a checked inhabitation such as
+  `example : Alias := declaration`; prose comparison of two restated types is
+  not evidence of identity. Signature modules live under the owning `Grass/**`
+  module tree and are therefore included by the ordinary Lake build. The module
   pins its imports, namespace, open scopes, notation and relevant options, uses
   `set_option autoImplicit false`, and contains no holes, metavariables,
   ellipses, admissions, axioms, or unresolved names. Review records the checked
@@ -321,12 +325,22 @@ must not confuse them:
 
 The language tag ``lean`` is syntax highlighting, not an authority class. A
 block without ellipses is not automatically exact. New or materially edited
-blocks must carry one of the two labels. Every existing unlabelled documentation
-block is schematic by default, regardless of how complete it looks; an already
+blocks must carry one of the two labels. A new or materially edited unlabelled
+block is treated as schematic and the missing label is a review defect the
+author must repair; it cannot be used as exact evidence while that defect is
+open. Every pre-existing unlabelled documentation block is schematic by
+default, regardless of how complete it looks; an already
 implemented API obtains authority from its checked module, not its duplicate
 prose rendering. No repository-wide relabelling is required. New cross-owner
 reliance on a documented future boundary requires its owner to supply the exact
 classification and signature module first.
+
+An author may not nominate elaboratability, normalized type identity, or any
+other exactness-dependent review target over a schematic block. The nomination
+instead names the exact declaration or alias and its `Grass/**` signature
+module. If that checked surface does not exist yet, the honest target is the
+schematic design's semantic adequacy and constructive feasibility, not a claim
+that Lean has accepted its spelling.
 
 Design approval may accept a schematic block only under the complete checklist
 in [PROOF_FEASIBILITY.md](PROOF_FEASIBILITY.md) and the unavailable-phase rules
