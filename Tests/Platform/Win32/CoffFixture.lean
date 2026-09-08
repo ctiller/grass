@@ -1,6 +1,7 @@
 import Grass.Platform.Win32.Coff
 import Grass.Platform.Win32.CoffSymbol
 import Grass.Platform.Win32.CoffPdata
+import Grass.Platform.Win32.CoffXdata
 
 /-!
 # COFF records, against a real object file
@@ -42,6 +43,7 @@ table.
 namespace Grass.Tests.Platform.Win32.Coff
 
 open Grass.Platform.Win32.Coff
+open Grass.Std.Logical (ByteSeq)
 
 /-! ## The file header -/
 
@@ -355,6 +357,87 @@ theorem twoFunction_pdata_relocations :
          0x0c, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x03, 0x00,
          0x10, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x03, 0x00,
          0x14, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x03, 0x00] := by
+  decide
+
+/-! ## `.xdata`, and the two sections agreeing
+
+The same two-function object. Its `.xdata` is sixteen bytes: two eight-byte
+`UNWIND_INFO` blocks at offsets zero and eight, with no relocations at all --
+unwind data refers to nothing outside itself unless it carries a handler.
+-/
+
+/-- `alpha`'s `UNWIND_INFO`: version 1, no flags, one code pushing rbp, and a
+padding slot. -/
+def alphaUnwind : ByteSeq :=
+  [0x01, 0x01, 0x01, 0x00, 0x01, 0x50, 0x00, 0x00]
+
+/-- `beta`'s: two codes, so no padding slot is needed. -/
+def betaUnwind : ByteSeq :=
+  [0x01, 0x02, 0x02, 0x00, 0x02, 0x30, 0x01, 0x50]
+
+/-- **The sixteen bytes `ml64` wrote into `.xdata`.** -/
+theorem twoFunction_xdata_bytes :
+    xdataBytes [alphaUnwind, betaUnwind] =
+      [0x01, 0x01, 0x01, 0x00, 0x01, 0x50, 0x00, 0x00,
+       0x01, 0x02, 0x02, 0x00, 0x02, 0x30, 0x01, 0x50] := by
+  decide
+
+/--
+**Neither block needed padding.**
+
+Both are eight bytes, which is already four-aligned, so `xdataBlock` is the
+identity on them. This is what makes the padding path untested by the measured
+object -- worth saying, since a mutation to the padding would survive these
+bytes alone. -/
+theorem twoFunction_xdata_unpadded :
+    xdataBlock alphaUnwind = alphaUnwind ∧ xdataBlock betaUnwind = betaUnwind :=
+  ⟨by decide, by decide⟩
+
+/--
+**A block of odd length is padded to the next boundary.**
+
+The case the measured object cannot show, so it is stated on a made-up block
+rather than left to the general theorem. Five bytes become eight. -/
+theorem odd_block_padded :
+    xdataBlock [0x01, 0x02, 0x03, 0x04, 0x05]
+      = [0x01, 0x02, 0x03, 0x04, 0x05, 0x00, 0x00, 0x00] := by
+  decide
+
+/--
+**`beta`'s entry points at `beta`'s unwind block, not `alpha`'s.**
+
+The two sections agreeing, on the measured object. `betaEntry.unwindOffset` is
+eight, and eight is where `xdataOffsets` puts the second block -- so reading
+there returns `betaUnwind`.
+
+This is the check that a hardcoded zero would fail, and it is the defect the
+one-function fixture could not see. -/
+theorem betaEntry_points_at_betaUnwind :
+    ((xdataBytes [alphaUnwind, betaUnwind]).drop
+        betaEntry.unwindOffset.toNat).take (xdataBlock betaUnwind).length
+      = xdataBlock betaUnwind := by
+  decide
+
+/-- **And `alpha`'s points at `alpha`'s.** -/
+theorem alphaEntry_points_at_alphaUnwind :
+    ((xdataBytes [alphaUnwind, betaUnwind]).drop
+        alphaEntry.unwindOffset.toNat).take (xdataBlock alphaUnwind).length
+      = xdataBlock alphaUnwind := by
+  decide
+
+/--
+**The two sections' flag words, as `ml64` wrote them.**
+
+They differ, and the difference is the alignment field: `.pdata` carries
+`ALIGN_4BYTES` and `.xdata` carries `ALIGN_8BYTES`. The model had `.pdata`'s
+word in both places until this was measured -- a mistake invisible to every
+block-offset theorem, because those are about alignment *within* the section
+and this is alignment *of* it. -/
+theorem section_characteristics_measured :
+    pdataCharacteristics = 0x40300040
+    ∧ xdataCharacteristics = 0x40400040
+    ∧ pdataCharacteristics ≠ xdataCharacteristics := by
+  refine ⟨rfl, rfl, ?_⟩
   decide
 
 end Grass.Tests.Platform.Win32.Coff

@@ -10,6 +10,7 @@ import Grass.Platform.Win32.CoffLayout
 import Grass.Platform.Win32.CoffSymbol
 import Grass.Platform.Win32.CoffStrings
 import Grass.Platform.Win32.CoffPdata
+import Grass.Platform.Win32.CoffXdata
 
 /-!
 # Ledger coverage gate
@@ -99,7 +100,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.CoffLayout,
    `Grass.Platform.Win32.CoffSymbol,
    `Grass.Platform.Win32.CoffStrings,
-   `Grass.Platform.Win32.CoffPdata]
+   `Grass.Platform.Win32.CoffPdata,
+   `Grass.Platform.Win32.CoffXdata]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -113,7 +115,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 128
+def owedBaseline : Nat := 130
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -135,7 +137,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 70
+def notBehaviourBaseline : Nat := 74
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -376,7 +378,17 @@ def notBehaviour : List Name :=
     -- relocations.
     `Grass.Platform.Win32.Coff.pdataBytes,
     `Grass.Platform.Win32.Coff.pdataRelocations,
-    `Grass.Platform.Win32.Coff.pdataSection ]
+    `Grass.Platform.Win32.Coff.pdataSection,
+    -- `.xdata` assembly. `xdataBlock` applies the padding `alignPad` decides,
+    -- `xdataBytes` concatenates blocks, `xdataOffsets` is a running total over
+    -- them, and `xdataSection` collects name, bytes, relocations and flags.
+    -- The arrangement of blocks within the section is this profile's, not the
+    -- format's: COFF locates each `UNWIND_INFO` by the addend a `.pdata` entry
+    -- carries, so any order those addends describe is legal.
+    `Grass.Platform.Win32.Coff.xdataBlock,
+    `Grass.Platform.Win32.Coff.xdataBytes,
+    `Grass.Platform.Win32.Coff.xdataOffsets,
+    `Grass.Platform.Win32.Coff.xdataSection ]
 
 /--
 Declarations that genuinely model external behaviour and have no citation yet.
@@ -583,7 +595,16 @@ def owed : List Name :=
     -- assembling a second function. See `Tests/Platform/Win32/CoffFixture.lean`.
     `Grass.Platform.Win32.Coff.PdataEntry.toBytes,
     `Grass.Platform.Win32.Coff.PdataEntry.relocations,
-    `Grass.Platform.Win32.Coff.pdataCharacteristics ]
+    `Grass.Platform.Win32.Coff.pdataCharacteristics,
+    -- `.xdata`'s two external facts. `alignPad` encodes the requirement that
+    -- every `UNWIND_INFO` begin on a four-byte boundary, which the format
+    -- imposes and this profile does not get to choose.
+    -- `xdataCharacteristics` is the section's flag word, and it is *not*
+    -- `.pdata`'s: measured, they differ in the alignment field, `ALIGN_4BYTES`
+    -- against `ALIGN_8BYTES`. The model carried `.pdata`'s word in both places
+    -- until an object was read for it.
+    `Grass.Platform.Win32.Coff.alignPad,
+    `Grass.Platform.Win32.Coff.xdataCharacteristics ]
 
 /-- The declarations this gate holds the ledger responsible for. -/
 def modeledDeclarations : MetaM (Array Name) := do
