@@ -570,14 +570,21 @@ def movMem64Imm32 (m : MemOperand) (v : BitVec 32) : Option InsnEncoding :=
 /-!
 ## Prologue instructions
 
-The two instruction forms a Win64 prologue is built from. They exist because
-`Grass/ABI/Win64/UnwindBytes.lean` records an open obligation it cannot close
-on its own: `Layout.WellFormed` constrains code offsets against each other and
-against `SizeOfProlog`, but nothing relates them to the bytes an assembler
-would emit, "because this module models unwind data and not instructions --
-there is no encoder for `push` or `sub rsp` to compare against". These are that
-encoder. The recogniser that consumes them stays in the ABI layer, where the
-`Layout` it judges lives.
+The two instruction forms a Win64 prologue is built from.
+
+They exist for `Grass/ABI/Win64/UnwindBytes.lean`. `Layout.WellFormed` there
+constrains code offsets against each other and against `SizeOfProlog` but
+cannot relate them to the bytes an assembler would emit, and that module
+recorded the gap as an open obligation on the grounds that no encoder for
+`push` or `sub rsp` existed to compare against. These are that encoder;
+`Layout.Realizes` is the recogniser built on them, and it stays in the ABI
+layer where the `Layout` it judges lives.
+
+This paragraph used to quote that module's wording directly. It stopped being
+a quotation the moment the obligation was closed and the sentence rewritten,
+so it says what happened instead of putting words in another file's mouth.
+See `Grass/ABI/Win64/UnwindBytes.lean` for what remains open, which is the
+six operations with no unambiguous instruction.
 -/
 
 /--
