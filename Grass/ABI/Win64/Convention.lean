@@ -106,11 +106,22 @@ rule, and `docs/PLATFORM_ABI.md` section 3's "omitting a permitted behavior is
 unsound" applies to a caller reasoning from this table about a callee that
 touches them.
 
-That is an open obligation rather than a claim of coverage, and it is now the
-*only* side of the gap left. `Grass.ABI.Win64.UnwindOp` gained `saveXmm128`, so
-the unwind language can describe an XMM save; this table still cannot say which
-XMM registers a callee must preserve, because it models general-purpose
-registers only. `Grass.ISA.X86.Xmm` exists but carries numbering alone.
+That is an open obligation rather than a claim of coverage, and what remains
+open has narrowed since it was written.
+
+The XMM half is closed. `Grass.ABI.Win64.UnwindOp` gained `saveXmm128`, so the
+unwind language can describe an XMM save, and `xmmVolatility` below now says
+which registers a callee must preserve -- `xmm0`-`xmm5` volatile,
+`xmm6`-`xmm15` not. An earlier version of this paragraph said this table
+"still cannot say" that, and went on saying it after `xmmVolatility` was added
+twelve lines further down. It was a false claim about the file it was written
+in.
+
+`MXCSR`, the x87 control word and the direction-flag rule are still not named
+anywhere here, and that is the obligation that survives. Those are not register
+classes but *mode* state, which a caller reasoning from this table would
+assume unchanged across a call and which the convention constrains
+independently of any register's volatility.
 -/
 
 /-- Which XMM registers a callee must preserve.
