@@ -215,6 +215,13 @@ reference closure, citation coverage, complete effect derivation, and mutation
 fixtures showing that a changed expansion, omitted clobber, or dropped fault
 exit breaks the certificate.
 
+The first C3 review slice implements the instruction-polymorphic hierarchical
+`Source`, `VerifiedFragment`, and dependent `Generator` foundation. Its public
+theorems expose exact expansion-derived effects, contract closure, instruction
+counts, and all-exit classification without treating generator evaluation as
+proof authority. Structural source locations, composition, and registry closure
+remain separate successor slices so each can be reviewed against one invariant.
+
 ### C4 — Authored source and checked lowering
 
 Implement the stable term-level surface before adding punctuation-saving
