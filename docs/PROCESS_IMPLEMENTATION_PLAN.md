@@ -5064,9 +5064,10 @@ number. An untrackable obligation is a sentence, not a record.
 
 ### 10.141 A citation of mine that named nothing, and what declaring it cost
 
-`StepsLocally.sharedWritesAdmitted_of_no_writes` was cited by that field's own
-docstring and by `Grass/Process/Network/Plan.lean`'s note on `sharedUpdate`, and
-declared by neither. My defect, landed by my own commit `c373340` alongside the
+`sharedWritesAdmitted_of_no_writes` was cited by
+`StepsLocally.sharedWritesAdmitted`'s own docstring under the bare name and by
+`Grass/Process/Network/Plan.lean`'s note on `sharedUpdate` under the
+`StepsLocally.` prefix, and declared under neither. My defect, landed by my own commit `c373340` alongside the
 field `agent-bus` ruling `g-design:84` asked for. `Tools/DocstringAudit.py` did
 not see it: its identifier check fires only inside sentences carrying a
 strong-claim word, and neither citation has one. `agent-bus` `c-process:106`
@@ -5079,7 +5080,9 @@ no author burden." A role that may write nothing supplies `writesPermitted` and
 gets `sharedWritesAdmitted` from it.
 
 **Declaring it is half the repair.** A lemma with no consumer and an
-unsatisfiable hypothesis is the shape §10.105 refuses, so both halves are here:
+unsatisfiable hypothesis is the shape §10.130 refuses — "a record nothing
+inhabits, a law that cannot fail, a disjunct no plan can reach" — so both halves
+are here:
 `the_connection_writes_nothing` inhabits the hypothesis at a real role —
 `serverTopology`'s connection may write neither region — and
 `theConnectionOwesNoValueBound` consumes it.
@@ -5089,6 +5092,55 @@ the theorem lives, and only one of them was wrong in a way a reader would notice
 the bare name resolves, `StepsLocally.` does not, because `StepsLocally` is a
 structure and not the namespace the theorem sits in. A first attempt at this
 repair fixed one site and reported both fixed.
+
+### 10.144 Two premises the corrections contradicted, and neither was noticed
+
+The corrections in §10.140 and §10.141 were reviewed and two of them turned out
+to leave standing the sentences they repudiate. Both are on `main`, both are
+mine, and in each case the correction landed on the *conclusion* while the
+*premise* it was derived from stayed where it was.
+
+**`agreesGlue` is a mixability law, not a coverage law.**
+`Grass/Process/Network/Assertion.lean`'s module note said gluing "is exactly the
+statement that the fragments name a *complete and independent decomposition* of
+the world: agreement on a set of fragments carries no information about the
+rest". That is false. `agreesGlue` asks only that any two worlds can be mixed
+along any set of fragments, and an agreement can satisfy every law while one
+fragment's clause fixes the whole world.
+`Tests/Process/AssertionFixtures.lean`'s `leakyAgreement` is that agreement —
+`Agrees fragment left right := fragment = .obligations → left = right` — and it
+is kept, because a gluing law reading as a decomposition law is the natural
+misreading and survived several revisions.
+
+`WorldAgreement.subsingleton_of_forced_equality` does not catch it: that refuses
+the agreement forcing equality at *every* fragment, and this one forces it at
+one. So **coverage is an obligation on whoever supplies the world and this layer
+does not state it** — nothing says the fragments exhaust `World`. Filed here with
+a number rather than left as a sentence, on the rule §10.140 adopted one file
+over and this repair had broken.
+
+**And acceptance cannot see the segmentation whatever carries it.**
+`Grass/Process/Run.lean` said the segmentation is an index rather than a field
+"so that an acceptance relation, which sees only `ProcessRunState.history`,
+cannot branch on it". The "so that" does not follow. `ProcessAcceptance` has
+three clauses — `TerminalAccepts` over a request and result, `TraceAccepts` over
+a `Trace`, `DemandsWellFormed` over a `Bag` — and none takes a `ProcessRunState`,
+so no acceptance relation can reach a field of it either.
+
+What index-versus-field decides is something else and worth keeping: whether the
+segmentation is part of the state a refinement has to preserve. As a field it
+would be, and a replacement producing the same observations in a different number
+of transitions changes it. That is the first of the module's two tests and it is
+what the earlier draft failed — the right conclusion from the wrong reason, which
+is why three sites and a ledger paragraph all repeated it.
+
+**The pattern, since it is the third time.** §10.134's title is "the correction
+left the sentences it corrected in place". Here the correction left the sentence
+it was *derived from* in place, which is harder to see: the repaired paragraph
+reads correctly on its own and only contradicts something forty lines up, or four
+hundred lines down, or in another file. Grepping the claim's wording finds the
+first kind. It does not find this kind, because the premise is phrased as a
+different claim.
 
 ## 11. The authoring facade
 

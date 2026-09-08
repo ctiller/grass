@@ -370,4 +370,57 @@ theorem acceptedSomething_needs_its_region
     (fun empty => (understated_footprint_impossible assertion
       (fun fragment member => empty ⟨fragment, member⟩) sameMeaning).elim)
 
+/-! ## What `agreesGlue` does not say
+
+`Grass/Process/Network/Assertion.lean`'s module note claimed `agreesGlue` is
+"exactly the statement that the fragments name a *complete and independent
+decomposition* of the world: agreement on a set of fragments carries no
+information about the rest". Local adversarial review refuted it and this is the
+refutation, kept because the claim is the natural reading of a gluing law and was
+believed for several revisions. §10.144.
+-/
+
+open Classical in
+/--
+**An agreement that says nothing except at one fragment, where it says
+everything.**
+
+`agreesGlue` asks that any two worlds can be *mixed* along any set of fragments.
+It does not ask that the fragments cover the world, and this satisfies it: when
+`.obligations` is inside, the mixture is `left`, and every fragment outside is
+not `.obligations` so its clause is vacuous; when it is outside, the mixture is
+`right` symmetrically.
+
+`WorldAgreement.subsingleton_of_forced_equality` is not violated, because it
+refuses the agreement that forces equality at *every* fragment. This one forces
+it at one.
+-/
+def leakyAgreement : WorldAgreement serverTopology FixtureWorld where
+  Agrees fragment left right := fragment = .obligations → left = right
+  agreesRefl := by intro _ _ _; rfl
+  agreesSymm := by
+    intro fragment left right holds isObligations
+    exact (holds isObligations).symm
+  agreesTrans := by
+    intro fragment a b c first second isObligations
+    exact (first isObligations).trans (second isObligations)
+  agreesGlue := by
+    intro inside left right
+    by_cases obligationsInside : inside .obligations
+    · refine ⟨left, ?_, ?_⟩
+      · intro _ _ _; rfl
+      · intro fragment outside isObligations
+        exact absurd (isObligations ▸ obligationsInside) outside
+    · refine ⟨right, ?_, ?_⟩
+      · intro fragment isInside isObligations
+        exact absurd (isObligations ▸ isInside) obligationsInside
+      · intro _ _ _; rfl
+
+/-- **So agreement at one fragment can determine every other**, and gluing does
+not forbid it. An assertion framed by `{.obligations}` under this agreement may
+depend on anything at all. -/
+theorem gluing_does_not_bound_the_footprint (left right : FixtureWorld)
+    (agreed : leakyAgreement.Agrees .obligations left right) : left = right :=
+  agreed rfl
+
 end Grass.Process.Tests.NetworkAssertions

@@ -79,16 +79,20 @@ segment of each observation to be *retained* through "later weaving, flattening,
 serialization, machine simulation, and projection". Carrying it as an index of
 `Reachable` is what keeps it, and `Reachable.observationCausality` reads it.
 
-What keeps it out of acceptance is the *type*: `ProcessAcceptance.TraceAccepts`
-takes a `Trace p.Observation`, so an acceptance relation sees only
-`ProcessRunState.history` and has nothing to branch the segmentation on. The
-declaration note further down this module states it that way, and an earlier
-version of this paragraph offered the index-versus-field distinction instead,
-which does not entail it — a field over `segmented` would be no more visible to
-`TraceAccepts` than an index is.
+What keeps it out of acceptance is the *types of `ProcessAcceptance`'s clauses*:
+`TerminalAccepts` takes a request and a result, `TraceAccepts` a
+`Trace p.Observation`, `DemandsWellFormed` a `Bag p.Demand`. None takes a
+`ProcessRunState`, so no acceptance relation can branch on the segmentation
+however it is carried. An earlier version of this paragraph offered the
+index-versus-field distinction instead, which does not entail it — a field over
+`segmented` would be no more visible to those three clauses than an index is.
 
-An earlier draft put `Segmented` inside `ProcessRunState`, which failed the
-first test, and then deleted it from the run entirely, which failed the second.
+**What index-versus-field does decide** is whether the segmentation is part of
+the state a refinement has to preserve. As a field of `ProcessRunState` it would
+be, and a replacement producing the same observations in a different number of
+transitions changes it — which is the first test above, and what the earlier
+draft that put it there failed. Deleting it from the run entirely failed the
+second. §10.144.
 -/
 
 namespace Grass.Process
@@ -453,9 +457,10 @@ The states reachable by a finite execution prefix, together with the
 segmentation that produced their trace.
 
 The `Segmented` index is what keeps `docs/PROCESS.md` §4's observation causality
-available. It is an index rather than a field of the run state so that an
-acceptance relation, which sees only `ProcessRunState.history`, cannot branch on
-it — see the module note.
+available. It is an index rather than a field of the run state so that a
+refinement changing only the number of transitions does not change the run state
+— see the module note, which also records why this is not what keeps acceptance
+from branching on it.
 
 Finite by construction: this is the prefix relation, and every statement about
 maximal or infinite executions belongs to `Grass.Semantics`.

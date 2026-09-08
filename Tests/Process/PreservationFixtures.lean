@@ -510,8 +510,8 @@ def theInterruptionStep (reason : Interrupt) :
 
 `ProcessPlan.sharedWritesAdmitted_of_no_writes` was cited by two docstrings
 and declared by neither until §10.141. Declaring it is only half the repair: a
-lemma with no consumer and an unsatisfiable hypothesis would be the shape this
-ledger refuses. Both halves are here.
+lemma with no consumer and an unsatisfiable hypothesis would be §10.130's shape —
+a record nothing inhabits — so both halves are here.
 -/
 
 /-- **`serverTopology`'s connection role may write no region.**

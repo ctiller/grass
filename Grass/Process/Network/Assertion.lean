@@ -48,11 +48,17 @@ in the weave became dischargeable only at identical worlds, and no theorem
 noticed.
 
 `agreesGlue` is the law that excludes it. It says any two worlds can be mixed
-along any set of fragments, which is exactly the statement that the fragments
-name a *complete and independent decomposition* of the world: agreement on a set
-of fragments carries no information about the rest. Under the equality agreement
-gluing at a proper subset would force `left = right`, so the degenerate
-agreement is no longer a `WorldAgreement`.
+along any set of fragments, and under the equality agreement gluing at a proper
+subset would force `left = right`, so the degenerate agreement is no longer a
+`WorldAgreement`.
+
+**It says less than that, and an earlier version of this paragraph said more.**
+It claimed gluing was "exactly the statement that the fragments name a complete
+and independent decomposition of the world: agreement on a set of fragments
+carries no information about the rest". That is false — mixability is not
+coverage — and `Tests/Process/AssertionFixtures.lean`'s `leakyAgreement` is an
+agreement satisfying every law while its `.obligations` clause forces the whole
+world equal. §10.144.
 
 It is a real obligation on whoever supplies the world, and the shape it demands
 is a product over fragments. `docs/PROCESS.md` §3's `LogicalProcessNetwork` is
@@ -106,9 +112,13 @@ relative to *the agreement it is given*, and `agreesGlue` forces mixability
 rather than coverage, so an agreement that hides a component inside a named
 fragment admits a `framed` assertion depending on it.
 `WorldAgreement.subsingleton_of_forced_equality` refuses only the global
-equality agreement and says nothing about that partial one. Coverage is a real
-obligation on whoever supplies the world, which is what the note above says
-about the world parameter generally.
+equality agreement and says nothing about that partial one.
+
+So coverage is an obligation on whoever supplies the world, and this layer does
+not state it: nothing here says the fragments exhaust `World`.
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.144 files it with a number rather than
+leaving it as a sentence. The note above states a *different* obligation — that
+gluing demands a product shape — which is not the same thing.
 
 `escrow` and `session` are separate constructors because the world separates
 them — `inFlight : ChannelEscrowLedger` and `sessions : ChannelSessionLedger` are
