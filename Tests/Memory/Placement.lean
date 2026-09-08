@@ -1,0 +1,438 @@
+import Grass.Memory.Apply
+
+/-!
+# Placement, instantiated
+
+`Grass/Memory/Range.lean` records from its first line that `Nat` disjointness says
+nothing about machine addresses, and `Grass/Memory/Addressing.lean` proves the
+arithmetic that closes the gap. For several milestones nothing could *use* that
+proof, because no allocation carried an address — the module was imported by the
+axiom audit and by nothing else, and `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2
+listed the debt as undischarged.
+
+This file is the check that it is discharged: the bridge applies to a state built
+the ordinary way, not only to a hypothetical one.
+
+It also pins the two things placement is *not*. It is not aliasing, since two
+allocations may share a base and remain distinct storage until `MemoryState.aliases`
+says otherwise; and it is not *authority*, in the narrow sense
+`placement_is_not_authority` states — an unplaced allocation is live, readable and
+writable exactly as a placed one is. What it is not any more is invisible to
+`denialOf`, which reads `base` in two clauses; four docstrings in this tree still
+said otherwise a round after the plan recorded the correction, one of them
+thirty-two lines from its own retraction.
+-/
+
+namespace Tests.Memory.Placement
+
+open Grass.Core Grass.Memory Grass.Std.Logical
+
+private def allocs : FreshSupply AllocTag := .initial
+
+/-- A placed allocation. -/
+def placed : AllocId := allocs.fresh.1
+
+/-- A second allocation, deliberately left unplaced: a logical address space has
+allocations with no machine address, which is why the base is an `Option`. -/
+def unplaced : AllocId := allocs.fresh.2.fresh.1
+
+private def epoch : EpochId := (FreshSupply.initial (Tag := EpochTag)).fresh.1
+
+private def contexts : FreshSupply ContextTag := .initial
+
+/-- The context these allocations belong to, and the one every descriptor below runs
+in. The theorems here are not about who accesses; the field has no default, so this
+file says whose storage it is rather than leaving it unowned by accident. -/
+def someContext : ContextId := contexts.fresh.1
+
+/-- Four kilobytes based at `0x1000`. -/
+def placedRecord : AllocationRecord :=
+  { extent := ⟨0, 4096⟩, epoch := epoch, space := .cpuVirtual
+    source := .virtualAlloc, owners := [someContext]
+    permission := .readWrite, live := true, bytes := .empty, base := some 0x1000 }
+
+/-- The same shape, with nowhere to be. -/
+def unplacedRecord : AllocationRecord :=
+  { placedRecord with base := Option.none }
+
+/-- A state holding both. -/
+def state : MemoryState :=
+  (MemoryState.empty.allocateAll?
+    [(placed, placedRecord), (unplaced, unplacedRecord)]).getD .empty
+
+/-- Both allocations happened, so `getD` did not fall back. -/
+theorem the_allocations_succeed :
+    (MemoryState.empty.allocateAll?
+      [(placed, placedRecord), (unplaced, unplacedRecord)]).isSome := by decide
+
+/-- The placed allocation does not wrap, which is the hypothesis every bridge lemma
+takes. Proved rather than decided: `FitsAllocation` bounds by `2 ^ 64`, and asking
+the kernel to evaluate that is how a fixture stops finishing. -/
+theorem placed_does_not_wrap : state.PlacedWithoutWrap placed := by
+  intro record hrec base hbase
+  have hlook : state.allocations.lookup placed = some placedRecord := by decide
+  rw [hlook] at hrec
+  have hr : record = placedRecord := by simpa using hrec.symm
+  subst hr
+  have hb : base = 0x1000 := by
+    have hbr : placedRecord.base = some (0x1000 : MachineAddress) := rfl
+    rw [hbr] at hbase
+    simpa using hbase.symm
+  subst hb
+  show (0x1000 : MachineAddress).toNat + (4096 : Nat) ≤ 2 ^ 64
+  have hsmall : (0x1000 : MachineAddress).toNat = 4096 := by decide
+  have hpow : (2 : Nat) ^ 13 ≤ 2 ^ 64 := Nat.pow_le_pow_right (by decide) (by decide)
+  have h13 : (8192 : Nat) = 2 ^ 13 := by decide
+  omega
+
+/--
+**Two disjoint ranges in a placed allocation do not alias.**
+
+The offset-to-address bridge, applied. The two ranges are `[0, 8)` and `[8, 16)`,
+whose offsets are adjacent — the case where `Nat` reasoning is least informative
+about addresses and where an off-by-one in `addressOf` would show.
+-/
+theorem disjoint_offsets_have_distinct_addresses (i j : Nat)
+    (hi : (ByteRange.mk 0 8).Covers i) (hj : (ByteRange.mk 8 8).Covers j) :
+    state.addressAt? placed i ≠ state.addressAt? placed j :=
+  MemoryState.addressAt?_ne_of_disjoint (record := placedRecord) (base := 0x1000)
+    placed_does_not_wrap (by decide) (by decide) (by decide) (by decide) hi hj rfl
+
+/-- The addresses are the ones arithmetic says, so the theorem above is about a
+real placement rather than a vacuous one. -/
+theorem the_addresses_are_where_expected :
+    state.addressAt? placed 0 = some 0x1000 ∧
+    state.addressAt? placed 8 = some 0x1008 := by decide
+
+/-- An unplaced allocation has no address, and asking is not an error. This is the
+case a mandatory base would have forced a profile to invent. -/
+theorem unplaced_has_no_address : state.addressAt? unplaced 0 = Option.none := by decide
+
+/-- **Placement is not authority**, in the sense that matters: the unplaced
+allocation is live, readable and writable exactly as the placed one is, and the two
+records differ in nothing but where they sit.
+
+`MetadataAt` no longer compares equal, and the change is deliberate.
+`AllocationRecord.base`'s docstring used to say "nothing in `denialOf` reads this",
+which was true and was the problem — an access declared an address and nothing
+compared it to the placement, so every Spike 1 fixture's address contradicted the
+placement the same fixture built. `denialOf` reads the base now, so the base is part
+of the metadata view a decision depends on, and this theorem states the property it
+was written for rather than the equality that happened to hold. -/
+theorem placement_is_not_authority :
+    (state.MetadataAt placed).map (fun m => (m.extent, m.epoch, m.space, m.permission, m.live)) =
+      (state.MetadataAt unplaced).map
+        (fun m => (m.extent, m.epoch, m.space, m.permission, m.live)) ∧
+    (state.MetadataAt placed).bind (fun m => m.base) ≠
+      (state.MetadataAt unplaced).bind (fun m => m.base) := by
+  exact ⟨by decide, by decide⟩
+
+/-! ## An extent that does not start at zero
+
+`denialOf`'s wrap clause bounded by `extent.size` and the addresses an access can
+reach run to `extent.stop`. Review placed an allocation with a non-zero
+`extent.start` past the wrap point and had its store admitted at an address inside a
+second, unrelated live allocation — with `SharesBytes` false between the two, so it
+is not §4.4.1b's same-base case. These are that state, refused.
+-/
+
+/-- A third allocation, whose extent starts at 200 and ends at 250. -/
+def offsetAlloc : AllocId := allocs.fresh.2.fresh.2.fresh.1
+
+/-- Based so that offset 200 lands at address 100 — past the wrap. Its *size* is 50,
+which fits; its *stop* is 250, which does not. -/
+def offsetRecord : AllocationRecord :=
+  { extent := ⟨200, 50⟩, epoch := epoch, space := .cpuVirtual
+    source := .virtualAlloc, owners := [someContext]
+    permission := .readWrite, live := true, bytes := .empty
+    base := some (0 - 100) }
+
+/-- A state holding it beside the placed allocation, which sits at `0x1000`. -/
+def wrapped : MemoryState :=
+  (state.allocate? offsetAlloc offsetRecord).getD state
+
+/-- The allocation is there, and the two are not aliases — so any collision below is
+a placement collision rather than a declared one. -/
+theorem the_wrapped_allocation_is_there :
+    (wrapped.allocations.lookup offsetAlloc).isSome ∧
+    ¬ wrapped.SharesBytes offsetAlloc placed := by
+  exact ⟨by decide, by decide⟩
+
+/-- **The wrap is refused.** With the clause bounded by `extent.size` this allocation
+passed, because 50 bytes fit anywhere. -/
+theorem the_offset_wrap_is_refused :
+    denialOf wrapped
+      { context := someContext, address := .numeric 100, space := .cpuVirtual
+        provenance :=
+          { space := .cpuVirtual, root := offsetAlloc, epoch := epoch
+            source := .virtualAlloc, rootExtent := ⟨200, 50⟩, path := [] }
+        range := ⟨200, 8⟩, intent := .write, requiredPermission := .readWrite
+        alignment := 1, initialization := .readsNothing
+        producesInitialized := true } = some AuditViolationClass.placementWraps := by
+  decide
+
+/-- And an allocation with the same non-zero start that does *not* wrap is still
+admitted, so the clause did not simply become "refuse a non-zero start". -/
+def fitting : MemoryState :=
+  (state.allocate? offsetAlloc { offsetRecord with base := some 0x2000 }).getD state
+
+theorem an_offset_allocation_that_fits_is_admitted :
+    (fitting.allocations.lookup offsetAlloc).isSome ∧
+    denialOf fitting
+      { context := someContext, address := .numeric (0x2000 + 200), space := .cpuVirtual
+        provenance :=
+          { space := .cpuVirtual, root := offsetAlloc, epoch := epoch
+            source := .virtualAlloc, rootExtent := ⟨200, 50⟩, path := [] }
+        range := ⟨200, 8⟩, intent := .write, requiredPermission := .readWrite
+        alignment := 1, initialization := .readsNothing
+        producesInitialized := true } = Option.none := by
+  exact ⟨by decide, by decide⟩
+
+/-! ## The address a descriptor declares must be the one its placement gives
+
+`AuditViolationClass.addressDisagreesWithPlacement` repairs a demonstrated defect --
+its docstring records that every address in the Spike 1 fixtures contradicted the
+placement the same fixture built, and that six of `Tests/Op/FakeIsa.lean`'s own
+descriptors named an address belonging to a different allocation. Nothing tested it:
+review deleted the clause and the whole tree stayed green, so the repair could have
+been undone invisibly. -/
+
+/-- The `fitting` allocation accessed at the address a *different* live allocation is
+based at. Every other clause of `denialOf` passes: the allocation is live, in the
+right epoch and space, its extent agrees with the provenance, the range is inside it,
+the placement does not wrap and the permission covers the intent. -/
+theorem an_address_from_another_allocation_is_refused :
+    denialOf fitting
+      { context := someContext, address := .numeric 0x1000, space := .cpuVirtual
+        provenance :=
+          { space := .cpuVirtual, root := offsetAlloc, epoch := epoch
+            source := .virtualAlloc, rootExtent := ⟨200, 50⟩, path := [] }
+        range := ⟨200, 8⟩, intent := .write, requiredPermission := .readWrite
+        alignment := 1, initialization := .readsNothing
+        producesInitialized := true } =
+      some AuditViolationClass.addressDisagreesWithPlacement := by
+  decide
+
+/-- `0x1000` is not an arbitrary wrong address: it is where `placed` sits, so the
+refusal above is about *which* allocation the address belongs to rather than about an
+address belonging to none. `an_offset_allocation_that_fits_is_admitted` is the
+positive control -- the same descriptor at the address `fitting`'s own placement gives
+is denied nothing. -/
+theorem the_wrong_address_is_another_allocations_base :
+    (fitting.allocations.lookup placed).map AllocationRecord.base = some (some 0x1000) ∧
+    (fitting.allocations.lookup offsetAlloc).map AllocationRecord.base =
+      some (some 0x2000) := by
+  exact ⟨by decide, by decide⟩
+
+/-! ## The bounds clause fires through the block evaluator, and only there
+
+`the_bounds_clause_cannot_fire` proves that `step` never reaches `denialOf`'s bounds
+clause: well-formedness supplies nesting and containment and the extent clause forces
+the record's extent to equal the declared root extent. `applyAccess` asks `denialOf`
+with no well-formedness hypothesis, so for a block descriptor the clause is the only
+thing between the access and a write outside its allocation. Nothing tested it --
+`outOfBounds` appeared nowhere under `Tests/` except in one prose comment. -/
+
+/-- A block store reaching far past the allocation it names. Every other clause of
+`denialOf` passes: the allocation is live, in the right epoch, space and source, its
+extent agrees with the provenance's declared root extent, the placement does not wrap,
+the declared address is the one the placement gives, and the permission covers the
+intent. -/
+def overrunningStore : AccessDescriptor :=
+  { context := someContext, address := .numeric (0x2000 + 200), space := .cpuVirtual
+    provenance :=
+      { space := .cpuVirtual, root := offsetAlloc, epoch := epoch
+        source := .virtualAlloc, rootExtent := ⟨200, 50⟩, path := [] }
+    range := ⟨200, 4096⟩, intent := .write, requiredPermission := .readWrite
+    alignment := 1, initialization := .readsNothing
+    producesInitialized := true }
+
+/-! ### Both inequalities of the bounds clause
+
+`ByteRange.Contains r s` is `r.start ≤ s.start ∧ s.stop ≤ r.stop`, and
+`overrunningStore` starts exactly where its allocation does, so its refusal exercises
+the upper inequality alone. Review weakened the clause to that inequality and the whole
+tree stayed green: a block access could underrun into bytes below an allocation whose
+extent does not start at zero, which is the only kind this fixture family has.
+
+This is the third `Contains` guard found pinned in one direction — `issue?`'s
+containment clause was the first and `MayLend`'s sublet bound the second — so the sweep
+this time was over every call site rather than the one review named.
+`an_underrunning_block_access_is_refused` is the missing half here,
+`a_borrower_may_not_sublet_below_what_it_holds` in `Tests/Op/StandardLoan.lean`, and
+`a_range_below_the_provenance_is_refused` in `Tests/Memory/WellFormedClauses.lean`. -/
+
+/-- **A block access outside its allocation is refused.** -/
+theorem a_block_access_out_of_bounds_is_refused :
+    denialOf fitting overrunningStore = some AuditViolationClass.outOfBounds := by
+  decide
+
+/-- The same store with a range that fits is denied nothing, so the refusal is the
+bound and not the descriptor. -/
+theorem the_same_block_access_inside_the_allocation_is_admitted :
+    denialOf fitting { overrunningStore with range := ⟨200, 8⟩ } = Option.none := by
+  decide
+
+/-- And the refusal changes nothing, which is what makes it a refusal rather than a
+partial write. `applyAccess_refused_preserves_state` is stated over an arbitrary state;
+this discharges its hypothesis for a concrete one, so the block evaluator really does
+leave `fitting` alone. -/
+theorem the_refused_block_access_changes_nothing :
+    applyAccess fitting overrunningStore (List.replicate 4096 0) (fun _ => 0) =
+      (.refused AuditViolationClass.outOfBounds, fitting) :=
+  applyAccess_refused_preserves_state fitting overrunningStore _ _
+    a_block_access_out_of_bounds_is_refused
+
+/-! ## The four clauses ahead of the bounds clause, which nothing discriminated
+
+`AuditViolationClass.emittedByTransition` declares the classes a profile must
+recognize — `AuditViolationClass.emittedByTransition_length` is how many, stated as a
+theorem because this sentence carried the number and went stale four times. Two of them -- `wrongAddressSpace` and `deadProvenance` -- appeared nowhere
+under `Tests/` at all, and review switched off each of the four `denialOf` clauses that
+produce them with the tree staying green.
+
+They matter most on the block path, for the reason
+`a_block_access_out_of_bounds_is_refused` above already gives: `applyAccess` asks
+`denialOf` with no well-formedness hypothesis, so these clauses are the only thing
+between a block descriptor and a write into storage the table does not hold, into a
+torn-down allocation, or through a stale-epoch provenance -- §2's "address reuse never
+revives old pointers", as a committed write. On the `step` path `authorityOf` reports
+`unavailable` for a dead provenance, so the access is refused anyway, under the wrong
+class. -/
+
+/-- A fourth allocation, torn down. -/
+def freedAlloc : AllocId := allocs.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- A fifth the table never holds, so a descriptor may name it. -/
+def absentAlloc : AllocId := allocs.fresh.2.fresh.2.fresh.2.fresh.2.fresh.1
+
+/-- A second epoch, so a provenance can be stale. -/
+private def laterEpoch : EpochId := (FreshSupply.initial (Tag := EpochTag)).fresh.2.fresh.1
+
+/-- The `fitting` state with a dead allocation beside it. -/
+def withFreed : MemoryState :=
+  (fitting.allocate? freedAlloc { placedRecord with live := false }).getD fitting
+
+/-- The four descriptors below differ from `overrunningStore` in one field each, and
+the state holds what they name -- so each refusal is the clause it is named for. -/
+theorem the_liveness_fixtures_are_real :
+    (withFreed.allocations.lookup freedAlloc).map AllocationRecord.live = some false ∧
+    withFreed.allocations.lookup absentAlloc = Option.none ∧
+    (withFreed.allocations.lookup offsetAlloc).map AllocationRecord.live = some true ∧
+    (withFreed.allocations.lookup offsetAlloc).map AllocationRecord.epoch = some epoch ∧
+    laterEpoch ≠ epoch := by
+  exact ⟨by decide, by decide, by decide, by decide, by decide⟩
+
+/-- **And one underrunning it.** `offsetAlloc`'s extent starts at 200, so a range at
+zero lies below the allocation while inside the address space — the lower inequality of
+`Contains`, which nothing exercised. -/
+theorem an_underrunning_block_access_is_refused :
+    (⟨0, 8⟩ : ByteRange).stop ≤ offsetRecord.extent.stop ∧
+    denialOf fitting
+      { overrunningStore with
+        range := ⟨0, 8⟩, address := .numeric 0x2000 } =
+      some AuditViolationClass.outOfBounds := by
+  exact ⟨by decide, by decide⟩
+
+/-- The same store bounded to eight bytes, which `withFreed` admits: the control every
+refusal below is measured against. -/
+def fittingStore : AccessDescriptor := { overrunningStore with range := ⟨200, 8⟩ }
+
+/-- It is admitted, so the four refusals are their clauses and not the descriptor. -/
+theorem the_fitting_store_is_admitted :
+    denialOf withFreed fittingStore = Option.none := by decide
+
+/-- **A provenance the allocation table does not hold is refused.** -/
+theorem an_absent_allocation_is_refused :
+    denialOf withFreed
+      { fittingStore with provenance := { fittingStore.provenance with root := absentAlloc } } =
+      some AuditViolationClass.provenanceNotAllocated := by decide
+
+/-- **A torn-down allocation is refused**, which is §5's teardown read at the access. -/
+theorem a_dead_allocation_is_refused :
+    denialOf withFreed
+      { fittingStore with provenance := { fittingStore.provenance with root := freedAlloc } } =
+      some AuditViolationClass.deadProvenance := by decide
+
+/-- **A stale-epoch provenance is refused**, which is §2's "address reuse never revives
+old pointers" at the access.
+
+The record is *live* here, which `the_freed_allocation_is_the_one_that_is_dead` below
+pins: these three theorems had three docstrings naming three conditions and all three
+asserted `deadProvenance`, so the class threw away the distinction the file had already
+made. Each names its own class now. -/
+theorem a_stale_epoch_is_refused :
+    denialOf withFreed
+      { fittingStore with provenance := { fittingStore.provenance with epoch := laterEpoch } } =
+      some AuditViolationClass.staleEpoch := by decide
+
+/-- The three refusals above are three conditions and not one: the identity the first
+names is absent from the table, the second's record is torn down, and the third's is
+**live** and merely at another epoch. Without this the three classes would be three
+names for whatever `withFreed` happens to contain. -/
+theorem the_freed_allocation_is_the_one_that_is_dead :
+    withFreed.allocations.lookup absentAlloc = Option.none ∧
+    (withFreed.allocations.lookup freedAlloc).any (fun r => !r.live) = true ∧
+    (withFreed.allocations.lookup offsetAlloc).any (fun r => r.live) = true := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **And a provenance naming a different address space is refused.** §7.5 makes
+spaces non-interchangeable, and this clause is the only comparison of the *record's*
+space with the provenance's anywhere in the layer: `WellFormedIn.spaceAgrees` relates
+the descriptor to itself, admissibility resolves the descriptor's space in the profile's
+table, and `authorityOf` reads neither. -/
+theorem a_provenance_in_another_space_is_refused :
+    denialOf withFreed
+      { fittingStore with provenance :=
+        { fittingStore.provenance with space := .deviceHostVisible } } =
+      some AuditViolationClass.wrongAddressSpace := by decide
+
+/-! ## The block evaluator commits a misaligned store
+
+`denialOf` has no alignment branch, and `Grass/Memory/Apply.lean` gives the reason:
+`AccessDescriptor.WellFormedIn.aligned` checks it and `step` requires well-formedness
+before any access is attempted, so a branch here would be unreachable. That was written
+unqualified and it is true only of the transition path. `applyAccess` asks `denialOf`
+with no well-formedness hypothesis at all -- the same fact that makes the bounds clause
+live, recorded forty lines below the alignment paragraph in the same file -- so on the
+block path nothing stands between a misaligned descriptor and a committed write.
+
+Kept as a demonstration rather than a guard, on the model of
+`a_join_of_two_duties_halves_the_ledger`: closing this breaks a theorem rather than
+passing unnoticed. Closing it means either an alignment clause in `denialOf`, which
+would be unreachable through `step` and would put a fifteenth class into
+`emittedByTransition`, or a well-formedness hypothesis on `applyAccess`, which changes
+the block evaluator's signature. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records
+the choice as open. -/
+
+/-- A four-byte store at offset 201 of the `fitting` allocation, demanding page
+alignment at an address that is not page-aligned. Every clause of `denialOf` passes:
+the address really is the allocation's base plus the offset, which is what the
+placement clause checks. -/
+def misalignedStore : AccessDescriptor :=
+  { overrunningStore with
+    range := ⟨201, 4⟩, address := .numeric (0x2000 + 201), alignment := 4096 }
+
+/-- **It is misaligned and it is not denied.** -/
+theorem a_misaligned_block_access_is_not_denied :
+    ¬ misalignedStore.AlignmentSatisfied ∧
+    ¬ misalignedStore.WellFormedIn AddressSpace.cpuVirtual64 ∧
+    denialOf fitting misalignedStore = Option.none := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- **And the block evaluator commits it**, which is the consequence. The second
+conjunct is the byte: offset 201 held nothing and holds `0xAB` afterwards. -/
+theorem a_misaligned_block_access_commits :
+    (applyAccess fitting misalignedStore (List.replicate 4 0xAB) (fun _ => 0)).1.Committed ∧
+    (applyAccess fitting misalignedStore (List.replicate 4 0xAB)
+      (fun _ => 0)).2.byteAt? offsetAlloc 201 = some 0xAB ∧
+    fitting.byteAt? offsetAlloc 201 = Option.none := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- The same store at a page-aligned address is well formed, so the fixture is about
+the alignment and not about the descriptor. -/
+theorem the_aligned_store_is_well_formed :
+    ({ misalignedStore with alignment := 1 } :
+      AccessDescriptor).WellFormedIn AddressSpace.cpuVirtual64 := by decide
+
+end Tests.Memory.Placement
