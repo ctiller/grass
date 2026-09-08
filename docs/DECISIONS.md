@@ -827,6 +827,50 @@ to imitate compiler-selected storage or CFG structure.
     of every `Grass/Process/**` module. This resolves the three-way
     spike/foundation/module mismatch raised by `c-spike` while retaining the
     process layer's no-import-all invariant.
+135. `Grass.Effect` is the optional high-level sequential proof-economy layer
+    specified by `EFFECTS.md`. It uses open dependent operation families,
+    finite duplicate-free rows, a well-founded free request/continuation program,
+    relational rooted operation-history theories, explicit requirement summaries, and
+    composable source-to-target handlers. Effect-row typeclasses establish
+    membership only. An explicit effect-lowering plan selects local abstract
+    handlers and feeds its derived requirements into the single
+    `PlatformPlan.ProviderEnv`; only that later owner selects physical providers
+    and establishes global dictionary coherence. Neutral Specification owns the
+    dependent, authority-indexed `ProviderDemandFamily` and exact binding-view
+    carrier; owner-specific substitution constructors prevent Effect from
+    discharging memory, resource, obligation, ABI, platform, or ISA demands.
+    The handoff retains the exact
+    upstream effect theory/model identity, so equal requirement names cannot
+    substitute a different dictionary semantics. Every effect-generated
+    operation has a registered origin, and sequential, explicit, and blended
+    Process sources derive one coverage-complete, conservative provider-demand
+    family from their selected boundary and complete protocol registries; local
+    operation origins point into that family. The generic sequential source also
+    retains an exact dependent `DirectProgramDerivation`; the Effect adapter
+    stores its program/model/progress/adapter proof there while provider demands
+    remain indexed only by the stable plan/model boundary. Thus the handoff cannot be removed by repackaging a
+    correctness proof, and
+    `ProjectedDriverCertificate.originRequirementConnections` discharges the
+    provider-owned realization members and forwards every other authority with
+    its exact origin into the later staged families. Handler proofs preserve
+    complete and pending-prefix behavior, ordered observations, and account for
+    every discharged and introduced requirement, including both simulation
+    directions whenever equivalence is claimed. Effect requirements do not
+    create, transfer, discharge, or adopt obligations: a later owned binding
+    connects a neutral requirement to the canonical operation/obligation
+    protocol. The lowering plan is indexed by the exact source row model and
+    carries one whole-row simulation relation, including frame/overlap,
+    observation, pending, and extension laws; independent handlers cannot
+    clobber sibling representations. Every nonterminal operation history must
+    extend or begin an allowed infinite chain, and provider refinement includes
+    request/domain coverage in addition to provider-to-model soundness.
+    Long-running scheduling, channels, pending occurrences,
+    cancellation, faults, and supervision remain Process concerns; adapters
+    may embed well-founded effect programs without making Process core depend on the
+    Effect implementation. Direct serial functions and first-class authored
+    assembly may refine the same specification requirements without constructing
+    a decorative effect-program witness. This resolves `coord1:73` before the
+    assigned foundation implementation begins.
 
 ## Explicitly rejected shortcuts
 

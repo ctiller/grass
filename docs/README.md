@@ -28,6 +28,7 @@ No document may override a narrower owner by restating it differently.
 | [RESOURCES.md](RESOURCES.md) | semantic resource budgets, physical execution envelopes, and their realization theorem |
 | [SPECIFICATION_LANGUAGES.md](SPECIFICATION_LANGUAGES.md) | open family of precious DSL fragments and their typed semantic junctions |
 | [GRAMMAR.md](GRAMMAR.md) | precious text/binary languages, incomplete versus invalid prefixes, parser/writer realization laws |
+| [EFFECTS.md](EFFECTS.md) | open law-bearing effect families, well-founded sequential programs, requirements, and staged handlers |
 | [PROCESS.md](PROCESS.md) | portable state/event/demand/view processes, networks, channels, flattening, resources, and driver boundary |
 | [PROCESS_SHARDING.md](PROCESS_SHARDING.md) | open process registries, facet certificates, scoped cancellation, SCC summaries, and rebuild cones |
 | [VERIFIED_PROGRAM.md](VERIFIED_PROGRAM.md) | the public certificate and emission gate |

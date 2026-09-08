@@ -52,12 +52,26 @@ structure DirectRelationalProgram (boundary : DriverBoundary) where
   binding : forall occurrence,
     occurrence \u2208 DynamicOccurrences Initial Step ->
     ExactSiteProtocolAndChildBinding occurrence
+  operationOrigin : forall occurrence,
+    occurrence \u2208 DynamicOccurrences Initial Step ->
+    RegisteredOperationOrigin boundary.providerDemands occurrence
   terminal : Request -> State -> TerminalResult -> Prop
   terminalDisposition : EveryTerminalStateClassifiesEveryPendingOccurrence
 
+def DirectRelationalProgram.originDemands
+    (program : DirectRelationalProgram boundary) : ProviderDemandFamily :=
+  boundary.providerDemands
+
+structure DirectProgramDerivation
+    (program : DirectRelationalProgram boundary) where
+  Kind : Type
+  payload : Kind
+  connectsExactly : RegisteredDerivationConnectsExactProgram payload program
+
 structure DirectProgramRealizes {R : Type u} [ResourceModel R]
     {resources : R} (spec : SpecProcess resources)
-    (program : DirectRelationalProgram spec.driverBoundary) where
+    (program : DirectRelationalProgram spec.driverBoundary)
+    (derivation : DirectProgramDerivation program) where
   invariant : program.State -> Prop
   initial : DirectInitialSimulation spec program invariant
   step : DirectStepSimulation spec program invariant
@@ -69,6 +83,10 @@ structure DirectProgramRealizes {R : Type u} [ResourceModel R]
 and produces one conventional, replaceable process presentation. The input
 already contains the program decomposition and correctness proof; neither the
 adapter's topology nor its chosen child placement becomes precious.
+The provider-demand family is the exact boundary envelope; every dynamic site
+must point to a registered member. Thus neither the adapter nor a replacement
+correctness proof can omit it, and provider certificates are not duplicated per
+call site.
 
 ### Construction
 

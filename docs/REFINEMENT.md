@@ -46,10 +46,30 @@ reviewed construction input, not a derived register-allocation result.
 Authors express the minimal precious specification using ordinary Lean models:
 functional observations, outcome/status policy, safety, progress, liveness, and
 terminal resource demands actually required. A generated-code route may also
-express structure using high-level monads and prove that program satisfies the
-specification. The direct authored-assembly route does not require a decorative
-monadic program witness. Missing lower-layer facilities are introduced as
-nominal capability requirements with laws, not assumed implementations.
+express well-founded sequential structure using the open law-bearing language in
+[EFFECTS.md](EFFECTS.md) and prove that program satisfies the specification.
+That is an optional proof-economy route, not the meaning of the specification.
+The direct authored-assembly route does not require a decorative monadic program
+witness. Missing lower-layer facilities are introduced as nominal capability
+requirements with laws, not assumed implementations.
+
+When this route uses `Grass.Effect`, the spec-indexed junction lives here rather
+than in Effect's dependency cone:
+
+```lean
+structure EffectSpecJunction (spec : SpecProcess resources)
+    (model : EffectRowModel row) (Initial : model.World -> Prop)
+    (program : EffectProgram row alpha) where
+  adequate : EffectProgramAdequate model Initial program
+  progressPolicy : MaximalExecutionPolicy (EffectMaximalExecution adequate)
+  progressExact : ProgressPolicyEquivalent progressPolicy
+    (NeutralProjectionOfSelectedSpecProgress spec)
+  meetsProgress : EffectProgramMeetsProgress adequate progressPolicy
+  behavior : EffectProgramBehaviorRefinesSpec spec model Initial program
+```
+
+Thus Effect remains importable without `Semantics`; this bridge alone mentions
+the exact `SpecProcess`.
 
 The authored specification body may be relational or an abstract spec-process
 network. Spec processes expose only logical roles, typed channels, linear/shared
@@ -101,8 +121,11 @@ novel code, but it is an explicit escape hatch. It does not justify removing
 the ordinary high-level theorem boundary or making assembly authors repeat
 portable application proofs.
 
-Portable code may demand an abstract effect; target-specific code may demand a
-specific provider family. Requirements remain explicit data/propositions so
+Portable code may demand an abstract effect family; target-specific code may
+select a local effect handler through an explicit lowering plan. Effect-row
+typeclasses prove membership only and never choose a provider. The one
+`PlatformPlan.ProviderEnv` later selects physical providers coherently for the
+accumulated requirements. Requirements remain explicit data/propositions so
 they can be propagated and reviewed.
 
 ## Act 2: weave
@@ -386,6 +409,51 @@ ambient search. Realization proves that the exact dictionary used by upstream
 definitions and proofs is the selected provider. Provider identities and
 environment evidence are ghost-propagated through requirements, ABIs, blocks,
 calls, and obligations.
+
+When the upstream route used `Grass.Effect`, that layer exports only its
+transparent `plan.handoff : EffectProviderHandoff plan`. This Act owns the cross-layer proof:
+
+```lean
+structure ProviderRealizesEffectPlan
+    (providerEnv : PlatformPlan.ProviderEnv)
+    (plan : EffectLoweringPlan source sourceModel) where
+  viewRealization : EffectPlanRealizedByView plan providerEnv.bindingView
+  environmentCoherence : SelectedViewEntriesAreTheExactProviderEnvDictionaries
+    providerEnv
+  inheritedDisposition : ExactAuthorityRespectingRequirementDisposition
+    plan.handoff.requirements providerEnv.bindingView
+  forwardedRequirements : ProviderDemandFamily
+  forwardedExact : forwardedRequirements.ExtEq
+    inheritedDisposition.exactForwardedFamily
+
+def ProviderRealizesEffectPlan.requirementConnections
+    (certificate : ProviderRealizesEffectPlan providerEnv plan) :
+    ExactAuthorityRespectingRequirementDisposition
+      plan.providerDemands providerEnv.bindingView :=
+  combineDisposition
+    certificate.inheritedDisposition
+    (dischargeAll plan.realizationDemands
+      (plan.realizationDemands_certified_iff.mpr certificate.viewRealization))
+
+structure EquivalentProviderRealizesEffectPlan ... extends
+    ProviderRealizesEffectPlan providerEnv plan where
+  historyCoverage : EverySelectedHistoryHasAProviderOperationPrefix ...
+```
+
+The Effect adapter stores this demand in the registered origin of every
+generated effect-operation site. Sequential, explicit, and blended sources
+derive one conservative provider-demand union from the selected boundary and
+complete declared protocol registry, including unused protocols.
+`ProjectedDriverCertificate.originRequirementConnections` consumes the
+resulting dependent family against its exact `ProviderEnv`: provider-owned
+members are discharged, while every memory/resource/obligation/ABI/ISA or later
+member is forwarded with its original origin into the next staged family. For an
+Effect origin, `requirementConnections` is the local constructor. Equal names or
+equal requirement sets cannot substitute a
+different effect theory, operation history, observation lens, or provider
+dictionary. The base theorem is directed refinement. Coverage/reflection is
+required only when the selected claim is equivalence or explicitly preserves
+the source's nondeterminism.
 
 One provider key has one realization. Intentional multi-backend programs use
 distinct keys and prove their coexistence. Platform, ISA, and API set are
