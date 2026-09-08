@@ -1,4 +1,4 @@
-import Grass.Artifact.Binary.Gobj.Framing
+import Grass.Artifact.Binary.Gobj.Scope
 
 /-!
 # Versioned proof-free `.gobj` payload envelope
@@ -21,7 +21,7 @@ deriving DecidableEq, Repr
 /-- The first-order, proof-free fields carried by one `.gobj` file. -/
 structure GobjPayload where
   formatVersion : GobjFormatVersion
-  scope : SizedByteArray 16
+  scope : StableScopeId
   sections : U32LengthPrefixedBytes
   symbols : U32LengthPrefixedBytes
   relocations : U32LengthPrefixedBytes
@@ -54,7 +54,7 @@ def writeGobj (payload : GobjPayload) : Std.Logical.ByteArray :=
   writeExact gobjMagic ++
   writeLittleEndian (count := 2) payload.formatVersion.toBits ++
   writeLittleEndian (count := 2) (0 : BitVec 16) ++
-  writeExact payload.scope ++
+  writeStableScopeId payload.scope ++
   writeU32LengthPrefixedBytes payload.sections ++
   writeU32LengthPrefixedBytes payload.symbols ++
   writeU32LengthPrefixedBytes payload.relocations ++
@@ -73,7 +73,7 @@ def readGobj (input : Std.Logical.ByteArray) : ParseResult GobjPayload :=
           match takeLittleEndian 2 afterVersion with
           | .done reserved afterReserved =>
             if _reservedOk : reserved = 0 then
-              match takeExactSized 16 afterReserved with
+              match readStableScopeId afterReserved with
               | .done scope afterScope =>
                 match readU32LengthPrefixedBytes afterScope with
                 | .done sections afterSections =>
@@ -103,7 +103,7 @@ def readGobj (input : Std.Logical.ByteArray) : ParseResult GobjPayload :=
                   | .invalid error => .invalid error
                 | .needMore hint => .needMore hint
                 | .invalid error => .invalid error
-              | .needMore hint => .needMore hint
+              | .needMore hint => requireAfter 20 (.needMore hint)
               | .invalid error => .invalid error
             else
               .invalid (.malformed "nonzero .gobj reserved field")
@@ -120,7 +120,8 @@ def readGobj (input : Std.Logical.ByteArray) : ParseResult GobjPayload :=
 /-- `length_writeGobj` gives the exact envelope and framed-body byte width. -/
 @[simp] theorem length_writeGobj (payload : GobjPayload) :
     (writeGobj payload).length =
-      44 + payload.sections.bytes.length + payload.symbols.bytes.length +
+      28 + (writeStableScopeId payload.scope).length +
+        payload.sections.bytes.length + payload.symbols.bytes.length +
         payload.relocations.bytes.length + payload.imports.bytes.length +
         payload.sourceMap.bytes.length := by
   simp [writeGobj]
@@ -139,7 +140,7 @@ every following suffix. -/
   simp only [readGobjFormatVersion_toBits]
   rw [takeLittleEndian_writeLittleEndian_append]
   simp only [dite_true]
-  rw [takeExactSized_writeExact_append]
+  rw [readStableScopeId_write_append]
   simp only
   rw [readU32LengthPrefixedBytes_write_append]
   simp only
