@@ -45,8 +45,6 @@ The type is `Uid`, not `Id`, because Lean's `Id` is the identity monad and
 `Id.run do` is ubiquitous. A `Grass.Core.Id` would make bare `Id` ambiguous in
 every module that opens `Grass.Core`.
 
-**Custody note.** `Grass.Core` is not owned by the memory agent. This module is
-temporary custody under `docs/MEMORY_IMPLEMENTATION_PLAN.md` §2.
 -/
 
 namespace Grass.Core
