@@ -252,6 +252,15 @@ pub fn drain_outbox(
                 continue;
             }
         }
+        if let Err(e) = verify_schema_activation_advances(&state, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
         if let Err(e) = verify_author_active(&state, agent, &data) {
             let reason = e.to_string();
             reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
@@ -962,6 +971,39 @@ fn verify_predecessor_not_contested(
 /// `base_code_commit`/`code_commit` are lower-stakes (correctable by a
 /// follow-up `scope.set`, or merely evidence rather than a binding field
 /// respectively) but the same silent-typo failure mode applies to both.
+/// AGENT_BUS_SCHEMA.md section 4: a `schema.activated`'s "`version` is
+/// greater than all previously activated versions."
+///
+/// `apply` cannot ask this. `schema.activated` references no predecessor at
+/// all (`SchemaActivated::referenced_ids` is empty), so two activations from
+/// different coordinators get no edge between them and `apply::
+/// topological_order` is free to replay a higher version first -- which made
+/// the lower one fatal on hosts that happened to fetch in that order, and
+/// made two coordinators activating the *same* version fatal in both. See
+/// `apply::apply_schema_activated`, which now takes the maximum, for the
+/// full argument.
+///
+/// Here `state` is the publishing host's own fully-reduced view, so the
+/// question has one answer. A coordinator that genuinely cannot see a
+/// concurrent activation yet is not stopped, and should not be: it has
+/// committed no error, and the two activations reconcile to the higher
+/// version on every host either way.
+fn verify_schema_activation_advances(
+    state: &crate::state::BusState,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    let crate::events::EventData::SchemaActivated(d) = data else {
+        return Ok(());
+    };
+    if d.version <= state.activated_schema_version {
+        return Err(invalid(format!(
+            "schema version {} is not greater than the currently activated {}",
+            d.version, state.activated_schema_version
+        )));
+    }
+    Ok(())
+}
+
 /// AGENT_BUS_SCHEMA.md section 8: a `review.reassigned` must inherit every
 /// finding still open on the chain, exactly once.
 ///
