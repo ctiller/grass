@@ -62,10 +62,14 @@ disambiguation relation. Parser implementation order may not choose meaning.
 A finite byte buffer has three semantic outcomes:
 
 ```lean
+structure ParseDiagnostic where
+  errorClass : ParseErrorClass
+  details : DiagnosticData
+
 inductive ParseResult (alpha : Type)
   | done (value : alpha) (rest : ByteArray)
   | needMore (minimumAdditional : Option Nat)
-  | invalid (error : ParseError)
+  | invalid (diagnostic : ParseDiagnostic)
 ```
 
 `needMore` means some extension can produce a derivation and the current input
@@ -80,28 +84,91 @@ Formats name their consumption rule. A whole-input language requires empty
 consumes one nonempty prefix. Nullable repetition and unguarded recursion are
 rejected because they can manufacture silent divergence.
 
+### 3.1 Lawful selection and finite-prefix classification
+
+`SelectedDerivation`, `RepairableIncompletePrefix`, and
+`IrrecoverablyInvalidPrefix` are specification relations. They are not three
+arbitrary predicates that an executable parser may define to describe its own
+answers. Otherwise a parser which rejects every input could select no
+derivations, call every input invalid, and satisfy a vacuous realization
+contract.
+
+A format therefore packages a reviewed selection/consumption policy and a
+law-bearing finite-prefix semantics. The concrete representation may differ,
+but it must expose the following facts:
+
+```lean
+structure FormatSemantics (format : Format alpha) where
+  selected : ByteArray -> alpha -> ByteArray -> Prop
+  repairable : ByteArray -> Option Nat -> Prop
+  irrecoverable : ByteArray -> ParseErrorClass -> Prop
+
+  selected_iff : selected input value rest <->
+    Derives format input value rest /\
+    SelectionPolicySelects format input value rest
+  selected_unique :
+    selected input left leftRest -> selected input right rightRest ->
+    left = right /\ leftRest = rightRest
+  repairable_iff : repairable input hint <->
+    NoSelectedDerivation input /\
+    SomeExtensionHasSelectedDerivation input /\
+    HintIsExactWhenPresent input hint
+  irrecoverable_iff : irrecoverable input errorClass <->
+    NoExtensionHasSelectedDerivation input /\
+    ClassifiesInvalidPrefix input errorClass
+  classified : ExactlyOneOfSelectedRepairableOrIrrecoverable input
+  consumes : EverySelectedSuccessObeysConsumptionAndProgress
+```
+
+The policy supplies the semantic choice when the underlying grammar has
+multiple derivations. It may select PEG priority, a canonical representation,
+or another reviewed rule, but parser implementation order is not a policy.
+Changing the parser does not change which derivations the policy selects.
+
+`SomeExtensionHasSelectedDerivation` requires a genuine repairing extension;
+appending bytes which remain wholly in `rest` is not progress. When
+`minimumAdditional = some n`, `n` is the least positive extension length that
+can reach a selected success. A parser which cannot compute or promise that
+least value returns `none`; it may not publish a convenient lower bound under
+the name “minimum.”
+
+Failure classes and diagnostics are separate. The ordinary realization
+contract compares a stable `ParseErrorClass` such as `malformed`, `unsupported`,
+`arithmeticOverflow`, or `trailingInput`. An implementation may attach source
+locations, paths, excerpts, and free-form wording, but those diagnostics are
+projected away before semantic comparison. A product may deliberately select a
+richer observable error algebra; only then do those details become precious.
+
 ## 4. Required parser and writer theorems
 
 For a selected implementation parser:
 
 ```lean
-structure ParserRealizes (format : Format alpha)
+structure ParserRealizes (semantics : FormatSemantics format)
     (parse : ByteArray -> ParseResult alpha) where
   successSound : forall input value rest,
-    parse input = .done value rest -> Derives format input value rest
+    parse input = .done value rest -> semantics.selected input value rest
   successComplete : forall input value rest,
-    SelectedDerivation format input value rest ->
+    semantics.selected input value rest ->
     parse input = .done value rest
   needMoreExact : forall input hint,
-    parse input = .needMore hint <-> RepairableIncompletePrefix format input hint
-  invalidExact : forall input error,
-    parse input = .invalid error <-> IrrecoverablyInvalidPrefix format input error
-  consumes : EverySuccessObeysConsumptionAndProgress format parse
+    parse input = .needMore hint <-> semantics.repairable input hint
+  invalidClassExact : forall input errorClass,
+    (exists diagnostic,
+      parse input = .invalid diagnostic /\
+      diagnostic.errorClass = errorClass) <->
+    semantics.irrecoverable input errorClass
 ```
 
 This is stronger than “success implies valid.” It prevents a parser which
 rejects every input, accepts only an easy subset, consumes the wrong suffix, or
 misclassifies a split valid message as invalid.
+
+Those claims depend on the laws of `FormatSemantics`; merely proving the four
+equations above against parser-chosen predicates proves nothing. Acceptance
+includes compiled negative fixtures attempting a reject-all parser, a parser
+which accepts only one valid value, false `needMore`, and rejection of a prefix
+which a later chunk repairs.
 
 A writer is a separate realization because a language can admit several
 encodings for one value:

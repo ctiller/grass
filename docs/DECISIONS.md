@@ -827,6 +827,18 @@ to imitate compiler-selected storage or CFG structure.
     of every `Grass/Process/**` module. This resolves the three-way
     spike/foundation/module mismatch raised by `c-spike` while retaining the
     process layer's no-import-all invariant.
+135. Grammar selection and finite-prefix classification are independently
+    law-bearing specification data, never predicates reverse-engineered from a
+    parser's outputs. `FormatSemantics` connects selected results to `Derives`
+    plus a reviewed consumption/disambiguation policy, characterizes
+    repairability by the existence of a genuine successful extension,
+    characterizes irrecoverability by the absence of every such extension, and
+    proves the three outcomes exhaustive and disjoint. This is the authority
+    that makes parser completeness non-vacuous: a reject-all or convenient
+    valid-subset parser cannot choose an empty selected language and call that a
+    realization. Stable observable error classes participate in these laws;
+    diagnostic strings and locations remain non-precious unless a product
+    explicitly observes a richer error algebra.
 
 ## Explicitly rejected shortcuts
 
