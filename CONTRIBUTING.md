@@ -38,6 +38,23 @@ pwsh ./check-spike-sources.ps1
 pwsh ./check-doc-links.ps1
 ```
 
+The three `.ps1` checks support PowerShell 7 on every supported platform and
+Windows PowerShell 5.1 on Windows. If `pwsh` is unavailable, invoke them with
+the in-box Windows host instead:
+
+```powershell
+powershell.exe -NoProfile -File .\audit-trust.ps1
+powershell.exe -NoProfile -File .\check-spike-sources.ps1
+powershell.exe -NoProfile -File .\check-doc-links.ps1
+```
+
+Review nominations must put the exact command the selected reviewer will run in
+`required_checks`. Choose either the `pwsh` or `powershell.exe` spelling for
+that reviewer's host; do not list both unless both executions are required. A
+reviewer must execute and report that exact command. Running the other spelling
+does not satisfy an already nominated command, because the bus compares the
+recorded command text exactly.
+
 The Lake commands compile the Lean libraries, and the trust command audits
 project declarations and named public roots for rejected transitive axioms, then
 rejects unverified `implemented_by` and `extern` replacements in the verified
