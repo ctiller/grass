@@ -313,7 +313,13 @@ statement that can be refuted. `colliding_handle_not_permitted` is the half
 with content and `sentinels_permitted` is the half that keeps it from being too
 narrow, since a process legitimately has no console.
 
-Process exit still has no relation, and that remains the open obligation.
+Process exit needed no relation, and that was a misreading of the gap rather
+than a gap. `ExitProcess` does not return, so there is no result for a relation
+to range over: `ExitResponse` is empty and `exit_never_returns` says so. A
+predicate over it would have been satisfied by `fun _ => False` as readily as
+by anything true, which `exit_result_claims_vacuous` makes explicit. The two
+absences the reviewer grouped together were not the same kind -- one was a
+missing claim and the other was a claim with no subject.
 
 `StdHandleId.value` used to be pinned only by `value_injective`, which says the
 three identifiers are mutually distinct and nothing about which is which. A
@@ -499,6 +505,47 @@ structure ExitRequest where
   /-- `uExitCode`, the status the process terminates with. -/
   status : BitVec 32
 deriving DecidableEq, Repr, Inhabited
+
+/--
+What `ExitProcess` returns to the code that called it.
+
+Empty, and that is the whole content. `ExitProcess` does not return: it
+terminates the calling process, so no instruction after the call executes and
+there is no value for a caller to inspect.
+
+This is why `ExitProcess` has no permitted-result relation while `WriteFile`
+and `GetStdHandle` do. An earlier version of this module's header recorded that
+absence as an open obligation, alongside the same absence for `GetStdHandle`.
+The two were not the same gap. `GetStdHandle`'s was real and is now filled by
+`Permitted`; this one is not a missing relation but a relation with nothing to
+range over, and saying so is the correct closure rather than inventing a
+predicate over an empty domain.
+
+The exit status is not a counterexample. It is delivered to whoever *waits* on
+the process -- a parent, a shell -- and not to the caller, which no longer
+exists to receive it. `ExitRequest` carries it for that reason and there is no
+`ExitResponse` beside it.
+-/
+abbrev ExitResponse := PEmpty
+
+/--
+**`ExitProcess` never returns.**
+
+Stated as the emptiness of its response type, which is what makes it
+unwritable rather than merely undocumented: a caller cannot construct a
+response, so no theorem in this tree can accidentally reason about what
+follows the call. -/
+theorem exit_never_returns (r : ExitResponse) : False := nomatch r
+
+/--
+**Every claim about a post-exit result is vacuous.**
+
+The consequence worth having explicitly. Any predicate whatever holds of every
+`ExitResponse`, which is precisely why writing a permitted-result relation for
+this call would have been an empty gesture -- it would have been satisfied by
+`fun _ => False` as readily as by anything true. -/
+theorem exit_result_claims_vacuous (P : ExitResponse → Prop) :
+    ∀ r, P r := fun r => nomatch r
 
 /-- The exit status for a successful run, per `docs/HELLO_WORLD.md`: zero. -/
 def successStatus : BitVec 32 := 0

@@ -123,7 +123,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 143
+def owedBaseline : Nat := 144
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -532,6 +532,11 @@ def owed : List Name :=
     `Grass.ABI.Win64.SearchablePdata.toBytes,
     -- Win32 console API.
     `Grass.Platform.Win32.StdHandleId.value,
+    -- That `ExitProcess` does not return. Documented API behaviour and not
+    -- this profile's choice, and the reason process exit has no
+    -- permitted-result relation: the response type is empty, so there is
+    -- nothing for one to range over.
+    `Grass.Platform.Win32.ExitResponse,
     `Grass.Platform.Win32.GetStdHandleResult.invalidHandleValue,
     `Grass.Platform.Win32.GetStdHandleResult.returnValue,
     `Grass.Platform.Win32.Allowed, `Grass.Platform.Win32.successStatus,
