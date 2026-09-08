@@ -82,6 +82,39 @@ example (id : BlockId) (member : id ∈ good.blockIds) :
     ∃ block, good.findBlock? id = some block :=
   good.blockForId id member
 
+def entryNormalKey : EdgeKey := ⟨blockId "entry", exitTag "normal"⟩
+
+example : good.edgeKeys = [
+    entryNormalKey,
+    ⟨blockId "entry", exitTag "failed"⟩,
+    ⟨blockId "return", exitTag "normal"⟩
+  ] := by decide
+
+example : (good.findEdge? entryNormalKey).isSome = true := by decide
+
+example (key : EdgeKey) :
+    (good.findEdge? key).isSome = true ↔ key ∈ good.edgeKeys :=
+  good.findEdge?_isSome_iff_mem_edgeKeys key
+
+example (located : LocatedEdge Terminal)
+    (hfind : good.findEdge? entryNormalKey = some located) :
+    located ∈ good.locatedEdges ∧ located.key = entryNormalKey :=
+  good.findEdge?_sound entryNormalKey located hfind
+
+example (located : LocatedEdge Terminal)
+    (hfind : good.findEdge? entryNormalKey = some located) :
+    ∃ block ∈ good.blocks,
+      block.id = entryNormalKey.source ∧
+      located.edge ∈ block.outgoing ∧
+      located.edge.exit = entryNormalKey.exit :=
+  good.findEdge?_structural entryNormalKey located hfind
+
+example : ∃ located, good.findEdge? entryNormalKey = some located :=
+  good.edgeForKey entryNormalKey (by decide)
+
+example : (good.findEdge? ⟨blockId "missing", exitTag "normal"⟩).isNone = true :=
+  by decide
+
 example : good.directTargets = [blockId "return"] := by decide
 
 example : good.predecessors (blockId "return") = [blockId "entry"] := by decide

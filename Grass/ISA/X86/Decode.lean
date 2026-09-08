@@ -573,10 +573,11 @@ about Grass's own pair. That is worth having and is not evidence about x86.
 More sharply, `opcodeTable` carries no evidence at all. `MatchesSpec` asks the
 record and the row to agree with each other, never with the ISA, so a row
 claiming the wrong immediate size leaves this theorem true and every decoded
-length wrong. The claim that these lengths are x86-64 rests on
-`Tools/x86-decode-differential.py`, which compares 56104 windows against NDISASM
-and was written after five separate table and `dispKindFor` mutations survived
-the whole build.
+length wrong. The claim that these lengths are x86-64 rested on an NDISASM
+differential over 56104 windows, written after five separate table and
+`dispKindFor` mutations survived the whole build. It was removed on 2026-09-08;
+that check is currently absent, and its replacement as a Lean test under
+`Tests/ISA/X86/**` is tracked against c-x86 (c-agent:78).
 
 There is also no converse: no `write (decode b) = b` for byte strings outside
 the image of `toBytes`, no injectivity of `decodeInsn`, and no completeness
@@ -731,7 +732,8 @@ to check by evaluation that the premises even hold.
 They do, and these corollaries say so once and for all. The point is not that
 the premises were in doubt; it is that a theorem nobody can instantiate proves
 nothing about the encoder, and that these corollaries go red under exactly the
-table mutations `Tools/x86-decode-differential.py` was written to catch.
+table mutations the removed NDISASM decoder differential was written to
+catch.
 -/
 
 /-- The row `findSpec` returns is the row for the opcode asked about.

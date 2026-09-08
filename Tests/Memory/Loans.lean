@@ -1111,7 +1111,7 @@ theorem an_identity_suffices (state : MemoryState) (context : ContextId)
     (hcover : grant.range.Contains range) (hholder : grant.holder = context)
     (hshares : state.SharesBytes grant.provenance.root provenance.root)
     (hgrant : state.CurrentEpoch grant.provenance)
-    (haccess : state.CurrentEpoch provenance)
+    (haccess : state.Live provenance)
     (hrights : grant.rights.Permits intent) :
     state.Granted context provenance range intent :=
   MemoryState.granted_of_grantAt hat hcover hholder hshares hgrant haccess hrights

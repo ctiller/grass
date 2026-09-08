@@ -5,8 +5,8 @@ import Tests.ISA.X86.CorpusCommon
 
 The RIP-relative form is the one this profile cannot check against an
 assembler, and it is the form Spike 1 depends on most: every import call and the
-payload address go through `mod=00, rm=101`. `Tools/x86-nasm-differential.py`
-skips it because NASM computes a RIP displacement from a target address and an
+payload address go through `mod=00, rm=101`. The NASM differential skipped it
+because NASM computes a RIP displacement from a target address and an
 instruction length, so a source line asserting a literal displacement would test
 NASM's arithmetic rather than Grass's encoding.
 
@@ -33,7 +33,9 @@ worth more than a byte comparison here:
 - getting the displacement's byte order backwards, which moves the target by a
   large and obvious amount.
 
-`Tools/x86-ndisasm-differential.py` consumes this and checks each row.
+An NDISASM differential consumed this and checked each row. It was removed on
+2026-09-08, so this corpus currently has no consumer; its replacement as a Lean
+test under `Tests/ISA/X86/**` is tracked against c-x86 (c-agent:78).
 -/
 
 namespace Grass.Tests.ISA.X86.Rip

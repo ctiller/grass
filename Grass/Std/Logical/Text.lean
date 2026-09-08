@@ -31,7 +31,7 @@ structure String where ofByteArray ::
   isValidUTF8 : ByteArray.IsValidUTF8 toByteArray
 ```
 
-`String.toUTF8` is the projection and `String.fromUTF8` is the constructor. So
+`String.toUTF8` is the projection and `String.fromUTF8` is the constructor. That block is a quote of core and nothing typechecks a quote, so the two facts this argument actually rests on -- that `toUTF8` is the projection and that `utf8ByteSize` is `toByteArray.size` -- are pinned as `rfl` in `Tests/Std/Text.lean`. A toolchain bump that reshapes `String` fails there rather than silently falsifying this paragraph. So
 encoding and decoding are not algorithms this module could have got wrong; they
 are taking a structure apart and putting it back together.
 
