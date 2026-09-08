@@ -55,6 +55,8 @@ deriving Repr, DecidableEq
 
 namespace BitfieldLayout
 
+universe u₁ u₂
+
 variable {profile : LayoutProfile}
 
 def fieldNames (layout : BitfieldLayout profile) : List Name :=
@@ -148,6 +150,28 @@ theorem fieldNamesNodup_of_wellFormed (layout : BitfieldLayout profile)
     (h : layout.WellFormed) : layout.fieldNames.Nodup :=
   (wellFormed_iff layout).mp h |>.1.1.1.1.1.1.2
 
+theorem fieldsNonempty_of_wellFormed (layout : BitfieldLayout profile)
+    (h : layout.WellFormed) : layout.fields ≠ [] :=
+  (wellFormed_iff layout).mp h |>.1.1.1.1.1.1.1
+
+theorem storageSizePositive_of_wellFormed (layout : BitfieldLayout profile)
+    (h : layout.WellFormed) : 0 < layout.storageSize :=
+  (wellFormed_iff layout).mp h |>.1.1.1.1.1.2
+
+theorem aggregateAlignmentPositive_of_wellFormed
+    (layout : BitfieldLayout profile) (h : layout.WellFormed) :
+    0 < layout.alignment :=
+  (wellFormed_iff layout).mp h |>.1.1.1.1.2
+
+theorem profileAcceptsAlignment_of_wellFormed
+    (layout : BitfieldLayout profile) (h : layout.WellFormed) :
+    profile.acceptsAlignment layout.alignment = true :=
+  (wellFormed_iff layout).mp h |>.1.1.1.2
+
+theorem storageSizeAligned_of_wellFormed (layout : BitfieldLayout profile)
+    (h : layout.WellFormed) : IsAligned layout.storageSize layout.alignment :=
+  (wellFormed_iff layout).mp h |>.1.1.2
+
 theorem fieldsWellFormed_of_wellFormed (layout : BitfieldLayout profile)
     (h : layout.WellFormed) : layout.FieldsWellFormed :=
   (wellFormed_iff layout).mp h |>.1.2
@@ -161,6 +185,64 @@ theorem fieldWithinStorage_of_wellFormed (layout : BitfieldLayout profile)
     (member : field ∈ layout.fields) :
     field.range.stop ≤ layout.storageSize * 8 :=
   (layout.fieldsWellFormed_of_wellFormed h field member).2
+
+theorem fieldWidthPositive_of_wellFormed (layout : BitfieldLayout profile)
+    (h : layout.WellFormed) (field : BitField)
+    (member : field ∈ layout.fields) : 0 < field.range.width :=
+  (layout.fieldsWellFormed_of_wellFormed h field member).1
+
+private theorem eq_of_mem_of_mem_of_map_nodup
+    {α : Type u₁} {β : Type u₂} (key : α → β)
+    {items : List α} {left right : α}
+    (unique : (items.map key).Nodup)
+    (leftMem : left ∈ items) (rightMem : right ∈ items)
+    (sameKey : key left = key right) : left = right := by
+  induction items with
+  | nil => simp at leftMem
+  | cons head tail ih =>
+      rw [List.map_cons, List.nodup_cons] at unique
+      rw [List.mem_cons] at leftMem rightMem
+      rcases leftMem with rfl | leftMem
+      · rcases rightMem with rfl | rightMem
+        · rfl
+        · exfalso
+          apply unique.1
+          rw [sameKey]
+          exact List.mem_map.mpr ⟨right, rightMem, rfl⟩
+      · rcases rightMem with rfl | rightMem
+        · exfalso
+          apply unique.1
+          rw [← sameKey]
+          exact List.mem_map.mpr ⟨left, leftMem, rfl⟩
+        · exact ih unique.2 leftMem rightMem
+
+/-- Two declared fields of a valid bitfield layout with the same name are the
+same authored logical bit range. -/
+theorem field_eq_of_mem_of_mem_of_name_eq
+    (layout : BitfieldLayout profile) (left right : BitField)
+    (closed : layout.WellFormed)
+    (leftMem : left ∈ layout.fields) (rightMem : right ∈ layout.fields)
+    (sameName : left.name = right.name) : left = right := by
+  exact eq_of_mem_of_mem_of_map_nodup BitField.name
+    (by simpa [fieldNames] using layout.fieldNamesNodup_of_wellFormed closed)
+    leftMem rightMem sameName
+
+/-- Under `BitfieldLayout.WellFormed`, nominal lookup returns the exact authored
+field already held by the caller. -/
+theorem lookup?_eq_some_of_mem
+    (layout : BitfieldLayout profile) (name : Name)
+    (field : BitField) (closed : layout.WellFormed)
+    (member : field ∈ layout.fields) (hasName : field.name = name) :
+    layout.lookup? name = some field := by
+  have nameMember : name ∈ layout.fieldNames := by
+    simp [fieldNames]
+    exact ⟨field, member, hasName⟩
+  obtain ⟨found, foundLookup⟩ := layout.fieldForName name nameMember
+  have foundFacts := layout.lookup?_sound name found foundLookup
+  have foundEq : found = field :=
+    layout.field_eq_of_mem_of_mem_of_name_eq found field closed
+      foundFacts.1 member (foundFacts.2.trans hasName.symm)
+  simpa [foundEq] using foundLookup
 
 end BitfieldLayout
 

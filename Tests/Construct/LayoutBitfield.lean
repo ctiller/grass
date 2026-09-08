@@ -20,9 +20,28 @@ example : ∃ selected, valid.lookup? ⟨"payload"⟩ = some selected :=
   valid.fieldForName ⟨"payload"⟩ (by native_decide)
 example : valid.FieldsWellFormed := valid.fieldsWellFormed_of_wellFormed (by native_decide)
 example : valid.FieldsDisjoint := valid.fieldsDisjoint_of_wellFormed (by native_decide)
+example : valid.fields ≠ [] := valid.fieldsNonempty_of_wellFormed (by native_decide)
+example : 0 < valid.storageSize := valid.storageSizePositive_of_wellFormed (by native_decide)
+example : 0 < valid.alignment :=
+  valid.aggregateAlignmentPositive_of_wellFormed (by native_decide)
+example : profile.acceptsAlignment valid.alignment = true :=
+  valid.profileAcceptsAlignment_of_wellFormed (by native_decide)
+example : Grass.Memory.IsAligned valid.storageSize valid.alignment :=
+  valid.storageSizeAligned_of_wellFormed (by native_decide)
 example : (field "payload" 8 24).range.stop ≤ valid.storageSize * 8 :=
   valid.fieldWithinStorage_of_wellFormed (by native_decide)
     (field "payload" 8 24) (by native_decide)
+example : 0 < (field "payload" 8 24).range.width :=
+  valid.fieldWidthPositive_of_wellFormed (by native_decide)
+    (field "payload" 8 24) (by native_decide)
+example : valid.lookup? (field "payload" 8 24).name = some (field "payload" 8 24) :=
+  valid.lookup?_eq_some_of_mem (field "payload" 8 24).name
+    (field "payload" 8 24) (by native_decide) (by native_decide) rfl
+example (left right : BitField)
+    (leftMem : left ∈ valid.fields) (rightMem : right ∈ valid.fields)
+    (sameName : left.name = right.name) : left = right :=
+  valid.field_eq_of_mem_of_mem_of_name_eq left right
+    (by native_decide) leftMem rightMem sameName
 example : (field "mode" 3 5).range.Disjoint (field "tag" 0 3).range :=
   BitRange.Disjoint.symm (by native_decide)
 
