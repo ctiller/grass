@@ -85,27 +85,34 @@ depend on but do not track.
 ## 2. S0 — Inherited state
 
 Three pieces of this library were written by agents who did not own it, because
-they needed it and no owner existed. All three are declared temporary custody in
-source and on the bus. Nothing here is a criticism: each is a correct decision
-under [MEMORY_IMPLEMENTATION_PLAN.md](MEMORY_IMPLEMENTATION_PLAN.md) §2, and each
-was marked rather than smuggled.
+they needed it and no owner existed. Nothing here is a criticism: each was a
+correct decision under
+[MEMORY_IMPLEMENTATION_PLAN.md](MEMORY_IMPLEMENTATION_PLAN.md) §2, and each was
+marked rather than smuggled.
 
-| Path | Custodian | Bus record | Disposition |
-|---|---|---|---|
-| `Grass/Std/Logical/Byte.lean` | `c-mem` | `c-mem:1`, `coord1:26` | accept as-is; §4.1 |
-| `Grass/Std/Logical/FiniteMap.lean` | `c-mem` | `c-mem:1`, `coord1:26` | accept, then extend; §4.3 |
-| `Grass/Process/Bag.lean` | `c-process` | `c-process:28`, `coord1:25` | accept and move; §4.2 |
+**All three handoffs have been accepted, so this section is history rather than
+a queue.**
 
-The third row is not visible from this branch. `Grass/Process/Bag.lean` exists
-only on `agent/c-process/process-layer`; there is no `Grass/Process/` directory
-here. It is tabulated because the handoff is agreed and inbound, not because a
-reader can inspect it.
+| Path | Former custodian | Offered | Accepted | Where it went |
+|---|---|---|---|---|
+| `Grass/Std/Logical/Byte.lean` | `c-mem` | `c-mem:47` | `c-stdlib:19` | stayed put; §4.1 |
+| `Grass/Std/Logical/FiniteMap.lean` | `c-mem` | `c-mem:47` | `c-stdlib:19` | stayed put; §4.3 |
+| `Grass/Process/Bag.lean` | `c-process` | `c-process:52` | `c-stdlib:15` | `Grass/Std/Logical/Bag.lean`; §4.2 |
 
-`Grass/Std/Logical/Vec.lean` is new and is this plan's, not custody.
+`Grass/Std/Logical/Vec.lean` is this plan's own and was never custody.
 
-The custody markers stay until each handoff is accepted. Replacing them is part
-of accepting, not a precondition for offering: an implementor releasing a file
-should not have to rewrite its docstring first.
+The custody markers were to stay until each handoff was accepted, because
+replacing them is part of accepting rather than a precondition for offering: an
+implementor releasing a file should not have to rewrite its docstring first
+(`coord1:32`).
+
+**That replacement was owed from 2026-09-07 and was not made until later**, so
+for a stretch `Byte.lean` and `FiniteMap.lean` carried a note saying that
+`Grass.Std.Logical` "is not owned by the memory agent" and that the module was
+"temporary custody", while being owned outright by the agent reading it. The lesson is not "remember
+to update docstrings": it is that an accepted handoff has *two* halves, and only
+one of them is a bus event, so nothing in the protocol notices the other going
+undone.
 
 ## 3. S1 — The sequence vocabulary freeze
 
@@ -727,6 +734,37 @@ that a reviewer should accept; and `Vec.get?_eq_some_iff` with
 module stated the `none` case both ways and the `some` case only in the direction
 that builds one, which is a real asymmetry rather than a stylistic one.
 
+**THE COSTING ABOVE MEASURED ONE OWNER'S BRANCHES AND STATED A CONCLUSION ABOUT
+EVERY OWNER'S.** It is right about `Grass/Memory/**` and wrong as a size for the
+migration, and the two are consistent because the memory layer is the one place
+`ByteSeq` is used abstractly. Its own explanation says so: "zero pattern matches
+on a byte sequence, zero concatenations, and only four operations used". A layer
+with that profile is exactly the layer where `abbrev ByteSeq := Vec Byte` costs
+one line — and exactly the wrong sample to generalize from.
+
+The x86 and Win64 layers build byte sequences *concretely*, and there `ByteSeq`
+is not a type they pass through but a `List` they construct and destructure:
+
+- **List literals as `ByteSeq` values.** `Grass/ISA/X86/Bytes.lean` writes
+  `le32`, `le64` and `le16` as bracketed literals of extracted bit slices, and
+  `rexBytes`, `escapeBytes`, `modrmBytes` and `sibBytes` as `[b]` or `[]`;
+  `Grass/ABI/Win64/UnwindBytes.lean` writes `padding` as `[0, 0]` or `[]`. Under
+  `Vec` none of these elaborate, because `Vec` has no literal syntax. **That is
+  §3.5, which this section is therefore coupled to and did not know it was.** The
+  repair is `Vec.fromList [...]` at every such site, or the scoped notation §3.5
+  measures — which is a decision, not a substitution.
+- **Cons patterns as `ByteSeq` consumers.** `Grass/ISA/X86/Decode.lean` reads
+  with `| b :: rest =>` and, in `takeLe64`, an eight-deep
+  `| a :: b :: c :: d :: e :: f :: g :: h :: rest =>`. `Vec` is a structure, so
+  no cons pattern applies to it at all. These become `Vec.pop?` chains or
+  `Vec.recOnCons`, and the eight-deep one has no direct spelling.
+
+Neither is hard. Both are edits in `c-x86`'s exclusive scope, of a shape the
+memory-layer measurement never saw, and they mean the migration is a coordinated
+change across at least two owners rather than "a single sitting". Reproduce with
+`git grep -n ByteSeq -- Grass/ISA Grass/ABI` and read the bodies, not the
+signatures: the signatures are what made this look uniform.
+
 **One trap to hand over with it.** `Vec`'s `GetElem?` is definitionally
 `v.toList[i]?`, so `List` lemmas *unify* against a `Vec` and then leave goals
 mixing `Vec.length v` with `v.toList.length`, which `omega` cannot bridge. The
@@ -737,21 +775,43 @@ into mechanical substitution. Note also that this repository has no mathlib, so
 
 ### 4.1 `Byte.lean`
 
-Accept unchanged. `abbrev Byte := BitVec 8` is exactly what §1 specifies.
-Accepting replaces the custody note and folds the `ByteArray` declaration back
-next to `Byte`, where §1 groups them; it currently sits in `Vec.lean` only
-because this agent does not edit a file still under another's custody.
+Accepted unchanged, on 2026-09-07. `abbrev Byte := BitVec 8` is exactly what §1
+specifies, and the custody note has been replaced with what actually happened.
 
-`ByteSeq` does not disappear at acceptance. It is the type the memory layer's
-event and state fields use today, and retiring it means editing
-`Grass/Memory/**`, which is `c-mem`'s exclusive scope. The two names coexist
-until that migration is agreed with `c-mem`; `Vec.lean` records why.
+**The other half of what this section promised did not happen, and cannot as
+stated.** It said accepting "folds the `ByteArray` declaration back next to
+`Byte`, where §1 groups them", and that the name "currently sits in `Vec.lean`
+only because this agent does not edit a file still under another's custody".
+Custody ended and the fold did not follow, because custody was never what
+prevented it. `Vec.lean` imports `Byte.lean`, so declaring `ByteArray` beside
+`Byte` requires `Byte.lean` to import `Vec` — a cycle.
+
+Breaking the cycle is possible and is defensible on its own terms: `Vec α` is
+generic and needs nothing from `Byte` except to state that one abbreviation, so
+`Vec.lean` could drop the import. The cost lands on every module that reaches
+`Byte` only through `Vec`, each needing its own import line, and those modules
+are not all this owner's — `g-build:83` authorized the one in
+`Grass/Build/Cache/Key.lean` when this was last attempted, which is evidence of
+the shape of the change rather than of its size.
+
+It is therefore a cross-owner change that no consumer has asked for, which puts
+it in §1's band 3. It stays open, with the reason now recorded as the import
+graph rather than as a custody boundary that no longer exists.
+
+`ByteSeq` also does not disappear at acceptance, and §4.0 above costs that
+migration and corrects its own first estimate. The two names coexist until it is
+arranged with the owners §4.0 names; `Byte.lean` and `Vec.lean` record why.
 
 ### 4.2 `Bag.lean`
 
-Accept and move to `Grass/Std/Logical/Bag.lean`. `c-process:28` designed the
-handover as a rename and a re-export, and the module carries no process
-vocabulary, so this should be exactly that.
+Accepted and moved to `Grass/Std/Logical/Bag.lean` (`c-process:52`,
+`c-stdlib:15`). `c-process:28` designed the handover as a rename and a
+re-export, the module carries no process vocabulary, and that is what it was.
+
+One thing the move did not do: `Grass/Process/Bag.lean` still exists on `main`
+as a near-duplicate of the moved module. Removing it is an edit to
+`c-process`'s exclusive scope, offered as a measured probe in `c-stdlib:55` and
+taken in `c-process:120`.
 
 `c-process:28` flags the representation as one a library owner might revisit:
 `Bag α := Quotient (List.isSetoid α)`, hand-rolled rather than mathlib's
@@ -766,7 +826,11 @@ hand-rolled version is the only option, not the worse of two.
 
 ### 4.3 `FiniteMap.lean`
 
-Accept, then close the two gaps its author deliberately left:
+Accepted on 2026-09-07, and the custody note has been replaced. The note had
+predicted the transfer would happen "by rename and re-export"; no rename was
+needed, because the module was already sited where its owner wanted it.
+
+Two gaps its author deliberately left are still open:
 
 - **Disjoint union with split and join laws.** `c-mem`'s own M0 requirements name
   these, and the module comment records their absence as waiting for M3. This is
