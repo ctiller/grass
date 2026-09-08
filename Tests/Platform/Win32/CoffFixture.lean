@@ -45,6 +45,12 @@ namespace Grass.Tests.Platform.Win32.Coff
 open Grass.Platform.Win32.Coff
 open Grass.Std.Logical (ByteSeq)
 
+-- The whole-object theorems at the end evaluate a three-hundred-byte file by
+-- `decide`, which walks the list. The default depth is not enough and the
+-- alternative -- checking only fragments -- would defeat the point of
+-- instantiating the layout theorems on a real file.
+set_option maxRecDepth 8000
+
 /-! ## The file header -/
 
 /-- The header of the measured object: five sections, no optional header. -/
@@ -438,6 +444,99 @@ theorem section_characteristics_measured :
     ∧ xdataCharacteristics = 0x40400040
     ∧ pdataCharacteristics ≠ xdataCharacteristics := by
   refine ⟨rfl, rfl, ?_⟩
+  decide
+
+/-! ## A whole object, assembled
+
+The layout theorems in `CoffLayout.lean` are quantified over any `Object`. This
+builds one -- three sections, two symbols, one long name -- and instantiates
+them, so that what they claim is visible as concrete numbers rather than only as
+a statement about all files.
+
+The object is the two-function shape measured throughout: `.text` holding
+`alpha` and `beta`, `.pdata` with their two entries, `.xdata` with their two
+unwind blocks. It is not byte-identical to what `ml64` produced and does not try
+to be -- that object also carries `.data`, `.debug$S`, `@comp.id` and `@feat.00`,
+and interleaves each section's relocations with its data. What is checked is
+that every pointer in this file addresses what it claims to.
+-/
+
+/-- `.text`: alpha's five bytes then beta's seven. -/
+def textSection : Section where
+  name := ⟨[0x2e, 0x74, 0x65, 0x78, 0x74], by decide⟩
+  data := [0x55, 0x33, 0xc0, 0x5d, 0xc3,
+           0x55, 0x53, 0x33, 0xc0, 0x5b, 0x5d, 0xc3]
+  relocations := []
+  characteristics := 0x60500020
+
+/-- The three sections in file order. -/
+def demoSections : List Section :=
+  [ textSection
+  , pdataSection pdataName [alphaEntry, betaEntry]
+  , xdataSection ⟨[0x2e, 0x78, 0x64, 0x61, 0x74, 0x61], by decide⟩
+      [alphaUnwind, betaUnwind] [] ]
+
+/-- Two symbols, one of which needs the string table. -/
+def demoSymbols : List Symbol :=
+  [ { name := .short ⟨[0x61, 0x6c, 0x70, 0x68, 0x61], by decide⟩
+      value := 0, sectionNumber := .section_ 1, type := 0x0020
+      storageClass := 2, numberOfAuxSymbols := 0 }
+  , { name := .long 4
+      value := 5, sectionNumber := .section_ 1, type := 0x0020
+      storageClass := 2, numberOfAuxSymbols := 0 } ]
+
+/-- The whole object. -/
+def demoObject : Object where
+  machine := .amd64
+  sections := demoSections
+  symbols := demoSymbols
+  strings := [[0x62, 0x65, 0x74, 0x61, 0x5f, 0x6c, 0x6f, 0x6e, 0x67]]
+
+/--
+**The file's size is exactly its parts.**
+
+Twenty bytes of header, one hundred and twenty of section table, fifty-two of
+data, sixty of relocations, thirty-six of symbols and fourteen of string
+table. No padding and no slack, which is what makes every offset below mean
+what it says. -/
+theorem demoObject_length : demoObject.toBytes.length = 302 := by decide
+
+/-- **The section table starts at byte twenty and holds three headers.** -/
+theorem demoObject_sectionTable :
+    demoObject.fileHeader.sectionTableOffset = 20
+    ∧ demoObject.fileHeader.numberOfSections.toNat = 3 := by decide
+
+/--
+**Each section's data is at the offset its own header gives.**
+
+`header_points_at_data` instantiated three times. These are the numbers a
+reader would follow: `.text` at 140, `.pdata` at 152, `.xdata` at 176. -/
+theorem demoObject_data_offsets :
+    ((demoObject.toBytes.drop 140).take 12) = textSection.data
+    ∧ ((demoObject.toBytes.drop 152).take 24)
+        = (pdataSection pdataName [alphaEntry, betaEntry]).data
+    ∧ ((demoObject.toBytes.drop 176).take 16)
+        = xdataBytes [alphaUnwind, betaUnwind] := by
+  decide
+
+/--
+**The symbol table is where the file header points, and holds two records.** -/
+theorem demoObject_symbolTable :
+    demoObject.fileHeader.pointerToSymbolTable.toNat = 252
+    ∧ demoObject.fileHeader.numberOfSymbols.toNat = 2
+    ∧ ((demoObject.toBytes.drop 252).take 36)
+        = (demoSymbols.map Symbol.toBytes).flatten := by
+  decide
+
+/--
+**The long symbol name resolves to a real string.**
+
+The second symbol carries offset four, and offset four in this object's string
+table is `beta_long`. That is the whole promise of a `SymbolName.long`, checked
+on a concrete file rather than as a quantified statement. -/
+theorem demoObject_long_name_resolves :
+    ((stringTableBytes demoObject.strings).drop 4).take 9
+      = [0x62, 0x65, 0x74, 0x61, 0x5f, 0x6c, 0x6f, 0x6e, 0x67] := by
   decide
 
 end Grass.Tests.Platform.Win32.Coff
