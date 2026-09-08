@@ -79,6 +79,11 @@ example (evidence : IndirectTargetEvidence policy.graph.blockIds)
     (block : BlockId) (hblock : block ∈ evidence.targets) :
     block ∈ policy.graph.blockIds :=
   TargetPolicy.targetAllowed_of_indirectEvidence? hfind block hblock
+example (evidence : IndirectTargetEvidence policy.graph.blockIds)
+    (hfind : policy.indirectEvidence? indirectSite = some evidence)
+    (block : BlockId) (hblock : block ∈ evidence.targets) :
+    ∃ targetBlock, policy.graph.findBlock? block = some targetBlock :=
+  TargetPolicy.targetBlock_of_indirectEvidence? hfind block hblock
 example : policy.resolves (.indirect indirectSite) = true ↔
     (policy.indirectEvidence? indirectSite).isSome = true :=
   policy.resolves_indirect_iff indirectSite
@@ -180,6 +185,16 @@ example (imported : ImportedProgram Nat String Nat Instruction)
     (hreported : ControlTarget.direct target ∈ instruction.controlTargets) :
     ∃ targetBlock, imported.policy.graph.findBlock? target = some targetBlock :=
   imported.directTargetBlock instruction hinstruction target hreported
+example (imported : ImportedProgram Nat String Nat Instruction)
+    (instruction : ImportedInstruction Nat Instruction)
+    (hinstruction : instruction ∈ imported.instructions)
+    (hreported : ControlTarget.indirect indirectSite ∈
+      instruction.controlTargets) :
+    ∃ evidence, imported.policy.indirectEvidence? indirectSite = some evidence ∧
+      ∀ block ∈ evidence.targets,
+        ∃ targetBlock,
+          imported.policy.graph.findBlock? block = some targetBlock :=
+  imported.indirectTargetBlocks instruction hinstruction indirectSite hreported
 
 example : (importBytes decoder policy [1, 1]).map (fun _ => ()) =
     .error (.unresolvedControlTarget 0 (.direct missing)) := by rfl

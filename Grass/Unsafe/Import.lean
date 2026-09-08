@@ -157,6 +157,18 @@ theorem targetAllowed_of_indirectEvidence?
     target ∈ policy.graph.blockIds :=
   evidence.targetsAllowed target htarget
 
+/-- Every target enumerated by selected indirect evidence identifies a
+concrete structural CFG block. -/
+theorem targetBlock_of_indirectEvidence?
+    {State : Type u} {Terminal : Type v}
+    {policy : TargetPolicy State Terminal} {site : Name}
+    {evidence : IndirectTargetEvidence policy.graph.blockIds}
+    (hfind : policy.indirectEvidence? site = some evidence)
+    (target : BlockId) (htarget : target ∈ evidence.targets) :
+    ∃ targetBlock, policy.graph.findBlock? target = some targetBlock :=
+  policy.graph.blockForId target
+    (targetAllowed_of_indirectEvidence? hfind target htarget)
+
 /-- Indirect resolution is exactly successful finite-evidence lookup. -/
 theorem resolves_indirect_iff
     {State : Type u} {Terminal : Type v}
@@ -438,6 +450,26 @@ theorem directTargetBlock
   TargetPolicy.block_of_direct_resolution
     (program.controlTargetEvidence instruction hinstruction (.direct block)
       htarget)
+
+/-- Every accepted indirectly reported site exposes its exact finite evidence,
+and every enumerated target identifies a concrete structural CFG block. -/
+theorem indirectTargetBlocks
+    {State : Type u} {Terminal : Type v} {Byte : Type w}
+    {Instruction : Type x}
+    (program : ImportedProgram State Terminal Byte Instruction)
+    (instruction : ImportedInstruction Byte Instruction)
+    (hinstruction : instruction ∈ program.instructions)
+    (site : Name) (htarget : ControlTarget.indirect site ∈
+      instruction.controlTargets) :
+    ∃ evidence, program.policy.indirectEvidence? site = some evidence ∧
+      ∀ target ∈ evidence.targets,
+        ∃ targetBlock,
+          program.policy.graph.findBlock? target = some targetBlock := by
+  obtain ⟨evidence, hfind⟩ := TargetPolicy.indirectEvidence_of_resolution
+    (program.controlTargetEvidence instruction hinstruction (.indirect site)
+      htarget)
+  exact ⟨evidence, hfind, fun target member =>
+    TargetPolicy.targetBlock_of_indirectEvidence? hfind target member⟩
 
 /-- Every accepted imported instruction owns a nonempty source-byte slice. -/
 theorem instructionBytesNonempty
