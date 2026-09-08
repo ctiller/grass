@@ -292,6 +292,47 @@ theorem FileHeader.sectionTableOffset_of_obj {h : FileHeader}
     (hz : h.sizeOfOptionalHeader = 0) : h.sectionTableOffset = 20 := by
   simp [sectionTableOffset, hz]
 
+/-! ## Sections -/
+
+/--
+A section as an author supplies it: what it is called, what is in it, and what
+must be fixed up. Deliberately carries no file offsets.
+-/
+structure Section where
+  /-- The eight-byte name. -/
+  name : SectionName
+  /-- The section's contents. -/
+  data : ByteSeq
+  /-- Fix-ups into `data`. -/
+  relocations : List Relocation
+  /-- Section flags. -/
+  characteristics : BitVec 32
+
+/-- Bytes the relocation directory occupies. -/
+def Section.relocationSize (s : Section) : Nat := 10 * s.relocations.length
+
+/-- The relocation directory, flattened. -/
+def Section.relocationBytes (s : Section) : ByteSeq :=
+  (s.relocations.map Relocation.toBytes).flatten
+
+/-- **Flattened relocations are ten bytes per entry.**
+
+Stated over a plain list rather than over a `Section`, because the induction has
+to generalise and a field of a fixed structure does not. -/
+theorem length_flatten_relocations (rs : List Relocation) :
+    ((rs.map Relocation.toBytes).flatten).length = 10 * rs.length := by
+  induction rs with
+  | nil => rfl
+  | cons r rest ih => simp [ih]; omega
+
+/-- **The directory is exactly `relocationSize` bytes.**
+
+No separators, which is what makes `pointerToRelocations` plus
+`numberOfRelocations` sufficient for a reader to find every entry. -/
+@[simp] theorem Section.length_relocationBytes (s : Section) :
+    s.relocationBytes.length = s.relocationSize :=
+  length_flatten_relocations s.relocations
+
 /-! ## A list lemma the layout proofs rest on -/
 
 /--

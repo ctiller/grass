@@ -1,6 +1,4 @@
-import Grass.Platform.Win32.Coff
-import Grass.Platform.Win32.CoffSymbol
-import Grass.Platform.Win32.CoffStrings
+import Grass.Platform.Win32.CoffAux
 
 /-!
 # COFF object layout
@@ -90,46 +88,8 @@ say where everything is.
 
 namespace Grass.Platform.Win32.Coff
 
+open Grass.ISA.X86 (le16 le32)
 open Grass.Std.Logical (ByteSeq)
-
-/--
-A section as an author supplies it: what it is called, what is in it, and what
-must be fixed up. Deliberately carries no file offsets.
--/
-structure Section where
-  /-- The eight-byte name. -/
-  name : SectionName
-  /-- The section's contents. -/
-  data : ByteSeq
-  /-- Fix-ups into `data`. -/
-  relocations : List Relocation
-  /-- Section flags. -/
-  characteristics : BitVec 32
-
-/-- Bytes the relocation directory occupies. -/
-def Section.relocationSize (s : Section) : Nat := 10 * s.relocations.length
-
-/-- The relocation directory, flattened. -/
-def Section.relocationBytes (s : Section) : ByteSeq :=
-  (s.relocations.map Relocation.toBytes).flatten
-
-/-- **Flattened relocations are ten bytes per entry.**
-
-Stated over a plain list rather than over a `Section`, because the induction has
-to generalise and a field of a fixed structure does not. -/
-theorem length_flatten_relocations (rs : List Relocation) :
-    ((rs.map Relocation.toBytes).flatten).length = 10 * rs.length := by
-  induction rs with
-  | nil => rfl
-  | cons r rest ih => simp [ih]; omega
-
-/-- **The directory is exactly `relocationSize` bytes.**
-
-No separators, which is what makes `pointerToRelocations` plus
-`numberOfRelocations` sufficient for a reader to find every entry. -/
-@[simp] theorem Section.length_relocationBytes (s : Section) :
-    s.relocationBytes.length = s.relocationSize :=
-  length_flatten_relocations s.relocations
 
 /-- An object file: a machine, its sections, and its two tables. -/
 structure Object where
@@ -138,8 +98,9 @@ structure Object where
   /-- The sections, in file order. -/
   sections : List Section
   /-- The symbol table, in index order. A relocation's `symbolIndex` is an
-  index into this list. -/
-  symbols : List Symbol
+  index into the *records* this expands to, which is not the same as an index
+  into this list whenever any entry carries an auxiliary record. -/
+  symbols : List SymbolEntry
   /-- The string table's names, in order, each without its terminator. A
   `SymbolName.long` offset addresses one of these. -/
   strings : List ByteSeq
@@ -214,7 +175,9 @@ def Object.fileHeader (o : Object) : FileHeader where
   numberOfSections := BitVec.ofNat 16 o.sections.length
   timeDateStamp := 0
   pointerToSymbolTable := BitVec.ofNat 32 o.symbolTableOffset
-  numberOfSymbols := BitVec.ofNat 32 o.symbols.length
+  -- Records, not symbols: an auxiliary record is a table entry and a
+  -- relocation's index counts it. See `SymbolEntry`.
+  numberOfSymbols := BitVec.ofNat 32 (symbolRecordCount o.symbols)
   sizeOfOptionalHeader := 0
   characteristics := 0
 
@@ -242,7 +205,7 @@ def Object.sectionHeaders (o : Object) : List SectionHeader :=
 /-- Everything after the section data: relocations, symbols, strings. -/
 def Object.tailBytes (o : Object) : ByteSeq :=
   (o.sections.map Section.relocationBytes).flatten
-    ++ (o.symbols.map Symbol.toBytes).flatten
+    ++ symbolTableBytes o.symbols
     ++ stringTableBytes o.strings
 
 /--
@@ -278,13 +241,6 @@ theorem length_flatten_data (ss : List Section) :
   | nil => rfl
   | cons s rest ih => simp [ih]
 
-/-- **Flattened symbol records are eighteen bytes each.** -/
-theorem length_flatten_symbols (ss : List Symbol) :
-    ((ss.map Symbol.toBytes).flatten).length = 18 * ss.length := by
-  induction ss with
-  | nil => rfl
-  | cons x rest ih => simp [ih]; omega
-
 /-- **Flattened relocation directories are `relocSize` bytes.** -/
 theorem length_flatten_relocBytes (ss : List Section) :
     ((ss.map Section.relocationBytes).flatten).length
@@ -302,12 +258,13 @@ alignment requirement is added to `toBytes` without being added here. -/
 theorem Object.length_toBytes (o : Object) :
     o.toBytes.length
       = o.headerSize + o.dataSize + o.relocSize
-        + 18 * o.symbols.length + (4 + stringEntriesSize o.strings) := by
+        + 18 * symbolRecordCount o.symbols
+        + (4 + stringEntriesSize o.strings) := by
   rw [toBytes, List.length_append, List.length_append, List.length_append,
       FileHeader.length_toBytes, length_flatten_sectionHeaders,
       length_flatten_data, Object.length_sectionHeaders, tailBytes,
       List.length_append, List.length_append, length_flatten_relocBytes,
-      length_flatten_symbols, length_stringTableBytes]
+      length_symbolTableBytes, length_stringTableBytes]
   simp [headerSize, dataSize, relocSize]
   omega
 
@@ -445,15 +402,16 @@ The layout half, the same shape as `data_at_layout_offset`: stated over the
 computed offset rather than over `FileHeader.pointerToSymbolTable`, and not
 sufficient on its own for the same reason. -/
 theorem Object.symbols_at_layout_offset (o : Object) :
-    ((o.toBytes.drop o.symbolTableOffset).take (18 * o.symbols.length))
-      = (o.symbols.map Symbol.toBytes).flatten := by
+    ((o.toBytes.drop o.symbolTableOffset).take
+        (18 * symbolRecordCount o.symbols))
+      = symbolTableBytes o.symbols := by
   have hpre := o.length_prefix
   have hdata : ((o.sections.map Section.data).flatten).length = o.dataSize :=
     length_flatten_data o.sections
   have hrel : ((o.sections.map Section.relocationBytes).flatten).length
       = o.relocSize := length_flatten_relocBytes o.sections
-  have hsym : ((o.symbols.map Symbol.toBytes).flatten).length
-      = 18 * o.symbols.length := length_flatten_symbols o.symbols
+  have hsym : (symbolTableBytes o.symbols).length
+      = 18 * symbolRecordCount o.symbols := length_symbolTableBytes o.symbols
   rw [toBytes, symbolTableOffset, ← hpre, ← hdata, ← hrel, Nat.add_assoc,
       drop_length_append, drop_length_append, tailBytes, List.append_assoc,
       List.drop_left, ← hsym, List.take_left]
@@ -473,12 +431,12 @@ bound is the wrap condition, and `numberOfSymbols` needs its own because it is a
 separate field with a separate width. -/
 theorem Object.symbol_table_at_header_pointer (o : Object)
     (hoff : o.symbolTableOffset < 2 ^ 32)
-    (hcount : o.symbols.length < 2 ^ 32) :
+    (hcount : symbolRecordCount o.symbols < 2 ^ 32) :
     ((o.toBytes.drop o.fileHeader.pointerToSymbolTable.toNat).take
         (18 * o.fileHeader.numberOfSymbols.toNat))
-      = (o.symbols.map Symbol.toBytes).flatten := by
+      = symbolTableBytes o.symbols := by
   show ((o.toBytes.drop (BitVec.ofNat 32 o.symbolTableOffset).toNat).take
-      (18 * (BitVec.ofNat 32 o.symbols.length).toNat)) = _
+      (18 * (BitVec.ofNat 32 (symbolRecordCount o.symbols)).toNat)) = _
   simp only [BitVec.toNat_ofNat, Nat.mod_eq_of_lt hoff, Nat.mod_eq_of_lt hcount]
   exact o.symbols_at_layout_offset
 
@@ -525,6 +483,47 @@ theorem Object.section_table_at_offset (o : Object) :
         from by simp [FileHeader.sectionTableOffset, Object.fileHeader],
       List.append_assoc, drop_length_append, List.drop_zero, ← hsh,
       List.take_left]
+
+/-! ## The auxiliary record agrees with the section table -/
+
+/--
+**And those are the numbers the object's own section table carries.**
+
+The statement that is not definitional. `Object.sectionHeaders` computes
+`sizeOfRawData` and `numberOfRelocations` independently of this module, and
+this says the auxiliary record agrees with the header the object actually
+emits -- so the format's duplication cannot come apart.
+
+Proved by the same decomposition `header_points_at_data` uses: name the section
+by splitting the list at it, and the header for it falls out of how
+`sectionHeaders` zips. -/
+theorem aux_agrees_with_object_header (o : Object) (pre : List Section)
+    (sec : Section) (post : List Section) (a : AuxSectionDefinition)
+    (h : o.sections = pre ++ sec :: post) :
+    ∃ hdr ∈ o.sectionHeaders,
+      (a.toBytes sec).take 4 = le32 hdr.sizeOfRawData
+      ∧ ((a.toBytes sec).drop 4).take 2 = le16 hdr.numberOfRelocations := by
+  refine ⟨{ name := sec.name
+            virtualSize := 0
+            virtualAddress := 0
+            sizeOfRawData := BitVec.ofNat 32 sec.data.length
+            pointerToRawData :=
+              BitVec.ofNat 32
+                (o.headerSize + (pre.map (fun x => x.data.length)).sum)
+            pointerToRelocations :=
+              BitVec.ofNat 32
+                (o.headerSize + o.dataSize
+                  + (pre.map Section.relocationSize).sum)
+            pointerToLinenumbers := 0
+            numberOfRelocations := BitVec.ofNat 16 sec.relocations.length
+            numberOfLinenumbers := 0
+            characteristics := sec.characteristics }, ?_, ?_, ?_⟩
+  · unfold Object.sectionHeaders
+    rw [h, dataOffsets_append, relocOffsets_append,
+        List.zip_append (by simp), List.zip_append (by simp)]
+    simp [dataOffsets, relocOffsets]
+  · exact (aux_restates_section a sec).1
+  · exact (aux_restates_section a sec).2
 
 end Grass.Platform.Win32.Coff
 

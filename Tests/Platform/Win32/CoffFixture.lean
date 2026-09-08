@@ -477,14 +477,24 @@ def demoSections : List Section :=
   , xdataSection ⟨[0x2e, 0x78, 0x64, 0x61, 0x74, 0x61], by decide⟩
       [alphaUnwind, betaUnwind] [] ]
 
-/-- Two symbols, one of which needs the string table. -/
-def demoSymbols : List Symbol :=
-  [ { name := .short ⟨[0x61, 0x6c, 0x70, 0x68, 0x61], by decide⟩
-      value := 0, sectionNumber := .section_ 1, type := 0x0020
-      storageClass := 2, numberOfAuxSymbols := 0 }
-  , { name := .long 4
-      value := 5, sectionNumber := .section_ 1, type := 0x0020
-      storageClass := 2, numberOfAuxSymbols := 0 } ]
+/--
+Three table entries from two symbols.
+
+The `.text` section symbol carries an auxiliary record, so it occupies two
+entries; the two function symbols occupy one each. That is what makes
+`numberOfSymbols` three rather than two, and it is the arithmetic a relocation's
+index depends on. -/
+def demoSymbols : List SymbolEntry :=
+  [ { symbol :=
+        { name := .short ⟨[0x2e, 0x74, 0x65, 0x78, 0x74], by decide⟩
+          value := 0, sectionNumber := .section_ 1, type := 0
+          storageClass := 3, numberOfAuxSymbols := 1 }
+      aux := some (AuxSectionDefinition.plain, textSection) }
+  , { symbol :=
+        { name := .long 4
+          value := 5, sectionNumber := .section_ 1, type := 0x0020
+          storageClass := 2, numberOfAuxSymbols := 0 }
+      aux := none } ]
 
 /-- The whole object. -/
 def demoObject : Object where
@@ -497,10 +507,10 @@ def demoObject : Object where
 **The file's size is exactly its parts.**
 
 Twenty bytes of header, one hundred and twenty of section table, fifty-two of
-data, sixty of relocations, thirty-six of symbols and fourteen of string
-table. No padding and no slack, which is what makes every offset below mean
+data, sixty of relocations, fifty-four of symbol table -- three records, not
+two -- and fourteen of string table. No padding and no slack, which is what makes every offset below mean
 what it says. -/
-theorem demoObject_length : demoObject.toBytes.length = 302 := by decide
+theorem demoObject_length : demoObject.toBytes.length = 320 := by decide
 
 /-- **The section table starts at byte twenty and holds three headers.** -/
 theorem demoObject_sectionTable :
@@ -521,12 +531,19 @@ theorem demoObject_data_offsets :
   decide
 
 /--
-**The symbol table is where the file header points, and holds two records.** -/
+**The symbol table is where the file header points, and reports three
+records for two symbols.**
+
+The count is the point. Two symbols are defined; one of them is a section
+symbol with an auxiliary record, so the table holds three eighteen-byte
+entries and the header must say three. A writer reporting two would leave every
+relocation index past the auxiliary record pointing one entry early -- at a
+section symbol rather than at the function it meant. -/
 theorem demoObject_symbolTable :
     demoObject.fileHeader.pointerToSymbolTable.toNat = 252
-    ∧ demoObject.fileHeader.numberOfSymbols.toNat = 2
-    ∧ ((demoObject.toBytes.drop 252).take 36)
-        = (demoSymbols.map Symbol.toBytes).flatten := by
+    ∧ demoObject.fileHeader.numberOfSymbols.toNat = 3
+    ∧ ((demoObject.toBytes.drop 252).take 54)
+        = symbolTableBytes demoSymbols := by
   decide
 
 /--
@@ -583,8 +600,14 @@ A symbol declaring an auxiliary record and emitting none leaves the table
 desynchronised from that point on, and that was the state of these modules
 before `CoffAux.lean`. -/
 theorem sectionSymbol_with_aux_is_two_entries :
-    (sectionSymbolBytes measuredPdataSymbol AuxSectionDefinition.plain
-        (pdataSection pdataName [alphaEntry, betaEntry])).length = 36 := by
+    ({ symbol := measuredPdataSymbol
+       aux := some (AuxSectionDefinition.plain,
+                    pdataSection pdataName [alphaEntry, betaEntry])
+     } : SymbolEntry).count = 2
+    ∧ ({ symbol := measuredPdataSymbol
+         aux := some (AuxSectionDefinition.plain,
+                      pdataSection pdataName [alphaEntry, betaEntry])
+       } : SymbolEntry).toBytes.length = 36 := by
   decide
 
 end Grass.Tests.Platform.Win32.Coff

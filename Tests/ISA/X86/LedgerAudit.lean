@@ -117,7 +117,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 131
+def owedBaseline : Nat := 133
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -139,7 +139,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 76
+def notBehaviourBaseline : Nat := 77
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -395,7 +395,8 @@ def notBehaviour : List Name :=
     -- format neither requires nor forbids; `sectionSymbolBytes` concatenates a
     -- symbol with its auxiliary record, and both halves are cited above.
     `Grass.Platform.Win32.Coff.AuxSectionDefinition.plain,
-    `Grass.Platform.Win32.Coff.sectionSymbolBytes ]
+    `Grass.Platform.Win32.Coff.symbolRecordCount,
+    `Grass.Platform.Win32.Coff.symbolTableBytes ]
 
 /--
 Declarations that genuinely model external behaviour and have no citation yet.
@@ -616,7 +617,16 @@ def owed : List Name :=
     -- them hold the section's size and relocation count. The format states
     -- both numbers twice, once in the section header and once here, and the
     -- field order and the three unused tail bytes are its decision.
-    `Grass.Platform.Win32.Coff.AuxSectionDefinition.toBytes ]
+    `Grass.Platform.Win32.Coff.AuxSectionDefinition.toBytes,
+    -- Two facts about how the symbol table is counted, both the format's.
+    -- `SymbolEntry.count` says an auxiliary record is a table entry in its own
+    -- right, which is why both measured objects report fifteen symbols when
+    -- they define ten. `SymbolEntry.toBytes` derives `numberOfAuxSymbols` from
+    -- what follows, which is the field's meaning: it tells a reader how many
+    -- entries to skip, and a relocation's symbol index counts every one of
+    -- them.
+    `Grass.Platform.Win32.Coff.SymbolEntry.count,
+    `Grass.Platform.Win32.Coff.SymbolEntry.toBytes ]
 
 /-- The declarations this gate holds the ledger responsible for. -/
 def modeledDeclarations : MetaM (Array Name) := do

@@ -1,4 +1,5 @@
-import Grass.Platform.Win32.CoffLayout
+import Grass.Platform.Win32.CoffSymbol
+import Grass.Platform.Win32.CoffStrings
 
 /-!
 # Auxiliary section-definition records
@@ -25,7 +26,9 @@ So `AuxSectionDefinition.toBytes` takes the `Section` and computes both, and
 the structure has no field for either -- there is nothing for a caller to fill
 in wrongly. `aux_agrees_with_object_header` states the consequence against the
 section table the object actually emits, which is the half that is not merely
-definitional.
+definitional. It lives in `CoffLayout.lean`, because `Object` does and this
+module deliberately sits below it -- a section's records do not need to know
+how a file is laid out.
 
 ## What the remaining fields are
 
@@ -111,59 +114,104 @@ theorem aux_restates_section (a : AuxSectionDefinition) (s : Section) :
   constructor <;>
     simp [AuxSectionDefinition.toBytes, Grass.ISA.X86.le32, Grass.ISA.X86.le16]
 
-/--
-**And those are the numbers the object's own section table carries.**
+/-! ## Symbol table entries
 
-The statement that is not definitional. `Object.sectionHeaders` computes
-`sizeOfRawData` and `numberOfRelocations` independently of this module, and
-this says the auxiliary record agrees with the header the object actually
-emits -- so the format's duplication cannot come apart.
+## `NumberOfSymbols` counts records, not symbols
 
-Proved by the same decomposition `header_points_at_data` uses: name the section
-by splitting the list at it, and the header for it falls out of how
-`sectionHeaders` zips. -/
-theorem aux_agrees_with_object_header (o : Object) (pre : List Section)
-    (sec : Section) (post : List Section) (a : AuxSectionDefinition)
-    (h : o.sections = pre ++ sec :: post) :
-    ∃ hdr ∈ o.sectionHeaders,
-      (a.toBytes sec).take 4 = le32 hdr.sizeOfRawData
-      ∧ ((a.toBytes sec).drop 4).take 2 = le16 hdr.numberOfRelocations := by
-  refine ⟨{ name := sec.name
-            virtualSize := 0
-            virtualAddress := 0
-            sizeOfRawData := BitVec.ofNat 32 sec.data.length
-            pointerToRawData :=
-              BitVec.ofNat 32
-                (o.headerSize + (pre.map (fun x => x.data.length)).sum)
-            pointerToRelocations :=
-              BitVec.ofNat 32
-                (o.headerSize + o.dataSize
-                  + (pre.map Section.relocationSize).sum)
-            pointerToLinenumbers := 0
-            numberOfRelocations := BitVec.ofNat 16 sec.relocations.length
-            numberOfLinenumbers := 0
-            characteristics := sec.characteristics }, ?_, ?_, ?_⟩
-  · unfold Object.sectionHeaders
-    rw [h, dataOffsets_append, relocOffsets_append,
-        List.zip_append (by simp), List.zip_append (by simp)]
-    simp [dataOffsets, relocOffsets]
-  · exact (aux_restates_section a sec).1
-  · exact (aux_restates_section a sec).2
+The file header's `numberOfSymbols` is the number of eighteen-byte *entries* in
+the table, auxiliary records included. Both measured objects report fifteen:
+ten symbols and five auxiliary records, not ten. A writer that reported the
+symbol count would be wrong by the number of sections it defined.
 
-/-- A section symbol and the auxiliary record that defines it. -/
-def sectionSymbolBytes (sym : Symbol) (a : AuxSectionDefinition)
-    (s : Section) : ByteSeq :=
-  sym.toBytes ++ a.toBytes s
+That is not a cosmetic miscount. A relocation names its symbol by index into
+this table, so every index past the first auxiliary record would shift -- and a
+relocation pointing one entry early resolves against the previous symbol, which
+in these objects is a *section* rather than a function. The object would link
+and the call would go to the wrong place.
+
+`SymbolEntry` is what makes both counts come from one structure.
+-/
 
 /--
-**A section symbol with its auxiliary record is thirty-six bytes.**
+A symbol together with the auxiliary record defining it, if it has one.
 
-Two entries, which is exactly what `numberOfAuxSymbols = 1` tells a reader to
-expect. A symbol declaring one auxiliary record and emitting none is the defect
-this module was added to remove. -/
-@[simp] theorem length_sectionSymbolBytes (sym : Symbol)
-    (a : AuxSectionDefinition) (s : Section) :
-    (sectionSymbolBytes sym a s).length = 36 := by
-  simp [sectionSymbolBytes]
+The pairing is the point. `Symbol.numberOfAuxSymbols` is a field a caller could
+set to one while supplying no record, or to zero while supplying one; here the
+field is *derived* from whether `aux` is present, so the two cannot disagree.
+-/
+structure SymbolEntry where
+  /-- The symbol itself. Its `numberOfAuxSymbols` field is ignored and
+  recomputed -- see `SymbolEntry.toBytes`. -/
+  symbol : Symbol
+  /-- The auxiliary section definition, and the section it describes. -/
+  aux : Option (AuxSectionDefinition × Section)
+
+/-- How many eighteen-byte table entries this contributes. -/
+def SymbolEntry.count (e : SymbolEntry) : Nat :=
+  match e.aux with
+  | none => 1
+  | some _ => 2
+
+/--
+The entry's bytes, with `numberOfAuxSymbols` recomputed from `aux`.
+
+A caller cannot declare a record it does not supply, because the declaration is
+not theirs to make. -/
+def SymbolEntry.toBytes (e : SymbolEntry) : ByteSeq :=
+  match e.aux with
+  | none => { e.symbol with numberOfAuxSymbols := 0 }.toBytes
+  | some (a, s) =>
+      { e.symbol with numberOfAuxSymbols := 1 }.toBytes ++ a.toBytes s
+
+/--
+**An entry is eighteen bytes per record it claims.**
+
+The statement tying `count` to the bytes, which is what makes
+`numberOfSymbols` computable from the entry list without walking it twice. -/
+@[simp] theorem SymbolEntry.length_toBytes (e : SymbolEntry) :
+    e.toBytes.length = 18 * e.count := by
+  unfold toBytes count
+  cases e.aux <;> simp
+
+/--
+**A symbol with an auxiliary record declares exactly one.**
+
+Half of the agreement; the other half is that a symbol without one declares
+none. Together they say the field always describes what follows it. -/
+theorem SymbolEntry.declares_its_aux (e : SymbolEntry)
+    (a : AuxSectionDefinition) (s : Section) (h : e.aux = some (a, s)) :
+    e.toBytes = { e.symbol with numberOfAuxSymbols := 1 }.toBytes
+        ++ a.toBytes s := by
+  unfold toBytes
+  rw [h]
+
+/-- **And a symbol without one declares none.** -/
+theorem SymbolEntry.declares_no_aux (e : SymbolEntry) (h : e.aux = none) :
+    e.toBytes = { e.symbol with numberOfAuxSymbols := 0 }.toBytes := by
+  unfold toBytes
+  rw [h]
+
+/-- Every entry's bytes, in table order. -/
+def symbolTableBytes (entries : List SymbolEntry) : ByteSeq :=
+  (entries.map SymbolEntry.toBytes).flatten
+
+/-- The number the file header must report: records, not symbols. -/
+def symbolRecordCount (entries : List SymbolEntry) : Nat :=
+  (entries.map SymbolEntry.count).sum
+
+/--
+**The table is eighteen bytes per reported record.**
+
+The theorem a reader depends on: it takes `numberOfSymbols`, multiplies by
+eighteen, and expects to land exactly on the string table. -/
+theorem length_symbolTableBytes (entries : List SymbolEntry) :
+    (symbolTableBytes entries).length = 18 * symbolRecordCount entries := by
+  induction entries with
+  | nil => rfl
+  | cons e rest ih =>
+      simp only [symbolTableBytes, symbolRecordCount, List.map_cons,
+                 List.flatten_cons, List.length_append, List.sum_cons,
+                 SymbolEntry.length_toBytes] at *
+      omega
 
 end Grass.Platform.Win32.Coff
