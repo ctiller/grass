@@ -230,9 +230,65 @@ ordinary blocking call.
 ### Grammar and parser combinators
 
 The standard library mirrors the constructors in [GRAMMAR.md](GRAMMAR.md) and
-derives `ParserRealizes`/`WriterRealizes` compositionally for byte, bit, text,
-sequence, choice, repetition, dependent length, refinement, isomorphism, and
-productive recursion formats. These combinators are implementations of one
+derives `ParserRealizes semantics`/`WriterRealizes semantics` compositionally
+for byte, bit, text, sequence, choice, repetition, dependent length,
+refinement, isomorphism, and productive recursion formats. The public semantic
+composition surface includes these named constructors and laws:
+
+```lean
+def FormatSemantics.seq
+    (left : FormatSemantics leftFormat)
+    (right : forall value, FormatSemantics (rightFormat value)) :
+    FormatSemantics (.seq leftFormat rightFormat)
+theorem seq_selected_iff ...
+theorem seq_finite_prefix_classification ...
+
+def FormatSemantics.choice
+    (formats : FiniteNonempty (Format alpha))
+    (alternatives : forall format in formats, FormatSemantics format)
+    (resolution : LawfulChoiceResolution formats alternatives) :
+    FormatSemantics (.choice formats)
+theorem choice_selected_iff_selected_alternative ...
+theorem choice_finite_prefix_classification ...
+
+def FormatSemantics.repeat
+    (count : Nat) (item : FormatSemantics itemFormat)
+    (progress : Nonnullable itemFormat) :
+    FormatSemantics (.repeat count itemFormat)
+theorem repeat_selected_iff_exact_count ...
+theorem repeat_finite_prefix_classification ...
+
+def FormatSemantics.iso
+    (inner : FormatSemantics innerFormat) (equiv : alpha <-> beta) :
+    FormatSemantics (.iso innerFormat equiv)
+theorem iso_selected_iff ...
+theorem iso_finite_prefix_classification ...
+
+def FormatSemantics.recursive
+    (guard : ProductiveRecursionWitness) (body : GuardedSemanticsBody guard) :
+    FormatSemantics (.recursive guard body.format)
+theorem recursive_unfold_selected_iff ...
+theorem recursive_unfold_finite_prefix_classification ...
+```
+
+`FormatSemantics.seq` composes the left semantics with the semantics selected
+by its dependent value and proves exact intermediate and final suffixes.
+`FormatSemantics.choice` requires either disjoint alternatives or an explicit
+lawful priority/disambiguation policy; its selection is total over the union's
+consumption-admissible derivations. `FormatSemantics.repeat` requires the exact
+count and the usual non-nullable progress premise. `FormatSemantics.iso`
+transports values without changing input, suffix, classification, or minimum
+additional length. `FormatSemantics.recursive` requires the supplied productive
+guard and proves both selected-result and finite-prefix equations by guarded
+unfolding. In every case the `*_finite_prefix_classification` theorem preserves
+the exhaustive, disjoint `done`/`needMore`/`invalid` partition; any `some n`
+hint is the exact least positive repairing length, while `none` remains
+permitted. The selected-result theorem preserves the consumption policy with
+its actual `input`, `value`, and `rest` arguments.
+
+The corresponding parser constructors consume only these semantic packages and
+existing `ParserRealizes semantics` proofs. They do not ask each caller to
+reprove the algebraic laws. These combinators are implementations of one
 precious `Format` denotation, not the denotation itself. Generated tables carry
 checked certificates; scalar, SIMD, hand-assembly, and process-pipelined parsers
 remain interchangeable realizations.

@@ -94,43 +94,75 @@ derivations, call every input invalid, and satisfy a vacuous realization
 contract.
 
 A format therefore packages a reviewed selection/consumption policy and a
-law-bearing finite-prefix semantics. The concrete representation may differ,
+law-bearing finite-prefix semantics. Selection is constrained independently of
+the parser: it may resolve ambiguity, but it may neither invent a derivation nor
+discard every admissible derivation. The concrete representation may differ,
 but it must expose the following facts:
 
 ```lean
+structure ConsumptionPolicy (format : Format alpha) where
+  rule : ConsumptionRule
+  admits : ByteArray -> alpha -> ByteArray -> Prop
+  admits_iff : forall input value rest,
+    admits input value rest <->
+      ConsumptionRuleAdmits rule input value rest
+
+structure SelectionPolicy (format : Format alpha) where
+  consumption : ConsumptionPolicy format
+  selects : ByteArray -> alpha -> ByteArray -> Prop
+  subset : forall input value rest,
+    selects input value rest ->
+      Derives format input value rest /\
+      consumption.admits input value rest
+  total : forall input,
+    (exists value rest,
+      Derives format input value rest /\
+      consumption.admits input value rest) ->
+    exists value rest, selects input value rest
+  unique : forall input left leftRest right rightRest,
+    selects input left leftRest -> selects input right rightRest ->
+    left = right /\ leftRest = rightRest
+
 structure FormatSemantics (format : Format alpha) where
-  selected : ByteArray -> alpha -> ByteArray -> Prop
-  repairable : ByteArray -> Option Nat -> Prop
+  selection : SelectionPolicy format
+  repairable : ByteArray -> Prop
   irrecoverable : ByteArray -> ParseErrorClass -> Prop
 
-  selected_iff : selected input value rest <->
-    Derives format input value rest /\
-    SelectionPolicySelects format input value rest
-  selected_unique :
-    selected input left leftRest -> selected input right rightRest ->
-    left = right /\ leftRest = rightRest
-  repairable_iff : repairable input hint <->
-    NoSelectedDerivation input /\
-    SomeExtensionHasSelectedDerivation input /\
-    HintIsExactWhenPresent input hint
+  repairable_iff : forall input, repairable input <->
+    NoSelectedDerivation selection input /\
+    SomeGenuineExtensionHasSelectedDerivation selection input
   irrecoverable_iff : irrecoverable input errorClass <->
-    NoExtensionHasSelectedDerivation input /\
+    NoExtensionHasSelectedDerivation selection input /\
     ClassifiesInvalidPrefix input errorClass
-  classified : ExactlyOneOfSelectedRepairableOrIrrecoverable input
-  consumes : EverySelectedSuccessObeysConsumptionAndProgress
+  irrecoverable_unique : forall input left right,
+    irrecoverable input left -> irrecoverable input right -> left = right
+  classified : forall input,
+    ExactlyOne
+      (ExistsSelectedDerivation selection input)
+      (repairable input)
+      (exists errorClass, irrecoverable input errorClass)
+  consumes : forall input value rest,
+    selection.selects input value rest ->
+    selection.consumption.admits input value rest
 ```
 
 The policy supplies the semantic choice when the underlying grammar has
 multiple derivations. It may select PEG priority, a canonical representation,
 or another reviewed rule, but parser implementation order is not a policy.
-Changing the parser does not change which derivations the policy selects.
+Changing the parser does not change which derivations the policy selects. The
+consumption policy is likewise tied by `admits_iff` to a named rule rather than
+an arbitrary filter. Consequently `subset` plus `total` cannot be satisfied by
+making either selection or consumption reject everything: whenever the named
+rule admits any real derivation, exactly one such derivation is selected.
 
-`SomeExtensionHasSelectedDerivation` requires a genuine repairing extension;
-appending bytes which remain wholly in `rest` is not progress. When
+`SomeGenuineExtensionHasSelectedDerivation` requires a nonempty repairing
+extension; appending bytes which remain wholly in `rest` is not progress. When
 `minimumAdditional = some n`, `n` is the least positive extension length that
 can reach a selected success. A parser which cannot compute or promise that
 least value returns `none`; it may not publish a convenient lower bound under
-the name “minimum.”
+the name “minimum.” The optional hint is deliberately not part of the
+classification relation: two implementations may return `none` and the same
+exact `some n` while realizing the same precious finite-prefix semantics.
 
 Failure classes and diagnostics are separate. The ordinary realization
 contract compares a stable `ParseErrorClass` such as `malformed`, `unsupported`,
@@ -147,12 +179,17 @@ For a selected implementation parser:
 structure ParserRealizes (semantics : FormatSemantics format)
     (parse : ByteArray -> ParseResult alpha) where
   successSound : forall input value rest,
-    parse input = .done value rest -> semantics.selected input value rest
+    parse input = .done value rest ->
+      semantics.selection.selects input value rest
   successComplete : forall input value rest,
-    semantics.selected input value rest ->
+    semantics.selection.selects input value rest ->
     parse input = .done value rest
-  needMoreExact : forall input hint,
-    parse input = .needMore hint <-> semantics.repairable input hint
+  needMoreExact : forall input,
+    (exists hint, parse input = .needMore hint) <->
+      semantics.repairable input
+  needMoreHintExact : forall input n,
+    parse input = .needMore (some n) ->
+    n = LeastPositiveRepairingExtensionLength semantics.selection input
   invalidClassExact : forall input errorClass,
     (exists diagnostic,
       parse input = .invalid diagnostic /\
@@ -174,13 +211,14 @@ A writer is a separate realization because a language can admit several
 encodings for one value:
 
 ```lean
-structure WriterRealizes (format : Format alpha)
+structure WriterRealizes (semantics : FormatSemantics format)
     (write : alpha -> ByteArray) where
-  sound : forall value, Derives format (write value) value ByteArray.empty
-  canonical : SelectedWriterPolicy format write
+  sound : forall value,
+    semantics.selection.selects (write value) value ByteArray.empty
+  canonical : SelectedWriterPolicy semantics write
 
-theorem parse_write (parser : ParserRealizes format parse)
-    (writer : WriterRealizes format write) (value : alpha) :
+theorem parse_write (parser : ParserRealizes semantics parse)
+    (writer : WriterRealizes semantics write) (value : alpha) :
     parse (write value) = .done value ByteArray.empty := ...
 ```
 
@@ -218,9 +256,10 @@ state, and source grammar versus name/type checking.
 
 ## 6. Proof economy and implementation freedom
 
-`Format.parserRequirement format` is the standard way for a higher-level
+`Format.parserRequirement semantics` is the standard way for a higher-level
 precious process to demand “a process which implements this parser.” It exports
-only the byte-input/result protocol and `ParserRealizes` theorem family. The
+only the byte-input/result protocol and `ParserRealizes semantics` theorem
+family. The
 enclosing root `SpecProcess` is proved parametrically over every satisfying
 witness; refinement later selects or constructs one and captures any internal
 lexer/parser graph behind that boundary.
@@ -246,7 +285,7 @@ sequences; maximum and overflowing lengths; invalid reserved values; ambiguous
 alternatives; nullable-recursion rejection; and mutations that accept one
 forbidden input or reject one required input. Fuzzing compares independent
 implementations and vendor/system behavior, but only forall proofs discharge
-`ParserRealizes`.
+`ParserRealizes semantics`.
 
 The grammar front is successful only if changing parser organization or tuning
 does not change the precious specification, while changing the accepted
