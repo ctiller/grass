@@ -155,6 +155,10 @@ alignments from selected object representations and ordinary struct placement.
 separation, while lookup theorems recover concrete placements from nominal field
 membership. Empty, packed, overlay, bitfield, and flexible-tail representations
 remain separate constructors rather than exceptions to the ordinary checker.
+`Grass.Construct.Layout.Nested` composes a checked inner field through an outer
+field whose selected representation exactly matches the inner aggregate's size
+and alignment. Its exported theorems translate local offsets into exact outer
+ranges while preserving containment, allocation bounds, alignment, and framing.
 
 Build layout and placement values under `Grass/Construct/`:
 
