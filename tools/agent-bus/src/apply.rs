@@ -1655,7 +1655,18 @@ fn apply_review_closing(
         .ok_or_else(|| invalid(format!("{}: unknown nomination {nomination}", env.id)))?;
     match label {
         "declined" => {
-            let reviewer = chain.nomination_reviewer.get(nomination).unwrap();
+            // `ok_or_else`, not `unwrap`. Every nomination link does have a
+            // reviewer entry, and with the map now append-only that holds
+            // more firmly than when this was written -- but a panic inside
+            // `reduce` is strictly worse than the `Err` it replaces: an
+            // `Err` is a message a caller reports, a panic takes the process
+            // with it, and every host reducing the same stream panics
+            // identically. The invariant this rested on has already been
+            // edited once this week.
+            let reviewer = chain
+                .nomination_reviewer
+                .get(nomination)
+                .ok_or_else(|| invalid(format!("{}: unknown nomination {nomination}", env.id)))?;
             if reviewer != &env.agent {
                 return Err(invalid(format!(
                     "{}: only the named reviewer may decline this nomination",
@@ -2069,7 +2080,13 @@ fn apply_review_merge_authorized(
         // not fleet-wide-fatal.
         return Ok(());
     }
-    let reviewer = chain.nomination_reviewer.get(&d.nomination).unwrap();
+    // `ok_or_else`, not `unwrap` -- see the identical note in
+    // `apply_review_closing`. A panic inside `reduce` is worse than an
+    // `Err`, and it panics identically on every host.
+    let reviewer = chain
+        .nomination_reviewer
+        .get(&d.nomination)
+        .ok_or_else(|| invalid(format!("{}: unknown nomination {}", env.id, d.nomination)))?;
     if reviewer != &env.agent {
         return Err(invalid(format!(
             "{}: only the accepting reviewer may authorize a merge",
