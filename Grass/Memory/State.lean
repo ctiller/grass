@@ -1,4 +1,5 @@
 import Grass.Memory.Addressing
+import Grass.Memory.Backing
 import Grass.Memory.ByteStore
 import Grass.Memory.Audit
 import Grass.Memory.Authority
@@ -165,12 +166,31 @@ structure AllocationRecord where
   /-- Whether it is live. A dead allocation authorizes nothing, whatever
   provenance is presented. -/
   live : Bool
-  /-- The allocation's bytes.
+  /-- The backing store this allocation is a view onto.
 
-  Initialization is read off this rather than tracked beside it: a separate list
-  of initialized offsets was a second source of truth that could disagree with
-  the values, and `RangeInitialized` now cannot drift from what was written. -/
-  bytes : ByteStore
+  `g-design:185`: bytes live once, in `MemoryState.backings`, and an allocation
+  record is a typed *view* of them. Two records naming one backing share bytes by
+  construction, so a write through either is visible through the other with nothing
+  propagating it -- `Grass/Memory/Backing.lean`'s `sharing_is_real` is that theorem.
+
+  The previous shape gave every record its own `ByteStore` and declared sharing
+  separately in an `aliases` list. `Tests/Op/StandardLoan.lean`'s
+  `the_alias_is_not_yet_a_byte_level_fact` is the proof that this was an
+  authority-level claim the byte semantics did not implement: it stores through one
+  allocation and reads the stale value through the one declared aliased to it.
+
+  Initialization is still read off the bytes rather than tracked beside them, for
+  the reason the old field gave: a separate list of initialized offsets is a second
+  source of truth that can disagree with the values. -/
+  backing : StorageId
+  /-- Where this view starts in its backing store.
+
+  A `Nat`, so a view never begins before its store. Allocation mints a view at
+  origin zero; a mapping transition is what produces a non-zero one, and
+  `ByteRange.translate` is the arithmetic. The signed offset the intermediate
+  design installed in its alias list is the difference of two origins, which is
+  why it does not need declaring. -/
+  origin : Nat
   /-- Where the allocation sits in its address space, if it sits anywhere.
 
   `Option`, and not because placement is optional bookkeeping. `docs/MEMORY_MODEL.md`
@@ -239,15 +259,21 @@ def AllocationRecord.metadata (record : AllocationRecord) : AllocationRecord.Met
 /--
 The memory state.
 
-`aliases` is symmetric by convention and `SharesBytes` closes it, so a profile
-declares each aliased pair once.
+Bytes live in `backings`, one store per `StorageId`, and an allocation record is a
+view onto one of them. Sharing is therefore backing equality rather than a declared
+list, which is what `SharesBytes` reads.
 -/
 structure MemoryState where
   private mk ::
   /-- The live and dead allocations. -/
   allocations : FiniteMap AllocId AllocationRecord
-  /-- Pairs of allocations whose bytes are the same storage. -/
-  aliases : List (AllocId × AllocId)
+  /-- The byte stores, one per backing identity.
+
+  Bytes live here and nowhere else. An `AllocationRecord` names one of these and an
+  origin into it, so two records naming the same backing are two views of one store
+  and sharing is arithmetic rather than declaration. This replaces `aliases`, which
+  asserted a sharing that `write` did not implement. -/
+  backings : FiniteMap StorageId ByteStore
   /-- The authority grants currently live. **Private**: see below.
 
 
@@ -262,7 +288,8 @@ structure MemoryState where
 namespace MemoryState
 
 /-- The state with nothing allocated. -/
-def empty : MemoryState := { allocations := .empty, aliases := [], grants := .empty }
+def empty : MemoryState :=
+  { allocations := .empty, backings := .empty, grants := .empty }
 
 /-! ## The grant map is sealed
 
@@ -361,154 +388,76 @@ def grantEntries (state : MemoryState) : List (GrantId × AuthorityGrant) :=
 def grantAt? (state : MemoryState) (id : GrantId) : Option AuthorityGrant :=
   state.grants.lookup id
 
-/-- One declared aliasing hop, in either direction. Aliasing is symmetric by
-convention and this is where the convention is discharged. -/
-def AliasHop (state : MemoryState) (a b : AllocId) : Prop :=
-  (a, b) ∈ state.aliases ∨ (b, a) ∈ state.aliases
-
-instance (state : MemoryState) (a b : AllocId) : Decidable (state.AliasHop a b) :=
-  inferInstanceAs (Decidable (_ ∨ _))
-
-/-- Every identity the alias list mentions, in either position.
-
-The vertices of the alias graph. `SharesAfter` quantifies its intermediate over this
-rather than over the allocation table, which is what makes the closure symmetric:
-review was asked for a symmetry theorem and found the definition did not admit one.
-
-`SharesAfter` used `state.allocations.domain`, so a one-hop path `a → b` required
-`b` to be *allocated* while the reversed path required `a` to be. Alias `(a, b)` with
-`a` allocated and `b` not, and `SharesBytes b a` held while `SharesBytes a b` did
-not — for a relation whose whole meaning is "these two name the same bytes".
-Unreachable through `step`, because `denialOf` refuses an unallocated root and
-`issue?` requires a live provenance, so both ends are allocated on every path an
-operation can take; but a relation that is asymmetric anywhere cannot have a symmetry
-theorem, and `conflicts_symm` wanted one.
-
-Quantifying over the graph's own vertices keeps the closure decidable — it is still a
-list — and makes it conservative in the safe direction: an alias naming an
-unallocated identity now propagates sharing rather than silently stopping, and more
-sharing means more freezing. -/
-def aliasIdentities (state : MemoryState) : List AllocId :=
-  state.aliases.flatMap (fun pair => [pair.1, pair.2])
-
-/-- `state.SharesAfter n a b` holds when `b` is reachable from `a` in at most `n`
-declared hops. The bounded form, so the closure below is decidable. -/
-def SharesAfter (state : MemoryState) : Nat → AllocId → AllocId → Prop
-  | 0, a, b => a = b
-  | n + 1, a, b =>
-      a = b ∨ ∃ mid ∈ state.aliasIdentities, state.AliasHop a mid ∧
-        state.SharesAfter n mid b
-
-instance decSharesAfter (state : MemoryState) : (n : Nat) → (a b : AllocId) →
-    Decidable (state.SharesAfter n a b)
-  | 0, _, _ => inferInstanceAs (Decidable (_ = _))
-  | n + 1, _, b =>
-      have : ∀ mid, Decidable (state.SharesAfter n mid b) := fun mid =>
-        decSharesAfter state n mid b
-      inferInstanceAs (Decidable (_ ∨ ∃ _ ∈ _, _))
+/-- The backing an allocation is a view onto, if it is allocated. -/
+def backingOf? (state : MemoryState) (id : AllocId) : Option StorageId :=
+  (state.allocations.lookup id).map (·.backing)
 
 /--
 `state.SharesBytes a b` holds when two allocations name the same storage.
 
-**Transitively.** `docs/MEMORY_MODEL.md` §7.5 makes mapping, pinning and sharing
-typed transitions, and those compose: a profile that declares a file aliased to a
-view, and that view aliased to a second view, has said all three name the same
-bytes. This was a single hop, so the two ends of such a chain were declared
-non-conflicting and a cross-context write to the far end committed with no
-violation — the same defect `SharesBytes` was introduced to fix, one hop further
-out. Local adversarial review built the chain.
+**Transitively, and without a closure.** The previous design declared sharing in an
+`aliases` list and walked its transitive closure with a fuel bound -- `SharesAfter`,
+`AliasHop`, `aliasIdentities`, a decidability instance over the bound, and a
+symmetry proof by induction over path length. All of it existed to answer a question
+that backing equality answers directly, because equality is already reflexive,
+symmetric and transitive. `g-design:185` is the ruling and the scaffolding is gone.
 
-The bound is the number of declared aliases, which is the longest simple path any
-chain can have, so `SharesAfter` at that bound is the full closure and stays
-decidable.
+The chain the old design got wrong -- a file aliased to a view, that view aliased to
+a second view, with the two ends declared non-conflicting -- cannot be expressed
+here: three views onto one backing share bytes pairwise because they name one
+`StorageId`, not because a closure reached that far.
+
+The `a = b` disjunct keeps reflexivity unconditional, including for identities that
+are not allocated. The old definition had that property at fuel zero and
+`sharesBytes_refl` states it; dropping it would make an unallocated identity fail to
+share bytes with itself, which is conservative in the *unsafe* direction -- less
+sharing means less freezing.
 -/
 def SharesBytes (state : MemoryState) (a b : AllocId) : Prop :=
-  state.SharesAfter state.aliases.length a b
+  a = b ∨ (state.backingOf? a = state.backingOf? b ∧ (state.backingOf? a).isSome = true)
 
 instance (state : MemoryState) (a b : AllocId) : Decidable (state.SharesBytes a b) :=
-  inferInstanceAs (Decidable (state.SharesAfter _ a b))
+  inferInstanceAs (Decidable (_ ∨ _ ∧ _))
 
-theorem sharesAfter_zero_of_eq {state : MemoryState} {n : Nat} {a b : AllocId}
-    (h : a = b) : state.SharesAfter n a b := by
-  cases n with
-  | zero => exact h
-  | succ m => exact .inl h
-
+/-- Every allocation shares bytes with itself, allocated or not. -/
 theorem sharesBytes_refl (state : MemoryState) (a : AllocId) : state.SharesBytes a a :=
-  sharesAfter_zero_of_eq rfl
-
-/-- Aliasing is symmetric, which `AliasHop` gets by construction. -/
-theorem aliasHop_symm {state : MemoryState} {a b : AllocId} (h : state.AliasHop a b) :
-    state.AliasHop b a := h.symm
-
-/-- A declared hop's far end is one of the alias graph's own vertices. -/
-theorem mem_aliasIdentities_of_hop {state : MemoryState} {a b : AllocId}
-    (h : state.AliasHop a b) : b ∈ state.aliasIdentities := by
-  unfold aliasIdentities
-  rcases h with h | h
-  · exact List.mem_flatMap.mpr ⟨(a, b), h, by simp⟩
-  · exact List.mem_flatMap.mpr ⟨(b, a), h, by simp⟩
-
-/-- A hop may be appended to a path, which is the step the recursion does not give:
-`SharesAfter` peels from the front and a reversal needs to add at the back. -/
-theorem sharesAfter_snoc {state : MemoryState} : ∀ {n : Nat} {a b c : AllocId},
-    state.SharesAfter n a b → state.AliasHop b c → state.SharesAfter (n + 1) a c := by
-  intro n
-  induction n with
-  | zero =>
-    intro a b c hpath hhop
-    have hab : a = b := hpath
-    subst hab
-    exact .inr ⟨c, mem_aliasIdentities_of_hop hhop, hhop, sharesAfter_zero_of_eq rfl⟩
-  | succ m ih =>
-    intro a b c hpath hhop
-    rcases hpath with hab | ⟨mid, hmid, hop, hrest⟩
-    · subst hab
-      exact .inr ⟨c, mem_aliasIdentities_of_hop hhop, hhop, sharesAfter_zero_of_eq rfl⟩
-    · exact .inr ⟨mid, hmid, hop, ih hrest hhop⟩
+  .inl rfl
 
 /--
 **Sharing bytes is symmetric.**
 
-The theorem `Grass/Op/Step.lean`'s `conflicts_symm` takes as a hypothesis, and the
-reason the definition above quantifies over the alias graph's vertices rather than the
-allocation table: with the old quantifier this was false, and review found it when
-asked for the proof.
-
-Reversing a path keeps its length, so the same bound works and no strengthening of
-`aliases.length` is needed — which is why the statement is over `SharesAfter n` for
-every `n` rather than only over the closure.
+The theorem `Grass/Op/Step.lean`'s `conflicts_symm` takes as a hypothesis. Under the
+declared-alias design this needed the closure to quantify over the alias graph's own
+vertices and a proof by induction on path length, and review found the first
+definition did not admit it at all. Equality is symmetric, so there is nothing left
+to prove.
 -/
-theorem sharesAfter_symm {state : MemoryState} : ∀ {n : Nat} {a b : AllocId},
-    state.SharesAfter n a b → state.SharesAfter n b a := by
-  intro n
-  induction n with
-  | zero => intro a b h; exact (h : a = b).symm
-  | succ m ih =>
-    intro a b h
-    rcases h with hab | ⟨mid, _, hop, hrest⟩
-    · exact .inl hab.symm
-    · exact sharesAfter_snoc (ih hrest) (aliasHop_symm hop)
-
-/-- The closure form. -/
 theorem sharesBytes_symm {state : MemoryState} {a b : AllocId}
-    (h : state.SharesBytes a b) : state.SharesBytes b a :=
-  sharesAfter_symm h
+    (h : state.SharesBytes a b) : state.SharesBytes b a := by
+  rcases h with rfl | ⟨heq, hsome⟩
+  · exact .inl rfl
+  · exact .inr ⟨heq.symm, heq ▸ hsome⟩
 
-/-- One declared hop shares bytes.
+/-- **Sharing bytes is transitive.** The property the old fuel bound was chosen to
+approximate, now free. It was never stated as a theorem there: the bound was
+`aliases.length`, and the argument that this was the longest simple path lived in a
+docstring rather than in the proof. -/
+theorem sharesBytes_trans {state : MemoryState} {a b c : AllocId}
+    (hab : state.SharesBytes a b) (hbc : state.SharesBytes b c) :
+    state.SharesBytes a c := by
+  rcases hab with rfl | ⟨hab, hsome⟩
+  · exact hbc
+  · rcases hbc with rfl | ⟨hbc, _⟩
+    · exact .inr ⟨hab, hsome⟩
+    · exact .inr ⟨hab.trans hbc, hsome⟩
 
-The allocation-table hypothesis is gone with the change above: a hop's far end is a
-vertex of the alias graph by construction, so `mem_aliasIdentities_of_hop` supplies
-what the existential needs and a caller no longer has to prove the far end is
-allocated. -/
-theorem sharesBytes_of_hop {state : MemoryState} {a b : AllocId}
-    (hhop : state.AliasHop a b)
-    (hpos : 0 < state.aliases.length) : state.SharesBytes a b := by
-  unfold SharesBytes
-  cases hn : state.aliases.length with
-  | zero => omega
-  | succ m =>
-    exact .inr ⟨b, mem_aliasIdentities_of_hop hhop, hhop, sharesAfter_zero_of_eq rfl⟩
+/-- Two views onto one backing share bytes. The replacement for `sharesBytes_of_hop`,
+and unlike it there is no side condition about the graph being nonempty. -/
+theorem sharesBytes_of_backing_eq {state : MemoryState} {a b : AllocId}
+    {ra rb : AllocationRecord} (hra : state.allocations.lookup a = some ra)
+    (hrb : state.allocations.lookup b = some rb) (h : ra.backing = rb.backing) :
+    state.SharesBytes a b := by
+  exact .inr ⟨by simp [backingOf?, hra, hrb, h], by simp [backingOf?, hra]⟩
 
 
 /--
@@ -1256,33 +1205,20 @@ private def splitMap (state : MemoryState) (id low high : GrantId) (boundary : N
 /-!
 ### What a grants-only update leaves alone
 
-`SharesBytes`, `CurrentEpoch` and `Live` read the allocation table and the alias
-list, so a state that differs only in `grants` agrees with the original on all
-three. For the last two that is definitional — they are non-recursive definitions
-over a projection — but `SharesAfter` recurses on the alias-chain length, so its
-state argument does not reduce and the agreement needs an induction. Without it
-every theorem below would have to carry a hypothesis about the state
-`MemoryState.splitMap` produces, which none of them is in a position to discharge.
--/
+`SharesBytes`, `CurrentEpoch` and `Live` read the allocation table, so a state that
+differs only in `grants` agrees with the original on all three -- definitionally,
+because each is a non-recursive definition over a projection.
 
-private theorem sharesAfter_grants (state : MemoryState)
-    (g : FiniteMap GrantId AuthorityGrant) (n : Nat) (a b : AllocId) :
-    SharesAfter { state with grants := g } n a b ↔ state.SharesAfter n a b := by
-  induction n generalizing a b with
-  | zero => exact Iff.rfl
-  | succ n ih =>
-    constructor
-    · rintro (rfl | ⟨mid, hmem, hhop, hrest⟩)
-      · exact Or.inl rfl
-      · exact Or.inr ⟨mid, hmem, hhop, (ih mid b).mp hrest⟩
-    · rintro (rfl | ⟨mid, hmem, hhop, hrest⟩)
-      · exact Or.inl rfl
-      · exact Or.inr ⟨mid, hmem, hhop, (ih mid b).mpr hrest⟩
+This section used to need an induction. `SharesAfter` recursed on the alias-chain
+length, so its state argument did not reduce and `sharesAfter_grants` had to be
+proved by induction over the fuel bound before `sharesBytes_grants` could follow.
+`g-design:185` replaced the declared alias closure with backing equality, which does
+not recurse, and the induction went with it.
+-/
 
 private theorem sharesBytes_grants (state : MemoryState)
     (g : FiniteMap GrantId AuthorityGrant) (a b : AllocId) :
-    SharesBytes { state with grants := g } a b ↔ state.SharesBytes a b :=
-  sharesAfter_grants state g _ a b
+    SharesBytes { state with grants := g } a b ↔ state.SharesBytes a b := Iff.rfl
 
 private theorem currentEpoch_grants (state : MemoryState)
     (g : FiniteMap GrantId AuthorityGrant) (provenance : Provenance) :
@@ -1911,9 +1847,9 @@ and it is public, so the fact is available to a caller who cannot see `grants`.
 -/
 
 /-- An issue changes the grant map only. -/
-theorem allocations_issue? {state issued : MemoryState} {id : GrantId}
+theorem grantsOnly_issue? {state issued : MemoryState} {id : GrantId}
     {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
-    issued.allocations = state.allocations := by
+    issued = { state with grants := issued.grants } := by
   unfold issue? at h
   repeat' split at h
   all_goals
@@ -1922,9 +1858,9 @@ theorem allocations_issue? {state issued : MemoryState} {id : GrantId}
       | exact absurd h (by simp)
 
 /-- A return changes the grant map only. -/
-theorem allocations_returnGrant? {state returned : MemoryState} {context : ContextId}
+theorem grantsOnly_returnGrant? {state returned : MemoryState} {context : ContextId}
     {id : GrantId} (h : state.returnGrant? context id = some returned) :
-    returned.allocations = state.allocations := by
+    returned = { state with grants := returned.grants } := by
   unfold returnGrant? at h
   repeat' split at h
   all_goals
@@ -1933,9 +1869,9 @@ theorem allocations_returnGrant? {state returned : MemoryState} {context : Conte
       | exact absurd h (by simp)
 
 /-- A split changes the grant map only. -/
-theorem allocations_splitGrant? {state next : MemoryState} {id low high : GrantId}
+theorem grantsOnly_splitGrant? {state next : MemoryState} {id low high : GrantId}
     {boundary : Nat} (h : state.splitGrant? id low high boundary = some next) :
-    next.allocations = state.allocations := by
+    next = { state with grants := next.grants } := by
   unfold splitGrant? at h
   cases hlook : state.grants.lookup id with
   | none => rw [hlook, Option.bind_none] at h; exact absurd h (by simp)
@@ -1948,9 +1884,9 @@ theorem allocations_splitGrant? {state next : MemoryState} {id low high : GrantI
         | exact absurd h (by simp)
 
 /-- A join changes the grant map only. -/
-theorem allocations_joinGrants? {state next : MemoryState} {low high into : GrantId}
+theorem grantsOnly_joinGrants? {state next : MemoryState} {low high into : GrantId}
     (h : state.joinGrants? low high into = some next) :
-    next.allocations = state.allocations := by
+    next = { state with grants := next.grants } := by
   unfold joinGrants? at h
   cases hlow : state.grants.lookup low with
   | none => rw [hlow, Option.bind_none] at h; exact absurd h (by simp)
@@ -1967,10 +1903,10 @@ theorem allocations_joinGrants? {state next : MemoryState} {low high into : Gran
           | exact absurd h (by simp)
 
 /-- A transfer changes the grant map only. -/
-theorem allocations_transferGrant? {state next : MemoryState} {actor : ContextId}
+theorem grantsOnly_transferGrant? {state next : MemoryState} {actor : ContextId}
     {id : GrantId} {recipient : ContextId}
     (h : state.transferGrant? actor id recipient = some next) :
-    next.allocations = state.allocations := by
+    next = { state with grants := next.grants } := by
   unfold transferGrant? at h
   cases hlook : state.grants.lookup id with
   | none => rw [hlook, Option.bind_none] at h; exact absurd h (by simp)
@@ -1983,39 +1919,39 @@ theorem allocations_transferGrant? {state next : MemoryState} {actor : ContextId
         | exact absurd h (by simp)
 
 /-- **A declared authority change moves no bytes**, one delta at a time. -/
-theorem allocations_applyAuthorityDelta? {state next : MemoryState} {actor : ContextId}
+theorem grantsOnly_applyAuthorityDelta? {state next : MemoryState} {actor : ContextId}
     {delta : AuthorityDelta} (h : state.applyAuthorityDelta? actor delta = some next) :
-    next.allocations = state.allocations := by
+    next = { state with grants := next.grants } := by
   cases delta with
   | issue id grant =>
     have h' : (if grant.lender ≠ actor then Option.none else state.issue? id grant)
         = some next := h
     split at h'
     · exact absurd h' (by simp)
-    · exact allocations_issue? h'
+    · exact grantsOnly_issue? h'
   | returnGrant id =>
     have h' : state.returnGrant? actor id = some next := h
-    exact allocations_returnGrant? h'
+    exact grantsOnly_returnGrant? h'
   | split id low high boundary =>
     have h' : (if (state.grantAt? id).all (fun grant => decide (grant.holder = actor)) then
         state.splitGrant? id low high boundary else Option.none) = some next := h
     split at h'
-    · exact allocations_splitGrant? h'
+    · exact grantsOnly_splitGrant? h'
     · exact absurd h' (by simp)
   | join low high into =>
     have h' : (if (state.grantAt? low).all (fun grant => decide (grant.holder = actor)) then
         state.joinGrants? low high into else Option.none) = some next := h
     split at h'
-    · exact allocations_joinGrants? h'
+    · exact grantsOnly_joinGrants? h'
     · exact absurd h' (by simp)
   | transfer id recipient =>
     have h' : state.transferGrant? actor id recipient = some next := h
-    exact allocations_transferGrant? h'
+    exact grantsOnly_transferGrant? h'
 
 /-- **And a whole declared effect moves no bytes.** -/
-theorem allocations_applyAuthorityEffect? {state next : MemoryState} {actor : ContextId} :
+theorem grantsOnly_applyAuthorityEffect? {state next : MemoryState} {actor : ContextId} :
     ∀ {effect : AuthorityEffect}, state.applyAuthorityEffect? actor effect = some next →
-      next.allocations = state.allocations := by
+      next = { state with grants := next.grants } := by
   intro effect
   induction effect generalizing state with
   | nil =>
@@ -2030,7 +1966,28 @@ theorem allocations_applyAuthorityEffect? {state next : MemoryState} {actor : Co
     | none => rw [hd] at h; exact absurd h (by simp)
     | some mid =>
       rw [hd, Option.bind_some] at h
-      exact (ih h).trans (allocations_applyAuthorityDelta? hd)
+      have hmid := grantsOnly_applyAuthorityDelta? hd
+      have hnext := ih h
+      rw [hnext, hmid]
+
+/-- **A declared authority change moves no bytes.** The corollary `cellAt?` needs
+about the allocation table. -/
+theorem allocations_applyAuthorityEffect? {state next : MemoryState} {actor : ContextId}
+    {effect : AuthorityEffect} (h : state.applyAuthorityEffect? actor effect = some next) :
+    next.allocations = state.allocations := by
+  rw [grantsOnly_applyAuthorityEffect? h]
+
+/-- **And it moves no bytes in the other half of storage either.**
+
+`g-design:185` put the bytes in `MemoryState.backings` rather than in each
+allocation record, so "moves no bytes" stopped being a statement about the
+allocation table alone. This is the other half, and it is a corollary rather than a
+mirrored proof because `grantsOnly_applyAuthorityEffect?` states the structural fact
+both rest on. -/
+theorem backings_applyAuthorityEffect? {state next : MemoryState} {actor : ContextId}
+    {effect : AuthorityEffect} (h : state.applyAuthorityEffect? actor effect = some next) :
+    next.backings = state.backings := by
+  rw [grantsOnly_applyAuthorityEffect? h]
 
 @[simp] theorem grantAt?_eq_lookup (state : MemoryState) (id : GrantId) :
     state.grantAt? id = state.grants.lookup id := rfl
@@ -2761,16 +2718,47 @@ A *fresh* identity is always accepted. An identity with nothing outstanding over
 may be replaced freely, which is how a fixture builds a state and how a profile
 records a permission change or a placement.
 -/
+def ensureBacking (state : MemoryState) (backing : StorageId) : MemoryState :=
+  match state.backings.lookup backing with
+  | some _ => state
+  | Option.none => { state with backings := state.backings.insert backing .empty }
+
+/-- Installing a store leaves the allocation table alone. -/
+@[simp] theorem allocations_ensureBacking (state : MemoryState) (backing : StorageId) :
+    (state.ensureBacking backing).allocations = state.allocations := by
+  unfold ensureBacking; split <;> rfl
+
+/-- Installing a store leaves the grants alone. -/
+@[simp] theorem grantEntries_ensureBacking (state : MemoryState) (backing : StorageId) :
+    (state.ensureBacking backing).grantEntries = state.grantEntries := by
+  unfold ensureBacking; split <;> rfl
+
+/--
+Allocate `record` under `id`, installing its backing store if that identity has
+none yet.
+
+**A record naming a backing that already exists keeps that store**, which is how a
+fixture builds two views of one allocation: allocate both with the same
+`AllocationRecord.backing`, and they share bytes with no further declaration. The
+previous design needed an `alias` door for this and the door was a lie, because
+`write` wrote only the named allocation.
+
+`ByteStore.empty` is `⟨[]⟩` and carries no size, so installing one commits to
+nothing about the extent -- reads before writes return `none` exactly as they did
+when each record carried its own store.
+-/
 def allocate? (state : MemoryState) (id : AllocId) (record : AllocationRecord) :
     Option MemoryState :=
+  let installed := state.ensureBacking record.backing
   match state.allocations.lookup id with
   | some existing =>
       if existing ≠ record ∧
           state.grantEntries.any
             (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) then
         Option.none
-      else some { state with allocations := state.allocations.insert id record }
-  | Option.none => some { state with allocations := state.allocations.insert id record }
+      else some { installed with allocations := state.allocations.insert id record }
+  | Option.none =>
+      some { installed with allocations := state.allocations.insert id record }
 
 /-- Allocate several records in order, refusing if any is refused.
 
@@ -3024,19 +3012,31 @@ views' translated spans overlap. Under that design a declared alias graph is not
 authority source at all, and the offset relating two views is derived from their
 origins rather than declared anywhere.
 
-The ruling is right and `Tests/Op/StandardLoan.lean`'s
-`the_alias_is_not_yet_a_byte_level_fact` is c-mem's own proof of why: this door
-declares two allocations to be the same storage while `MemoryState.write` writes only
-the named one, so the claim has no byte-level counterpart. That theorem's docstring
-already named the replacement as the better shape before c-mem built this instead.
+`Tests/Op/StandardLoan.lean`'s `the_alias_is_not_yet_a_byte_level_fact` is c-mem's
+own proof of why the declaring door had to go: it declared two allocations to be the
+same storage while `MemoryState.write` wrote only the named one, so the claim had no
+byte-level counterpart.
 
-Until the replacement lands, **no `MemoryProfile` or `VerifiedProgram`-facing
-transition may depend on this**, and it is unchecked besides: it prepends any pair
-of allocations with no proof that the mapping is real. Treat it as a placeholder
-that records an intent, not as an interface.
+This door has one. Re-pointing `b`'s view at `a`'s backing and origin means a
+subsequent write through either is visible through the other, because there is one
+store and both are views of it. `Grass/Memory/Backing.lean`'s `sharing_is_real` is
+that theorem.
+
+**`b`'s previous bytes are not merged, and are no longer reachable through `b`.**
+That is the honest reading of "these two are now the same storage" and it is why
+this is a transition rather than a declaration. A profile that wants `b`'s old
+contents must copy them before mapping.
+
+Refuses silently -- by changing nothing -- when either identity is unallocated,
+which is the same shape `write` uses for a missing allocation.
 -/
-def alias (state : MemoryState) (a b : AllocId) : MemoryState :=
-  { state with aliases := (a, b) :: state.aliases }
+def mapOnto (state : MemoryState) (a b : AllocId) : MemoryState :=
+  match state.allocations.lookup a, state.allocations.lookup b with
+  | some ra, some rb =>
+      { state with
+        allocations := state.allocations.insert b
+          { rb with backing := ra.backing, origin := ra.origin } }
+  | _, _ => state
 
 /--
 Write `bytes` at `start` in allocation `id`.
@@ -3052,9 +3052,15 @@ def write (state : MemoryState) (id : AllocId) (start : Nat) (bytes : ByteSeq)
   match state.allocations.lookup id with
   | Option.none => state
   | some record =>
-      { state with
-        allocations := state.allocations.insert id
-          { record with bytes := record.bytes.write start bytes initializes } }
+      match state.backings.lookup record.backing with
+      | Option.none => state
+      | some store =>
+          -- Through the *backing*, at the view's translated offset. This is the
+          -- line that makes sharing real: another view onto the same store sees
+          -- this write with nothing having to propagate it.
+          { state with
+            backings := state.backings.insert record.backing
+              (store.write (record.origin + start) bytes initializes) }
 
 /-- **Writing bytes changes no authority.** Half of "authority is not data", from
 the other side: `cellAt?_applyAuthorityEffect?` says a declared authority change
@@ -3064,35 +3070,52 @@ moves no bytes, and this says a write grants nothing. Both are needed by
     (bytes : ByteSeq) (initializes : Bool) :
     (state.write id start bytes initializes).grantEntries = state.grantEntries := by
   unfold write
-  split <;> rfl
+  split
+  · rfl
+  · split <;> rfl
 
 /-- The byte allocation `id` holds at `offset`, if it holds one. -/
 def byteAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option Byte :=
-  (state.allocations.lookup id).bind (·.bytes.byteAt? offset)
+  (state.allocations.lookup id).bind fun record =>
+    (state.backings.lookup record.backing).bind fun store =>
+      store.byteAt? (record.origin + offset)
 
 /-- What allocation `id` holds at `offset`: the byte and whether it counts as
 initialized. Both from one lookup, for the reason `ByteStore.cellAt?` gives. -/
 def cellAt? (state : MemoryState) (id : AllocId) (offset : Nat) : Option (Byte × Bool) :=
-  (state.allocations.lookup id).bind (·.bytes.cellAt? offset)
+  (state.allocations.lookup id).bind fun record =>
+    (state.backings.lookup record.backing).bind fun store =>
+      store.cellAt? (record.origin + offset)
 
-/-- A cell is a function of the allocation table alone. -/
+/-- A cell is a function of the allocation table and the backing stores.
+
+It used to be a function of the allocation table alone, because each record carried
+its own bytes. Under `g-design:185` the record names a store and the bytes are in
+`MemoryState.backings`, so agreeing on the table is no longer enough -- two states
+with identical allocations and different stores disagree on every cell. The extra
+hypothesis is the honest one, and every caller can discharge it: the transitions
+that use this framing law touch grants, not storage. -/
 theorem cellAt?_of_allocations_eq {a b : MemoryState} (h : a.allocations = b.allocations)
-    (id : AllocId) (offset : Nat) : a.cellAt? id offset = b.cellAt? id offset := by
+    (hb : a.backings = b.backings) (id : AllocId) (offset : Nat) :
+    a.cellAt? id offset = b.cellAt? id offset := by
   unfold cellAt?
-  rw [h]
+  rw [h, hb]
 
 /-- The framing form `Grass/Op/Step.lean` uses. -/
 theorem cellAt?_applyAuthorityEffect? {state next : MemoryState} {actor : ContextId}
     {effect : AuthorityEffect} (h : state.applyAuthorityEffect? actor effect = some next)
     (id : AllocId) (offset : Nat) : next.cellAt? id offset = state.cellAt? id offset :=
-  cellAt?_of_allocations_eq (allocations_applyAuthorityEffect? h) id offset
+  cellAt?_of_allocations_eq (allocations_applyAuthorityEffect? h)
+    (backings_applyAuthorityEffect? h) id offset
 
 /-- The byte is the cell's first component. Both go through one lookup, so a
 framing fact proved for cells is immediately a framing fact for bytes. -/
 @[simp] theorem byteAt?_eq_map_cellAt? (state : MemoryState) (id : AllocId) (offset : Nat) :
     state.byteAt? id offset = (state.cellAt? id offset).map Prod.fst := by
   unfold byteAt? cellAt? ByteStore.byteAt?
-  cases state.allocations.lookup id <;> simp
+  cases state.allocations.lookup id with
+  | none => rfl
+  | some record => cases state.backings.lookup record.backing <;> rfl
 
 /-- `state.InitializedAt id offset` holds when that byte is initialized. The
 pointwise form of `RangeInitialized`, which a padding argument needs because
@@ -3109,88 +3132,52 @@ initialized in `id`. Read off the byte store, so it says what the writes said. -
 def RangeInitialized (state : MemoryState) (id : AllocId) (range : ByteRange) : Prop :=
   match state.allocations.lookup id with
   | Option.none => False
-  | some record => record.bytes.Initialized range
+  | some record =>
+      match state.backings.lookup record.backing with
+      | Option.none => False
+      | some store => store.Initialized (ByteRange.translate record.origin range)
 
 instance (state : MemoryState) (id : AllocId) (range : ByteRange) :
     Decidable (state.RangeInitialized id range) := by
-  unfold RangeInitialized; split <;> infer_instance
+  unfold RangeInitialized
+  split
+  · infer_instance
+  · split <;> infer_instance
 
 /-! ### Framing
 
 What a write does *not* change. `applyAccess` reasons by disjointness, and
-disjointness is only useful with lemmas saying that everything outside the
-written range survives. `docs/MEMORY_MODEL.md` §2 makes provenance the authority,
-so the two axes are "a different allocation" and "a disjoint range within the
-same one"; both are below. -/
+disjointness is only useful with lemmas saying that everything outside the written
+range survives.
 
-/-- A write changes no allocation's metadata: extent, epoch, space, permission,
-and liveness come back unchanged.
+**The axes changed with `g-design:185`.** They used to be "a different allocation"
+and "a disjoint range within the same one", because distinct `AllocId`s owned
+distinct `ByteStore`s and so were distinct storage by construction. That is no
+longer true: two records naming one backing are distinct identities over shared
+bytes, which is the whole point of the replacement. The axes are now "a different
+*backing*" and "a disjoint range within one backing", and a lemma whose hypothesis
+is identity-distinctness can only conclude something about the allocation table --
+never about bytes. `Grass/Memory/Backing.lean`'s `write_of_other_backing` is the
+byte-level half. -/
 
-`denialOf` reads **seven** record fields plus initialization, not five: `source` and
-`base` are the two this theorem does not mention, and `AllocationRecord.Metadata`
-carries all seven. So "a write cannot quietly widen what a later access may reach" does
-not follow from the five equalities below — it follows from `write`'s type, which
-returns a record differing in `bytes` alone. This theorem is the readable half of that
-and the sentence claiming otherwise overstated it; the paragraph above
-`AllocationRecord.Metadata` is where the seven are counted. -/
-theorem write_preserves_metadata (state : MemoryState) (id : AllocId) (start : Nat)
-    (bytes : ByteSeq) (initializes : Bool) (other : AllocId) (record : AllocationRecord)
-    (h : (state.write id start bytes initializes).allocations.lookup other = some record) :
-    ∃ before, state.allocations.lookup other = some before ∧
-      before.extent = record.extent ∧ before.epoch = record.epoch ∧
-      before.space = record.space ∧ before.permission = record.permission ∧
-      before.live = record.live := by
-  unfold write at h
-  split at h
-  · exact ⟨record, h, rfl, rfl, rfl, rfl, rfl⟩
-  · rename_i found hfound
-    by_cases hid : other = id
-    · subst hid
-      rw [FiniteMap.lookup_insert_self] at h
-      cases h
-      exact ⟨found, hfound, rfl, rfl, rfl, rfl, rfl⟩
-    · rw [FiniteMap.lookup_insert_ne _ hid _] at h
-      exact ⟨record, h, rfl, rfl, rfl, rfl, rfl⟩
+/-- **A write never changes the allocation table.**
 
-/-- **A write to one allocation leaves every other allocation alone.**
-
-Distinct `AllocId`s are distinct storage by construction, which is what
-`docs/MEMORY_MODEL.md` §2 means by making provenance rather than address the
-authority. -/
+Stronger than the theorem this replaces, and true for every identity rather than
+only for other ones: `write` now edits `MemoryState.backings` and leaves
+`allocations` alone entirely, so there is no insertion to frame around. The `hne`
+hypothesis is kept because callers pass it and because dropping it would silently
+widen what they are relying on -- but it is unused, and that is the point. What a
+caller may *not* do is conclude from `other ≠ id` that `other`'s bytes are
+unchanged; that needs the backings to differ, which is
+`Grass/Memory/Backing.lean`'s `write_of_other_backing`. -/
 theorem write_preserves_other_allocation (state : MemoryState) {id other : AllocId}
-    (hne : other ≠ id) (start : Nat) (bytes : ByteSeq) (initializes : Bool) :
+    (_hne : other ≠ id) (start : Nat) (bytes : ByteSeq) (initializes : Bool) :
     (state.write id start bytes initializes).allocations.lookup other =
       state.allocations.lookup other := by
   unfold write
   split
   · rfl
-  · exact FiniteMap.lookup_insert_ne _ hne _
-
-/-- Initialization of another allocation survives a write. -/
-theorem rangeInitialized_write_of_other_allocation (state : MemoryState)
-    {id other : AllocId} (hne : other ≠ id) (start : Nat) (bytes : ByteSeq)
-    (initializes : Bool) {range : ByteRange} (h : state.RangeInitialized other range) :
-    (state.write id start bytes initializes).RangeInitialized other range := by
-  unfold RangeInitialized at h ⊢
-  rw [write_preserves_other_allocation state hne start bytes initializes]
-  exact h
-
-/-- **Initialization of a disjoint range in the same allocation survives a
-write.** The state-level form of `ByteStore.initialized_write_of_disjoint`, and
-the one a framing argument about two fields of one object needs. -/
-theorem rangeInitialized_write_of_disjoint (state : MemoryState) (id : AllocId)
-    {start : Nat} {bytes : ByteSeq} {initializes : Bool} {range : ByteRange}
-    (hd : (ByteRange.mk start bytes.length).Disjoint range)
-    (h : state.RangeInitialized id range) :
-    (state.write id start bytes initializes).RangeInitialized id range := by
-  unfold RangeInitialized at h ⊢
-  unfold write
-  cases hfound : state.allocations.lookup id with
-  | none => rw [hfound] at h; exact absurd h (by simp)
-  | some record =>
-    rw [hfound] at h
-    rw [FiniteMap.lookup_insert_self]
-    exact ByteStore.initialized_write_of_disjoint record.bytes hd h
+  · split <;> rfl
 
 /--
 Two memory states agree when every allocation holds the same *cell* — byte and
@@ -3237,43 +3224,68 @@ theorem write_of_missing (state : MemoryState) {id : AllocId} (start : Nat)
     state.write id start bytes initializes = state := by
   unfold write; rw [h]
 
-/-- A write leaves its own allocation present, with the written store. -/
+/-- A write leaves its own allocation record exactly as it was.
+
+It used to leave a *rewritten* record, because the bytes were in it. They are in
+`MemoryState.backings` now, so a write does not touch the allocation table at all
+and the record comes back unchanged. -/
 theorem lookup_write_self (state : MemoryState) {id : AllocId} (start : Nat)
     (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
     (h : state.allocations.lookup id = some record) :
-    (state.write id start bytes initializes).allocations.lookup id =
-      some { record with bytes := record.bytes.write start bytes initializes } := by
+    (state.write id start bytes initializes).allocations.lookup id = some record := by
   unfold write
   rw [h]
+  split <;> exact h
+
+/-- The store a write leaves under the written allocation's backing. -/
+theorem backings_write_self (state : MemoryState) {id : AllocId} (start : Nat)
+    (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
+    {store : ByteStore} (h : state.allocations.lookup id = some record)
+    (hs : state.backings.lookup record.backing = some store) :
+    (state.write id start bytes initializes).backings.lookup record.backing =
+      some (store.write (record.origin + start) bytes initializes) := by
+  unfold write
+  rw [h, hs]
   exact FiniteMap.lookup_insert_self _ _ _
 
 /-- The cell a write leaves at an offset, in terms of the store's own law. -/
 theorem cellAt?_write_self (state : MemoryState) {id : AllocId} (start : Nat)
     (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
-    (h : state.allocations.lookup id = some record) (offset : Nat) :
+    {store : ByteStore} (h : state.allocations.lookup id = some record)
+    (hs : state.backings.lookup record.backing = some store) (offset : Nat) :
     (state.write id start bytes initializes).cellAt? id offset =
-      (record.bytes.write start bytes initializes).cellAt? offset := by
+      (store.write (record.origin + start) bytes initializes).cellAt?
+        (record.origin + offset) := by
   unfold cellAt?
-  rw [lookup_write_self state start bytes initializes h]
+  rw [lookup_write_self state start bytes initializes h,
+    backings_write_self state start bytes initializes h hs]
   rfl
 
 /-- The byte a write leaves at an offset, in terms of the store's own law. -/
 theorem byteAt?_write_self (state : MemoryState) {id : AllocId} (start : Nat)
     (bytes : ByteSeq) (initializes : Bool) {record : AllocationRecord}
-    (h : state.allocations.lookup id = some record) (offset : Nat) :
+    {store : ByteStore} (h : state.allocations.lookup id = some record)
+    (hs : state.backings.lookup record.backing = some store) (offset : Nat) :
     (state.write id start bytes initializes).byteAt? id offset =
-      (record.bytes.write start bytes initializes).byteAt? offset := by
+      (store.write (record.origin + start) bytes initializes).byteAt?
+        (record.origin + offset) := by
   unfold byteAt?
-  rw [lookup_write_self state start bytes initializes h]
+  rw [lookup_write_self state start bytes initializes h,
+    backings_write_self state start bytes initializes h hs]
   rfl
 
-/-- Two states whose allocation records agree at `id` agree on what is
-initialized there. -/
+/-- Two states whose allocation records agree at `id`, and whose stores agree,
+agree on what is initialized there.
+
+The second hypothesis is new with `g-design:185`: initialization is read off the
+backing store, so agreeing on the record is no longer enough to agree on the
+bytes. -/
 theorem rangeInitialized_congr_of_lookup {a b : MemoryState} {id : AllocId}
-    {range : ByteRange} (h : a.allocations.lookup id = b.allocations.lookup id) :
+    {range : ByteRange} (h : a.allocations.lookup id = b.allocations.lookup id)
+    (hb : a.backings = b.backings) :
     a.RangeInitialized id range ↔ b.RangeInitialized id range := by
   unfold RangeInitialized
-  rw [h]
+  rw [h, hb]
 
 /-- **A write neither creates nor destroys initialization outside its own range.**
 The `iff` rather than the forward direction alone: framing has to carry a *lack*
@@ -3289,33 +3301,44 @@ theorem rangeInitialized_write_iff_of_disjoint (state : MemoryState) {id : Alloc
   | none => rw [write_of_missing state _ _ _ hfound, hfound]
   | some record =>
     rw [lookup_write_self state start bytes initializes hfound]
-    exact ByteStore.initialized_write_iff_of_disjoint record.bytes hd
+    cases hs : state.backings.lookup record.backing with
+    | none =>
+      -- No store, so the write changed nothing at all.
+      unfold write
+      rw [hfound, hs, hfound, hs]
+    | some store =>
+      rw [backings_write_self state start bytes initializes hfound hs]
+      -- The write and the range are disjoint in the view's own coordinates, so
+      -- they are disjoint in the store's, both having moved by `record.origin`.
+      exact ByteStore.initialized_write_iff_of_disjoint store
+        (ByteRange.translate_disjoint_of_disjoint record.origin hd)
 
-/-- Inside the range it wrote, a write determines the cell: byte and
-initialization both come from the run just prepended. -/
+/-- The byte a write leaves inside its own range. -/
 theorem cellAt?_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}
     {bytes : ByteSeq} {initializes : Bool} {record : AllocationRecord}
-    (hfound : state.allocations.lookup id = some record) {offset : Nat}
+    {store : ByteStore} (hfound : state.allocations.lookup id = some record)
+    (hs : state.backings.lookup record.backing = some store) {offset : Nat}
     (h : (ByteRange.mk start bytes.length).Covers offset) :
     (state.write id start bytes initializes).cellAt? id offset =
       (bytes[offset - start]?).map (·, initializes) := by
-  unfold cellAt?
-  rw [lookup_write_self state start bytes initializes hfound]
-  simp only [Option.bind_some]
-  exact ByteStore.cellAt?_write_of_covers record.bytes h
+  rw [cellAt?_write_self state start bytes initializes hfound hs]
+  have h' : (ByteRange.mk (record.origin + start) bytes.length).Covers
+      (record.origin + offset) := by
+    unfold ByteRange.Covers ByteRange.stop at h ⊢
+    simp only [] at h ⊢
+    omega
+  have := ByteStore.cellAt?_write_of_covers store h'
+  simpa using this
 
 /-- The byte a write leaves inside its own range. -/
 theorem byteAt?_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}
     {bytes : ByteSeq} {initializes : Bool} {record : AllocationRecord}
-    (hfound : state.allocations.lookup id = some record) {offset : Nat}
+    {store : ByteStore} (hfound : state.allocations.lookup id = some record)
+    (hs : state.backings.lookup record.backing = some store) {offset : Nat}
     (h : (ByteRange.mk start bytes.length).Covers offset) :
     (state.write id start bytes initializes).byteAt? id offset = bytes[offset - start]? := by
-  unfold byteAt?
-  rw [lookup_write_self state start bytes initializes hfound]
-  simp only [Option.bind_some]
-  unfold ByteStore.byteAt?
-  rw [ByteStore.cellAt?_write_of_covers record.bytes h]
-  cases bytes[offset - start]? <;> simp
+  rw [byteAt?_eq_map_cellAt?, cellAt?_write_of_covers state hfound hs h]
+  cases bytes[offset - start]? <;> rfl
 
 /-- An initializing write initializes each byte it covered. -/
 theorem initializedAt_write_of_covers (state : MemoryState) {id : AllocId} {start : Nat}

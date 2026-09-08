@@ -125,6 +125,19 @@ disjuncts are exactly what makes that agreement hold.
 def Disjoint (r s : ByteRange) : Prop :=
   r.size = 0 ∨ s.size = 0 ∨ r.stop ≤ s.start ∨ s.stop ≤ r.start
 
+/-- **Translation preserves disjointness.** Two local ranges that do not overlap do
+not overlap in the backing store either, because both move by the same origin.
+
+The framing lemmas need exactly this: a write and a read through one view are
+disjoint in the view's own coordinates, and what `ByteStore` sees is both of them
+shifted by that view's origin. -/
+theorem translate_disjoint_of_disjoint (origin : Nat) {r s : ByteRange}
+    (h : r.Disjoint s) : (translate origin r).Disjoint (translate origin s) := by
+  unfold Disjoint stop at h
+  unfold translate Disjoint stop
+  simp only [] at h ⊢
+  omega
+
 /--
 `r.Contains s` holds when `s`'s extent lies within `r`'s.
 
