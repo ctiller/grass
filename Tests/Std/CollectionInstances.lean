@@ -15,6 +15,31 @@ failure is silent in the worst way: nothing looks wrong until a proof stops with
 `unsolved goals` on a step that reads as trivial, and nothing points at the
 notation as the cause.
 
+## The sweep this fixture is the result of, and what it does not cover
+
+Every instance-provided notation across all seven modules of `Grass/Std/Logical`
+was probed by asking `simp` for a law through it. The complete result:
+
+* `Vec` — `EmptyCollection`, `Inhabited` and `ForIn` were orphaned; fixed on
+  `agent/c-stdlib/empty-notation` and pinned by `Tests/Std/VecInstances.lean`.
+  `Append` and `Membership` reach their laws already. There is deliberately no
+  bridge from `a ∈ v` to `a ∈ v.toList`: that is the representation seam, and
+  dissolving it is the leak the private structure exists to prevent.
+* `Bag` and `FiniteMap` — the gaps this file pins.
+* `Order` — supplies only `Decidable` instances, which `decide` reaches without a
+  `simp` bridge. Checked directly on `Permutation` and `Pairwise`, both
+  directions.
+* `Text`, `HostBytes` and `Byte` — declare no instances, so the gap is not
+  expressible in them.
+
+**What that sweep cannot see.** The gaps were found by listing every `def` per
+module and probing the ones no theorem's *name* mentions. That is a name-shaped
+heuristic: a law observing an operation without naming it is invisible to it, and
+it produced one false positive — `Grass/Std/Logical/Order.lean` looks like it
+defines `stableSorted`, but that text is inside a quoted code block, and a scan
+that does not strip fenced blocks reads documentation as declarations. So this is
+evidence that the gaps below are real, not that none remain.
+
 Each bridge gets two examples. The first is a bare `simp`, so removing the
 corresponding `@[simp]` from the library breaks this fixture — the only way it can
 tell a load-bearing lemma from a decorative one. The second pins the hazard: the
