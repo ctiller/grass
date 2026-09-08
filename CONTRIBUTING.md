@@ -28,7 +28,10 @@ both the annotated document and its comment-free authored source.
 6. Keep caches, local worktrees, credentials, generated binaries, and editor
    state out of commits.
 
-Run the repository's current consistency check from its root:
+## Repository validation
+
+Run the repository's current consistency checks from its root. These are the
+canonical command strings used by review nominations on a PowerShell 7 host:
 
 ```powershell
 lake build
@@ -38,9 +41,8 @@ pwsh ./check-spike-sources.ps1
 pwsh ./check-doc-links.ps1
 ```
 
-The three `.ps1` checks support PowerShell 7 on every supported platform and
-Windows PowerShell 5.1 on Windows. If `pwsh` is unavailable, invoke them with
-the in-box Windows host instead:
+The three `.ps1` checks also support Windows PowerShell 5.1. On a Windows host
+without `pwsh`, these are the canonical alternative command strings:
 
 ```powershell
 powershell.exe -NoProfile -File .\audit-trust.ps1
@@ -49,8 +51,8 @@ powershell.exe -NoProfile -File .\check-doc-links.ps1
 ```
 
 Review nominations must put the exact command the selected reviewer will run in
-`required_checks`. Choose either the `pwsh` or `powershell.exe` spelling for
-that reviewer's host; do not list both unless both executions are required. A
+`required_checks`. Copy either canonical spelling above for that reviewer's
+host; do not list both unless both executions are required. A
 reviewer must execute and report that exact command. Running the other spelling
 does not satisfy an already nominated command, because the bus compares the
 recorded command text exactly.
