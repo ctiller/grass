@@ -39,12 +39,31 @@ instance (left right : FileSpan) : Decidable (left.Disjoint right) := by
 left unchanged here; image validation rejects zero before serialization. -/
 def alignUp (value alignment : Nat) : Nat :=
   if alignment = 0 then value
-  else value + ((alignment - value % alignment) % alignment)
+  else if value % alignment = 0 then value
+  else value + (alignment - value % alignment)
 
 /-- Alignment never moves an offset backward. -/
 theorem le_alignUp (value alignment : Nat) : value ≤ alignUp value alignment := by
   unfold alignUp
-  split <;> simp_all
+  split
+  · simp_all
+  · split <;> simp_all
+
+/-- Positive alignment produces an exact multiple boundary. -/
+theorem alignUp_mod_eq_zero (value : Nat) {alignment : Nat}
+    (positive : 0 < alignment) : alignUp value alignment % alignment = 0 := by
+  unfold alignUp
+  rw [if_neg (Nat.ne_of_gt positive)]
+  split
+  next aligned => exact aligned
+  next unaligned =>
+    rw [Nat.add_mod]
+    have remainderLt : value % alignment < alignment := Nat.mod_lt value positive
+    have fillLt : alignment - value % alignment < alignment := by omega
+    rw [Nat.mod_eq_of_lt fillLt]
+    have fillsBoundary : value % alignment + (alignment - value % alignment) = alignment := by
+      omega
+    rw [fillsBoundary, Nat.mod_self]
 
 /-- Microsoft PE Format, "MS-DOS Stub (Image Only)": the canonical adapter DOS
 header stores `e_lfanew` at byte 60 and ends at byte 64. -/
@@ -94,7 +113,7 @@ def placeSectionsFrom (cursor fileAlignment : Nat) : List RawSection → List Pl
       let start := alignUp cursor fileAlignment
       let placed : PlacedSection :=
         { source
-          rawSpan := ⟨start, source.contents.length⟩ }
+          rawSpan := ⟨start, alignUp source.contents.length fileAlignment⟩ }
       placed :: placeSectionsFrom placed.rawSpan.endOffset fileAlignment tail
 
 @[simp] theorem placeSectionsFrom_length (cursor fileAlignment : Nat)
@@ -105,6 +124,32 @@ def placeSectionsFrom (cursor fileAlignment : Nat) : List RawSection → List Pl
   | cons source tail ih =>
       simp only [placeSectionsFrom, List.length_cons]
       exact congrArg Nat.succ (ih _)
+
+/-- Raw payload bytes followed by the zero padding declared by `rawSpan`. -/
+def PlacedSection.paddedContents (placed : PlacedSection) : Std.Logical.ByteArray :=
+  placed.source.contents ++
+    Vec.replicate (placed.rawSpan.size - placed.source.contents.length) 0
+
+/-- Padding has exactly the declared raw extent whenever that extent contains
+the source bytes. -/
+theorem PlacedSection.length_paddedContents (placed : PlacedSection)
+    (contains : placed.source.contents.length ≤ placed.rawSpan.size) :
+    placed.paddedContents.length = placed.rawSpan.size := by
+  simp only [PlacedSection.paddedContents, Vec.length_append, Vec.length_replicate]
+  omega
+
+/-- Every placement produced by `placeSectionsFrom` contains its source bytes. -/
+theorem placed_rawSize_ge (cursor fileAlignment : Nat) (sections : List RawSection) :
+    ∀ placed ∈ placeSectionsFrom cursor fileAlignment sections,
+      placed.source.contents.length ≤ placed.rawSpan.size := by
+  induction sections generalizing cursor with
+  | nil => simp [placeSectionsFrom]
+  | cons source tail ih =>
+      intro placed member
+      simp only [placeSectionsFrom, List.mem_cons] at member
+      rcases member with rfl | member
+      · exact le_alignUp _ _
+      · exact ih _ placed member
 
 /-- Place all requested raw sections after the complete canonical NT-header
 region. This function consumes `ExecutableImageDescription` without learning

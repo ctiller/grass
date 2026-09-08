@@ -36,10 +36,10 @@ theorem fragment_local_disjoint_but_absolute_overlaps :
 
 example : (placeRawSections twoSectionImage 512).length = 2 := by decide
 
-example : ((placeRawSections twoSectionImage 512).get? 0).map (·.rawSpan) = some ⟨512, 2⟩ := by
+example : ((placeRawSections twoSectionImage 512).get? 0).map (·.rawSpan) = some ⟨512, 512⟩ := by
   decide
 
-example : ((placeRawSections twoSectionImage 512).get? 1).map (·.rawSpan) = some ⟨1024, 3⟩ := by
+example : ((placeRawSections twoSectionImage 512).get? 1).map (·.rawSpan) = some ⟨1024, 512⟩ := by
   decide
 
 end Grass.Tests.Artifact.PE.Layout
