@@ -139,6 +139,14 @@ and existence theorems keep edge lookup proof-bearing even for raw malformed
 graphs with repeated block identities; graph well-formedness eliminates those
 duplicates rather than making lookup partial or block-first.
 
+`Grass.CFG.Intake` is the construction-owned target for upstream lowering
+adapters. It binds opaque upstream entry identities to graph blocks and opaque
+step identities to canonical edges, checks uniqueness and exact structural
+resolution, and exposes proof-bearing lookup results. It deliberately does not
+claim that an upstream process or specification is realized; the process owner
+must provide that adapter theorem once the complete process-plan interface is
+available.
+
 ### C1 — Joins, loops, calls, and stack shapes
 
 Extend the CFG kernel without introducing an authored parallel manifest:
