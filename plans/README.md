@@ -33,6 +33,16 @@ optional transport optimization, but either agent can publish and later learn
 the other's event without it. Finding these mismatches early is one of the
 roadmap system's primary throughput benefits.
 
+The roadmap protocol is therefore a peer protocol, not a coordinator service.
+Each agent appends declarations and responses under its own identity and may
+subscribe directly to any peer whose roadmap, exports, or requests affect its
+work. Replicas may learn those immutable events in different orders; reduction
+of the same event set must produce the same current plans and dependency state.
+Temporary disconnection delays knowledge but does not transfer authority,
+invalidate a plan, or prevent either peer from continuing local work. No
+coordinator lease, acknowledgement, routing decision, or availability premise
+appears in a roadmap or dependency correctness claim.
+
 An active implementor updates that roadmap whenever the active milestone,
 dependency, risk, or delivery expectation materially changes, and at least once
 in every twelve-hour period while it claims active work. Silence caused by an
