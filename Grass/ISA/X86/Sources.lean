@@ -18,12 +18,31 @@ than by HTTP status, for the reasons in `Grass.Cite.RetrievalStatus`.
   revision at all, which `docs/VALIDATION.md` §1 requires ("stable identity,
   title, publisher, revision/date"); this module pins 092.
 
-- **AMD is dead.** The URL `docs/REFERENCES.md` pins,
-  `https://docs.amd.com/v/u/en-US/40332_4.09_APM_PUB`, renders a 404 and
-  redirects to the portal root. So does the `4.10` slug that search engines
-  still index, and so does every `www.amd.com/content/dam/.../40332*.pdf` path
-  tried. AMD appears to have retired the `/v/u/en-US/` scheme for the
-  Technical Information Portal.
+- **AMD is dead, and it lies about it.** The URL `docs/REFERENCES.md` pins,
+  `https://docs.amd.com/v/u/en-US/40332_4.09_APM_PUB`, answers **HTTP 200**
+  with 2575 bytes of HTML titled "AMD Technical Information Portal" -- a
+  JavaScript shell that renders the 404 client-side. An earlier version of this
+  paragraph said it "renders a 404", which is what a browser shows and not what
+  the server says.
+
+  The distinction is the whole trap. Any liveness check keyed on status codes
+  reports this URL healthy, so the document could be recorded as retrievable
+  by a probe that never rendered the page. Re-checking it means fetching the
+  body and reading it, not asking whether the request succeeded.
+
+  Retried today across every location this corpus knows of. The `/v/u/en-US/`
+  scheme is dead for individual volumes too -- `24594_3.37`, which search
+  engines still index, is a genuine HTTP 404. Both
+  `www.amd.com/content/dam/.../programmer-references/40332.pdf` and
+  `www.amd.com/system/files/TechDocs/40332.pdf` fail to connect at all rather
+  than returning an error.
+
+  A third-party mirror does serve an 18.7 MB PDF of publication 40332 at
+  revision **4.07**. It is not cited and does not lift the blocker: it is not
+  AMD, and it is not the pinned revision, so a section or page anchor written
+  against 4.09 cannot be confirmed against it. It is recorded because the next
+  person to look will find it and should know it was considered and refused
+  rather than missed.
 
   The AMD APM is `referenceOnly`, so `docs/VALIDATION.md` §1 leaves exactly one
   disposition: release blocker. `Ledger.releaseBlockers` reports it, and it is
@@ -60,7 +79,7 @@ def intelAnchorCheckDate : Date := ⟨2026, 9, 3⟩
 
 /-- When the AMD APM's retrieval was last re-attempted across every location
 this corpus knows of. See `amd64Apm409`. -/
-def amdRecheckDate : Date := ⟨2026, 9, 3⟩
+def amdRecheckDate : Date := ⟨2026, 9, 7⟩
 
 /--
 Intel 64 and IA-32 Architectures Software Developer's Manual, combined volume
