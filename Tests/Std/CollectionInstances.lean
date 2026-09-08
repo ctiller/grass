@@ -96,6 +96,38 @@ example (a : α) : ({a} : Bag α).card = 1 := by simp
 routes it through the same bridges cannot quietly break it. -/
 example (a b : α) : a ∈ ({b} : Bag α) ↔ a = b := by simp
 
+/-! ## The other direction, which is deliberately *not* bridged
+
+Everything above adds a bridge because the laws were stated about one spelling and
+a consumer could reach for another. The reverse case exists too and is left alone,
+so the difference is worth pinning rather than leaving to be rediscovered as a
+gap.
+
+`Bag`'s union and membership laws are stated over `+` and `∈`, and `Vec`'s
+concatenation laws over `++`. A goal naming the underlying definition instead
+reaches none of them. That is a naming observation rather than a missing law --
+the laws cover each operation as consumers write it, no module in the tree names
+these forms in code, and `Tools/CoverageAudit.lean` exempts `Vec.append` on
+exactly this ground. `Bag.append` and `Bag.Mem` are `protected` so the second
+spelling stays out of reach of an `open`.
+
+The examples below pin both halves. If someone later decides the named forms
+should reach the laws, these fail, and the decision gets made deliberately
+instead of by adding a lemma that looks harmless.
+-/
+
+example (x y : Bag α) : (x + y).card = x.card + y.card := by simp
+
+/-- error: `simp` made no progress -/
+#guard_msgs in
+example (x y : Bag α) : (Bag.append x y).card = x.card + y.card := by simp
+
+example (a : α) (x y : Bag α) : a ∈ x + y ↔ a ∈ x ∨ a ∈ y := by simp
+
+/-- error: `simp` made no progress -/
+#guard_msgs in
+example (a : α) (x y : Bag α) : Bag.Mem (x + y) a ↔ a ∈ x ∨ a ∈ y := by simp
+
 /-! ## `FiniteMap`: the same gap, oriented the other way
 
 `FiniteMap`'s laws are stated about `empty` rather than about a numeral, so here
