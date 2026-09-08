@@ -2,6 +2,10 @@
 
 Status: normative interface draft for adversarial review.
 
+Lean-shaped code blocks in this document are **Schematic Lean** unless a block
+is explicitly introduced as **Exact Lean**. Schematic names state the normative
+role and indexing without claiming to mirror the current library declaration.
+
 This document owns Grass's portable process-authoring shape. Execution traces,
 nondeterminism, safety, and liveness remain owned by [SEMANTICS.md](SEMANTICS.md);
 providers and commits by [PLATFORM_ABI.md](PLATFORM_ABI.md); refinement by
@@ -53,7 +57,9 @@ modeling.
 
 The general form is relational so nondeterministic specifications remain first
 class. A deterministic convenience constructor accepts an `update` function and
-derives the relation.
+derives the relation. The following is schematic Lean; the order and indexing
+of the fields are normative, while the concrete library uses its owned `Bag`,
+observation-segment, and accessor aliases.
 
 ```lean
 structure ProcessVocabulary where
@@ -84,7 +90,7 @@ structure ProcessSpec where
   Initial : Request -> State -> AbstractDemandBag vocabulary.Demand ->
             List vocabulary.Observation -> Prop
   Terminal : Request -> State -> TerminalResult -> Prop
-  Step : State -> ProcessEvent vocabulary ->
+  Step : (request : Request) -> State -> ProcessEvent vocabulary ->
          State -> AbstractDemandBag vocabulary.Demand ->
          List vocabulary.Observation -> Prop
   view : Option (ViewFacet State)
@@ -95,10 +101,19 @@ structure DeterministicProcess (v : ProcessVocabulary) where
   TerminalResult : Type
   initial : Request -> State × AbstractDemandBag v.Demand × List v.Observation
   terminal : Request -> State -> Option TerminalResult
-  update : State -> ProcessEvent v ->
+  update : Request -> State -> ProcessEvent v ->
            State × AbstractDemandBag v.Demand × List v.Observation
   view : Option (ViewFacet State)
 ```
+
+`Step` is indexed by the exact request fixed for the process instance, just as
+`Initial` and `Terminal` are. A run never chooses a new request at a transition:
+the run or `ProcessInstance` supplies its already-stored request to every local
+step. Standard constructors and combinators thread that argument, so this adds
+no ordinary author field, duplicated request state, or proof ceremony. A
+deterministic description may inspect the request in `update`; one whose update
+is request-independent simply ignores the argument. This is the normative
+resolution recorded by `g-design:298` for `c-process:107`.
 
 The interruption, fault, and environment-violation classes are fields of the
 vocabulary, not one global classification. `agent-bus` disposition `g-design:4`
@@ -331,31 +346,31 @@ inductive ProcessRunInitial (p : ProcessSpec) (request : p.Request) :
 inductive ProcessRunTransition (p : ProcessSpec) (request : p.Request) :
     ProcessRunState p request -> ProcessRunState p request -> Prop
   | stepExternal
-      (step : p.Step local (.external event) afterLocal issued emitted)
+      (step : p.Step request local (.external event) afterLocal issued emitted)
       : ProcessRunTransition p request
           (.running local outstanding observations)
           (.running afterLocal (outstanding + issued) (observations ++ emitted))
   | stepResult
       (consume : ConsumeExactlyOneMatching outstanding demand remainder)
-      (step : p.Step local (.result demand result)
+      (step : p.Step request local (.result demand result)
         afterLocal issued emitted)
       : ProcessRunTransition p request
           (.running local outstanding observations)
           (.running afterLocal (remainder + issued) (observations ++ emitted))
   | stepInterrupted
       (consume : ConsumeExactlyOneMatching outstanding demand remainder)
-      (step : p.Step local (.interrupted demand reason)
+      (step : p.Step request local (.interrupted demand reason)
         afterLocal issued emitted)
       : ProcessRunTransition p request
           (.running local outstanding observations)
           (.running afterLocal (remainder + issued) (observations ++ emitted))
   | stepFault
-      (step : p.Step local (.fault fault) afterLocal issued emitted)
+      (step : p.Step request local (.fault fault) afterLocal issued emitted)
       : ProcessRunTransition p request
           (.running local outstanding observations)
           (.running afterLocal (outstanding + issued) (observations ++ emitted))
   | stepEnvironmentViolation
-      (step : p.Step local (.environmentViolation violation)
+      (step : p.Step request local (.environmentViolation violation)
         afterLocal issued emitted)
       : ProcessRunTransition p request
           (.running local outstanding observations)
@@ -594,6 +609,14 @@ structure LogicalProcessNetworkCore
   observations : Trace boundary.Observation
   usedNominals : MonotoneNominalHistory
 
+-- Schematic projection of the root clauses of the complete predicate.
+structure LogicalProcessNetworkCore.WellFormed
+    (network : LogicalProcessNetworkCore topology Message) : Prop where
+  rootExists : ExistsRootInstanceAtTopologyRoot network
+  rootUnique : AnyTwoRootInstancesOccupyTheSameExactSlot network
+  -- the remaining slot, lifecycle, parentage, escrow, nominal, and shared-state laws
+  ...
+
 structure WorldAgreement (topology : ProcessTopology registry boundary)
     (World : Type) where
   Agrees : NetworkFragment topology -> World -> World -> Prop
@@ -733,9 +756,13 @@ The detach transition changes only `.attached parent` to
 `.detached parent`, proves the references identical, and establishes the
 corresponding non-returning child disposition. Thus a root and a detached child
 are distinguishable from network state, and an audit can validate detachment
-without replaying the transition history. Root uniqueness and the validity of
-attached parent/spawn relationships remain network well-formedness laws rather
-than proof fields paid by each instance author.
+without replaying the transition history. The logical network's `WellFormed`
+predicate requires **exactly one root**: `rootExists` supplies a root instance
+at the topology's root, and `rootUnique` identifies the slot of any two root
+instances. Uniqueness alone is insufficient, because an empty or child-only
+network would satisfy it vacuously. Root existence, root uniqueness, and the
+validity of attached parent/spawn relationships are global network laws, not
+proof fields paid by each instance author.
 
 `usedNominals` contains every process generation, channel epoch, child demand,
 message occurrence, and coalesced replacement ever allocated in the execution
@@ -1109,6 +1136,7 @@ inductive NetworkTransition (plan : ProcessPlan registry boundary) :
   | reroute (step : ExactRerouteTransition plan before after)
   | coalesce (step : ExactCoalescingTransition plan before after)
   | join (step : ExactJoinTransition plan before after)
+  | reapDeath (step : ExactDiedChildReapTransition plan before after)
   | detach (step : ExactDetachTransition plan before after)
   | restart (step : ExactRestartTransition plan before after)
 
@@ -1128,6 +1156,42 @@ demand/channel embedding, occurrence and resolve token, lifecycle authority,
 and obligation equation. Routing coverage proves every endpoint input/output
 enters through exactly one constructor: no fabrication, bypass, or unclassified
 death is possible.
+
+The constructor names above are schematic names for exact transition
+interfaces; their record layouts remain implementation-owned. Their lifecycle
+constraints are normative. `detach` requires the exact child in the
+before-world to be both `.running` and `.attached` under a current parent
+authority. It preserves that live incarnation, its request, state, outstanding
+demands, resources, obligations, and remembered parent while changing only
+`.attached parent` to `.detached parent`. It cannot detach, erase, or otherwise
+dispose of a `.died reason` incarnation. These lifecycle and root-parentage
+constraints are the normative resolution recorded by `g-design:297` for
+`c-process:103`.
+
+`join` is successful collection: it requires an attached child with a stored
+`.terminated result` and preserves that exact result through the parent-facing
+success disposition. `reapDeath` is the distinct died-child collection path. It
+requires an attached child whose stored lifecycle is the exact `.died reason`,
+requires the corresponding parent-facing death occurrence to have been
+delivered or recorded, and frees the slot only while the parent adopts or
+disposes of **exactly** the child's remaining obligations, custody, escrow, and
+resources. The reason and adoption equation are transition data; neither may be
+reconstructed, weakened, or erased by treating death as success or detachment.
+Standard child-death and reap constructors package these witnesses, so an
+ordinary process author supplies no new lifecycle proof fields.
+
+The migration keeps `a_corpse_may_be_orphaned` as a required negative fixture:
+the old two-step `childDied`-then-`detach` witness must be refuted by the new
+liveness premise. A paired positive fixture takes the same died attached child
+through `reapDeath` and checks the exact reason and adoption equation.
+
+`restart` replaces an ended incarnation but is not a reparenting transition. It
+preserves the exact parentage class and relation stored at the slot: a root
+restarts as the root; an attached child remains attached to the same exact
+parent incarnation; and a detached child retains the same exact former-parent
+record. Any change of parent authority requires a separate authorized lifecycle
+transition. This local equality belongs on `Restarts` for useful diagnostics,
+while `WellFormed` retains the global exactly-one-root invariant.
 
 `allocatedNominals` is definitionally empty for nonallocating transitions and
 contains every new process generation, channel epoch, local/child/message
@@ -1241,8 +1305,9 @@ does not prove acknowledgement or recover its resources.
 `NetworkTransition.childLifecycle` is indexed by the complete
 `ChildLifecycleEvent` family. Success/failure/ordinary termination consumes live
 lifecycle authority, establishes the exact terminal state and parent event,
-transfers or disposes every resource and obligation, and only then enables join
-or restart. The event's exact terminal result, cancellation reason, interruption
+transfers or disposes every resource and obligation, and only then enables the
+matching join, death-reap, or restart path. The event's exact terminal result,
+cancellation reason, interruption
 reason, fault, or violation is stored in the resulting protocol-indexed
 `ProcessLifecycle`; a death disposition supplies its exact `ProcessDeathReason`.
 Joins, supervisors, and audits therefore do not reconstruct an ending from a
@@ -1539,22 +1604,22 @@ structure ProcessCorrect (p : ProcessSpec) (accept : ProcessAcceptance p) where
     p.Initial request s issued emitted -> Invariant s
   initialDemands : ∀ request s issued emitted,
     p.Initial request s issued emitted -> accept.DemandsWellFormed issued
-  preserved : ∀ s event s' demands emitted,
-    Invariant s -> p.Step s event s' demands emitted -> Invariant s'
+  preserved : ∀ request s event s' demands emitted,
+    Invariant s -> p.Step request s event s' demands emitted -> Invariant s'
   terminal : ∀ request s result,
     Invariant s -> p.Terminal request s result ->
       accept.TerminalAccepts request result
-  terminalNoStep : forall state after result event issued emitted,
-    (forall request, p.Terminal request state result) ->
-    ¬ p.Step state event after issued emitted
+  terminalNoStep : forall request state after result event issued emitted,
+    p.Terminal request state result ->
+    ¬ p.Step request state event after issued emitted
   viewAccepts : forall facet, p.view = some facet ->
     forall state, Invariant state ->
       accept.ViewAccepts facet state (facet.render state)
   observationsAccept : forall request segmented runState,
     Reachable accept.terminalRemainder request segmented runState ->
       accept.TraceAccepts runState.history
-  demandsWellFormed : forall state after event issued emitted,
-    Invariant state -> p.Step state event after issued emitted ->
+  demandsWellFormed : forall request state after event issued emitted,
+    Invariant state -> p.Step request state event after issued emitted ->
       accept.DemandsWellFormed issued
   progress : forall request, MeetsProcessProgress p accept Invariant request
 
@@ -1632,6 +1697,17 @@ structure ProcessPlanRealizes {R : Type u} [ResourceModel R]
   demands : MeetsAllIndependentDemands plan spec
   resources : ResourceAxisRealizationFamily spec plan
 ```
+
+This request-local `terminalNoStep` is the law a driver with one concrete
+request can use. The migration must retain
+`Tests/Process/PrefixFixtures.lean`'s
+`upto_is_never_universally_terminal` as the required negative fixture for the
+old universally quantified, vacuous premise, and add the discriminating
+positive pair: state 3 cannot step for request 3, while the same state may step
+for request 4. The `ProcessSpec.Step` signature, `ProcessRun`, `ProcessCorrect`,
+local network stepping, progress, and spike consumers move together; c-process
+coordinates the Process-side migration with c-spike rather than requiring spike
+authors to bridge two transient signatures.
 
 `ProcessAcceptance` is trusted specification input when supplied directly. The
 preferred product path derives it from the precious `BehaviorContract`; a
@@ -1743,7 +1819,7 @@ inductive SequentialDecision
 structure SequentialMachine (boundary : DriverBoundary) where
   State Request Terminal : Type
   initial : Request -> State
-  decide : State -> SequentialDecision boundary State Terminal
+  decide : Request -> State -> SequentialDecision boundary State Terminal
   invariant : State -> Prop
   initialInvariant : forall request, invariant (initial request)
   internalPreserves : EveryInternalDecisionPreserves invariant decide
@@ -1775,7 +1851,7 @@ structure DirectRelationalProgram (boundary : DriverBoundary) where
   Initial : Request -> State ->
     AbstractDemandBag (EffectDemand boundary) ->
     List boundary.Observation -> Prop
-  Step : State -> DirectEvent boundary -> State ->
+  Step : Request -> State -> DirectEvent boundary -> State ->
     AbstractDemandBag (EffectDemand boundary) ->
     List boundary.Observation -> Prop
   Pending : State -> AbstractDemandBag (EffectDemand boundary)
@@ -2375,7 +2451,8 @@ structure ProcessLoopInvariant
 A reusable driver theorem proves initial construction and one exhaustive
 preservation/coverage case for every `NetworkTransition`, including spawn,
 send, receive, commit, child/root success or failure, ordinary close,
-cancellation resolution, fault, interruption, death, join, and restart,
+cancellation resolution, fault, interruption, death, join, death reaping,
+detachment, and restart,
 and the relationship between loop SCCs and process frontiers/measures. A large
 assembly loop does not restate the entire application semantics. Each dispatch
 path proves only that it implements one named transition of one process instance
