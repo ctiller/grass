@@ -3348,7 +3348,7 @@ Two consequences it found, both worth more than the count:
 inhabited nowhere — `terminated_result_is_exact` took a `Sound` hypothesis
 nothing had ever supplied. `Tests/Process/FrontierFixtures.lean`'s
 `waiting_is_wellFormed` and `waiting_is_sound` are the witnesses, and the fixture
-says plainly that seven of the eight clauses cannot fail at that plan:
+says plainly that all but one clause cannot fail at that plan:
 `nominalsAllocated` is the one with content. Inhabited, not exercised — the same
 distinction §10.59 drew for `ExactInitialNetwork` at the same plan.
 
@@ -3558,7 +3558,7 @@ world.
 **A correction to the paragraph above, made the same way the rest of this ledger
 gets corrected — by looking rather than by agreeing.** `WellFormed` does not
 belong on that list. `Tests/Process/WorldFixtures.lean`'s `quiet_is_wellFormed`
-is a second witness, at `serverPlan`. It is *vacuous* — all eight clauses are
+is a second witness, at `serverPlan`. It is *vacuous* — every clause is
 `absurd found`, the empty network being well formed because there is nothing to
 be wrong about — which is a different complaint from having no witness, and the
 sweep's own table said so. Stating it as "no witness" would have been the same
@@ -5038,7 +5038,7 @@ is `createsNothing`. Four vacuous fields out of six is the generality-by-vacuity
 **What this does not settle.** A merge is still *expressible* as a sequence in
 one sense: two `Coalesces` into two *different* carriers, the second consuming
 the first's carrier, is a chain and is not forbidden. That is a genuine coalesce
-chain rather than a half-done merge — `EscrowLedger.no_cycle` is what keeps it
+chain rather than a half-done merge — `CoalescesTo.no_cycle` is what keeps it
 finite — and §3 appears to permit it. Recorded rather than ruled on.
 
 ### 10.132 A root cannot die, and a step into a world is not a run that reaches it
@@ -5053,7 +5053,8 @@ instance to record a current parent. `NetworkTransition.dying_was_supervised` is
 that over the family: a step that *kills* an instance found it recording a
 current parent. The proof splits on the transition's own `scope` at
 `.instanceState kind slot`, discharges the negative branch with `touchesOnly`,
-and gives eleven separate reasons in the positive one.
+and gives eleven branches in the positive one, five of which are the same
+reason.
 
 Note what it does not say, because each reading was believed and refuted:
 
@@ -5079,8 +5080,8 @@ not; both halves were false.
 `ProcessPlan.UnkilledRootAt` says a slot holds an instance with no current parent
 that has not died. `start_holds_an_unkilled_root` gets it from
 `ExactInitialNetwork`; `execution_holds_an_unkilled_root` carries it across a
-whole `StepsTo`, taking `WellFormed` alongside because `slotsAgree` is what
-supplies the kind agreement `died_cast` needs. Each fixture world is then refused —
+whole `StepsTo`, and takes no well-formedness hypothesis: every statement it
+spends is at the incarnation's own kind, so nothing needs transporting. Each fixture world is then refused —
 some individually and the `holding` ones by a theorem quantified over every such
 world — with a `no_run_reaches_*` corollary stating the same thing about
 executions rather than leaving the inference to a reader.
@@ -5139,11 +5140,12 @@ clause says nothing. Local adversarial review built that world and proved
 **The fix is to drop the transport, not to add the guard as a conjunct.**
 `ProcessInstance.lifecycle` is already indexed by the incarnation's own kind, so
 `incarnation.lifecycle ≠ .died reason` is well-typed with no equation at all;
-`ProcessLifecycle.died_cast` bridges it to `dying_was_supervised`, which is
-stated at the slot's kind, and `execution_holds_an_unkilled_root` carries
-`WellFormed` so `slotsAgree` supplies the bridge where the proof needs it. Kind
-agreement belongs to well-formedness; the invariant should not have been
-asserting it by accident.
+The same fix belongs one declaration over, and a reviewer proved it by
+writing both halves: with `dying_was_supervised` also stated at the incarnation's
+own kind, the `WellFormed` hypothesis `execution_holds_an_unkilled_root` used to
+carry disappears, because it existed only to bridge a transport. A rule applied
+to one declaration and not to its consumer leaves the residue looking like a
+necessity — this entry called it one.
 
 A companion, `parentless_slot_is_unkilled`, kept the transported form, had no
 consumer, and was cited as load-bearing by a theorem that did not use it. It was
@@ -5168,7 +5170,7 @@ what was wrong with them was expressible in Lean and still true.
   was derived from, which survives every search for the refutation.
 * A sentence a reviewer had to refute by writing Lean **should become the Lean**.
   `a_corpse_may_be_orphaned`, `theJoinIntoTheDeadSender` and
-  `Tests/Process/AssertionFixtures.lean`'s `leakyAgreement` are all that.
+  `the_corpse_is_collected` are all that.
 * Resolve every backticked Lean-style name, **prefix included**, against the
   declaration set before committing. `Tools/DocstringAudit.py` checks identifiers
   only inside sentences carrying a strong-claim word, which `agent-bus`
@@ -5292,7 +5294,7 @@ tables as a reader's index and the files themselves as the record.
 | `Network/Progress.lean` | §7's progress theorem, as a no-infinite-silent-run law, over what a run can reach |
 | `Network/Initial.lean` | §3's `ExactInitialNetwork`, and `initial_is_wellformed` |
 | `Progress.lean` | the per-process livelock theorem: no silent cycle, no infinite silent run |
-| `Network/WellFormedness.lean` | §3's capstone: a step of a well-formed network reaches a well-formed one, all eight clauses |
+| `Network/WellFormedness.lean` | §3's capstone: a step of a well-formed network reaches a well-formed one, every clause |
 | `Weave/Blend.lean` | §8's disjoint weave, and that routing is forced |
 
 `Grass/Process/Network/Transition.lean` was reworked six times over the same
@@ -5354,7 +5356,7 @@ full `ProcessCorrect`; the first two are now excluded and the third is §10.70.
 ### The capstone, and what proving it cost
 
 `ProcessPlan.wellFormed_preserved` — a step of a well-formed network reaches a
-well-formed one — is proved, all eight clauses, axioms clean. It is worth a
+well-formed one — is proved, every clause, axioms clean. It is worth a
 paragraph here because of the ratio.
 
 §10.73 was a clause-by-clause *argument* for it, filed with a warning that it

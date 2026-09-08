@@ -170,7 +170,7 @@ theorem aliased_is_not_wellFormed : ¬ aliased.WellFormed :=
 
 open Classical in
 /--
-**And the other seven clauses do not refuse it**, which is why the eighth had to
+**And no other clause refuses it**, which is why this one had to
 be added rather than derived.
 
 Only `occurrencesOnTheirSession` is even about the escrow ledger, and it is

@@ -1183,8 +1183,10 @@ structure Restarts (before after : plan.LogicalProcessNetwork)
   `LogicalProcessNetworkCore.RootUnique` is a well-formedness law a second root
   breaks.
 
-  Restarting the root is not a network step under any reading: a supervisor
-  restarts a child, and a root has no supervisor. If a root ends the program is
+  A supervisor restarts a child, and a root has no supervisor — but note that
+  this field is what says so, and it says it of the *new* incarnation only:
+  nothing here constrains the old one, so a restart at a root's slot is admitted
+  by the family and deletes the root. §10.132's last section. If a root ends the program is
   over, and starting again is a new run — `ExactInitialNetwork`, not a
   transition.
 
@@ -2248,17 +2250,14 @@ private theorem not_dead_where_nothing_moved
     {was now : ProcessInstance plan.topology} {reason : ProcessDeathReason}
     (agrees : before.instances kind slot = after.instances kind slot)
     (foundBefore : before.instances kind slot = some was)
-    (notAlreadyDead : ∀ (earlier : ProcessDeathReason) (wasKind : was.kind = kind),
-      (wasKind ▸ was.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
-        ≠ .died earlier)
+    (notAlreadyDead : ∀ earlier : ProcessDeathReason,
+      was.lifecycle ≠ ProcessLifecycle.died earlier)
     (foundAfter : after.instances kind slot = some now)
-    (sameKind : now.kind = kind)
-    (dead : (sameKind ▸ now.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
-      = .died reason) : False := by
+    (dead : now.lifecycle = ProcessLifecycle.died reason) : False := by
   rw [foundBefore, foundAfter] at agrees
   injection agrees with same
   subst same
-  exact notAlreadyDead reason sameKind dead
+  exact notAlreadyDead reason dead
 
 /--
 **A step that kills an instance found it recording a current parent.**
@@ -2320,19 +2319,16 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
     {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
     {was now : ProcessInstance plan.topology} {reason : ProcessDeathReason}
     (foundBefore : before.instances kind slot = some was)
-    (notAlreadyDead : ∀ (earlier : ProcessDeathReason) (wasKind : was.kind = kind),
-      (wasKind ▸ was.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
-        ≠ .died earlier)
+    (notAlreadyDead : ∀ earlier : ProcessDeathReason,
+      was.lifecycle ≠ ProcessLifecycle.died earlier)
     (foundAfter : after.instances kind slot = some now)
-    (sameKind : now.kind = kind)
-    (dead : (sameKind ▸ now.lifecycle : ProcessLifecycle (plan.topology.protocol kind))
-      = .died reason) :
+    (dead : now.lifecycle = ProcessLifecycle.died reason) :
     was.parentage.currentParent ≠ none := by
   by_cases inScope : transition.scope (.instanceState kind slot)
   case neg =>
     exact absurd (transition.touchesOnly (.instanceState kind slot) inScope)
       (fun agrees =>
-        not_dead_where_nothing_moved agrees foundBefore notAlreadyDead foundAfter sameKind dead)
+        not_dead_where_nothing_moved agrees foundBefore notAlreadyDead foundAfter dead)
   case pos =>
     revert inScope
     cases transition with
@@ -2346,9 +2342,9 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
         rw [foundAfter] at foundLater
         injection foundLater with isNow
         subst isNow
-        have transported := (ProcessLifecycle.live_cast sameKind now.lifecycle).mpr liveLater
-        rw [dead] at transported
-        exact transported.elim
+        have running : now.lifecycle.Live := liveLater
+        rw [dead] at running
+        exact running.elim
       · exact absurd isPending (by simp)
       · exact absurd isRegion (by simp)
     | spawn otherKind otherSlot _ _ _ step =>
@@ -2371,9 +2367,9 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
         rw [foundAfter] at foundLater
         injection foundLater with isNow
         subst isNow
-        have transported := (ProcessLifecycle.live_cast sameKind now.lifecycle).mpr liveLater
-        rw [dead] at transported
-        exact transported.elim
+        have running : now.lifecycle.Live := liveLater
+        rw [dead] at running
+        exact running.elim
       · exact absurd isNominals (by simp)
       · exact absurd isPending (by simp)
     | interrupt otherKind otherSlot _ _ _ step =>
@@ -2386,7 +2382,8 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
         rw [foundAfter] at foundLater
         injection foundLater with isNow
         subst isNow
-        exact absurd (dead.symm.trans isEnding) (by intro equal; cases equal)
+        refine absurd ((ProcessLifecycle.died_cast laterKind).mpr dead |>.symm.trans isEnding)
+          (by intro equal; cases equal)
       · exact absurd isObligations (by simp)
     | fault otherKind otherSlot _ _ step =>
       intro inScope
@@ -2398,7 +2395,8 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
         rw [foundAfter] at foundLater
         injection foundLater with isNow
         subst isNow
-        exact absurd (dead.symm.trans isEnding) (by intro equal; cases equal)
+        refine absurd ((ProcessLifecycle.died_cast laterKind).mpr dead |>.symm.trans isEnding)
+          (by intro equal; cases equal)
       · exact absurd isObligations (by simp)
     | environmentViolation otherKind otherSlot _ _ step =>
       intro inScope
@@ -2410,7 +2408,8 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
         rw [foundAfter] at foundLater
         injection foundLater with isNow
         subst isNow
-        exact absurd (dead.symm.trans isEnding) (by intro equal; cases equal)
+        refine absurd ((ProcessLifecycle.died_cast laterKind).mpr dead |>.symm.trans isEnding)
+          (by intro equal; cases equal)
       · exact absurd isObligations (by simp)
     | childCancelled otherKind otherSlot _ _ _ step =>
       intro inScope
@@ -2422,7 +2421,8 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
         rw [foundAfter] at foundLater
         injection foundLater with isNow
         subst isNow
-        exact absurd (dead.symm.trans isEnding) (by intro equal; cases equal)
+        refine absurd ((ProcessLifecycle.died_cast laterKind).mpr dead |>.symm.trans isEnding)
+          (by intro equal; cases equal)
       · exact absurd isObligations (by simp)
     | processTermination otherKind otherSlot _ _ step =>
       intro inScope
@@ -2434,7 +2434,8 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
         rw [foundAfter] at foundLater
         injection foundLater with isNow
         subst isNow
-        exact absurd (dead.symm.trans isEnding) (by intro equal; cases equal)
+        refine absurd ((ProcessLifecycle.died_cast laterKind).mpr dead |>.symm.trans isEnding)
+          (by intro equal; cases equal)
       · exact absurd isObligations (by simp)
     | childDied otherKind otherSlot _ _ wasChild step =>
       intro inScope
@@ -2464,8 +2465,9 @@ theorem dying_was_supervised (transition : plan.NetworkTransition before after)
       injection foundTo with isNow
       subst isWas
       subst isNow
-      exact absurd (sameLifecycle.symm.trans dead : _ = ProcessLifecycle.died reason)
-        (notAlreadyDead reason fromKind)
+      refine absurd ?_ (notAlreadyDead reason)
+      refine (ProcessLifecycle.died_cast fromKind).mp ?_
+      exact sameLifecycle.symm.trans ((ProcessLifecycle.died_cast toKind).mpr dead)
     | send _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
     | commit _ step => intro inScope; exact absurd inScope.2 (by simp)
     | receive _ _ _ step =>

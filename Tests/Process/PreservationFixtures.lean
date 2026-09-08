@@ -471,9 +471,10 @@ from an unreachable world is a real step, and it is not a step of any run.
 
 **§10.132 ran that down and got the answer wrong the first time.** The first
 version of this section gave three of the four a step into their before-world
-and said they were therefore reachable. A fresh reviewer refuted it: each new
-predecessor world has an *empty root slot*, so none of them is a world of a run
-either, and the gap had moved back exactly one step rather than closing.
+and said they were therefore reachable. A fresh reviewer refuted it: those predecessor worlds are
+no more worlds of a run than the ones they precede — most for want of anything in
+the root slot at all — so the gap had moved back exactly one step rather than
+closing.
 
 What closes it is an invariant over executions rather than steps.
 `ProcessPlan.execution_holds_an_unkilled_root` says every world of every run
@@ -762,7 +763,6 @@ theorem every_run_holds_an_unkilled_root
     (execution : serverPlan.StepsTo start final) :
     serverPlan.UnkilledRootAt final .listener () :=
   serverPlan.execution_holds_an_unkilled_root execution
-    isStart.initial_is_wellformed
     (ProcessPlan.start_holds_an_unkilled_root isStart)
     (fun _ _ _ _ _ restart => no_restart_at_the_root_slot restart)
 

@@ -431,10 +431,13 @@ theorem start_holds_an_unkilled_root {request : (plan.topology.protocol plan.top
 slot.**
 
 `NetworkTransition.parentless_slot_survives` at every step of a run for the
-parentage half, and `NetworkTransition.dying_was_supervised` for the death half,
-bridged by `WellFormed.slotsAgree` and `ProcessLifecycle.died_cast` — the bridge
-is why the well-formedness hypothesis is here rather than a convenience. The
-disjunct is the one `parentless_slot_survives` concludes with:
+parentage half, and `NetworkTransition.dying_was_supervised` for the death half.
+Neither takes a well-formedness hypothesis: both are stated at the incarnation's
+own kind, so no transport needs bridging and no `slotsAgree` is spent. An earlier
+version carried `WellFormed` through the induction for exactly that bridge, which
+was an artefact of `dying_was_supervised` having been stated at the slot's kind
+rather than a fact about the invariant. The disjunct is the one
+`parentless_slot_survives` concludes with:
 `Restarts.restartsAChild` constrains only the new incarnation, so a restart at
 the root's slot is the single way an execution can end
 without a root. A plan at which that restart is unconstructible —
@@ -456,7 +459,6 @@ theorem execution_holds_an_unkilled_root
     {kind : plan.topology.ProcessKind} {slot : plan.topology.InstanceId kind}
     {network final : plan.LogicalProcessNetwork}
     (execution : plan.StepsTo network final)
-    (wellFormed : network.WellFormed)
     (held : plan.UnkilledRootAt network kind slot)
     (noRestart : ∀ (before after : plan.LogicalProcessNetwork)
       (allocation : Allocation plan.topology.Carrier)
@@ -464,23 +466,16 @@ theorem execution_holds_an_unkilled_root
       (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation),
       plan.Restarts before after kind slot allocation emitted localEmitted → False) :
     plan.UnkilledRootAt final kind slot := by
-  have carried : plan.UnkilledRootAt final kind slot ∧ final.WellFormed := by
-    induction execution with
-    | still => exact ⟨held, wellFormed⟩
-    | more _ step carried =>
-      obtain ⟨⟨was, found, parentless, unkilled⟩, formed⟩ := carried
-      have formedAfter := plan.wellFormed_preserved step formed
-      rcases step.transition.parentless_slot_survives found parentless with
-        ⟨now, foundNow, stillParentless⟩ | ⟨allocation, emitted, localEmitted, restart⟩
-      · refine ⟨⟨now, foundNow, stillParentless, ?_⟩, formedAfter⟩
-        intro reason dead
-        obtain ⟨nowKind, _⟩ := formedAfter.slotsAgree kind slot now foundNow
-        exact step.transition.dying_was_supervised found
-          (fun earlier wasKind carriedDead =>
-            unkilled earlier ((ProcessLifecycle.died_cast wasKind).mp carriedDead))
-          foundNow nowKind ((ProcessLifecycle.died_cast nowKind).mpr dead) parentless
-      · exact absurd restart (noRestart _ _ allocation emitted localEmitted)
-  exact carried.1
+  induction execution with
+  | still => exact held
+  | more _ step carried =>
+    obtain ⟨was, found, parentless, unkilled⟩ := carried
+    rcases step.transition.parentless_slot_survives found parentless with
+      ⟨now, foundNow, stillParentless⟩ | ⟨allocation, emitted, localEmitted, restart⟩
+    · refine ⟨now, foundNow, stillParentless, ?_⟩
+      intro reason dead
+      exact step.transition.dying_was_supervised found unkilled foundNow dead parentless
+    · exact absurd restart (noRestart _ _ allocation emitted localEmitted)
 
 /-- And a whole family of them, which is what §8's aggregate consumes. -/
 theorem family_holds_along_every_execution_from_a_start
