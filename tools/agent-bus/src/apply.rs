@@ -495,33 +495,35 @@ fn apply_registered(state: &mut BusState, env: &Envelope, d: &AgentRegistered) -
             env.agent
         )));
     }
-    // The role the agent declares must be the role the registry binds it to.
+    // The declared role is deliberately *not* compared against the registry
+    // here, and this is exactly the question `require_bootstrap_coordinator`'s
+    // doc comment says replay must never ask -- read it: the argument is the
+    // same one, reached from the other direction.
     //
-    // Every authority check in this crate reads `AgentState::primary_role`,
-    // which comes solely from this payload, while `cli::status` prints the
-    // registry's `MemberBinding::role` -- so a divergence is invisible in the
-    // one place an operator would look, and the declared value is the one
-    // that decides what the identity may do. An identity the roster binds as
-    // `auditor` could declare itself an implementor and hold every authority
-    // gates 20 and 21 deny it.
+    // `state.roster_epoch` is whatever epoch the registry tip names at
+    // *reduction* time, not the epoch that was current when this event was
+    // authored, and `sync::reduce_local` re-reduces every event on every read.
+    // `agent.registered` is sequence zero, immutable and never amendable, so
+    // there is no follow-up event that could ever repair a mismatch. Nothing
+    // enforces role immutability on the registry side either --
+    // `registry::propose_transition` "trusts its caller entirely" -- so a
+    // single hand-run epoch transition that rebinds one agent's role makes
+    // that agent's registration permanently unreducible on every host holding
+    // the new epoch, and `reduce` propagates with a bare `?`, so that is the
+    // whole bus down for the whole fleet, forever. The check did not even hold
+    // uniformly to buy that risk: it was silently skipped for any agent no
+    // longer in `active_members`, so a retired agent's registration was judged
+    // by a different rule than a live one's.
     //
-    // Reachable without malice: `cli::register` lands the registry transition
-    // before draining the registration event, and refuses to run again once
-    // the member exists, so a failed drain leaves a hand-written `submit
-    // --kind agent.registered` as the only way forward -- and that payload
-    // may name any role.
-    if let Some(binding) = state
-        .roster_epoch
-        .as_ref()
-        .and_then(|e| e.active_members.get(&env.agent))
-    {
-        if binding.role != d.primary_role {
-            return Err(invalid(format!(
-                "{}: registers as {} but the roster epoch binds {} as {} -- the declared role must match the registry, since it is the declared one that grants authority",
-                env.id, d.primary_role, env.agent, binding.role
-            )));
-        }
-    }
+    // The rule itself is real and is not weakened -- every authority check in
+    // this crate reads `AgentState::primary_role`, which comes solely from
+    // this payload, while `cli::status` prints the registry's
+    // `MemberBinding::role`, so a divergence is invisible in the one place an
+    // operator would look and the declared value is the one that decides what
+    // the identity may do. It moves to publication, where the roster has one
+    // answer and a refusal costs only a resubmission:
+    // `coordinator::verify_declared_role_matches_roster`, alongside the
+    // membership and liveness questions relocated there for the same reason.
     if d.primary_role != Role::Implementor
         && (d.product_base.is_some() || d.product_branch.is_some())
     {
@@ -2490,9 +2492,21 @@ fn apply_friction_synthesized(
             )));
         }
     }
+    // Added to the theme's set, never overwriting it. Two agents synthesising
+    // the same theme from disjoint reports reference different
+    // `friction.reported` events and each other's nothing, so
+    // `topological_order` gives them no edge and both orders are valid. The
+    // `insert` that stood here kept whichever arrived last, so the two orders
+    // left different ids behind -- silently, with no error to notice, which is
+    // exactly the divergence `state::BusState::friction_theme_synthesis`'s own
+    // comment now records. "This event synthesised this theme" is the fact
+    // that is true in every order; which of them is *current* is a question
+    // for a reader, over the whole set.
     state
         .friction_theme_synthesis
-        .insert(d.theme.clone(), env.id.clone());
+        .entry(d.theme.clone())
+        .or_default()
+        .insert(env.id.clone());
     state.friction_synthesis.insert(env.id.clone(), d.clone());
     Ok(())
 }
@@ -3808,20 +3822,96 @@ mod tests {
         }
     }
 
-    /// M4: the role an agent declares must be the role the registry binds it
-    /// to. Every authority check reads the declared value, while `status`
-    /// prints the registry's -- so a divergence grants authority invisibly.
+    /// M4's rule -- the role an agent declares must be the role the registry
+    /// binds it to -- is real, but reduction is the wrong place to ask it, and
+    /// this pins that it no longer does.
+    ///
+    /// `apply_registered` used to compare the payload against
+    /// `state.roster_epoch`: the epoch the registry tip names at *reduction*
+    /// time, on whichever host is reducing, not the epoch that was current
+    /// when the event was authored. `agent.registered` is sequence zero,
+    /// immutable and never amendable, and `registry::propose_transition`
+    /// "trusts its caller entirely" -- it enforces no role immutability -- so
+    /// one hand-run epoch transition that rebound a role made that agent's
+    /// registration permanently unreducible on every host holding the new
+    /// epoch. `reduce` propagates with a bare `?` and has no per-event
+    /// isolation, so that is not one broken record, it is every host unable to
+    /// read the bus at all, forever. It is precisely the failure
+    /// `require_bootstrap_coordinator`'s doc comment sets out, surviving in a
+    /// second place.
+    ///
+    /// The pair to this is `coordinator::verify_declared_role_matches_roster`
+    /// and `drain_outbox_rejects_a_registration_declaring_a_role_the_registry_
+    /// does_not_bind`, where the roster has exactly one answer and refusing
+    /// costs one resubmission.
     #[test]
-    fn a_registration_may_not_declare_a_role_the_registry_does_not_bind() {
-        let mut state = empty_state(&[("aud", Role::Auditor)]);
+    fn a_registration_reduces_under_a_roster_epoch_that_rebound_its_role() {
         let aud = a("aud");
-        let err = apply_event(&mut state, &register(&aud, Role::Implementor)).unwrap_err();
-        assert!(
-            err.to_string().contains("must match the registry"),
-            "an auditor may not register as an implementor, got: {err}"
+        let reg = register(&aud, Role::Auditor);
+        let stood_down = Envelope::new(
+            &aud,
+            1,
+            no_frontier(),
+            &EventData::AgentStatus(AgentStatusEvent {
+                status: LifecycleStatus::Done,
+                note: text("audit complete"),
+                product_branch: None,
+                product_commit: None,
+            }),
+            [],
         );
-        // The honest declaration still works.
-        apply_ok(&mut state, &register(&aud, Role::Auditor));
+        let streams: BTreeMap<Agent, Vec<Envelope>> =
+            [(aud.clone(), vec![reg.clone(), stood_down])]
+                .into_iter()
+                .collect();
+
+        let bind = |id: u64, role: Role| {
+            let mut members = BTreeMap::new();
+            members.insert(
+                aud.clone(),
+                MemberBinding {
+                    role,
+                    host: short("host1"),
+                    coordinator_custody_epoch: 0,
+                    standby: None,
+                },
+            );
+            RosterEpoch::root(hash(id), members)
+        };
+        let as_registered = bind(900, Role::Auditor);
+        // The same identity, rebound by a later administrative transition.
+        let rebound = bind(901, Role::Implementor);
+
+        let reduce_under = |epoch: &RosterEpoch| {
+            let mut known = BTreeMap::new();
+            known.insert(epoch.id.clone(), epoch.clone());
+            reduce(config(), Some(epoch.clone()), known, &streams)
+        };
+
+        let original = reduce_under(&as_registered)
+            .expect("the roster the agent registered under obviously reduces");
+        let mut after_rebinding = reduce_under(&rebound).expect(
+            "a registry rebinding must not make an immutable sequence-zero event unreducible",
+        );
+
+        // The registration is recorded from its own payload, and the record is
+        // the same one either way -- the whole point of section 2.3's "an
+        // event consumes the exact historical state it observed."
+        assert_eq!(original.agents[&aud].primary_role, Role::Auditor);
+        assert_eq!(after_rebinding.agents[&aud].primary_role, Role::Auditor);
+
+        // Compare the whole state, not just the agent record. The only
+        // difference permitted is the roster itself, which is an *input* to
+        // `reduce` rather than anything an event wrote -- so it is normalised
+        // away explicitly here instead of by comparing a narrow sub-map, which
+        // would hide an order-dependent write somewhere else.
+        after_rebinding.roster_epoch = original.roster_epoch.clone();
+        after_rebinding.known_epochs = original.known_epochs.clone();
+        assert_eq!(
+            format!("{original:#?}"),
+            format!("{after_rebinding:#?}"),
+            "which epoch a host happens to hold must not change what the log reduces to"
+        );
     }
 
     /// The check is `require_self_active_role`, not merely a role
@@ -4680,6 +4770,160 @@ mod tests {
         assert_eq!(
             format!("{resolution_first:#?}"),
             format!("{newcomer_first:#?}"),
+            "GATE 15/16: both valid orders must reduce to identical state"
+        );
+    }
+
+    /// A *second* claim from an agent that already claimed the same
+    /// predecessor must get the same verdict whether or not a coordinator's
+    /// `lifecycle.conflict_resolved` was replayed first.
+    ///
+    /// `ExclusiveTracker::record`'s same-agent refusal used to sit behind a
+    /// `resolved` lookup, and `resolved` is written by a coordinator's event
+    /// on a *different* stream. `topological_order` builds edges from `refs`
+    /// and each stream's own predecessor, never from `observed`: the
+    /// resolution references the two racers, but nothing gives it an edge to a
+    /// later claim by one of their agents, so both orders below are valid
+    /// linear extensions. With the resolution naming *coord1*'s candidate, the
+    /// resolved branch only refused coord1's own agent and fell through to a
+    /// plain insert for alice -- `Ok`. Reduce the claim first and the
+    /// unresolved branch found alice's own earlier claim -- `Err`, and with no
+    /// per-event isolation in `reduce` that is the whole bus unreadable,
+    /// permanently, on every host that fetched alice's stream first. The
+    /// author's own host was the permissive one whenever it had the
+    /// resolution, so `dry_run` passed and the event published.
+    ///
+    /// Both halves are asserted here, because either alone admits a wrong fix:
+    ///
+    ///  - the same-agent claim is refused *identically* in both orders (the
+    ///    refusal itself stays -- streams are single-writer and every linear
+    ///    extension orders an agent's own events the same way, so this is one
+    ///    of the few questions replay may soundly ask, and refusing
+    ///    deterministically is what stops it being publishable at all); and
+    ///  - a *cross-agent* late claim on the same key still reduces in both
+    ///    orders, converges on byte-identical whole state, and is actually
+    ///    recorded -- so "refuse everything late" cannot pass either.
+    #[test]
+    fn a_second_same_agent_claim_is_refused_the_same_either_side_of_a_resolution() {
+        let members = [
+            ("alice", Role::Implementor),
+            ("bob", Role::Implementor),
+            ("carol", Role::Implementor),
+            ("dave", Role::Implementor),
+            ("coord1", Role::Coordinator),
+            ("coord2", Role::Coordinator),
+        ];
+        let (alice, bob, carol, dave) = (a("alice"), a("bob"), a("carol"), a("dave"));
+        let (coord1, coord2) = (a("coord1"), a("coord2"));
+
+        let issue_env = Envelope::new(
+            &alice,
+            1,
+            no_frontier(),
+            &EventData::IssueOpened(IssueOpened {
+                target: bob.clone(),
+                issue_kind: IssueKind::Bug,
+                severity: Priority::Normal,
+                summary: text("s"),
+                code_commit: None,
+                locations: vec![],
+                expected: None,
+                observed_behavior: None,
+                reproduction: vec![],
+                blocks: StringSet::default(),
+                evidence: StringSet::default(),
+            }),
+            [],
+        );
+        let reassign = |who: &Agent, seq: u64, to: &Agent, why: &str| {
+            Envelope::new(
+                who,
+                seq,
+                no_frontier(),
+                &EventData::IssueReassigned(IssueReassigned {
+                    issue: issue_env.id.clone(),
+                    previous_assignment: issue_env.id.clone(),
+                    previous_target: bob.clone(),
+                    new_target: to.clone(),
+                    reason: text(why),
+                }),
+                [issue_env.id.clone()],
+            )
+        };
+        let by_alice = reassign(&alice, 2, &carol, "r1");
+        let by_coord1 = reassign(&coord1, 1, &dave, "r2");
+        // The resolution names coord1's candidate, not alice's -- that is the
+        // whole point: the old resolved branch only ever refused the *winner's*
+        // agent, so alice slipped through it.
+        let resolve_env = Envelope::new(
+            &coord1,
+            2,
+            frontier_seeing(&[&by_alice.id]),
+            &EventData::LifecycleConflictResolved(LifecycleConflictResolved {
+                root: by_alice.id.clone(),
+                competing: StringSet::from_iter([by_alice.id.clone(), by_coord1.id.clone()]),
+                selected: by_coord1.id.clone(),
+                reason: text("the coordinator's reassignment stands"),
+                user_authority: text("operator"),
+            }),
+            [by_alice.id.clone(), by_coord1.id.clone()],
+        );
+        // alice claims the same predecessor a second time. Nothing here
+        // references the resolution, and nothing in the resolution references
+        // this, so a host may reduce them in either order.
+        let again_by_alice = reassign(&alice, 3, &dave, "r1 again");
+        // The control: an agent with no prior claim on this key, arriving just
+        // as late.
+        let by_coord2 = reassign(&coord2, 1, &carol, "r3");
+
+        let run = |latecomer: &Envelope, latecomer_first: bool| {
+            let mut state = empty_state(&members);
+            for (name, role) in members {
+                apply_ok(&mut state, &register(&a(name), role));
+            }
+            apply_ok(&mut state, &issue_env);
+            apply_ok(&mut state, &by_alice);
+            apply_ok(&mut state, &by_coord1);
+            let tail: Vec<Envelope> = if latecomer_first {
+                vec![latecomer.clone(), resolve_env.clone()]
+            } else {
+                vec![resolve_env.clone(), latecomer.clone()]
+            };
+            reduce_onto(state, &tail)
+        };
+
+        // Half one: identical verdict, message included. The message reaches an
+        // operator through a rejection receipt, so two hosts giving different
+        // reasons for the same event would be its own divergence.
+        let claim_first = run(&again_by_alice, true).err().map(|e| e.to_string());
+        let resolution_first = run(&again_by_alice, false).err().map(|e| e.to_string());
+        assert_eq!(
+            claim_first, resolution_first,
+            "whether a second same-agent claim is fatal must not depend on whether the \
+             coordinator's resolution was replayed first"
+        );
+        let refusal = claim_first.expect("a second claim on the same predecessor is refused");
+        assert!(
+            refusal.contains("already claimed the same predecessor"),
+            "the refusal must be the order-independent group-membership one: {refusal}"
+        );
+
+        // Half two: the cross-agent latecomer is unaffected -- still recorded,
+        // still reducible in both orders, still convergent. A fix that simply
+        // refused every claim on a resolved key would pass half one and fail
+        // here.
+        let control_first = run(&by_coord2, true).expect("a cross-agent late claim must reduce");
+        let control_second = run(&by_coord2, false).expect("a cross-agent late claim must reduce");
+        assert!(
+            control_first.exclusive.is_contested(&by_coord2.id),
+            "the late claim must be recorded as a member of the resolved group, not silently \
+             skipped -- `is_contested` is true exactly for a recorded non-winner"
+        );
+        // The whole state, not one sub-map: a narrow compare has already let a
+        // real order-dependent write through this file's suite once.
+        assert_eq!(
+            format!("{control_first:#?}"),
+            format!("{control_second:#?}"),
             "GATE 15/16: both valid orders must reduce to identical state"
         );
     }
@@ -5883,7 +6127,7 @@ mod tests {
         apply_ok(&mut state, &env);
         assert_eq!(
             state.friction_theme_synthesis.get(&topic("proof.rebuild")),
-            Some(&env.id)
+            Some(&BTreeSet::from([env.id.clone()]))
         );
     }
 
@@ -5982,6 +6226,94 @@ mod tests {
         assert!(
             err.to_string().contains("revisit_trigger must be set"),
             "{err}"
+        );
+    }
+
+    /// Two agents synthesising the same theme concurrently must converge.
+    ///
+    /// This is the confluence half of the reduction-DoS class rather than the
+    /// totality half, and it is the quieter failure of the two: nothing
+    /// returns `Err`, nothing wedges, the fleet keeps running -- and two hosts
+    /// hold permanently different answers for the theme with nothing to
+    /// surface it. Each synthesis cites its own author's `friction.reported`
+    /// and neither cites the other, so `topological_order` gives the pair no
+    /// edge; the `insert` that used to stand in `apply_friction_synthesized`
+    /// simply kept whichever the host happened to reduce last, and the
+    /// measured result was `{"review-latency": bob:2}` forward and
+    /// `{"review-latency": alice:2}` reversed.
+    ///
+    /// Recording the set is the fix that survives, for the same reason
+    /// `ReviewChain::authorizations` is a `BTreeSet`: "these events
+    /// synthesised this theme" is true in every order, while "this one is the
+    /// most recent" was never a fact reduction could know.
+    #[test]
+    fn two_concurrent_syntheses_of_one_theme_converge_and_are_both_recorded() {
+        let (alice, bob) = (a("alice"), a("bob"));
+        let members = [("alice", Role::Coordinator), ("bob", Role::Coordinator)];
+
+        let report = |who: &Agent, area: &str| {
+            Envelope::new(
+                who,
+                1,
+                no_frontier(),
+                &EventData::FrictionReported(friction_report(area)),
+                [],
+            )
+        };
+        let by_alice = report(&alice, "proof.rebuild");
+        let by_bob = report(&bob, "review.turnaround");
+
+        // Same theme, disjoint reports, neither observing the other.
+        let synthesis = |who: &Agent, cites: &EventId| {
+            Envelope::new(
+                who,
+                2,
+                frontier_seeing(&[cites]),
+                &EventData::FrictionSynthesized(synthesized(
+                    "review-latency",
+                    &[cites],
+                    crate::common::FrictionDispositionKind::AcceptedCost,
+                )),
+                [cites.clone()],
+            )
+        };
+        let syn_alice = synthesis(&alice, &by_alice.id);
+        let syn_bob = synthesis(&bob, &by_bob.id);
+
+        let run = |alice_first: bool| {
+            let mut state = empty_state(&members);
+            for (name, role) in members {
+                apply_ok(&mut state, &register(&a(name), role));
+            }
+            apply_ok(&mut state, &by_alice);
+            apply_ok(&mut state, &by_bob);
+            let tail: Vec<Envelope> = if alice_first {
+                vec![syn_alice.clone(), syn_bob.clone()]
+            } else {
+                vec![syn_bob.clone(), syn_alice.clone()]
+            };
+            reduce_onto(state, &tail)
+                .expect("both orders are valid linear extensions and must reduce")
+        };
+
+        let forward = run(true);
+        let reverse = run(false);
+
+        // Both must be *recorded*: a "fix" that skipped the second write would
+        // converge just as well and lose half the evidence.
+        assert_eq!(
+            forward
+                .friction_theme_synthesis
+                .get(&topic("review-latency")),
+            Some(&BTreeSet::from([syn_alice.id.clone(), syn_bob.id.clone()])),
+            "both syntheses must be recorded against the theme they name"
+        );
+        // The whole state, not just the one map -- a narrow compare has
+        // already let a real order-dependent write through this suite.
+        assert_eq!(
+            format!("{forward:#?}"),
+            format!("{reverse:#?}"),
+            "GATE 15/16: both valid orders must reduce to identical state"
         );
     }
 

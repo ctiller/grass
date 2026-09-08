@@ -246,9 +246,24 @@ pub struct BusState {
     pub friction_reports: BTreeMap<EventId, FrictionReported>,
     /// Every `friction.synthesized` event, verbatim.
     pub friction_synthesis: BTreeMap<EventId, FrictionSynthesized>,
-    /// The most recent synthesis event for each theme -- what a later
-    /// `duplicate_of` reference and `agent-bus friction --theme` both read.
-    pub friction_theme_synthesis: BTreeMap<crate::scalars::CoordinationTopic, EventId>,
+    /// Every synthesis event published for each theme.
+    ///
+    /// A set, and load-bearing for the same reason `authorizations`/`merged`/
+    /// `reconciled` above are. This used to hold one `EventId` per theme, "the
+    /// most recent synthesis", written with a plain `insert` that overwrote
+    /// whatever was there. Two agents synthesising the same theme from
+    /// disjoint reports have no `refs` edge between them, so both orders are
+    /// valid linear extensions and each left a different id behind: no error,
+    /// no wedge, just two hosts quietly disagreeing about the theme forever --
+    /// which is worse than a wedge, because nothing surfaces it.
+    ///
+    /// "Most recent" was never a fact reduction could know: there is no
+    /// canonical order across independent per-agent streams to be recent
+    /// *in*. What is true in every order is which events named the theme, so
+    /// that is what is recorded, and any reader wanting one of them picks by a
+    /// rule of its own from the whole set (`BTreeSet` iterates in `EventId`
+    /// order, which is the same on every host).
+    pub friction_theme_synthesis: BTreeMap<crate::scalars::CoordinationTopic, BTreeSet<EventId>>,
     /// Every `broadcast.published` event, verbatim.
     pub broadcasts: BTreeMap<EventId, BroadcastPublished>,
     /// Who has acknowledged each broadcast, by `broadcast.acknowledged`.

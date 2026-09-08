@@ -252,6 +252,20 @@ pub fn drain_outbox(
                 continue;
             }
         }
+        // The declared-role-versus-registry check, relocated out of
+        // `apply::apply_registered` -- see `verify_declared_role_matches_
+        // roster`. `epoch` here is the same registry epoch this drain
+        // authorized the stream write against moments ago, refreshed with the
+        // rest of the batch when gate 17 required a fetch.
+        if let Err(e) = verify_declared_role_matches_roster(&epoch, agent, &data) {
+            let reason = e.to_string();
+            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
+            rejected.push(RejectedCandidate {
+                kind: candidate.kind.clone(),
+                reason,
+            });
+            continue;
+        }
         if let Err(e) = verify_author_active(&state, agent, &data) {
             let reason = e.to_string();
             reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
@@ -823,6 +837,61 @@ fn verify_author_active(
             "{agent} is retired or otherwise inactive, so it cannot publish this event"
         ))),
     }
+}
+
+/// An `agent.registered` must declare the role the registry actually binds
+/// this identity to.
+///
+/// Every authority check in `apply` reads `AgentState::primary_role`, which
+/// comes solely from that payload, while `cli::status` prints the registry's
+/// `MemberBinding::role` -- so a divergence is invisible in the one place an
+/// operator would look, and the declared value is the one that decides what
+/// the identity may do. An identity the roster binds as `auditor` could
+/// declare itself an implementor and hold every authority gates 20 and 21
+/// deny it. It is reachable without malice: `cli::register` lands the
+/// registry transition before draining the registration event and refuses to
+/// run again once the member exists, so a failed drain leaves a hand-written
+/// `submit --kind agent.registered` as the only way forward, and that payload
+/// may name any role.
+///
+/// `apply::apply_registered` used to ask it, against `state.roster_epoch` --
+/// the epoch the registry tip names at *reduction* time. That is the mistake
+/// `require_bootstrap_coordinator`'s doc comment sets out in full:
+/// `agent.registered` is sequence zero, immutable and never amendable, and
+/// `registry::propose_transition` enforces no role immutability, so one
+/// hand-run epoch transition that rebinds a role made that registration fail
+/// forever, on every host that fetched the new epoch, with `reduce`'s bare
+/// `?` turning it into the whole bus rather than the one event. Here `epoch`
+/// is the registry epoch this drain already authorized the stream write
+/// against, the answer does not move underneath the check, and a refusal
+/// costs one resubmission with the right role.
+///
+/// `Ok(())` for an agent the epoch does not bind: `registry::
+/// authorize_stream_write` has already refused a non-member by the time this
+/// runs, so the only way here is a binding that exists, and inventing a
+/// second refusal for the impossible case would just duplicate its message.
+fn verify_declared_role_matches_roster(
+    epoch: &crate::registry::RosterEpoch,
+    agent: &Agent,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    let d = match data {
+        crate::events::EventData::AgentRegistered(d) => d,
+        _ => return Ok(()),
+    };
+    let binding = match epoch.active_members.get(agent) {
+        Some(b) => b,
+        None => return Ok(()),
+    };
+    if binding.role != d.primary_role {
+        return Err(invalid(format!(
+            "registers as {} but roster epoch {} binds {agent} as {} -- the declared role must \
+             match the registry, since it is the declared one that grants authority; resubmit \
+             with primary_role {}, or land a registry transition binding {} first",
+            d.primary_role, epoch.id, binding.role, binding.role, d.primary_role
+        )));
+    }
+    Ok(())
 }
 
 /// Every agent this event names must still be active.
@@ -1561,6 +1630,90 @@ mod tests {
             "{}",
             drained.rejected[0].reason
         );
+    }
+
+    /// The publication half of the relocated M4 rule, and the proof that the
+    /// relocation is actually wired up.
+    ///
+    /// `apply::apply_registered` used to compare the declared role against
+    /// `state.roster_epoch` -- the epoch the *reducing* host holds, which a
+    /// later registry transition moves, permanently breaking an immutable
+    /// sequence-zero event on every host that fetched the new epoch (see
+    /// `apply::tests::a_registration_reduces_under_a_roster_epoch_that_rebound_
+    /// its_role`, this test's other half). Asked here it has exactly one
+    /// answer, and the cost of being wrong is one resubmission.
+    ///
+    /// Both directions are asserted: the mismatched declaration is refused
+    /// with a durable receipt, and the honest one immediately afterwards
+    /// publishes -- otherwise a gate that simply refused every
+    /// `agent.registered` would pass.
+    #[test]
+    fn drain_outbox_rejects_a_registration_declaring_a_role_the_registry_does_not_bind() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        let (_config, epoch, _commit) = crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+        let aud = a("aud");
+        let mut members = epoch.active_members.clone();
+        members.insert(
+            aud.clone(),
+            crate::registry::MemberBinding {
+                // The registry binds this identity as the least-authority role.
+                role: Role::Auditor,
+                host: short("host1"),
+                coordinator_custody_epoch: 0,
+                standby: None,
+            },
+        );
+        crate::registry::propose_transition(repo.path(), &epoch, members).unwrap();
+
+        let registration = |role: Role| {
+            Candidate::new(
+                &aud,
+                &EventData::AgentRegistered(crate::events::AgentRegistered {
+                    display_name: short("Auditor"),
+                    primary_role: role,
+                    purpose: text("x"),
+                    product_base: None,
+                    product_branch: None,
+                    provider: None,
+                    model: None,
+                }),
+                vec![],
+            )
+        };
+
+        // Declaring `implementor` would grant every authority gates 20 and 21
+        // deny an auditor, and `cli::status` would still print `auditor`.
+        crate::outbox::submit(repo.path(), "aud-reg", &registration(Role::Implementor)).unwrap();
+        let drained = drain_outbox(repo.path(), repo.path(), &aud, &short("host1"), 0, "origin")
+            .expect("a refused candidate is a rejection receipt, never a failed drain");
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("must match the registry")
+                && drained.rejected[0].reason.contains("auditor"),
+            "{}",
+            drained.rejected[0].reason
+        );
+
+        // The honest declaration publishes.
+        crate::outbox::submit(repo.path(), "aud-reg2", &registration(Role::Auditor)).unwrap();
+        let drained =
+            drain_outbox(repo.path(), repo.path(), &aud, &short("host1"), 0, "origin").unwrap();
+        assert_eq!(drained.rejected.len(), 0, "{:?}", drained.rejected);
+        assert_eq!(drained.published.len(), 1);
     }
 
     #[test]

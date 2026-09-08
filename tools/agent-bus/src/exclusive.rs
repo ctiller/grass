@@ -78,23 +78,38 @@ impl ExclusiveTracker {
     /// coordinator has resolved the key. The winner stays a pure function of
     /// the final membership (`winner`), so hosts that assembled the same set
     /// in different orders still agree.
+    ///
+    /// Note what this deliberately does *not* read: `resolved`. An earlier
+    /// version answered the same-agent question in two branches, one for a
+    /// resolved key and one for an unresolved one, and that reintroduced the
+    /// whole defect through the back door. `resolved` is written by a
+    /// coordinator's `lifecycle.conflict_resolved` on a *different* stream,
+    /// which references the racing candidates but has no edge to a later
+    /// claim from one of their agents -- so both orders are valid linear
+    /// extensions, and the two branches disagreed about them. With a
+    /// resolution naming someone *else*'s candidate the resolved branch fell
+    /// through to a plain insert and returned `Ok`; without the resolution
+    /// yet applied the unresolved branch found the agent's own earlier claim
+    /// and returned `Err`. The author's own host was the permissive case
+    /// whenever it had fetched the resolution, so `dry_run` passed, the event
+    /// published, and every host that had not fetched the resolution first
+    /// then failed to reduce the bus at all -- permanently, the log being
+    /// append-only.
+    ///
+    /// Asking only `groups` restores the single-writer justification above in
+    /// full: the same-agent members of a group come solely from that agent's
+    /// own stream, which every linear extension orders identically, so the
+    /// verdict is the same on every host and in every order. A second claim
+    /// on the same predecessor is therefore never publishable rather than
+    /// publishable-then-fatal-elsewhere.
     pub fn record(&mut self, key: &str, candidate: &EventId) -> AbResult<()> {
-        if let Some(winner) = self.resolved.get(key) {
-            if winner.agent() == candidate.agent() {
-                return Err(invalid(format!(
-                    "{candidate}: this agent's own {winner} already has a coordinator-resolved disposition, so a further claim on the same predecessor is forward progress rather than a new exclusive claim"
-                )));
-            }
-            self.groups
-                .entry(key.to_string())
-                .or_default()
-                .insert(candidate.clone());
-            return Ok(());
-        }
         let group = self.groups.entry(key.to_string()).or_default();
         if let Some(existing) = group.iter().find(|e| e.agent() == candidate.agent()) {
             return Err(invalid(format!(
-                "{candidate}: this agent already claimed the same predecessor ({existing})"
+                "{candidate}: this agent already claimed the same predecessor ({existing}); a \
+                 further claim on the same predecessor is forward progress from whichever claim \
+                 wins, not a new exclusive claim -- name the winning claim as the predecessor \
+                 instead"
             )));
         }
         group.insert(candidate.clone());
@@ -353,8 +368,48 @@ mod tests {
         t.resolve("issue:1", alice.clone()).unwrap();
         let err = t.record("issue:1", &eid("alice", 1)).unwrap_err();
         assert!(
-            err.to_string().contains("coordinator-resolved disposition"),
+            err.to_string()
+                .contains("already claimed the same predecessor"),
             "{err}"
+        );
+    }
+
+    /// The same-agent verdict must not depend on whether a coordinator's
+    /// resolution -- on a *different* stream, with no edge to this claim --
+    /// happened to be replayed first.
+    ///
+    /// The failing case was a resolution naming somebody *else*'s candidate:
+    /// `record` used to take a separate resolved-key branch that only refused
+    /// the resolved winner's own agent, so alice's second claim was `Ok` once
+    /// bob had been declared the winner and `Err` before that. Both orders are
+    /// valid linear extensions and `reduce` has no per-event isolation, so the
+    /// permissive order made the event publishable and the other order made
+    /// every host that held it unable to reduce the bus at all.
+    ///
+    /// Asserted on the whole `Result`, not merely on `is_ok`: the message ends
+    /// up in a rejection receipt, so two hosts printing different reasons for
+    /// the same event would be its own divergence.
+    #[test]
+    fn a_second_same_agent_claim_gets_the_same_verdict_either_side_of_a_resolution() {
+        let (a1, a2, b1) = (eid("alice", 1), eid("alice", 2), eid("bob", 1));
+
+        // The resolution reduced first, naming bob.
+        let mut after = ExclusiveTracker::default();
+        after.record("k", &a1).unwrap();
+        after.record("k", &b1).unwrap();
+        after.resolve("k", b1.clone()).unwrap();
+        let after_resolution = after.record("k", &a2);
+
+        // alice's second claim reduced first.
+        let mut before = ExclusiveTracker::default();
+        before.record("k", &a1).unwrap();
+        before.record("k", &b1).unwrap();
+        let before_resolution = before.record("k", &a2);
+
+        assert_eq!(
+            after_resolution.map_err(|e| e.to_string()),
+            before_resolution.map_err(|e| e.to_string()),
+            "the same-agent refusal must not read `resolved`, which another agent's stream sets"
         );
     }
 
