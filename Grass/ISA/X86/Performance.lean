@@ -668,6 +668,48 @@ def unroutable (p : MicroarchProfile) (uops : List Uop) : List Uop :=
 def Routable (p : MicroarchProfile) (uops : List Uop) : Prop :=
   ∀ u ∈ uops, ∃ id ∈ u.eligiblePorts, p.ValidPort id
 
+/-- The list step, by induction. `not_forall` and `not_not` are mathlib names
+and this library has no mathlib, so the negation is pushed by hand. -/
+private theorem exists_validPort_iff (p : MicroarchProfile) :
+    ∀ l : List PortId, (¬ ∀ x ∈ l, ¬ p.ValidPort x) ↔ ∃ x ∈ l, p.ValidPort x
+  | [] => by simp
+  | hd :: tl => by
+      by_cases h : p.ValidPort hd
+      · simp [h]
+      · simp [h, exists_validPort_iff p tl]
+
+/--
+`unroutable` decides `Routable`, and this is what connects them.
+
+`unfusedSlotLowerBound` names `Routable` as an obligation on its caller, and
+`unroutable` was written to report the uops that violate it. Nothing related the
+two, which left the caller holding a `Prop` it had no way to discharge beside a
+`List` whose emptiness meant nothing in particular. Checking that `unroutable`
+is empty *is* checking `Routable`.
+
+The uop with no eligible ports at all is the case worth naming, because the two
+definitions reach it by opposite routes and had to be checked rather than
+assumed to agree. `List.all` is vacuously true on the empty list, so such a uop
+is reported unroutable; and `Routable` asks for a port in that same empty list,
+so it fails there too. They agree, and for the right reason: a uop with no
+eligible port can never issue.
+-/
+
+theorem unroutable_eq_nil_iff (p : MicroarchProfile) (uops : List Uop) :
+    p.unroutable uops = [] ↔ p.Routable uops := by
+  simp only [unroutable, Routable, List.filter_eq_nil_iff, List.all_eq_true,
+    decide_eq_true_eq]
+  constructor
+  · intro h u hu; exact (exists_validPort_iff p u.eligiblePorts).mp (h u hu)
+  · intro h u hu; exact (exists_validPort_iff p u.eligiblePorts).mpr (h u hu)
+
+/-- So the obligation is dischargeable by computation rather than by argument.
+
+Without this a caller could state `Routable` and not prove it. With it, a
+concrete profile and uop list settle the question by `decide`. -/
+instance (p : MicroarchProfile) (uops : List Uop) : Decidable (p.Routable uops) :=
+  decidable_of_iff _ (unroutable_eq_nil_iff p uops)
+
 end MicroarchProfile
 
 /-- How many uops in a list can only be executed on one given port.
@@ -707,10 +749,21 @@ fusion-aware cycle bound would need a fusion model that no vendor guarantees, so
 `unfusedSlotLowerBound` counts the quantity it can count and is named for it.
 `TimingBasis` keeps it out of any security argument regardless.
 
-`Routable` is an **open obligation** on the caller: a uop whose only eligible
-ports do not exist on `p` contributes nothing to `portPressure` and would make
-this an underestimate even of slots. `MicroarchProfile.unroutable` reports them
-and nothing calls it yet.
+`Routable` is a precondition on the caller, and it is now one a caller can
+discharge. `MicroarchProfile.unroutable_eq_nil_iff` says that checking
+`unroutable` is empty is checking `Routable`, and the `Decidable` instance
+beside it settles a concrete profile and uop list by `decide`. Before that the
+precondition was stated and unprovable: `unroutable` reported the violating
+uops and nothing related the report to the condition, so a caller held a
+`Prop` with no route to it and a `List` whose emptiness meant nothing in
+particular.
+
+What the precondition buys is unchanged, and is still an **open obligation**:
+a uop whose only eligible ports do not exist on `p` contributes nothing to
+`portPressure`, so the maximum below ignores it and the result is an
+underestimate even of slots. That sentence is an argument rather than a
+theorem, and proving it needs a model of what a slot is, which this module
+does not have. The obligation is narrower than it was, not gone.
 -/
 def unfusedSlotLowerBound (p : MicroarchProfile) (uops : List Uop) : Nat :=
   let byIssue := if p.issueWidth = 0 then uops.length
