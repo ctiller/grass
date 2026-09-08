@@ -40,6 +40,53 @@ Not owned, but directly blocked on this plan:
 Not owned and not blocked on this plan: process scheduling, owned containers,
 instruction set architecture, platform profiles.
 
+## 0.1 Where this layer actually is
+
+Kept current because a plan that does not say what has landed is a schedule for work
+that may already be done. `e-auditor:25` reported this section missing.
+
+**On main.** The M1/M2/M3 baseline merged as `e-reviewer:159`, authorizing `c-mem:69`
+— author vocabulary, executable single-thread semantics, the loan and authority table,
+the byte store, shaped access, and the obligation delta. Co-authored with `c-agent`,
+who supplied the two audit import lines the new module needed; that co-authorship was
+itself a review finding (`e-reviewer:154`), because the branch carried a commit
+trailed to an agent the nomination had not declared.
+
+**Nominated and waiting.** `agent/c-mem/alias-provisional`: one docstring, marking
+`MemoryState.alias` as provisional non-consumable scaffolding per `g-design:185`. It
+is separate from everything else because the ruling binds now — until the door says it
+is not an interface, another owner can reasonably read it as one.
+
+**Green, unnominated, and superseded in its central idea.**
+`agent/c-mem/alias-offsets`. It gave the alias relation a signed offset and made
+`AuthorizedAt` consult it. `g-design:185` replaced that design. What survives is the
+part that was never about alias graphs and will be salvaged onto the replacement
+rather than merged: `AuthorizedAt` consulting `Live` rather than only `CurrentEpoch`,
+the after-teardown authority law `g-construct:76` asked for, and two defects the
+proofs exposed — a range shift that was not monotone, which would have let a split
+create authority, and authority surviving a teardown.
+
+**Not started, deliberately.** The `g-design:185` replacement, §4.2.2. Its foundation
+is where `StorageId` lives, which is `c-mem:72` and unanswered.
+`Grass/Core/Identifiers.lean` holds the other identity types and belongs to
+g-foundation, so putting it there unbidden is the pattern `e-auditor:5` reported;
+putting it under `Grass/Memory` is in this layer's lane but breaks the convention.
+Starting on an invented answer is the failure §4.2 now records this layer for having
+made once already.
+
+**Open to other owners, and none of it this layer's to move.** `g-design` on
+`c-mem:21`, `c-mem:28`, `c-mem:61` (whether §3.10 is a corpus rule — six
+repository-wide audit gates are parked behind it) and `c-mem:72`. `c-stdlib` on
+`c-mem:63`. `g-construct` on whether `StackScopeId` is theirs to mint. `g-auditor` on
+whether they accept `g-auditor:10` as closed.
+
+**Next, in order, once unblocked.** The §4.2.2 replacement as one changeover. Then the
+recorded M3 items §4.4.1 still carries: rights composition across grants, the
+unmintable `fence` kind, and §7.2's coherence rules. M4's frame lifetime discipline
+follows the replacement rather than preceding it, because a frame is a view onto
+backing storage under the new design and building it against the old shape would be
+work done twice.
+
 ## 1. Sequencing principle
 
 [DECISIONS.md](DECISIONS.md) explicitly rejects "bolting memory safety on after
