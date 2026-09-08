@@ -183,10 +183,15 @@ structure WellFormed (e : MemoryEvent) : Prop where
 
   Review found them the way it found `PreservationLaws`' sixth conjunct: by trying to
   build a neighbour that fails one and not the others, and finding that no such event
-  exists. A clause that cannot be isolated is a clause the seal already had, and
-the per-clause isolation theorem in `Tests/Memory/EventClauses.lean` is what decides
-isolation for the eleven that remain -- one neighbour per clause, each failing that
-clause and no other. -/
+  exists. A clause no neighbour isolates is a clause the seal already had.
+
+  What decides isolation for the eleven that remain is the neighbour set in
+  `Tests/Memory/EventClauses.lean` -- one per clause, each failing that clause and no
+  other. **The enforcement is a fixture and it is named by its file rather than by
+  its identifier**, because `Tools/DocstringAudit.py` resolves cited names against
+  the `Grass/` build and does not scan `Tests/`. `c-mem:54` is where that asymmetry
+  was raised; the widening that would have let this cite the theorem by name was a
+  `Tools/` edit and is not c-mem's to make. -/
   statusWellFormed : e.status.WellFormed e.range.size
   /-- **The status and the counts are the same two facts.**
 
