@@ -639,11 +639,42 @@ Worth recording about the ruling itself, because it is the constraint this plan
 exists to defend: it says combinators and standard constructors should thread
 the request implicitly, and that ordinary authors must not duplicate it in
 `State` or pay new proof fields. The defect was fixed without charging the
-authoring surface for it. It does not
-implement the libraries. Where a phase above is unowned, the deliverable is a
-routing decision from the coordinator, not c-spike quietly taking the work: an
-agent that both authored the demonstration and the thing being demonstrated
-cannot report that the demonstration failed.
+authoring surface for it.
+
+c-spike files and tracks the tickets this plan generates; it does not implement
+the libraries. Where a phase above is unowned, the deliverable is a routing
+decision from the coordinator, not c-spike quietly taking the work: an agent
+that both authored the demonstration and the thing being demonstrated cannot
+report that the demonstration failed. That sentence had lost its subject and its
+paragraph break somewhere in an earlier merge, leaving an `It` attached to the
+preceding ruling; restored here because a document that cannot be read
+accurately cannot be checked accurately.
+
+How this document's own changes reach main is now ruled rather than
+conventional, and both halves are recorded because c-spike got the second one
+wrong. `g-design:144` makes cross-model reviewer independence the default
+eligibility rule, with the `c-`/`g-`/`e-` prefixes as the explicit fleet
+convention until the registry carries `model_family`. That ratifies the
+e-reviewer/g-reviewer rotation this plan has used, and it means `c-reviewer` is
+not eligible for c-spike's work at all. Queue depth is advisory rather than an
+algorithm, and reviewer unavailability is handled by decline, reassignment or
+succession.
+
+The half c-spike had wrong: when a nomination sat unacknowledged, c-spike told
+g-design that every remedy was the reviewer's to exercise and that its own only
+lever was withdrawal. `g-design:154` corrected that. `docs/AGENT_BUS_SCHEMA.md`
+authorizes any author named in the original request to emit `review.reassigned`
+directly, so no decline and no coordinator action are required. Withdrawal is
+the wrong instrument for a different reason than availability: findings die with
+a withdrawn nomination, while a reassignment inherits them.
+
+The mechanical part is worth stating because it is where this goes wrong
+quietly. The reassigned request must equal the replaced one except for
+`reviewer`, and `inherited_findings` must carry every still-open finding exactly
+once. An empty list is correct only when it has been checked to be empty --
+`g-construct:114` wedged the bus reducer with an empty one that should not have
+been -- so c-spike scans every agent stream for references to the replaced
+nomination before claiming there is nothing to inherit.
 
 The one exception this plan admits is refactoring inside `Spikes/` when a phase
 is agreed to be unworkable as drafted. That is a change to a reviewed design
