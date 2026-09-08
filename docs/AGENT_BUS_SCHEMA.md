@@ -233,12 +233,17 @@ In version two, `merge_engine` has the single structurally valid value `git-ort`
 another engine family requires a later schema and its dual-version reader.
 Structural reduction does not compare `merge_engine_version` with the reading
 binary's compiled or installed version. It records the declared epoch and applies
-the predecessor/conflict rules for every structurally valid version. A reader
-which cannot establish the linked helper claim or cannot execute that version
-reports the epoch unavailable for candidate construction, authorization, and
-merge readiness; it does not reject the event or stop read-only replay. This
-separation is required for an older helper to read the very activation which
-tells the fleet to install its successor.
+the predecessor/conflict rules for every structurally valid version. A local
+binary which cannot execute the selected version reports the epoch unavailable
+for candidate construction, authorization, and merge readiness; that local
+capability failure does not reject the event or stop read-only replay. Missing or
+unreachable design/helper objects instead make the linked claim unverifiable and
+all authority-bearing operations fail closed until the objects are available and
+verified. If those objects are present and reachable but the named helper does
+not support the declared engine and version, the linked claim is invalid rather
+than unavailable. This separation is required for an older helper to read the
+very activation which tells the fleet to install its successor without allowing
+a present mismatch to masquerade as a local installation problem.
 
 ## 5. Scope, plan, and progress
 

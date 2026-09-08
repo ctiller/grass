@@ -610,13 +610,17 @@ to imitate compiler-selected storage or CFG structure.
     a reviewed helper migration. It does not rewrite bootstrap or historical
     authorizations. Once objects are local, verification is a local operation
     over changed paths and tree spines, not a network round trip or checkout.
-    Within the bootstrap schema's fixed `git-ort` family, event reduction is
-    independent of the reading host's version capability: it records and selects
-    a structurally valid version activation even when that host cannot execute
-    it. Missing local or linked support makes only the affected candidate,
+    Within the version-two event schema's fixed `git-ort` family, event reduction
+    is independent of the reading host's execution capability: it records and
+    selects a structurally valid version activation even when that host cannot
+    execute it. That local capability gap makes only the affected candidate,
     authorization, and merge operations unavailable; it cannot make append-only
-    history unreducible. Changing engine family, including adopting the future
-    certificate engine, requires a schema activation with dual-version readers.
+    history unreducible. Missing or unreachable linked objects make the claim
+    unverifiable and authority fails closed until verification succeeds. Present,
+    reachable objects which establish that the helper does not support the
+    declared engine/version make the linked claim invalid. Changing engine
+    family, including adopting the future certificate engine, requires a schema
+    activation with dual-version readers.
 115. `agent.resumed` may transfer exclusive custody from the identity's latest
     own lifecycle event of any status or a coordinator retirement targeting it,
     so silent death while `active` does not strand the identity or its role.
@@ -866,9 +870,11 @@ to imitate compiler-selected storage or CFG structure.
     activates the profile at its exact candidate commit; no later event creates
     an activation gap. That candidate alone may begin from a colliding tree, and
     it may neither add nor retain a governed collision. A concurrent advance
-    loses under the existing stale-`previous_main` rule. Descendants inherit a
-    checked collision index and update it only along changed paths/tree spines,
-    while a clean audit may reconstruct it from the complete tree. Repository
+    loses under the existing stale-`previous_main` rule. Descendants inherit the
+    first parent's (`previous_main`'s) checked collision index and update it along
+    every path whose entry differs from that first parent and along the affected
+    tree spines; `audit-main` must independently reconstruct the index from the
+    complete tree. Repository
     tooling normalizes to the single lowercase root `tools/`; `Tools/` is not a
     valid peer. After the boundary commit, pre-existing and newly introduced
     collisions fail equally, independent of checkout settings.

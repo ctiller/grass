@@ -281,12 +281,16 @@ that family requires a schema activation with dual-version readers. Within this
 schema, pure event reduction records and selects a structurally valid activation
 without comparing its version with constants compiled into the reading helper.
 That comparison would make an upgrade event render every older reader unable to
-replay the append-only log. Local version availability and linked validation of
-the named design/helper commits are authority-operation gates: a host which
-cannot validate or execute the selected epoch may still run read-only reduction,
-`tail`, and `status`, but it must refuse candidate construction, authorization,
-and merge readiness with an explicit unavailable result. Installing a compatible
-reviewed helper changes that local capability, not the reduced history.
+replay the append-only log. Local inability to execute the selected version is an
+authority-operation availability gate: the host may still run read-only
+reduction, `tail`, and `status`, but it must refuse candidate construction,
+authorization, and merge readiness with an explicit unavailable result.
+Installing a compatible reviewed helper changes that local capability, not the
+reduced history. Linked validation is distinct: missing or unreachable named
+design/helper objects make the claim unverifiable and authority-bearing
+operations fail closed until verification succeeds, while present reachable
+objects which establish that the helper does not support the declared engine and
+version make the linked claim invalid.
 
 ### 6.2 Scope
 
@@ -648,11 +652,13 @@ helper distribution owns any bundled/side-by-side historical engine support;
 individual agents are not required to curate old system Git installations.
 Reduction is capability-independent for the open version field: it retains the
 version declared by every structurally valid `git-ort` activation even when the
-local binary cannot execute or linked-validate that epoch. Unsupported locally
-means the affected authority operation is unavailable, never that replay of the
-bus is malformed. A different engine family is not a value of this schema; it
-uses the schema-upgrade route above so old readers never encounter an unknown
-family as if it were a valid version-two event.
+local binary cannot execute that epoch. Unsupported locally means the affected
+authority operation is unavailable, never that replay of the bus is malformed.
+Missing or unreachable linked objects make the claim unverifiable and fail
+authority operations closed; reachable objects which establish incompatible
+helper support make it invalid. A different engine family is not a value of this
+schema; it uses the schema-upgrade route above so old readers never encounter an
+unknown family as if it were a valid version-two event.
 
 The initial protocol performs no compaction. If storage becomes material,
 closed segments may be archived only under a separately reviewed, exactly
@@ -704,7 +710,9 @@ Before use, the helper must pass fixtures for:
     epoch validation, capability-independent replay of a locally unsupported
     `git-ort` version, schema rejection of another engine family, and refusal of
     candidate/authorization/merge operations which lack local or linked version
-    support;
+    support; a negative case with reachable design/helper objects whose helper
+    does not support the declared engine/version must reject the linked claim as
+    invalid rather than report a local unavailable result;
 21. custody transfer from active, paused, terminal, and coordinator-retired
     lifecycle predecessors; and
 22. identical candidate tree and commit object IDs on Windows and Linux for the

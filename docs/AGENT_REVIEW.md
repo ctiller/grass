@@ -481,7 +481,7 @@ certificate. `merge-ready` checks that certificate and the named object rather
 than asking the host's system Git to rediscover the merge. Once referenced
 objects are local, this check is local and proportional to changed entries and
 their tree spines; it performs no publication, fetch, or whole-repository file
-checkout. Activation requires a schema readable alongside the bootstrap
+checkout. Activation requires a schema readable alongside the version-two event
 schema, linked validators for both histories, negative fixtures for omitted,
 altered, and injected paths, and a reviewed helper migration.
 
@@ -494,15 +494,17 @@ authorization, and candidate manifest name the exact profile, design/helper
 versions, previous `main`, complete collision-free candidate tree, and checked
 collision index. The candidate is the sole transition exception: it may begin
 from pre-existing collisions but may not introduce a new one or leave any
-collision governed by the profile. The existing reviewed fast-forward advances
-`main` to that exact tree and makes the profile effective for that commit and
-all descendants. A receipt reports this transition but does not activate it in
-a later race-prone step.
+collision governed by the profile. The reviewer's existing non-force push of the
+reviewed, two-parent normalization candidate advances `main` to that exact tree
+and makes the profile effective for that commit and all descendants. A receipt
+reports this transition but does not activate it in a later race-prone step.
 
-Subsequent candidates inherit the parent's checked collision index and update
-it for changed paths and tree spines; a clean audit may reconstruct the index
-from the complete Git tree. Thus the semantic invariant covers the complete
-candidate tree while ordinary local work remains incremental. A host setting
+Subsequent candidates inherit the first parent's -- that is,
+`previous_main`'s -- checked collision index and update it along every path whose
+entry differs from that first parent and along the affected tree spines.
+`audit-main` must independently reconstruct the index from the complete Git tree.
+Thus the semantic invariant covers the complete candidate tree while ordinary
+local work remains incremental. A host setting
 such as `core.ignorecase=false` cannot make an invalid tree valid. The
 normalization target for repository tooling is the single lowercase root
 `tools/`; `Tools/` must be removed by that candidate. A concurrent advance of
