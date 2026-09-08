@@ -1,5 +1,6 @@
 import Grass.Platform.Win32.Coff
 import Grass.Platform.Win32.CoffSymbol
+import Grass.Platform.Win32.CoffPdata
 
 /-!
 # COFF records, against a real object file
@@ -245,6 +246,115 @@ the leading-NUL rule. -/
 theorem probe_name_too_long :
     SymbolName.short?
       [0x67, 0x72, 0x61, 0x73, 0x73, 0x70, 0x72, 0x6f, 0x62, 0x65] = none := by
+  decide
+
+/-! ## `.pdata` built rather than transcribed
+
+The relocations above were written out as literals. These build the same section
+from a description of the function -- which symbol it is, which symbol its
+unwind data is, and how long it is -- and check that what comes out is what
+`ml64` wrote. That is a stronger statement than the literal one: it says the
+*constructor* agrees with the assembler, not just that a hand-copied list does.
+-/
+
+/-- The measured object's single `.pdata` entry: `grassprobe` is symbol 13, its
+`UNWIND_INFO` is symbol 14, and the function is seven bytes long. -/
+def measuredPdataEntry : PdataEntry where
+  functionSymbol := 13
+  unwindSymbol := 14
+  functionLength := 7
+  unwindOffset := 0
+
+/--
+**The twelve bytes `ml64` wrote into `.pdata`.**
+
+Two zero addresses around the length. `BeginAddress` and `UnwindInfoAddress`
+read zero because the linker has not run; `EndAddress` holds seven, which is
+`push rbp; push rbx; xor eax, eax; pop rbx; pop rbp; ret`. -/
+theorem measuredPdataEntry_bytes :
+    pdataBytes [measuredPdataEntry] =
+      [0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00,
+       0x00, 0x00, 0x00, 0x00] := by
+  decide
+
+/--
+**The constructed relocations are the ones `ml64` emitted.**
+
+Byte-for-byte the same thirty bytes as `measuredPdataRelocations_bytes` above,
+but reached by building the section rather than by transcribing it. If
+`PdataEntry.relocations` put a field at the wrong offset or named the wrong
+symbol, this would differ and that would not. -/
+theorem measuredPdataRelocations_constructed :
+    ((pdataRelocations [measuredPdataEntry]).map Relocation.toBytes).flatten
+      = (measuredPdataRelocations.map Relocation.toBytes).flatten := by
+  decide
+
+/-- **And the built section carries exactly what the measured header
+described**: twelve bytes of data and three relocations. -/
+theorem measuredPdataSection_shape :
+    (pdataSection pdataName [measuredPdataEntry]).data.length = 12
+    ∧ (pdataSection pdataName [measuredPdataEntry]).relocations.length = 3
+    ∧ (pdataSection pdataName [measuredPdataEntry]).characteristics
+        = measuredPdataHeader.characteristics := by
+  decide
+
+/-! ## Two functions, which is what pins the stride
+
+A second object was assembled for this: `alpha`, five bytes with one pushed
+register, and `beta`, seven bytes with two. One entry cannot show the stride --
+at index zero, a twelve-byte stride and an eight-byte one give the same offsets,
+and a mutation to that effect survived a fixture that had only `grassprobe`.
+
+It also caught a real defect. `UnwindInfoAddress` is not zero for the second
+function: both share one `.xdata` section, so the field carries the byte offset
+of that function's own `UNWIND_INFO` within it. The model wrote zero there until
+this object was measured.
+-/
+
+/-- `alpha`: five bytes, unwind data at the start of `.xdata`. -/
+def alphaEntry : PdataEntry where
+  functionSymbol := 12
+  unwindSymbol := 13
+  functionLength := 5
+  unwindOffset := 0
+
+/-- `beta`: seven bytes, unwind data eight bytes into the same `.xdata`. -/
+def betaEntry : PdataEntry where
+  functionSymbol := 14
+  unwindSymbol := 13
+  functionLength := 7
+  unwindOffset := 8
+
+/--
+**The twenty-four bytes `ml64` wrote for two functions.**
+
+The second entry's trailing eight is the defect this fixture exists to catch:
+`beta`'s `UNWIND_INFO` is not at the start of `.xdata`, and a model that wrote
+zero would aim every function after the first at the first one's unwind data. -/
+theorem twoFunction_pdata_bytes :
+    pdataBytes [alphaEntry, betaEntry] =
+      [0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+       0x00, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00]
+      := by decide
+
+/--
+**The six relocations, at offsets 0, 4, 8, 12, 16 and 20.**
+
+The stride, measured rather than assumed. The second entry's three fields start
+at twelve, which is what makes a twelve-byte `RUNTIME_FUNCTION` observable at
+all; every one-entry fixture agrees with an eight-byte stride by accident.
+
+Note that `alpha` and `beta` are symbols 12 and 14 while both unwind
+relocations name 13: one `$xdatasym` shared between them, distinguished by the
+addend rather than by the symbol. -/
+theorem twoFunction_pdata_relocations :
+    ((pdataRelocations [alphaEntry, betaEntry]).map Relocation.toBytes).flatten
+      = [0x00, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x03, 0x00,
+         0x04, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x03, 0x00,
+         0x08, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x03, 0x00,
+         0x0c, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x03, 0x00,
+         0x10, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x03, 0x00,
+         0x14, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x03, 0x00] := by
   decide
 
 end Grass.Tests.Platform.Win32.Coff

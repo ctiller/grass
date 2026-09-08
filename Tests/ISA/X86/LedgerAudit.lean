@@ -9,6 +9,7 @@ import Grass.Platform.Win32.Coff
 import Grass.Platform.Win32.CoffLayout
 import Grass.Platform.Win32.CoffSymbol
 import Grass.Platform.Win32.CoffStrings
+import Grass.Platform.Win32.CoffPdata
 
 /-!
 # Ledger coverage gate
@@ -97,7 +98,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.Profile, `Grass.Platform.Win32.Coff,
    `Grass.Platform.Win32.CoffLayout,
    `Grass.Platform.Win32.CoffSymbol,
-   `Grass.Platform.Win32.CoffStrings]
+   `Grass.Platform.Win32.CoffStrings,
+   `Grass.Platform.Win32.CoffPdata]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -111,7 +113,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 125
+def owedBaseline : Nat := 128
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -133,7 +135,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 67
+def notBehaviourBaseline : Nat := 70
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -366,7 +368,15 @@ def notBehaviour : List Name :=
     -- legal; `tailBytes` and `symbolTableOffset` record the one chosen here.
     -- A vendor document would not contradict a different choice.
     `Grass.Platform.Win32.Coff.Object.tailBytes,
-    `Grass.Platform.Win32.Coff.Object.symbolTableOffset ]
+    `Grass.Platform.Win32.Coff.Object.symbolTableOffset,
+    -- `.pdata` assembly, which asserts nothing beyond the three rows above.
+    -- `pdataBytes` concatenates entries, `pdataRelocations` numbers them by
+    -- position, and `pdataSection` puts name, bytes, relocations and flags in
+    -- one record so a caller cannot pair a section's data with someone else's
+    -- relocations.
+    `Grass.Platform.Win32.Coff.pdataBytes,
+    `Grass.Platform.Win32.Coff.pdataRelocations,
+    `Grass.Platform.Win32.Coff.pdataSection ]
 
 /--
 Declarations that genuinely model external behaviour and have no citation yet.
@@ -559,7 +569,21 @@ def owed : List Name :=
     -- four-byte size that *includes itself*, which is the quirk a writer gets
     -- wrong by four and which a reader uses to find the end of the object.
     `Grass.Platform.Win32.Coff.stringEntry,
-    `Grass.Platform.Win32.Coff.stringTableBytes ]
+    `Grass.Platform.Win32.Coff.stringTableBytes,
+    -- `.pdata`'s three format facts. `PdataEntry.toBytes` is the twelve-byte
+    -- entry and which of its fields hold addends -- zero, the function length,
+    -- and the unwind offset. `PdataEntry.relocations` is the structure the
+    -- bytes cannot carry: three ADDR32NB fix-ups at 0, 4 and 8, with the first
+    -- two naming the function and the third the shared unwind section.
+    -- `pdataCharacteristics` is the section's flag word.
+    --
+    -- Measured on two objects, not one. A single function cannot distinguish a
+    -- twelve-byte stride from an eight-byte one, and cannot show that
+    -- UnwindInfoAddress carries a nonzero offset -- both were caught only by
+    -- assembling a second function. See `Tests/Platform/Win32/CoffFixture.lean`.
+    `Grass.Platform.Win32.Coff.PdataEntry.toBytes,
+    `Grass.Platform.Win32.Coff.PdataEntry.relocations,
+    `Grass.Platform.Win32.Coff.pdataCharacteristics ]
 
 /-- The declarations this gate holds the ledger responsible for. -/
 def modeledDeclarations : MetaM (Array Name) := do
