@@ -256,6 +256,21 @@ def stackDelta : UnwindOp → Nat
   -- machine frame and not the alignment of the frame it sits in, and a
   -- prologue mixing `pushMachineFrame` with an alignment argument would be
   -- reasoning from a premise nothing here establishes.
+  --
+  -- Nothing does that reasoning today: `Grass.ABI.Win64.AlignedForCall` takes
+  -- two bare `Nat`s and no caller derives them from a `Prologue`. So the guard
+  -- that would make the mistake unwritable -- a predicate refusing a prologue
+  -- that records a machine frame -- is deliberately not here: it would be a
+  -- precondition invented for a caller that does not exist, which is the same
+  -- trade `Grass/ABI/Win64/UnwindBytes.lean` declines for the prologue
+  -- recogniser.
+  --
+  -- What the caller will need is smaller than it looks.
+  -- `Grass.ABI.Win64.alignedForCall_iff_total` says alignment depends only on
+  -- how far the prologue moved `RSP`, not on how that was split between pushes
+  -- and a `sub`, so `Prologue.stackDelta` is the whole input and no second
+  -- model of the split is needed. What must be established alongside it is
+  -- exactly this: that the prologue records no machine frame.
   | .pushMachineFrame _ => 0
 
 /-- The `OpInfo` nibble.

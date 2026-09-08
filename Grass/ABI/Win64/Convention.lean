@@ -374,6 +374,21 @@ instance (pushes subtracted : Nat) : Decidable (AlignedForCall pushes subtracted
   inferInstanceAs (Decidable (_ = _))
 
 /--
+Alignment depends only on how far the prologue moved `RSP`, not on how the
+movement was split between pushes and a `sub`.
+
+Each push moves `RSP` down 8 and the subtraction moves it down its own value, so
+`8 * pushes + subtracted` is the whole story and the two arguments carry one
+number between them. Stating it is what lets a caller holding only a total --
+`Prologue.stackDelta`, say -- reach this predicate without inventing a
+split that would be a second model of the same fact.
+-/
+theorem alignedForCall_iff_total (pushes subtracted : Nat) :
+    AlignedForCall pushes subtracted ↔ AlignedForCall 0 (pushes * 8 + subtracted) := by
+  simp only [AlignedForCall, rspAfterPrologue, entryMisalignment, stackAlignment]
+  omega
+
+/--
 An odd number of pushes with no adjustment leaves the stack aligned.
 
 The entry misalignment and one push cancel, which is why a leaf-ish function
