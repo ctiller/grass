@@ -129,6 +129,12 @@ example : readSymbolTail objectDescription.header objectDescription.bytes =
     .done (objectDescription.symbolTail (by decide)) Vec.empty := by
   exact objectDescription.readSymbolTail_bytes (by decide)
 
+example : DeclaredObjectLayoutValid objectDescription.header
+    objectDescription.sectionLayout.1
+    (objectDescription.symbolTail (by decide)).stringTable?
+    objectDescription.bytes.length := by
+  exact objectDescription.layoutValid (by decide)
+
 example : (objectDescription.contents (by decide)).map SectionContents.header =
     objectDescription.sectionLayout.1 := by
   exact objectDescription.contents_headers (by decide)
@@ -185,6 +191,12 @@ def absentDescription : ObjectDescription :=
 example : readSymbolTail absentDescription.header absentDescription.bytes =
     .done (absentDescription.symbolTail (by decide)) Vec.empty := by
   exact absentDescription.readSymbolTail_bytes (by decide)
+
+example : DeclaredObjectLayoutValid absentDescription.header
+    absentDescription.sectionLayout.1
+    (absentDescription.symbolTail (by decide)).stringTable?
+    absentDescription.bytes.length := by
+  exact absentDescription.layoutValid (by decide)
 
 example : writeObjectDescription absentDescription = .ok noSymbolsObject := by
   rfl

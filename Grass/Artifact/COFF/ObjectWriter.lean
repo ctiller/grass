@@ -217,6 +217,123 @@ theorem SectionDescription.headerAt_pointersCoherent
       constructor <;> intro impossible <;> omega
   exact ⟨rawCoherent, relocationsCoherent, linesCoherent⟩
 
+/-- Every synthesized section span is either the canonical empty span at zero
+or lies wholly inside that section's contiguous canonical byte interval. -/
+theorem SectionDescription.headerAt_declaredSpan_bounds
+    (description : SectionDescription) (offset : Nat)
+    (rawFits : description.rawData.length < 2 ^ 32)
+    (relocationCountFits : description.relocations.length < 2 ^ 16)
+    (lineCountFits : description.lineNumbers.length < 2 ^ 16)
+    (endFits : offset + description.byteLength < 2 ^ 32)
+    {span : ByteSpan}
+    (member : span ∈ (description.headerAt offset).declaredSpans) :
+    (span.offset = 0 ∧ span.length = 0) ∨
+      (offset ≤ span.offset ∧
+        span.endExclusive ≤ offset + description.byteLength) := by
+  have offsetFits : offset < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  have relocationOffsetFits :
+      offset + description.rawData.length < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  have lineOffsetFits :
+      offset + description.rawData.length +
+        10 * description.relocations.length < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  simp [SectionHeader.declaredSpans] at member
+  rcases member with rfl | rfl | rfl
+  · by_cases empty : description.rawData.length = 0
+    · left
+      simp [SectionHeader.rawDataSpan,
+        description.headerAt_pointerToRawData_of_empty offset empty,
+        description.headerAt_sizeOfRawData offset rawFits, empty]
+    · right
+      simp [SectionHeader.rawDataSpan, ByteSpan.endExclusive,
+        description.headerAt_pointerToRawData_of_pos offset
+          (Nat.pos_of_ne_zero empty) offsetFits,
+        description.headerAt_sizeOfRawData offset rawFits,
+        SectionDescription.byteLength]
+      omega
+  · by_cases empty : description.relocations.length = 0
+    · left
+      simp [SectionHeader.relocationSpan,
+        description.headerAt_pointerToRelocations_of_empty offset empty,
+        description.headerAt_numberOfRelocations offset relocationCountFits,
+        empty]
+    · right
+      simp [SectionHeader.relocationSpan, ByteSpan.endExclusive,
+        description.headerAt_pointerToRelocations_of_pos offset
+          (Nat.pos_of_ne_zero empty) relocationOffsetFits,
+        description.headerAt_numberOfRelocations offset relocationCountFits,
+        SectionDescription.byteLength]
+      omega
+  · by_cases empty : description.lineNumbers.length = 0
+    · left
+      simp [SectionHeader.lineNumberSpan,
+        description.headerAt_pointerToLineNumbers_of_empty offset empty,
+        description.headerAt_numberOfLineNumbers offset lineCountFits, empty]
+    · right
+      simp [SectionHeader.lineNumberSpan, ByteSpan.endExclusive,
+        description.headerAt_pointerToLineNumbers_of_pos offset
+          (Nat.pos_of_ne_zero empty) lineOffsetFits,
+        description.headerAt_numberOfLineNumbers offset lineCountFits,
+        SectionDescription.byteLength]
+      omega
+
+/-- The raw-data, relocation, and line-number spans synthesized for one
+canonical section are pairwise disjoint, including all zero-width cases. -/
+theorem SectionDescription.headerAt_declaredSpans_pairwise
+    (description : SectionDescription) (offset : Nat)
+    (rawFits : description.rawData.length < 2 ^ 32)
+    (relocationCountFits : description.relocations.length < 2 ^ 16)
+    (lineCountFits : description.lineNumbers.length < 2 ^ 16)
+    (endFits : offset + description.byteLength < 2 ^ 32) :
+    ((description.headerAt offset).declaredSpans).Pairwise ByteSpan.Disjoint := by
+  have offsetFits : offset < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  have relocationOffsetFits :
+      offset + description.rawData.length < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  have lineOffsetFits :
+      offset + description.rawData.length +
+        10 * description.relocations.length < 2 ^ 32 := by
+    unfold SectionDescription.byteLength at endFits
+    omega
+  by_cases rawEmpty : description.rawData.length = 0
+  all_goals by_cases relocationEmpty : description.relocations.length = 0
+  all_goals by_cases lineEmpty : description.lineNumbers.length = 0
+  all_goals simp [SectionHeader.declaredSpans, ByteSpan.Disjoint,
+    ByteSpan.endExclusive, SectionHeader.rawDataSpan,
+    SectionHeader.relocationSpan, SectionHeader.lineNumberSpan,
+    SectionDescription.headerAt, extentPointer, rawEmpty, relocationEmpty,
+    lineEmpty, BitVec.toNat_ofNat, Nat.mod_eq_of_lt rawFits,
+    Nat.mod_eq_of_lt relocationCountFits,
+    Nat.mod_eq_of_lt lineCountFits, Nat.mod_eq_of_lt offsetFits,
+    Nat.mod_eq_of_lt relocationOffsetFits, Nat.mod_eq_of_lt lineOffsetFits]
+  all_goals omega
+
+/-- Every span of one canonical section fits any container that reaches the
+end of that section's contiguous byte interval. -/
+theorem SectionDescription.headerAt_declaredSpans_fit
+    (description : SectionDescription) (offset containerLength : Nat)
+    (rawFits : description.rawData.length < 2 ^ 32)
+    (relocationCountFits : description.relocations.length < 2 ^ 16)
+    (lineCountFits : description.lineNumbers.length < 2 ^ 16)
+    (addressFits : offset + description.byteLength < 2 ^ 32)
+    (sectionFits : offset + description.byteLength ≤ containerLength) :
+    ∀ span ∈ (description.headerAt offset).declaredSpans,
+      span.Fits containerLength := by
+  intro span member
+  rcases description.headerAt_declaredSpan_bounds offset rawFits
+      relocationCountFits lineCountFits addressFits member with empty | bounded
+  · unfold ByteSpan.Fits ByteSpan.endExclusive
+    omega
+  · exact Nat.le_trans bounded.2 sectionFits
+
 /-- Repackage a raw section description as the dependent value expected by the
 section-content reader. The three hypotheses are precisely the on-disk field
 width obligations used by `SectionDescription.headerAt`. -/
@@ -610,6 +727,128 @@ def sectionDescriptionListLength : List SectionDescription → Nat
   | description :: descriptions =>
     description.byteLength + sectionDescriptionListLength descriptions
 
+/-- Spans synthesized by a canonical section list are either empty at zero or
+bounded by the complete contiguous interval assigned to that list. -/
+theorem layoutSectionList_declaredSpan_bounds (offset : Nat)
+    (descriptions : List SectionDescription)
+    (widths : ∀ description ∈ descriptions,
+      description.widthsFit = true)
+    (endFits : offset + sectionDescriptionListLength descriptions < 2 ^ 32)
+    {span : ByteSpan}
+    (member : span ∈ (layoutSectionList offset descriptions).1.flatMap
+      SectionHeader.declaredSpans) :
+    (span.offset = 0 ∧ span.length = 0) ∨
+      (offset ≤ span.offset ∧ span.endExclusive ≤
+        offset + sectionDescriptionListLength descriptions) := by
+  induction descriptions generalizing offset with
+  | nil => simp [layoutSectionList] at member
+  | cons description descriptions ih =>
+      have descriptionWidth := description.widthsFit_iff.mp
+        (widths description (by simp))
+      have tailWidths : ∀ tail ∈ descriptions, tail.widthsFit = true :=
+        fun tail tailMember => widths tail (by simp [tailMember])
+      have headEndFits : offset + description.byteLength < 2 ^ 32 := by
+        unfold sectionDescriptionListLength at endFits
+        omega
+      have tailEndFits : offset + description.byteLength +
+          sectionDescriptionListLength descriptions < 2 ^ 32 := by
+        unfold sectionDescriptionListLength at endFits
+        omega
+      simp only [layoutSectionList, List.flatMap_cons, List.mem_append] at member
+      rcases member with headMember | tailMember
+      · rcases description.headerAt_declaredSpan_bounds offset
+          descriptionWidth.1 descriptionWidth.2.1 descriptionWidth.2.2
+          headEndFits headMember with empty | bounded
+        · exact Or.inl empty
+        · right
+          unfold sectionDescriptionListLength
+          constructor
+          · exact bounded.1
+          · omega
+      · rcases ih (offset + description.byteLength) tailWidths tailEndFits
+          tailMember with empty | bounded
+        · exact Or.inl empty
+        · right
+          unfold sectionDescriptionListLength
+          constructor <;> omega
+
+/-- All spans synthesized by a canonical section list are pairwise disjoint,
+including empty spans represented at pointer zero. -/
+theorem layoutSectionList_declaredSpans_pairwise (offset : Nat)
+    (descriptions : List SectionDescription)
+    (widths : ∀ description ∈ descriptions,
+      description.widthsFit = true)
+    (endFits : offset + sectionDescriptionListLength descriptions < 2 ^ 32) :
+    ((layoutSectionList offset descriptions).1.flatMap
+      SectionHeader.declaredSpans).Pairwise ByteSpan.Disjoint := by
+  induction descriptions generalizing offset with
+  | nil => simp [layoutSectionList]
+  | cons description descriptions ih =>
+      have descriptionWidth := description.widthsFit_iff.mp
+        (widths description (by simp))
+      have tailWidths : ∀ tail ∈ descriptions, tail.widthsFit = true :=
+        fun tail tailMember => widths tail (by simp [tailMember])
+      have headEndFits : offset + description.byteLength < 2 ^ 32 := by
+        unfold sectionDescriptionListLength at endFits
+        omega
+      have tailEndFits : offset + description.byteLength +
+          sectionDescriptionListLength descriptions < 2 ^ 32 := by
+        unfold sectionDescriptionListLength at endFits
+        omega
+      simp only [layoutSectionList, List.flatMap_cons]
+      rw [List.pairwise_append]
+      refine ⟨description.headerAt_declaredSpans_pairwise offset
+          descriptionWidth.1 descriptionWidth.2.1 descriptionWidth.2.2
+          headEndFits,
+        ih (offset + description.byteLength) tailWidths tailEndFits, ?_⟩
+      intro headSpan headMember tailSpan tailMember
+      rcases description.headerAt_declaredSpan_bounds offset
+          descriptionWidth.1 descriptionWidth.2.1 descriptionWidth.2.2
+          headEndFits headMember with headEmpty | headBounded
+      · left
+        unfold ByteSpan.endExclusive
+        omega
+      · rcases layoutSectionList_declaredSpan_bounds
+          (offset + description.byteLength) descriptions tailWidths tailEndFits
+          tailMember with tailEmpty | tailBounded
+        · right
+          unfold ByteSpan.endExclusive
+          omega
+        · left
+          exact Nat.le_trans headBounded.2 tailBounded.1
+
+/-- Every header synthesized by canonical list layout has coherent zero and
+nonzero pointers. -/
+theorem layoutSectionList_pointersCoherent (offset : Nat)
+    (descriptions : List SectionDescription) (offsetPositive : 0 < offset)
+    (widths : ∀ description ∈ descriptions,
+      description.widthsFit = true)
+    (endFits : offset + sectionDescriptionListLength descriptions < 2 ^ 32) :
+    ∀ header ∈ (layoutSectionList offset descriptions).1,
+      header.PointersCoherent := by
+  induction descriptions generalizing offset with
+  | nil => simp [layoutSectionList]
+  | cons description descriptions ih =>
+      have descriptionWidth := description.widthsFit_iff.mp
+        (widths description (by simp))
+      have tailWidths : ∀ tail ∈ descriptions, tail.widthsFit = true :=
+        fun tail tailMember => widths tail (by simp [tailMember])
+      have headEndFits : offset + description.byteLength < 2 ^ 32 := by
+        unfold sectionDescriptionListLength at endFits
+        omega
+      have tailEndFits : offset + description.byteLength +
+          sectionDescriptionListLength descriptions < 2 ^ 32 := by
+        unfold sectionDescriptionListLength at endFits
+        omega
+      intro header member
+      simp only [layoutSectionList, List.mem_cons] at member
+      rcases member with rfl | tailMember
+      · exact description.headerAt_pointersCoherent offset offsetPositive
+          descriptionWidth.1 descriptionWidth.2.1 descriptionWidth.2.2
+          headEndFits
+      · exact ih (offset + description.byteLength) (by omega) tailWidths
+          tailEndFits header tailMember
+
 /-- Sum of all canonical section-content widths in source order. -/
 def ObjectDescription.sectionsByteLength
     (description : ObjectDescription) : Nat :=
@@ -859,6 +1098,78 @@ theorem ObjectDescription.widthsFit_symbolCount
   simp only [Bool.and_eq_true] at widths
   exact of_decide_eq_true widths.1.1.2
 
+/-- Whole-object width validity supplies the final canonical section offset. -/
+theorem ObjectDescription.widthsFit_sectionLayoutEnd
+    (description : ObjectDescription)
+    (widths : description.widthsFit = true) :
+    description.sectionLayout.2 < 2 ^ 32 := by
+  unfold ObjectDescription.widthsFit at widths
+  simp only [Bool.and_eq_true] at widths
+  exact of_decide_eq_true widths.1.2
+
+/-- Synthesized object section headers all have coherent pointers. -/
+theorem ObjectDescription.sectionLayout_pointersCoherent
+    (description : ObjectDescription)
+    (widths : description.widthsFit = true) :
+    ∀ header ∈ description.sectionLayout.1.toList,
+      header.PointersCoherent := by
+  have endFits : 20 + 40 * description.sections.length +
+      sectionDescriptionListLength description.sections.toList < 2 ^ 32 := by
+    change 20 + 40 * description.sections.length +
+      description.sectionsByteLength < 2 ^ 32
+    rw [← description.end_sectionLayout]
+    exact description.widthsFit_sectionLayoutEnd widths
+  simpa only [ObjectDescription.sectionLayout, Vec.toList_fromList] using
+    layoutSectionList_pointersCoherent
+      (20 + 40 * description.sections.length) description.sections.toList
+      (by omega) (description.widthsFit_sections widths) endFits
+
+/-- Every canonical object section span is empty at zero or lies between the
+end of the table prefix and the end of all section contents. -/
+theorem ObjectDescription.sectionLayout_declaredSpan_bounds
+    (description : ObjectDescription)
+    (widths : description.widthsFit = true) {span : ByteSpan}
+    (member : span ∈ sectionDeclaredSpans description.sectionLayout.1) :
+    (span.offset = 0 ∧ span.length = 0) ∨
+      (20 + 40 * description.sections.length ≤ span.offset ∧
+        span.endExclusive ≤ description.sectionLayout.2) := by
+  have endFits : 20 + 40 * description.sections.length +
+      sectionDescriptionListLength description.sections.toList < 2 ^ 32 := by
+    change 20 + 40 * description.sections.length +
+      description.sectionsByteLength < 2 ^ 32
+    rw [← description.end_sectionLayout]
+    exact description.widthsFit_sectionLayoutEnd widths
+  have rawBound := layoutSectionList_declaredSpan_bounds
+    (20 + 40 * description.sections.length) description.sections.toList
+    (description.widthsFit_sections widths) endFits
+    (span := span) (by
+      simpa only [sectionDeclaredSpans, ObjectDescription.sectionLayout,
+        Vec.toList_fromList] using member)
+  rcases rawBound with empty | bounded
+  · exact Or.inl empty
+  · right
+    refine ⟨bounded.1, ?_⟩
+    rw [description.end_sectionLayout]
+    exact bounded.2
+
+/-- All section spans in a width-valid canonical object are pairwise disjoint. -/
+theorem ObjectDescription.sectionLayout_declaredSpans_pairwise
+    (description : ObjectDescription)
+    (widths : description.widthsFit = true) :
+    (sectionDeclaredSpans description.sectionLayout.1).Pairwise
+      ByteSpan.Disjoint := by
+  have endFits : 20 + 40 * description.sections.length +
+      sectionDescriptionListLength description.sections.toList < 2 ^ 32 := by
+    change 20 + 40 * description.sections.length +
+      description.sectionsByteLength < 2 ^ 32
+    rw [← description.end_sectionLayout]
+    exact description.widthsFit_sectionLayoutEnd widths
+  simpa only [sectionDeclaredSpans, ObjectDescription.sectionLayout,
+    Vec.toList_fromList] using
+    layoutSectionList_declaredSpans_pairwise
+      (20 + 40 * description.sections.length) description.sections.toList
+      (description.widthsFit_sections widths) endFits
+
 /-- Writable descriptions necessarily satisfy the complete width check. -/
 theorem ObjectDescription.Writable.widthsFit
     (description : ObjectDescription)
@@ -998,6 +1309,179 @@ theorem ObjectDescription.readSymbolTail_bytes
         split <;> simp_all <;> rfl
       rw [tailEq]
       exact parsed
+
+/-- The synthesized prefix span ends exactly where canonical section contents
+begin. -/
+theorem ObjectDescription.prefixSpan_endExclusive
+    (description : ObjectDescription)
+    (sectionCountFits : description.sections.length < 2 ^ 16) :
+    description.header.prefixSpan.endExclusive =
+      20 + 40 * description.sections.length := by
+  simp [Header.prefixSpan, ByteSpan.endExclusive,
+    description.header_numberOfSections sectionCountFits,
+    description.header_sizeOfOptionalHeader]
+
+/-- The end of canonical section contents never exceeds the serialized object
+length; any symbol/string tail follows it. -/
+theorem ObjectDescription.sectionLayoutEnd_le_length_bytes
+    (description : ObjectDescription) :
+    description.sectionLayout.2 ≤ description.bytes.length := by
+  rw [description.length_bytes, description.end_sectionLayout]
+  unfold ObjectDescription.byteLength
+  omega
+
+/-- Every writable canonical object has a coherent, bounded, pairwise-disjoint
+declared span layout, including either form of the optional symbol tail. -/
+theorem ObjectDescription.layoutValid (description : ObjectDescription)
+    (writable : description.Writable = true) :
+    DeclaredObjectLayoutValid description.header description.sectionLayout.1
+      (description.symbolTail writable).stringTable? description.bytes.length := by
+  have widths := ObjectDescription.Writable.widthsFit description writable
+  have sectionCountFits := description.widthsFit_sectionCount widths
+  have sectionCount : description.sectionLayout.1.length =
+      description.header.numberOfSections.toNat := by
+    rw [description.length_sectionLayout]
+    symm
+    exact description.header_numberOfSections sectionCountFits
+  have sectionPointers := description.sectionLayout_pointersCoherent widths
+  have sectionPairwise :=
+    description.sectionLayout_declaredSpans_pairwise widths
+  have prefixEnd := description.prefixSpan_endExclusive sectionCountFits
+  have layoutEndLeBytes := description.sectionLayoutEnd_le_length_bytes
+  have prefixSectionFits : ∀ span ∈
+      description.header.prefixSpan ::
+        sectionDeclaredSpans description.sectionLayout.1,
+      span.Fits description.bytes.length := by
+    intro span member
+    simp only [List.mem_cons] at member
+    rcases member with rfl | sectionMember
+    · unfold ByteSpan.Fits
+      rw [prefixEnd]
+      exact Nat.le_trans (by
+        rw [description.end_sectionLayout]
+        omega) layoutEndLeBytes
+    · rcases description.sectionLayout_declaredSpan_bounds widths
+          sectionMember with empty | bounded
+      · unfold ByteSpan.Fits ByteSpan.endExclusive
+        omega
+      · exact Nat.le_trans bounded.2 layoutEndLeBytes
+  have prefixSectionPairwise :
+      (description.header.prefixSpan ::
+        sectionDeclaredSpans description.sectionLayout.1).Pairwise
+          ByteSpan.Disjoint := by
+    apply List.Pairwise.cons
+    · intro span member
+      rcases description.sectionLayout_declaredSpan_bounds widths member with
+        empty | bounded
+      · right
+        unfold Header.prefixSpan ByteSpan.endExclusive
+        omega
+      · left
+        rw [prefixEnd]
+        exact bounded.1
+    · exact sectionPairwise
+  cases symbolsEq : description.symbols with
+  | absent =>
+      have pointerZero :=
+        description.header_pointerToSymbolTable_absent symbolsEq
+      have countZero : description.header.numberOfSymbols.toNat = 0 := by
+        rw [description.header_numberOfSymbols
+          (description.widthsFit_symbolCount widths)]
+        simp [SymbolDescription.cellCount, symbolsEq]
+      have tailEq : description.symbolTail writable =
+          .absent pointerZero countZero := by
+        unfold ObjectDescription.symbolTail
+        split <;> simp_all <;> rfl
+      have stringsEq :
+          (description.symbolTail writable).stringTable? = none := by
+        rw [tailEq]
+        rfl
+      rw [stringsEq]
+      refine ⟨sectionCount, ?_, sectionPointers, ?_, ?_⟩
+      · exact ⟨pointerZero, countZero⟩
+      · simpa [declaredObjectSpans] using prefixSectionFits
+      · simpa [declaredObjectSpans] using prefixSectionPairwise
+  | present cells strings =>
+      have layoutFits := description.widthsFit_sectionLayoutEnd widths
+      have pointerEq : description.header.pointerToSymbolTable.toNat =
+          description.sectionLayout.2 :=
+        description.header_pointerToSymbolTable_present cells strings symbolsEq
+          layoutFits
+      have pointerNonzero :
+          description.header.pointerToSymbolTable.toNat ≠ 0 := by
+        rw [pointerEq, description.end_sectionLayout]
+        omega
+      have countEq : description.header.numberOfSymbols.toNat = cells.length := by
+        rw [description.header_numberOfSymbols
+          (description.widthsFit_symbolCount widths)]
+        simp [SymbolDescription.cellCount, symbolsEq]
+      have validations :
+          validAuxLayoutScan cells.length cells.toList = true ∧
+            validPrimaryNamesScan cells.length cells.toList strings = true := by
+        unfold ObjectDescription.Writable at writable
+        rw [widths, symbolsEq] at writable
+        simpa only [true_and, Bool.and_eq_true] using writable
+      have cellCount :
+          cells.length = description.header.numberOfSymbols.toNat :=
+        countEq.symm
+      let table : SymbolTable description.header := { cells, cellCount }
+      let validated : AuxValidatedSymbolTable description.header :=
+        { table, auxLayoutValid := validations.1 }
+      have tailEq : description.symbolTail writable =
+          .present pointerNonzero validated strings validations.2 := by
+        unfold ObjectDescription.symbolTail
+        split <;> simp_all <;> rfl
+      have bytesLength : description.bytes.length =
+          description.sectionLayout.2 + 18 * cells.length +
+            strings.declaredSize.toNat := by
+        rw [description.length_bytes, description.end_sectionLayout]
+        unfold ObjectDescription.byteLength
+        simp [SymbolDescription.byteLength, symbolsEq]
+        omega
+      have stringsEq :
+          (description.symbolTail writable).stringTable? = some strings := by
+        rw [tailEq]
+        rfl
+      rw [stringsEq]
+      refine ⟨sectionCount, pointerNonzero, sectionPointers, ?_, ?_⟩
+      · intro span member
+        simp [declaredObjectSpans] at member
+        rcases member with rfl | prefixOrSection | rfl | rfl
+        · exact prefixSectionFits description.header.prefixSpan (by simp)
+        · exact prefixSectionFits span (by simp [prefixOrSection])
+        · simp [ByteSpan.Fits, Header.symbolTableSpan,
+            ByteSpan.endExclusive, pointerEq, countEq, bytesLength]
+        · simp [ByteSpan.Fits, Header.stringTableSpan,
+            Header.symbolTableSpan, ByteSpan.endExclusive, pointerEq, countEq,
+            bytesLength]
+      · change (description.header.prefixSpan ::
+          sectionDeclaredSpans description.sectionLayout.1 ++
+          [description.header.symbolTableSpan,
+            description.header.stringTableSpan strings]).Pairwise
+            ByteSpan.Disjoint
+        rw [List.pairwise_append]
+        refine ⟨prefixSectionPairwise, ?_, ?_⟩
+        · simp [ByteSpan.Disjoint, Header.symbolTableSpan,
+            Header.stringTableSpan, ByteSpan.endExclusive, pointerEq, countEq]
+        · intro left leftMember right rightMember
+          have leftEnd : left.endExclusive ≤ description.sectionLayout.2 := by
+            simp only [List.mem_cons] at leftMember
+            rcases leftMember with rfl | sectionMember
+            · rw [prefixEnd, description.end_sectionLayout]
+              omega
+            · rcases description.sectionLayout_declaredSpan_bounds widths
+                  sectionMember with empty | bounded
+              · unfold ByteSpan.endExclusive
+                omega
+              · exact bounded.2
+          have rightOffset : description.sectionLayout.2 ≤ right.offset := by
+            simp at rightMember
+            rcases rightMember with rfl | rfl
+            · simp [Header.symbolTableSpan, pointerEq]
+            · simp [Header.stringTableSpan, Header.symbolTableSpan,
+                ByteSpan.endExclusive, pointerEq]
+          left
+          exact Nat.le_trans leftEnd rightOffset
 
 /-- Canonical dependent contents corresponding to an object description's
 synthesized section layout. -/
