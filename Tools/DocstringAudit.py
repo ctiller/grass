@@ -12,11 +12,11 @@ docstring routinely claims more than its statement proves -- that is how
 `decodeInsn_toBytes` came to be described as evidence about x86 -- and the
 check is cheap. The docstring now describes what the code does.
 
-docs/MEMORY_IMPLEMENTATION_PLAN.md section 3.10:
-
-    Any implementation comment using "ensures", "prevents", "cannot", "only", or
-    "preserves" must name the enforcing type or theorem. If it cannot name one, it
-    must be rewritten as an intended invariant or an open obligation.
+`docs/REVIEW.md` section "Documentation assurance and mechanized gates" owns the
+corpus-wide vocabulary and evidence rule. This audit implements the deliberately
+under-reporting, machine-recognizable subset ratified there for `Grass/**/*.lean`.
+`docs/MEMORY_IMPLEMENTATION_PLAN.md` section 3.10 cites that corpus rule rather
+than defining a competing list.
 
 Four adversarial review rounds each found a docstring asserting a property the
 code did not have -- including one naming a theorem that did not exist, in the
@@ -48,11 +48,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Deliberately narrow. The designer's rule names "ensures", "prevents", "cannot",
-# "only", and "preserves"; the last two occur constantly in ordinary descriptive
-# English ("the only fault position", "a value that is never live") and flagging
-# every one buries the signal. What is kept are the words that assert a mechanism
-# rather than describe a value, plus "only" in its guarantee-shaped phrasings.
+# Deliberately narrower than REVIEW.md's authoritative human-review vocabulary.
+# Broad uses of "only" and similar ordinary descriptive English bury the signal,
+# so this subset keeps mechanism-shaped terms and guarantee-shaped "only"
+# phrasings. Human review still covers `exactly`, `append-only`, and claims that
+# do not match these spellings.
 #
 # The tool therefore under-reports by construction. It is a net for the specific
 # drift four review rounds found -- a definition or module comment asserting an

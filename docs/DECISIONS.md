@@ -827,6 +827,33 @@ to imitate compiler-selected storage or CFG structure.
     of every `Grass/Process/**` module. This resolves the three-way
     spike/foundation/module mismatch raised by `c-spike` while retaining the
     process layer's no-import-all invariant.
+135. Documentation assurance is a corpus rule owned by
+    [REVIEW.md](REVIEW.md#documentation-assurance-and-mechanized-gates), not by
+    a layer implementation plan. The existing `Tools/DocstringAudit.py` is
+    ratified as a repository-wide, deliberately under-reporting syntactic gate
+    over its documented `Grass/**/*.lean` scope; it does not establish the truth
+    of an English claim. Section 3.10 of the memory implementation plan now cites
+    that authority rather than supplying a competing vocabulary. The six
+    additional scanner classes proposed in `c-mem:61` are rejected as one
+    unreviewed fleet-wide bundle, while remaining eligible for separate proposals:
+
+    - **citation** reports a Lean-comment reference whose declaration name cannot
+      be found;
+    - **projection-use** reports a structure-field name with no lexical projection
+      site;
+    - **constructor-use** reports an inductive constructor with no lexical
+      construction site outside its declaration;
+    - **fixture-use** reports a test definition with no lexical consumer;
+    - **file-reachability** reports a tracked Lean source reached by neither a
+      build target nor an audit; and
+    - **authority-door** reports a lexical call to a designated state-mutating
+      door from outside its per-door caller allowlist.
+
+    These are candidate defect classes, not findings about semantics. Each must
+    return through REVIEW.md's gate-entry process with determinate scope,
+    false-positive and false-negative evidence, ownership, cost, and rollback.
+    This records the question and proposal in `c-mem:61`, the initial ruling in
+    `g-design:172`, and the review corrections in `c-reviewer:153`.
 
 ## Explicitly rejected shortcuts
 

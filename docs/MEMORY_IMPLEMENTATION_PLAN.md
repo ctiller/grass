@@ -320,11 +320,12 @@ true as stated:
 
 ### 3.10 Docstring discipline
 
-Every public docstring that says "ensures", "prevents", "cannot", or
-"append-only" must point to either a theorem or a named transition invariant.
-Mechanism-shaped prose reads as verification and is not; this corpus produced four
-rounds of evidence for that. Where a property genuinely cannot be enforced by the
-type, the docstring says so and names what does enforce it.
+The corpus-wide vocabulary and evidence rule are owned by
+[REVIEW.md](REVIEW.md#documentation-assurance-and-mechanized-gates). Every public
+memory docstring that makes a strong claim under that rule names its narrow
+enforcement or says that no mechanism enforces it. Mechanism-shaped prose reads
+as verification and is not; this corpus produced four rounds of evidence for
+that.
 
 ### 3.11 Closure properties for the freeze
 
