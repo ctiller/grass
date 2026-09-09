@@ -11,6 +11,9 @@ import Grass.ISA.X86.Execution.DecodedSite
 import Grass.ISA.X86.Execution.AccessRun
 import Grass.ISA.X86.Execution.Fetch
 import Grass.ISA.X86.Execution.SubRspNormal
+import Grass.ISA.X86.Execution.PushNormal
+import Grass.ISA.X86.Execution.AccessFree
+import Grass.ISA.X86.Execution.MoveNormal
 import Grass.ISA.X86.Execution.StackInstruction
 import Grass.ISA.X86.Execution.CompletionFlags
 import Grass.ISA.X86.Decode
@@ -116,6 +119,8 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.State, `Grass.ISA.X86.Execution.DecodedSite,
    `Grass.ISA.X86.Execution.AccessRun, `Grass.ISA.X86.Execution.Fetch,
    `Grass.ISA.X86.Execution.SubRspNormal,
+   `Grass.ISA.X86.Execution.PushNormal,
+   `Grass.ISA.X86.Execution.AccessFree, `Grass.ISA.X86.Execution.MoveNormal,
    `Grass.ISA.X86.Execution.StackInstruction, `Grass.ISA.X86.Execution.CompletionFlags,
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
@@ -164,7 +169,9 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Seven execution-foundation facts add length/flag/encoding obligations.
 -- No prior debt moves to notBehaviour or becomes cited through these tests.
 -- The fetched normal SUB RSP constructor adds one instruction-transfer obligation.
-def owedBaseline : Nat := 233
+-- The fetched normal register PUSH adds one instruction-transfer obligation.
+-- Normal MOV adds its encoding, effect, flags and architectural result obligations.
+def owedBaseline : Nat := 238
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -199,7 +206,7 @@ acquiring a citation.
 -- Ten exception helpers traverse, project or compare already selected values.
 -- Eight execution helpers represent state or select existing decoded constructors.
 -- One helper replaces the memory-machine field after a checked fetch.
-def notBehaviourBaseline : Nat := 160
+def notBehaviourBaseline : Nat := 161
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -431,6 +438,7 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.State.withGpr,
     `Grass.ISA.X86.Execution.State.withStatusFlags,
     `Grass.ISA.X86.Execution.FetchedSite.afterState,
+    `Grass.ISA.X86.Execution.MoveInstruction.destination,
     `Grass.ISA.X86.Execution.DecodedSite.fallthroughRip,
     `Grass.ISA.X86.Execution.StackInstruction.selectPush,
     `Grass.ISA.X86.Execution.StackInstruction.selectSubRsp,
@@ -673,6 +681,11 @@ def owed : List Name :=
     -- Source inspection and representation tests do not settle that attachment.
     `Grass.ISA.X86.Execution.DecodedSite.check,
     `Grass.ISA.X86.Execution.SubRspNormal.result,
+    `Grass.ISA.X86.Execution.PushNormal.result,
+    `Grass.ISA.X86.Execution.completedMoveRflags,
+    `Grass.ISA.X86.Execution.MoveInstruction.encoding,
+    `Grass.ISA.X86.Execution.MoveInstruction.effect,
+    `Grass.ISA.X86.Execution.MoveNormal.result,
     `Grass.ISA.X86.Execution.StackInstruction.encoding,
     `Grass.ISA.X86.Execution.statusMask,
     `Grass.ISA.X86.Execution.resumeMask,
