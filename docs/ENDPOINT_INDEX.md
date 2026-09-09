@@ -6,6 +6,10 @@ documents; it does not change their contracts or certify a milestone. Status
 describes this revision unless a later inspected delivery or interview report is
 explicitly named below.
 
+Latest inspected raw-execution delivery: [checked CPU execution and CALL
+provenance](#checked-cpu-execution-and-call-provenance), `0159cb87`. Earlier
+delivery sections explain the retained carrier, service and dispatch boundaries.
+
 ## Start from the authored output
 
 [Hello Program.lean](../Spikes/1_Hello_World/Program.lean) ends in
@@ -155,10 +159,47 @@ service cases and `service_receipt` inversion are unchanged by this delta.
 Use `git show d83bdca1:Grass/Platform/Win32/RawStep.lean` and
 `git show d83bdca1:Grass/Platform/Win32/ApiDispatch.lean` for the exact inspected
 implementation. This is logical dispatch from the loaded import layout, not
-native DLL/export adequacy. CPU, refusal, provider-resume and terminal cases,
-plus exhaustive public-profile coverage, remain outstanding in this relation
-at that delivery. Entry `EdgeAgreement` has not gained the service case's
+native DLL/export adequacy. At that delivery, CPU, refusal, provider-resume and
+terminal cases, plus exhaustive public-profile coverage, remained outstanding;
+the later CPU delivery is described below. Entry `EdgeAgreement` has not gained the service case's
 stronger causal-realization premises.
+
+### Checked CPU execution and CALL provenance
+
+Inspected architecture delivery `0159cb87` adds `EvaluatedCall` to all three
+API-entry constructors. It retains the selected `Cpu.policy?`, an actual
+`CheckedExecution.normal` result of `some (.ok (.call success))`, and `HEq`
+between that success's receipt and the same handoff receipt. A standalone CALL
+receipt no longer suffices without this evaluator provenance.
+
+Three new CPU constructors retain actual checked evaluation:
+
+| Case | Required result and retained evidence |
+|---|---|
+| `cpuCompleted` | Normal evaluation succeeds with the exact `.completed` outcome; CALL is excluded from this case and enters through the API-entry constructors |
+| `cpuFailure` | Normal evaluation returns a full typed `CheckedExecution.Failure`, whose mapped outcome supplies the reached state; the event retains `.checked failure`, not only its projected reason |
+| `cpuUncovered` | An explicitly non-normal choice evaluates to the exact outside-profile reached state and reason |
+
+All three CPU cases require caller control at the selected policy's context and
+retain `EdgeAgreement`. Their result uses `RawState.withMachine`, preserving
+the original metadata, control and runtime table even if the reached metadata
+cannot pack into the checked protocol view. A refusal diagnostic does not
+become a successful physical execution by being retained.
+
+`RawStep.cpu_checked` exposes the selected policy, caller context, checked
+evaluator outcome and exact `withMachine` after-state. `RawStep.cpu_rejected`
+excludes a CPU edge when evaluation under the selected policy returns `none`;
+it does not classify a failure to select a policy. The direct fixture proves
+that CALL is not plain completion and constructs an uncovered CPU edge retaining
+a failed protocol view and the original runtime table.
+
+Inspect `git show 0159cb87:Grass/Platform/Win32/RawStep.lean`,
+`git show 0159cb87:Grass/Platform/Win32/RawStepSignature.lean`, and
+`git show 0159cb87:Tests/Platform/Win32RawStep.lean` for this delivery.
+Service and its inversion are unchanged. This remains a partial relation,
+not a public profile or physical-adequacy theorem: policy-selection failure,
+provider refusal, provider-resume/return, terminal observation and exhaustive
+coverage are still outstanding at this revision.
 
 ## Find a symbol without another inventory
 
