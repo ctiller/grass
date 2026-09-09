@@ -24,6 +24,8 @@ import Grass.Assembly.Win32Constants
 import Grass.Assembly.RipRelative
 import Grass.Assembly.FrameAllocation
 import Grass.Assembly.SourcePrologue
+import Grass.Assembly.SourceInitialization
+import Grass.Assembly.SourceTemplates
 import Grass.Assembly.SourceStore
 import Grass.Assembly.Store32
 import Grass.Assembly.Store32Execution
