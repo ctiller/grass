@@ -93,6 +93,7 @@ import Grass.Assembly.SourceRuntimeFunction
 import Grass.Refinement.Console.WriteFileObserved
 import Grass.Refinement.Console.WriteAllX86
 import Grass.Refinement.Console.WriteAllHead
+import Grass.Refinement.Console.WriteAllGuards
 import Grass.Refinement.Console.WriteFileLoad
 import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
