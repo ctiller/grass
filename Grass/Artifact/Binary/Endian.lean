@@ -79,6 +79,23 @@ theorem writeLittleEndian_realizes (count : Nat) :
     WriterRealizes (littleEndianSemantics count) (@writeLittleEndian count) :=
   (writeExact_realizes count).iso (littleEndianIsomorphism count)
 
+/-- `derives_littleEndianFormat_iff` states that a little-endian derivation
+consumes exactly the canonical bytes for its value and preserves exactly the
+stated suffix. -/
+theorem derives_littleEndianFormat_iff {count : Nat}
+    {input rest : Std.Logical.ByteArray} {value : BitVec (8 * count)} :
+    Derives (littleEndianFormat count) input value rest ↔
+      input = writeLittleEndian value ++ rest := by
+  constructor
+  · intro derivation
+    have fixed := derivation.iso_inner
+    have repeated := derives_fixedBytes_iff.mp fixed
+    change input = (bitVecToLittleEndian value).1 ++ rest
+    exact (derives_repeatedBytes_iff.mp repeated).1
+  · intro equality
+    rw [equality]
+    exact (writeLittleEndian_realizes count).derivesWithSuffix value rest
+
 /-- `takeLittleEndian_writeLittleEndian` states the complete-input little-endian
 reader/writer round trip. -/
 @[simp] theorem takeLittleEndian_writeLittleEndian {count : Nat}

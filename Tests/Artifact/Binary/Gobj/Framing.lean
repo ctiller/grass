@@ -22,6 +22,16 @@ example : readU32LengthPrefixedBytes
       .done payload suffix := by
   exact readU32LengthPrefixedBytes_write_append payload suffix
 
+example : Derives u32LengthPrefixedBytesFormat
+    (writeU32LengthPrefixedBytes payload ++ suffix) payload suffix := by
+  exact derives_u32LengthPrefixedBytes_iff.mpr rfl
+
+example : readU32LengthPrefixedBytes
+    (writeU32LengthPrefixedBytes payload ++ suffix) = .done payload suffix ↔
+    Derives u32LengthPrefixedBytesFormat
+      (writeU32LengthPrefixedBytes payload ++ suffix) payload suffix :=
+  readU32LengthPrefixedBytes_done_iff _ _ _
+
 example : readU32LengthPrefixedBytes (Vec.fromList [0x03, 0x00]) =
     .needMore (some 2) := by rfl
 
