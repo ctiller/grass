@@ -74,7 +74,7 @@ theorem observed_suffix {rip : BitVec 64} {bytes : ByteSeq}
       congrArg (List.drop site.encoding.size) site.bytesExact
     _ = site.rest := by rw [← site.encoding.length_toBytes]; simp
 
-/-- One observed byte stream cannot certify two different decoded instructions. -/
+/-- `encoding_unique` identifies the decoded encoding for the same observed byte stream. -/
 theorem encoding_unique {rip : BitVec 64} {bytes : ByteSeq}
     (a b : DecodedSite rip bytes) : a.encoding = b.encoding := by
   have h := a.decoded.symm.trans b.decoded

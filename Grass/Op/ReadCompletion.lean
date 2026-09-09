@@ -106,6 +106,37 @@ theorem performPreparedAccess_readOnly_storage
        exact ⟨MemoryState.allocations_applyAuthorityEffect? authorityApplied,
          MemoryState.backings_applyAuthorityEffect? authorityApplied⟩)
 
+/-- A read-only prepared access declaring no ledger or authority effect frames
+the complete memory state and obligation map on every branch. -/
+theorem performPreparedAccess_readOnly_noEffects_frame
+    (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor)
+    (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (prepared : prepareAccess state.memory d = .ok resolved)
+    (outcome : AccessOutcome d) (contextKind : ContextKind) (cause : EventCause)
+    (readOnly : d.intent.writes = false)
+    (noLedgerEffect : d.ledgerEffect = [])
+    (noAuthorityEffect : d.authorityEffect = []) :
+    (performPreparedAccess policy state d resolved prepared outcome contextKind cause).memory =
+        state.memory ∧
+      (performPreparedAccess policy state d resolved prepared outcome contextKind cause).obligations =
+        state.obligations := by
+  unfold performPreparedAccess
+  repeat' split
+  all_goals first
+    | exact ⟨rfl, rfl⟩
+    | (rename_i ledger ledgerApplied lent authorityApplied
+       have ledgerSame : ledger = state.obligations := by
+         rw [noLedgerEffect] at ledgerApplied
+         exact Option.some.inj ledgerApplied.symm
+       have memorySame : lent = state.memory := by
+         rw [noAuthorityEffect, MemoryState.applyAuthorityEffect?_nil] at authorityApplied
+         exact Option.some.inj authorityApplied.symm
+       subst ledger
+       subst lent
+       have writtenAbsent := outcome_written_none_of_readOnly outcome readOnly
+       rw [Grass.Memory.commitResolved_of_eq_none _ _ _ _ _ writtenAbsent]
+       exact ⟨rfl, rfl⟩)
+
 /-- `performPreparedAccess_readOnly_allocations` frames the allocation table on
 every branch, including refusal branches. -/
 theorem performPreparedAccess_readOnly_allocations

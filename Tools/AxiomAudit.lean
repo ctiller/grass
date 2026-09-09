@@ -2,6 +2,10 @@ import Lean
 import Grass.Op.Completion
 import Grass.Op.CompletedAccess
 import Grass.Op.ReadCompletion
+import Grass.Op.PreparedPlacement
+import Grass.ISA.X86.Execution.AccessRun
+import Grass.ISA.X86.Execution.Fetch
+import Grass.ISA.X86.Execution.SubRspNormal
 import Grass.Semantics.OutputCut
 import Grass.Specification.TextLine
 import Grass.Console.Behavior

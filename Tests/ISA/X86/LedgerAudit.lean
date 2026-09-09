@@ -8,6 +8,9 @@ import Grass.ISA.X86.RegisterDecode
 import Grass.ISA.X86.RegisterLaws
 import Grass.ISA.X86.Execution.State
 import Grass.ISA.X86.Execution.DecodedSite
+import Grass.ISA.X86.Execution.AccessRun
+import Grass.ISA.X86.Execution.Fetch
+import Grass.ISA.X86.Execution.SubRspNormal
 import Grass.ISA.X86.Execution.StackInstruction
 import Grass.ISA.X86.Execution.CompletionFlags
 import Grass.ISA.X86.Decode
@@ -110,6 +113,8 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.RegisterSemantics, `Grass.ISA.X86.RegisterDecode,
    `Grass.ISA.X86.RegisterLaws,
    `Grass.ISA.X86.Execution.State, `Grass.ISA.X86.Execution.DecodedSite,
+   `Grass.ISA.X86.Execution.AccessRun, `Grass.ISA.X86.Execution.Fetch,
+   `Grass.ISA.X86.Execution.SubRspNormal,
    `Grass.ISA.X86.Execution.StackInstruction, `Grass.ISA.X86.Execution.CompletionFlags,
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
@@ -157,7 +162,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Seven execution-foundation facts add length/flag/encoding obligations.
 -- No prior debt moves to notBehaviour or becomes cited through these tests.
 -- Exception tables add 18 schema, flag, serialization and validation obligations.
-def owedBaseline : Nat := 232
+-- The fetched normal SUB RSP constructor adds one instruction-transfer obligation.
+def owedBaseline : Nat := 233
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -190,7 +196,8 @@ acquiring a citation.
 -- external relation; neither asserts Windows adequacy or physical nonresponse.
 -- Three new generic definitions derive history events or name selected evidence.
 -- Ten exception helpers traverse, project or compare already selected values.
-def notBehaviourBaseline : Nat := 159
+-- One helper replaces the memory-machine field after a checked fetch.
+def notBehaviourBaseline : Nat := 160
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -421,6 +428,7 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.State.statusFlags,
     `Grass.ISA.X86.Execution.State.withGpr,
     `Grass.ISA.X86.Execution.State.withStatusFlags,
+    `Grass.ISA.X86.Execution.FetchedSite.afterState,
     `Grass.ISA.X86.Execution.DecodedSite.fallthroughRip,
     `Grass.ISA.X86.Execution.StackInstruction.selectPush,
     `Grass.ISA.X86.Execution.StackInstruction.selectSubRsp,
@@ -662,6 +670,7 @@ def owed : List Name :=
     -- completed flag transfers retain debt until declaration-level attachment.
     -- Source inspection and representation tests do not settle that attachment.
     `Grass.ISA.X86.Execution.DecodedSite.check,
+    `Grass.ISA.X86.Execution.SubRspNormal.result,
     `Grass.ISA.X86.Execution.StackInstruction.encoding,
     `Grass.ISA.X86.Execution.statusMask,
     `Grass.ISA.X86.Execution.resumeMask,

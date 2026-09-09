@@ -1,10 +1,10 @@
 # Bounded x86 execution work
 
 The current implementation supplies the carrier, canonical stack-instruction
-selection and completed-flag functions for the generated Hello prologue. It
-does not yet supply fetched-memory receipts, instruction execution or unwind
-reversal. [The agreed execution boundary](HELLO_UNWIND_BOUNDARY.md) defines
-the remaining composition with the actual memory checker and final source.
+selection, actual fetched-memory receipts and a conditional normal SUB RSP
+completion constructor. PUSH execution and unwind reversal remain unfinished.
+[The agreed execution boundary](HELLO_UNWIND_BOUNDARY.md) defines the remaining
+composition with the actual memory checker and final source.
 
 `Execution.State` embeds `Memory.MachineState` once, alongside the GPR file,
 RIP and full 64-bit RFLAGS. The six status flags are a derived view. Its masked
@@ -17,6 +17,28 @@ placement or final-source membership. A fallthrough cursor is not the next RIP
 of a branch. `StackInstruction` selects existing production PUSH register and
 SUB RSP immediate encodings by exact equality; it has no second opcode table.
 Its completeness laws cover every production GPR and both immediate widths.
+
+`AccessRun` requires the actual selected sequence to contain exactly one access
+substep, with its no-fault plan, reached-state preparation and oracle answer,
+actual step result and clean ledger. `FetchedSite` adds an initialized execute
+read at RIP, a present allocation base, and the exact memory-backed oracle.
+Its descriptor has no obligation or authority effects.
+The decoder consumes the whole actual observed extent. Placement, decoded
+bytes, event size, memory-state and obligation preservation are derived. Final emitted-source
+membership remains an assembly adapter obligation.
+
+`SubRspNormal` joins that actual fetch to an access-free operation under the same
+policy, context and cause. Its encoding equality fixes the production typed
+immediate, including width and sign extension. The result uses the actual final
+memory machine, production arithmetic, full-RFLAGS normal rule and fetched
+fallthrough RIP. `machine_frame`, `fetched_event`, `events_exact` and
+`state_frame` retain the continuous run and observations.
+
+This is a conditional normal branch, not total instruction execution. Failure to
+construct its receipt says nothing about whether another outcome is possible.
+Faults, traps, interruptions and their delivered contexts remain obligations of
+the later total correspondence. Physical input admissibility and the source
+basis remain separate from these model-level constructor laws.
 
 `CompletionFlags` is conditional on ordinary instruction completion before
 event delivery. PUSH clears RF; SUB merges its six defined status flags and
@@ -75,7 +97,13 @@ bytes establishes initialization of the resolved span; those observations are
 independent of the indeterminate-byte provider. Fixtures retain a missing-cell
 counterexample where changing that provider changes the observed bytes.
 
-These are generic transition laws. The instruction receipt still must bind the
-actual selected sequence, fetched source bytes and instruction-specific register
-and memory effects. Rejected, denied and permitted fault outcomes remain separate.
-No completed x86 execution or partial-unwind proof is claimed by these files.
+The fetch fixture observes PUSH r12 bytes through an actual execute access and
+rejects wrong-address and non-executable preparation. The SUB fixture constructs
+the actual fetched normal branch and checks RSP, RIP, RFLAGS and another GPR;
+a mismatched immediate has a different encoding. Neither fixture is hardware
+correspondence evidence or an all-execution proof.
+
+Remaining work binds final emitted source to these fetched bytes, adds the PUSH
+store and checked saved-read branches, and carries actual prefix receipts into
+unwind reversal. Rejected, denied and permitted fault outcomes remain separate.
+No total x86 execution or partial-unwind proof is claimed by these files.
