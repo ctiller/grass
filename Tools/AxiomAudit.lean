@@ -4,6 +4,7 @@ import Grass.Semantics.BehaviorContract
 import Grass.Semantics.Environment
 import Grass.Semantics.SpecificationDemands
 import Grass.Console.ObservedBehavior
+import Grass.Console.ObservedEmbedding
 import Grass.Console.Contract
 import Grass.Console.ContractCorrect
 import Grass.Spec.Console

@@ -35,7 +35,9 @@ theorem lineDemandsCorrect {R Outcome : Type} [model : ResourceModel R] {resourc
   simp only [lineDemands, List.mem_cons, List.not_mem_nil, or_false] at member
   rcases member with rfl | rfl | rfl
   · exact fun _ history => ObservedBehavior.history_accounting history
-  · exact fun rendering selection => ⟨ObservedBehavior.reportingWait request rendering selection⟩
+  · exact fun rendering =>
+      ⟨fun cut => ⟨ObservedBehavior.writingWait request rendering cut⟩,
+       fun selection => ⟨ObservedBehavior.reportingWait request rendering selection⟩⟩
   · exact snapshot.selectedAxes_empty
 
 /-- The unchanged authored console theorem includes base rows and the requested
