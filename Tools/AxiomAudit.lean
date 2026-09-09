@@ -1,4 +1,5 @@
 import Lean
+import Grass.ISA.X86.RegisterDecode
 import Grass.Semantics.OutputCut
 import Grass.Specification.TextLine
 import Grass.Console.Behavior
@@ -28,6 +29,7 @@ import Grass.Assembly.FrameAllocation
 import Grass.Assembly.SourcePrologue
 import Grass.Assembly.SourceInitialization
 import Grass.Assembly.SourceTemplates
+import Grass.Assembly.SourceSplice
 import Grass.Assembly.SourceStore
 import Grass.Assembly.Store32
 import Grass.Assembly.Store32Execution
