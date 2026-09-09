@@ -9,8 +9,9 @@ import Grass.ISA.X86.Execution.ReturnSlotFactory
 This module performs the one architectural operation available at an opaque
 provider boundary: an actual checked read of the return slot.  The provider has
 no fetched `RET` byte in this model.  Consequently the resulting RIP and RSP
-are a platform resume construction justified by the retained call frame, not
-an x86 instruction receipt.
+form a computed resume candidate, not an x86 instruction receipt. The fixed
+endpoint must additionally establish original issuance, matched return and
+physical provider-transfer correspondence.
 
 The Win64 facts used here are limited to the modeled general-purpose register
 table in `Grass.ABI.Win64.Convention`.  XMM preservation, MXCSR, x87 control
