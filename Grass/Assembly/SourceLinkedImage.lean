@@ -224,7 +224,7 @@ def buildExcept {frame rootOffset} (splice : SourceSplice.Result frame rootOffse
                 else .error .xdataBytes
             else .error .pdataBytes
 
-/-- Compatibility erases the diagnostic and cannot diverge from construction. -/
+/-- `build?_eq_toOption` identifies this projection with diagnostic construction. -/
 def build? {frame rootOffset} (splice : SourceSplice.Result frame rootOffset)
     {table : StaticObjects.Table} (statics : StaticSection.Layout table)
     (sections : Sections) (requests : SourceImportRequests.Result splice) :
