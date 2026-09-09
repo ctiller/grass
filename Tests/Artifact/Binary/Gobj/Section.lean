@@ -60,6 +60,32 @@ example : readGobjSection (Vec.fromList [0, 0, 0, 0, 0, 8]) =
 example : readGobjSection (Vec.fromList [0, 0, 0, 0, 0, 0, 1, 0]) =
     .invalid (.malformed "nonzero .gobj section reserved field") := by rfl
 
+/-! Split-prefix campaign at every section-entry field boundary. -/
+
+example : readGobjSection (writeGobjSection entry |>.take 0) =
+    .needMore (some 4) := by rfl
+
+example : readGobjSection (writeGobjSection entry |>.take 4) =
+    .needMore (some 5) := by rfl
+
+example : readGobjSection (writeGobjSection entry |>.take 9) =
+    .needMore (some 1) := by rfl
+
+example : readGobjSection (writeGobjSection entry |>.take 10) =
+    .needMore (some 1) := by rfl
+
+example : readGobjSection (writeGobjSection entry |>.take 11) =
+    .needMore (some 2) := by rfl
+
+example : readGobjSection (writeGobjSection entry |>.take 13) =
+    .needMore (some 4) := by rfl
+
+example : readGobjSection (writeGobjSection entry |>.take 17) =
+    .needMore (some 2) := by rfl
+
+example : readGobjSection (writeGobjSection entry |>.take 19) =
+    .done entry Vec.empty := by rfl
+
 theorem singleton_countFits : (Vec.singleton entry).length < 2 ^ 32 := by decide
 
 def table : GobjSectionTable := ⟨Vec.singleton entry, singleton_countFits⟩

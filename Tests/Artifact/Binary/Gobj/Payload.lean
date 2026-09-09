@@ -62,6 +62,45 @@ example : readGobj
     (Vec.fromList [0x47, 0x4f, 0x42, 0x4a, 0x01, 0x00, 0x00, 0x00]) =
       .needMore (some 22) := by rfl
 
+/-! Split-prefix campaign at every fixed or length-delimited envelope field. -/
+
+example : readGobj (writeGobj payload |>.take 0) = .needMore (some 4) := by
+  rfl
+
+example : readGobj (writeGobj payload |>.take 4) = .needMore (some 2) := by
+  rfl
+
+example : readGobj (writeGobj payload |>.take 6) = .needMore (some 2) := by
+  rfl
+
+example : readGobj (writeGobj payload |>.take 8) = .needMore (some 22) := by
+  rfl
+
+example : readGobj (writeGobj payload |>.take 29) = .needMore (some 21) := by
+  rfl
+
+example : readGobj (writeGobj payload |>.take 40) = .needMore (some 4) := by
+  rfl
+
+example : readGobj (writeGobj payload |>.take 44) = .needMore (some 1) := by
+  rfl
+
+example : readGobj (writeGobj payload |>.take 45) = .needMore (some 4) := by
+  rfl
+
+example : readGobj (writeGobj payload |>.take 49) = .needMore (some 4) := by
+  rfl
+
+example : readGobj (writeGobj payload |>.take 53) = .needMore (some 4) := by
+  rfl
+
+example : readGobj (writeGobj payload |>.take 57) = .needMore (some 4) := by
+  rfl
+
+example : readGobj (writeGobj payload |>.take 61) =
+    .done payload Vec.empty := by
+  rfl
+
 example : readScopeComponent
     (writeScopeComponent "λ" ++ suffix) = .done "λ" suffix := by
   exact readScopeComponent_write_append "λ" suffix
