@@ -133,3 +133,20 @@ imported entry and an actual initialized execute-access `FetchedSite` receipt.
 Its `original_event` theorem connects the event's observed instruction to the
 original PE bytes. It requires a supplied checked fetch; the CLI does not
 construct that receipt, establish an OS loader, or prove a store transition.
+
+## Completed model witness
+
+`StoreCompletion` now joins an actual fetched C7 candidate to a subsequent
+completed write, preserving policy/context continuity, exact payload, placed
+address, and backing mutation. `CompletedViolation` attaches the original PE
+entry and an object in that same caller state, and proves that an actually
+committed byte lies outside the declared object. Root-allocation permission
+does not discharge object bounds.
+
+`Tests/Disasm/CompletedStore.lean` constructs a closed code/data-backing fixture:
+the original C7 bytes are fetched, the root16 byte at offset8 changes from0 to42,
+and the narrower object8 witness identifies that committed byte as excluded.
+It also checks an enlarged referent and an unrelated-pointer refusal. This
+fixture uses the explicitly unproved `FakeIsa` profile package; its theorem is
+a declared-model witness, not Windows execution adequacy or recovered C
+provenance. The host CLI still reports candidate assessments, not these receipts.

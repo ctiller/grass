@@ -4,6 +4,8 @@ import Grass.Disasm.StoreAttempt
 import Grass.Disasm.Spatial
 import Grass.Disasm.Entry
 import Grass.Disasm.FetchedEntry
+import Grass.Disasm.CompletedViolation
+import Grass.ISA.X86.Execution.StoreCompletion
 import Grass.ISA.X86.Execution.StoreCandidate
 import Grass.Disasm.CallerObject
 import Grass.Artifact.PE.Imported

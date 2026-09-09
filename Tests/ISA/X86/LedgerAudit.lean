@@ -31,6 +31,8 @@ import Grass.Artifact.PE.ExceptionBinding
 import Grass.Artifact.PE.Imported
 import Grass.Disasm.StoreAttempt
 import Grass.Disasm.FetchedEntry
+import Grass.Disasm.CompletedViolation
+import Grass.ISA.X86.Execution.StoreCompletion
 import Grass.ISA.X86.Execution.StoreCandidate
 import Grass.Disasm.Entry
 import Grass.Disasm.CallerObject
@@ -146,7 +148,8 @@ def auditedModules : List Name :=
    `Grass.Artifact.PE.LayoutInvariance, `Grass.Artifact.PE.LayoutBinding,
    `Grass.Artifact.PE.Imported, `Grass.Disasm.StoreAttempt,
    `Grass.Disasm.Entry, `Grass.Disasm.CallerObject,
-   `Grass.Disasm.FetchedEntry, `Grass.ISA.X86.Execution.StoreCandidate]
+   `Grass.Disasm.FetchedEntry, `Grass.ISA.X86.Execution.StoreCandidate,
+   `Grass.Disasm.CompletedViolation, `Grass.ISA.X86.Execution.StoreCompletion]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -186,7 +189,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- The vendor URL is provenance; formal ledger anchors remain owed.
 -- Reviewed fetched normal SUB RSP adds one transfer obligation.
 -- Reviewed PUSH/MOV add five instruction-transfer obligations.
-def owedBaseline : Nat := 257
+-- The completed-store carrier pins a bounded instruction access contract.
+def owedBaseline : Nat := 258
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -228,7 +232,9 @@ acquiring a citation.
 -- state via checked memory doors; they assert no recovered allocator behavior.
 -- Reviewed fetch helper replaces only the memory-machine field.
 -- Reviewed AccessFree receipt adds one representation helper.
-def notBehaviourBaseline : Nat := 182
+-- Three completed-object helpers transport proven memory equality or compose
+-- existing spatial checks; they do not assert a loader or source interpretation.
+def notBehaviourBaseline : Nat := 185
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -369,6 +375,9 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    `Grass.Disasm.CompletedViolation.transportObject,
+    `Grass.Disasm.CompletedViolation.fetchedObject,
+    `Grass.Disasm.CompletedViolation.check,
     -- Compatibility delegates retain coverage; modeled behavior moved to ISA.
     `Grass.Disasm.StoreAttempt.Error,
     `Grass.Disasm.StoreAttempt.Evidence,
@@ -610,6 +619,7 @@ def owed : List Name :=
     `Grass.ISA.X86.Execution.StoreCandidate.BaseDisplacement.modBits,
     `Grass.ISA.X86.Execution.StoreCandidate.BaseDisplacement.value,
     `Grass.ISA.X86.Execution.StoreCandidate.Evidence,
+    `Grass.ISA.X86.Execution.StoreCompletion,
     `Grass.ISA.X86.Execution.StoreCandidate.Evidence.address,
     `Grass.ISA.X86.Execution.StoreCandidate.Evidence.width,
     `Grass.ISA.X86.Execution.StoreCandidate.check,
@@ -876,7 +886,8 @@ def modeledDeclarations : MetaM (Array Name) := do
     -- or address-profile bounds in their fields. Include each type explicitly
     -- rather than letting the generic structure filter hide the obligation.
     -- This exception adds coverage; it exempts no future declaration.
-    if n == ``Grass.Disasm.Entry.Entry ||
+    if n == ``Grass.ISA.X86.Execution.StoreCompletion ||
+        n == ``Grass.Disasm.Entry.Entry ||
         n == ``Grass.ISA.X86.Execution.StoreCandidate.Evidence ||
         n == ``Grass.Platform.Win32.WriteFile.Prepared ||
         n == ``Grass.Platform.Win32.WriteFile.ReturnResult ||
