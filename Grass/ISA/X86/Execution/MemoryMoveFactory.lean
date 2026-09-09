@@ -25,6 +25,12 @@ inductive Success {before : State} {afterFetch : MachineState}
 
 namespace Success
 
+/-- The provenance of the actual data access retained by either normal receipt. -/
+def provenance {before : State} {afterFetch : MachineState} {fetch : FetchedSite before afterFetch} :
+    Success fetch → Provenance
+  | .store _ receipt _ => receipt.access.descriptor.provenance
+  | .load _ receipt _ => receipt.access.descriptor.provenance
+
 def result {before : State} {afterFetch : MachineState} {fetch : FetchedSite before afterFetch} :
     Success fetch → State
   | .store _ receipt _ => receipt.result
@@ -113,6 +119,27 @@ private def fromSite (policy : CpuAccessPolicy) {before : State} {afterFetch : M
                         payloadExact := by simp [payload, h, Instruction.payload?]
                         supplied := by rfl } rfl)
 
+private theorem fromSite_stack {policy : CpuAccessPolicy} {before : State}
+    {afterFetch : MachineState} {fetch : FetchedSite before afterFetch}
+    {fetchSpace : fetch.descriptor.space = .cpuVirtual}
+    {fetchContext : fetch.descriptor.context = fetch.run.context}
+    {policyContext : policy.context = fetch.run.context} {success : Success fetch}
+    (ran : fromSite policy fetch fetchSpace fetchContext policyContext = .ok success) :
+    success.provenance = policy.stack := by
+  unfold fromSite at ran
+  split at ran
+  · contradiction
+  · rename_i selected selectionExact
+    rcases selected with ⟨instruction, encoded, encodingExact⟩
+    cases instruction <;>
+      (simp only at ran
+       split at ran
+       · contradiction
+       · split at ran
+         · contradiction
+         · cases Except.ok.inj ran
+           rfl)
+
 def fromFetched {policy : CpuAccessPolicy} {before : State}
     (fetched : FetchFactory.Success policy before) : Except Failure (Success fetched.dispatched.fetch) :=
   let metadata := fetched.observed.dispatch_metadata fetched.dispatched fetched.dispatch_exact
@@ -128,6 +155,15 @@ def fromFetched {policy : CpuAccessPolicy} {before : State}
         _ = fetched.observed.run.context := fetched.context_exact.symm
         _ = fetched.dispatched.fetch.run.context := metadata.2.1.symm)
     (by rw [metadata.2.1, fetched.context_exact])
+
+/-- `fromFetched_stack` retains the exact policy stack provenance used to plan
+the actual data access; successful preparation does not choose another root. -/
+theorem fromFetched_stack {policy : CpuAccessPolicy} {before : State}
+    {fetched : FetchFactory.Success policy before} {success : Success fetched.dispatched.fetch}
+    (ran : fromFetched fetched = .ok success) : success.provenance = policy.stack := by
+  apply fromSite_stack (policyContext := ?_) ran
+  have metadata := fetched.observed.dispatch_metadata fetched.dispatched fetched.dispatch_exact
+  rw [metadata.2.1, fetched.context_exact]
 
 theorem fetchedPolicy {policy : CpuAccessPolicy} {before : State}
     (fetched : FetchFactory.Success policy before) :
@@ -147,5 +183,33 @@ def memoryMove (policy : CpuAccessPolicy) (before : State) :
       match fromFetched fetched with
       | .error reason => .error reason
       | .ok success => .ok ⟨fetched, success⟩
+
+/-- `memoryMove_stack` recovers the selected stack provenance from actual
+factory evaluation, rather than from a standalone success value. -/
+theorem memoryMove_stack {policy : CpuAccessPolicy} {before : State}
+    {success : CompleteSuccess policy before}
+    (ran : memoryMove policy before = .ok success) :
+    success.execution.provenance = policy.stack := by
+  unfold memoryMove at ran
+  split at ran
+  · contradiction
+  · split at ran
+    · contradiction
+    · rename_i execution executed
+      cases Except.ok.inj ran
+      exact fromFetched_stack executed
+
+/-- The load branch exposes the same provenance equation directly on its
+original actual access descriptor. -/
+theorem memoryMove_load_stack {policy : CpuAccessPolicy} {before : State}
+    {fetched : FetchFactory.Success policy before}
+    {instruction : MemoryMoveNormal.Instruction}
+    {encoded : MemoryMoveNormal.Instruction.Encoding instruction}
+    {afterData : MachineState}
+    {receipt : LoadNormal instruction encoded before fetched.after afterData}
+    {fetchExact : receipt.fetch = fetched.dispatched.fetch}
+    (ran : memoryMove policy before = .ok ⟨fetched, .load encoded receipt fetchExact⟩) :
+    receipt.access.descriptor.provenance = policy.stack :=
+  memoryMove_stack ran
 
 end Grass.ISA.X86.Execution.MemoryMoveFactory

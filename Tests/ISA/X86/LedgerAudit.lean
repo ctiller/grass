@@ -378,7 +378,7 @@ acquiring a citation.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
 -- Runtime, compatibility and shared spatial adapters retain actual evidence.
--- One canonical log suffix projection asserts no transition by itself.
+-- Shared failure recovery removes one duplicate; memory-MOV provenance adds one projection.
 def notBehaviourBaseline : Nat := 370
 
 /--
@@ -768,6 +768,7 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.MemoryMoveSelection.displacement?,
     `Grass.ISA.X86.Execution.MemoryMoveSelection.select,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.Success.result,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.Success.provenance,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.reached,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.fromSite,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.fromFetched,
