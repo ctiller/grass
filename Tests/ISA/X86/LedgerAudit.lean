@@ -24,6 +24,7 @@ import Grass.Platform.Win32.WriteFile
 import Grass.Platform.Win32.WriteFileNonresponse
 import Grass.Platform.Win32.WriteFileStabilization
 import Grass.Platform.Win32.WriteFileReturn
+import Grass.Platform.Win32.LoaderEntry
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
 import Grass.Artifact.PE.ExceptionBinding
@@ -127,6 +128,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileNonresponse,
    `Grass.Platform.Win32.WriteFileStabilization,
    `Grass.Platform.Win32.WriteFileResult, `Grass.Platform.Win32.WriteFileReturn,
+   `Grass.Platform.Win32.LoaderImage, `Grass.Platform.Win32.LoaderRegion,
+   `Grass.Platform.Win32.LoaderEntry,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
@@ -168,7 +171,9 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Seven execution-foundation facts add length/flag/encoding obligations.
 -- No prior debt moves to notBehaviour or becomes cited through these tests.
 -- The fetched normal SUB RSP constructor adds one instruction-transfer obligation.
-def owedBaseline : Nat := 233
+-- Thirteen loader/entry, IAT-width, placement and permission commitments.
+-- Preferred-base model fixtures and a native sample do not discharge citation debt.
+def owedBaseline : Nat := 246
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -204,7 +209,9 @@ acquiring a citation.
 -- Eight execution helpers represent state or select existing decoded constructors.
 -- One helper replaces the memory-machine field after a checked fetch.
 -- One continuation shift reindexes existing committed edges and histories.
-def notBehaviourBaseline : Nat := 161
+-- Fourteen loader helpers install/compare supplied memory records, scan identity
+-- references, project checked header data, and transform finite byte sequences.
+def notBehaviourBaseline : Nat := 175
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -345,6 +352,20 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    `Grass.Platform.Win32.InitializedRegion.allocationRecord,
+    `Grass.Platform.Win32.InitializedRegion.backingRecord,
+    `Grass.Platform.Win32.MemoryFresh,
+    `Grass.Platform.Win32.installInitializedRegion?,
+    `Grass.Platform.Win32.Loader.CpuPlacementValid,
+    `Grass.Platform.Win32.Loader.CpuPlacementsDisjoint,
+    `Grass.Platform.Win32.Loader.HistoryFresh,
+    `Grass.Platform.Win32.Loader.ImportTargets,
+    `Grass.Platform.Win32.Loader.PlacementValid,
+    `Grass.Platform.Win32.Loader.RegionsPresent,
+    `Grass.Platform.Win32.Loader.installRegions?,
+    `Grass.Platform.Win32.Loader.patchContents,
+    `Grass.Platform.Win32.Loader.patchedByte,
+    `Grass.Platform.Win32.Loader.preferredBase,
     -- Derived accumulated histories and the type of an externally supplied
     -- observation relation, not new Windows behavior facts.
     `Grass.Platform.Win32.WriteFile.InfiniteContinuation.historyAt,
@@ -549,6 +570,19 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    `Grass.Platform.Win32.Loader.EntryMapped,
+    `Grass.Platform.Win32.Loader.EnvironmentValid,
+    `Grass.Platform.Win32.Loader.ImportPatch.byteAt?,
+    `Grass.Platform.Win32.Loader.LoadedImage.initialState,
+    `Grass.Platform.Win32.Loader.PatchesValid,
+    `Grass.Platform.Win32.Loader.StackPlacementValid,
+    `Grass.Platform.Win32.Loader.StackValid,
+    `Grass.Platform.Win32.Loader.assignedRegions,
+    `Grass.Platform.Win32.Loader.imageRegions,
+    `Grass.Platform.Win32.Loader.importPatches?,
+    `Grass.Platform.Win32.Loader.importPatchesFrom?,
+    `Grass.Platform.Win32.Loader.initialize?,
+    `Grass.Platform.Win32.Loader.sectionPermission,
     -- PE/COFF fixed field widths, offsets, alignments, and characteristic bits
     -- are source-defined format commitments. Their directly derived spans and
     -- the eight-byte section-name representation therefore remain debt too.

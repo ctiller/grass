@@ -1,6 +1,20 @@
-# Auxiliary native Windows API observations
+# Windows validation samples
 
-The supported direction is Grass-authored probe programs using the same production PE entry, imports and emitter as Hello World. This C/Python campaign is retained as auxiliary comparison evidence; it is not that probe implementation and will not be expanded. [Lean semantic cases](../../Tests/Platform/Win32ProbeCases.lean) exercise accepted and rejected outcomes while the production Grass source-to-PE binding is being completed. They do not yet emit a runnable Grass program.
+Run the Grass-authored Hello World sample from the repository root on Windows:
+
+```powershell
+./probes/windows/run-grass-hello.ps1
+```
+
+This emits the unchanged Grass source through the production source linker and
+PE writer, launches the binary with a timeout, and compares exact stdout bytes
+and process exit status. Results and binary hashes are recorded under
+`.lake/grass-windows-probes`. See the [initialization checkpoint](../../docs/WINDOWS_LOADER_INITIALIZATION.md)
+for checked model facts, the first native result, and open correspondence work.
+
+## Auxiliary API campaign
+
+Grass-authored probe programs use the production PE entry, imports and emitter. This C/Python campaign is retained as auxiliary comparison evidence and will not be expanded. [Lean semantic cases](../../Tests/Platform/Win32ProbeCases.lean) exercise accepted and rejected API outcomes; those individual cases do not yet emit runnable Grass programs.
 
 This directory contains an external validation harness for the bounded synchronous `WriteFile` model. It compiles `writefile.c` with the installed MSVC x64 tools, runs each case in a separate process with a timeout, and writes `.lake/windows-probes/results.json`.
 
