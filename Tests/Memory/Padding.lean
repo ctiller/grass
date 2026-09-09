@@ -87,8 +87,8 @@ def frameOwner : ContextId := contexts.fresh.1
 def stackRecord₀ : AllocationRecord :=
   { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual, source := .stack
     owners := [frameOwner]
-    permission := .readWrite, live := true, bytes := .empty
-    base := some 0x1000 }
+    permission := .readWrite, live := true, base := some 0x1000
+    backing := (FreshSupply.initial (Tag := StorageTag)).fresh.1, origin := 0 }
 
 /-- The state before anything is written. -/
 def state₀ : MemoryState := (MemoryState.empty.allocate? alloc stackRecord₀).getD .empty

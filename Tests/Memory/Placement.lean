@@ -29,6 +29,11 @@ open Grass.Core Grass.Memory Grass.Std.Logical
 
 private def allocs : FreshSupply AllocTag := .initial
 
+/-- Backing identities, one per allocation here: these fixtures are about placement
+and liveness, so nothing in them shares storage. `g-design:185` made that a fact a
+fixture states rather than one it gets by having distinct `AllocId`s. -/
+private def stores : FreshSupply StorageTag := .initial
+
 /-- A placed allocation. -/
 def placed : AllocId := allocs.fresh.1
 
@@ -49,7 +54,8 @@ def someContext : ContextId := contexts.fresh.1
 def placedRecord : AllocationRecord :=
   { extent := ⟨0, 4096⟩, epoch := epoch, space := .cpuVirtual
     source := .virtualAlloc, owners := [someContext]
-    permission := .readWrite, live := true, bytes := .empty, base := some 0x1000 }
+    permission := .readWrite, live := true, base := some 0x1000
+    backing := stores.fresh.1, origin := 0 }
 
 /-- The same shape, with nowhere to be. -/
 def unplacedRecord : AllocationRecord :=
@@ -144,8 +150,8 @@ which fits; its *stop* is 250, which does not. -/
 def offsetRecord : AllocationRecord :=
   { extent := ⟨200, 50⟩, epoch := epoch, space := .cpuVirtual
     source := .virtualAlloc, owners := [someContext]
-    permission := .readWrite, live := true, bytes := .empty
-    base := some (0 - 100) }
+    permission := .readWrite, live := true, base := some (0 - 100)
+    backing := stores.fresh.2.fresh.1, origin := 0 }
 
 /-- A state holding it beside the placed allocation, which sits at `0x1000`. -/
 def wrapped : MemoryState :=

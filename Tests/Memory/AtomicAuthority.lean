@@ -37,6 +37,11 @@ namespace Tests.Memory.AtomicAuthority
 open Grass.Core Grass.Memory
 
 private def allocs : FreshSupply AllocTag := .initial
+
+/-- Backing identities. Nothing in this fixture shares storage, which
+`g-design:185` made a fact a fixture states rather than one it gets for free from
+distinct `AllocId`s. -/
+private def stores : FreshSupply StorageTag := .initial
 private def epochs : FreshSupply EpochTag := .initial
 private def contexts : FreshSupply ContextTag := .initial
 private def grants : FreshSupply GrantTag := .initial
@@ -84,16 +89,18 @@ def owned : MemoryState :=
   (MemoryState.empty.allocate? counter
     { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
       source := .virtualAlloc, owners := [lender]
-      permission := .readWrite, live := true, bytes := .empty
-      base := some 0x2000 }).getD .empty
+      permission := .readWrite, live := true
+      base := some 0x2000
+      backing := stores.fresh.1, origin := 0 }).getD .empty
 
 /-- The allocation happened, so `getD` did not fall back to the empty state. -/
 theorem the_allocation_succeeds :
     (MemoryState.empty.allocate? counter
       { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
         source := .virtualAlloc, owners := [lender]
-        permission := .readWrite, live := true, bytes := .empty
-        base := some 0x2000 }).isSome := by decide
+        permission := .readWrite, live := true
+        base := some 0x2000
+        backing := stores.fresh.1, origin := 0 }).isSome := by decide
 
 /-- Read/write conveyed for **atomic** access only. §3's atomic shared access,
 expressed as a right rather than as an authority state. -/
@@ -318,8 +325,9 @@ def pagedAtomically : MemoryState :=
   (owned.allocate? atomicPage
     { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
       source := .virtualAlloc, owners := [lender]
-      permission := .atomicReadWrite, live := true, bytes := .empty
-      base := some 0x3000 }).getD owned
+      permission := .atomicReadWrite, live := true
+      base := some 0x3000
+      backing := stores.fresh.2.fresh.1, origin := 0 }).getD owned
 
 /-- An ordinary write to it. Its declared permission is what the page grants. -/
 def plainStore : AccessDescriptor :=
@@ -362,8 +370,9 @@ def pagedReadOnly : MemoryState :=
   (pagedAtomically.allocate? readOnlyPage
     { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
       source := .virtualAlloc, owners := [lender]
-      permission := .readOnly, live := true, bytes := .empty
-      base := some 0x4000 }).getD pagedAtomically
+      permission := .readOnly, live := true
+      base := some 0x4000
+      backing := stores.fresh.2.fresh.2.fresh.1, origin := 0 }).getD pagedAtomically
 
 /-- An ordinary **read** of it, declaring more than the page carries. -/
 def overDeclaredLoad : AccessDescriptor :=

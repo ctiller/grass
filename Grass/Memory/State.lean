@@ -3024,6 +3024,79 @@ def storeOf (state : MemoryState) (record : AllocationRecord) : ByteStore :=
   (state.backings.lookup record.backing).getD .empty
 
 /--
+Install `store` under `backing`, unless authority is outstanding over it.
+
+**Bytes moved out from behind a guard when they moved out of the record, and this
+puts them back.** `allocate?` refuses to replace a record while a grant is
+outstanding over storage that shares bytes with it, and
+`Tests/Memory/Loans.lean`'s `bytes_may_not_be_rewritten_under_a_grant` is the proof
+that the guard covered the record's `bytes` field specifically -- because
+`docs/MEMORY_MODEL.md` §1 names raw memory before permissions or provenance.
+`g-design:185` put the bytes in `MemoryState.backings`, where `allocate?`'s guard
+cannot reach them, so an unguarded installer would be a second door onto exactly
+what that guard exists to protect. Calling it a fixture-only door in a docstring
+would not close it: that is the shape of claim this whole replacement exists to
+stop making.
+
+Refuses while any grant's root is a view onto this backing. A profile with nothing
+lent out may install whatever it likes, which is the half that keeps this usable for
+building a state that already holds bytes.
+
+`allocate?` deliberately installs nothing, because `MemoryState.storeOf` reads an
+absent backing as empty and a fresh allocation holds nothing. Two records naming one
+backing are two views of whatever this installs, so this is also how a fixture builds
+sharing with content: install once, allocate twice.
+-/
+def installStore? (state : MemoryState) (backing : StorageId) (store : ByteStore) :
+    Option MemoryState :=
+  if state.grantEntries.any
+      (fun entry => decide (state.backingOf? entry.2.provenance.root = some backing)) then
+    Option.none
+  else some { state with backings := state.backings.insert backing store }
+
+/-- Installing a store moves no allocation. -/
+@[simp] theorem allocations_installStore? {state next : MemoryState} {backing : StorageId}
+    {store : ByteStore} (h : state.installStore? backing store = some next) :
+    next.allocations = state.allocations := by
+  unfold installStore? at h
+  split at h
+  · exact absurd h (by simp)
+  · injection h with h; subst h; rfl
+
+/-- Installing a store grants nothing. -/
+@[simp] theorem grantEntries_installStore? {state next : MemoryState} {backing : StorageId}
+    {store : ByteStore} (h : state.installStore? backing store = some next) :
+    next.grantEntries = state.grantEntries := by
+  unfold installStore? at h
+  split at h
+  · exact absurd h (by simp)
+  · injection h with h; subst h; rfl
+
+/-- The store a view reads after one is installed under its own backing. -/
+theorem storeOf_installStore?_self {state next : MemoryState}
+    {record : AllocationRecord} {store : ByteStore}
+    (h : state.installStore? record.backing store = some next) :
+    next.storeOf record = store := by
+  unfold installStore? at h
+  split at h
+  · exact absurd h (by simp)
+  · injection h with h
+    subst h
+    unfold storeOf
+    simp only [FiniteMap.lookup_insert_self]
+    rfl
+
+/-- **Bytes under an outstanding grant cannot be replaced.** The law
+`bytes_may_not_be_rewritten_under_a_grant` used to get from `allocate?`'s record
+guard, restated where the bytes now live. -/
+theorem installStore?_of_granted {state : MemoryState} {backing : StorageId}
+    {store : ByteStore} (h : state.grantEntries.any
+      (fun entry => decide (state.backingOf? entry.2.provenance.root = some backing))) :
+    state.installStore? backing store = Option.none := by
+  unfold installStore?
+  rw [if_pos h]
+
+/--
 Write `bytes` at `start` in allocation `id`.
 
 `initializes` is `AccessDescriptor.producesInitialized`: a completed write does
