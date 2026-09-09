@@ -3,7 +3,8 @@
 Navigation snapshot inspected at `f3b69bfa`, 2026-09-09, informed by interviews
 with `architecture` and `spikes`. This page routes readers to code and its owning
 documents; it does not change their contracts or certify a milestone. Status
-describes this revision unless explicitly marked as an interview report.
+describes this revision unless a later inspected delivery or interview report is
+explicitly named below.
 
 ## Start from the authored output
 
@@ -49,7 +50,7 @@ For ownership details and recorded reviews, use
 use [HELLO_UNWIND_BOUNDARY.md](HELLO_UNWIND_BOUNDARY.md). These documents retain
 their own status labels; a reviewed direction is not an implemented declaration.
 
-## Work reported beyond this snapshot
+## Deliveries beyond the initial snapshot
 
 Spikes reported a loaded-Hello prologue fixture on main `87fa3e5b`, explicitly
 short of full Hello, and relative certificate/loop work on
@@ -83,13 +84,13 @@ pending-call domains and request kinds, not original-call or ABI validity.
 
 `Raw.StepSignature` is
 `Graph → RawState → Choice → Event → RawState → Graph → Prop`.
-It is a type, not an installed or exhaustive transition relation.
+It is a type; the partial implementation delivered later is indexed below.
 `Event.Appends` relates edge suffixes to the existing logs; the graph stores
 causal edges rather than a duplicate history. `EdgeAgreement` gives necessary
 log/graph conditions, not sufficient evidence that an instruction or API ran.
 
-At this delivery, architecture owns the still-pending fixed `RawStep.lean`
-union; x86 owns CPU cases; Windows owns WriteFile entry, service/initialization
+Architecture owns the fixed raw-step composition; x86 owns CPU cases;
+Windows owns WriteFile entry, service/initialization
 and modeled return; the certificate-root effort owns the reusable provider
 resume connection and delegated GetStdHandle/ExitProcess endpoints;
 process owns caller normalization; lowering owns loop induction; spikes owns
@@ -99,6 +100,40 @@ superseded by this inspected carrier amendment. It is not a completed endpoint.
 Provider resume connects the Windows opaque-provider contract to an actual
 return-slot read. It does not model a physical RET through provider bytes:
 unchanged Hello has no authored RET, and native correspondence remains open.
+
+### Partial raw-step implementation
+
+Inspected architecture delivery `dd4c85d1` on
+`codex/architecture-raw-composition` supplies
+[RawStep.lean](../Grass/Platform/Win32/RawStep.lean), with a
+[direct consumer fixture](../Tests/Platform/Win32RawStep.lean).
+`Raw.RawStep` fixes one loaded image and one `WriteFile.Realization` across a
+derivation. Its four constructors are three combined actual-CALL/API-entry
+cases (`writeFileEntry`, `getStdHandleEntry`, `exitProcessEntry`) and `service`.
+This supersedes the signature-only implementation status, not the remaining
+whole-execution obligations.
+
+Each entry starts from the exact pre-CALL checked state and prior runtime table,
+retains its actual CALL/handoff receipt, and computes the corresponding raw
+result. `RawStep.agreement` exposes the event-log suffix and graph obligations
+of every installed case. Entry graph constraints are only `EdgeAgreement` at
+this delivery; they do not establish the stronger provider causal realization.
+
+The service case retains the committed receipt, actual output, resulting runtime
+and exact event kind: empty output is internal; nonempty output is publication
+for that call. `Graph.Realizes` equates the selected provider causal order with
+the raw graph's transitive closure at the before and after protocol states.
+`RawStep.service_receipt` inverts the service choice to recover its record,
+action-indexed receipt, output, exact after-state, event kind and both causal
+closure facts. The fixture constructs a five-loan quiet service edge and rejects
+a wrong observation; it is model evidence, not native reachability or adequacy.
+
+The relation is a partial union, not a public `BehaviorModel`, realization
+profile, or exhaustive Windows execution model. ApiDispatch strengthening,
+CPU/refusal/return/terminal cases and exhaustive coverage remain outstanding
+at `dd4c85d1`. In particular, `exitProcessEntry` is an entry case, not proof of
+terminal observation. The supplied realization remains fixed across the
+derivation; graph agreement does not discharge native correspondence.
 
 ## Find a symbol without another inventory
 
