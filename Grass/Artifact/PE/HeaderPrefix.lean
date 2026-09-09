@@ -54,15 +54,36 @@ def writeImageCoffHeader (sectionCount : BitVec 16) : Std.Logical.ByteArray :=
     (writeImageCoffHeader sectionCount).length = coffHeaderSize := by
   simp [writeImageCoffHeader, coffHeaderSize]
 
+/-- Fixed bytes through the COFF machine field, immediately before the section
+count. -/
+def writeHeaderPrefixLeading : Std.Logical.ByteArray :=
+  writeCanonicalDosHeader ++ writePeSignature ++
+    writeLittleEndian (count := 2) amd64Machine
+
+@[simp] theorem length_writeHeaderPrefixLeading : writeHeaderPrefixLeading.length = 70 := by
+  simp [writeHeaderPrefixLeading, writePeSignature, canonicalPeOffset]
+
+/-- Fixed COFF fields after the section count. -/
+def writeHeaderPrefixTrailing : Std.Logical.ByteArray :=
+  writeLittleEndian (count := 4) (0 : BitVec 32) ++
+  writeLittleEndian (count := 4) (0 : BitVec 32) ++
+  writeLittleEndian (count := 4) (0 : BitVec 32) ++
+  writeLittleEndian (count := 2) (240 : BitVec 16) ++
+  writeLittleEndian (count := 2) executableImageCharacteristics
+
+@[simp] theorem length_writeHeaderPrefixTrailing : writeHeaderPrefixTrailing.length = 16 := by
+  simp [writeHeaderPrefixTrailing]
+
 /-- Serialize the complete prefix before the PE32+ optional header. -/
 def writeHeaderPrefix (sectionCount : BitVec 16) : Std.Logical.ByteArray :=
-  writeCanonicalDosHeader ++ writePeSignature ++ writeImageCoffHeader sectionCount
+  writeHeaderPrefixLeading ++ writeLittleEndian (count := 2) sectionCount ++
+    writeHeaderPrefixTrailing
 
 /-- The canonical prefix is 64 DOS bytes, four signature bytes, and twenty COFF
 header bytes. -/
 @[simp] theorem length_writeHeaderPrefix (sectionCount : BitVec 16) :
     (writeHeaderPrefix sectionCount).length =
       canonicalPeOffset + peSignatureSize + coffHeaderSize := by
-  simp [writeHeaderPrefix, writePeSignature, peSignatureSize]
+  simp [writeHeaderPrefix, canonicalPeOffset, peSignatureSize, coffHeaderSize]
 
 end Grass.Artifact.PE
