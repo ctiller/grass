@@ -130,7 +130,7 @@ theorem derives_gobjReserved_iff {input rest : Std.Logical.ByteArray} :
 
 /-- Compose two independent canonical prefix languages. This local algebraic
 law keeps the envelope proof about formats rather than its executable reader. -/
-private theorem derives_canonicalSeq_iff {α β : Type}
+theorem derives_canonicalSeq_iff {α β : Type}
     {first : Format α} {second : Format β}
     {writeFirst : α → Std.Logical.ByteArray}
     {writeSecond : β → Std.Logical.ByteArray}

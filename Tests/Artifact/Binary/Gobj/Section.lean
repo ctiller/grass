@@ -40,6 +40,15 @@ example : readGobjSection (writeGobjSection entry ++ suffix) =
     .done entry suffix := by
   exact readGobjSection_write_append entry suffix
 
+example : Derives gobjSectionFormat (writeGobjSection entry ++ suffix)
+    entry suffix := by
+  exact derives_gobjSection_iff.mpr rfl
+
+example (input rest : Std.Logical.ByteArray) (value : GobjSection) :
+    readGobjSection input = .done value rest ↔
+      Derives gobjSectionFormat input value rest := by
+  exact readGobjSection_done_iff input value rest
+
 example : readGobjSection (Vec.fromList [0, 0, 0, 0, 32]) =
     .invalid (.malformed
       ".gobj section alignment exponent exceeds 31") := by rfl

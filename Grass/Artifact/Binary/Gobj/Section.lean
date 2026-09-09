@@ -45,6 +45,44 @@ def readGobjSectionAlignment (bits : Byte) :
   unfold readGobjSectionAlignment
   rw [dif_pos alignment.valid]
 
+/-- Successful alignment decoding returns exactly the structure carrying the
+input byte. -/
+theorem readGobjSectionAlignment_ok_iff (bits : Byte)
+    (alignment : GobjSectionAlignment) :
+    readGobjSectionAlignment bits = .ok alignment ↔
+      bits = alignment.bits := by
+  constructor
+  · intro decoded
+    unfold readGobjSectionAlignment at decoded
+    split at decoded
+    next valid =>
+      injection decoded with equality
+      exact congrArg GobjSectionAlignment.bits equality
+    next => contradiction
+  · intro equality
+    subst bits
+    exact readGobjSectionAlignment_bits alignment
+
+/-- Independent byte language for a valid section-alignment exponent. -/
+def gobjSectionAlignmentFormat : Format GobjSectionAlignment :=
+  .lift (.refine anyByteFormat fun bits => bits.toNat ≤ 31)
+    GobjSectionAlignment.bits
+
+/-- The alignment format consumes exactly the canonical validated byte. -/
+theorem derives_gobjSectionAlignment_iff
+    {input rest : Std.Logical.ByteArray} {alignment : GobjSectionAlignment} :
+    Derives gobjSectionAlignmentFormat input alignment rest ↔
+      input = writeByte alignment.bits ++ rest := by
+  constructor
+  · intro derivation
+    exact derivation.lift_inner.refine_inner.byteInput
+  · intro equality
+    rw [equality]
+    apply Derives.lift
+    apply Derives.refine
+    · exact writeByte_realizes.derivesWithSuffix alignment.bits rest
+    · exact alignment.valid
+
 /-- Decode and reject any reserved section-permission bit. -/
 def readGobjSectionPermissions (bits : Byte) :
     Except ParseError GobjSectionPermissions :=
@@ -58,6 +96,90 @@ def readGobjSectionPermissions (bits : Byte) :
   unfold readGobjSectionPermissions
   rw [dif_pos permissions.reservedClear]
 
+/-- Successful permission decoding returns exactly the structure carrying the
+input byte. -/
+theorem readGobjSectionPermissions_ok_iff (bits : Byte)
+    (permissions : GobjSectionPermissions) :
+    readGobjSectionPermissions bits = .ok permissions ↔
+      bits = permissions.bits := by
+  constructor
+  · intro decoded
+    unfold readGobjSectionPermissions at decoded
+    split at decoded
+    next reservedClear =>
+      injection decoded with equality
+      exact congrArg GobjSectionPermissions.bits equality
+    next => contradiction
+  · intro equality
+    subst bits
+    exact readGobjSectionPermissions_bits permissions
+
+/-- Independent byte language for valid, reserved-free section permissions. -/
+def gobjSectionPermissionsFormat : Format GobjSectionPermissions :=
+  .lift (.refine anyByteFormat fun bits => bits.toNat < 8)
+    GobjSectionPermissions.bits
+
+/-- The permission format consumes exactly the canonical validated byte. -/
+theorem derives_gobjSectionPermissions_iff
+    {input rest : Std.Logical.ByteArray} {permissions : GobjSectionPermissions} :
+    Derives gobjSectionPermissionsFormat input permissions rest ↔
+      input = writeByte permissions.bits ++ rest := by
+  constructor
+  · intro derivation
+    exact derivation.lift_inner.refine_inner.byteInput
+  · intro equality
+    rw [equality]
+    apply Derives.lift
+    apply Derives.refine
+    · exact writeByte_realizes.derivesWithSuffix permissions.bits rest
+    · exact permissions.reservedClear
+
+/-- Nested representation used by the independent section-entry language. -/
+abbrev GobjSectionFields :=
+  U32LengthPrefixedBytes ×
+    (GobjSectionAlignment ×
+      (GobjSectionPermissions × (Unit × U32LengthPrefixedBytes)))
+
+/-- Independent language for every field and invariant of one section entry. -/
+def gobjSectionFieldsFormat : Format GobjSectionFields :=
+  .seq u32LengthPrefixedBytesFormat fun _ =>
+  .seq gobjSectionAlignmentFormat fun _ =>
+  .seq gobjSectionPermissionsFormat fun _ =>
+  .seq gobjReservedFormat fun _ =>
+    u32LengthPrefixedBytesFormat
+
+/-- Canonical writer over the nested section-entry representation. -/
+def writeGobjSectionFields (fields : GobjSectionFields) :
+    Std.Logical.ByteArray :=
+  writeU32LengthPrefixedBytes fields.1 ++
+  writeByte fields.2.1.bits ++
+  writeByte fields.2.2.1.bits ++
+  writeLittleEndian (count := 2) (0 : BitVec 16) ++
+  writeU32LengthPrefixedBytes fields.2.2.2.2
+
+/-- The independent nested section format denotes exactly its canonical
+writer prefix. -/
+theorem derives_gobjSectionFields_iff
+    {input rest : Std.Logical.ByteArray} {fields : GobjSectionFields} :
+    Derives gobjSectionFieldsFormat input fields rest ↔
+      input = writeGobjSectionFields fields ++ rest := by
+  unfold gobjSectionFieldsFormat writeGobjSectionFields
+  rw [derives_canonicalSeq_iff derives_u32LengthPrefixedBytes_iff
+    (derives_canonicalSeq_iff derives_gobjSectionAlignment_iff
+      (derives_canonicalSeq_iff derives_gobjSectionPermissions_iff
+        (derives_canonicalSeq_iff derives_gobjReserved_iff
+          derives_u32LengthPrefixedBytes_iff)))]
+  simp [Vec.append_assoc]
+
+/-- Forget a public section entry into the values of the independent field
+language. -/
+def GobjSection.toFields (entry : GobjSection) : GobjSectionFields :=
+  (entry.name, (entry.alignment, (entry.permissions, ((), entry.contents))))
+
+/-- Independent typed language of canonical `.gobj` section entries. -/
+def gobjSectionFormat : Format GobjSection :=
+  .lift gobjSectionFieldsFormat GobjSection.toFields
+
 /-- Serialize one canonical section entry. -/
 def writeGobjSection (entry : GobjSection) : Std.Logical.ByteArray :=
   writeU32LengthPrefixedBytes entry.name ++
@@ -65,6 +187,23 @@ def writeGobjSection (entry : GobjSection) : Std.Logical.ByteArray :=
   writeByte entry.permissions.bits ++
   writeLittleEndian (count := 2) (0 : BitVec 16) ++
   writeU32LengthPrefixedBytes entry.contents
+
+/-- The independent public section format denotes exactly the canonical writer
+prefix with an arbitrary suffix retained. -/
+theorem derives_gobjSection_iff {input rest : Std.Logical.ByteArray}
+    {entry : GobjSection} :
+    Derives gobjSectionFormat input entry rest ↔
+      input = writeGobjSection entry ++ rest := by
+  constructor
+  · intro derivation
+    have canonical := derives_gobjSectionFields_iff.mp derivation.lift_inner
+    simpa [GobjSection.toFields, writeGobjSectionFields, writeGobjSection,
+      Vec.append_assoc] using canonical
+  · intro canonical
+    apply Derives.lift
+    apply derives_gobjSectionFields_iff.mpr
+    simpa [GobjSection.toFields, writeGobjSectionFields, writeGobjSection,
+      Vec.append_assoc] using canonical
 
 /-- Parse one section entry, validating alignment, permissions, and reserved
 bytes while retaining the exact suffix. -/
@@ -100,6 +239,111 @@ def readGobjSection (input : Std.Logical.ByteArray) : ParseResult GobjSection :=
     | .invalid error => .invalid error
   | .needMore hint => .needMore hint
   | .invalid error => .invalid error
+
+/-- Arbitrary successful section parsing is equivalent to the independent
+section-entry format derivation. -/
+theorem readGobjSection_done_iff (input : Std.Logical.ByteArray)
+    (entry : GobjSection) (rest : Std.Logical.ByteArray) :
+    readGobjSection input = .done entry rest ↔
+      Derives gobjSectionFormat input entry rest := by
+  rw [derives_gobjSection_iff]
+  constructor
+  · intro parsed
+    unfold readGobjSection at parsed
+    split at parsed
+    next name afterName nameParsed =>
+      split at parsed
+      next alignmentBits afterAlignment alignmentBitsParsed =>
+        split at parsed
+        next alignment alignmentDecoded =>
+          split at parsed
+          next permissionBits afterPermissions permissionBitsParsed =>
+            split at parsed
+            next permissions permissionsDecoded =>
+              split at parsed
+              next reserved afterReserved reservedParsed =>
+                split at parsed
+                next reservedOk =>
+                  split at parsed
+                  next contents suffix contentsParsed =>
+                    injection parsed with entryEq restEq
+                    subst entry
+                    subst rest
+                    have nameInput := derives_u32LengthPrefixedBytes_iff.mp
+                      ((readU32LengthPrefixedBytes_done_iff input name
+                        afterName).mp nameParsed)
+                    have alignmentInput :=
+                      (takeByte_realizes.successSound afterName alignmentBits
+                        afterAlignment alignmentBitsParsed).byteInput
+                    have permissionsInput :=
+                      (takeByte_realizes.successSound afterAlignment
+                        permissionBits afterPermissions
+                        permissionBitsParsed).byteInput
+                    have reservedInput := derives_littleEndianFormat_iff.mp
+                      ((takeLittleEndian_realizes 2).successSound
+                        afterPermissions reserved afterReserved reservedParsed)
+                    have contentsInput :=
+                      derives_u32LengthPrefixedBytes_iff.mp
+                        ((readU32LengthPrefixedBytes_done_iff afterReserved
+                          contents suffix).mp contentsParsed)
+                    have alignmentOk :=
+                      (readGobjSectionAlignment_ok_iff alignmentBits
+                        alignment).mp alignmentDecoded
+                    have permissionsOk :=
+                      (readGobjSectionPermissions_ok_iff permissionBits
+                        permissions).mp permissionsDecoded
+                    have alignmentBytes : afterName =
+                        writeByte alignment.bits ++ afterAlignment := by
+                      rw [alignmentOk] at alignmentInput
+                      simpa [writeByte] using alignmentInput
+                    have permissionsBytes : afterAlignment =
+                        writeByte permissions.bits ++ afterPermissions := by
+                      rw [permissionsOk] at permissionsInput
+                      simpa [writeByte] using permissionsInput
+                    calc
+                      input = writeU32LengthPrefixedBytes name ++ afterName :=
+                        nameInput
+                      _ = writeU32LengthPrefixedBytes name ++
+                          (writeByte alignment.bits ++ afterAlignment) := by
+                        rw [alignmentBytes]
+                      _ = writeU32LengthPrefixedBytes name ++
+                          (writeByte alignment.bits ++
+                              (writeByte permissions.bits ++ afterPermissions)) := by
+                        rw [permissionsBytes]
+                      _ = writeU32LengthPrefixedBytes name ++
+                          (writeByte alignment.bits ++
+                            (writeByte permissions.bits ++
+                              (writeLittleEndian (count := 2)
+                                (0 : BitVec 16) ++ afterReserved))) := by
+                        rw [reservedInput, reservedOk]
+                      _ = writeGobjSection {
+                          name := name
+                          alignment := alignment
+                          permissions := permissions
+                          contents := contents } ++ suffix := by
+                        rw [contentsInput]
+                        simp [writeGobjSection, Vec.append_assoc]
+                  all_goals contradiction
+                next => contradiction
+              all_goals contradiction
+            next => contradiction
+          all_goals contradiction
+        next => contradiction
+      all_goals contradiction
+    all_goals contradiction
+  · intro canonical
+    rw [canonical]
+    unfold readGobjSection writeGobjSection
+    simp only [Vec.append_assoc]
+    rw [readU32LengthPrefixedBytes_write_append]
+    simp only
+    rw [takeByte_writeByte_append]
+    simp only [readGobjSectionAlignment_bits]
+    rw [takeByte_writeByte_append]
+    simp only [readGobjSectionPermissions_bits]
+    rw [takeLittleEndian_writeLittleEndian_append]
+    simp only [dite_true]
+    rw [readU32LengthPrefixedBytes_write_append]
 
 /-- `length_writeGobjSection` gives the exact section-entry width. -/
 @[simp] theorem length_writeGobjSection (entry : GobjSection) :
