@@ -136,6 +136,22 @@ documentation-link checks also passed.
 The six exhaustive decoder fixture theorems and decoder soundness theorem use
 only the accepted `propext` and `Quot.sound` axioms.
 
+Driver integration review subsequently found a missed fail-open case: legacy
+`-` predictions had the full mask but skipped flag comparison, so 953 rows could
+silently lose their flag checks. Campaign intake now requires a non-`None`
+prediction before checking its mask. A separate corpus control replaces an
+actual full-status row's flag field with `-` and requires rejection through that
+same intake helper before any native execution. Legacy parsing remains available
+outside the modeled campaign. `python -O Tools/x86-native/run.py` completed
+994/0, 12 harness controls and one corpus control in
+`target/x86-native/semantics-required-flags/`; optimization cannot disable the
+explicit checks.
+Independent re-review approved this follow-up, reproduced the optimized 994/0
+campaign in `target/x86-native/semantics-required-flags-independent/`, and
+mutated the actual generated corpus through `main`: replacing the first MOV
+prediction with `-` preserved the coverage digest but failed before worker
+execution. All 994 retained rows had non-`None` flag predictions.
+
 ## Separate legacy BSF finding
 
 `Tests/ISA/X86/MachineProbes.lean`, `bsfZeroSource`, requires RAX preservation
