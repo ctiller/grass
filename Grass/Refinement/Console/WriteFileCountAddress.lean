@@ -1,6 +1,7 @@
 import Grass.Assembly.FrameMemorySource
 import Grass.Assembly.SourceFetch
 import Grass.ISA.X86.Execution.BodyComputationFactory
+import Grass.ISA.X86.Execution.MemoryMoveFactory
 import Grass.Platform.Win32.CpuPolicy
 import Grass.Platform.Win32.WriteFileArguments
 
@@ -64,6 +65,24 @@ theorem SourceLea.load_stack_same {image : Loader.ImageInput} {inputs : Loader.E
   obtain ⟨_, stack, _, stackSelected, _, stackExact, _⟩ := Cpu.policy?_inputs loadSelected
   rw [stackExact]
   exact Option.some.inj (stackSelected.symm.trans (lea.stack_selected selected))
+
+/-- The actual load factory uses this same argument provenance. A standalone
+load receipt or a numeric pointer equality cannot discharge this conclusion. -/
+theorem SourceLea.load_provenance {image : Loader.ImageInput} {inputs : Loader.EntryInputs}
+    {loaded : Loader.LoadedImage image inputs} {policy loadPolicy : CpuAccessPolicy}
+    {frame : SourceFrame.Result} {rootOffset : Nat}
+    {source : SourceResolve.Result frame rootOffset} {before loadBefore : State}
+    (lea : SourceLea policy source before) (selected : Cpu.policy? loaded before = some policy)
+    (loadSelected : Cpu.policy? loaded loadBefore = some loadPolicy)
+    {fetched : FetchFactory.Success loadPolicy loadBefore}
+    {instruction : MemoryMoveNormal.Instruction}
+    {encoded : MemoryMoveNormal.Instruction.Encoding instruction} {afterData : MachineState}
+    {receipt : MemoryMoveNormal.LoadNormal instruction encoded loadBefore fetched.after afterData}
+    {fetchExact : receipt.fetch = fetched.dispatched.fetch}
+    (ran : MemoryMoveFactory.memoryMove loadPolicy loadBefore =
+      .ok ⟨fetched, .load encoded receipt fetchExact⟩) :
+    receipt.access.descriptor.provenance = lea.argument.provenance :=
+  (MemoryMoveFactory.memoryMove_load_stack ran).trans (lea.load_stack_same selected loadSelected)
 
 /-- The destination is the source-local address formed from the actual RSP.
 This equality is modular; the spatial theorem below additionally excludes wrap. -/
