@@ -5,6 +5,9 @@ import Grass.Disasm.Spatial
 import Grass.Disasm.Entry
 import Grass.Disasm.CallerObject
 import Grass.Artifact.PE.Imported
+import Grass.Op.Completion
+import Grass.Op.CompletedAccess
+import Grass.Op.ReadCompletion
 import Grass.Semantics.OutputCut
 import Grass.Specification.TextLine
 import Grass.Console.Behavior
