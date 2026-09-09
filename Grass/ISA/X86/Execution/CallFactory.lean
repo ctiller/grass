@@ -39,12 +39,6 @@ def result {policy : CpuAccessPolicy} {before : State} (success : Success policy
 
 end Success
 
-private def reachedAfterAccess (before : State) {descriptor : AccessDescriptor} :
-    RunFactory.AccessFailure descriptor → State
-  | .rejected _ => before
-  | .violations after | .preparationUnavailable after _ | .answerUnavailable after =>
-      { before with machine := after }
-
 /-- From an actual fetch, execute the target read and return-address store for the
 production RIP-relative indirect CALL form. -/
 def callFromFetched {policy : CpuAccessPolicy} (before : State)
@@ -68,7 +62,7 @@ def callFromFetched {policy : CpuAccessPolicy} (before : State)
                       site.run.context site.run.contextKind site.run.cause with
                   | .error reason =>
                       .error (.read
-                        (reachedAfterAccess { before with machine := fetched.after } reason)
+                        (RunFactory.AccessFailure.reached { before with machine := fetched.after } reason)
                         readDescriptor reason)
                   | .ok readSuccess =>
                       let read : ReadValue64 readSuccess.run :=
@@ -95,7 +89,7 @@ def callFromFetched {policy : CpuAccessPolicy} (before : State)
                                 readSuccess.run.contextKind readSuccess.run.cause with
                             | .error reason =>
                                 .error (.store
-                                  (reachedAfterAccess
+                                  (RunFactory.AccessFailure.reached
                                     { before with machine := readSuccess.after } reason)
                                   storeDescriptor reason)
                             | .ok storeSuccess =>

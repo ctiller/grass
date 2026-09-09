@@ -801,6 +801,7 @@ def notBehaviour : List Name :=
     -- Generic constructors for already selected singleton/access-free generic
     -- operation runs; they add no instruction or target behavior.
     `Grass.ISA.X86.Execution.RunFactory.access,
+    `Grass.ISA.X86.Execution.RunFactory.AccessFailure.reached,
     `Grass.ISA.X86.Execution.RunFactory.accessFree,
     `Grass.ISA.X86.Execution.RunFactory.accessFreeOperation,
     `Grass.ISA.X86.Execution.RunFactory.instHasOperationFacetsFixedAccessFreeOperation,
@@ -832,7 +833,6 @@ def notBehaviour : List Name :=
     -- Fixed CALL and return-slot routing delegates to the modeled access and
     -- CALL receipts; projections and read-policy plumbing add no CPU transfer.
     `Grass.ISA.X86.Execution.CallFactory.Success.result,
-    `Grass.ISA.X86.Execution.CallFactory.reachedAfterAccess,
     `Grass.ISA.X86.Execution.CallFactory.call,
     -- The graph of checked constructors supplies no new physical adequacy claim.
     `Grass.ISA.X86.Execution.CheckedExecution.Success.outcome,
@@ -855,7 +855,6 @@ def notBehaviour : List Name :=
     -- Fixed PUSH routing constructs the separately modeled PushNormal receipt;
     -- its failure projection retains the actual already-reached machine.
     `Grass.ISA.X86.Execution.PushFactory.push,
-    `Grass.ISA.X86.Execution.PushFactory.reachedAfterAccess,
     `Grass.ISA.X86.Execution.FetchFactory.accessReached,
     `Grass.ISA.X86.Execution.FetchFactory.fetchPolicy,
     -- Decoder-table lookup and packaging of independently checked encoding laws.

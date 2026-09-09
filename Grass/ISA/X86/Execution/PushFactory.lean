@@ -27,12 +27,6 @@ structure Success (before : State) where
   afterStore : MachineState
   receipt : PushNormal before afterFetch afterStore register
 
-private def reachedAfterAccess (before : State) {descriptor : AccessDescriptor} :
-    RunFactory.AccessFailure descriptor → State
-  | .rejected _ => before
-  | .violations after | .preparationUnavailable after _ | .answerUnavailable after =>
-      { before with machine := after }
-
 def pushFromFetched {policy : CpuAccessPolicy} (before : State)
     (fetched : FetchFactory.Success policy before) : Except Failure (Success before) :=
       let site := fetched.dispatched.fetch
@@ -52,7 +46,7 @@ def pushFromFetched {policy : CpuAccessPolicy} (before : State)
                 match storedResult : RunFactory.access storePolicy fetched.after descriptor
                     site.run.context site.run.contextKind site.run.cause with
                 | .error reason =>
-                    .error (.store (reachedAfterAccess { before with machine := fetched.after } reason)
+                    .error (.store (RunFactory.AccessFailure.reached { before with machine := fetched.after } reason)
                       descriptor reason)
                 | .ok stored =>
                     have metadata := fetched.observed.dispatch_metadata fetched.dispatched

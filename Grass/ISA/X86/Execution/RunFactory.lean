@@ -35,6 +35,34 @@ inductive AccessFailure (descriptor : AccessDescriptor) where
   | preparationUnavailable (after : MachineState) (reason : AuditViolationClass)
   | answerUnavailable (after : MachineState)
 
+/-- Recover the CPU prefix at an access failure. `AccessFailure.reached_rejected` retains the
+supplied state; the other constructor equations retain its CPU fields and use
+the failure's actual machine state. -/
+def AccessFailure.reached (before : State) {descriptor : AccessDescriptor} :
+    AccessFailure descriptor → State
+  | .rejected _ => before
+  | .violations after | .preparationUnavailable after _ | .answerUnavailable after =>
+      { before with machine := after }
+
+@[simp] theorem AccessFailure.reached_rejected (before : State)
+    (descriptor : AccessDescriptor) (reason : StepRejection) :
+    reached before (AccessFailure.rejected (descriptor := descriptor) reason) = before := rfl
+
+@[simp] theorem AccessFailure.reached_violations (before : State)
+    (descriptor : AccessDescriptor) (after : MachineState) :
+    reached before (AccessFailure.violations (descriptor := descriptor) after) =
+      { before with machine := after } := rfl
+
+@[simp] theorem AccessFailure.reached_preparationUnavailable (before : State)
+    (descriptor : AccessDescriptor) (after : MachineState) (reason : AuditViolationClass) :
+    reached before (AccessFailure.preparationUnavailable (descriptor := descriptor) after reason) =
+      { before with machine := after } := rfl
+
+@[simp] theorem AccessFailure.reached_answerUnavailable (before : State)
+    (descriptor : AccessDescriptor) (after : MachineState) :
+    reached before (AccessFailure.answerUnavailable (descriptor := descriptor) after) =
+      { before with machine := after } := rfl
+
 structure AccessSuccess (policy : StepPolicy) (before : MachineState)
     (descriptor : AccessDescriptor) (context : ContextId) (contextKind : ContextKind)
     (cause : EventCause) where
