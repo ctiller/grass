@@ -19,8 +19,9 @@ are equations over it rather than statements about a transition's branches.
 has its own `performAccess`, which does event minting and ledger work `applyAccess`
 knows nothing about, and it is `step` that a program runs through.
 
-What ties them is `MemoryState.commit`: every access that commits, commits
-through it. So the framing results here are results about the transition, and
+What ties them is `MemoryState.commitResolved`: every access that commits carries
+the already checked `ResolvedAccess` through it. So the framing results here are
+results about the transition, and
 `Op.performAccess_frames_untouched` and `Op.runAccesses_frames_untouched` are
 those results stated for `performAccess` and `runAccesses` directly.
 
@@ -33,7 +34,7 @@ quantifies over `sequence.accesses` instead, which contains both.
 This is spelled out because an earlier version of this comment claimed
 `applyAccess` had been *factored out of* `performAccess` when it had been written
 alongside it — two write paths, framing proved about one, prose implying it
-covered both. Review found it. `commit` is the repair.
+covered both. Review found it. `commitResolved` is the repair.
 
 What is still true and worth saying plainly: a straight-line argument over
 `runBlock` is an argument about `applyAccess`, not about `step`.
@@ -49,15 +50,17 @@ the map the declared authority effect left, while `applyAccess` cannot change th
 grant map at all, so for any non-empty effect the two leave different states by
 construction.
 
-What the two *do* share is `MemoryState.commit`, which is what the framing laws below
-are about and what the repair above was for. Anything stronger than that is unproved,
-and this paragraph is where it was claimed.
+What the two *do* share is `MemoryState.commitResolved`, including the exact backing
+span prepared before authority and byte checks. The framing laws below are about that
+shared commit path. Anything stronger than that is unproved, and this paragraph is
+where it was claimed.
 
 ## What it does not decide
 
-Authority beyond what an allocation record means. `denialOf` checks liveness,
-epoch, address space, bounds, permission, and initialization, because those are
-what an `AllocationRecord` *is*. Loans are `Grass/Op/Step.lean`'s `refusalOf`, in
+Authority beyond the allocation-to-backing binding. `denialOf` checks provenance,
+liveness, epoch, address space, the backing's existence and capacity, placement,
+permission, initialization, and the executable backing-layout gate. Loans are
+`Grass/Op/Step.lean`'s `refusalOf`, in
 clauses of its own that need no policy; frames, pins and lock tokens are an
 `AuthorityProvider`, which does. A caller that uses `applyAccess` alone gets memory's
 own rules and neither.
@@ -85,14 +88,12 @@ open Grass.Std.Logical
 Why the state refuses one access, or `none` if it authorizes it.
 
 Checked before anything commits, so a denial leaves the state exactly as it was
-(`docs/MEMORY_MODEL.md` §1). The order is deliberate: allocation, then liveness, then epoch, then space, then the
-provenance's declared allocation source, then its declared extent, then bounds, then
-placement, then permission, then initialization — so the recorded class names the first
-thing that was wrong rather than an incidental consequence. Ten groups, and this list
-named seven until review counted them against the body twice: `provenanceSourceMismatch`
-had its own violation class and was missing from the one enumeration a reader checks the
-code against, and the first three were written as one word, "liveness", while returning
-one class for three independent conditions — which is how they stayed collapsed.
+(`docs/MEMORY_MODEL.md` §1). The order is deliberate, so the recorded class names
+the first thing that was wrong rather than an incidental consequence. Checked resolution first
+distinguishes missing allocation, dead or stale provenance, address-space/source/extent
+mismatch, a non-nested path, range containment, missing backing, and malformed mapping.
+Placement, permission, initialization, and the temporary global backing-layout gate
+follow that one resolution.
 
 The placement clauses sit *after* bounds, and were inserted before it when they
 landed. `addressOf base d.range.start` is only meaningful once the range is known to
@@ -136,27 +137,191 @@ nineteen citations were repointed at `refusalOf`. Two were not, and both were th
 -- the sentence a reader chasing "who checks §3's loan rule" would follow. Forty lines
 above, the same file already says the true thing.
 -/
+def MemoryState.ResolveFailure.auditClass : MemoryState.ResolveFailure → AuditViolationClass
+  | .provenanceNotAllocated => .provenanceNotAllocated
+  | .deadProvenance => .deadProvenance
+  | .staleEpoch => .staleEpoch
+  | .wrongAddressSpace => .wrongAddressSpace
+  | .provenanceSourceMismatch => .provenanceSourceMismatch
+  | .provenanceExtentMismatch => .provenanceExtentMismatch
+  | .provenanceNotNested => .provenanceNotNested
+  | .rangeOutsideProvenance => .outOfBounds
+  | .backingNotAllocated => .backingNotAllocated
+  | .mappingOutOfBounds => .mappingOutOfBounds
+
+/-- The resolver outcome with its dependent evidence erased.
+`MemoryState.resolveClassification_congr_metadata` uses it to state that stable
+metadata preserves the precise failure class. -/
+inductive MemoryState.ResolveClassification where
+  | failure (reason : MemoryState.ResolveFailure)
+  | resolved
+deriving DecidableEq, Repr
+
+def MemoryState.resolveClassification (state : MemoryState) (provenance : Provenance)
+    (requested : ByteRange) : MemoryState.ResolveClassification :=
+  match state.resolveAccess? provenance requested with
+  | .error reason => .failure reason
+  | .ok _ => .resolved
+
+/-- The same classification computed from the stable metadata view. Kept private:
+runtime resolution remains `resolveAccess?`; the equality below prevents this proof
+projection from becoming a second executable rule. -/
+private def MemoryState.resolveClassificationOfMetadata
+    (metadata : Option MemoryState.AccessMetadata) (provenance : Provenance)
+    (requested : ByteRange) : MemoryState.ResolveClassification :=
+  match metadata with
+  | none => .failure .provenanceNotAllocated
+  | some access =>
+      let allocation := access.allocation
+      if allocation.live ≠ true then .failure .deadProvenance
+      else if allocation.epoch ≠ provenance.epoch then .failure .staleEpoch
+      else if allocation.space ≠ provenance.space then .failure .wrongAddressSpace
+      else if allocation.source ≠ provenance.source then .failure .provenanceSourceMismatch
+      else if allocation.extent ≠ provenance.rootExtent then .failure .provenanceExtentMismatch
+      else if ¬ provenance.Nested then .failure .provenanceNotNested
+      else if ¬ provenance.extent.Contains requested then .failure .rangeOutsideProvenance
+      else match access.capacity with
+        | none => .failure .backingNotAllocated
+        | some capacity =>
+            if (allocation.extent.shift allocation.origin).WithinBound capacity then
+              .resolved
+            else .failure .mappingOutOfBounds
+
+private theorem ByteRange.shiftedWithinBound_of_extent_eq
+    {allocationExtent provenanceExtent : ByteRange} {origin capacity : Nat}
+    (hextent : allocationExtent = provenanceExtent)
+    (hbound : (allocationExtent.shift origin).WithinBound capacity) :
+    (provenanceExtent.shift origin).WithinBound capacity := by
+  rwa [← hextent]
+
+/-- Erasing dependent resolver evidence is exactly classification through
+`MetadataAt`. -/
+private theorem MemoryState.resolveClassification_eq_metadata (state : MemoryState)
+    (provenance : Provenance) (requested : ByteRange) :
+    state.resolveClassification provenance requested =
+      resolveClassificationOfMetadata (state.MetadataAt provenance.root)
+        provenance requested := by
+  unfold resolveClassification
+  cases hr : state.resolveAccess? provenance requested with
+  | error failure =>
+      unfold resolveAccess? at hr
+      repeat' split at hr
+      all_goals
+        cases hr
+      all_goals
+        simp_all [resolveClassificationOfMetadata, MetadataAt, backingCapacity?,
+          AllocationRecord.metadata]
+      all_goals solve_by_elim [ByteRange.shiftedWithinBound_of_extent_eq]
+  | ok access =>
+      unfold resolveAccess? at hr
+      repeat' split at hr
+      all_goals
+        cases hr
+      all_goals
+        simp_all [resolveClassificationOfMetadata, MetadataAt, backingCapacity?,
+          AllocationRecord.metadata]
+      all_goals solve_by_elim [ByteRange.shiftedWithinBound_of_extent_eq]
+
+/-- `MetadataAt` contains every input to checked resolution except backing bytes and
+allocation owners, neither of which changes its success or precise failure class. -/
+theorem MemoryState.resolveClassification_congr_metadata {a b : MemoryState}
+    {provenance : Provenance} {requested : ByteRange}
+    (hmeta : a.MetadataAt provenance.root = b.MetadataAt provenance.root) :
+    a.resolveClassification provenance requested =
+      b.resolveClassification provenance requested := by
+  rw [resolveClassification_eq_metadata, resolveClassification_eq_metadata, hmeta]
+
+/-- Resolve and check one access once. The successful value is the exact checked
+backing span consumed by authority, observations, events, and writes. -/
+def prepareAccess (state : MemoryState) (d : AccessDescriptor) :
+    Except AuditViolationClass (state.ResolvedAccess d.provenance d.range) :=
+  match state.resolveAccess? d.provenance d.range with
+  | .error failure => .error failure.auditClass
+  | .ok access =>
+      if ¬ state.DedicatedBackings then
+        .error .backingLayoutUnsupported
+      else if access.allocation.base.any
+          (fun b => !decide (FitsAllocation b access.allocation.extent.stop)) then
+        .error .placementWraps
+      else if access.allocation.base.any
+          (fun b => d.address != Address.numeric (addressOf b d.range.start)) then
+        .error .addressDisagreesWithPlacement
+      else if ¬ access.allocation.permission.Grants d.requiredPermission then
+        .error .permissionDenied
+      else if ¬ access.allocation.permission.Permits d.intent then
+        .error .intentNotPermitted
+      else if d.initialization = .allBytesInitialized ∧ ¬ access.RangeInitialized then
+        .error .uninitializedRead
+      else .ok access
+
+/-- Why the prepared access was refused, if it was. -/
 def denialOf (state : MemoryState) (d : AccessDescriptor) : Option AuditViolationClass :=
-  match state.allocations.lookup d.provenance.root with
-  | Option.none => some .provenanceNotAllocated
-  | some record =>
-      if record.live ≠ true then some .deadProvenance
-      else if record.epoch ≠ d.provenance.epoch then some .staleEpoch
-      else if record.space ≠ d.provenance.space then some .wrongAddressSpace
-      else if record.source ≠ d.provenance.source then some .provenanceSourceMismatch
-      else if record.extent ≠ d.provenance.rootExtent then some .provenanceExtentMismatch
-      else if ¬ record.extent.Contains d.range then some .outOfBounds
-      else if record.base.any (fun b => !decide (FitsAllocation b record.extent.stop)) then
-        some .placementWraps
-      else if record.base.any
-                (fun b => d.address != Address.numeric (addressOf b d.range.start)) then
-        some .addressDisagreesWithPlacement
-      else if ¬ record.permission.Grants d.requiredPermission then some .permissionDenied
-      else if ¬ record.permission.Permits d.intent then some .intentNotPermitted
-      else if d.initialization = .allBytesInitialized ∧
-              ¬ state.RangeInitialized d.provenance.root d.range then
-        some .uninitializedRead
-      else Option.none
+  match prepareAccess state d with
+  | .error class_ => some class_
+  | .ok _ => none
+
+@[simp] theorem denialOf_prepareAccess_error (state : MemoryState)
+    (d : AccessDescriptor) (class_ : AuditViolationClass)
+    (h : prepareAccess state d = .error class_) :
+    denialOf state d = some class_ := by
+  simp [denialOf, h]
+
+@[simp] theorem denialOf_prepareAccess_ok (state : MemoryState)
+    (d : AccessDescriptor) (access : state.ResolvedAccess d.provenance d.range)
+    (h : prepareAccess state d = .ok access) :
+    denialOf state d = none := by
+  simp [denialOf, h]
+
+theorem denialOf_eq_none_iff (state : MemoryState) (d : AccessDescriptor) :
+    denialOf state d = none ↔
+      ∃ access : state.ResolvedAccess d.provenance d.range,
+        prepareAccess state d = .ok access := by
+  unfold denialOf
+  cases h : prepareAccess state d with
+  | error class_ => simp
+  | ok access => exact ⟨fun _ => ⟨access, rfl⟩, fun _ => rfl⟩
+
+theorem prepareAccess_ok_unique {state : MemoryState} {d : AccessDescriptor}
+    {a b : state.ResolvedAccess d.provenance d.range}
+    (ha : prepareAccess state d = .ok a) (hb : prepareAccess state d = .ok b) : a = b := by
+  rw [ha] at hb
+  exact Except.ok.inj hb
+
+theorem resolveAccess?_of_prepareAccess {state : MemoryState} {d : AccessDescriptor}
+    {access : state.ResolvedAccess d.provenance d.range}
+    (h : prepareAccess state d = .ok access) :
+    state.resolveAccess? d.provenance d.range = .ok access := by
+  cases hr : state.resolveAccess? d.provenance d.range with
+  | error failure => simp [prepareAccess, hr] at h
+  | ok resolved =>
+      by_cases hwrap : resolved.allocation.base.any
+          (fun b => !decide (FitsAllocation b resolved.allocation.extent.stop)) = true
+      <;> by_cases haddress : resolved.allocation.base.any
+          (fun b => d.address != Address.numeric (addressOf b d.range.start)) = true
+      <;> by_cases hgrants : resolved.allocation.permission.Grants d.requiredPermission
+      <;> by_cases hpermits : resolved.allocation.permission.Permits d.intent
+      <;> by_cases hinit : d.initialization = .allBytesInitialized ∧
+          ¬ resolved.RangeInitialized
+      <;> by_cases hdedicated : state.DedicatedBackings
+      <;> simp_all [prepareAccess]
+
+/-- A prepared access certifies the temporary executable backing profile. -/
+theorem dedicatedBackings_of_prepareAccess {state : MemoryState}
+    {d : AccessDescriptor} {access : state.ResolvedAccess d.provenance d.range}
+    (h : prepareAccess state d = .ok access) : state.DedicatedBackings := by
+  cases hr : state.resolveAccess? d.provenance d.range with
+  | error failure => simp [prepareAccess, hr] at h
+  | ok resolved =>
+      by_cases hwrap : resolved.allocation.base.any
+          (fun b => !decide (FitsAllocation b resolved.allocation.extent.stop)) = true
+      <;> by_cases haddress : resolved.allocation.base.any
+          (fun b => d.address != Address.numeric (addressOf b d.range.start)) = true
+      <;> by_cases hgrants : resolved.allocation.permission.Grants d.requiredPermission
+      <;> by_cases hpermits : resolved.allocation.permission.Permits d.intent
+      <;> by_cases hinit : d.initialization = .allBytesInitialized ∧
+          ¬ resolved.RangeInitialized
+      <;> by_cases hdedicated : state.DedicatedBackings
+      <;> simp_all [prepareAccess]
 
 /--
 **The bounds clause above cannot fire on the transition path**, which is what
@@ -218,12 +383,108 @@ end AccessResult
 
 /-- The bytes `d` observes, reading uninitialized positions through
 `indeterminate`. Always exactly `d.range.size` long. -/
-def observedBytes (state : MemoryState) (d : AccessDescriptor)
+def observedBytes {state : MemoryState} {d : AccessDescriptor}
+    (access : state.ResolvedAccess d.provenance d.range)
     (indeterminate : Nat → Byte) : ByteSeq :=
   (List.range d.range.size).map fun i =>
-    match state.byteAt? d.provenance.root (d.range.start + i) with
+    match access.byteAt? (d.range.start + i) with
     | some byte => byte
     | Option.none => indeterminate i
+
+/-- Initialization of a prepared backing span is exactly pointwise initialization
+through the allocation-local checked view. This is the bridge used to carry a
+denial decision across a disjoint backing-span write. -/
+theorem MemoryState.ResolvedAccess.rangeInitialized_iff_initializedAt
+    {state : MemoryState} {provenance : Provenance} {requested : ByteRange}
+    (access : state.ResolvedAccess provenance requested) :
+    access.RangeInitialized ↔
+      ∀ offset, requested.Covers offset → state.InitializedAt provenance.root offset := by
+  constructor
+  · intro h offset hcovered
+    unfold MemoryState.InitializedAt
+    rw [← access.cellAt?_eq_state hcovered]
+    unfold MemoryState.ResolvedAccess.RangeInitialized ByteStore.Initialized at h
+    have hbacking := h (access.allocation.origin + offset)
+      ((Coordinates.Mapping.span_covers access.allocation.mapping requested offset).2 hcovered)
+    simpa [MemoryState.ResolvedAccess.cellAt?, hcovered, BackingRecord.cellAt?,
+      ByteStore.InitializedAt] using hbacking
+  · intro h backingOffset hcovered
+    have horigin : access.allocation.origin ≤ backingOffset := by
+      rw [ByteRange.covers_def] at hcovered
+      change access.allocation.origin + requested.start ≤ backingOffset ∧ _ at hcovered
+      omega
+    have hlocal : requested.Covers (backingOffset - access.allocation.origin) := by
+      apply (Coordinates.Mapping.span_covers access.allocation.mapping requested
+        (backingOffset - access.allocation.origin)).1
+      change (access.allocation.mapping.span requested).range.Covers backingOffset at hcovered
+      simpa [AllocationRecord.mapping, Nat.add_sub_of_le horigin] using hcovered
+    have hcell := h (backingOffset - access.allocation.origin) hlocal
+    unfold MemoryState.InitializedAt at hcell
+    rw [← access.cellAt?_eq_state hlocal] at hcell
+    simpa [MemoryState.ResolvedAccess.cellAt?, hlocal, BackingRecord.cellAt?,
+      ByteStore.InitializedAt, Nat.add_sub_of_le horigin] using hcell
+
+/-- Cell agreement carries the initialization decision between two resolutions of
+the same provenance and requested range. Stable metadata is handled separately by
+the denial congruence theorem. -/
+theorem MemoryState.ResolvedAccess.rangeInitialized_congr
+    {a b : MemoryState} {provenance : Provenance} {requested : ByteRange}
+    (accessA : a.ResolvedAccess provenance requested)
+    (accessB : b.ResolvedAccess provenance requested) (hcells : a.AgreesOn b) :
+    accessA.RangeInitialized ↔ accessB.RangeInitialized := by
+  constructor
+  · intro h
+    apply accessB.rangeInitialized_iff_initializedAt.mpr
+    intro offset hcovered
+    have hinit := accessA.rangeInitialized_iff_initializedAt.mp h offset hcovered
+    unfold MemoryState.InitializedAt at hinit ⊢
+    rw [← hcells provenance.root offset]
+    exact hinit
+  · intro h
+    apply accessA.rangeInitialized_iff_initializedAt.mpr
+    intro offset hcovered
+    have hinit := accessB.rangeInitialized_iff_initializedAt.mp h offset hcovered
+    unfold MemoryState.InitializedAt at hinit ⊢
+    rw [hcells provenance.root offset]
+    exact hinit
+
+/-- Local disjointness becomes backing-span disjointness when two resolutions use
+the same allocation identity. `ByteRange.Disjoint.of_take` is the theorem that
+keeps the writer's prefix disjoint. -/
+theorem MemoryState.ResolvedAccess.prefix_span_disjoint_of_same_root
+    {state : MemoryState} {writerProvenance queryProvenance : Provenance}
+    {writerRange queryRange : ByteRange}
+    (writer : state.ResolvedAccess writerProvenance writerRange)
+    (query : state.ResolvedAccess queryProvenance queryRange) (count : Nat)
+    (hroot : writerProvenance.root = queryProvenance.root)
+    (hdisjoint : writerRange.Disjoint queryRange) :
+    (writer.prefix count).span.Disjoint query.span := by
+  have hallocation : writer.allocation = query.allocation := by
+    apply Option.some.inj
+    exact writer.allocationLookup.symm.trans (hroot ▸ query.allocationLookup)
+  unfold MemoryState.ResolvedAccess.span Coordinates.ResolvedRange.span
+  change (writer.allocation.mapping.span (writerRange.take count)).Disjoint
+    (query.allocation.mapping.span queryRange)
+  rw [hallocation]
+  exact (Coordinates.Mapping.span_disjoint_iff query.allocation.mapping
+    (writerRange.take count) queryRange).2 ((hdisjoint.symm.of_take count).symm)
+
+/-- Under the executable layout gate, distinct live allocations have disjoint
+backing spans because their backing identities differ. -/
+theorem MemoryState.ResolvedAccess.prefix_span_disjoint_of_ne
+    {state : MemoryState} (hdedicated : state.DedicatedBackings)
+    {writerProvenance queryProvenance : Provenance}
+    {writerRange queryRange : ByteRange}
+    (writer : state.ResolvedAccess writerProvenance writerRange)
+    (query : state.ResolvedAccess queryProvenance queryRange) (count : Nat)
+    (hne : writerProvenance.root ≠ queryProvenance.root) :
+    (writer.prefix count).span.Disjoint query.span := by
+  left
+  have hbacking := hdedicated.backing_ne_of_live_lookup
+    writer.allocationLookup query.allocationLookup writer.allocationLive
+      query.allocationLive hne
+  change writer.allocation.backing ≠ query.allocation.backing
+  exact hbacking
 
 /--
 Commit an access's written bytes to memory.
@@ -232,12 +493,13 @@ Commit an access's written bytes to memory.
 `performAccess` and `applyAccess` below both go through this, so the framing laws
 stated here are laws about the transition and not about a parallel implementation
 that happens to agree. An earlier arrangement had the two writing memory
-separately, which is the same two-sources-of-truth defect this branch removed from
-`AllocationRecord`, and review found it.
+separately, which was a second source of truth for backing selection, and review
+found it.
 
-Not the single *write* primitive: that is `MemoryState.write`, which `commit`
-wraps and which `Grass/Memory/Shape.lean`'s `writeField` also calls, since a
-typed field store is not an access. An earlier version of this paragraph said
+Not the single *write* primitive: that is `MemoryState.writeResolved`, which
+`commitResolved` wraps and which `Grass/Memory/Shape.lean`'s `writeField` also calls
+after resolving its field range, since a typed field store is not an access. An
+earlier version of this paragraph said
 "the single write path" flatly and review corrected it. What is true is narrower
 and is the thing the laws need: every `AccessDescriptor` that commits, commits
 here.
@@ -245,27 +507,94 @@ here.
 `none` means the access wrote nothing, which is not the same as writing zero
 bytes: a read commits no write at all.
 -/
-def MemoryState.commit (state : MemoryState) (d : AccessDescriptor)
-    (written : Option ByteSeq) : MemoryState :=
+def WrittenFits (d : AccessDescriptor) (written : Option ByteSeq) : Prop :=
+  ∀ bytes, written = some bytes → bytes.length ≤ d.range.size
+
+/-- Commit through the already prepared mapping. There is no second lookup and
+no missing-backing fallback. -/
+def MemoryState.commitResolved (state : MemoryState) (d : AccessDescriptor)
+    (access : state.ResolvedAccess d.provenance d.range)
+    (written : Option ByteSeq) (hfits : WrittenFits d written) : MemoryState :=
   match written with
   | Option.none => state
-  | some bytes => state.write d.provenance.root d.range.start bytes d.producesInitialized
+  | some bytes =>
+      state.writeResolved access bytes d.producesInitialized (hfits bytes rfl)
 
 /-- A commit changes no authority, whatever it writes. -/
-@[simp] theorem grantEntries_commit (state : MemoryState) (d : AccessDescriptor)
-    (written : Option ByteSeq) :
-    (state.commit d written).grantEntries = state.grantEntries := by
-  unfold MemoryState.commit
+@[simp] theorem grantEntries_commitResolved (state : MemoryState) (d : AccessDescriptor)
+    (access : state.ResolvedAccess d.provenance d.range)
+    (written : Option ByteSeq) (hfits : WrittenFits d written) :
+    (state.commitResolved d access written hfits).grantEntries = state.grantEntries := by
+  unfold MemoryState.commitResolved
   split
   · rfl
-  · exact MemoryState.grantEntries_write _ _ _ _ _
+  · exact MemoryState.grantEntries_writeResolved _ _ _ _ _
+
+/-- `dedicatedBackings_commitResolved` states that a resolved commit preserves the
+temporary executable backing profile. -/
+theorem dedicatedBackings_commitResolved (state : MemoryState) (d : AccessDescriptor)
+    (access : state.ResolvedAccess d.provenance d.range)
+    (written : Option ByteSeq) (hfits : WrittenFits d written)
+    (hdedicated : state.DedicatedBackings) :
+    (state.commitResolved d access written hfits).DedicatedBackings := by
+  unfold MemoryState.commitResolved
+  split
+  · exact hdedicated
+  · exact hdedicated.writeResolved _ _ _ _
+
+/-- A resolved byte write changes no fact used by the executable backing-layout
+gate. The biconditional is needed when carrying a denial in either direction. -/
+@[simp] theorem dedicatedBackings_writeResolved_iff (state : MemoryState)
+    {provenance : Provenance} {requested : ByteRange}
+    (access : state.ResolvedAccess provenance requested) (bytes : ByteSeq)
+    (initializes : Bool) (fits : bytes.length ≤ requested.size) :
+    (state.writeResolved access bytes initializes fits).DedicatedBackings ↔
+      state.DedicatedBackings := by
+  unfold MemoryState.DedicatedBackings
+  simp only [MemoryState.allocations_writeResolved,
+    MemoryState.backingCapacity?_writeResolved]
+
+@[simp] theorem commitResolved_of_eq_none (state : MemoryState) (d : AccessDescriptor)
+    (access : state.ResolvedAccess d.provenance d.range)
+    (written : Option ByteSeq) (hfits : WrittenFits d written)
+    (h : written = none) : state.commitResolved d access written hfits = state := by
+  subst written
+  rfl
+
+@[simp] theorem commitResolved_of_eq_some (state : MemoryState) (d : AccessDescriptor)
+    (access : state.ResolvedAccess d.provenance d.range)
+    (written : Option ByteSeq) (hfits : WrittenFits d written) (bytes : ByteSeq)
+    (h : written = some bytes) :
+    state.commitResolved d access written hfits =
+      state.writeResolved access bytes d.producesInitialized (hfits bytes h) := by
+  subst written
+  rfl
+
+@[simp] theorem metadataAt_commitResolved (state : MemoryState) (d : AccessDescriptor)
+    (access : state.ResolvedAccess d.provenance d.range)
+    (written : Option ByteSeq) (hfits : WrittenFits d written) (id : AllocId) :
+    (state.commitResolved d access written hfits).MetadataAt id = state.MetadataAt id := by
+  cases written with
+  | none => rfl
+  | some bytes =>
+      exact MemoryState.metadataAt_writeResolved state access bytes
+        d.producesInitialized (hfits bytes rfl) id
 
 /-- `WrittenFits d written` bounds committed bytes by the range the access
 declared. `Committed.writtenFits` is where the transition gets it; `applyAccess`
 gets it by truncating. Without it a commit could write past the declared range
 and every framing argument stated over `d.range` would be false. -/
-def WrittenFits (d : AccessDescriptor) (written : Option ByteSeq) : Prop :=
-  ∀ bytes, written = some bytes → bytes.length ≤ d.range.size
+def writtenBytes (d : AccessDescriptor) (writeData : ByteSeq) : Option ByteSeq :=
+  if d.intent.writes then some (writeData.take d.range.size) else none
+
+theorem writtenBytes_fits (d : AccessDescriptor) (writeData : ByteSeq) :
+    WrittenFits d (writtenBytes d writeData) := by
+  intro bytes h
+  unfold writtenBytes at h
+  split at h
+  · cases h
+    simpa only [List.length_take] using Nat.min_le_left d.range.size writeData.length
+  · simp at h
 
 /--
 **A commit frames every cell the access did not declare.**
@@ -274,22 +603,35 @@ The law both write paths inherit. Stated over the *declared* range, which is wha
 a caller reads off a descriptor, and sound because `WrittenFits` bounds what was
 actually written by it.
 -/
-theorem cellAt?_commit_of_untouched (state : MemoryState) (d : AccessDescriptor)
-    {written : Option ByteSeq} (hfits : WrittenFits d written) {id : AllocId} {offset : Nat}
+theorem cellAt?_commitResolved_of_span_disjoint (state : MemoryState)
+    (d : AccessDescriptor) (access : state.ResolvedAccess d.provenance d.range)
+    {written : Option ByteSeq} (hfits : WrittenFits d written)
+    {span : Coordinates.BackingSpan}
+    (hdisjoint : ∀ bytes, written = some bytes →
+      (access.prefix bytes.length).span.Disjoint span) (offset : Nat) :
+    (state.commitResolved d access written hfits).cellAtBacking? span offset =
+      state.cellAtBacking? span offset := by
+  unfold MemoryState.commitResolved
+  split
+  · rfl
+  · apply MemoryState.cellAtBacking?_writeResolved_of_span_disjoint
+    exact hdisjoint _ rfl
+
+/-- Under the executable dedicated-backing profile, a commit frames every
+allocation-local cell outside the descriptor's declared footprint. -/
+theorem cellAt?_commitResolved_of_untouched (state : MemoryState)
+    (d : AccessDescriptor) (access : state.ResolvedAccess d.provenance d.range)
+    {written : Option ByteSeq} (hfits : WrittenFits d written)
+    (hdedicated : state.DedicatedBackings) {id : AllocId} {offset : Nat}
     (h : ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
-    (state.commit d written).cellAt? id offset = state.cellAt? id offset := by
-  unfold MemoryState.commit
-  cases hw : written with
-  | none => rfl
-  | some bytes =>
-    refine MemoryState.cellAt?_write_of_not_covers state d.provenance.root ?_
-    by_cases hid : id = d.provenance.root
-    · subst hid
-      refine Or.inr fun hin => h ⟨rfl, ?_⟩
-      have hlen := hfits bytes hw
-      simp only [ByteRange.covers_def] at hin ⊢
-      omega
-    · exact Or.inl hid
+    (state.commitResolved d access written hfits).cellAt? id offset =
+      state.cellAt? id offset := by
+  unfold MemoryState.commitResolved
+  split
+  · rfl
+  · apply MemoryState.cellAt?_writeResolved_of_untouched
+    · exact hdedicated
+    · exact h
 
 /--
 Apply one access to memory.
@@ -299,15 +641,15 @@ state unchanged, which is `applyAccess_refused_preserves_state`.
 -/
 def applyAccess (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSeq)
     (indeterminate : Nat → Byte) : AccessResult × MemoryState :=
-  match denialOf state d with
-  | some class_ => (.refused class_, state)
-  | Option.none =>
+  match prepareAccess state d with
+  | .error class_ => (.refused class_, state)
+  | .ok access =>
       ( { observed :=
-            if d.intent.reads then some (observedBytes state d indeterminate)
+            if d.intent.reads then some (observedBytes access indeterminate)
             else Option.none
           refusal := Option.none }
-      , state.commit d (if d.intent.writes then some (writeData.take d.range.size)
-                        else Option.none) )
+      , state.commitResolved d access (writtenBytes d writeData)
+          (writtenBytes_fits d writeData) )
 
 /-! ## The laws
 
@@ -333,7 +675,13 @@ theorem applyAccess_refused_preserves_state (state : MemoryState) (d : AccessDes
     (writeData : ByteSeq) (indeterminate : Nat → Byte) {class_ : AuditViolationClass}
     (h : denialOf state d = some class_) :
     applyAccess state d writeData indeterminate = (.refused class_, state) := by
-  simp [applyAccess, h]
+  unfold denialOf at h
+  cases hp : prepareAccess state d with
+  | error c =>
+      simp only [hp] at h
+      cases h
+      simp [applyAccess, hp]
+  | ok access => simp [hp] at h
 
 /-- A refused access observes nothing. A refusal that still reported bytes would
 let a denied read leak the storage it was denied. -/
@@ -341,7 +689,8 @@ theorem applyAccess_refused_observes_nothing (state : MemoryState) (d : AccessDe
     (writeData : ByteSeq) (indeterminate : Nat → Byte) {class_ : AuditViolationClass}
     (h : denialOf state d = some class_) :
     (applyAccess state d writeData indeterminate).1.observed = Option.none := by
-  simp [applyAccess, h, AccessResult.refused]
+  rw [applyAccess_refused_preserves_state state d writeData indeterminate h]
+  rfl
 
 /--
 What `applyAccess` leaves in memory, in one equation.
@@ -353,56 +702,57 @@ them.
 theorem applyAccess_state (state : MemoryState) (d : AccessDescriptor)
     (writeData : ByteSeq) (indeterminate : Nat → Byte) :
     (applyAccess state d writeData indeterminate).2 =
-      if denialOf state d = Option.none ∧ d.intent.writes = true then
-        state.write d.provenance.root d.range.start (writeData.take d.range.size)
-          d.producesInitialized
-      else state := by
-  unfold applyAccess MemoryState.commit
-  cases hden : denialOf state d with
-  | some c => simp
-  | none => by_cases hw : d.intent.writes = true <;> simp [hw]
+      match prepareAccess state d with
+      | .error _ => state
+      | .ok access =>
+          state.commitResolved d access (writtenBytes d writeData)
+            (writtenBytes_fits d writeData) := by
+  unfold applyAccess
+  split <;> rfl
 
 /-- A read-only access leaves memory untouched. -/
 theorem applyAccess_read_preserves_state (state : MemoryState) (d : AccessDescriptor)
     (writeData : ByteSeq) (indeterminate : Nat → Byte) (h : d.intent.writes = false) :
     (applyAccess state d writeData indeterminate).2 = state := by
+  have hwritten : writtenBytes d writeData = none := by simp [writtenBytes, h]
   rw [applyAccess_state]
-  simp [h]
+  cases prepareAccess state d with
+  | error _ => rfl
+  | ok access => exact commitResolved_of_eq_none state d access _ _ hwritten
 
-/-- **An access frames every other allocation.** Distinct `AllocId`s are distinct
-storage by construction, which is what `docs/MEMORY_MODEL.md` §2 means by making
-provenance rather than address the authority. -/
+/-- **An access frames every other allocation in executable states.** A successful
+preparation establishes `DedicatedBackings`; a state outside that profile is
+refused unchanged. -/
 theorem applyAccess_frames_other_allocation (state : MemoryState) (d : AccessDescriptor)
     (writeData : ByteSeq) (indeterminate : Nat → Byte) {other : AllocId}
     (hne : other ≠ d.provenance.root) (offset : Nat) :
     (applyAccess state d writeData indeterminate).2.byteAt? other offset =
       state.byteAt? other offset := by
-  rw [applyAccess_state]
-  split
-  · unfold MemoryState.byteAt?
-    rw [MemoryState.write_preserves_other_allocation state hne]
-  · rfl
+  unfold MemoryState.byteAt?
+  unfold applyAccess
+  cases hp : prepareAccess state d with
+  | error _ => rfl
+  | ok access =>
+      rw [cellAt?_commitResolved_of_untouched state d access
+        (writtenBytes_fits d writeData) (dedicatedBackings_of_prepareAccess hp)]
+      exact fun h => hne h.1.symm
 
 /-- **An access frames every range in its own allocation that it did not write.**
 The pointwise form; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4's "reads and writes to
 disjoint ranges commute and frame", framing half. -/
 theorem applyAccess_frames_uncovered_offset (state : MemoryState) (d : AccessDescriptor)
     (writeData : ByteSeq) (indeterminate : Nat → Byte) {offset : Nat}
-    (hout : ¬ (ByteRange.mk d.range.start (writeData.take d.range.size).length).Covers
-      offset) :
+    (hout : ¬ d.range.Covers offset) :
     (applyAccess state d writeData indeterminate).2.byteAt? d.provenance.root offset =
       state.byteAt? d.provenance.root offset := by
-  rw [applyAccess_state]
-  split
-  · cases hfound : state.allocations.lookup d.provenance.root with
-    | none => rw [MemoryState.write_of_missing state _ _ _ hfound]
-    | some record =>
-      rw [MemoryState.byteAt?_write_self _ _ _ _ hfound]
-      unfold MemoryState.byteAt?
-      rw [hfound]
-      simp only [Option.bind_some]
-      exact ByteStore.byteAt?_write_of_not_covers record.bytes hout
-  · rfl
+  unfold MemoryState.byteAt?
+  unfold applyAccess
+  cases hp : prepareAccess state d with
+  | error _ => rfl
+  | ok access =>
+      rw [cellAt?_commitResolved_of_untouched state d access
+        (writtenBytes_fits d writeData) (dedicatedBackings_of_prepareAccess hp)]
+      exact fun h => hout h.2
 
 /-- The range-level framing law, which is the one a disjointness argument states:
 an access confined to `d.range` leaves every byte of a disjoint range as it was. -/
@@ -412,282 +762,475 @@ theorem applyAccess_frames_disjoint_range (state : MemoryState) (d : AccessDescr
     (applyAccess state d writeData indeterminate).2.byteAt? d.provenance.root offset =
       state.byteAt? d.provenance.root offset := by
   refine applyAccess_frames_uncovered_offset state d writeData indeterminate ?_
-  intro hin
-  refine hd.not_covers ?_ hcov
-  simp only [ByteRange.covers_def, List.length_take] at hin ⊢
-  omega
+  exact fun hin => hd.not_covers hin hcov
 
+/-- The result branch exposes the same prepared access used by observation and
+commit; no consumer needs to resolve the descriptor again. -/
+theorem applyAccess_result (state : MemoryState) (d : AccessDescriptor)
+    (writeData : ByteSeq) (indeterminate : Nat → Byte) :
+    (applyAccess state d writeData indeterminate).1 =
+      match prepareAccess state d with
+      | .error class_ => .refused class_
+      | .ok access =>
+          { observed := if d.intent.reads then
+              some (observedBytes access indeterminate) else none
+            refusal := none } := by
+  unfold applyAccess
+  cases prepareAccess state d <;> rfl
 
-/-! ### Denial is framed too
-
-Every framing law above is about bytes. A commutation argument also needs that
-the *decision* is stable: if writing elsewhere could change whether `d` is
-refused, two accesses would not commute however their bytes behaved.
-`denialOf_write_of_other_allocation`, `denialOf_write_of_disjoint`, and
-`denialOf_applyAccess_of_disjoint` are the lemmas that rule it out.
--/
-
-/--
-**Agreeing states decide the same way.**
-
-`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 recorded that `MemoryState.AgreesOn` does
-not carry the refusal decision, and that a caller wanting decision stability had to
-assemble it. This is that assembly, and it makes plain why cells alone were never
-enough: `denialOf` reads five metadata fields as well as initialization, so two
-states can agree at every byte and refuse differently. Review built exactly that
-pair.
-
-With both halves it goes through. Metadata agreement covers liveness, epoch,
-space, bounds and permission directly, and with cell agreement it also gives
-initialization by `rangeInitialized_congr_of_agrees`.
--/
-theorem denialOf_congr_of_agrees {a b : MemoryState} {d : AccessDescriptor}
-    (hmeta : a.MetadataAt d.provenance.root = b.MetadataAt d.provenance.root)
-    (hcells : a.AgreesOn b) : denialOf a d = denialOf b d := by
-  unfold denialOf
-  simp only [MemoryState.rangeInitialized_congr_of_agrees hmeta hcells]
-  unfold MemoryState.MetadataAt at hmeta
-  cases ha : a.allocations.lookup d.provenance.root with
-  | none =>
-    rw [ha] at hmeta
-    cases hb : b.allocations.lookup d.provenance.root with
-    | none => rfl
-    | some rb => rw [hb] at hmeta; simp at hmeta
-  | some ra =>
-    rw [ha] at hmeta
-    cases hb : b.allocations.lookup d.provenance.root with
-    | none => rw [hb] at hmeta; simp at hmeta
-    | some rb =>
-      rw [hb] at hmeta
-      simp only [Option.map_some, Option.some.injEq] at hmeta
-      have he : ra.extent = rb.extent :=
-        congrArg AllocationRecord.Metadata.extent hmeta
-      have hep : ra.epoch = rb.epoch :=
-        congrArg AllocationRecord.Metadata.epoch hmeta
-      have hsp : ra.space = rb.space :=
-        congrArg AllocationRecord.Metadata.space hmeta
-      have hso : ra.source = rb.source :=
-        congrArg AllocationRecord.Metadata.source hmeta
-      have hpe : ra.permission = rb.permission :=
-        congrArg AllocationRecord.Metadata.permission hmeta
-      have hli : ra.live = rb.live :=
-        congrArg AllocationRecord.Metadata.live hmeta
-      have hba : ra.base = rb.base :=
-        congrArg AllocationRecord.Metadata.base hmeta
-      simp only []
-      rw [he, hep, hsp, hso, hpe, hli, hba]
-
-/-- A write to another allocation does not change whether `d` is refused. -/
-theorem denialOf_write_of_other_allocation (state : MemoryState) (d : AccessDescriptor)
-    {id : AllocId} (hne : d.provenance.root ≠ id) (start : Nat) (bytes : ByteSeq)
-    (initializes : Bool) :
-    denialOf (state.write id start bytes initializes) d = denialOf state d := by
-  unfold denialOf
-  simp only [MemoryState.write_preserves_other_allocation state hne,
-    MemoryState.rangeInitialized_congr_of_lookup
-      (MemoryState.write_preserves_other_allocation state hne start bytes initializes)]
-
-/-- **A write to a disjoint range does not change whether `d` is refused.**
-
-The initialization clause is the one that could have gone wrong: it is the only
-part of `denialOf` that reads bytes rather than metadata, and
-`ByteStore.initialized_write_iff_of_disjoint` is what makes it stable in both
-directions. -/
-theorem denialOf_write_of_disjoint (state : MemoryState) (d : AccessDescriptor)
-    {start : Nat} {bytes : ByteSeq} {initializes : Bool}
-    (hd : (ByteRange.mk start bytes.length).Disjoint d.range) :
-    denialOf (state.write d.provenance.root start bytes initializes) d =
-      denialOf state d := by
-  unfold denialOf
-  simp only [MemoryState.rangeInitialized_write_iff_of_disjoint state hd]
-  cases hfound : state.allocations.lookup d.provenance.root with
-  | none =>
-    simp only [MemoryState.write_of_missing state start bytes initializes hfound, hfound]
-  | some record =>
-    rw [MemoryState.lookup_write_self state start bytes initializes hfound]
-
-/-- Applying one access does not change whether a disjoint one is refused. -/
-theorem denialOf_applyAccess_of_disjoint (state : MemoryState) (dA dB : AccessDescriptor)
-    (writeData : ByteSeq) (indeterminate : Nat → Byte)
-    (hroot : dA.provenance.root = dB.provenance.root) (hd : dA.range.Disjoint dB.range) :
-    denialOf (applyAccess state dA writeData indeterminate).2 dB = denialOf state dB := by
-  rw [applyAccess_state]
-  split
-  · rw [hroot]
-    refine denialOf_write_of_disjoint state dB ?_
-    have hsub := (hd.symm.of_take writeData.length).symm
-    simpa [ByteRange.take, List.length_take, Nat.min_comm] using hsub
-  · rfl
-
-/--
-**Accesses to disjoint ranges commute.**
-
-`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4's "reads and writes to disjoint ranges
-commute and frame", commutation half. Two accesses to disjoint ranges of one
-allocation leave memory agreeing at every offset whichever order they ran in.
-
-Agreement rather than equality, and that is not a weakening to make a proof go
-through: the byte store is a journal, so the two orders leave different write
-histories and no proof could make those states equal. `AgreesOn` compares *cells*,
-so it carries initialization as well as values. It does not carry the refusal
-decision — `denialOf` reads allocation metadata too — and an earlier version of
-this paragraph said it did.
-
-Read the conclusion precisely: it is about the resulting *state*, not about the
-`AccessResult`s. Decision stability is a proof ingredient rather than part of what
-is concluded — `denialOf_applyAccess_of_disjoint` is needed because without it one
-order could refuse what the other committed and no fact about bytes would rescue
-that, but the theorem does not itself state that neither order refuses.
-`observedBytes_congr` is the piece a caller needs to carry an observation across,
-and `applyAccess_result_comm` below is the result-level statement — which this
-paragraph said was not proved here, seventy lines above the proof, until review
-caught it.
-
-Both accesses must lie in one allocation, which `hroot` requires.
-`applyAccess_comm_of_other_allocation` and
-`applyAccess_result_comm_of_other_allocation` are the cross-allocation pair, where
-disjointness is free because distinct `AllocId`s are distinct storage.
--/
-theorem applyAccess_comm (state : MemoryState) (dA dB : AccessDescriptor)
-    (writeA writeB : ByteSeq) (indetA indetB : Nat → Byte)
-    (hroot : dA.provenance.root = dB.provenance.root)
-    (hd : dA.range.Disjoint dB.range) :
-    (applyAccess (applyAccess state dA writeA indetA).2 dB writeB indetB).2.AgreesOn
-      (applyAccess (applyAccess state dB writeB indetB).2 dA writeA indetA).2 := by
-  have hdA : (ByteRange.mk dA.range.start (writeA.take dA.range.size).length).Disjoint
-      (ByteRange.mk dB.range.start (writeB.take dB.range.size).length) := by
-    have h1 := (hd.of_take writeB.length)
-    have h2 := (h1.symm.of_take writeA.length).symm
-    simpa [ByteRange.take, List.length_take, Nat.min_comm] using h2
-  rw [applyAccess_state (applyAccess state dA writeA indetA).2 dB writeB indetB,
-    applyAccess_state (applyAccess state dB writeB indetB).2 dA writeA indetA,
-    denialOf_applyAccess_of_disjoint state dA dB writeA indetA hroot hd,
-    denialOf_applyAccess_of_disjoint state dB dA writeB indetB hroot.symm hd.symm,
-    applyAccess_state state dA writeA indetA,
-    applyAccess_state state dB writeB indetB]
-  by_cases hA : denialOf state dA = Option.none ∧ dA.intent.writes = true
-  · by_cases hB : denialOf state dB = Option.none ∧ dB.intent.writes = true
-    · simp only [if_pos hA, if_pos hB, hroot]
-      exact MemoryState.write_comm state dB.provenance.root hdA
-    · simp only [if_pos hA, if_neg hB]
-      exact MemoryState.AgreesOn.refl _
-  · by_cases hB : denialOf state dB = Option.none ∧ dB.intent.writes = true
-    · simp only [if_neg hA, if_pos hB]
-      exact MemoryState.AgreesOn.refl _
-    · simp only [if_neg hA, if_neg hB]
-      exact MemoryState.AgreesOn.refl _
-
-/-- Two states agreeing over an access's range give it the same observation. The
-lemma a caller uses to carry a read across a write it has framed. -/
-theorem observedBytes_congr {a b : MemoryState} (d : AccessDescriptor)
-    (indeterminate : Nat → Byte)
+/-- Resolved snapshots with the same requested cells produce the same observed
+byte sequence. -/
+theorem observedBytes_congr {a b : MemoryState} {d : AccessDescriptor}
+    (accessA : a.ResolvedAccess d.provenance d.range)
+    (accessB : b.ResolvedAccess d.provenance d.range) (indeterminate : Nat → Byte)
     (h : ∀ offset, offset < d.range.size →
-      a.byteAt? d.provenance.root (d.range.start + offset) =
-        b.byteAt? d.provenance.root (d.range.start + offset)) :
-    observedBytes a d indeterminate = observedBytes b d indeterminate := by
+      accessA.byteAt? (d.range.start + offset) =
+        accessB.byteAt? (d.range.start + offset)) :
+    observedBytes accessA indeterminate = observedBytes accessB indeterminate := by
   unfold observedBytes
   refine List.map_congr_left fun i hi => ?_
   rw [List.mem_range] at hi
   rw [h i hi]
 
-/--
-**An access gets the same result whichever side of a disjoint access it runs on.**
 
-The half `applyAccess_comm` does not conclude. That theorem is about the resulting
-state; this is about the `AccessResult`, which is both the refusal decision and the
-observed bytes. Together they say a disjoint pair commutes in every respect the
-model records, which is what §4's "reads and writes to disjoint ranges commute"
-asks for and what §4.2 recorded as still owed.
+/-! ### Denial is framed too
 
-Both halves come from framing rather than from anything new:
-`denialOf_applyAccess_of_disjoint` for the decision, and
-`applyAccess_frames_disjoint_range` fed through `observedBytes_congr` for the read.
+Byte framing is only half of commutation. The backing-span laws below also carry
+stable allocation/backing metadata, initialization outside the written prefix,
+and `DedicatedBackings`, so a later access is prepared against the same mapping
+and capacity rather than resolved independently.
 -/
-theorem applyAccess_result (state : MemoryState) (d : AccessDescriptor)
-    (writeData : ByteSeq) (indeterminate : Nat → Byte) :
-    (applyAccess state d writeData indeterminate).1 =
-      match denialOf state d with
-      | some class_ => AccessResult.refused class_
-      | Option.none =>
-          { observed :=
-              if d.intent.reads then some (observedBytes state d indeterminate)
-              else Option.none
-            refusal := Option.none } := by
-  unfold applyAccess
-  cases denialOf state d <;> rfl
 
-theorem applyAccess_result_comm (state : MemoryState) (dA dB : AccessDescriptor)
-    (writeA writeB : ByteSeq) (indetA indetB : Nat → Byte)
+/-- Once both states have resolved the same descriptor, stable access metadata,
+agreement on initialization, and agreement on the global executable-layout gate
+make their remaining denial decisions identical. -/
+theorem denialOf_congr_of_resolved_init {a b : MemoryState} {d : AccessDescriptor}
+    (accessA : a.ResolvedAccess d.provenance d.range)
+    (accessB : b.ResolvedAccess d.provenance d.range)
+    (hmeta : a.MetadataAt d.provenance.root = b.MetadataAt d.provenance.root)
+    (hinitialized : accessA.RangeInitialized ↔ accessB.RangeInitialized)
+    (hdedicated : a.DedicatedBackings ↔ b.DedicatedBackings) :
+    denialOf a d = denialOf b d := by
+  have hrecordMeta : accessA.allocation.metadata = accessB.allocation.metadata := by
+    unfold MemoryState.MetadataAt at hmeta
+    rw [accessA.allocationLookup, accessB.allocationLookup] at hmeta
+    exact congrArg MemoryState.AccessMetadata.allocation (Option.some.inj hmeta)
+  have hextent : accessA.allocation.extent = accessB.allocation.extent :=
+    congrArg AllocationRecord.Metadata.extent hrecordMeta
+  have hpermission : accessA.allocation.permission = accessB.allocation.permission :=
+    congrArg AllocationRecord.Metadata.permission hrecordMeta
+  have hbase : accessA.allocation.base = accessB.allocation.base :=
+    congrArg AllocationRecord.Metadata.base hrecordMeta
+  unfold denialOf prepareAccess
+  rw [MemoryState.resolveAccess?_eq_ok accessA, MemoryState.resolveAccess?_eq_ok accessB]
+  by_cases hda : a.DedicatedBackings
+  <;> by_cases hdb : b.DedicatedBackings
+  <;> by_cases hwrap : accessB.allocation.base.any
+        (fun base => !decide (FitsAllocation base accessB.allocation.extent.stop)) = true
+  <;> by_cases haddress : accessB.allocation.base.any
+        (fun base => d.address != Address.numeric (addressOf base d.range.start)) = true
+  <;> by_cases hgrants : accessB.allocation.permission.Grants d.requiredPermission
+  <;> by_cases hpermits : accessB.allocation.permission.Permits d.intent
+  <;> by_cases hinit : d.initialization = .allBytesInitialized ∧
+        ¬ accessB.RangeInitialized
+  <;> simp_all
+  all_goals
+    have hnotinit : ¬ (d.initialization = .allBytesInitialized ∧
+        ¬ accessB.RangeInitialized) := by
+      intro h
+      exact h.2 (hinit h.1)
+    simp [hnotinit]
+
+/-- Checked-cell agreement supplies the initialization premise of
+`denialOf_congr_of_resolved_init`. `denialOf_congr_of_resolved` keeps an explicit
+`DedicatedBackings` equivalence because `MetadataAt` describes only one allocation. -/
+theorem denialOf_congr_of_resolved {a b : MemoryState} {d : AccessDescriptor}
+    (accessA : a.ResolvedAccess d.provenance d.range)
+    (accessB : b.ResolvedAccess d.provenance d.range)
+    (hmeta : a.MetadataAt d.provenance.root = b.MetadataAt d.provenance.root)
+    (hcells : a.AgreesOn b)
+    (hdedicated : a.DedicatedBackings ↔ b.DedicatedBackings) :
+    denialOf a d = denialOf b d :=
+  denialOf_congr_of_resolved_init accessA accessB hmeta
+    (accessA.rangeInitialized_congr accessB hcells) hdedicated
+
+/-- States agreeing on stable metadata and every checked cell decide an access the
+same way, provided they also agree on the global executable-layout gate. The latter
+is separate because metadata at `d`'s root cannot describe unrelated bindings. -/
+theorem denialOf_congr_of_agrees {a b : MemoryState} {d : AccessDescriptor}
+    (hmeta : a.MetadataAt d.provenance.root = b.MetadataAt d.provenance.root)
+    (hcells : a.AgreesOn b)
+    (hdedicated : a.DedicatedBackings ↔ b.DedicatedBackings) :
+    denialOf a d = denialOf b d := by
+  have hclassification := MemoryState.resolveClassification_congr_metadata
+    (provenance := d.provenance) (requested := d.range) hmeta
+  cases ha : a.resolveAccess? d.provenance d.range with
+  | error failureA =>
+      cases hb : b.resolveAccess? d.provenance d.range with
+      | error failureB =>
+          have hf : failureA = failureB := by
+            simpa [MemoryState.resolveClassification, ha, hb] using hclassification
+          subst failureB
+          simp [denialOf, prepareAccess, ha, hb]
+      | ok accessB =>
+          simp [MemoryState.resolveClassification, ha, hb] at hclassification
+  | ok accessA =>
+      cases hb : b.resolveAccess? d.provenance d.range with
+      | error failureB =>
+          simp [MemoryState.resolveClassification, ha, hb] at hclassification
+      | ok accessB =>
+          exact denialOf_congr_of_resolved accessA accessB hmeta hcells hdedicated
+
+/-- A backing-span-disjoint resolved write preserves every denial class for `d`.
+Resolver failures are carried by stable metadata; for a successful resolution,
+the disjoint backing spans carry the initialization clause as well. -/
+theorem denialOf_writeResolved_of_span_disjoint (state : MemoryState)
+    (d : AccessDescriptor) {writerProvenance : Provenance}
+    {writerRange : ByteRange}
+    (writer : state.ResolvedAccess writerProvenance writerRange)
+    (bytes : ByteSeq) (initializes : Bool) (fits : bytes.length ≤ writerRange.size)
+    (hdisjoint : ∀ query : state.ResolvedAccess d.provenance d.range,
+      (writer.prefix bytes.length).span.Disjoint query.span) :
+    denialOf (state.writeResolved writer bytes initializes fits) d = denialOf state d := by
+  let after := state.writeResolved writer bytes initializes fits
+  change denialOf after d = denialOf state d
+  have hmeta : after.MetadataAt d.provenance.root = state.MetadataAt d.provenance.root := by
+    exact MemoryState.metadataAt_writeResolved state writer bytes initializes fits _
+  have hgate : after.DedicatedBackings ↔ state.DedicatedBackings := by
+    exact dedicatedBackings_writeResolved_iff state writer bytes initializes fits
+  have hclassification := MemoryState.resolveClassification_congr_metadata
+    (requested := d.range) hmeta
+  cases hquery : state.resolveAccess? d.provenance d.range with
+  | error failure =>
+      cases hafter : after.resolveAccess? d.provenance d.range with
+      | error afterFailure =>
+          have hf : afterFailure = failure := by
+            simpa [MemoryState.resolveClassification, hafter, hquery] using hclassification
+          subst afterFailure
+          simp [denialOf, prepareAccess, hafter, hquery]
+      | ok afterAccess =>
+          simp [MemoryState.resolveClassification, hafter, hquery] at hclassification
+  | ok query =>
+      let afterQuery := query.afterWrite writer bytes initializes fits
+      exact denialOf_congr_of_resolved_init afterQuery query hmeta
+        (MemoryState.rangeInitialized_afterWrite_iff_of_span_disjoint
+          query writer bytes initializes fits (hdisjoint query)) hgate
+
+/-- A successfully prepared descriptor remains successfully prepared after a
+backing-span-disjoint write, with the resolver evidence transported through that
+exact write. -/
+theorem prepareAccess_writeResolved_of_span_disjoint (state : MemoryState)
+    (d : AccessDescriptor) {writerProvenance : Provenance}
+    {writerRange : ByteRange}
+    (query : state.ResolvedAccess d.provenance d.range)
+    (writer : state.ResolvedAccess writerProvenance writerRange)
+    (bytes : ByteSeq) (initializes : Bool) (fits : bytes.length ≤ writerRange.size)
+    (hprepared : prepareAccess state d = .ok query)
+    (hdisjoint : (writer.prefix bytes.length).span.Disjoint query.span) :
+    prepareAccess (state.writeResolved writer bytes initializes fits) d =
+      .ok (query.afterWrite writer bytes initializes fits) := by
+  have hdedicated : state.DedicatedBackings :=
+    dedicatedBackings_of_prepareAccess hprepared
+  have hafterDedicated :
+      (state.writeResolved writer bytes initializes fits).DedicatedBackings :=
+    hdedicated.writeResolved writer bytes initializes fits
+  have hinitialized := MemoryState.rangeInitialized_afterWrite_iff_of_span_disjoint
+    query writer bytes initializes fits hdisjoint
+  unfold prepareAccess at hprepared ⊢
+  rw [MemoryState.resolveAccess?_eq_ok query] at hprepared
+  rw [MemoryState.resolveAccess?_eq_ok (query.afterWrite writer bytes initializes fits)]
+  simp only at hprepared ⊢
+  simp only [hdedicated, not_true_eq_false, if_false] at hprepared
+  simp only [hafterDedicated, not_true_eq_false, if_false]
+  simp only [MemoryState.ResolvedAccess.afterWrite_allocation]
+  repeat' split at hprepared <;> simp_all
+
+/-- `denialOf_commitResolved_of_span_disjoint` preserves a backing-span-disjoint
+descriptor's denial and requests disjointness only in the branch that writes. -/
+theorem denialOf_commitResolved_of_span_disjoint (state : MemoryState)
+    (writerDescriptor queryDescriptor : AccessDescriptor)
+    (writer : state.ResolvedAccess writerDescriptor.provenance writerDescriptor.range)
+    (written : Option ByteSeq) (fits : WrittenFits writerDescriptor written)
+    (hdisjoint : ∀ bytes, written = some bytes →
+      ∀ query : state.ResolvedAccess queryDescriptor.provenance queryDescriptor.range,
+        (writer.prefix bytes.length).span.Disjoint query.span) :
+    denialOf (state.commitResolved writerDescriptor writer written fits) queryDescriptor =
+      denialOf state queryDescriptor := by
+  cases written with
+  | none => rfl
+  | some bytes =>
+      exact denialOf_writeResolved_of_span_disjoint state queryDescriptor writer bytes
+        writerDescriptor.producesInitialized (fits bytes rfl) (hdisjoint bytes rfl)
+
+/-- `denialOf_applyAccess_of_disjoint` preserves the denial decision for a disjoint
+range in the same allocation by comparing the translated backing spans. -/
+theorem denialOf_applyAccess_of_disjoint (state : MemoryState)
+    (dA dB : AccessDescriptor) (writeData : ByteSeq) (indeterminate : Nat → Byte)
     (hroot : dA.provenance.root = dB.provenance.root)
-    (hd : dA.range.Disjoint dB.range) :
-    (applyAccess (applyAccess state dB writeB indetB).2 dA writeA indetA).1 =
-      (applyAccess state dA writeA indetA).1 := by
-  have hobs : observedBytes (applyAccess state dB writeB indetB).2 dA indetA =
-      observedBytes state dA indetA := by
-    refine observedBytes_congr dA indetA (fun offset hlt => ?_)
-    have hcov : dA.range.Covers (dA.range.start + offset) :=
-      ByteRange.covers_of (Nat.le_add_right _ _) (by omega)
-    have := applyAccess_frames_disjoint_range state dB writeB indetB hd.symm hcov
-    rw [← hroot] at this
-    exact this
-  rw [applyAccess_result, applyAccess_result,
-    denialOf_applyAccess_of_disjoint state dB dA writeB indetB hroot.symm hd.symm, hobs]
+    (hdisjoint : dA.range.Disjoint dB.range) :
+    denialOf (applyAccess state dA writeData indeterminate).2 dB = denialOf state dB := by
+  rw [applyAccess_state]
+  cases hprepared : prepareAccess state dA with
+  | error _ => simp only
+  | ok writer =>
+      simp only
+      apply denialOf_commitResolved_of_span_disjoint
+      intro bytes _ query
+      exact writer.prefix_span_disjoint_of_same_root query bytes.length hroot hdisjoint
 
-/-! ### Accesses in different allocations
-
-`applyAccess_comm` and `applyAccess_result_comm` need disjoint ranges because they
-are about one allocation. Across allocations disjointness is free:
-`docs/MEMORY_MODEL.md` §2 makes distinct `AllocId`s distinct storage by
-construction, so offsets that happen to coincide are not the same bytes. §4.2
-recorded these as unstated with `denialOf_write_of_other_allocation` as the
-decision half; here they are. -/
-
-/-- An access to another allocation does not change whether `d` is refused. -/
+/-- `denialOf_applyAccess_of_other_allocation` preserves the denial decision across
+distinct allocations. `dedicatedBackings_of_prepareAccess` supplies the fact used
+to separate their backing identities. -/
 theorem denialOf_applyAccess_of_other_allocation (state : MemoryState)
     (dA dB : AccessDescriptor) (writeData : ByteSeq) (indeterminate : Nat → Byte)
     (hne : dB.provenance.root ≠ dA.provenance.root) :
     denialOf (applyAccess state dA writeData indeterminate).2 dB = denialOf state dB := by
   rw [applyAccess_state]
-  split
-  · exact denialOf_write_of_other_allocation state dB hne _ _ _
-  · rfl
+  cases hprepared : prepareAccess state dA with
+  | error _ => simp only
+  | ok writer =>
+      simp only
+      apply denialOf_commitResolved_of_span_disjoint
+      intro bytes _ query
+      exact writer.prefix_span_disjoint_of_ne
+        (dedicatedBackings_of_prepareAccess hprepared) query bytes.length hne.symm
 
-/-- **Accesses in different allocations commute**, in the resulting state. -/
-theorem applyAccess_comm_of_other_allocation (state : MemoryState) (dA dB : AccessDescriptor)
+/-- Two successfully prepared accesses with disjoint backing-coordinate prefixes commute
+observationally. This is the core state theorem; the source-coordinate wrappers
+below derive its span premise from either local disjointness or distinct live
+allocation identities. -/
+theorem applyAccess_comm_of_prepared (state : MemoryState)
+    (dA dB : AccessDescriptor) (writeA writeB : ByteSeq)
+    (indetA indetB : Nat → Byte)
+    (accessA : state.ResolvedAccess dA.provenance dA.range)
+    (accessB : state.ResolvedAccess dB.provenance dB.range)
+    (hpreparedA : prepareAccess state dA = .ok accessA)
+    (hpreparedB : prepareAccess state dB = .ok accessB)
+    (hdisjointA : ∀ countA,
+      (accessA.prefix countA).span.Disjoint accessB.span)
+    (hdisjointB : ∀ countB,
+      (accessB.prefix countB).span.Disjoint accessA.span)
+    (hdisjointWrites : ∀ countA countB,
+      (accessA.prefix countA).span.Disjoint (accessB.prefix countB).span) :
+    (applyAccess (applyAccess state dA writeA indetA).2 dB writeB indetB).2.AgreesOn
+      (applyAccess (applyAccess state dB writeB indetB).2 dA writeA indetA).2 := by
+  have hstateA : (applyAccess state dA writeA indetA).2 =
+      state.commitResolved dA accessA (writtenBytes dA writeA)
+        (writtenBytes_fits dA writeA) := by
+    rw [applyAccess_state, hpreparedA]
+  have hstateB : (applyAccess state dB writeB indetB).2 =
+      state.commitResolved dB accessB (writtenBytes dB writeB)
+        (writtenBytes_fits dB writeB) := by
+    rw [applyAccess_state, hpreparedB]
+  cases hwrittenA : writtenBytes dA writeA with
+  | none =>
+      have hstateA' : (applyAccess state dA writeA indetA).2 = state := by
+        rw [hstateA, commitResolved_of_eq_none state dA accessA _ _ hwrittenA]
+      cases hwrittenB : writtenBytes dB writeB with
+      | none =>
+          have hstateB' : (applyAccess state dB writeB indetB).2 = state := by
+            rw [hstateB, commitResolved_of_eq_none state dB accessB _ _ hwrittenB]
+          simpa only [hstateA', hstateB'] using MemoryState.AgreesOn.refl state
+      | some bytesB =>
+          have hstateB' : (applyAccess state dB writeB indetB).2 =
+              state.writeResolved accessB bytesB dB.producesInitialized
+                (writtenBytes_fits dB writeB bytesB hwrittenB) := by
+            rw [hstateB, commitResolved_of_eq_some state dB accessB _ _ _ hwrittenB]
+          have hpreparedAfterB := prepareAccess_writeResolved_of_span_disjoint
+            state dA accessA accessB bytesB dB.producesInitialized
+              (writtenBytes_fits dB writeB bytesB hwrittenB) hpreparedA
+              (hdisjointB bytesB.length)
+          simp only [hstateA', hstateB']
+          rw [applyAccess_state, hpreparedAfterB]
+          simp only
+          rw [commitResolved_of_eq_none _ dA _ _ _ hwrittenA]
+          exact MemoryState.AgreesOn.refl _
+  | some bytesA =>
+      have hstateA' : (applyAccess state dA writeA indetA).2 =
+          state.writeResolved accessA bytesA dA.producesInitialized
+            (writtenBytes_fits dA writeA bytesA hwrittenA) := by
+        rw [hstateA, commitResolved_of_eq_some state dA accessA _ _ _ hwrittenA]
+      cases hwrittenB : writtenBytes dB writeB with
+      | none =>
+          have hstateB' : (applyAccess state dB writeB indetB).2 = state := by
+            rw [hstateB, commitResolved_of_eq_none state dB accessB _ _ hwrittenB]
+          have hpreparedAfterA := prepareAccess_writeResolved_of_span_disjoint
+            state dB accessB accessA bytesA dA.producesInitialized
+              (writtenBytes_fits dA writeA bytesA hwrittenA) hpreparedB
+              (hdisjointA bytesA.length)
+          simp only [hstateA', hstateB']
+          rw [applyAccess_state, hpreparedAfterA]
+          simp only
+          rw [commitResolved_of_eq_none _ dB _ _ _ hwrittenB]
+          exact MemoryState.AgreesOn.refl _
+      | some bytesB =>
+          have hstateB' : (applyAccess state dB writeB indetB).2 =
+              state.writeResolved accessB bytesB dB.producesInitialized
+                (writtenBytes_fits dB writeB bytesB hwrittenB) := by
+            rw [hstateB, commitResolved_of_eq_some state dB accessB _ _ _ hwrittenB]
+          have hpreparedAfterA := prepareAccess_writeResolved_of_span_disjoint
+            state dB accessB accessA bytesA dA.producesInitialized
+              (writtenBytes_fits dA writeA bytesA hwrittenA) hpreparedB
+              (hdisjointA bytesA.length)
+          have hpreparedAfterB := prepareAccess_writeResolved_of_span_disjoint
+            state dA accessA accessB bytesB dB.producesInitialized
+              (writtenBytes_fits dB writeB bytesB hwrittenB) hpreparedA
+              (hdisjointB bytesB.length)
+          simp only [hstateA', hstateB']
+          rw [applyAccess_state, hpreparedAfterA]
+          simp only
+          rw [commitResolved_of_eq_some _ dB _ _ _ _ hwrittenB]
+          rw [applyAccess_state, hpreparedAfterB]
+          simp only
+          rw [commitResolved_of_eq_some _ dA _ _ _ _ hwrittenA]
+          exact MemoryState.writeResolved_comm state accessA accessB bytesA bytesB
+            dA.producesInitialized dB.producesInitialized
+            (writtenBytes_fits dA writeA bytesA hwrittenA)
+            (writtenBytes_fits dB writeB bytesB hwrittenB)
+            (hdisjointWrites bytesA.length bytesB.length)
+
+/-- **Accesses to disjoint ranges in one allocation commute**, in checked cells
+and initialization. Refused branches preserve state; when both prepare, local
+disjointness is translated through their one shared mapping. -/
+theorem applyAccess_comm (state : MemoryState) (dA dB : AccessDescriptor)
     (writeA writeB : ByteSeq) (indetA indetB : Nat → Byte)
+    (hroot : dA.provenance.root = dB.provenance.root)
+    (hdisjoint : dA.range.Disjoint dB.range) :
+    (applyAccess (applyAccess state dA writeA indetA).2 dB writeB indetB).2.AgreesOn
+      (applyAccess (applyAccess state dB writeB indetB).2 dA writeA indetA).2 := by
+  cases hdenA : denialOf state dA with
+  | some classA =>
+      have hstableA := denialOf_applyAccess_of_disjoint state dB dA writeB indetB
+        hroot.symm hdisjoint.symm
+      have hdenAfterA : denialOf (applyAccess state dB writeB indetB).2 dA =
+          some classA := by rw [hstableA, hdenA]
+      rw [applyAccess_refused_preserves_state state dA writeA indetA hdenA,
+        applyAccess_refused_preserves_state _ dA writeA indetA hdenAfterA]
+      exact MemoryState.AgreesOn.refl _
+  | none =>
+      cases hdenB : denialOf state dB with
+      | some classB =>
+          have hstableB := denialOf_applyAccess_of_disjoint state dA dB writeA indetA
+            hroot hdisjoint
+          have hdenAfterB : denialOf (applyAccess state dA writeA indetA).2 dB =
+              some classB := by rw [hstableB, hdenB]
+          rw [applyAccess_refused_preserves_state _ dB writeB indetB hdenAfterB,
+            applyAccess_refused_preserves_state state dB writeB indetB hdenB]
+          exact MemoryState.AgreesOn.refl _
+      | none =>
+          obtain ⟨accessA, hpreparedA⟩ := (denialOf_eq_none_iff state dA).mp hdenA
+          obtain ⟨accessB, hpreparedB⟩ := (denialOf_eq_none_iff state dB).mp hdenB
+          apply applyAccess_comm_of_prepared state dA dB writeA writeB indetA indetB
+            accessA accessB hpreparedA hpreparedB
+          · intro countA
+            exact accessA.prefix_span_disjoint_of_same_root accessB countA
+              hroot hdisjoint
+          · intro countB
+            exact accessB.prefix_span_disjoint_of_same_root accessA countB
+              hroot.symm hdisjoint.symm
+          · intro countA countB
+            exact accessA.prefix_span_disjoint_of_same_root (accessB.prefix countB)
+              countA hroot (hdisjoint.of_take countB)
+
+/-- **Accesses in distinct live allocations commute** under the executable
+dedicated-backing profile established by either successful preparation. -/
+theorem applyAccess_comm_of_other_allocation (state : MemoryState)
+    (dA dB : AccessDescriptor) (writeA writeB : ByteSeq)
+    (indetA indetB : Nat → Byte)
     (hne : dA.provenance.root ≠ dB.provenance.root) :
     (applyAccess (applyAccess state dA writeA indetA).2 dB writeB indetB).2.AgreesOn
       (applyAccess (applyAccess state dB writeB indetB).2 dA writeA indetA).2 := by
-  rw [applyAccess_state (applyAccess state dA writeA indetA).2 dB writeB indetB,
-    applyAccess_state (applyAccess state dB writeB indetB).2 dA writeA indetA,
-    denialOf_applyAccess_of_other_allocation state dA dB writeA indetA (Ne.symm hne),
-    denialOf_applyAccess_of_other_allocation state dB dA writeB indetB hne,
-    applyAccess_state state dA writeA indetA, applyAccess_state state dB writeB indetB]
-  by_cases hA : denialOf state dA = Option.none ∧ dA.intent.writes = true
-  · by_cases hB : denialOf state dB = Option.none ∧ dB.intent.writes = true
-    · simp only [if_pos hA, if_pos hB]
-      exact MemoryState.write_comm_of_ne state hne _ _ _ _ _ _
-    · simp only [if_pos hA, if_neg hB]
+  cases hdenA : denialOf state dA with
+  | some classA =>
+      have hstableA := denialOf_applyAccess_of_other_allocation
+        state dB dA writeB indetB hne
+      have hdenAfterA : denialOf (applyAccess state dB writeB indetB).2 dA =
+          some classA := by rw [hstableA, hdenA]
+      rw [applyAccess_refused_preserves_state state dA writeA indetA hdenA,
+        applyAccess_refused_preserves_state _ dA writeA indetA hdenAfterA]
       exact MemoryState.AgreesOn.refl _
-  · by_cases hB : denialOf state dB = Option.none ∧ dB.intent.writes = true
-    · simp only [if_neg hA, if_pos hB]
-      exact MemoryState.AgreesOn.refl _
-    · simp only [if_neg hA, if_neg hB]
-      exact MemoryState.AgreesOn.refl _
+  | none =>
+      cases hdenB : denialOf state dB with
+      | some classB =>
+          have hstableB := denialOf_applyAccess_of_other_allocation
+            state dA dB writeA indetA hne.symm
+          have hdenAfterB : denialOf (applyAccess state dA writeA indetA).2 dB =
+              some classB := by rw [hstableB, hdenB]
+          rw [applyAccess_refused_preserves_state _ dB writeB indetB hdenAfterB,
+            applyAccess_refused_preserves_state state dB writeB indetB hdenB]
+          exact MemoryState.AgreesOn.refl _
+      | none =>
+          obtain ⟨accessA, hpreparedA⟩ := (denialOf_eq_none_iff state dA).mp hdenA
+          obtain ⟨accessB, hpreparedB⟩ := (denialOf_eq_none_iff state dB).mp hdenB
+          have hdedicated := dedicatedBackings_of_prepareAccess hpreparedA
+          apply applyAccess_comm_of_prepared state dA dB writeA writeB indetA indetB
+            accessA accessB hpreparedA hpreparedB
+          · intro countA
+            exact accessA.prefix_span_disjoint_of_ne hdedicated accessB countA hne
+          · intro countB
+            exact accessB.prefix_span_disjoint_of_ne hdedicated accessA countB hne.symm
+          · intro countA countB
+            exact accessA.prefix_span_disjoint_of_ne hdedicated
+              (accessB.prefix countB) countA hne
 
-/-- **And in their results.** The same access gets the same decision and observes
-the same bytes on either side of an access to a different allocation. -/
+/-- Equal denial decisions and byte agreement over the descriptor's range give
+the access the same result. Resolution remains checked independently in each
+state; its successful evidence is used only to read the agreed cells. -/
+theorem applyAccess_result_congr {a b : MemoryState} (d : AccessDescriptor)
+    (writeData : ByteSeq) (indeterminate : Nat → Byte)
+    (hdenial : denialOf a d = denialOf b d)
+    (hbytes : ∀ offset, d.range.Covers offset →
+      a.byteAt? d.provenance.root offset = b.byteAt? d.provenance.root offset) :
+    (applyAccess a d writeData indeterminate).1 =
+      (applyAccess b d writeData indeterminate).1 := by
+  cases hda : denialOf a d with
+  | none =>
+      have hdb : denialOf b d = none := by rw [← hdenial, hda]
+      obtain ⟨accessA, hpreparedA⟩ := (denialOf_eq_none_iff a d).mp hda
+      obtain ⟨accessB, hpreparedB⟩ := (denialOf_eq_none_iff b d).mp hdb
+      have hobserved : observedBytes accessA indeterminate =
+          observedBytes accessB indeterminate := by
+        apply observedBytes_congr
+        intro offset hoffset
+        have hcovered : d.range.Covers (d.range.start + offset) :=
+          ByteRange.covers_of (Nat.le_add_right _ _) (by omega)
+        rw [accessA.byteAt?_eq_state hcovered, accessB.byteAt?_eq_state hcovered]
+        exact hbytes _ hcovered
+      rw [applyAccess_result, applyAccess_result, hpreparedA, hpreparedB]
+      simp only
+      rw [hobserved]
+  | some class_ =>
+      have hdb : denialOf b d = some class_ := by rw [← hdenial, hda]
+      rw [applyAccess_refused_preserves_state a d writeData indeterminate hda,
+        applyAccess_refused_preserves_state b d writeData indeterminate hdb]
+
+/-- A descriptor produces the same result before or after an access to a
+disjoint range in the same allocation. -/
+theorem applyAccess_result_comm (state : MemoryState) (dA dB : AccessDescriptor)
+    (writeA writeB : ByteSeq) (indetA indetB : Nat → Byte)
+    (hroot : dA.provenance.root = dB.provenance.root)
+    (hdisjoint : dA.range.Disjoint dB.range) :
+    (applyAccess (applyAccess state dB writeB indetB).2 dA writeA indetA).1 =
+      (applyAccess state dA writeA indetA).1 := by
+  apply applyAccess_result_congr
+  · exact denialOf_applyAccess_of_disjoint state dB dA writeB indetB
+      hroot.symm hdisjoint.symm
+  · intro offset hcovered
+    have hframe := applyAccess_frames_disjoint_range state dB writeB indetB
+      hdisjoint.symm hcovered
+    simpa [hroot] using hframe
+
+/-- The same result stability holds across distinct allocation identities. -/
 theorem applyAccess_result_comm_of_other_allocation (state : MemoryState)
-    (dA dB : AccessDescriptor) (writeA writeB : ByteSeq) (indetA indetB : Nat → Byte)
+    (dA dB : AccessDescriptor) (writeA writeB : ByteSeq)
+    (indetA indetB : Nat → Byte)
     (hne : dA.provenance.root ≠ dB.provenance.root) :
     (applyAccess (applyAccess state dB writeB indetB).2 dA writeA indetA).1 =
       (applyAccess state dA writeA indetA).1 := by
-  have hobs : observedBytes (applyAccess state dB writeB indetB).2 dA indetA =
-      observedBytes state dA indetA := by
-    refine observedBytes_congr dA indetA (fun offset _ => ?_)
-    exact applyAccess_frames_other_allocation state dB writeB indetB hne _
-  rw [applyAccess_result, applyAccess_result,
-    denialOf_applyAccess_of_other_allocation state dB dA writeB indetB hne, hobs]
+  apply applyAccess_result_congr
+  · exact denialOf_applyAccess_of_other_allocation state dB dA writeB indetB hne
+  · intro offset _
+    exact applyAccess_frames_other_allocation state dB writeB indetB hne offset
 
 /-! ## Straight-line blocks
 
@@ -704,16 +1247,17 @@ declared range, so the stronger hypothesis would buy nothing and cost every
 caller an extra obligation.
 -/
 
-/-- **An access moves no allocation's metadata.** The bytes are the only thing it
-moves, which is what makes a later access decided the same way. -/
+/-- **An access moves no allocation or backing-capacity metadata.** It changes only
+the selected backing's byte store, which is what makes a later access resolve the
+same mapping and capacity. -/
 theorem applyAccess_preserves_metadata (state : MemoryState) (d : AccessDescriptor)
     (writeData : ByteSeq) (indeterminate : Nat → Byte) (other : AllocId) :
     (applyAccess state d writeData indeterminate).2.MetadataAt other =
       state.MetadataAt other := by
   rw [applyAccess_state]
-  split
-  · exact MemoryState.metadataAt_write _ _ _ _ _ _
-  · rfl
+  cases prepareAccess state d with
+  | error _ => rfl
+  | ok access => exact metadataAt_commitResolved state d access _ _ other
 
 /--
 **§10's preservation item, as far as this layer can state it.**
@@ -729,22 +1273,10 @@ and `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records what moving it would co
 partial statement is still worth more than a `Prop` a profile names: this one has
 content, and a profile cannot choose it.
 
-The conjuncts, in order: a refused access changes nothing and observes nothing; a
-non-writing access changes nothing; a write moves no allocation's metadata, so no
-allocation's extent, epoch, space, source, permission or liveness moves under any
-access; and the two framing laws — another allocation, and an uncovered offset in this
-one — which are "range preserved" pointwise.
-
-**Two, and this said three.** `applyAccess_frames_disjoint_range` was a sixth conjunct
-and it follows from the fifth by arithmetic alone: the written prefix is a subrange of
-`d.range`, so an offset covered by a range disjoint from `d.range` is not covered by
-it. Nothing about `applyAccess` is used. Review proved the implication against these
-definitions rather than replacing the conjunct with `True`, which would have proved
-nothing. It inflated the apparent content of the item, in a record whose whole argument
-is that a stated proposition has content a bare `Prop` does not.
-`applyAccess_frames_disjoint_range` stays as a caller-facing corollary. Initialization is not a
-separate conjunct because it is read off the bytes: `RangeInitialized` cannot drift
-from what was written, which is why `AllocationRecord.initialized` was deleted.
+The conjuncts say: refusal changes nothing; a non-writing access changes nothing;
+stable allocation/backing metadata does not move; every checked cell outside the
+declared footprint is framed in both value and initialization; and the temporary
+dedicated-backing execution invariant is preserved.
 -/
 def PreservationLaws : Prop :=
   (∀ (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSeq)
@@ -760,31 +1292,36 @@ def PreservationLaws : Prop :=
       (applyAccess state d writeData indeterminate).2.MetadataAt other =
         state.MetadataAt other) ∧
   (∀ (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSeq)
-      (indeterminate : Nat → Byte) (other : AllocId),
-      other ≠ d.provenance.root → ∀ (offset : Nat),
-        (applyAccess state d writeData indeterminate).2.byteAt? other offset =
-          state.byteAt? other offset) ∧
+      (indeterminate : Nat → Byte) (id : AllocId) (offset : Nat),
+      ¬ (d.provenance.root = id ∧ d.range.Covers offset) →
+        (applyAccess state d writeData indeterminate).2.cellAt? id offset =
+          state.cellAt? id offset) ∧
   (∀ (state : MemoryState) (d : AccessDescriptor) (writeData : ByteSeq)
-      (indeterminate : Nat → Byte) (offset : Nat),
-      ¬ (ByteRange.mk d.range.start (writeData.take d.range.size).length).Covers offset →
-        (applyAccess state d writeData indeterminate).2.byteAt? d.provenance.root offset =
-          state.byteAt? d.provenance.root offset)
+      (indeterminate : Nat → Byte), state.DedicatedBackings →
+      (applyAccess state d writeData indeterminate).2.DedicatedBackings)
 
-/-- **The preservation laws hold**, which is the proof every `MemoryProfile` supplies
-for §10's preservation item. Its conjuncts are, in order,
-`applyAccess_refused_preserves_state`, `applyAccess_read_preserves_state`,
-`applyAccess_preserves_metadata`, `applyAccess_frames_other_allocation` and
-`applyAccess_frames_uncovered_offset`. -/
+/-- **The preservation laws hold**, including stable backing metadata and the
+temporary applicability invariant. -/
 theorem preservationLaws : PreservationLaws :=
   ⟨fun state d writeData ind _ h =>
      applyAccess_refused_preserves_state state d writeData ind h,
    fun state d writeData ind h => applyAccess_read_preserves_state state d writeData ind h,
    fun state d writeData ind other =>
      applyAccess_preserves_metadata state d writeData ind other,
-   fun state d writeData ind _ hne offset =>
-     applyAccess_frames_other_allocation state d writeData ind hne offset,
-   fun state d writeData ind _ hout =>
-     applyAccess_frames_uncovered_offset state d writeData ind hout⟩
+   fun state d writeData ind id offset hout => by
+     unfold applyAccess
+     cases hp : prepareAccess state d with
+     | error _ => rfl
+     | ok access =>
+         exact cellAt?_commitResolved_of_untouched state d access
+           (writtenBytes_fits d writeData) (dedicatedBackings_of_prepareAccess hp) hout,
+   fun state d writeData ind hdedicated => by
+     unfold applyAccess
+     cases hp : prepareAccess state d with
+     | error _ => exact hdedicated
+     | ok access =>
+         exact dedicatedBackings_commitResolved state d access
+           (writtenBytes d writeData) (writtenBytes_fits d writeData) hdedicated⟩
 
 /-- Run a block of accesses in order, threading the state. -/
 def runBlock (state : MemoryState) (indeterminate : Nat → Byte) :
@@ -825,16 +1362,12 @@ theorem cellAt?_applyAccess_of_untouched (state : MemoryState) (d : AccessDescri
     (h : ¬ Touches (d, writeData) id offset) :
     (applyAccess state d writeData indeterminate).2.cellAt? id offset =
       state.cellAt? id offset := by
-  rw [applyAccess_state]
-  split
-  · refine MemoryState.cellAt?_write_of_not_covers state d.provenance.root ?_
-    by_cases hid : id = d.provenance.root
-    · subst hid
-      refine Or.inr fun hin => h ⟨rfl, ?_⟩
-      simp only [ByteRange.covers_def, List.length_take] at hin ⊢
-      omega
-    · exact Or.inl hid
-  · rfl
+  unfold applyAccess
+  cases hp : prepareAccess state d with
+  | error _ => rfl
+  | ok access =>
+      exact cellAt?_commitResolved_of_untouched state d access
+        (writtenBytes_fits d writeData) (dedicatedBackings_of_prepareAccess hp) h
 
 /--
 **A straight-line block frames every cell no step of it touches.**
@@ -869,22 +1402,20 @@ theorem byteAt?_runBlock_of_untouched (indeterminate : Nat → Byte)
     (block : List (AccessDescriptor × ByteSeq)) (state : MemoryState) {id : AllocId}
     {offset : Nat} (hall : ∀ step ∈ block, ¬ Touches step id offset) :
     (runBlock state indeterminate block).2.byteAt? id offset = state.byteAt? id offset := by
-  rw [MemoryState.byteAt?_eq_map_cellAt?, MemoryState.byteAt?_eq_map_cellAt?,
-    cellAt?_runBlock_of_untouched indeterminate block state hall]
+  unfold MemoryState.byteAt?
+  rw [cellAt?_runBlock_of_untouched indeterminate block state hall]
 
 /--
-**What a step wrote survives the rest of the block.**
+**What a successful write stored survives the rest of an untouched block.**
 
-`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4's exit criterion, stated as one theorem: a
-store's bytes are still there at the end of a straight-line block, provided no
-later step's declared range covers them. Everything a caller must check is
-decidable from the descriptors — `Touches` is — so discharging a block is
-checking ranges rather than reasoning about the store.
+The store is resolved once by `prepareAccess`; the covered readback theorem then
+reads through that same allocation-to-backing mapping. Later steps need only avoid
+the written allocation-local offset.
 -/
 theorem byteAt?_write_survives_block (state : MemoryState) (d : AccessDescriptor)
     (writeData : ByteSeq) (indeterminate : Nat → Byte)
     (block : List (AccessDescriptor × ByteSeq)) {record : AllocationRecord}
-    (hfound : state.allocations.lookup d.provenance.root = some record)
+    (_hfound : state.allocations.lookup d.provenance.root = some record)
     (hden : denialOf state d = Option.none) (hwrites : d.intent.writes = true)
     {offset : Nat}
     (hcov : (ByteRange.mk d.range.start (writeData.take d.range.size).length).Covers offset)
@@ -892,8 +1423,15 @@ theorem byteAt?_write_survives_block (state : MemoryState) (d : AccessDescriptor
     (runBlock (applyAccess state d writeData indeterminate).2 indeterminate
         block).2.byteAt? d.provenance.root offset =
       (writeData.take d.range.size)[offset - d.range.start]? := by
-  rw [byteAt?_runBlock_of_untouched indeterminate block _ hall, applyAccess_state,
-    if_pos (And.intro hden hwrites)]
-  exact MemoryState.byteAt?_write_of_covers _ hfound hcov
+  rw [byteAt?_runBlock_of_untouched indeterminate block _ hall]
+  obtain ⟨access, hprepared⟩ := (denialOf_eq_none_iff state d).mp hden
+  rw [applyAccess_state, hprepared]
+  simp only
+  have hwritten : writtenBytes d writeData = some (writeData.take d.range.size) := by
+    simp [writtenBytes, hwrites]
+  rw [commitResolved_of_eq_some state d access _ _ _ hwritten]
+  exact MemoryState.byteAt?_writeResolved_of_covers state access
+    (writeData.take d.range.size) d.producesInitialized
+    (writtenBytes_fits d writeData _ hwritten) hcov
 
 end Grass.Memory

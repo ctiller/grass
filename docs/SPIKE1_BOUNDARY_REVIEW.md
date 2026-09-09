@@ -70,9 +70,9 @@ audit campaign or a claim of Spike 1 acceptance.
 | Shared static packing and endian proofs | Completed library cleanup, integrated by spikes | Static packing `3bb27d4c`, 32-bit bridge `159b63fd`, and 64-bit inverse included by `e084b408`; supplier independent reviews and root integration gates passed |
 | Architecture documentation discoverability and boundary clarification | Completed documentation cleanup | Auditor verified prior discoverability finding closed; facade and canonical execution documents integrated by `e084b408` |
 | AUD-004: independent x86 encoding/boundary validation | Approved bounded replacement, deferred by spikes until the current x86 receipt checkpoint | Revisit when that checkpoint lands; x86 owns oracle contract and campaign, with retained replay and mutation evidence required for closure |
-| AUD-005: source/image diagnostic causes | Spikes dispatched a narrow diagnostic change to Sol | Preserve one construction pipeline and existing causes; review distinguishable negative-case diagnostics and unchanged success/rejection behavior before closure |
+| AUD-005: source/image diagnostic causes | Closed by independent auditor review at `46fb6fb0` | Fix `005ec8a3` uses one `buildExcept` pipeline, retains PE causes, and derives `build?` by universally proved direct projection; success and distinct failure fixtures supplement that identity |
 | AUD-006: build observability | Auditor owns bounded passive sampling and retained-campaign inventory; no full-build profile or performance fix claimed | Review the resulting command, failure and resource evidence before proposing resource policy or optimization |
-| AUD-007: duplicate contributor build request | Spikes owns documentation correction | Remove the duplicate Tests target invocation while retaining all distinct checks; verify the final instructions before closure |
+| AUD-007: duplicate contributor build request | Closed by independent auditor review at `46fb6fb0` | Fix `f51d4fce` removes the redundant second full-build target request, retaining focused Tests as an alternative and the distinct audit checks |
 
 Execution, semantic unwind reversal, sole-root migration and final certificate
 work remain active implementation and acceptance obligations. Their existence

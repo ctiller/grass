@@ -29,7 +29,8 @@ theorem the_derived_oracle_answers_with_exact_bytes :
   intro resolved h
   have hrange : transferredWrite.range = resolved.range := by cases h; decide
   have hintent : transferredWrite.intent = .write := rfl
-  exact ⟨hrange, hintent, by simp⟩
+  have hadmitted : denialOf machine₀.memory transferredWrite = none := by decide
+  exact ⟨hrange, hintent, by simp [hadmitted]⟩
 
 theorem the_existing_step_commits_the_resolved_value :
     ∀ resolved, ∀ h : resolved? = some resolved,

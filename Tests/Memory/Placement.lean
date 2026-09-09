@@ -13,9 +13,8 @@ listed the debt as undischarged.
 This file is the check that it is discharged: the bridge applies to a state built
 the ordinary way, not only to a hypothetical one.
 
-It also pins the two things placement is *not*. It is not aliasing, since two
-allocations may share a base and remain distinct storage until `MemoryState.aliases`
-says otherwise; and it is not *authority*, in the narrow sense
+It also pins the two things placement is *not*. It is not backing identity: two
+allocations may share a base while naming distinct backings; and it is not *authority*, in the narrow sense
 `placement_is_not_authority` states — an unplaced allocation is live, readable and
 writable exactly as a placed one is. What it is not any more is invisible to
 `denialOf`, which reads `base` in two clauses; four docstrings in this tree still
@@ -28,6 +27,7 @@ namespace Tests.Memory.Placement
 open Grass.Core Grass.Memory Grass.Std.Logical
 
 private def allocs : FreshSupply AllocTag := .initial
+private def backings : FreshSupply StorageTag := .initial
 
 /-- A placed allocation. -/
 def placed : AllocId := allocs.fresh.1
@@ -35,6 +35,10 @@ def placed : AllocId := allocs.fresh.1
 /-- A second allocation, deliberately left unplaced: a logical address space has
 allocations with no machine address, which is why the base is an `Option`. -/
 def unplaced : AllocId := allocs.fresh.2.fresh.1
+
+private def placedBacking : StorageId := backings.fresh.1
+private def unplacedBacking : StorageId := backings.fresh.2.fresh.1
+private def offsetBacking : StorageId := backings.fresh.2.fresh.2.fresh.1
 
 private def epoch : EpochId := (FreshSupply.initial (Tag := EpochTag)).fresh.1
 
@@ -49,21 +53,26 @@ def someContext : ContextId := contexts.fresh.1
 def placedRecord : AllocationRecord :=
   { extent := ⟨0, 4096⟩, epoch := epoch, space := .cpuVirtual
     source := .virtualAlloc, owners := [someContext]
-    permission := .readWrite, live := true, bytes := .empty, base := some 0x1000 }
+    permission := .readWrite, live := true, backing := placedBacking, origin := 0
+    base := some 0x1000 }
 
 /-- The same shape, with nowhere to be. -/
 def unplacedRecord : AllocationRecord :=
-  { placedRecord with base := Option.none }
+  { placedRecord with backing := unplacedBacking, base := Option.none }
+
+private def pageBacking : BackingRecord := { capacity := 4096, bytes := .empty }
 
 /-- A state holding both. -/
-def state : MemoryState :=
-  (MemoryState.empty.allocateAll?
-    [(placed, placedRecord), (unplaced, unplacedRecord)]).getD .empty
+private def state? : Option MemoryState := do
+  let state ← MemoryState.empty.installBacking? placedBacking pageBacking
+  let state ← state.installBacking? unplacedBacking pageBacking
+  state.allocateAll? [(placed, placedRecord), (unplaced, unplacedRecord)]
+
+def state : MemoryState := state?.getD .empty
 
 /-- Both allocations happened, so `getD` did not fall back. -/
 theorem the_allocations_succeed :
-    (MemoryState.empty.allocateAll?
-      [(placed, placedRecord), (unplaced, unplacedRecord)]).isSome := by decide
+    state?.isSome := by decide
 
 /-- The placed allocation does not wrap, which is the hypothesis every bridge lemma
 takes. Proved rather than decided: `FitsAllocation` bounds by `2 ^ 64`, and asking
@@ -120,11 +129,14 @@ placement the same fixture built. `denialOf` reads the base now, so the base is 
 of the metadata view a decision depends on, and this theorem states the property it
 was written for rather than the equality that happened to hold. -/
 theorem placement_is_not_authority :
-    (state.MetadataAt placed).map (fun m => (m.extent, m.epoch, m.space, m.permission, m.live)) =
+    (state.MetadataAt placed).map
+        (fun m => (m.allocation.extent, m.allocation.epoch, m.allocation.space,
+          m.allocation.permission, m.allocation.live)) =
       (state.MetadataAt unplaced).map
-        (fun m => (m.extent, m.epoch, m.space, m.permission, m.live)) ∧
-    (state.MetadataAt placed).bind (fun m => m.base) ≠
-      (state.MetadataAt unplaced).bind (fun m => m.base) := by
+        (fun m => (m.allocation.extent, m.allocation.epoch, m.allocation.space,
+          m.allocation.permission, m.allocation.live)) ∧
+    (state.MetadataAt placed).bind (fun m => m.allocation.base) ≠
+      (state.MetadataAt unplaced).bind (fun m => m.allocation.base) := by
   exact ⟨by decide, by decide⟩
 
 /-! ## An extent that does not start at zero
@@ -144,19 +156,24 @@ which fits; its *stop* is 250, which does not. -/
 def offsetRecord : AllocationRecord :=
   { extent := ⟨200, 50⟩, epoch := epoch, space := .cpuVirtual
     source := .virtualAlloc, owners := [someContext]
-    permission := .readWrite, live := true, bytes := .empty
+    permission := .readWrite, live := true, backing := offsetBacking, origin := 0
     base := some (0 - 100) }
 
 /-- A state holding it beside the placed allocation, which sits at `0x1000`. -/
-def wrapped : MemoryState :=
-  (state.allocate? offsetAlloc offsetRecord).getD state
+private def offsetBackingRecord : BackingRecord := { capacity := 250, bytes := .empty }
+
+private def wrapped? : Option MemoryState := do
+  let state ← state.installBacking? offsetBacking offsetBackingRecord
+  state.allocate? offsetAlloc offsetRecord
+
+def wrapped : MemoryState := wrapped?.getD state
 
 /-- The allocation is there, and the two are not aliases — so any collision below is
 a placement collision rather than a declared one. -/
 theorem the_wrapped_allocation_is_there :
-    (wrapped.allocations.lookup offsetAlloc).isSome ∧
+    wrapped?.isSome ∧ (wrapped.allocations.lookup offsetAlloc).isSome ∧
     ¬ wrapped.SharesBytes offsetAlloc placed := by
-  exact ⟨by decide, by decide⟩
+  exact ⟨by decide, by decide, by decide⟩
 
 /-- **The wrap is refused.** With the clause bounded by `extent.size` this allocation
 passed, because 50 bytes fit anywhere. -/
@@ -173,11 +190,14 @@ theorem the_offset_wrap_is_refused :
 
 /-- And an allocation with the same non-zero start that does *not* wrap is still
 admitted, so the clause did not simply become "refuse a non-zero start". -/
-def fitting : MemoryState :=
-  (state.allocate? offsetAlloc { offsetRecord with base := some 0x2000 }).getD state
+private def fitting? : Option MemoryState := do
+  let state ← state.installBacking? offsetBacking offsetBackingRecord
+  state.allocate? offsetAlloc { offsetRecord with base := some 0x2000 }
+
+def fitting : MemoryState := fitting?.getD state
 
 theorem an_offset_allocation_that_fits_is_admitted :
-    (fitting.allocations.lookup offsetAlloc).isSome ∧
+    fitting?.isSome ∧ (fitting.allocations.lookup offsetAlloc).isSome ∧
     denialOf fitting
       { context := someContext, address := .numeric (0x2000 + 200), space := .cpuVirtual
         provenance :=
@@ -186,7 +206,7 @@ theorem an_offset_allocation_that_fits_is_admitted :
         range := ⟨200, 8⟩, intent := .write, requiredPermission := .readWrite
         alignment := 1, initialization := .readsNothing
         producesInitialized := true } = Option.none := by
-  exact ⟨by decide, by decide⟩
+  exact ⟨by decide, by decide, by decide⟩
 
 /-! ## The address a descriptor declares must be the one its placement gives
 
@@ -310,18 +330,21 @@ def absentAlloc : AllocId := allocs.fresh.2.fresh.2.fresh.2.fresh.2.fresh.1
 private def laterEpoch : EpochId := (FreshSupply.initial (Tag := EpochTag)).fresh.2.fresh.1
 
 /-- The `fitting` state with a dead allocation beside it. -/
-def withFreed : MemoryState :=
-  (fitting.allocate? freedAlloc { placedRecord with live := false }).getD fitting
+private def withFreed? : Option MemoryState :=
+  fitting.allocate? freedAlloc { placedRecord with live := false }
+
+def withFreed : MemoryState := withFreed?.getD fitting
 
 /-- The four descriptors below differ from `overrunningStore` in one field each, and
 the state holds what they name -- so each refusal is the clause it is named for. -/
 theorem the_liveness_fixtures_are_real :
+    withFreed?.isSome ∧
     (withFreed.allocations.lookup freedAlloc).map AllocationRecord.live = some false ∧
     withFreed.allocations.lookup absentAlloc = Option.none ∧
     (withFreed.allocations.lookup offsetAlloc).map AllocationRecord.live = some true ∧
     (withFreed.allocations.lookup offsetAlloc).map AllocationRecord.epoch = some epoch ∧
     laterEpoch ≠ epoch := by
-  exact ⟨by decide, by decide, by decide, by decide, by decide⟩
+  exact ⟨by decide, by decide, by decide, by decide, by decide, by decide⟩
 
 /-- **And one underrunning it.** `offsetAlloc`'s extent starts at 200, so a range at
 zero lies below the allocation while inside the address space — the lower inequality of

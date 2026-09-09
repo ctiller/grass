@@ -58,9 +58,11 @@ This note cannot override FOUNDATION.md, MEMORY_MODEL.md, or DECISIONS.md.
 
 | Declaration | Shape | Note |
 |---|---|---|
-| `AllocationRecord` | `extent`, `epoch`, `space`, `source`, `owners`, `permission`, `live`, `bytes`, `base` | `initialized` was removed as a second source of truth. `base` is an `Option` because a logical address space has unplaced allocations. This row omitted `source` and `owners`, both load-bearing: `source` feeds `provenanceSourceMismatch` and `owners` feeds `refusalOf`'s owner exemption. |
-| `AllocationRecord.Metadata` | the seven fields a decision reads | Kept in step with what `denialOf` reads; `base` joined it when the address check landed. |
-| `MemoryState` | `allocations`, `aliases`, private `grants` | The constructor and the grant field are private. Five doors change the grant map -- `issue?`, `returnGrant?`, `splitGrant?`, `joinGrants?`, `transferGrant?` -- and the historical door audit was intended to check that no other path did. |
+| `AllocationRecord` | `extent`, `epoch`, `space`, `source`, `owners`, `permission`, `live`, `backing`, `origin`, `base` | A view maps local offset `i` to backing offset `origin + i`. Bytes and initialization belong to the backing record. `base` remains optional for unplaced logical allocations. |
+| `AllocationRecord.Metadata` | view identity, bounds, permission, liveness, mapping and placement fields | Excludes ownership and bytes. `MemoryState.AccessMetadata` also includes the installed backing capacity needed to classify access resolution. |
+| `MemoryState` | `allocations`, `backings`, private `grants` | The constructor and grant field are private. Backing installation is fresh-only; allocation changes are checked. Authority doors preserve both storage maps. |
+| `BackingRecord` | `capacity`, `bytes` | One byte and initialization store per `StorageId`; checked observations reject out-of-capacity access. |
+| `MemoryState.ResolvedAccess` | authoritative allocation/backing lookups and a checked range certificate | Binds the actual provenance and full requested range to one backing span; observation, normalized authority and commit reuse it. |
 | `MachineState` | as declared | |
 | `AuditViolation`, `AuditViolationLedger` | as declared | The ledger's records are private; `records?` is the read view. |
 
@@ -71,7 +73,7 @@ This note cannot override FOUNDATION.md, MEMORY_MODEL.md, or DECISIONS.md.
 | `Substep`, `SubstepSequence` | `access`/`compute`; `substeps`, `onFault` | The commit-prefix model §1 requires. |
 | `FaultVisibility` | `priorEffectsVisible`, `transactional`, `profileSpecific` | See *provisional*: the profile-specific rule is a name with no way to say what it means. |
 | `AccessStatus`, `Restartability` | as declared | `Restartability` is declared and read by nothing; recorded in plan §4.2. |
-| `MemoryEvent`, `ValidMemoryEvent`, `EventCause`, `EventKind` | as declared | §7.1's event vocabulary. `ValidMemoryEvent.mk` is sealed so a malformed trace is unrepresentable. |
+| `MemoryEvent`, `ValidMemoryEvent`, `EventCause`, `EventKind` | as declared, including captured `mapping` | Events retain their committed read/write backing spans. Historical conflict checks do not consult current allocation mappings. `ValidMemoryEvent.mk` is sealed. |
 | `Committed`, `CompleteCommitted`, `AccessOutcome` | as declared | `CompleteCommitted` exists so an oracle cannot silently short-commit. |
 
 ### Authority
@@ -109,7 +111,7 @@ This note cannot override FOUNDATION.md, MEMORY_MODEL.md, or DECISIONS.md.
 | `FaultVisibility.profileSpecific` | The registry holds a *name* and `visibleEffects?` still refuses to guess, so registering a rule unblocks only the non-faulting path. The registry must eventually map a name to a survivor rule. | this layer, recorded in §4.2 |
 | `InitializationDemand` | Per access, where §4 asks for granularity "required to justify every read". A struct copy with padding must currently turn the check off for the whole range. | this layer, recorded in §4.2 |
 | `OperationFacets.ordering` (in `Grass/Op/`) | Single-valued, so an operation whose substeps differ in ordering cannot say so. | this layer, recorded in §4.2 |
-| `MemoryState.aliases` | Records no offset mapping, and `MemoryState.write` does not propagate across it — so `SharesBytes` is an authority-level fact with no byte-level counterpart. §4.2 names the two shapes that would close it and says neither should be taken without the design owner. | design decision, open |
+| `MemoryState.DedicatedBackings` | The executable profile currently admits only existing bounded backing storage with at most one live allocation per backing. Shared live views require a broader applicability and preservation proof. Physical placement and separation remain separate platform evidence. | memory-model / selected profile |
 | `Grass/Resource/*` | Built ahead of its consumers. Ten constructors and nine fields are declared and unbuilt or unread, each recorded in the two audits' allowlists. | M7, M9 |
 
 ---

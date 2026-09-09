@@ -94,6 +94,7 @@ theorem MatchedReturn.conforms_after {selected : ReturnInterpretation}
     (returned : MatchedReturn selected history result after) :
     result.Conforms after.machine.memory record.request frontier.accepted :=
   returned.conforms.transport returned.effects.allocations_unchanged
+    returned.effects.backings_unchanged
 
 /-- Actual return removes exactly this pending occurrence and its loans, and
 rejects replay. The reached publication remains the accepted request prefix. -/

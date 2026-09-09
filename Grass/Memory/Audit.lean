@@ -292,6 +292,19 @@ Refused rather than approximated: an allocation whose addresses are not well def
 is a placement the model has no account of. -/
 def placementWraps : AuditViolationClass := ⟨⟨"placementWraps"⟩⟩
 
+/-- The declared provenance chain is not nested within its root. -/
+def provenanceNotNested : AuditViolationClass := ⟨⟨"provenanceNotNested"⟩⟩
+
+/-- An allocation names storage absent from the authoritative backing map. -/
+def backingNotAllocated : AuditViolationClass := ⟨⟨"backingNotAllocated"⟩⟩
+
+/-- The complete allocation view extends beyond its backing's capacity. -/
+def mappingOutOfBounds : AuditViolationClass := ⟨⟨"mappingOutOfBounds"⟩⟩
+
+/-- The selected execution profile requires bounded, existing, dedicated backing
+storage for every live allocation. -/
+def backingLayoutUnsupported : AuditViolationClass := ⟨⟨"backingLayoutUnsupported"⟩⟩
+
 /--
 The classes the generic transition relation can emit.
 
@@ -299,26 +312,9 @@ A profile must declare all of these, which is what makes
 `AdmittedVocabulary.auditViolationClasses` a consulted registry rather than a
 field nothing reads. `StepPolicy` carries the proof.
 
-**`misaligned` was on this list and is not, because nothing emits it.** `denialOf`
-deliberately has no alignment branch -- `AccessDescriptor.WellFormedIn.aligned` rejects
-a misaligned access at the declaration, and `Grass/Memory/Apply.lean` argues that an
-unreachable branch looking like a check is worse than no branch. `refusalOf` returns
-`denialOf`'s eleven classes, five fixed ones of its own, and the providers';
-`runAccesses` and `runStep` add `machineAnswerIncomplete`. Seventeen, which is this
-list. None is this one.
-
-That sentence read "four fixed ones ... and four more" and was wrong in both halves
-before the last two splits and after them: `refusalOf` has always returned five classes
-of its own, and the tail is one. The paragraph four lines below says to re-read a count
-when the thing it counts changes, which is the instruction this sentence needed. Review deleted the entry and the whole tree stayed
-green, which is what a mandatory declaration of an unemittable class is worth: under
-`docs/MEMORY_MODEL.md` §8 an empty ledger is supposed to mean something, and it said
-nothing about alignment either way.
-
-The class itself stays, for a profile whose own alignment rule is stricter than the
-declared demand. Such a profile supplies an `AuthorityProvider`, and
-`AuthorityProvider.emittedClasses` puts its class in the declared set without help from
-this list.
+The generic memory checks include provenance, backing resolution, permissions,
+initialization, and the selected backing-layout applicability gate. Provider-owned
+classes remain separate. The exact count is checked by `emittedByTransition_length`.
 -/
 def emittedByTransition : List AuditViolationClass :=
   [outOfBounds, provenanceNotAllocated, deadProvenance, staleEpoch,
@@ -326,7 +322,8 @@ def emittedByTransition : List AuditViolationClass :=
    authorityUnavailable, authorityNotHeld, obligationNotAuthorized, wrongAddressSpace,
    machineAnswerIncomplete, provenanceExtentMismatch, provenanceSourceMismatch,
    addressDisagreesWithPlacement, placementWraps, authorityEffectRefused,
-   conflictingAccess]
+   conflictingAccess, provenanceNotNested, backingNotAllocated, mappingOutOfBounds,
+   backingLayoutUnsupported]
 
 /-- **The length, as a theorem, because nothing adjudicates a number in prose.**
 
@@ -350,7 +347,7 @@ docstring audit that arrived with main resolves every backticked name against th
 *build*, so a tool's internals in backticks now read as a Lean declaration that does
 not exist -- the convention is that backticks are for Lean names and a tool's parts
 are named in prose. -/
-theorem emittedByTransition_length : emittedByTransition.length = 18 := by decide
+theorem emittedByTransition_length : emittedByTransition.length = 22 := by decide
 
 end AuditViolationClass
 
