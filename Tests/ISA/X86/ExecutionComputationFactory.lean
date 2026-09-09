@@ -54,4 +54,20 @@ private def isFetchRejected : Bool := match rejectedResult with
   | _ => false
 example : isFetchRejected = true := by decide
 
+private def subState : State :=
+  { makeState [0x48, 0x83, 0xEC, 0x30] with
+    gpr := fun register => if register = .rsp then 0x200 else 0 }
+private def subResult := ComputationFactory.subRsp cpu subState
+private def subSuccess := subResult.toOption.get (by decide)
+example : subSuccess.result.gpr .rsp = 0x1D0 := by decide
+example : subSuccess.result.rip = 0x1004 := by decide
+example : subSuccess.afterFetch.events.length = 1 := by decide
+example : subSuccess.afterCompute.events.length = 1 := by decide
+
+private def subUnsupported := ComputationFactory.subRsp cpu movState
+private def subRetainsFetch : Bool := match subUnsupported with
+  | .error (.unsupported reached (.move _)) => reached.machine.events.length = 1
+  | _ => false
+example : subRetainsFetch = true := by decide
+
 end Grass.Tests.ExecutionComputationFactory

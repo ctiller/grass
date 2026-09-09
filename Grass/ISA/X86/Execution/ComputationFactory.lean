@@ -1,12 +1,14 @@
 import Grass.ISA.X86.Execution.FetchFactory
 import Grass.ISA.X86.Execution.MoveNormal
 import Grass.ISA.X86.Execution.RunFactory
+import Grass.ISA.X86.Execution.SubRspNormal
 
 /-!
-# Constructive fetched MOV execution
+# Constructive access-free instruction execution
 
-`move` constructs the fetched normal MOV receipt from a policy and input state.
-Other decoded families remain explicit unsupported reached prefixes.
+`move` and `subRsp` construct their fetched normal receipts from a policy and
+input state. Each function retains other decoded families as explicit
+unsupported reached prefixes.
 -/
 
 namespace Grass.ISA.X86.Execution.ComputationFactory
@@ -29,6 +31,18 @@ namespace MoveSuccess
 def result {before : State} (success : MoveSuccess before) : State := success.receipt.result
 
 end MoveSuccess
+
+structure SubRspSuccess (before : State) where
+  immediate : ImmediateArithmetic.Immediate
+  afterFetch : MachineState
+  afterCompute : MachineState
+  receipt : SubRspNormal before afterFetch afterCompute immediate
+
+namespace SubRspSuccess
+
+def result {before : State} (success : SubRspSuccess before) : State := success.receipt.result
+
+end SubRspSuccess
 
 /-- Fetch and execute only the bounded register MOV family. Every other selected
 family is retained as an explicit unsupported fetched prefix. -/
@@ -61,6 +75,41 @@ def move (policy : CpuAccessPolicy) (before : State) : Except Failure (MoveSucce
                     exact (Option.some.inj exact).symm }
               .ok
                 { instruction := instruction
+                  afterFetch := fetched.after
+                  afterCompute := computed.1
+                  receipt := receipt }
+      | instruction =>
+          .error (.unsupported { before with machine := fetched.after } instruction)
+
+/-- Fetch and execute the typed `SUB RSP, immediate` stack instruction. -/
+def subRsp (policy : CpuAccessPolicy) (before : State) :
+    Except Failure (SubRspSuccess before) :=
+  match FetchFactory.fetch policy before with
+  | .error reason => .error (.fetch reason)
+  | .ok fetched =>
+      let site := fetched.dispatched.fetch
+      match selected : fetched.dispatched.selection.instruction with
+      | .stack (.subRsp immediate) =>
+          match RunFactory.accessFree site.run.policy fetched.after site.run.context
+              site.run.contextKind site.run.cause with
+          | .error reason =>
+              .error (.accessFreeRejected { before with machine := fetched.after } reason)
+          | .ok computed =>
+              let receipt : SubRspNormal before fetched.after computed.1 immediate :=
+                { fetch := site
+                  encoding := by
+                    have exact := fetched.dispatched.selection.encoding_eq
+                    rw [selected] at exact
+                    exact (Option.some.inj exact).symm
+                  operation := RunFactory.accessFreeOperation
+                  sequence := .none_
+                  selected := rfl
+                  noDataSubsteps := rfl
+                  faultAt := RunFactory.noFaultPlan
+                  noFault := rfl
+                  ran := computed.2.ran }
+              .ok
+                { immediate := immediate
                   afterFetch := fetched.after
                   afterCompute := computed.1
                   receipt := receipt }
