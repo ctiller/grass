@@ -126,9 +126,29 @@ answer, and derives the committed memory state from the actual clean prepared
 transition with neutral ghost effects. It does not bypass the ordinary
 preparation, profile admission or authority checks.
 
-Remaining work binds final emitted source to these fetched bytes, adds checked
-saved-read branches, and carries actual prefix receipts into
-unwind reversal. Rejected, denied and permitted fault outcomes remain separate.
+`ArithmeticNormal`, `BranchNormal` and `LeaNormal` add conditional normal
+transfers using the production encoders and arithmetic. TEST/XOR keep undefined
+flags relational. `PushSavedRead` derives the saved value from an actual
+initialized read immediately after the PUSH store; it is not a POP or unwind.
+
+`ObservedFetch` and `Dispatch` select only from actual fetched bytes. Decode,
+trailing-byte and unsupported-instruction failures retain the reached fetch
+state. `InstructionDispatch` embeds the authored source directly and computes
+the production pipeline inventory; its four unsupported entries are the memory
+MOV forms owned by the memory implementation. CALL and UD2 recognition supplies
+syntax only, with no execution or event-delivery theorem.
+
+`CpuAccessPolicy` and `AddressPlan.descriptor` compute access ranges from current
+allocation placement and fixed code/stack provenance. `RunFactory` constructs
+the actual singleton or access-free operation and retains unsuccessful reached
+states. These are foundations for a fixed instruction factory; callers of the
+normal receipt types still provide evidence, and their union is not exhaustive
+raw execution. Fault vocabularies alone establish no architectural fault
+conditions, priority or delivery behavior.
+
+Remaining work composes final emitted source, fixed factory results, CALL target
+reads and return-address writes, and actual prefix receipts for unwind reversal.
+Rejected, denied and permitted fault outcomes remain separate.
 No total x86 execution or partial-unwind proof is claimed by these files.
 The [exact Hello coverage plan](X86_HELLO_COVERAGE.md) assigns the other emitted
 forms without replacing the production source with a second instruction list.
