@@ -49,10 +49,11 @@ and the runner reports those separately from ordinary agreement.
 ## Isolation
 
 An instruction under test can fault. `docs/VALIDATION.md` §4 requires probe
-processes to be isolated when faults or hangs are possible, so
-`Tools/x86-machine-probe.py` runs each probe in a child process. Windows sets a
-crashed child's exit code to the NTSTATUS, which means the fault class is
-reported rather than lost — a probe that raises `#UD` is data, not a crash.
+processes to be isolated when faults or hangs are possible, so the harness ran
+each probe in a child process, where Windows sets a crashed child's exit code to
+the NTSTATUS and the fault class is reported rather than lost. That harness was
+removed on 2026-09-08, so this corpus currently has no runner; its replacement
+as a Lean test under `Tests/ISA/X86/**` is tracked against c-x86 (c-agent:78).
 
 Ring 0 behaviour is out of reach from a user-mode process and is not attempted.
 -/

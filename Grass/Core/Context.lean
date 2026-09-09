@@ -16,11 +16,8 @@ Contexts are minted from a `FreshSupply` like every other identity, which is wha
 keeps a retired thread's numeric slot from being reused by a new thread that then
 inherits the old one's authority (`docs/FOUNDATION.md` law 22).
 
-**Custody note.** `Grass.Core` is not owned by the memory agent. This module is
-temporary custody under `docs/MEMORY_IMPLEMENTATION_PLAN.md` §2. It lives in
-`Core` rather than `Memory` because `Grass.Obligation` needs a context to name an
-obligation's owner and must not import `Grass.Memory`. The eventual owner may
-well be `Semantics`; the transfer is a rename and re-export.
+This lives in `Core` rather than `Memory` because `Grass.Obligation` needs a
+context to name an obligation's owner and must not import `Grass.Memory`.
 -/
 
 namespace Grass.Core

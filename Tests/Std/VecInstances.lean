@@ -208,4 +208,206 @@ example : (Id.run do
       n := n + 1
     return n) = 0 := by simp
 
+/-! ## Reading back a sequence you built
+
+The section above checks a single `push` read at its top, which is the only
+read-after-push shape `simp` could close before `Vec.get?_push` existed. A
+consumer that builds a sequence pushes more than once, and every other shape
+reported "no progress": the interaction of `Vec.length_push` normalising
+`(v.push a).length` to `v.length + 1` with `Vec.get?_push_self` wanting the
+unnormalised form meant the law could not fire on anything twice-pushed.
+
+These are the six goals that measurement used. Five of them failed before, and
+the one that passed is kept so the pair reads as a set rather than as a list of
+repairs.
+-/
+
+example (v : Vec Nat) (a : Nat) : (v.push a).get? v.length = some a := by simp
+
+example (v : Vec Nat) (a b : Nat) :
+    ((v.push a).push b).get? (v.length + 1) = some b := by simp
+
+example (v : Vec Nat) (a b : Nat) :
+    ((v.push a).push b).get? v.length = some a := by simp
+
+example (a b : Nat) : ((Vec.empty.push a).push b).get? 1 = some b := by simp
+
+example (a b : Nat) : ((Vec.empty.push a).push b).get? 0 = some a := by simp
+
+/-- Reading past the end, which the case split also has to get right. -/
+example (a b : Nat) : ((Vec.empty.push a).push b).get? 2 = none := by simp
+
+/-- And below the top of a variable sequence, which previously needed the
+conditional `Vec.get?_push_lt` supplied by hand. -/
+example (v : Vec Nat) (a : Nat) (i : Nat) (h : i < v.length) :
+    (v.push a).get? i = v.get? i := by simp [h]
+
+
+/-! ## Reading with a bound, in the shapes a migrating consumer writes
+
+`c-mem:51` measured what it would cost to retype the memory layer's byte
+sequences from `List Byte` to `Vec Byte` and reported twenty-five errors, all in
+the proof layer rather than in the declarations: `Grass/Memory/ByteStore.lean`
+and `Event.lean` discharge goals with `List.getElem?_eq_none`,
+`List.getElem?_eq_some_iff`, `List.getElem?_eq_getElem` and `List.length_take`
+directly rather than through any interface. After a migration each of those is a
+goal about a `Vec`, and the question this section asks is whether `simp` closes
+it without the consumer reaching back for `Vec.toList`.
+
+That is a *named* consumer with a *named* use, which is band 2 in
+`docs/STDLIB_IMPLEMENTATION_PLAN.md` §1 — the case the band rule exists to
+serve, and the reason these goals were written before the migration rather than
+after it.
+
+Three of the nine below did not close when they were first written. Two were
+laws that already existed and were not in the `simp` set — `Vec.get?_replicate`
+and `Vec.get?_eq_none_iff` — and one, `Vec.get?_isSome_iff`, did not exist.
+
+**Each of the three was measured load-bearing rather than assumed to be.**
+Deleting `@[simp]` from any one of them and rebuilding this module breaks it, and
+the three were checked separately, since a fixture that happens to exercise one
+of a group is the ordinary way the others stay unreachable. Both attribute
+changes were also applied one at a time against the whole 204-job tree before the
+next, because adding a law to the `simp` set can break a proof that closed
+without it — `Vec.ofHostBytes_append` did exactly that to its own module and the
+docstring there records it.
+
+A note for anyone reading an axiom-audit delta as a count of laws added: it is
+not one. Measured across this change, `Tools/AxiomAudit.lean` reports 13802 at
+the branch point, 13805 with `Vec.get?_isSome_iff` alone, and 13806 with the two
+`@[simp]` attributes as well. One theorem accounts for three of the four, because
+Lean generates auxiliary declarations for a simp lemma and the audit counts every
+declaration rather than every law.
+-/
+
+section ReadingWithABound
+
+variable {α : Type}
+
+/-! ### Out of range reads nothing
+
+`Vec.get?_eq_none_iff` states this and was not `@[simp]`, so the goal a consumer
+writes stopped on a law the module already had. -/
+
+example (v : Vec α) (i : Nat) (h : v.length ≤ i) : v.get? i = none := by simp [h]
+
+/-- The same through the bracket notation, which is how a field read spells it.
+This one closed before the attribute changed, through
+`Vec.getElem?_eq_get?`. -/
+example (v : Vec α) (i : Nat) (h : v.length ≤ i) : v[i]? = none := by simp [h]
+
+/-! ### In range reads something
+
+`Vec.get?_isSome_iff` is the half `Vec.get?_eq_none_iff` leaves behind: with the
+`none` case normalising to arithmetic and the `isSome` case not, the asymmetry is
+in the predicate rather than in the sequence. -/
+
+example (v : Vec α) (i : Nat) (h : i < v.length) : (v.get? i).isSome := by simp [h]
+
+/-! ### Bounds arithmetic over a prefix, which is where `c-mem`'s `omega` calls sit -/
+
+example (v : Vec α) (n : Nat) : (v.take n).length = min n v.length := by simp
+
+example (v : Vec α) (n i : Nat) (h : i < n) (hn : n ≤ v.length) :
+    i < (v.take n).length := by
+  simp; omega
+
+/-! ### Reading back what a constructor built
+
+`Vec.ofFn` is the counterpart of `Grass/Memory/Apply.lean`'s `observedBytes`,
+which builds its result as `(List.range n).map`. `Vec.replicate` is one of the
+four operations `c-mem:50` reports the layer using. `Vec.get?_replicate` existed
+and was not `@[simp]`, which is the same shape `Vec.get?_push` was in before it
+was written: a conditional read-back stated but unreachable. -/
+
+example (n : Nat) (f : Nat → α) (i : Nat) (h : i < n) :
+    (Vec.ofFn n f).get? i = some (f i) := by simp [h]
+
+example (n : Nat) (f : Nat → α) (i : Nat) (h : i < n) :
+    (Vec.ofFn n f)[i]? = some (f i) := by simp [h]
+
+example (n : Nat) (a : α) (i : Nat) (h : i < n) :
+    (Vec.replicate n a).get? i = some a := by simp [h]
+
+example (n : Nat) (a : α) (i : Nat) (h : n ≤ i) :
+    (Vec.replicate n a).get? i = none := by simp [h]
+
+end ReadingWithABound
+
+/-! ## The conditional laws, which were stated and out of the `simp` set
+
+Every gap this session's consumer-shaped probes found in `Vec` and `FiniteMap`
+had one cause, and the section above is the same finding arrived at from
+`c-mem`'s side. `Vec` states a law in two
+forms: a narrow one about a specific index or shape, marked `@[simp]`, and a
+general conditional one covering every case, not marked. A goal a consumer writes
+lands on the general case, reaches nothing, and stops on a term the module has a
+law about.
+
+`Vec.get?_push` was the first instance and was fixed by writing the general form.
+The rest did not need writing — `Vec.get?_replicate`, `Vec.get?_eq_none_iff`,
+`Vec.get?_set`, `Vec.sum_append`, `Vec.map_append` and
+`Grass/Std/Logical/FiniteMap.lean`'s `lookup_insert` and `lookup_erase` were all
+already there. They needed the attribute.
+
+Each was applied on its own against the whole tree before the next, because
+adding a law to the `simp` set can break a proof that closed without it, and
+`Vec.ofHostBytes_append` did exactly that to its own module.
+
+**Every one was then measured load-bearing, separately.** Deleting `@[simp]`
+from any of `Vec.get?_replicate`, `Vec.get?_eq_none_iff`, `Vec.get?_isSome_iff`,
+`Vec.get?_set`, `Vec.sum_append`, `Vec.map_append`, `Vec.isPrefix_append`,
+`FiniteMap.lookup_insert` or `FiniteMap.lookup_erase` and rebuilding breaks this
+module or `Tests/Std/CollectionInstances.lean`. One at a time, restoring from a saved copy
+rather than from git — an earlier run of this measurement used `git checkout --`
+on uncommitted work and reverted the laws it was measuring.
+-/
+
+section ConditionalLaws
+
+variable {α β : Type}
+
+/-! ### Update framing, which the memory layer applies
+
+`Vec.get?_set_self` was `@[simp]` and `Vec.get?_set` — the form covering a read
+at any index — was not, so the framing half of the law was unreachable. -/
+
+example (v : Vec α) (i : Nat) (a : α) (h : i < v.length) :
+    (v.set i a).get? i = some a := by simp [h]
+
+example (v : Vec α) (i j : Nat) (a : α) (h : j ≠ i) :
+    (v.set i a).get? j = v.get? j := by simp [h]
+
+/-! ### Homomorphisms over `++`
+
+`Vec.sum_push` and `Vec.map_push` were `@[simp]`; the `append` forms were not, so
+a fold that concatenated rather than pushed stopped. -/
+
+example (u v : Vec Nat) : (u ++ v).sum = u.sum + v.sum := by simp
+
+example (u v : Vec α) (f : α → β) : (u ++ v).map f = u.map f ++ v.map f := by simp
+
+/-! ### Prefix introduction
+
+`Vec.isPrefix_refl` covered the degenerate case. `IsPrefix` is the existence of a
+remainder, so the general introduction is an append, and it had no law — a
+streaming consumer asking whether what it committed is still a prefix of what it
+has seen reached nothing. -/
+
+example (u v : Vec α) : u.IsPrefix (u ++ v) := by simp
+
+/-! ### What is *not* a gap, recorded so the list above is not read as longer
+than it is
+
+`(v.take n).length + (v.drop n).length = v.length` reduces under `simp` to
+`min n v.length + (v.length - n) = v.length` and then wants `omega`. That is
+arithmetic a consumer finishes, not a missing law, and the same is true of the
+`FiniteMap` goal in `Tests/Std/CollectionInstances.lean` that needs case
+analysis over an `if`. -/
+
+example (v : Vec α) (n : Nat) : (v.take n).length + (v.drop n).length = v.length := by
+  simp; omega
+
+end ConditionalLaws
+
 end Grass.Tests.Std.Instances

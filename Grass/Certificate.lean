@@ -178,6 +178,39 @@ def mapInfinite (refinement : BehaviorRefinement concrete abstract)
   step index := refinement.step (execution.step index)
   consistent := refinement.infiniteConsistency execution.consistent
 
+/-- `BehaviorRefinement.mapInfinite_prefixEvents` states that mapping an
+infinite continuation preserves every finite observable event prefix exactly. -/
+@[simp]
+theorem mapInfinite_prefixEvents
+    (refinement : BehaviorRefinement concrete abstract)
+    {state : concrete.system.State} {graph : concrete.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    (execution : concrete.system.InfiniteContinuation state graph priorEvents)
+    (length : Nat) :
+    (refinement.mapInfinite execution).prefixEvents length =
+      execution.prefixEvents length := by
+  induction length with
+  | zero => rfl
+  | succ length inductionHypothesis =>
+      rw [RelationalSystem.InfiniteContinuation.prefixEvents,
+        RelationalSystem.InfiniteContinuation.prefixEvents,
+        inductionHypothesis]
+      rfl
+
+/-- Mapping a finite restriction of an infinite continuation yields an exact
+abstract `Steps` witness at the corresponding mapped frontier. -/
+theorem mapInfinite_prefixSteps
+    (refinement : BehaviorRefinement concrete abstract)
+    {state : concrete.system.State} {graph : concrete.system.Graph}
+    {priorEvents : List spec.AuditEvent}
+    (execution : concrete.system.InfiniteContinuation state graph priorEvents)
+    (length : Nat) :
+    abstract.system.Steps (refinement.mapState state)
+      (refinement.mapGraph graph) (execution.prefixEvents length)
+      (refinement.mapState (execution.stateAt length))
+      (refinement.mapGraph (execution.graphAt length)) :=
+  refinement.mapSteps (execution.prefixSteps length)
+
 /-- Reflexive refinement leaves every infinite continuation unchanged. -/
 theorem mapInfinite_refl (behavior : ProgramBehavior spec)
     {state : behavior.system.State} {graph : behavior.system.Graph}
@@ -487,5 +520,51 @@ structure ArtifactCertificate {spec : SpecProcess}
   adequate : (format.artifactBehavior artifact).Adequate
   stage : DerivedDemandFamily machine.stage.allKeys
   requirements : DemandCertificateFamily stage.demands
+
+namespace ProjectedDriverCertificate
+
+/-- `ProjectedDriverCertificate.allKeys_nodup` proves that the driver tier
+preserves global uniqueness of stable requirement keys. -/
+theorem allKeys_nodup {portable : PortableProgramCertificate spec}
+    (driver : ProjectedDriverCertificate portable) : driver.stage.allKeys.Nodup :=
+  driver.stage.allKeys_nodup spec.requirements.identities_nodup
+
+end ProjectedDriverCertificate
+
+namespace ProviderCertificate
+
+/-- `ProviderCertificate.allKeys_nodup` proves that the provider tier preserves
+global uniqueness of stable requirement keys. -/
+theorem allKeys_nodup {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    (provider : ProviderCertificate driver) : provider.stage.allKeys.Nodup :=
+  provider.stage.allKeys_nodup driver.allKeys_nodup
+
+end ProviderCertificate
+
+namespace MachineCertificate
+
+/-- `MachineCertificate.allKeys_nodup` proves that the machine tier preserves
+global uniqueness of stable requirement keys. -/
+theorem allKeys_nodup {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    {provider : ProviderCertificate driver}
+    (machine : MachineCertificate provider) : machine.stage.allKeys.Nodup :=
+  machine.stage.allKeys_nodup provider.allKeys_nodup
+
+end MachineCertificate
+
+namespace ArtifactCertificate
+
+/-- `ArtifactCertificate.allKeys_nodup` proves that the artifact tier preserves
+global uniqueness of stable requirement keys. -/
+theorem allKeys_nodup {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    {provider : ProviderCertificate driver}
+    {machine : MachineCertificate provider}
+    (artifact : ArtifactCertificate machine) : artifact.stage.allKeys.Nodup :=
+  artifact.stage.allKeys_nodup machine.allKeys_nodup
+
+end ArtifactCertificate
 
 end Grass

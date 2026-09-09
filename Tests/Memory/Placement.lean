@@ -435,4 +435,59 @@ theorem the_aligned_store_is_well_formed :
     ({ misalignedStore with alignment := 1 } :
       AccessDescriptor).WellFormedIn AddressSpace.cpuVirtual64 := by decide
 
+/-! ### Authority over torn-down storage
+
+`MemoryState.AuthorizedAt` consulted `CurrentEpoch`, which asks only whether the
+allocation's epoch matches the provenance's. `tearDown?` sets `live := false` and
+leaves the epoch alone, so a grant over torn-down storage satisfied the authority
+predicate. These are the states that showed it, written as a probe while answering
+`g-construct:76` and kept because the probe is the evidence.
+
+It was never reachable through the doors -- `issue?` refuses unless the provenance is
+live, and `tearDown?` refuses while any grant is outstanding -- so the guarantee
+existed as an emergent property of two guards rather than as anything stated.
+-/
+
+/-- Provenance rooted at the buffer. -/
+def placedProv : Provenance :=
+  { space := .cpuVirtual, root := placed, epoch := epoch, source := .virtualAlloc
+    rootExtent := ⟨0, 4096⟩, path := [] }
+
+/-- The placement fixture's buffer, torn down. Succeeds because it holds no grants. -/
+def afterTeardown : Option MemoryState := state.tearDown? [placed]
+
+theorem the_teardown_succeeds : afterTeardown.isSome := by decide
+
+theorem the_torn_down_allocation_is_not_live :
+    ∀ s ∈ afterTeardown, ¬ s.Live placedProv := by decide
+
+/-- **And its epoch still matches**, which is the trap: teardown does not advance the
+epoch, so every predicate asking only about epochs still says yes. -/
+theorem the_epoch_still_matches :
+    ∀ s ∈ afterTeardown, s.CurrentEpoch placedProv := by decide
+
+/-- A grant over the torn-down storage. Not reachable through `issue?`, which is the
+point: this is the value the model must not authorize even though nothing can put it
+in the table. -/
+def ghostGrant : AuthorityGrant :=
+  { kind := .loan, holder := someContext, lender := someContext
+    provenance := placedProv, range := ⟨0, 4⟩, rights := .readWrite }
+
+/-- **And it authorizes nothing**, which held before the liveness conjunct and is why
+the conjunct was worth adding. -/
+theorem a_grant_over_torn_down_storage_authorizes_nothing :
+    ∀ s ∈ afterTeardown,
+      ¬ s.AuthorizedAt ghostGrant someContext placedProv 0 .read := by decide
+
+/-- The same grant against the live state, so the theorem above is about liveness and
+not some other defect in the grant. -/
+theorem the_same_grant_authorizes_before_teardown :
+    state.AuthorizedAt ghostGrant someContext placedProv 0 .read := by decide
+
+/-- And nothing in the table authorizes it either, which is
+`MemoryState.not_granted_of_tearDown?` at a concrete state. -/
+theorem nothing_is_granted_over_torn_down_storage :
+    ∀ s ∈ afterTeardown,
+      ¬ s.Granted someContext placedProv ⟨0, 4⟩ .read := by decide
+
 end Tests.Memory.Placement
