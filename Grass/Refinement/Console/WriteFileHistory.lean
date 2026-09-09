@@ -92,8 +92,8 @@ private def fold (start : Start projection record) {state : CallProtocol.State R
   | .step previous action output committed =>
     advanceUpper start action output committed (fold start previous)
 
-/-- Alignment remains indexed by the complete original provider history and
-the fixed relation. Extending it cannot swap caller prefixes or resource suites. -/
+/-- `Aligned` retains the complete provider history and fixed relation;
+`Aligned.extend_start` preserves its original captured caller prefix. -/
 structure Aligned (relation : HandoffRelation projection)
     {state : CallProtocol.State Request} {frontier : Prefix state call record}
     (history : History realization initial call record frontier) where
@@ -126,7 +126,8 @@ theorem endpoint_full (aligned : Aligned relation history)
   have bounded := aligned.start.cut.bounded
   omega
 
-/-- Each extension preserves the original alignment witness and caller history. -/
+/-- `extend` retains the original alignment witness; `extend_start` exposes
+preservation of the caller history. -/
 def extend (aligned : Aligned relation history) {after : CallProtocol.State Request}
     {post : Prefix after call record} (action : Action) (output : Vec Byte)
     (step : CommittedStep realization frontier post action output) :

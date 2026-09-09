@@ -47,8 +47,8 @@ theorem pending (_stalled : Stalled predicate aligned) : PendingAt state call re
 
 end Stalled
 
-/-- An actual infinite provider stream with a separately supplied fixed-cut
-law; this is not the stalled carrier and cannot be built from a caller spin. -/
+/-- `FixedNonresponse.continuation` requires `InfiniteContinuation` provider
+steps; `FixedNonresponse.fixed` separately requires constant acceptance. -/
 structure FixedNonresponse (aligned : Aligned relation history) where
   continuation : InfiniteContinuation history
   fixed : FixedCut continuation
