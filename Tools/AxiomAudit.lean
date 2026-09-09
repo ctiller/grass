@@ -7,6 +7,7 @@ import Grass.CFG.Contract
 import Grass.CFG.Graph
 import Grass.CFG.Join
 import Grass.CFG.Loop
+import Grass.CFG.Stack
 import Grass.Certificate
 import Grass.Construct.Fragment.Generator
 import Grass.Construct.Fragment.Source

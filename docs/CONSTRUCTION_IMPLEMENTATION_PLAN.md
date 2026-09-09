@@ -175,6 +175,13 @@ Each obligation carries an invariant plus a measure or frontier description,
 but `LoopSelection.wellFormed` is deliberately structural: later block checking
 must still prove preservation and either rank decrease or frontier advancement.
 
+`Grass.CFG.Stack` supplies the ISA-neutral boundary vocabulary used by later
+call and composition checks. `StackShape` records depth plus exact lexical scope
+order, `StackDelta.apply?` rejects underflow without changing that scope order,
+and successful enter, leave, and delta operations preserve
+`StackShape.WellFormed`. ABI alignment and prologue selection remain parameters
+consumed by later layers rather than choices made by this module.
+
 ### C2 — Logical placement and static layouts
 
 `Grass.Construct.Layout.Core` separates an explicit profile's admissible
