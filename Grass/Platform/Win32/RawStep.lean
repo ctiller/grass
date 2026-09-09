@@ -3,6 +3,7 @@ import Grass.Platform.Win32.WriteFileRuntime
 import Grass.Platform.Win32.WriteFileService
 import Grass.Platform.Win32.GetStdHandleRuntime
 import Grass.Platform.Win32.ExitProcessRuntime
+import Grass.Platform.Win32.ApiDispatch
 
 /-!
 # Concrete raw endpoint case composition
@@ -10,14 +11,16 @@ import Grass.Platform.Win32.ExitProcessRuntime
 This is the fixed union of the endpoint cases currently implemented, indexed by
 one loaded image and one provider realization for an entire derivation. It is
 not a complete Windows execution model or a public realization profile. In
-particular, native import dispatch, CPU cases, failed/refused provider actions,
+particular, native export adequacy, CPU cases, failed/refused provider actions,
 physical return and terminal observation are not classified here. No totality,
 safety, or endpoint certification follows from this partial case relation.
 
 Entry cases combine the actual CALL and protocol handoff from the exact raw
 pre-CALL state. They never select a past CALL receipt at an already reached
 callee state. Service cases retain the actual committed action, runtime table,
-publication, and causal graph correspondence.
+publication, and causal graph correspondence. Entry dispatch is selected from
+the loaded import layout using the actual CALL effective address and target;
+logical selection is not proof of native DLL/export identity.
 -/
 
 namespace Grass.Platform.Win32.Raw
@@ -33,7 +36,7 @@ def Graph.Realizes (graph : Graph) (model : WriteFile.CausalModel)
     Relation.TransGen (fun a b => (a, b) ∈ graph) left right
 
 /-- Implemented endpoint cases only. The indices fix the image and realization;
-neither can be chosen anew by a constructor. Missing dispatch and outcome
+neither can be chosen anew by a constructor. Missing native adequacy and outcome
 coverage prevent using this relation as a certified public execution model. -/
 inductive RawStep {image : ImageInput} {inputs : EntryInputs}
     (loaded : LoadedImage image inputs) (realization : WriteFile.Realization) :
@@ -45,6 +48,12 @@ inductive RawStep {image : ImageInput} {inputs : EntryInputs}
         afterFetch afterRead afterStore displacement}
       {request : WriteFile.Request} {agent : ContextId}
       (entered : WriteFile.CallHandoff loaded before receipt request agent)
+      (dispatch : ApiDispatch.Binding loaded
+        (receipt.fetch.site.fallthroughRip + BitVec.ofInt 64 displacement.toInt) receipt.read.value)
+      (selected : ApiDispatch.select? loaded
+        (receipt.fetch.site.fallthroughRip + BitVec.ofInt 64 displacement.toInt)
+        receipt.read.value = some dispatch)
+      (requestMatches : dispatch.MatchesRequest (.writeFile request))
       (agreement : EdgeAgreement graph (before.raw calls) event
         (entered.rawAfter calls) nextGraph)
       (kind : event.kind = .internal) :
@@ -56,6 +65,13 @@ inductive RawStep {image : ImageInput} {inputs : EntryInputs}
       {receipt : Grass.ISA.X86.Execution.CallNormal before.machine
         afterFetch afterRead afterStore displacement} {agent : ContextId}
       (entered : GetStdHandle.CallHandoff loaded before receipt agent)
+      (dispatch : ApiDispatch.Binding loaded
+        (receipt.fetch.site.fallthroughRip + BitVec.ofInt 64 displacement.toInt) receipt.read.value)
+      (selected : ApiDispatch.select? loaded
+        (receipt.fetch.site.fallthroughRip + BitVec.ofInt 64 displacement.toInt)
+        receipt.read.value = some dispatch)
+      (requestMatches : dispatch.MatchesRequest
+        (.getStdHandle (GetStdHandle.selector entered.reached.machine)))
       (agreement : EdgeAgreement graph (before.raw calls) event
         (entered.afterRaw calls) nextGraph)
       (kind : event.kind = .internal) :
@@ -68,6 +84,13 @@ inductive RawStep {image : ImageInput} {inputs : EntryInputs}
       {receipt : Grass.ISA.X86.Execution.CallNormal before.machine
         afterFetch afterRead afterStore displacement} {agent : ContextId}
       (entered : ExitProcess.CallHandoff loaded before receipt agent)
+      (dispatch : ApiDispatch.Binding loaded
+        (receipt.fetch.site.fallthroughRip + BitVec.ofInt 64 displacement.toInt) receipt.read.value)
+      (selected : ApiDispatch.select? loaded
+        (receipt.fetch.site.fallthroughRip + BitVec.ofInt 64 displacement.toInt)
+        receipt.read.value = some dispatch)
+      (requestMatches : dispatch.MatchesRequest
+        (.exitProcess (ExitProcess.status entered.reached.machine)))
       (agreement : EdgeAgreement graph (before.raw calls) event
         (entered.handoff.initRaw calls) nextGraph)
       (kind : event.kind = .internal) :
@@ -96,6 +119,22 @@ variable {image : ImageInput} {inputs : EntryInputs}
 theorem agreement (step : RawStep loaded realization graph before choice event after nextGraph) :
     EdgeAgreement graph before event after nextGraph := by
   cases step <;> assumption
+
+/-- Every installed entry uses a successful computed logical import selection
+whose API variant matches the explicit choice. Native identity remains separate. -/
+theorem entry_binding {request : ApiRequest} {agent : ContextId}
+    (step : RawStep loaded realization graph before (.apiEntry request agent)
+      event after nextGraph) :
+    ∃ (address target : BitVec 64) (binding : ApiDispatch.Binding loaded address target),
+      ApiDispatch.select? loaded address target = some binding ∧
+      binding.MatchesRequest request := by
+  cases step with
+  | writeFileEntry entered dispatch selected requestMatches agreement kind =>
+      exact ⟨_, _, dispatch, selected, requestMatches⟩
+  | getStdHandleEntry entered dispatch selected requestMatches agreement kind =>
+      exact ⟨_, _, dispatch, selected, requestMatches⟩
+  | exitProcessEntry entered dispatch selected requestMatches agreement kind =>
+      exact ⟨_, _, dispatch, selected, requestMatches⟩
 
 /-- Inversion for the installed service case, not an exhaustive classification
 of physical provider activity or all choices admitted by a future profile. -/
