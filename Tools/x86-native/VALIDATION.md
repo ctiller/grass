@@ -5,17 +5,19 @@ CPUID vendor `GenuineIntel`, leaf 1 EAX `722594` (`0x000b06a2`). The hypervisor
 bit is set. Microcode is unknown. This is virtualized host execution evidence,
 not an Intel/AMD physical-machine matrix or a bare-metal result.
 
-Commands run from the repository root:
+The original campaign preceded the repository's Bash migration. Current
+equivalent commands, run from Git Bash at the repository root after merging
+main `f60c5ebe` (including the Bash gates at `8b035256`), are:
 
-```powershell
-powershell.exe -NoProfile -File Tools/x86-native/build.ps1
-python -O Tools/x86-native/run.py --worker target/x86-native/windows.exe --output target/x86-native/campaign-3
+```bash
+bash Tools/x86-native/build.sh
+python -O Tools/x86-native/run.py --worker target/x86-native/windows.exe --output target/x86-native/bash-current-main-campaign
 lake build
 lake build Tests
-powershell.exe -NoProfile -File audit-trust.ps1
-powershell.exe -NoProfile -File check-source-input.ps1
-powershell.exe -NoProfile -File check-spike-sources.ps1
-powershell.exe -NoProfile -File check-doc-links.ps1
+bash audit-trust.sh
+bash check-source-input.sh
+bash check-spike-sources.sh
+bash check-doc-links.sh
 git diff --check
 ```
 
@@ -27,7 +29,10 @@ named declarations and seven executable test modules, including NativeCorpus.
 Existing ledger output still reports nine unconfirmed anchors and AMD source
 retrieval debt; this campaign does not change their status.
 
-Full local evidence is retained in `target/x86-native/campaign-3/`; regenerate
+Original local evidence is retained in `target/x86-native/campaign-3/`; the
+post-migration evidence is in `target/x86-native/bash-current-main-campaign/`.
+The Bash build also succeeded with output `target/x86-native/bash build space`.
+Regenerate
 into a fresh output directory rather than overwriting it. The coverage identity
 is `c3ea5ec4c8356e7ba6c745684ce55faea505204104b8221986cdcc516a96ecd8`.
 It is the SHA-256 of newline-joined TSV label/input-register/input-flags/basis
@@ -43,6 +48,12 @@ Initial findings corrected before approval: overstated CMP coverage, weak
 population identity, unchecked terminal exception/RIP, and implicit RSP masking.
 The final-state harness cannot prove a byte sequence is exactly one instruction
 or expose canceling intermediate effects; that remains outside this campaign.
+
+Independent review also approved the Bash migration after a separate build to
+`target/x86-native/reviewer Bash build space` and another 870-case campaign with
+zero mismatches. Checks covered Bash syntax, missing discovery tool, excess
+arguments, rejected batch-expansion characters, Windows-form `VSWHERE`, an
+unsupported host, and propagation of a simulated compiler failure (exit 42).
 
 ## Separate legacy BSF finding
 

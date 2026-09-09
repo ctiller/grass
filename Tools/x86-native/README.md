@@ -4,13 +4,20 @@ This is the verification side lane following `spikes`, initially against main
 `28e5767b`. It exercises public encoders and register write-back on the host CPU.
 It does not certify instruction semantics or close citation/proof obligations.
 
-From the repository root, with the pinned Lean toolchain, Python 3 and MSVC x64:
+From Git Bash at the repository root, with the pinned Lean toolchain, Python 3
+and MSVC x64 (Visual Studio Installer must provide `vswhere.exe`):
 
-```powershell
+```bash
 lake build Tests.ISA.X86.NativeCorpus
-powershell.exe -NoProfile -File Tools/x86-native/build.ps1
+bash Tools/x86-native/build.sh
 python Tools/x86-native/run.py --worker target/x86-native/windows.exe --output target/x86-native/campaign-1
 ```
+
+`build.sh [output-directory]` supports paths containing spaces. Set `VSWHERE`
+to an alternate installer-discovery executable if necessary. The script invokes
+the vendor's `vcvars64.bat` through `cmd.exe` to obtain the compiler environment;
+it does not require PowerShell. This builds the Windows adapter, not a Linux
+adapter; unsupported hosts fail explicitly.
 
 Use a new output directory for every run. Outputs contain the generated TSV,
 CPU/OS and revision metadata, worker/source/corpus hashes, all native observations
