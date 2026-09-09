@@ -486,6 +486,8 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Bind the fixed policy to an existing successful CALL factory receipt.
+    `Grass.Platform.Win32.WriteFile.CallPolicy.ofFactory,
     `Grass.Platform.Win32.ExitProcess.entryHandoff?,
     `Grass.Platform.Win32.ExitProcess.EntryHandoff.after,
     `Grass.Platform.Win32.ExitProcess.EntryHandoff.initRaw,
