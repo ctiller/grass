@@ -86,6 +86,7 @@ import Grass.Artifact.PE.ExceptionBinding
 import Grass.ISA.X86.EndianBridge
 import Grass.Assembly.SourceRuntimeFunction
 import Grass.Refinement.Console.WriteFileObserved
+import Grass.Refinement.Console.WriteAllX86
 import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
 import Grass.Assembly.X86ControlFlow
