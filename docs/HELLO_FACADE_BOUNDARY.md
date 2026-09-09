@@ -100,10 +100,19 @@ to the resource-indexed root, without an adapter through legacy finite `accepts`
 
 | Proposed shape | Identity retained and reason |
 |---|---|
-| `PlatformPlan : Specification.RequirementSet → Type 1` | A closed inductive type. Its initial constructor quantifies the exact resource-indexed `spec`, takes `TargetProjection spec .win10X64`, and returns `PlatformPlan spec.driverBoundary.requirements` |
+| `PlatformPlan : Specification.RequirementSet → Type 2` | A closed inductive type. Its initial constructor quantifies the exact resource-indexed `spec`, takes `projection : TargetProjection spec .win10X64`, and returns `PlatformPlan (spec.driverBoundary projection.view).requirements` |
 | `PlatformPlan.win10X64SynchronousStdoutOnly projection` | The authored constructor spelling is retained; its layout defaults are fixed by that constructor, not independently selected while building its source |
 | `MachineSource plan` | Indexed by the **full plan value**. A requirement-set index alone loses the exact specification and projection because distinct specifications can require the same capabilities |
 | `VerifiedProgram spec` | Its proposed constructor retains the projection, a `MachineSource` of that exact Win10 plan, and a `RealizationCertificate` for `fixedWin10Profile projection`. The profile is determined by the selected projection, not an arbitrary replaceable field |
+
+Architecture reports an accepted elaboration correction: the plan lives in
+`Type 2` because it existentially captures an actual `SpecProcess resources`
+living in `Type 2`. This supersedes the earlier `Type 1` proposal without changing
+the semantic identity requirement or full-plan source index. The constructor's
+boundary index uses the exact retained `projection.view`. The unchanged authored
+annotation `PlatformPlan spec.driverBoundary.requirements` still needs its
+requested default-view elaboration regression; this note does not claim that
+regression has passed.
 
 Here `fixedWin10Profile` and the internal constructor/type shapes are proposed
 names for root review, not declarations claimed to exist. Preserving
