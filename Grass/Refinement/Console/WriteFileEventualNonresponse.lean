@@ -12,8 +12,8 @@ namespace Grass.Refinement.Console.WriteFileHistory
 open Grass.Console Grass.Semantics Grass.Std.Logical Grass.Op
 open Grass.Platform.Win32.WriteFile
 
-variable {R Outcome Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
-  {spec : CapturedSpecification resources Outcome}
+variable {R Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
+  {spec : SpecProcess resources}
   {projection : CapturedTargetProjection spec Status}
   {plan : LoanPlan} {realization : Realization} {initial state : ProtocolState}
   {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
