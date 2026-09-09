@@ -196,12 +196,19 @@ Trial rejection cases must demonstrate that annotations cannot bypass checks:
 These are acceptance requirements for the proposed implementation, not claims
 that these tests exist. Syntax-only compilation is insufficient evidence.
 
-## Linux and WASI as design participants
+## Linux, WASI, AArch64 and Wasm as design participants
 
 Craig requests Linux and WASI participation in this discussion. Their specialists
 are reviewing the declaration boundary; this section is a proposed cross-target
 test, not authorization to start ports or a claim that their implementations exist.
 It follows the versioned provider boundaries in [PLATFORM_ABI](PLATFORM_ABI.md).
+
+Craig additionally requests AArch64 and Wasm participation. Linux/WASI review
+platform and provider interfaces; AArch64/Wasm review execution and instruction
+construction. These are separate dimensions: an ISA alone does not select a
+platform contract, and WASI is not the semantics of all Wasm instructions.
+The existing four specialists are asked for bounded design input, not new work
+streams. Their reviews must precede ratifying a supposedly cross-target kernel.
 
 Separate a portable demanded operation from each target's concrete endpoint
 declaration and checked realization. A console operation may have several target
@@ -244,6 +251,25 @@ The test fails if they must restate Windows-only fields, duplicate a general law
 erase a failure distinction, or weaken the existing portable specification.
 Explicit custom implementations remain available through the same checked
 construction path. Spikes chooses when any target trial becomes implementation.
+
+Linux's initial review sharpens the split: target binding, entry/continuation
+ABI, and completion classification are independent descriptor components.
+Returning must not imply Win64 ReturnHome. Syscall identity includes the selected
+architecture ABI/personality; a syscall number alone is insufficient. A proposed
+direct Linux output/termination trial uses write and exit_group, with explicit
+descriptor rights/lifetime, raw results, partial progress and signal/restart
+scope. Neither failure nor nonreturning classification implies zero prior output
+or completed process termination. This is Linux specialist design input; exact
+implementation evidence remains to be supplied by the chosen target adapter.
+
+The instruction review asks AArch64 and Wasm to identify actual execution shapes
+before reusing x86's post-fetch builder. A shared interface must preserve each
+target's own state and receipt indices. No synthetic x86 fetch, register file or
+CALL/RET receipt may be required merely to access general proof laws. Request
+two differing instruction examples from each specialist and compare remaining
+authored obligations with the LEA/branch/arithmetic worksheet. The shared result
+should be laws and checked composition over real receipts, not a universal
+record that hides target-specific validation, control or refusal behavior.
 
 ## Instruction construction framework
 
