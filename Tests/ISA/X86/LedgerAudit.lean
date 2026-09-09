@@ -76,6 +76,7 @@ import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
 import Grass.Platform.Win32.WriteFileCallPlan
+import Grass.Platform.Win32.CallEntry
 import Grass.Platform.Win32.WriteFileHandoff
 import Grass.Platform.Win32.WriteFilePreservation
 import Grass.Platform.Win32.WriteFileCall
@@ -234,6 +235,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileArguments,
    `Grass.Platform.Win32.ApiRequest,
    `Grass.Platform.Win32.WriteFileCallPlan,
+   `Grass.Platform.Win32.CallEntry,
    `Grass.Platform.Win32.WriteFileHandoff,
    `Grass.Platform.Win32.WriteFilePreservation,
    `Grass.Platform.Win32.WriteFileCall,
@@ -364,8 +366,8 @@ acquiring a citation.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
 -- Runtime, import and checked-evaluator adapters retain actual evidence.
--- Original-history transport adds one reviewed structural adapter.
-def notBehaviourBaseline : Nat := 360
+-- Original-history transport and CALL compatibility names add four structural adapters.
+def notBehaviourBaseline : Nat := 363
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -507,6 +509,8 @@ reader could not be misled by its absence from the trust ledger.
 def notBehaviour : List Name :=
   [
     -- Bind the fixed policy to an existing successful CALL factory receipt.
+    `Grass.Platform.Win32.CallEntry.CallPolicy.ofFactory,
+    `Grass.Platform.Win32.WriteFile.CallPolicy,
     `Grass.Platform.Win32.WriteFile.CallPolicy.ofFactory,
     `Grass.Platform.Win32.ExitProcess.entryHandoff?,
     `Grass.Platform.Win32.ExitProcess.EntryHandoff.after,
@@ -580,6 +584,7 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.WriteFile.ProtocolState,
     `Grass.Platform.Win32.WriteFile.embedPending,
     `Grass.Platform.Win32.WriteFile.entryHandoff?,
+    `Grass.Platform.Win32.CallEntry.reachedCall?,
     `Grass.Platform.Win32.WriteFile.reachedCall?,
     `Grass.Platform.Win32.WriteFile.selectPending,
     -- Checked protocol projections and loader-table searches contain no new

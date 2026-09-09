@@ -1,7 +1,5 @@
 import Grass.Platform.Win32.WriteFileHandoff
-import Grass.Platform.Win32.CpuPolicy
-import Grass.ISA.X86.Execution.CallNormal
-import Grass.ISA.X86.Execution.CallFactory
+import Grass.Platform.Win32.CallEntry
 
 /-!
 # Actual CALL to checked WriteFile custody
@@ -17,79 +15,33 @@ namespace Grass.Platform.Win32.WriteFile
 open Grass.Core Grass.Memory Grass.Op Grass.ISA.X86
 open Grass.Platform.Win32.Loader
 
-/-- The fixed Windows policy and loaded roots used by this actual CALL receipt.
-The target read uses the separate data selector at its computed numeric address. -/
-structure CallPolicy {image : ImageInput} {inputs : EntryInputs}
+/-- Compatibility aliases for existing WriteFile consumers. -/
+abbrev CallPolicy {image : ImageInput} {inputs : EntryInputs}
     (loaded : LoadedImage image inputs) {before : Execution.State}
     {afterFetch afterRead afterStore : MachineState} {displacement : BitVec 32}
-    (receipt : Execution.CallNormal before afterFetch afterRead afterStore displacement) where
-  policy : Execution.CpuAccessPolicy
-  selected : Cpu.policy? loaded before = some policy
-  fetchPolicy : receipt.fetch.run.policy = policy.operationPolicy
-  context : receipt.fetch.run.context = policy.context
-  contextKind : receipt.fetch.run.contextKind = policy.contextKind
-  cause : receipt.fetch.run.cause = policy.cause
-  code : receipt.fetch.descriptor.provenance = policy.code
-  stack : receipt.storeDescriptor.provenance = policy.stack
-  data : Cpu.dataProvenance? loaded
-    (receipt.fetch.site.fallthroughRip + BitVec.ofInt 64 displacement.toInt) 8 =
-      some receipt.readDescriptor.provenance
+    (receipt : Execution.CallNormal before afterFetch afterRead afterStore displacement) :=
+  CallEntry.CallPolicy loaded receipt
 
-/-- `CallPolicy.ofFactory` derives the Windows binding from the actual fixed
-CALL factory's retained fetch, data selection and stack-store receipts. -/
-def CallPolicy.ofFactory {image : ImageInput} {inputs : EntryInputs}
+abbrev CallPolicy.ofFactory {image : ImageInput} {inputs : EntryInputs}
     {loaded : LoadedImage image inputs} {before : Execution.State}
     {policy : Execution.CpuAccessPolicy}
     (selected : Cpu.policy? loaded before = some policy)
     (success : Execution.CallFactory.Success policy before) :
-    CallPolicy loaded success.receipt := by
-  have operation : policy.operationPolicy = Cpu.operationPolicy := by
-    obtain ⟨_, _, _, _, _, _, _, _, _, operation, _, _⟩ := Cpu.policy?_inputs selected
-    exact operation
-  have data : policy.data = Cpu.dataProvenance? loaded := by
-    obtain ⟨_, _, _, _, _, _, _, _, _, _, _, data⟩ := Cpu.policy?_inputs selected
-    exact data
-  have metadata := success.fetched.observed.dispatch_metadata
-    success.fetched.dispatched success.fetched.dispatch_exact
-  refine ⟨policy, selected, ?_, ?_, ?_, ?_, ?_, success.stack_provenance, ?_⟩
-  · rw [success.fetch_exact, metadata.1, success.fetched.policy_exact]
-    rw [Execution.FetchFactory.fetchPolicy, operation]
-    rfl
-  · rw [success.fetch_exact, metadata.2.1, success.fetched.context_exact]
-  · rw [success.fetch_exact, metadata.2.2.1, success.fetched.contextKind_exact]
-  · rw [success.fetch_exact, metadata.2.2.2.1, success.fetched.cause_exact]
-  · rw [success.fetch_exact, metadata.2.2.2.2, success.fetched.descriptor_exact]
-    rfl
-  · rw [← data]
-    exact success.data_selected
+    CallPolicy loaded success.receipt :=
+  CallEntry.CallPolicy.ofFactory selected success
 
-/-- Repack the same metadata after the actual CPU transition. A failed check
-remains a refusal; this function never resets pending calls or identity supplies. -/
-def reachedCall? (before : ExecutionState.State ApiRequest)
+abbrev reachedCall? (before : ExecutionState.State ApiRequest)
     {afterFetch afterRead afterStore : MachineState} {displacement : BitVec 32}
-    (receipt : Execution.CallNormal before.machine afterFetch afterRead afterStore displacement) :
-    Option (ExecutionState.State ApiRequest) :=
-  if valid : (before.metadata.pack? receipt.result.machine).isSome then
-    some
-      { machine := receipt.result
-        metadata := before.metadata
-        control := before.control
-        protocolValid := valid }
-  else none
+    (receipt : Execution.CallNormal before.machine afterFetch afterRead afterStore displacement) :=
+  CallEntry.reachedCall? before receipt
 
-/-- `reachedCall?_fields` proves preservation of all metadata and control and uses exactly
-the architectural result of the supplied actual CALL. -/
 theorem reachedCall?_fields {before after : ExecutionState.State ApiRequest}
     {afterFetch afterRead afterStore : MachineState} {displacement : BitVec 32}
     {receipt : Execution.CallNormal before.machine afterFetch afterRead afterStore displacement}
     (success : reachedCall? before receipt = some after) :
     after.machine = receipt.result ∧ after.metadata = before.metadata ∧
-      after.control = before.control := by
-  unfold reachedCall? at success
-  split at success
-  · cases Option.some.inj success
-    exact ⟨rfl, rfl, rfl⟩
-  · contradiction
+      after.control = before.control :=
+  CallEntry.reachedCall?_fields success
 
 /-- One actual CALL, its exact reached carrier, and the full checked handoff.
 This is a custody binding, not evidence that the selected target is a native

@@ -96,6 +96,7 @@ import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
 import Grass.Platform.Win32.WriteFileCallPlan
+import Grass.Platform.Win32.CallEntry
 import Grass.Platform.Win32.WriteFileHandoff
 import Grass.Platform.Win32.WriteFilePreservation
 import Grass.Platform.Win32.WriteFileCall
