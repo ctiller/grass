@@ -52,4 +52,23 @@ example : (writeImportSection 0x2000 twoLibraries).length = 168 := by decide
 
 example : importLibrariesValid twoLibraries.toList = true := by decide
 
+private def textName : SectionName :=
+  ⟨Vec.fromList [46, 116, 101, 120, 116], by decide⟩
+
+private def callerDescription : ExecutableImageDescription :=
+  { entryPointRva := 4096
+    sections := Vec.fromList
+      [{ name := textName
+         contents := Vec.fromList [0x90]
+         characteristics := 0x60000020 }]
+    imports := libraries }
+
+set_option maxRecDepth 4096 in
+example : importSectionRva? callerDescription = some 0x2000 := by decide
+
+set_option maxRecDepth 4096 in
+example : importAddressRva? callerDescription 0 0 = some 0x2028 := by decide
+
+example : importAddressRva? callerDescription 0 1 = none := by decide
+
 end Grass.Tests.Artifact.PE.Imports

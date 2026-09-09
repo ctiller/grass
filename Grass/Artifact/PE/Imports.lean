@@ -268,4 +268,22 @@ def materializeImports (description : ExecutableImageDescription) :
     let baseRva := lastVirtualStart (placeImageSections provisional).toList
     withImportSection description baseRva
 
+/-- Synthesized `.idata` section RVA, absent exactly when no imports were
+requested. -/
+def importSectionRva? (description : ExecutableImageDescription) : Option Nat :=
+  if description.imports.length = 0 then none
+  else
+    let provisional := withImportSection description 0
+    some (lastVirtualStart (placeImageSections provisional).toList)
+
+/-- Query the loader-written IAT slot for a requested library and symbol. This
+is the artifact-layer address a caller uses for an indirect call; it exposes no
+instruction encoding. -/
+def importAddressRva? (description : ExecutableImageDescription)
+    (libraryIndex symbolIndex : Nat) : Option Nat := do
+  let baseRva ← importSectionRva? description
+  let layout ← (layoutImportLibraries description.imports).get? libraryIndex
+  let _symbol ← layout.library.symbols.get? symbolIndex
+  some (iatSlotRva baseRva layout symbolIndex)
+
 end Grass.Artifact.PE
