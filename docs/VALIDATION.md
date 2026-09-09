@@ -36,7 +36,7 @@ Source-backed Lean fixtures embed the authored spike files as literal character
 lists with the small `Tests/Assembly/SourceLiteral.lean` elaborator. Like
 `include_str`, it reads data from disk; it does not supply a proof or use native
 evaluation as proof authority. Literal characters avoid expensive kernel UTF-8
-decoding before parsing. Run `./check-source-input.ps1` after changing either
+decoding before parsing. Run `./check-source-input.sh` after changing either
 the source or its parser. This builds the parser's imports and directly
 elaborates those fixtures again: an ordinary cached `lake build` does not track
 the file read by the elaborator. The library workflow runs both checks. These fixtures establish

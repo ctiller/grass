@@ -35,25 +35,21 @@ both the annotated document and its comment-free authored source.
 
 Run the repository's current consistency check from its root:
 
-```powershell
+```bash
 lake build
 lake build Tests
-pwsh ./audit-trust.ps1
-pwsh ./check-source-input.ps1
-pwsh ./check-spike-sources.ps1
-pwsh ./check-doc-links.ps1
+./audit-trust.sh
+./check-source-input.sh
+./check-spike-sources.sh
+./check-doc-links.sh
 ```
 
-The four `.ps1` checks support PowerShell 7 on every supported platform and
-Windows PowerShell 5.1 on Windows. If `pwsh` is unavailable, invoke them with
-the in-box Windows host instead:
+The four checks require Bash and Perl. They run on Linux and in Git Bash on
+Windows.
 
-```powershell
-powershell.exe -NoProfile -File .\audit-trust.ps1
-powershell.exe -NoProfile -File .\check-source-input.ps1
-powershell.exe -NoProfile -File .\check-spike-sources.ps1
-powershell.exe -NoProfile -File .\check-doc-links.ps1
-```
+`audit-trust.sh` accepts repeated `--library-source-root`,
+`--test-source-root`, `--declaration`, and `--allowed-axiom` options when a
+focused audit needs to replace one of its default lists.
 
 The Lake commands compile the Lean libraries, and the trust command audits
 project declarations and named public roots for rejected transitive axioms, then
