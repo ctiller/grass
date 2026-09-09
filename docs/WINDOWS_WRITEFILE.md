@@ -40,7 +40,17 @@ returns `some`. It does not claim a conforming provider write exists yet.
 
 ## External validation
 
-The [native probe campaign](../probes/windows/README.md) builds an MSVC executable
+Probe programs are to be authored in Grass and emitted through Hello World's
+production PE entry/import/emitter path. The
+[semantic probe cases](../Tests/Platform/Win32ProbeCases.lean) currently check
+zero/partial/full successes, failure after zero/partial/full output, and rejected
+excess counts, count/output disagreement and wrong bytes using the existing Lean
+relations. They are not emitted programs. A thin host launcher may supply inherited
+stdout fixtures and collect output; it must not replace the API test body or its
+model predictions. The unavailable production emitter remains the blocking
+dependency; no parallel PE writer is introduced for validation.
+
+The [auxiliary native campaign](../probes/windows/README.md) builds an MSVC executable
 and checks real pipe API outcomes against an independently written comparator.
 It is neither a Grass-emitted artifact nor an extraction of the Lean relation.
 The comparator's negative controls challenge its count and prefix checks; they

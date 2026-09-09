@@ -1,4 +1,6 @@
-# Native Windows API probes
+# Auxiliary native Windows API observations
+
+The supported direction is Grass-authored probe programs using the same production PE entry, imports and emitter as Hello World. This C/Python campaign is retained as auxiliary comparison evidence; it is not that probe implementation and will not be expanded. [Lean semantic cases](../../Tests/Platform/Win32ProbeCases.lean) exercise accepted and rejected outcomes while the production emitter is being completed. They do not yet emit a runnable Grass program.
 
 This directory contains an external validation harness for the bounded synchronous `WriteFile` model. It compiles `writefile.c` with the installed MSVC x64 tools, runs each case in a separate process with a timeout, and writes `.lake/windows-probes/results.json`.
 
