@@ -10,6 +10,7 @@ import Grass.ISA.X86.Execution.State
 import Grass.ISA.X86.Execution.DecodedSite
 import Grass.ISA.X86.Execution.AccessRun
 import Grass.ISA.X86.Execution.Fetch
+import Grass.ISA.X86.Execution.FetchedEncoding
 import Grass.ISA.X86.Execution.SubRspNormal
 import Grass.ISA.X86.Execution.PushNormal
 import Grass.ISA.X86.Execution.AccessFree
@@ -118,6 +119,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.EndianBridge,
    `Grass.ISA.X86.Execution.State, `Grass.ISA.X86.Execution.DecodedSite,
    `Grass.ISA.X86.Execution.AccessRun, `Grass.ISA.X86.Execution.Fetch,
+   `Grass.ISA.X86.Execution.FetchedEncoding,
    `Grass.ISA.X86.Execution.SubRspNormal,
    `Grass.ISA.X86.Execution.PushNormal,
    `Grass.ISA.X86.Execution.AccessFree, `Grass.ISA.X86.Execution.MoveNormal,
