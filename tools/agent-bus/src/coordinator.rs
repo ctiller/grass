@@ -773,11 +773,13 @@ fn build_frontier(
 /// The git-linked half of `review.merge_authorized` validation
 /// (AGENT_REVIEW.md section 7) that `apply.rs` deliberately leaves out of
 /// its pure, git-repo-free reduction. Re-runs `merge_candidate::verify_
-/// authorship`/`reconstruct_candidate` against the *submitted* payload
-/// (`d`) -- not merely trusting that `cli::prepare_merge` was ever run, or
-/// run honestly -- and confirms the candidate tag `prepare-merge` would
-/// have published is independently fetchable from `remote`
-/// (`gitrepo::remote_tag_matches`, a real `ls-remote`). Deliberately does
+/// authorship` against the *submitted* payload (`d`) -- not merely trusting
+/// that `cli::prepare_merge` was ever run, or run honestly -- confirms the
+/// candidate tag `prepare-merge` would have published is independently
+/// fetchable from `remote` (`gitrepo::remote_tag_matches`, a real
+/// `ls-remote`), and validates the object that tag names against the
+/// payload (`merge_candidate::verify_candidate_object`/`verify_candidate_
+/// scope`) rather than rebuilding the merge locally. Deliberately does
 /// *not* additionally require the tag to already exist in this checkout's
 /// own local clone: `drain_outbox` may run from any checkout, not just the
 /// one that ran `prepare-merge`, and a tag genuinely pushed from elsewhere
@@ -828,6 +830,41 @@ fn verify_review_merge_authorized(
             d.nomination
         )));
     }
+    // Deliberately no local-only `tag_exists_at` precondition here: `drain_outbox`
+    // may run from any checkout, not just the one `prepare-merge` ran from, and a
+    // tag `prepare-merge` pushed from a *different* checkout is genuinely valid
+    // even though this checkout has never fetched it. `remote_tag_matches` (a real
+    // `ls-remote`) is the checkout-independent, authoritative check for "other
+    // agents could verify this merge" -- see its own doc comment -- so it alone is
+    // both necessary and sufficient for *publication* of the tag.
+    let tag = crate::merge_candidate::candidate_tag_name(reviewer, d.candidate.as_str());
+    if !crate::gitrepo::remote_tag_matches(repo, remote, &tag, d.candidate.as_str())? {
+        return Err(invalid(format!(
+            "candidate tag refs/tags/{tag} is not fetchable from {remote}; other agents could \
+             not verify this merge"
+        )));
+    }
+    // This gate used to rebuild the merge here with this host's own `git
+    // merge-tree --write-tree` and require the result to equal `d.candidate`,
+    // which is what made an installed git version protocol authority: a
+    // coordinator on a different build rejected a perfectly honest
+    // reviewer's authorization, and the only remedy on offer was to make
+    // every host in the fleet compile one particular git. The repository
+    // owner rejected that design (g-design:249).
+    //
+    // So validate the object the tag actually names instead. The tag is
+    // immutable and was just confirmed on `remote`, so fetching it here is
+    // reading the same bytes every other agent will read -- not a local
+    // re-derivation of what they *should* have been.
+    crate::merge_candidate::fetch_candidate_tag(repo, remote, reviewer, d.candidate.as_str())?;
+    // Deliberately after that fetch. This gate may run from any checkout,
+    // including one that has only ever seen `main` and the bus -- the
+    // reviewed commits themselves reach it through the candidate's own
+    // history, since the candidate has `reviewed_commit` as a parent. Asking
+    // about authorship first made a coordinator on a second clone fail with
+    // "does not name an object" for a perfectly valid authorization; the
+    // reconstruction that used to sit here hid it, because the only hosts
+    // that got this far had already built the merge locally.
     let expected_authors: std::collections::BTreeSet<Agent> =
         chain.current_request.authors.iter().cloned().collect();
     crate::merge_candidate::verify_authorship(
@@ -837,46 +874,31 @@ fn verify_review_merge_authorized(
         d.previous_main.as_str(),
         d.reviewed_commit.as_str(),
     )?;
-    // The verifying host must also be on the pinned engine: reconstructing
-    // the candidate below with a different ORT version would disagree with a
-    // perfectly honest reviewer and reject a valid authorization.
-    //
-    // Deliberately here rather than at the top of this gate. Nothing above is
-    // engine-dependent -- `blocking_issue_for_chain` reads reduced state and
-    // `verify_authorship` reads commit trailers through libgit2 -- so an
-    // authorization that is wrong about its *authors* must say so, not blame
-    // this host's git. Same reasoning as the `merge_engine_epoch` check at the
-    // end of this function, and see `require_pinned_merge_engine`'s own doc.
-    crate::bootstrap::require_pinned_merge_engine(state)?;
-    let reconstructed = crate::merge_candidate::reconstruct_candidate(
+    crate::merge_candidate::verify_candidate_object(
         repo,
+        reviewer,
         d.previous_main.as_str(),
         d.reviewed_commit.as_str(),
-        reviewer,
+        d.candidate.as_str(),
     )?;
-    if reconstructed != d.candidate.as_str() {
-        return Err(invalid(format!(
-            "candidate {} does not match the deterministic reconstruction {reconstructed} from \
-             previous_main/reviewed_commit/reviewer",
-            d.candidate
-        )));
-    }
-    // Deliberately no local-only `tag_exists_at` precondition here: `drain_outbox`
-    // may run from any checkout, not just the one `prepare-merge` ran from, and a
-    // tag `prepare-merge` pushed from a *different* checkout is genuinely valid
-    // even though this checkout has never fetched it. `remote_tag_matches` (a real
-    // `ls-remote`) is the checkout-independent, authoritative check for "other
-    // agents could verify this merge" -- see its own doc comment -- so it alone is
-    // both necessary and sufficient here.
-    let tag = crate::merge_candidate::candidate_tag_name(reviewer, d.candidate.as_str());
-    if !crate::gitrepo::remote_tag_matches(repo, remote, &tag, d.candidate.as_str())? {
-        return Err(invalid(format!(
-            "candidate tag refs/tags/{tag} is not fetchable from {remote}; other agents could \
-             not verify this merge"
-        )));
-    }
-    // Checked last, after this gate's own reconstruction work, so a
-    // candidate that is wrong in a more specific way still says so.
+    // The content bound: a candidate nobody rebuilds is still not allowed to
+    // touch anything outside the scope this nomination was reviewed against.
+    // Checked here as well as in `merge_ready` because this is the
+    // publication boundary -- a hand-crafted `submit --kind
+    // review.merge_authorized` never runs `merge-ready` at all.
+    crate::merge_candidate::verify_candidate_scope(
+        repo,
+        d.previous_main.as_str(),
+        d.candidate.as_str(),
+        d.reviewed_scope.as_slice(),
+    )?;
+    // The `checks` half of the binding is already enforced, and enforced
+    // somewhere that cannot drift: `apply_review_merge_authorized` requires
+    // every one of the nomination's `required_checks` to appear in
+    // `d.checks`, at reduction time, on every host. That check never touched
+    // the merge engine, so nothing here needs to move or be duplicated.
+    // Checked last, after this gate's own candidate work, so a candidate
+    // that is wrong in a more specific way still says so.
     // `apply` checks only that the epoch names a real activation, which is
     // all it can soundly do -- a later `merge_engine.activated` moves
     // `current_merge_engine_epoch` and this authorization neither references
@@ -1506,6 +1528,14 @@ mod tests {
     use crate::events::{AgentStatusEvent, EventData, LifecycleStatus, Role};
     use crate::outbox::Candidate;
     use crate::scalars::{Agent, ObjectId, Text};
+
+    /// Every fixture here records an engine version no host runs and no
+    /// build of this crate ever pinned, so the whole module stands as an
+    /// assertion that publication never consults it. Spelling a crate
+    /// constant instead would make the fixtures agree with the code under
+    /// test by construction, which is how the version pin stayed invisible
+    /// to this suite while wedging hosts in the field.
+    const FOREIGN_ENGINE_VERSION: &str = "1.2.3-no-build-ever-pinned-this";
 
     fn a(name: &str) -> Agent {
         Agent::parse(name.to_string()).unwrap()
@@ -4210,6 +4240,11 @@ mod tests {
             &f.reviewer,
         )
         .unwrap();
+        // Published like any real candidate: authorship is checked *after*
+        // the candidate tag is confirmed and fetched, so that a coordinator
+        // draining from a checkout which has only ever seen `main` and the
+        // bus still has the reviewed commits to read trailers from.
+        publish_candidate_tag(&f, &candidate);
         crate::outbox::submit(
             f.repo.path(),
             "auth",
@@ -4239,6 +4274,7 @@ mod tests {
             &f.reviewer,
         )
         .unwrap();
+        publish_candidate_tag(&f, &candidate);
         crate::outbox::submit(
             f.repo.path(),
             "auth",
@@ -4269,6 +4305,7 @@ mod tests {
             &f.reviewer,
         )
         .unwrap();
+        publish_candidate_tag(&f, &candidate);
         crate::outbox::submit(
             f.repo.path(),
             "auth",
@@ -4288,25 +4325,75 @@ mod tests {
         );
     }
 
+    /// Tags `commit` as `reviewer`'s candidate and pushes the tag, exactly
+    /// as `prepare-merge` would -- so the gate under test sees a candidate
+    /// that is published and fetchable, and can only reject it for what the
+    /// *object* says.
+    fn publish_candidate_tag(f: &ReviewFixture, commit: &str) {
+        let tag = crate::merge_candidate::candidate_tag_name(&f.reviewer, commit);
+        crate::gitrepo::tag_lightweight(f.repo.path(), &tag, commit).unwrap();
+        let push = crate::gitrepo::run(
+            f.repo.path(),
+            &["push", &f.remote, &format!("refs/tags/{tag}")],
+        )
+        .unwrap();
+        assert!(push.success, "{push:?}");
+    }
+
+    /// A commit with the given parents, message and tree, built directly --
+    /// not through `merge_candidate::reconstruct_candidate`. This is how a
+    /// tampered or hand-crafted candidate gets into the fixture: the gate
+    /// no longer rebuilds the merge, so what it rejects has to be a real
+    /// object that is wrong in a specific, nameable way.
+    fn forged_candidate(
+        f: &ReviewFixture,
+        parents: &[&str],
+        message: &str,
+        tree_of: &str,
+    ) -> String {
+        use crate::gitobjects::{HistoryReader, ObjectWriter};
+        let g = crate::gitobjects::Libgit2Reader::open(f.repo.path()).unwrap();
+        let tree = g
+            .resolve_rev(&format!("{tree_of}^{{tree}}"))
+            .unwrap()
+            .expect("tree must resolve");
+        let resolved: Vec<ObjectId> = parents
+            .iter()
+            .map(|p| g.resolve_rev(p).unwrap().expect("parent must resolve"))
+            .collect();
+        let refs: Vec<&ObjectId> = resolved.iter().collect();
+        g.create_commit(&tree, &refs, message)
+            .unwrap()
+            .into_string()
+    }
+
+    /// The publication gate used to rebuild the merge with this host's own
+    /// `git merge-tree --write-tree` and compare object ids, which is what
+    /// made an installed git version protocol authority (g-design:249). It
+    /// now validates the object the candidate tag actually names -- so a
+    /// forged candidate has to be rejected by a property of *that object*,
+    /// not by a hash it fails to match.
+    ///
+    /// Parents first: a commit that merges the right two commits in the
+    /// wrong order is a different merge.
     #[test]
-    fn drain_outbox_rejects_review_merge_authorized_with_a_candidate_that_does_not_reconstruct() {
-        // Drives the real `drain_outbox`, so the bus it reduces is pinned by
-        // `genesis` to this build's engine version and there is no seam to
-        // hand it a differently-pinned state -- see
-        // `bootstrap::requires_the_pinned_engine`.
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_rejects_review_merge_authorized_with_a_candidate_that_does_not_reconstruct",
-        ) {
-            return;
-        }
+    fn drain_outbox_rejects_review_merge_authorized_whose_candidate_has_the_wrong_parents() {
         let f = build_review_fixture(Some("zoe"));
-        // A syntactically valid but *wrong* candidate id -- never actually
-        // built by `merge_candidate::reconstruct_candidate`.
-        let bogus_candidate = "f".repeat(40);
+        let forged = forged_candidate(
+            &f,
+            // Reversed: `reviewed_commit` first, `previous_main` second.
+            &[&f.feature_commit, &f.previous_main],
+            &format!(
+                "agent-bus candidate\n\nAgent-Bus-Reviewer: {}\n",
+                f.reviewer
+            ),
+            &f.feature_commit,
+        );
+        publish_candidate_tag(&f, &forged);
         crate::outbox::submit(
             f.repo.path(),
             "auth",
-            &merge_authorized_candidate(&f, &bogus_candidate),
+            &merge_authorized_candidate(&f, &forged),
         )
         .unwrap();
 
@@ -4316,7 +4403,133 @@ mod tests {
         assert!(
             drained.rejected[0]
                 .reason
-                .contains("does not match the deterministic reconstruction"),
+                .contains("candidate parents do not match"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    /// A candidate whose parents are right but which carries somebody
+    /// else's reviewer trailer. Nobody rebuilds the tree any more, so this
+    /// trailer is the accountability binding: it says which reviewer stands
+    /// behind the content.
+    #[test]
+    fn drain_outbox_rejects_review_merge_authorized_whose_candidate_names_another_reviewer() {
+        let f = build_review_fixture(Some("zoe"));
+        let forged = forged_candidate(
+            &f,
+            &[&f.previous_main, &f.feature_commit],
+            "agent-bus candidate\n\nAgent-Bus-Reviewer: someone-else\n",
+            &f.feature_commit,
+        );
+        publish_candidate_tag(&f, &forged);
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &forged),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("exactly one matching Agent-Bus-Reviewer trailer"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    /// Right parents, right reviewer trailer, but extra content in the
+    /// message. The exact-message check is what stops a candidate from
+    /// smuggling further trailers past a validator that only reads back the
+    /// one it expects.
+    #[test]
+    fn drain_outbox_rejects_review_merge_authorized_whose_candidate_message_carries_more_than_the_trailer(
+    ) {
+        let f = build_review_fixture(Some("zoe"));
+        let forged = forged_candidate(
+            &f,
+            &[&f.previous_main, &f.feature_commit],
+            &format!(
+                "agent-bus candidate\n\nAgent-Bus-Reviewer: {}\nAgent-Bus-Agent: {}\n",
+                f.reviewer, f.reviewer
+            ),
+            &f.feature_commit,
+        );
+        publish_candidate_tag(&f, &forged);
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &forged),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("does not carry the exact candidate message"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    /// The content bound, and the check that most directly replaces the
+    /// deleted reconstruction: a candidate whose parents, message and
+    /// trailer are all correct, but whose *tree* carries a file the
+    /// nomination never covered.
+    ///
+    /// Under the old design this was caught only incidentally -- the tree
+    /// differed from the local rebuild, so the object ids differed. There
+    /// is no rebuild now, so scope is what bounds the tree, and this test
+    /// fails outright if `verify_candidate_scope` is not called here.
+    #[test]
+    fn drain_outbox_rejects_review_merge_authorized_whose_candidate_touches_an_unreviewed_path() {
+        let f = build_review_fixture(Some("zoe"));
+        // A commit on top of the feature branch touching a path outside the
+        // reviewed scope (`feature.txt`), used only for its tree.
+        git(
+            f.repo.path(),
+            &["checkout", "--quiet", "--detach", &f.feature_commit],
+        );
+        std::fs::write(f.repo.path().join("smuggled.txt"), "not reviewed\n").unwrap();
+        git(f.repo.path(), &["add", "."]);
+        git(
+            f.repo.path(),
+            &["commit", "-q", "-m", "smuggled\n\nAgent-Bus-Agent: zoe"],
+        );
+        let smuggled = crate::gitrepo::rev_parse(f.repo.path(), "HEAD").unwrap();
+        git(f.repo.path(), &["checkout", "--quiet", "main"]);
+
+        let forged = forged_candidate(
+            &f,
+            &[&f.previous_main, &f.feature_commit],
+            &format!(
+                "agent-bus candidate\n\nAgent-Bus-Reviewer: {}\n",
+                f.reviewer
+            ),
+            &smuggled,
+        );
+        publish_candidate_tag(&f, &forged);
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &forged),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("outside reviewed_scope"),
             "{}",
             drained.rejected[0].reason
         );
@@ -4324,11 +4537,6 @@ mod tests {
 
     #[test]
     fn drain_outbox_rejects_review_merge_authorized_with_no_candidate_tag_at_all() {
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_rejects_review_merge_authorized_with_no_candidate_tag_at_all",
-        ) {
-            return;
-        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -4362,11 +4570,6 @@ mod tests {
     #[test]
     fn drain_outbox_rejects_review_merge_authorized_with_a_candidate_tag_that_never_reached_origin()
     {
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_rejects_review_merge_authorized_with_a_candidate_tag_that_never_reached_origin",
-        ) {
-            return;
-        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -4443,28 +4646,27 @@ mod tests {
             other => panic!("fixture built the wrong event: {other:?}"),
         };
 
-        // The epoch the authorization names is real and this host runs its
-        // engine, so nothing else in the gate objects to it -- but the bus
-        // has since selected a different one.
-        //
-        // "This host runs its engine" has to be spelled `host_engine_version`
-        // rather than the compile-time `SUPPORTED_MERGE_ENGINE_VERSION`: the
-        // two are equal only on a host provisioned with the pinned git, and
-        // anywhere else this fixture claimed an engine the host does not have,
-        // so the gate refused for that reason and never reached the stale
-        // -epoch refusal under test. See `bootstrap::host_engine_version`.
+        // The epoch the authorization names is real, so nothing else in the
+        // gate objects to it -- but the bus has since selected a different
+        // one. Both epochs record an engine version no host anywhere runs,
+        // which is now simply ignored: if any comparison against the
+        // installed git ever comes back, this test stops reaching the
+        // stale-epoch refusal it is about and fails.
         let newer = EventId::new(&f.coord1, 4242);
-        let host_engine = short(&crate::bootstrap::host_engine_version());
+        let engine_version = short(FOREIGN_ENGINE_VERSION);
         state.merge_engine_info.insert(
             d.merge_engine_epoch.clone(),
             (
                 short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                host_engine.clone(),
+                engine_version.clone(),
             ),
         );
         state.merge_engine_info.insert(
             newer.clone(),
-            (short(crate::bootstrap::SUPPORTED_MERGE_ENGINE), host_engine),
+            (
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                engine_version,
+            ),
         );
         state.current_merge_engine_epoch = Some(newer.clone());
 
@@ -4475,55 +4677,6 @@ mod tests {
             msg.contains("is not the currently selected merge engine epoch")
                 && msg.contains(&newer.to_string()),
             "the message must name the epoch that is current now: {msg}"
-        );
-    }
-
-    /// The pinned-engine gate's *call site*, not the predicate.
-    ///
-    /// `bootstrap::pinned_engine_tests` proves what
-    /// `require_pinned_merge_engine` decides; it cannot see whether this
-    /// function calls it. Mutation testing showed that gap was real --
-    /// deleting the call from here left every suite green, because the test
-    /// host happens to run the pinned version, so the check was invisible
-    /// either way. Pinning a version nobody runs makes the call observable.
-    #[test]
-    fn the_authorization_gate_refuses_a_host_that_is_not_on_the_selected_engine() {
-        let f = build_review_fixture(Some("zoe"));
-        let candidate = crate::merge_candidate::reconstruct_candidate(
-            f.repo.path(),
-            &f.previous_main,
-            &f.feature_commit,
-            &f.reviewer,
-        )
-        .unwrap();
-
-        // A reduced state for this fixture, with the bus's selected engine
-        // moved to a version this host does not have.
-        let snapshot =
-            crate::sync::cached_snapshot(f.repo.path(), f.repo.path()).expect("reduce fixture");
-        let mut state = snapshot.state;
-        let epoch = EventId::new(&f.coord1, 987);
-        state.merge_engine_info.insert(
-            epoch.clone(),
-            (
-                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                short("0.0.0-not-a-real-git"),
-            ),
-        );
-        state.current_merge_engine_epoch = Some(epoch);
-
-        let d = match merge_authorized_candidate(&f, &candidate)
-            .typed_data()
-            .unwrap()
-        {
-            EventData::ReviewMergeAuthorized(d) => d,
-            other => panic!("fixture built the wrong event: {other:?}"),
-        };
-        let err = verify_review_merge_authorized(f.repo.path(), &f.remote, &state, &f.reviewer, &d)
-            .expect_err("a host off the selected engine must not verify a candidate");
-        assert!(
-            err.to_string().contains("0.0.0-not-a-real-git"),
-            "expected the selected-engine refusal, got: {err}"
         );
     }
 
@@ -4544,11 +4697,6 @@ mod tests {
     /// absent from the exclusion list below.
     #[test]
     fn drain_outbox_review_merge_authorized_gate_passes_a_genuinely_valid_candidate() {
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_review_merge_authorized_gate_passes_a_genuinely_valid_candidate",
-        ) {
-            return;
-        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -4584,7 +4732,10 @@ mod tests {
             "has no Agent-Bus-Agent trailer",
             "ineligible to merge",
             "do not match nomination authors",
-            "does not match the deterministic reconstruction",
+            "candidate parents do not match",
+            "exactly one matching Agent-Bus-Reviewer trailer",
+            "does not carry the exact candidate message",
+            "outside reviewed_scope",
             "candidate tag is not fetchable",
             "is not fetchable from",
         ] {
@@ -4610,11 +4761,6 @@ mod tests {
     /// ran `prepare-merge` could never validly drain the authorization.
     #[test]
     fn drain_outbox_review_merge_authorized_gate_accepts_a_tag_never_fetched_into_this_checkout() {
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_review_merge_authorized_gate_accepts_a_tag_never_fetched_into_this_checkout",
-        ) {
-            return;
-        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -4658,7 +4804,10 @@ mod tests {
             "has no Agent-Bus-Agent trailer",
             "ineligible to merge",
             "do not match nomination authors",
-            "does not match the deterministic reconstruction",
+            "candidate parents do not match",
+            "exactly one matching Agent-Bus-Reviewer trailer",
+            "does not carry the exact candidate message",
+            "outside reviewed_scope",
             "candidate tag is not fetchable",
             "is not fetchable from",
         ] {
@@ -4805,7 +4954,7 @@ mod tests {
             object_format: "sha1".to_string(),
             product_review_from: ObjectId::parse("0".repeat(40)).unwrap(),
             merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: FOREIGN_ENGINE_VERSION.to_string(),
         }
     }
 
@@ -5336,7 +5485,7 @@ mod tests {
         let data = MergeEngineActivated {
             previous_epoch: EventId::new(&f.coord1, 0),
             merge_engine: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-            merge_engine_version: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+            merge_engine_version: short(FOREIGN_ENGINE_VERSION),
             design_commit: ObjectId::parse("0".repeat(40)).unwrap(),
             helper_commit: ObjectId::parse("0".repeat(40)).unwrap(),
         };
@@ -5437,14 +5586,6 @@ mod tests {
 
     #[test]
     fn drain_outbox_rejects_review_merge_reconciled_when_main_was_never_advanced() {
-        // The reconciliation gate itself is engine-independent, but its
-        // fixture is not: `authorized_and_published` has to get a real
-        // `review.merge_authorized` through the publication gate first.
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_rejects_review_merge_reconciled_when_main_was_never_advanced",
-        ) {
-            return;
-        }
         let f = build_review_fixture(Some("zoe"));
         let (candidate, authorization_id) = authorized_and_published(&f);
         // `main` deliberately left at `previous_main` -- the candidate was
@@ -5494,13 +5635,6 @@ mod tests {
     /// reconciliation.
     #[test]
     fn drain_outbox_accepts_review_merge_reconciled_when_main_was_genuinely_advanced() {
-        // See the sibling rejection test: the fixture needs a genuinely
-        // published authorization, which needs the pinned engine.
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_accepts_review_merge_reconciled_when_main_was_genuinely_advanced",
-        ) {
-            return;
-        }
         let f = build_review_fixture(Some("zoe"));
         let (candidate, authorization_id) = authorized_and_published(&f);
         git(
@@ -5561,7 +5695,7 @@ mod tests {
             object_format: "sha1".to_string(),
             product_review_from: ObjectId::parse("1".repeat(40)).unwrap(),
             merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: FOREIGN_ENGINE_VERSION.to_string(),
         });
         state.known_epochs.insert(epoch.id.clone(), epoch.clone());
         state.roster_epoch = Some(epoch.clone());
@@ -5700,7 +5834,7 @@ mod tests {
             object_format: "sha1".to_string(),
             product_review_from: ObjectId::parse("1".repeat(40)).unwrap(),
             merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: FOREIGN_ENGINE_VERSION.to_string(),
         });
         state
             .exclusive

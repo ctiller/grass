@@ -802,18 +802,23 @@ fn apply_merge_engine_activated(
     // joins its own key's group, which is a set, and whether its effect
     // applies is `ExclusiveTracker::disposition`, a pure function of that
     // group's final membership.
-    if d.merge_engine.as_str() != crate::bootstrap::SUPPORTED_MERGE_ENGINE {
-        return Err(invalid(format!(
-            "{}: unsupported merge_engine {}",
-            env.id, d.merge_engine
-        )));
-    }
-    if d.merge_engine_version.as_str() != crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION {
-        return Err(invalid(format!(
-            "{}: unsupported merge_engine_version {}",
-            env.id, d.merge_engine_version
-        )));
-    }
+    // `merge_engine`/`merge_engine_version` are *recorded* here and judged
+    // nowhere. Reduction used to reject any value that did not equal a pair
+    // of compile-time constants in this build, which made the whole bus
+    // unreadable -- not merely
+    // unmergeable: `reduce` propagates with `?` and has no per-event
+    // isolation, and the log is append-only, so a single such event wedged
+    // `status`, `tail`, `coordinate` and sync on every host whose binary
+    // carried a different constant, permanently. A reduction handler must be
+    // total over well-formed events, and "well-formed" cannot mean "agrees
+    // with the reader's build".
+    //
+    // Nothing downstream needs the judgement either. Candidate validation no
+    // longer reconstructs the merge locally (g-design:249; see
+    // `merge_candidate::verify_candidate_object`), so no consumer's answer
+    // depends on which engine or version produced a tree. The pair stays in
+    // the event schema, is recorded in `merge_engine_info` below, and is read
+    // back only as a diagnostic label for the epoch.
     let key = format!("engine_epoch:{}", d.previous_epoch);
     state.exclusive.record(&key, &env.id)?;
     state.merge_engine_info.insert(
@@ -1734,7 +1739,20 @@ fn apply_review_closing(
         .ok_or_else(|| invalid(format!("{}: unknown nomination {nomination}", env.id)))?;
     match label {
         "declined" => {
-            let reviewer = chain.nomination_reviewer.get(nomination).unwrap();
+            // `ok_or_else`, not `unwrap`. The invariant does hold -- every
+            // writer of `review_chain_by_nomination` writes
+            // `nomination_reviewer` for the same key on the same root, and
+            // both maps are append-only -- but a panic on the reduction path
+            // is strictly worse than an `Err` for the same defect: it takes
+            // the whole process down rather than the one command, so a host
+            // cannot even report what it choked on. The message names the
+            // pair whose disagreement would be the bug.
+            let reviewer = chain.nomination_reviewer.get(nomination).ok_or_else(|| {
+                invalid(format!(
+                    "{}: nomination {nomination} is in review_chain_by_nomination but has no nomination_reviewer entry",
+                    env.id
+                ))
+            })?;
             if reviewer != &env.agent {
                 return Err(invalid(format!(
                     "{}: only the named reviewer may decline this nomination",
@@ -2298,7 +2316,15 @@ fn apply_review_merge_authorized(
         // not fleet-wide-fatal.
         return Ok(());
     }
-    let reviewer = chain.nomination_reviewer.get(&d.nomination).unwrap();
+    // See the note at the sibling site: `ok_or_else` rather than `unwrap`,
+    // because a panic on the reduction path takes the process rather than
+    // the command.
+    let reviewer = chain.nomination_reviewer.get(&d.nomination).ok_or_else(|| {
+        invalid(format!(
+            "{}: nomination {} is in review_chain_by_nomination but has no nomination_reviewer entry",
+            env.id, d.nomination
+        ))
+    })?;
     if reviewer != &env.agent {
         return Err(invalid(format!(
             "{}: only the accepting reviewer may authorize a merge",
@@ -3026,6 +3052,19 @@ fn dependency_from(data: &EventData) -> EventId {
 mod tests {
     use super::*;
     use crate::common::Priority;
+    /// Every merge-engine fixture in this module records a version string no
+    /// build of this crate has ever pinned, and reduction is expected to
+    /// accept all of them.
+    ///
+    /// That is the point of spelling it here rather than reaching for a
+    /// crate constant. Reduction used to reject any `merge_engine_version`
+    /// that did not equal a compile-time constant, and because the fixtures
+    /// spelled that same constant, the whole suite agreed with the code
+    /// under test by construction -- the gate that made the bus unreadable
+    /// on every host built against a different constant was invisible from
+    /// in here. Using a foreign version everywhere means any reintroduction
+    /// of that gate fails hundreds of tests, not zero.
+    const FOREIGN_ENGINE_VERSION: &str = "1.2.3-no-build-ever-pinned-this";
     use crate::frontier::{FrontierEntry, ObservedFrontier};
     use crate::registry::{MemberBinding, RosterEpoch};
     use crate::scalars::{Branch, ObjectId, Short, StringSet, Text};
@@ -3051,7 +3090,7 @@ mod tests {
             object_format: "sha1".to_string(),
             product_review_from: hash(1),
             merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: FOREIGN_ENGINE_VERSION.to_string(),
         }
     }
 
@@ -5600,7 +5639,7 @@ mod tests {
             engine_epoch.clone(),
             (
                 short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                short(FOREIGN_ENGINE_VERSION),
             ),
         );
         state.current_merge_engine_epoch = Some(engine_epoch.clone());
@@ -5699,7 +5738,7 @@ mod tests {
             engine_epoch.clone(),
             (
                 short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                short(FOREIGN_ENGINE_VERSION),
             ),
         );
         state.current_merge_engine_epoch = Some(engine_epoch.clone());
@@ -7316,7 +7355,7 @@ mod tests {
             genesis.clone(),
             (
                 short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                short(FOREIGN_ENGINE_VERSION),
             ),
         );
         genesis
@@ -7326,7 +7365,7 @@ mod tests {
         MergeEngineActivated {
             previous_epoch: previous_epoch.clone(),
             merge_engine: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-            merge_engine_version: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+            merge_engine_version: short(FOREIGN_ENGINE_VERSION),
             design_commit: hash(1),
             helper_commit: hash(2),
         }
@@ -7429,52 +7468,112 @@ mod tests {
         assert!(err.to_string().contains("is not a coordinator"), "{err}");
     }
 
+    /// Reduction records the engine and version, and judges neither.
+    ///
+    /// This replaces two tests that asserted the opposite: reduction used to
+    /// `Err` on any `merge_engine`/`merge_engine_version` that did not equal
+    /// this build's own compile-time constants. That was not a merge
+    /// restriction, it was a bus-wide outage. `reduce` propagates every
+    /// handler error with `?` and has no per-event isolation, and an agent
+    /// stream is append-only -- so one such event permanently stopped
+    /// `status`, `tail`, `coordinate` and sync from working at all on every
+    /// host whose binary carried a different constant. The fleet lost three
+    /// working days to exactly this shape.
+    ///
+    /// The values used here are deliberately absurd. If any equality gate
+    /// against a build constant, or against this host's installed `git`,
+    /// ever returns, one of them will trip it.
     #[test]
-    fn rejects_merge_engine_activated_with_an_unsupported_engine() {
-        let mut state = empty_state(&[("coord1", Role::Coordinator)]);
-        let coord1 = a("coord1");
-        apply_ok(&mut state, &register(&coord1, Role::Coordinator));
-        let epoch = state.roster_epoch.as_ref().unwrap().clone();
-        let genesis = seed_merge_engine_genesis(&mut state);
-        let mut data = merge_engine_activated(&genesis);
-        data.merge_engine = short("some-other-engine");
-        let env = Envelope::new(
-            &coord1,
-            1,
-            complete_frontier(&epoch),
-            &EventData::MergeEngineActivated(data),
-            [],
-        );
-        let err = apply_event(&mut state, &env).unwrap_err();
-        assert!(
-            err.to_string().contains("unsupported merge_engine"),
-            "{err}"
-        );
+    fn merge_engine_activated_records_any_engine_and_version_without_judging_them() {
+        for (engine, version) in [
+            ("some-other-engine", "0.0.1"),
+            ("git-ort", "0.0.1"),
+            ("git-recursive", "99.99.99"),
+            ("an-engine-invented-after-this-build", "not-even-a-version"),
+        ] {
+            let mut state = empty_state(&[("coord1", Role::Coordinator)]);
+            let coord1 = a("coord1");
+            apply_ok(&mut state, &register(&coord1, Role::Coordinator));
+            let epoch = state.roster_epoch.as_ref().unwrap().clone();
+            let genesis = seed_merge_engine_genesis(&mut state);
+            let mut data = merge_engine_activated(&genesis);
+            data.merge_engine = short(engine);
+            data.merge_engine_version = short(version);
+            let env = Envelope::new(
+                &coord1,
+                1,
+                complete_frontier(&epoch),
+                &EventData::MergeEngineActivated(data),
+                [],
+            );
+            apply_event(&mut state, &env).unwrap_or_else(|e| {
+                panic!("reduction must be total over well-formed events; {engine}/{version}: {e}")
+            });
+            // Recorded verbatim, and selected: the event is applied, not
+            // merely tolerated.
+            assert_eq!(
+                state.merge_engine_info.get(&env.id),
+                Some(&(short(engine), short(version))),
+                "the pair must be readable back as the diagnostic it now is"
+            );
+            assert_eq!(state.current_merge_engine_epoch.as_ref(), Some(&env.id));
+        }
     }
 
-    /// The version half of the pinned merge engine, checked independently
-    /// of the engine name (found by a design-fidelity review: only the
-    /// name was validated, never the version).
+    /// The same property one level up, through `reduce` rather than a single
+    /// handler: a whole bus carrying such an event must still reduce.
+    ///
+    /// This is the assertion that actually names the outage. A per-handler
+    /// test can be satisfied by a handler that returns `Ok` while `reduce`
+    /// still fails somewhere else; what a host needs to know is that
+    /// `status`, `tail` and `coordinate` come back.
     #[test]
-    fn rejects_merge_engine_activated_with_an_unsupported_version() {
+    fn a_bus_recording_an_unknown_engine_version_still_reduces_end_to_end() {
         let mut state = empty_state(&[("coord1", Role::Coordinator)]);
         let coord1 = a("coord1");
         apply_ok(&mut state, &register(&coord1, Role::Coordinator));
         let epoch = state.roster_epoch.as_ref().unwrap().clone();
         let genesis = seed_merge_engine_genesis(&mut state);
         let mut data = merge_engine_activated(&genesis);
-        data.merge_engine_version = short("0.0.1");
-        let env = Envelope::new(
+        data.merge_engine_version = short("2.99.0-from-a-host-this-build-never-heard-of");
+        let activation = Envelope::new(
             &coord1,
             1,
             complete_frontier(&epoch),
             &EventData::MergeEngineActivated(data),
             [],
         );
-        let err = apply_event(&mut state, &env).unwrap_err();
+        // An ordinary, entirely unrelated event published afterwards: the
+        // outage was that *everything* after such an event became
+        // unreachable, not just merging.
+        let after = Envelope::new(
+            &coord1,
+            2,
+            complete_frontier(&epoch),
+            &EventData::AgentStatus(AgentStatusEvent {
+                status: LifecycleStatus::Active,
+                note: text("still here"),
+                product_branch: None,
+                product_commit: None,
+            }),
+            [],
+        );
+
+        let mut base = empty_state(&[("coord1", Role::Coordinator)]);
+        apply_ok(&mut base, &register(&coord1, Role::Coordinator));
+        seed_merge_engine_genesis(&mut base);
+        let replayed = reduce_onto(base, &[activation.clone(), after.clone()])
+            .expect("a bus is not allowed to become unreadable because of a recorded version");
         assert!(
-            err.to_string().contains("unsupported merge_engine_version"),
-            "{err}"
+            replayed.events.contains_key(&after.id),
+            "the event after the activation must still be reachable"
+        );
+        assert_eq!(
+            replayed.merge_engine_info.get(&activation.id),
+            Some(&(
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                short("2.99.0-from-a-host-this-build-never-heard-of")
+            ))
         );
     }
 
@@ -8146,7 +8245,7 @@ mod tests {
             .or_insert_with(|| {
                 (
                     short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                    short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                    short(FOREIGN_ENGINE_VERSION),
                 )
             });
         state.current_merge_engine_epoch.get_or_insert(engine_epoch);
@@ -9675,7 +9774,7 @@ mod tests {
             engine_epoch.clone(),
             (
                 short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                short(FOREIGN_ENGINE_VERSION),
             ),
         );
         state.current_merge_engine_epoch = Some(engine_epoch);
@@ -10624,7 +10723,7 @@ mod tests {
                 engine_epoch.clone(),
                 (
                     short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                    short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                    short(FOREIGN_ENGINE_VERSION),
                 ),
             );
             state.current_merge_engine_epoch = Some(engine_epoch.clone());
@@ -11615,7 +11714,7 @@ mod tests {
                 .or_insert_with(|| {
                     (
                         short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                        short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+                        short(FOREIGN_ENGINE_VERSION),
                     )
                 });
             state

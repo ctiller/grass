@@ -188,14 +188,14 @@ theorem lookup_erase_ne (m : FiniteMap K V) {key other : K} (h : other ≠ key) 
   simp [lookup, erase, findValue_eraseKey_ne h]
 
 /-- The combined framing law, in the shape memory proofs actually apply it. -/
-theorem lookup_insert (m : FiniteMap K V) (key other : K) (value : V) :
+@[simp] theorem lookup_insert (m : FiniteMap K V) (key other : K) (value : V) :
     (m.insert key value).lookup other =
       if other = key then some value else m.lookup other := by
   by_cases h : other = key
   · subst h; simp
   · simp [lookup_insert_ne m h, h]
 
-theorem lookup_erase (m : FiniteMap K V) (key other : K) :
+@[simp] theorem lookup_erase (m : FiniteMap K V) (key other : K) :
     (m.erase key).lookup other = if other = key then none else m.lookup other := by
   by_cases h : other = key
   · subst h; simp

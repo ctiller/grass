@@ -63,6 +63,13 @@ lake build
 pwsh ./audit-trust.ps1
 ```
 
+The PowerShell checks support both PowerShell 7 and Windows PowerShell 5.1.
+On a Windows host without `pwsh`, run the same trust check with:
+
+```powershell
+powershell.exe -NoProfile -File .\audit-trust.ps1
+```
+
 The trust script generates a temporary audit import over every library and test
 module. Its Lean command unfolds even irreducible result aliases to discover
 concrete `VerifiedProgram` producers and audits every declaration originating
@@ -82,6 +89,13 @@ authored Lean views remain exact:
 ```powershell
 pwsh ./check-spike-sources.ps1
 pwsh ./check-doc-links.ps1
+```
+
+The Windows PowerShell 5.1 equivalents are:
+
+```powershell
+powershell.exe -NoProfile -File .\check-spike-sources.ps1
+powershell.exe -NoProfile -File .\check-doc-links.ps1
 ```
 
 The last two commands are corpus consistency checks, not compilation or proof
