@@ -166,6 +166,38 @@ than this draft's base `97d9a9bd`; inspect its captured contract/view with
 `git show ea34b67b:Grass/Console/Contract.lean`. Those branch locations help review
 the proposal; they do not claim the public frontend migration is complete.
 
+## Accepted shared returning-call construction
+
+Status: accepted refactor direction reported by architecture, agreed with spikes
+and Windows on 2026-09-09 in response to the user's reuse requirement.
+Implementation is pending the certificate-root Sol implementer and Windows;
+the module names below describe their intended ownership, not delivered code.
+
+The shared returning-call construction is accepted only when **both
+GetStdHandle and WriteFile consume it now**. Reuse by the second API is part of
+this change, not deferred cleanup. A second independent return/home producer
+does not satisfy this direction.
+
+| Shared boundary | Owner and intended consumer connection |
+|---|---|
+| `CallEntry.lean` | Certificate-root Sol owns the generic fixed CALL policy and reached-state conversion |
+| `ReturnHome.lean` | Certificate-root Sol owns the shared return/home plan and checked producer from an actual CALL; both returning APIs consume this producer |
+| WriteFile extension and producer | Windows retains WriteFile-specific requirements and invokes the shared producer rather than reproducing its return/home construction |
+| Existing public entry points | Preserve consumers through aliases or adapters onto the shared implementation |
+
+This shares construction machinery, not native API semantics. WriteFile's
+buffer, count slot, fifth argument and publication remain API-specific;
+ExitProcess remains nonreturning. Shared initialized-return vocabulary and
+constants move to a lower dependency layer to avoid cycles. Runtime frame
+projection stays downstream in `CallRuntime`; `ReturnHome` must not import
+`CallRuntime`. If `Argument`/`Resolved` extraction is needed, extract the
+existing representation once instead of adding a duplicate.
+
+Mechanical factoring of call-protocol entry is a subsequent bounded step,
+not a prerequisite to this shared producer. Spikes owns acceptance and Windows
+and root own the implementation; this note records their agreed boundary
+without claiming that either API has already migrated.
+
 ## Terminal frontier decision
 
 The owned Hello requirement includes terminal status, and the standard
