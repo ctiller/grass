@@ -130,6 +130,133 @@ theorem FormatSemantics.invalid_iff
     exact semantics.invalidNoCompletion invalid
   · exact semantics.invalidComplete
 
+/-! ## Canonical semantics for deterministic prefix languages -/
+
+/-- A finite selected completion exists exactly when some numeric suffix width
+admits one. This is the bridge used to choose the semantic minimum. -/
+theorem hasSelectedCompletion_iff_exists_count {α : Type}
+    (selected : Std.Logical.ByteArray → α → Std.Logical.ByteArray → Prop)
+    (input : Std.Logical.ByteArray) :
+    HasSelectedCompletion selected input ↔
+      ∃ count, CompletesAfter selected input count := by
+  constructor
+  · rintro ⟨suffix, value, rest, completed⟩
+    exact ⟨suffix.length, suffix, value, rest, rfl, completed⟩
+  · rintro ⟨count, suffix, value, rest, _length, completed⟩
+    exact ⟨suffix, value, rest, completed⟩
+
+/-- Every inhabited predicate on natural numbers has a least inhabitant. -/
+theorem exists_least_nat {predicate : Nat → Prop}
+    (inhabited : ∃ count, predicate count) :
+    ∃ least, predicate least ∧
+      ∀ candidate, predicate candidate → least ≤ candidate := by
+  rcases inhabited with ⟨witness, witnessValid⟩
+  induction witness using Nat.strongRecOn with
+  | ind witness inductionHypothesis =>
+      by_cases lower : ∃ candidate, candidate < witness ∧ predicate candidate
+      · rcases lower with ⟨candidate, candidateLower, candidateValid⟩
+        exact inductionHypothesis candidate candidateLower candidateValid
+      · refine ⟨witness, witnessValid, ?_⟩
+        intro candidate candidateValid
+        apply Nat.le_of_not_gt
+        intro candidateLower
+        exact lower ⟨candidate, candidateLower, candidateValid⟩
+
+/-- Least number of appended bytes reaching a selected result, or zero when
+there is no finite completion. -/
+noncomputable def minimumCompletionCount {α : Type}
+    (selected : Std.Logical.ByteArray → α → Std.Logical.ByteArray → Prop)
+    (input : Std.Logical.ByteArray) : Nat := by
+  classical
+  exact if completed : HasSelectedCompletion selected input then
+    Classical.choose (exists_least_nat
+      ((hasSelectedCompletion_iff_exists_count selected input).mp completed))
+  else 0
+
+/-- When a completion exists, `minimumCompletionCount` itself is attainable. -/
+theorem minimumCompletionCount_spec {α : Type}
+    (selected : Std.Logical.ByteArray → α → Std.Logical.ByteArray → Prop)
+    (input : Std.Logical.ByteArray)
+    (completed : HasSelectedCompletion selected input) :
+    CompletesAfter selected input (minimumCompletionCount selected input) := by
+  classical
+  unfold minimumCompletionCount
+  rw [dif_pos completed]
+  exact (Classical.choose_spec (exists_least_nat
+    ((hasSelectedCompletion_iff_exists_count selected input).mp completed))).1
+
+/-- No attainable completion uses fewer bytes than the semantic minimum. -/
+theorem minimumCompletionCount_le {α : Type}
+    (selected : Std.Logical.ByteArray → α → Std.Logical.ByteArray → Prop)
+    (input : Std.Logical.ByteArray)
+    (completed : HasSelectedCompletion selected input)
+    {candidate : Nat} (candidateCompleted : CompletesAfter selected input candidate) :
+    minimumCompletionCount selected input ≤ candidate := by
+  classical
+  unfold minimumCompletionCount
+  rw [dif_pos completed]
+  exact (Classical.choose_spec (exists_least_nat
+    ((hasSelectedCompletion_iff_exists_count selected input).mp completed))).2
+      candidate candidateCompleted
+
+/-- Every deterministic prefix language has canonical selection semantics:
+current derivations are selected directly, repairable inputs carry the least
+completion width, and prefixes with no finite completion are malformed. -/
+noncomputable def deterministicPrefixSemantics {α : Type} (format : Format α)
+    (deterministic : ∀ {input value₁ rest₁ value₂ rest₂},
+      Derives format input value₁ rest₁ →
+      Derives format input value₂ rest₂ →
+      value₁ = value₂ ∧ rest₁ = rest₂) :
+    FormatSemantics format where
+  selectedDerivation input value rest := Derives format input value rest
+  selectionPolicy _ _ _ := True
+  repairableIncompletePrefix input hint :=
+    ¬HasSelection (Derives format) input ∧
+      HasSelectedCompletion (Derives format) input ∧
+      hint = some (minimumCompletionCount (Derives format) input)
+  irrecoverablyInvalidPrefix input errorClass :=
+    ¬HasSelectedCompletion (Derives format) input ∧
+      errorClass = .malformed
+  selectedIff := by simp
+  selectedComplete := by
+    rintro input ⟨value, rest, derivation⟩
+    exact ⟨value, rest, derivation⟩
+  selectedDeterministic := by
+    intro input value₁ rest₁ value₂ rest₂ first second
+    exact deterministic first second
+  repairableNoSelection := by
+    rintro input hint ⟨noSelection, _completion, _hint⟩
+    exact noSelection
+  repairableHasCompletion := by
+    rintro input hint ⟨_noSelection, completion, _hint⟩
+    exact completion
+  repairableHintExact := by
+    rintro input count ⟨_noSelection, completion, hint⟩
+    injection hint with countEq
+    subst count
+    exact minimumCompletionCount_spec (Derives format) input completion
+  repairableHintMinimal := by
+    rintro input count ⟨_noSelection, completion, hint⟩ candidate candidateDone
+    injection hint with countEq
+    subst count
+    exact minimumCompletionCount_le (Derives format) input completion candidateDone
+  repairableHintUnique := by
+    rintro input first second ⟨_, _, rfl⟩ ⟨_, _, rfl⟩
+    rfl
+  repairableComplete := by
+    intro input noSelection completion
+    exact ⟨some (minimumCompletionCount (Derives format) input),
+      noSelection, completion, rfl⟩
+  invalidNoCompletion := by
+    rintro input errorClass ⟨noCompletion, _class⟩
+    exact noCompletion
+  invalidClassUnique := by
+    rintro input first second ⟨_, rfl⟩ ⟨_, rfl⟩
+    rfl
+  invalidComplete := by
+    intro input noCompletion
+    exact ⟨.malformed, noCompletion, rfl⟩
+
 /-- A total parser implements all four directions required by `docs/GRAMMAR.md`:
 success is sound and complete for the selected derivation, and both non-success
 classifications are exact biconditionals. -/

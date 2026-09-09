@@ -375,6 +375,54 @@ preserves every following suffix. -/
     readGobjSection (writeGobjSection entry) = .done entry Vec.empty := by
   simpa using readGobjSection_write_append entry Vec.empty
 
+/-- The independent section-entry language has one value and suffix for each
+input. -/
+theorem gobjSection_derives_deterministic
+    {input : Std.Logical.ByteArray} {firstValue secondValue : GobjSection}
+    {firstRest secondRest : Std.Logical.ByteArray}
+    (first : Derives gobjSectionFormat input firstValue firstRest)
+    (second : Derives gobjSectionFormat input secondValue secondRest) :
+    firstValue = secondValue ∧ firstRest = secondRest := by
+  have firstParsed :=
+    (readGobjSection_done_iff input firstValue firstRest).mpr first
+  have secondParsed :=
+    (readGobjSection_done_iff input secondValue secondRest).mpr second
+  rw [firstParsed] at secondParsed
+  injection secondParsed with valueEq restEq
+  exact ⟨valueEq, restEq⟩
+
+/-- Every successful section parse consumes its complete nonempty canonical
+entry prefix and returns precisely the remaining suffix. -/
+theorem readGobjSection_success_progress {input : Std.Logical.ByteArray}
+    {entry : GobjSection} {rest : Std.Logical.ByteArray}
+    (parsed : readGobjSection input = .done entry rest) :
+    ∃ consumed, input = consumed ++ rest ∧ 0 < consumed.length := by
+  have canonical := derives_gobjSection_iff.mp
+    ((readGobjSection_done_iff input entry rest).mp parsed)
+  refine ⟨writeGobjSection entry, canonical, ?_⟩
+  simp [writeGobjSection, writeByte]
+  omega
+
+/-- Canonical deterministic semantics for the `.gobj` section-entry
+language. -/
+noncomputable def gobjSectionSemantics :
+    FormatSemantics gobjSectionFormat :=
+  deterministicPrefixSemantics gobjSectionFormat
+    gobjSection_derives_deterministic
+
+/-- The section writer realizes the independently defined deterministic entry
+semantics. -/
+theorem writeGobjSection_realizes :
+    WriterRealizes gobjSectionSemantics writeGobjSection := by
+  constructor
+  · intro entry
+    simpa using (derives_gobjSection_iff (entry := entry)
+      (rest := Vec.empty)).mpr (by simp)
+  · intro entry
+    change Derives gobjSectionFormat (writeGobjSection entry) entry Vec.empty
+    simpa using (derives_gobjSection_iff (entry := entry)
+      (rest := Vec.empty)).mpr (by simp)
+
 /-- Serialize section entries consecutively in their canonical source order. -/
 def writeGobjSectionList : List GobjSection → Std.Logical.ByteArray
   | [] => Vec.empty

@@ -470,6 +470,31 @@ theorem readGobj_done_iff (input : Std.Logical.ByteArray)
     simp only
     rw [readU32LengthPrefixedBytes_write_append]
 
+/-- The independent payload language has one value and suffix for each input. -/
+theorem gobjPayload_derives_deterministic
+    {input : Std.Logical.ByteArray} {firstValue secondValue : GobjPayload}
+    {firstRest secondRest : Std.Logical.ByteArray}
+    (first : Derives gobjPayloadFormat input firstValue firstRest)
+    (second : Derives gobjPayloadFormat input secondValue secondRest) :
+    firstValue = secondValue ∧ firstRest = secondRest := by
+  have firstParsed := (readGobj_done_iff input firstValue firstRest).mpr first
+  have secondParsed := (readGobj_done_iff input secondValue secondRest).mpr second
+  rw [firstParsed] at secondParsed
+  injection secondParsed with valueEq restEq
+  exact ⟨valueEq, restEq⟩
+
+/-- Every successful payload parse consumes its complete nonempty canonical
+envelope prefix and returns precisely the remaining suffix. -/
+theorem readGobj_success_progress {input : Std.Logical.ByteArray}
+    {payload : GobjPayload} {rest : Std.Logical.ByteArray}
+    (parsed : readGobj input = .done payload rest) :
+    ∃ consumed, input = consumed ++ rest ∧ 0 < consumed.length := by
+  have canonical := derives_gobjPayload_iff.mp
+    ((readGobj_done_iff input payload rest).mp parsed)
+  refine ⟨writeGobj payload, canonical, ?_⟩
+  simp [writeGobj]
+  omega
+
 /-- `length_writeGobj` gives the exact envelope and framed-body byte width. -/
 @[simp] theorem length_writeGobj (payload : GobjPayload) :
     (writeGobj payload).length =
@@ -509,5 +534,24 @@ every following suffix. -/
 @[simp] theorem readGobj_write (payload : GobjPayload) :
     readGobj (writeGobj payload) = .done payload Vec.empty := by
   simpa using readGobj_write_append payload Vec.empty
+
+/-- Canonical deterministic semantics for the `.gobj` envelope language. -/
+noncomputable def gobjPayloadSemantics :
+    FormatSemantics gobjPayloadFormat :=
+  deterministicPrefixSemantics gobjPayloadFormat
+    gobjPayload_derives_deterministic
+
+/-- The `.gobj` writer realizes the independently defined deterministic
+payload semantics. -/
+theorem writeGobj_realizes :
+    WriterRealizes gobjPayloadSemantics writeGobj := by
+  constructor
+  · intro payload
+    simpa using (derives_gobjPayload_iff (payload := payload)
+      (rest := Vec.empty)).mpr (by simp)
+  · intro payload
+    change Derives gobjPayloadFormat (writeGobj payload) payload Vec.empty
+    simpa using (derives_gobjPayload_iff (payload := payload)
+      (rest := Vec.empty)).mpr (by simp)
 
 end Grass.Artifact.Binary.Gobj

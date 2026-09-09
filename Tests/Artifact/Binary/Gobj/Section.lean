@@ -44,6 +44,9 @@ example : Derives gobjSectionFormat (writeGobjSection entry ++ suffix)
     entry suffix := by
   exact derives_gobjSection_iff.mpr rfl
 
+example : Derives gobjSectionFormat (writeGobjSection entry) entry Vec.empty := by
+  exact writeGobjSection_realizes.sound entry
+
 example (input rest : Std.Logical.ByteArray) (value : GobjSection) :
     readGobjSection input = .done value rest ↔
       Derives gobjSectionFormat input value rest := by

@@ -39,6 +39,9 @@ example : Derives gobjPayloadFormat (writeGobj payload ++ suffix)
     payload suffix := by
   exact derives_gobjPayload_iff.mpr rfl
 
+example : Derives gobjPayloadFormat (writeGobj payload) payload Vec.empty := by
+  exact writeGobj_realizes.sound payload
+
 example (input rest : Std.Logical.ByteArray) (value : GobjPayload) :
     readGobj input = .done value rest ↔
       Derives gobjPayloadFormat input value rest := by
