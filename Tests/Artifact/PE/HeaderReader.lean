@@ -9,7 +9,17 @@ private def suffix : Std.Logical.ByteArray := Vec.fromList [0xaa, 0xbb]
 example : takeHeaderPrefix (writeHeaderPrefix 3 ++ suffix) = .done 3 suffix := by
   simp
 
-example : takeHeaderPrefix (Vec.replicate 80 0) = .needMore (some 8) := by
+example : takeHeaderPrefix (writeHeaderPrefix 4 |>.take 80) = .needMore (some 8) := by
+  rfl
+
+example : takeHeaderPrefix (Vec.fromList [0]) =
+    .invalid (.malformed "impossible PE header prefix") := by
+  rfl
+
+private def arbitraryCountPrefix : Std.Logical.ByteArray :=
+  writeHeaderPrefixLeading ++ Vec.fromList [0xaa]
+
+example : takeHeaderPrefix arbitraryCountPrefix = .needMore (some 17) := by
   rfl
 
 private def badMagic : Std.Logical.ByteArray :=

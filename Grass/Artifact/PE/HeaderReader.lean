@@ -37,6 +37,18 @@ seventy-byte fixed leading region. -/
     (u := writeLittleEndian (count := 2) sectionCount) (n := 2)
     countLength writeHeaderPrefixTrailing
 
+/-- Decide whether a short byte sequence is the prefix of some canonical
+header. The two section-count bytes are unconstrained; bytes before and after
+them must agree with the fixed writer regions. -/
+def headerPrefixCompatible (input : Std.Logical.ByteArray) : Bool :=
+  if input.length ≤ 70 then
+    decide (input = writeHeaderPrefixLeading.take input.length)
+  else if input.length ≤ 72 then
+    decide (input.take 70 = writeHeaderPrefixLeading)
+  else
+    decide (input.take 70 = writeHeaderPrefixLeading) &&
+      decide (input.drop 72 = writeHeaderPrefixTrailing.take (input.length - 72))
+
 /-- Read the canonical prefix and recover its section count. -/
 def takeHeaderPrefix (input : Std.Logical.ByteArray) : ParseResult (BitVec 16) :=
   if _enough : headerPrefixSize ≤ input.length then
@@ -48,7 +60,9 @@ def takeHeaderPrefix (input : Std.Logical.ByteArray) : ParseResult (BitVec 16) :
           .done sectionCount (input.drop headerPrefixSize)
         else .invalid (.malformed "noncanonical PE header prefix")
     | _ => .invalid (.malformed "unreadable PE section count")
-  else .needMore (some (headerPrefixSize - input.length))
+  else if headerPrefixCompatible input then
+    .needMore (some (headerPrefixSize - input.length))
+  else .invalid (.malformed "impossible PE header prefix")
 
 /-- A canonical written prefix is read exactly and leaves an arbitrary suffix
 untouched. -/
