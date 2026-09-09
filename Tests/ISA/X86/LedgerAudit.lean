@@ -252,6 +252,7 @@ acquiring a citation.
 -- Three completed-object helpers transport proven memory equality or compose
 -- existing spatial checks; they do not assert a loader or source interpretation.
 -- Main adds a reviewed reindexing helper for continuation suffixes.
+def notBehaviourBaseline : Nat := 200
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -390,8 +391,6 @@ Declarations reviewed and found to carry no claim about a processor.
 A permanent claim, one line of reasoning each. Anything here is asserting that a
 reader could not be misled by its absence from the trust ledger.
 -/
-def notBehaviourBaseline : Nat := 200
-
 def notBehaviour : List Name :=
   [
     `Grass.Platform.Win32.InitializedRegion.allocationRecord,
