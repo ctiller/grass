@@ -162,6 +162,42 @@ def duplicateBlock : Graph Nat Terminal where
 
 example : ¬ duplicateBlock.WellFormed := by decide
 
+/-- Two distinct blocks may alias the same block identity while each keeps a
+locally unique exit family.  This isolates the global `blockIds.Nodup` boundary
+used by edge-lookup canonicity. -/
+def aliasedEntryBlock : Block Nat Terminal := {
+  entryBlock with outgoing := [
+    ⟨exitTag "normal", .terminal .returned⟩,
+    ⟨exitTag "failed", .terminal .failed⟩
+  ]
+}
+
+def duplicateBlockIdEdges : Graph Nat Terminal where
+  entry := blockId "entry"
+  blocks := [entryBlock, aliasedEntryBlock, returnBlock]
+
+def duplicateBlockDirectLocated : LocatedEdge Terminal :=
+  ⟨blockId "entry", ⟨exitTag "normal", .block (blockId "return")⟩⟩
+
+def duplicateBlockTerminalLocated : LocatedEdge Terminal :=
+  ⟨blockId "entry", ⟨exitTag "normal", .terminal .returned⟩⟩
+
+example : ∀ block ∈ duplicateBlockIdEdges.blocks,
+    (Graph.outgoingTags block).Nodup := by decide
+
+example : ¬ duplicateBlockIdEdges.blockIds.Nodup := by decide
+example : ¬ duplicateBlockIdEdges.WellFormed := by decide
+
+example : duplicateBlockDirectLocated ∈ duplicateBlockIdEdges.locatedEdges ∧
+    duplicateBlockTerminalLocated ∈ duplicateBlockIdEdges.locatedEdges ∧
+    duplicateBlockDirectLocated.key = duplicateBlockTerminalLocated.key := by
+  decide
+
+example : duplicateBlockDirectLocated ≠ duplicateBlockTerminalLocated := by decide
+
+example : duplicateBlockIdEdges.findEdge?
+    duplicateBlockDirectLocated.key = some duplicateBlockDirectLocated := by rfl
+
 def missingEntry : Graph Nat Terminal where
   entry := blockId "missing"
   blocks := [entryBlock, returnBlock]
