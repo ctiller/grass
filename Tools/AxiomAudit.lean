@@ -63,6 +63,7 @@ import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
 import Grass.ISA.X86.Execution.CallNormal
 import Grass.ISA.X86.Execution.CallFactory
+import Grass.ISA.X86.Execution.CheckedStep
 import Grass.ISA.X86.Execution.CheckedChoice
 import Grass.ISA.X86.Execution.ReturnSlotRead
 import Grass.ISA.X86.Execution.ReturnSlotFactory
@@ -115,6 +116,8 @@ import Grass.Platform.Win32.WriteFileCall
 import Grass.Platform.Win32.WriteFileCallPreservation
 import Grass.Platform.Win32.WriteFileRuntime
 import Grass.Platform.Win32.WriteFileService
+import Grass.Platform.Win32.WriteFileRuntimeLinked
+import Grass.Platform.Win32.ApiDispatch
 import Grass.Refinement.Console.WriteFilePolicy
 import Grass.Artifact.PE.ExceptionBinding
 import Grass.ISA.X86.EndianBridge

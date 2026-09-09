@@ -38,7 +38,8 @@ private def memory (encoding : InsnEncoding) : MemoryState :=
     (chainedAlloc, rec stackBacking .mappedFile .readWrite 0x4000)]).getD .empty
 private def before (encoding : InsnEncoding) : State :=
   { machine := .initial (memory encoding)
-    gpr := fun r => if r = .rsp then 0x4000 else 0, rip := 0x1000, rflags := 0x202 }
+    gpr := fun r => if r = .rsp then 0x4000 else if r = .rcx then 0xFEDCBA9876543210 else 0
+    rip := 0x1000, rflags := 0x202 }
 private def cpu : CpuAccessPolicy :=
   { operationPolicy := policy, context := thread₀, contextKind := .thread
     cause := ⟨⟨"memory-move"⟩⟩, code := bufferProv, stack := chainedProv

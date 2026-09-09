@@ -40,6 +40,7 @@ import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
 import Grass.ISA.X86.Execution.CallNormal
 import Grass.ISA.X86.Execution.CallFactory
+import Grass.ISA.X86.Execution.CheckedStep
 import Grass.ISA.X86.Execution.CheckedChoice
 import Grass.ISA.X86.Execution.ReturnSlotRead
 import Grass.ISA.X86.Execution.ReturnSlotFactory
@@ -80,6 +81,8 @@ import Grass.Platform.Win32.WriteFileCallPreservation
 import Grass.Platform.Win32.WriteFileRuntime
 import Grass.Platform.Win32.WriteFileService
 import Grass.Platform.Win32.WriteFileServiceContinuation
+import Grass.Platform.Win32.WriteFileRuntimeLinked
+import Grass.Platform.Win32.ApiDispatch
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.Encoding
 import Grass.Artifact.PE.LayoutBinding
@@ -201,7 +204,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.PushFactory,
    `Grass.ISA.X86.Execution.CallNormal,
    `Grass.ISA.X86.Execution.CallFactory, `Grass.ISA.X86.Execution.ReturnSlotRead,
-   `Grass.ISA.X86.Execution.CheckedChoice,
+   `Grass.ISA.X86.Execution.CheckedStep, `Grass.ISA.X86.Execution.CheckedChoice,
    `Grass.ISA.X86.Execution.ReturnSlotFactory,
    `Grass.ISA.X86.LinearAddress,
    `Grass.ISA.X86.Execution.StackInstruction, `Grass.ISA.X86.Execution.CompletionFlags,
@@ -235,6 +238,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileRuntime,
    `Grass.Platform.Win32.WriteFileService,
    `Grass.Platform.Win32.WriteFileServiceContinuation,
+   `Grass.Platform.Win32.WriteFileRuntimeLinked,
+   `Grass.Platform.Win32.ApiDispatch,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
@@ -355,9 +360,9 @@ acquiring a citation.
 -- Fixed dispatch and access factories add thirty checked structural helpers.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
--- Runtime and execution adapters retain checked receipts and graph agreement.
--- Two continuation adapters transport supplied evidence.
-def notBehaviourBaseline : Nat := 340
+-- Runtime, import and checked-evaluator adapters retain actual evidence.
+-- Certificate encoding adds one reviewed structural adapter.
+def notBehaviourBaseline : Nat := 360
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -506,6 +511,14 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.ExitProcess.entryHandoff?,
     `Grass.Platform.Win32.ExitProcess.EntryHandoff.after,
     `Grass.Platform.Win32.ExitProcess.EntryHandoff.initRaw,
+    -- Computed logical import bindings, not native DLL/export adequacy.
+    `Grass.Platform.Win32.ApiDispatch.requestApi,
+    `Grass.Platform.Win32.ApiDispatch.apiForBytes?,
+    `Grass.Platform.Win32.ApiDispatch.candidateAt?,
+    `Grass.Platform.Win32.ApiDispatch.candidates,
+    `Grass.Platform.Win32.ApiDispatch.select?,
+    `Grass.Platform.Win32.ApiDispatch.Binding.MatchesRequest,
+    `Grass.Platform.Win32.ApiDispatch.ofCall?,
     -- Actual receipt projections and computed runtime frontier updates.
     `Grass.Platform.Win32.WriteFile.CallHandoff.runtime,
     `Grass.Platform.Win32.WriteFile.CallHandoff.rawAfter,
@@ -796,6 +809,21 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.CallFactory.Success.result,
     `Grass.ISA.X86.Execution.CallFactory.reachedAfterAccess,
     `Grass.ISA.X86.Execution.CallFactory.call,
+    -- The graph of checked constructors supplies no new physical adequacy claim.
+    `Grass.ISA.X86.Execution.CheckedExecution.Success.outcome,
+    `Grass.ISA.X86.Execution.CheckedExecution.accessReason,
+    `Grass.ISA.X86.Execution.CheckedExecution.fetchFailure,
+    `Grass.ISA.X86.Execution.CheckedExecution.computationFailure,
+    `Grass.ISA.X86.Execution.CheckedExecution.pushFailure,
+    `Grass.ISA.X86.Execution.CheckedExecution.callFailure,
+    `Grass.ISA.X86.Execution.CheckedExecution.bodyFailure,
+    `Grass.ISA.X86.Execution.CheckedExecution.memoryMoveFailure,
+    `Grass.ISA.X86.Execution.CheckedExecution.normal,
+    `Grass.ISA.X86.Execution.CheckedExecution.Failure.outcome,
+    `Grass.ISA.X86.Execution.CheckedExecution.resultOutcome,
+    `Grass.ISA.X86.Execution.CheckedExecution.evaluate,
+    `Grass.ISA.X86.Execution.CheckedExecution.CheckedStep,
+
     `Grass.ISA.X86.Execution.ReturnSlotFactory.readPolicy,
     `Grass.ISA.X86.Execution.ReturnSlotFactory.accessReached,
     `Grass.ISA.X86.Execution.ReturnSlotFactory.read,

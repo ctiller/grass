@@ -52,7 +52,8 @@ private def identitiesFrom : Nat → FreshSupply AllocTag → FreshSupply Storag
     { allocation := allocations.fresh.1, storage := storages.fresh.1, epoch } ::
       identitiesFrom count allocations.fresh.2 storages.fresh.2
 
-private def inputsFor (plan : PE.ImagePlan) (targets : ImportTargets) : EntryInputs :=
+/-- Shared initialized stack and identity inputs for bounded loader consumers. -/
+def inputsFor (plan : PE.ImagePlan) (targets : ImportTargets) : EntryInputs :=
   { environment, thread, independentContext := peer
     identities := identitiesFrom (plan.layout.placed.length + 1)
       allocationSupply.fresh.2 storageSupply.fresh.2

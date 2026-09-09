@@ -63,4 +63,38 @@ theorem service_cannot_acquire_stdout {image : ImageInput} {inputs : EntryInputs
   · cases kind
   · cases EventKind.endpoint.inj kind
 
+/-- A completed CALL cannot be accepted by the ordinary completed CPU case;
+its actual receipt must be retained by a combined API-entry case. -/
+theorem call_is_not_plain_completion
+    {policy : Grass.ISA.X86.Execution.CpuAccessPolicy}
+    {start finish : Grass.ISA.X86.Execution.State}
+    (callResult : Grass.ISA.X86.Execution.CallFactory.Success policy start) :
+    (Grass.ISA.X86.Execution.CheckedExecution.Success.call callResult).outcome ≠
+      .progressed finish .completed := by
+  intro equal
+  cases equal
+
+/-- Even a failed protocol view can retain an evaluator's uncovered CPU prefix.
+This is a conditional checker diagnostic, not a physical page-fault transfer. -/
+theorem uncovered_keeps_failed_view {image : ImageInput} {inputs : EntryInputs}
+    {loaded : LoadedImage image inputs} {realization : WriteFile.Realization}
+    {raw : RawState}
+    {policy : Grass.ISA.X86.Execution.CpuAccessPolicy}
+    (selected : Cpu.policy? loaded raw.machine = some policy)
+    (control : raw.control = .caller policy.context) (bad : raw.checked? = none) :
+    let event : Event := ⟨[], [], .outsideProfile (.cpu (.faultTransfer .pageFault))⟩
+    RawStep loaded realization [] raw (.cpu (.fault .pageFault)) event
+      (raw.withMachine raw.machine) [] ∧
+    (raw.withMachine raw.machine).checked? = none ∧
+    (raw.withMachine raw.machine).calls = raw.calls := by
+  refine ⟨?_, ?_, rfl⟩
+  · apply RawStep.cpuUncovered control selected
+    · intro flags impossible
+      cases impossible
+    · rfl
+    · refine ⟨?_, empty_graph_valid _, empty_graph_valid _, Graph.extends_refl []⟩
+      constructor <;> simp [RawState.withMachine]
+    · rfl
+  · exact bad
+
 end Grass.Tests.Win32RawStep
