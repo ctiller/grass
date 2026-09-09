@@ -111,7 +111,7 @@ structure StoreNormal (instruction : Instruction) (encoded : Instruction.Encodin
   width : access.descriptor.range.size = instruction.width
   payload : ByteSeq
   payloadExact : instruction.payload? = some payload
-  supplied : fetch.writeData
+  supplied : access.writeData
     (afterFetch.noteContext access.run.context access.run.contextKind) access.descriptor = payload
 
 namespace StoreNormal
@@ -241,8 +241,8 @@ def read {instruction : Instruction} {encoded : Instruction.Encoding instruction
     {before : State} {afterFetch afterData : MachineState}
     (receipt : LoadNormal instruction encoded before afterFetch afterData) :
     ReadValue32 receipt.access.run :=
-  { writeData := receipt.fetch.writeData
-    indeterminate := receipt.fetch.indeterminate
+  { writeData := receipt.access.writeData
+    indeterminate := receipt.access.indeterminate
     memoryOracle := receipt.access.memoryOracle
     reads := by rw [receipt.intent]; rfl
     writes := by rw [receipt.intent]; rfl

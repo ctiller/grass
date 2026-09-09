@@ -135,7 +135,7 @@ structure StoreNormal {frame : SourceFrame.Result} {rootOffset : Nat}
   base : MachineAddress
   placed : access.run.resolved.allocation.base = some base
   rsp : before.gpr .rsp = addressOf base instruction.rspRootOffset
-  supplied : site.fetch.writeData
+  supplied : access.writeData
     (afterFetch.noteContext access.run.context access.run.contextKind) access.descriptor =
       instruction.payload
 
@@ -269,8 +269,8 @@ theorem selected_encoding {frame rootOffset} {source : SourceResolve.Result fram
 def read {frame rootOffset} {source : SourceResolve.Result frame rootOffset}
     {before : State} {afterFetch afterLoad : MachineState}
     (receipt : LoadNormal source before afterFetch afterLoad) : ReadValue32 receipt.access.run :=
-  { writeData := receipt.site.fetch.writeData
-    indeterminate := receipt.site.fetch.indeterminate
+  { writeData := receipt.access.writeData
+    indeterminate := receipt.access.indeterminate
     memoryOracle := receipt.access.memoryOracle
     reads := by rw [receipt.intent]; rfl
     writes := by rw [receipt.intent]; rfl
