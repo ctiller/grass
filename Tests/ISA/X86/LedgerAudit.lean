@@ -269,7 +269,7 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Twelve fixed CPU/ABI obligations, including executable/readable region
 -- selection and explicit Entry structure enrollment.
 -- Six fixed request/stack contracts are newly enrolled; no existing debt moves.
-def owedBaseline : Nat := 306
+def owedBaseline : Nat := 309
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -834,6 +834,9 @@ def owed : List Name :=
     `Grass.Platform.Win32.ReturnHome.homeSpaceBytes,
     `Grass.Platform.Win32.ReturnHome.stackRequests,
     `Grass.Platform.Win32.ReturnHome.StackPlanFactory.derive?,
+    `Grass.Platform.Win32.ReturnHome.StackPlanFactory.deriveLoaded?,
+    `Grass.Platform.Win32.ReturnHome.Plan,
+    `Grass.Platform.Win32.ReturnHome.InitializedReturnQword,
     -- Fixed operational choices and ABI widths require declaration-level
     -- authority; vendor prose links alone do not close the citation ledger.
     `Grass.Platform.Win32.Cpu.accessFaults,
@@ -1156,6 +1159,8 @@ def modeledDeclarations : MetaM (Array Name) := do
     -- rather than letting the generic structure filter hide the obligation.
     -- This exception adds coverage; it exempts no future declaration.
     if n == ``Grass.Platform.Win32.WriteFile.Abi.StackPlan ||
+        n == ``Grass.Platform.Win32.ReturnHome.Plan ||
+        n == ``Grass.Platform.Win32.ReturnHome.InitializedReturnQword ||
         n == ``Grass.Platform.Win32.GetStdHandle.StackPlan ||
         n == ``Grass.Platform.Win32.WriteFile.Abi.InitializedReturnQword ||
         n == ``Grass.Platform.Win32.ApiRequest ||

@@ -8,7 +8,8 @@ example (state : Grass.ISA.X86.Execution.State) :
     selector state = BitVec.setWidth 32 (state.gpr .rcx) := rfl
 
 example (returnSlot homeSlot : Grass.Platform.Win32.WriteFile.Argument) :
-    (stackRequests returnSlot homeSlot).length = 2 := by simp [stackRequests]
+    (stackRequests returnSlot homeSlot).length = 2 := by
+  simp [stackRequests, ReturnHome.stackRequests]
 
 example {image inputs loaded before afterFetch afterRead afterStore displacement receipt agent}
     (handoff : @CallHandoff image inputs loaded before afterFetch afterRead afterStore

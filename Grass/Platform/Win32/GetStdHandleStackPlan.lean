@@ -21,13 +21,13 @@ theorem continuation_exact {callBefore : State}
     plan.continuation = call.fetch.site.fallthroughRip :=
   ReturnHome.StackPlanFactory.continuation_exact success
 
-def deriveLoaded? {image : Loader.ImageInput} {inputs : Loader.EntryInputs}
+abbrev deriveLoaded? {image : Loader.ImageInput} {inputs : Loader.EntryInputs}
     {loaded : Loader.LoadedImage image inputs} {callBefore : State}
     {afterFetch afterRead afterStore : Grass.Memory.MachineState} {displacement : BitVec 32}
     {call : CallNormal callBefore afterFetch afterRead afterStore displacement}
     (binding : WriteFile.CallPolicy loaded call) :
     Except Failure (GetStdHandle.StackPlan call.result) :=
-  derive? binding.policy call
+  ReturnHome.StackPlanFactory.deriveLoaded? binding
 
 theorem loaded_continuation_exact {image : Loader.ImageInput} {inputs : Loader.EntryInputs}
     {loaded : Loader.LoadedImage image inputs} {callBefore : State}
