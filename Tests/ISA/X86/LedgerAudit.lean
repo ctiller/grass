@@ -1,5 +1,6 @@
 import Lean.Elab.Command
 import Grass.ISA.X86.Bytes
+import Grass.ISA.X86.EndianBridge
 import Grass.ISA.X86.BasicInstructions
 import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.ImmediateArithmetic
@@ -100,7 +101,7 @@ The citation machinery itself is not modeled behaviour and is not audited: a
 def auditedModules : List Name :=
   [`Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.BasicInstructions,
-   `Grass.ISA.X86.Rel32,
+   `Grass.ISA.X86.Rel32, `Grass.ISA.X86.EndianBridge,
    `Grass.ISA.X86.ImmediateArithmetic,
    `Grass.ISA.X86.RegisterSemantics, `Grass.ISA.X86.RegisterDecode,
    `Grass.ISA.X86.RegisterLaws,
