@@ -233,7 +233,7 @@ acquiring a citation.
 -- Three new generic definitions derive history events or name selected evidence.
 -- Ten exception helpers traverse, project or compare already selected values.
 -- One helper replaces the memory-machine field after a checked fetch.
-def notBehaviourBaseline : Nat := 197
+def notBehaviourBaseline : Nat := 199
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -509,6 +509,9 @@ def notBehaviour : List Name :=
     -- modeled fetch, dispatch, and MOV receipts.
     `Grass.ISA.X86.Execution.ComputationFactory.MoveSuccess.result,
     `Grass.ISA.X86.Execution.ComputationFactory.move,
+    -- Constructive SUB RSP routing and projection of its already-modeled receipt.
+    `Grass.ISA.X86.Execution.ComputationFactory.SubRspSuccess.result,
+    `Grass.ISA.X86.Execution.ComputationFactory.subRsp,
     -- Fixed PUSH routing constructs the separately modeled PushNormal receipt;
     -- its failure projection retains the actual already-reached machine.
     `Grass.ISA.X86.Execution.PushFactory.push,
