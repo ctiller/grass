@@ -9,6 +9,9 @@ import Grass.Console.Contract
 import Grass.Console.ContractCorrect
 import Grass.Spec.Console
 import Grass.Spec.Resource
+import Grass.Op.Completion
+import Grass.Op.CompletedAccess
+import Grass.Op.ReadCompletion
 import Grass.Semantics.OutputCut
 import Grass.Specification.TextLine
 import Grass.Console.Behavior
