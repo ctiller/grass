@@ -13,6 +13,10 @@ import Grass.Console.Captured
 import Grass.Console.CapturedDemands
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
+import Grass.Console.TargetProjection
+import Grass.Console.CapturedProjection
+import Grass.Refinement.Console.WriteWaitingGap
+import Grass.Refinement.Console.WriteFileProjection
 import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
 import Grass.Assembly.X86ControlFlow
