@@ -80,6 +80,16 @@ instance {Request : Type} (memory : MemoryState) (supply : FreshSupply CallTag)
     (pending.entries.Pairwise (fun left right => left.2.caller ≠ right.2.caller) ∧
       ∀ entry ∈ pending.entries, supply.Issued entry.1 ∧ entry.2.Valid memory))
 
+/-- Candidate protocol bookkeeping separated from the machine it describes.
+`Metadata.pack?_isSome` states the two conditions enforced when packing it.
+Whether `boundaries` is a faithful historical trace remains a caller obligation;
+this record makes no machine-validity or execution claim. -/
+structure Metadata (Request : Type) where
+  callSupply : FreshSupply CallTag
+  grantSupply : FreshSupply GrantTag
+  pending : FiniteMap CallId (Pending Request)
+  boundaries : List Boundary
+
 /-- State for the checked protocol doors. Invariants concern loan bookkeeping,
 not the validity of arbitrary initial machine executions. -/
 structure State (Request : Type) where
@@ -91,6 +101,13 @@ structure State (Request : Type) where
   boundaries : List Boundary
   grantsCovered : GrantSupplyCovers machine.memory grantSupply
   pendingValid : PendingTableValid machine.memory callSupply pending
+
+/-- Extract all candidate bookkeeping data from a checked state. -/
+def State.metadata {Request : Type} (state : State Request) : Metadata Request where
+  callSupply := state.callSupply
+  grantSupply := state.grantSupply
+  pending := state.pending
+  boundaries := state.boundaries
 
 def initial {Request : Type} (machine : MachineState) (supply : FreshSupply GrantTag)
     (covered : GrantSupplyCovers machine.memory supply) : State Request :=
@@ -176,6 +193,55 @@ private theorem checked?_fields {Request : Type} {machine : MachineState}
       exact ⟨rfl, rfl, rfl, rfl, rfl⟩
     · simp at success
   · simp at success
+
+/-- Check candidate metadata against a machine using the existing private checker.
+`Metadata.pack?_isSome` gives its exact acceptance rule. -/
+def Metadata.pack? {Request : Type} (metadata : Metadata Request)
+    (machine : MachineState) : Option (State Request) :=
+  checked? machine metadata.callSupply metadata.grantSupply metadata.pending
+    metadata.boundaries
+
+/-- `State.metadata_pack?` proves that extracting and repacking a checked state
+preserves the complete state record. -/
+theorem State.metadata_pack? {Request : Type} (state : State Request) :
+    state.metadata.pack? state.machine = some state := by
+  unfold Metadata.pack? checked? State.metadata
+  rw [dif_pos state.grantsCovered, dif_pos state.pendingValid]
+
+/-- `Metadata.pack?_fields` proves successful packing preserves both the supplied
+machine and every metadata field; private proof fields add no observable identity. -/
+theorem Metadata.pack?_fields {Request : Type} {metadata : Metadata Request}
+    {machine : MachineState} {next : State Request}
+    (success : metadata.pack? machine = some next) :
+    next.machine = machine ∧ next.metadata = metadata := by
+  have fields := checked?_fields success
+  refine ⟨fields.1, ?_⟩
+  cases metadata
+  simp only [State.metadata] at fields ⊢
+  rcases fields with ⟨_, rfl, rfl, rfl, rfl⟩
+  rfl
+
+/-- Candidate metadata packs exactly when grant coverage and pending-table
+validity both hold for the supplied machine. -/
+theorem Metadata.pack?_isSome {Request : Type} (metadata : Metadata Request)
+    (machine : MachineState) :
+    (metadata.pack? machine).isSome ↔
+      GrantSupplyCovers machine.memory metadata.grantSupply ∧
+      PendingTableValid machine.memory metadata.callSupply metadata.pending := by
+  by_cases covered : GrantSupplyCovers machine.memory metadata.grantSupply <;>
+    by_cases valid : PendingTableValid machine.memory metadata.callSupply metadata.pending <;>
+    simp [Metadata.pack?, checked?, covered, valid]
+
+/-- Packing returns `none` exactly when grant coverage or pending-table validity
+fails. Boundary-history validity is not an additional hidden check. -/
+theorem Metadata.pack?_eq_none {Request : Type} (metadata : Metadata Request)
+    (machine : MachineState) :
+    metadata.pack? machine = none ↔
+      ¬ GrantSupplyCovers machine.memory metadata.grantSupply ∨
+      ¬ PendingTableValid machine.memory metadata.callSupply metadata.pending := by
+  by_cases covered : GrantSupplyCovers machine.memory metadata.grantSupply <;>
+    by_cases valid : PendingTableValid machine.memory metadata.callSupply metadata.pending <;>
+    simp [Metadata.pack?, checked?, covered, valid]
 
 /-- A successful return identifies the exact pending occurrence it consumed. -/
 theorem return?_matches_occurrence {Request : Type} {state next : State Request}

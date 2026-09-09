@@ -37,7 +37,6 @@ Run the repository's current consistency check from its root:
 
 ```bash
 lake build
-lake build Tests
 ./audit-trust.sh
 ./check-source-input.sh
 ./check-spike-sources.sh
@@ -51,7 +50,9 @@ Windows.
 `--test-source-root`, `--declaration`, and `--allowed-axiom` options when a
 focused audit needs to replace one of its default lists.
 
-The Lake commands compile the Lean libraries, and the trust command audits
+`lake build` compiles both `Grass` and `Tests`, the default targets in
+`lakefile.toml`. Use `lake build Tests` for a focused test-library build rather
+than repeating it after an unchanged default build. The trust command audits
 project declarations and named public roots for rejected transitive axioms, then
 rejects unverified `implemented_by` and `extern` replacements in the verified
 runtime dependency closure. Participating module cohorts and persisted non-meta

@@ -1,15 +1,20 @@
 import Lean.Elab.Command
 import Grass.ISA.X86.Bytes
-import Grass.ISA.X86.EndianBridge
 import Grass.ISA.X86.BasicInstructions
 import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.ImmediateArithmetic
 import Grass.ISA.X86.RegisterDecode
 import Grass.ISA.X86.RegisterLaws
+import Grass.ISA.X86.EndianBridge
 import Grass.ISA.X86.Execution.State
 import Grass.ISA.X86.Execution.DecodedSite
 import Grass.ISA.X86.Execution.AccessRun
 import Grass.ISA.X86.Execution.Fetch
+import Grass.ISA.X86.Execution.FetchedEncoding
+import Grass.ISA.X86.Execution.MemoryAccess
+import Grass.ISA.X86.Execution.MemoryWrite
+import Grass.ISA.X86.Execution.ReadValue32
+import Grass.ISA.X86.Execution.MemoryMoveNormal
 import Grass.ISA.X86.Execution.SubRspNormal
 import Grass.ISA.X86.Execution.PushNormal
 import Grass.ISA.X86.Execution.AccessFree
@@ -46,10 +51,26 @@ import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Signatures
 import Grass.Platform.Win32.WriteFile
 import Grass.Platform.Win32.WriteFileNonresponse
+import Grass.Platform.Win32.WriteFileStabilization
 import Grass.Platform.Win32.WriteFileReturn
+import Grass.Platform.Win32.LoaderEntry
+import Grass.Platform.Win32.LoadedAccess
+import Grass.Platform.Win32.LoadedDataAccess
+import Grass.Platform.Win32.CpuVocabulary
+import Grass.Platform.Win32.CpuPolicy
+import Grass.Platform.Win32.ExecutionState
+import Grass.Platform.Win32.WriteFileAbi
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
 import Grass.Artifact.PE.ExceptionBinding
+import Grass.Artifact.PE.Imported
+import Grass.Disasm.StoreAttempt
+import Grass.Disasm.FetchedEntry
+import Grass.Disasm.CompletedViolation
+import Grass.ISA.X86.Execution.StoreCompletion
+import Grass.ISA.X86.Execution.StoreCandidate
+import Grass.Disasm.Entry
+import Grass.Disasm.CallerObject
 
 /-!
 # Ledger coverage gate
@@ -133,12 +154,17 @@ The citation machinery itself is not modeled behaviour and is not audited: a
 def auditedModules : List Name :=
   [`Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.BasicInstructions,
-   `Grass.ISA.X86.Rel32, `Grass.ISA.X86.EndianBridge,
+   `Grass.ISA.X86.Rel32,
    `Grass.ISA.X86.ImmediateArithmetic,
    `Grass.ISA.X86.RegisterSemantics, `Grass.ISA.X86.RegisterDecode,
    `Grass.ISA.X86.RegisterLaws,
+   `Grass.ISA.X86.EndianBridge,
    `Grass.ISA.X86.Execution.State, `Grass.ISA.X86.Execution.DecodedSite,
    `Grass.ISA.X86.Execution.AccessRun, `Grass.ISA.X86.Execution.Fetch,
+   `Grass.ISA.X86.Execution.FetchedEncoding,
+   `Grass.ISA.X86.Execution.MemoryAccess, `Grass.ISA.X86.Execution.MemoryWrite,
+   `Grass.ISA.X86.Execution.ReadValue32,
+   `Grass.ISA.X86.Execution.MemoryMoveNormal,
    `Grass.ISA.X86.Execution.SubRspNormal,
    `Grass.ISA.X86.Execution.PushNormal,
    `Grass.ISA.X86.Execution.AccessFree, `Grass.ISA.X86.Execution.MoveNormal,
@@ -162,7 +188,14 @@ def auditedModules : List Name :=
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
    `Grass.Platform.Win32.Signatures, `Grass.Platform.Win32.WriteFile,
    `Grass.Platform.Win32.WriteFileNonresponse,
+   `Grass.Platform.Win32.WriteFileStabilization,
    `Grass.Platform.Win32.WriteFileResult, `Grass.Platform.Win32.WriteFileReturn,
+   `Grass.Platform.Win32.LoaderImage, `Grass.Platform.Win32.LoaderRegion,
+   `Grass.Platform.Win32.LoaderEntry,
+   `Grass.Platform.Win32.LoadedAccess, `Grass.Platform.Win32.CpuVocabulary,
+   `Grass.Platform.Win32.LoadedDataAccess,
+   `Grass.Platform.Win32.CpuPolicy,
+   `Grass.Platform.Win32.ExecutionState, `Grass.Platform.Win32.WriteFileAbi,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
@@ -172,7 +205,11 @@ def auditedModules : List Name :=
    `Grass.Artifact.PE.PrefixReader, `Grass.Artifact.PE.OptionalReader,
    `Grass.Artifact.PE.SectionReader, `Grass.Artifact.PE.ImageWriter,
    `Grass.Artifact.PE.ImageReader, `Grass.Artifact.PE.ImageRoundTrip,
-   `Grass.Artifact.PE.LayoutInvariance, `Grass.Artifact.PE.LayoutBinding]
+   `Grass.Artifact.PE.LayoutInvariance, `Grass.Artifact.PE.LayoutBinding,
+   `Grass.Artifact.PE.Imported, `Grass.Disasm.StoreAttempt,
+   `Grass.Disasm.Entry, `Grass.Disasm.CallerObject,
+   `Grass.Disasm.FetchedEntry, `Grass.ISA.X86.Execution.StoreCandidate,
+   `Grass.Disasm.CompletedViolation, `Grass.ISA.X86.Execution.StoreCompletion]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -200,13 +237,29 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- PE/COFF adds 71 format-schema, profile, serializer, and reader obligations.
 -- No PE declaration is treated as cited merely because a Lean roundtrip holds.
 -- Matched-return adds raw BOOL width, DWORD observation and result conformance.
+-- Exception tables add 18 schema, flag, serialization and validation obligations.
 -- Seven execution-foundation facts add length/flag/encoding obligations.
 -- No prior debt moves to notBehaviour or becomes cited through these tests.
--- Exception tables add 18 schema, flag, serialization and validation obligations.
 -- The fetched normal SUB RSP constructor adds one instruction-transfer obligation.
+-- Thirteen loader/entry, IAT-width, placement and permission commitments.
+-- Preferred-base model fixtures and a native sample do not discharge citation debt.
 -- The fetched normal register PUSH adds one instruction-transfer obligation.
 -- Normal MOV adds its encoding, effect, flags and architectural result obligations.
-def owedBaseline : Nat := 265
+-- Imported PE field traversal adds readImportedPrefix/readImportedImage and
+-- factors readSignatureAndCoff. Microsoft source is recorded in Imported.lean;
+-- formal subject/anchor enrollment remains explicit debt, not a citation claim.
+-- Imported C7 candidate evidence/check/address/width add four modeled facts.
+-- Decoder/encoder reuse does not discharge their separate external enrollment.
+-- Entry selection adds eight mapping definitions and its contract type.
+-- The vendor URL is provenance; formal ledger anchors remain owed.
+-- Reviewed fetched normal SUB RSP adds one transfer obligation.
+-- Reviewed PUSH/MOV add five instruction-transfer obligations.
+-- The completed-store carrier pins a bounded instruction access contract.
+-- Memory MOV completion adds eight architectural value, operand, width, payload,
+-- encoding, address, and result obligations. No existing debt is reclassified.
+-- Arithmetic, branch, LEA and fixed access dispatch add twenty reviewed obligations.
+-- Twelve fixed CPU/ABI obligations, including executable/readable region selection.
+def owedBaseline : Nat := 318
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -239,8 +292,29 @@ acquiring a citation.
 -- external relation; neither asserts Windows adequacy or physical nonresponse.
 -- Three new generic definitions derive history events or name selected evidence.
 -- Ten exception helpers traverse, project or compare already selected values.
+-- Eight execution helpers represent state or select existing decoded constructors.
 -- One helper replaces the memory-machine field after a checked fetch.
-def notBehaviourBaseline : Nat := 205
+-- One continuation shift reindexes existing committed edges and histories.
+-- Fourteen loader helpers install/compare supplied memory records, scan identity
+-- references, project checked header data, and transform finite byte sequences.
+-- One access-free receipt projects the already completed memory state.
+-- sectionSlicesMatch and checkImportedImage add only exact-data/proof plumbing
+-- over the separately owed external parser; neither defines a platform fact.
+-- Store operand and productionEncoding are projections/delegation to the
+-- separately modeled existing memory operand and encoder, not new ISA rules.
+-- Nine caller-factory definitions construct an explicitly declared synthetic
+-- state via checked memory doors; they assert no recovered allocator behavior.
+-- Reviewed fetch helper replaces only the memory-machine field.
+-- Reviewed AccessFree receipt adds one representation helper.
+-- Three completed-object helpers transport proven memory equality or compose
+-- existing spatial checks; they do not assert a loader or source interpretation.
+-- Main adds a reviewed reindexing helper for continuation suffixes.
+-- Four memory-completion helpers project or package already selected evidence.
+-- This addition moves no existing declaration from owed or cited coverage.
+-- Fixed dispatch and access factories add thirty checked structural helpers.
+-- Eleven checked carrier projections, loaded-record searches and internal labels.
+-- CALL and return-slot factories add six checked routing/projection helpers.
+def notBehaviourBaseline : Nat := 259
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -381,13 +455,68 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Checked protocol projections and loader-table searches contain no new
+    -- physical behavior claim. Their underlying profile/ABI facts remain owed.
+    `Grass.Platform.Win32.ExecutionState.State.callProtocol?,
+    `Grass.Platform.Win32.ExecutionState.State.ControlConsistent,
+    `Grass.Platform.Win32.ExecutionState.State.ofCallProtocol,
+    `Grass.Platform.Win32.Loader.allocationProvenance,
+    `Grass.Platform.Win32.Loader.LoadedImage.codeRoot?,
+    `Grass.Platform.Win32.Loader.CodeRoot.provenance,
+    `Grass.Platform.Win32.Loader.LoadedImage.stackProvenance?,
+    `Grass.Platform.Win32.Loader.LoadedImage.dataRoot?,
+    `Grass.Platform.Win32.Loader.DataRoot.provenance,
+    `Grass.Platform.Win32.Cpu.dataProvenance?,
+    `Grass.Platform.Win32.Cpu.instructionCause,
+    `Grass.Platform.Win32.InitializedRegion.allocationRecord,
+    `Grass.Platform.Win32.InitializedRegion.backingRecord,
+    `Grass.Platform.Win32.MemoryFresh,
+    `Grass.Platform.Win32.installInitializedRegion?,
+    `Grass.Platform.Win32.Loader.CpuPlacementValid,
+    `Grass.Platform.Win32.Loader.CpuPlacementsDisjoint,
+    `Grass.Platform.Win32.Loader.HistoryFresh,
+    `Grass.Platform.Win32.Loader.ImportTargets,
+    `Grass.Platform.Win32.Loader.PlacementValid,
+    `Grass.Platform.Win32.Loader.RegionsPresent,
+    `Grass.Platform.Win32.Loader.installRegions?,
+    `Grass.Platform.Win32.Loader.patchContents,
+    `Grass.Platform.Win32.Loader.patchedByte,
+    `Grass.Platform.Win32.Loader.preferredBase,
+    `Grass.Disasm.CompletedViolation.transportObject,
+    `Grass.Disasm.CompletedViolation.fetchedObject,
+    `Grass.Disasm.CompletedViolation.check,
+    -- Compatibility delegates retain coverage; modeled behavior moved to ISA.
+    `Grass.Disasm.StoreAttempt.Error,
+    `Grass.Disasm.StoreAttempt.Evidence,
+    `Grass.Disasm.StoreAttempt.Evidence.address,
+    `Grass.Disasm.StoreAttempt.Evidence.width,
+    `Grass.Disasm.StoreAttempt.check,
+    -- Equality composition over an existing checked fetch adds no loader rule.
+    `Grass.Disasm.FetchedEntry.check,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence.operand,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence.productionEncoding,
+    `Grass.Disasm.CallerObject.allocSupply,
+    `Grass.Disasm.CallerObject.backingSupply,
+    `Grass.Disasm.CallerObject.contextSupply,
+    `Grass.Disasm.CallerObject.epochSupply,
+    `Grass.Disasm.CallerObject.allocation,
+    `Grass.Disasm.CallerObject.backing,
+    `Grass.Disasm.CallerObject.caller,
+    `Grass.Disasm.CallerObject.epoch,
+    `Grass.Disasm.CallerObject.check,
+    `Grass.Disasm.StoreAttempt.Evidence.operand,
+    `Grass.Disasm.StoreAttempt.Evidence.productionEncoding,
     -- Derived accumulated histories and the type of an externally supplied
     -- observation relation, not new Windows behavior facts.
     `Grass.Platform.Win32.WriteFile.InfiniteContinuation.historyAt,
+    `Grass.Platform.Win32.WriteFile.InfiniteContinuation.shift,
     `Grass.Platform.Win32.WriteFile.StalledPredicate,
     `Grass.Platform.Win32.WriteFile.History.providerEvents,
     `Grass.Platform.Win32.WriteFile.ReturnInterpretation,
     `Grass.Platform.Win32.WriteFile.CallerInterpretation,
+    -- Exact-input/proof projections add no external field interpretation.
+    `Grass.Artifact.PE.sectionSlicesMatch,
+    `Grass.Artifact.PE.checkImportedImage,
     -- Exception traversal, masks and projections add no format policy.
     `Grass.Artifact.PE.resolveExtent?,
     `Grass.Artifact.PE.writeRuntimeFunctions,
@@ -478,6 +607,12 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.StackInstruction.selectSubRsp,
     `Grass.ISA.X86.Execution.StackInstruction.select,
     `Grass.ISA.X86.Execution.StackInstruction.decode,
+    -- Structural projections and proof-indexed packaging over an already selected
+    -- access completion or memory-MOV constructor.
+    `Grass.ISA.X86.Execution.ReadValue32.observed,
+    `Grass.ISA.X86.Execution.ReadValue32.bytes,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.displacement,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.LoadNormal.read,
     -- Checked packaging, projections and selectors over independently modeled
     -- encoders, decoders, fetches and machine transitions.
     `Grass.ISA.X86.Execution.ArithmeticInstruction.ofRegisterSelection,
@@ -640,6 +775,50 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    -- Fixed operational choices and ABI widths require declaration-level
+    -- authority; vendor prose links alone do not close the citation ledger.
+    `Grass.Platform.Win32.Cpu.accessFaults,
+    `Grass.Platform.Win32.Cpu.vocabulary,
+    `Grass.Platform.Win32.Cpu.operationalProfile,
+    `Grass.Platform.Win32.Cpu.operationPolicy,
+    `Grass.Platform.Win32.Cpu.policy?,
+    `Grass.Platform.Win32.Loader.ContainsCodeAddress,
+    `Grass.Platform.Win32.Loader.ContainsDataSpan,
+    `Grass.Platform.Win32.WriteFile.Abi.returnAddressBytes,
+    `Grass.Platform.Win32.WriteFile.Abi.homeSpaceBytes,
+    `Grass.Platform.Win32.WriteFile.Abi.overlappedSlotOffset,
+    `Grass.Platform.Win32.WriteFile.Abi.InitializedNullQword,
+    `Grass.Platform.Win32.WriteFile.Abi.Entry,
+    `Grass.Platform.Win32.Loader.EntryMapped,
+    `Grass.Platform.Win32.Loader.EnvironmentValid,
+    `Grass.Platform.Win32.Loader.ImportPatch.byteAt?,
+    `Grass.Platform.Win32.Loader.LoadedImage.initialState,
+    `Grass.Platform.Win32.Loader.PatchesValid,
+    `Grass.Platform.Win32.Loader.StackPlacementValid,
+    `Grass.Platform.Win32.Loader.StackValid,
+    `Grass.Platform.Win32.Loader.assignedRegions,
+    `Grass.Platform.Win32.Loader.imageRegions,
+    `Grass.Platform.Win32.Loader.importPatches?,
+    `Grass.Platform.Win32.Loader.importPatchesFrom?,
+    `Grass.Platform.Win32.Loader.initialize?,
+    `Grass.Platform.Win32.Loader.sectionPermission,
+    `Grass.Disasm.Entry.Entry,
+    `Grass.Disasm.Entry.virtualExtent,
+    `Grass.Disasm.Entry.fileBackedExtent,
+    `Grass.Disasm.Entry.fileBackedOffset,
+    `Grass.Disasm.Entry.mapsRva,
+    `Grass.Disasm.Entry.mappedSections,
+    `Grass.Disasm.Entry.selectMappedSection,
+    `Grass.Disasm.Entry.sectionBytes,
+    `Grass.Disasm.Entry.selectEntry,
+    `Grass.ISA.X86.Execution.StoreCandidate.BaseDisplacement.encoded,
+    `Grass.ISA.X86.Execution.StoreCandidate.BaseDisplacement.modBits,
+    `Grass.ISA.X86.Execution.StoreCandidate.BaseDisplacement.value,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence,
+    `Grass.ISA.X86.Execution.StoreCompletion,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence.address,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence.width,
+    `Grass.ISA.X86.Execution.StoreCandidate.check,
     -- PE/COFF fixed field widths, offsets, alignments, and characteristic bits
     -- are source-defined format commitments. Their directly derived spans and
     -- the eight-byte section-name representation therefore remain debt too.
@@ -716,6 +895,9 @@ def owed : List Name :=
     -- records are explicitly enrolled before the structure filter.
     `Grass.Artifact.PE.ParsedHeaderPrefix,
     `Grass.Artifact.PE.readHeaderPrefix,
+    `Grass.Artifact.PE.readSignatureAndCoff,
+    `Grass.Artifact.PE.readImportedPrefix,
+    `Grass.Artifact.PE.readImportedImage,
     `Grass.Artifact.PE.ParsedOptionalHeader,
     `Grass.Artifact.PE.readOptionalHeader,
     `Grass.Artifact.PE.ParsedSectionHeader,
@@ -815,6 +997,16 @@ def owed : List Name :=
     `Grass.ISA.X86.Execution.completedPushRflags,
     `Grass.ISA.X86.Execution.completedSubStatus,
     `Grass.ISA.X86.Execution.completedSubRflags,
+    -- Normal memory MOV semantics: value decoding, operand/width/payload/encoder
+    -- selection, effective address, and the two architectural result states.
+    `Grass.ISA.X86.Execution.ReadValue32.value,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.operand,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.width,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.payload?,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.encode?,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.effectiveAddress,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.StoreNormal.result,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.LoadNormal.result,
     `Grass.ISA.X86.ImmediateArithmetic.Immediate.opcode,
     `Grass.ISA.X86.ImmediateArithmetic.Kind.extension,
     `Grass.ISA.X86.ImmediateArithmetic.encode,
@@ -934,7 +1126,11 @@ def modeledDeclarations : MetaM (Array Name) := do
     -- or address-profile bounds in their fields. Include each type explicitly
     -- rather than letting the generic structure filter hide the obligation.
     -- This exception adds coverage; it exempts no future declaration.
-    if n == ``Grass.Platform.Win32.WriteFile.Prepared ||
+    if n == ``Grass.ISA.X86.Execution.StoreCompletion ||
+        n == ``Grass.Disasm.Entry.Entry ||
+        n == ``Grass.ISA.X86.Execution.StoreCandidate.Evidence ||
+        n == ``Grass.Platform.Win32.WriteFile.Abi.Entry ||
+        n == ``Grass.Platform.Win32.WriteFile.Prepared ||
         n == ``Grass.Platform.Win32.WriteFile.ReturnResult ||
         n == ``Grass.Artifact.PE.SectionName ||
         n == ``Grass.Artifact.PE.ParsedHeaderPrefix ||

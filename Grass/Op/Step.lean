@@ -526,8 +526,9 @@ about operations, and a memory profile that held it would have to know what an
 operation is.
 -/
 structure StepPolicy where
-  /-- The target's memory policy. -/
-  profile : MemoryProfile
+  /-- Operational admission data, without lower-layer proof checklist slots.
+  Target execution adequacy is a separate higher-layer obligation. -/
+  profile : OperationalProfile
   /-- The facets every reachable operation must supply. -/
   requiredFacets : List FacetName
   /-- How the machine answers an access. Required, not defaulted: what a load

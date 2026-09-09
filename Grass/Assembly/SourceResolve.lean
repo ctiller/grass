@@ -86,6 +86,7 @@ structure Output {frame : SourceFrame.Result} {rootOffset : Nat}
   detailExact : detail.Valid symbols codeBase splice.finalSizes
     (sourceOffset codeBase splice.finalSizes index) template encoding
   sizeExact : encoding.size = template.size
+  sizeBound : encoding.size ≤ 15
   encodingDecodes : ∀ rest : ByteSeq, decodeInsn (encoding.toBytes ++ rest) = .ok (encoding, rest)
 
 private structure Candidate (symbols : Symbols) (codeBase : Nat) (sizes : List Nat)
@@ -150,8 +151,10 @@ private def resolveAt? {frame rootOffset} (splice : SourceSplice.Result frame ro
                 X86ClosedEncoding.encode_decodes he⟩
           else none
   if hs : pair.encoding.size = template.size then
-    some ⟨index, origin, List.getElem?_eq_getElem bound, template, rfl,
-      pair.encoding, pair.detail, pair.valid, hs, pair.decodes⟩
+    if hb : pair.encoding.size ≤ 15 then
+      some ⟨index, origin, List.getElem?_eq_getElem bound, template, rfl,
+        pair.encoding, pair.detail, pair.valid, hs, hb, pair.decodes⟩
+    else none
   else none
 
 private def resolveIndices? {frame rootOffset} (splice : SourceSplice.Result frame rootOffset)
