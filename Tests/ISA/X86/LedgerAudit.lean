@@ -59,6 +59,7 @@ import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.GetStdHandleRuntime
+import Grass.Platform.Win32.GetStdHandleStackPlan
 import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
@@ -200,6 +201,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.CallRuntime,
    `Grass.Platform.Win32.RawStepSignature,
    `Grass.Platform.Win32.GetStdHandleRuntime,
+   `Grass.Platform.Win32.GetStdHandleStackPlan,
    `Grass.Platform.Win32.WriteFileArguments,
    `Grass.Platform.Win32.ApiRequest,
    `Grass.Platform.Win32.WriteFileCallPlan,
@@ -259,7 +261,7 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Twelve fixed CPU/ABI obligations, including executable/readable region
 -- selection and explicit Entry structure enrollment.
 -- Six fixed request/stack contracts are newly enrolled; no existing debt moves.
-def owedBaseline : Nat := 300
+def owedBaseline : Nat := 302
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -809,6 +811,8 @@ def owed : List Name :=
     `Grass.Platform.Win32.GetStdHandle.selector,
     `Grass.Platform.Win32.GetStdHandle.stackRequests,
     `Grass.Platform.Win32.GetStdHandle.StackPlan.requests,
+    `Grass.Platform.Win32.GetStdHandle.StackPlanFactory.derive?,
+    `Grass.Platform.Win32.GetStdHandle.StackPlanFactory.deriveLoaded?,
     -- Fixed operational choices and ABI widths require declaration-level
     -- authority; vendor prose links alone do not close the citation ledger.
     `Grass.Platform.Win32.Cpu.accessFaults,
