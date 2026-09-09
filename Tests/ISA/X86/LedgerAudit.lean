@@ -83,6 +83,7 @@ import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
 import Grass.Platform.Win32.WriteFileCallPlan
 import Grass.Platform.Win32.CallEntry
+import Grass.Platform.Win32.WriteFileStackPlan
 import Grass.Platform.Win32.WriteFileHandoff
 import Grass.Platform.Win32.WriteFilePreservation
 import Grass.Platform.Win32.WriteFileCall
@@ -248,6 +249,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.ApiRequest,
    `Grass.Platform.Win32.WriteFileCallPlan,
    `Grass.Platform.Win32.CallEntry,
+   `Grass.Platform.Win32.WriteFileStackPlan,
    `Grass.Platform.Win32.WriteFileHandoff,
    `Grass.Platform.Win32.WriteFilePreservation,
    `Grass.Platform.Win32.WriteFileCall,
@@ -321,8 +323,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Arithmetic, branch, LEA and fixed access dispatch add twenty reviewed obligations.
 -- Twelve fixed CPU/ABI obligations, including executable/readable region selection.
 -- Six fixed request/stack contracts are newly enrolled; no existing debt moves.
--- ExitProcess's argument and four GetStdHandle ABI declarations retain debt.
-def owedBaseline : Nat := 338
+-- Shared ABI declarations and the two WriteFile extension checks retain debt.
+def owedBaseline : Nat := 340
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -986,6 +988,8 @@ def owed : List Name :=
     `Grass.Platform.Win32.ReturnHome.StackPlanFactory.deriveLoaded?,
     `Grass.Platform.Win32.ReturnHome.Plan,
     `Grass.Platform.Win32.ReturnHome.InitializedReturnQword,
+    `Grass.Platform.Win32.WriteFile.Abi.StackPlanFactory.checked?,
+    `Grass.Platform.Win32.WriteFile.Abi.StackPlanFactory.deriveLoaded?,
     -- Fixed operational choices and ABI widths require declaration-level
     -- authority; vendor prose links alone do not close the citation ledger.
     `Grass.Platform.Win32.Cpu.accessFaults,
