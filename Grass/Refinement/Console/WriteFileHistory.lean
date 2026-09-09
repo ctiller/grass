@@ -15,14 +15,14 @@ namespace Grass.Refinement.Console.WriteFileHistory
 open Grass.Console Grass.Semantics Grass.Std.Logical Grass.Op
 open Grass.Platform.Win32.WriteFile
 
-variable {R Outcome Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
-  {spec : CapturedSpecification resources Outcome}
+variable {R Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
+  {spec : SpecProcess resources}
 
 /-- A reached upper frontier of the exact captured projection and the actual
 call's remaining bytes. Its history is supplied, never reconstructed from a cut. -/
 structure Start (projection : CapturedTargetProjection spec Status)
     (record : CallProtocol.Pending Request) where
-  upper : projection.system.History
+  upper : projection.componentSystem.History
   cut : OutputCut projection.target.payload
   located : upper.state = .pending cut
   suffix : record.request.bytes = cut.remaining
@@ -35,19 +35,19 @@ variable {projection : CapturedTargetProjection spec Status}
 handoff. No default relation or realization proof is supplied by lowering. -/
 def HandoffRelation (projection : CapturedTargetProjection spec Status) :=
   Realization → CallProtocol.State Request → (call : CallProtocol.CallId) →
-    (record : CallProtocol.Pending Request) → projection.system.History →
+    (record : CallProtocol.Pending Request) → projection.componentSystem.History →
     (state : CallProtocol.State Request) → Prefix state call record → Prop
 
 /-- Follow the original root, not an independently reconstructed handoff. -/
 def RootAligned (relation : HandoffRelation projection)
-    (upper : projection.system.History) {state : CallProtocol.State Request}
+    (upper : projection.componentSystem.History) {state : CallProtocol.State Request}
     {frontier : Prefix state call record} : History realization initial call record frontier → Prop
   | .handoff frontier _ _ _ _ => relation realization initial call record upper _ frontier
   | .step previous _ _ _ => RootAligned relation upper previous
 
 private abbrev Located (projection : CapturedTargetProjection spec Status)
     (cut : OutputCut projection.target.payload) :=
-  { upper : projection.system.History // upper.state = .pending cut }
+  { upper : projection.componentSystem.History // upper.state = .pending cut }
 
 private def positiveUpper {before after : CallProtocol.State Request}
     {pre : Prefix before call record} {post : Prefix after call record}
@@ -56,7 +56,7 @@ private def positiveUpper {before after : CallProtocol.State Request}
     (upper : Located projection (WriteFileProjection.cut start.cut start.suffix pre))
     (positive : pre.accepted < post.accepted) :
     Located projection (WriteFileProjection.cut start.cut start.suffix post) := by
-    refine ⟨upper.val.append (Grass.RelationalSystem.Path.snoc (system := projection.system) .nil
+    refine ⟨upper.val.append (Grass.RelationalSystem.Path.snoc (system := projection.componentSystem) .nil
       (.reply (WriteFileProjection.cut start.cut start.suffix pre)
         (.advance (WriteFileProjection.cut start.cut start.suffix post) (by
           change start.cut.offset + pre.accepted < start.cut.offset + post.accepted
@@ -106,7 +106,7 @@ variable {relation : HandoffRelation projection}
   {state : CallProtocol.State Request} {frontier : Prefix state call record}
   {history : History realization initial call record frontier}
 
-def upper (aligned : Aligned relation history) : projection.system.History :=
+def upper (aligned : Aligned relation history) : projection.componentSystem.History :=
   (fold aligned.start history).val
 
 def endpoint (aligned : Aligned relation history) : OutputCut projection.target.payload :=
@@ -198,9 +198,9 @@ def publicationPath (aligned : Aligned relation history) {after : CallProtocol.S
     {post : Prefix after call record} (action : Action) (output : Vec Byte)
     (step : CommittedStep realization frontier post action output)
     (positive : frontier.accepted < post.accepted) :
-    projection.system.Path aligned.upper.state aligned.upper.graph
+    projection.componentSystem.Path aligned.upper.state aligned.upper.graph
       (.pending (aligned.extend action output step).endpoint) () :=
-  Grass.RelationalSystem.Path.snoc (system := projection.system) .nil (.reply aligned.endpoint
+  Grass.RelationalSystem.Path.snoc (system := projection.componentSystem) .nil (.reply aligned.endpoint
     (.advance (aligned.extend action output step).endpoint (by
       change aligned.start.cut.offset + frontier.accepted < aligned.start.cut.offset + post.accepted
       omega))) (.emitted output) (.pending (aligned.extend action output step).endpoint) ()

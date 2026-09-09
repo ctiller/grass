@@ -14,8 +14,8 @@ namespace Grass.Refinement.Console.WriteFileHistory
 open Grass.Console Grass.Semantics Grass.Std.Logical Grass.Std.Console Grass.Op
 open Grass.Platform.Win32.WriteFile
 
-variable {R Outcome Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
-  {spec : CapturedSpecification resources Outcome}
+variable {R Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
+  {spec : SpecProcess resources}
   {projection : CapturedTargetProjection spec Status}
   {realization : Realization} {initial before after : CallProtocol.State Request}
   {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
@@ -144,8 +144,8 @@ theorem finish_allowed (returned : Returned aligned selected result after)
 /-- Append only a logical terminal cause to the already-folded upper history. -/
 def logicalFinish (returned : Returned aligned selected result after)
     (outcome : WriteOutcome) (next : WriteCursor projection.target.payload)
-    (done : returned.decision = .done outcome next) : projection.system.History :=
-  aligned.upper.append (Grass.RelationalSystem.Path.snoc (system := projection.system) .nil
+    (done : returned.decision = .done outcome next) : projection.componentSystem.History :=
+  aligned.upper.append (Grass.RelationalSystem.Path.snoc (system := projection.componentSystem) .nil
     (.reply aligned.endpoint (.finish (cause outcome))) (.terminal (cause outcome))
     (.finished aligned.endpoint (cause outcome)) ()
     ⟨aligned.upper_located, returned.finish_allowed outcome next done, rfl, rfl⟩)
@@ -168,7 +168,7 @@ theorem finish_no_republication (returned : Returned aligned selected result aft
 caller termination or observed process exit. -/
 def logicalComplete (returned : Returned aligned selected result after)
     (outcome : WriteOutcome) (next : WriteCursor projection.target.payload)
-    (done : returned.decision = .done outcome next) : projection.Complete :=
+    (done : returned.decision = .done outcome next) : projection.componentComplete :=
   .terminal (returned.logicalFinish outcome next done)
     ⟨aligned.endpoint, cause outcome, rfl, returned.finish_allowed outcome next done⟩
 

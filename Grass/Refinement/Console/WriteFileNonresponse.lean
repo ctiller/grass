@@ -12,8 +12,8 @@ namespace Grass.Refinement.Console.WriteFileHistory
 open Grass.Console Grass.Semantics Grass.Std.Logical Grass.Op
 open Grass.Platform.Win32.WriteFile
 
-variable {R Outcome Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
-  {spec : CapturedSpecification resources Outcome}
+variable {R Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
+  {spec : SpecProcess resources}
   {projection : CapturedTargetProjection spec Status}
   {realization : Realization} {initial state : CallProtocol.State Request}
   {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
@@ -35,7 +35,7 @@ def waiting (_stalled : Stalled predicate aligned) :
     Grass.RelationalSystem.PermanentWait (Behavior.boundary projection.target.payload) aligned.upper :=
   ⟨aligned.endpoint, aligned.upper_located, trivial⟩
 
-def complete (stalled : Stalled predicate aligned) : projection.Complete :=
+def complete (stalled : Stalled predicate aligned) : projection.componentComplete :=
   .waiting aligned.upper stalled.waiting
 
 theorem same_cut (stalled : Stalled predicate aligned) :
@@ -61,7 +61,7 @@ def waiting (_response : FixedNonresponse aligned) :
     Grass.RelationalSystem.PermanentWait (Behavior.boundary projection.target.payload) aligned.upper :=
   ⟨aligned.endpoint, aligned.upper_located, trivial⟩
 
-def complete (response : FixedNonresponse aligned) : projection.Complete :=
+def complete (response : FixedNonresponse aligned) : projection.componentComplete :=
   .waiting aligned.upper response.waiting
 
 /-- Every finite endpoint is rooted in the same original provider history. -/
