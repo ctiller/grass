@@ -29,6 +29,20 @@ theorem instruction_bytes {frame rootOffset}
   simp only [SourceResolve.Result.encodings, List.getElem_map]
   simp
 
+/-- Each byte in a resolved instruction occurs at its machine-derived source
+offset. This pointwise form feeds memory-backed instruction-width checks. -/
+theorem instruction_byte {frame rootOffset}
+    (source : SourceResolve.Result frame rootOffset) (index : Nat)
+    (bounded : index < source.outputs.length) (offset : Nat)
+    (byteBound : offset < source.outputs[index].encoding.toBytes.length) :
+    source.bytes.get? (ByteLayout.offset source.splice.finalSizes index + offset) =
+      some source.outputs[index].encoding.toBytes[offset] := by
+  have slice := congrArg (fun bytes : List Grass.Std.Logical.Byte => bytes[offset]?)
+    (instruction_bytes source index bounded)
+  have sizeBound : offset < source.outputs[index].encoding.size := by simpa using byteBound
+  simpa [Grass.Std.Logical.Vec.get?, List.getElem?_take, List.getElem?_drop,
+    sizeBound, List.getElem?_eq_getElem byteBound] using slice
+
 /-- If an actual completed fetch observes the exact bounded source slice, its
 decoded instruction is the encoding retained at that source position. -/
 theorem encoding_of_source_observation {frame rootOffset}

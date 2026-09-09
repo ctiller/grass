@@ -1,4 +1,5 @@
 import Lean
+import Grass.Assembly.CodeWriteFrame
 import Grass.Assembly.LoadedCodeRoot
 import Grass.Assembly.LoadedFetchObservation
 import Grass.Assembly.SourceFetchPolicy
