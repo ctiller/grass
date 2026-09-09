@@ -13,7 +13,9 @@ Finite `ExecutionPrefix` values do not retain their sequence of choices;
 does not supply a missing branching-strategy model, a permanent-wait execution
 constructor, or a stuttering simulation. The certificate gate requires this
 backward coverage beside every adjacent refinement, so verified emission
-preserves represented whole histories.
+preserves all histories represented by the current vocabulary. Decision 137's
+full-equivalence gate remains incomplete until the missing history forms are
+represented and covered.
 
 The predicate transport theorems quantify over arbitrary properties of these
 existing abstract objects. They do not inspect or create certificates for the

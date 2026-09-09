@@ -162,6 +162,19 @@ theorem forwardRefinement_not_covered :
   refine ⟨source, ?_⟩
   simpa only [BehaviorRefinement.observe_mapPrefix] using emitsTrue
 
+/-- Once the portable and concrete behavior fields are fixed to this example,
+this is exactly the new coverage field a projected-driver certificate must
+supply. Forward inclusion and adequacy cannot inhabit it. -/
+private abbrev RequiredDriverCoverage : Prop :=
+  BehaviorRefinement.Coverage forwardRefinement
+
+/-- The deletion refinement therefore cannot populate the mandatory adjacent
+tier coverage field. -/
+theorem forward_only_cannot_supply_required_driver_coverage :
+    ¬ Nonempty RequiredDriverCoverage := by
+  rintro ⟨coverage⟩
+  exact forwardRefinement_not_covered coverage
+
 /- Keep all three witnesses live in the fixture: both adequacy proofs and the
 forward refinement coexist with the differing may-execution properties. -/
 example : abstractBehavior.Adequate := abstractAdequate

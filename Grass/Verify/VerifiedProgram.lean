@@ -100,15 +100,18 @@ def refinement (verified : VerifiedProgram spec) :
     (((verified.artifact.refinement.trans verified.machine.refinement).trans
       verified.provider.refinement).trans verified.driver.refinement)
 
-/-- Loaded and portable behaviors cover the same represented finite and
-divergent histories. Author liveness and fairness remain separate demands. -/
+/-- Loaded behavior and the certificate-selected portable behavior cover the
+same currently represented finite and divergent histories. This does not make
+`ProgramBehavior` an authoritative relational semantics of `SpecProcess`;
+author liveness and fairness remain separate demands. -/
 theorem coverage (verified : VerifiedProgram spec) :
     BehaviorRefinement.Coverage verified.refinement :=
   BehaviorRefinement.Coverage.castConcrete verified.loadedBehavior_exact
     (((verified.artifact.coverage.trans verified.machine.coverage).trans
       verified.provider.coverage).trans verified.driver.coverage)
 
-/-- Every portable prefix/completion history has an exact loaded preimage. -/
+/-- Every represented history of the selected portable behavior has an exact
+loaded preimage. -/
 theorem histories_surjective (verified : VerifiedProgram spec) :
     Function.Surjective verified.refinement.mapHistory :=
   verified.coverage.histories
