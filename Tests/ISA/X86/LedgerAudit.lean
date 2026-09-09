@@ -31,6 +31,14 @@ import Grass.Platform.Win32.LoaderEntry
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
 import Grass.Artifact.PE.ExceptionBinding
+import Grass.Artifact.PE.Imported
+import Grass.Disasm.StoreAttempt
+import Grass.Disasm.FetchedEntry
+import Grass.Disasm.CompletedViolation
+import Grass.ISA.X86.Execution.StoreCompletion
+import Grass.ISA.X86.Execution.StoreCandidate
+import Grass.Disasm.Entry
+import Grass.Disasm.CallerObject
 
 /-!
 # Ledger coverage gate
@@ -144,7 +152,11 @@ def auditedModules : List Name :=
    `Grass.Artifact.PE.PrefixReader, `Grass.Artifact.PE.OptionalReader,
    `Grass.Artifact.PE.SectionReader, `Grass.Artifact.PE.ImageWriter,
    `Grass.Artifact.PE.ImageReader, `Grass.Artifact.PE.ImageRoundTrip,
-   `Grass.Artifact.PE.LayoutInvariance, `Grass.Artifact.PE.LayoutBinding]
+   `Grass.Artifact.PE.LayoutInvariance, `Grass.Artifact.PE.LayoutBinding,
+   `Grass.Artifact.PE.Imported, `Grass.Disasm.StoreAttempt,
+   `Grass.Disasm.Entry, `Grass.Disasm.CallerObject,
+   `Grass.Disasm.FetchedEntry, `Grass.ISA.X86.Execution.StoreCandidate,
+   `Grass.Disasm.CompletedViolation, `Grass.ISA.X86.Execution.StoreCompletion]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -180,7 +192,17 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Preferred-base model fixtures and a native sample do not discharge citation debt.
 -- The fetched normal register PUSH adds one instruction-transfer obligation.
 -- Normal MOV adds its encoding, effect, flags and architectural result obligations.
-def owedBaseline : Nat := 251
+-- Imported PE field traversal adds readImportedPrefix/readImportedImage and
+-- factors readSignatureAndCoff. Microsoft source is recorded in Imported.lean;
+-- formal subject/anchor enrollment remains explicit debt, not a citation claim.
+-- Imported C7 candidate evidence/check/address/width add four modeled facts.
+-- Decoder/encoder reuse does not discharge their separate external enrollment.
+-- Entry selection adds eight mapping definitions and its contract type.
+-- The vendor URL is provenance; formal ledger anchors remain owed.
+-- Reviewed fetched normal SUB RSP adds one transfer obligation.
+-- Reviewed PUSH/MOV add five instruction-transfer obligations.
+-- The completed-store carrier pins a bounded instruction access contract.
+def owedBaseline : Nat := 271
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -219,7 +241,17 @@ acquiring a citation.
 -- Fourteen loader helpers install/compare supplied memory records, scan identity
 -- references, project checked header data, and transform finite byte sequences.
 -- One access-free receipt projects the already completed memory state.
-def notBehaviourBaseline : Nat := 176
+-- sectionSlicesMatch and checkImportedImage add only exact-data/proof plumbing
+-- over the separately owed external parser; neither defines a platform fact.
+-- Store operand and productionEncoding are projections/delegation to the
+-- separately modeled existing memory operand and encoder, not new ISA rules.
+-- Nine caller-factory definitions construct an explicitly declared synthetic
+-- state via checked memory doors; they assert no recovered allocator behavior.
+-- Reviewed fetch helper replaces only the memory-machine field.
+-- Reviewed AccessFree receipt adds one representation helper.
+-- Three completed-object helpers transport proven memory equality or compose
+-- existing spatial checks; they do not assert a loader or source interpretation.
+-- Main adds a reviewed reindexing helper for continuation suffixes.
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -358,6 +390,8 @@ Declarations reviewed and found to carry no claim about a processor.
 A permanent claim, one line of reasoning each. Anything here is asserting that a
 reader could not be misled by its absence from the trust ledger.
 -/
+def notBehaviourBaseline : Nat := 200
+
 def notBehaviour : List Name :=
   [
     `Grass.Platform.Win32.InitializedRegion.allocationRecord,
@@ -374,6 +408,30 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.Loader.patchContents,
     `Grass.Platform.Win32.Loader.patchedByte,
     `Grass.Platform.Win32.Loader.preferredBase,
+    `Grass.Disasm.CompletedViolation.transportObject,
+    `Grass.Disasm.CompletedViolation.fetchedObject,
+    `Grass.Disasm.CompletedViolation.check,
+    -- Compatibility delegates retain coverage; modeled behavior moved to ISA.
+    `Grass.Disasm.StoreAttempt.Error,
+    `Grass.Disasm.StoreAttempt.Evidence,
+    `Grass.Disasm.StoreAttempt.Evidence.address,
+    `Grass.Disasm.StoreAttempt.Evidence.width,
+    `Grass.Disasm.StoreAttempt.check,
+    -- Equality composition over an existing checked fetch adds no loader rule.
+    `Grass.Disasm.FetchedEntry.check,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence.operand,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence.productionEncoding,
+    `Grass.Disasm.CallerObject.allocSupply,
+    `Grass.Disasm.CallerObject.backingSupply,
+    `Grass.Disasm.CallerObject.contextSupply,
+    `Grass.Disasm.CallerObject.epochSupply,
+    `Grass.Disasm.CallerObject.allocation,
+    `Grass.Disasm.CallerObject.backing,
+    `Grass.Disasm.CallerObject.caller,
+    `Grass.Disasm.CallerObject.epoch,
+    `Grass.Disasm.CallerObject.check,
+    `Grass.Disasm.StoreAttempt.Evidence.operand,
+    `Grass.Disasm.StoreAttempt.Evidence.productionEncoding,
     -- Derived accumulated histories and the type of an externally supplied
     -- observation relation, not new Windows behavior facts.
     `Grass.Platform.Win32.WriteFile.InfiniteContinuation.historyAt,
@@ -382,6 +440,9 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.WriteFile.History.providerEvents,
     `Grass.Platform.Win32.WriteFile.ReturnInterpretation,
     `Grass.Platform.Win32.WriteFile.CallerInterpretation,
+    -- Exact-input/proof projections add no external field interpretation.
+    `Grass.Artifact.PE.sectionSlicesMatch,
+    `Grass.Artifact.PE.checkImportedImage,
     -- Exception traversal, masks and projections add no format policy.
     `Grass.Artifact.PE.resolveExtent?,
     `Grass.Artifact.PE.writeRuntimeFunctions,
@@ -592,6 +653,23 @@ def owed : List Name :=
     `Grass.Platform.Win32.Loader.importPatchesFrom?,
     `Grass.Platform.Win32.Loader.initialize?,
     `Grass.Platform.Win32.Loader.sectionPermission,
+    `Grass.Disasm.Entry.Entry,
+    `Grass.Disasm.Entry.virtualExtent,
+    `Grass.Disasm.Entry.fileBackedExtent,
+    `Grass.Disasm.Entry.fileBackedOffset,
+    `Grass.Disasm.Entry.mapsRva,
+    `Grass.Disasm.Entry.mappedSections,
+    `Grass.Disasm.Entry.selectMappedSection,
+    `Grass.Disasm.Entry.sectionBytes,
+    `Grass.Disasm.Entry.selectEntry,
+    `Grass.ISA.X86.Execution.StoreCandidate.BaseDisplacement.encoded,
+    `Grass.ISA.X86.Execution.StoreCandidate.BaseDisplacement.modBits,
+    `Grass.ISA.X86.Execution.StoreCandidate.BaseDisplacement.value,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence,
+    `Grass.ISA.X86.Execution.StoreCompletion,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence.address,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence.width,
+    `Grass.ISA.X86.Execution.StoreCandidate.check,
     -- PE/COFF fixed field widths, offsets, alignments, and characteristic bits
     -- are source-defined format commitments. Their directly derived spans and
     -- the eight-byte section-name representation therefore remain debt too.
@@ -668,6 +746,9 @@ def owed : List Name :=
     -- records are explicitly enrolled before the structure filter.
     `Grass.Artifact.PE.ParsedHeaderPrefix,
     `Grass.Artifact.PE.readHeaderPrefix,
+    `Grass.Artifact.PE.readSignatureAndCoff,
+    `Grass.Artifact.PE.readImportedPrefix,
+    `Grass.Artifact.PE.readImportedImage,
     `Grass.Artifact.PE.ParsedOptionalHeader,
     `Grass.Artifact.PE.readOptionalHeader,
     `Grass.Artifact.PE.ParsedSectionHeader,
@@ -852,7 +933,10 @@ def modeledDeclarations : MetaM (Array Name) := do
     -- or address-profile bounds in their fields. Include each type explicitly
     -- rather than letting the generic structure filter hide the obligation.
     -- This exception adds coverage; it exempts no future declaration.
-    if n == ``Grass.Platform.Win32.WriteFile.Prepared ||
+    if n == ``Grass.ISA.X86.Execution.StoreCompletion ||
+        n == ``Grass.Disasm.Entry.Entry ||
+        n == ``Grass.ISA.X86.Execution.StoreCandidate.Evidence ||
+        n == ``Grass.Platform.Win32.WriteFile.Prepared ||
         n == ``Grass.Platform.Win32.WriteFile.ReturnResult ||
         n == ``Grass.Artifact.PE.SectionName ||
         n == ``Grass.Artifact.PE.ParsedHeaderPrefix ||

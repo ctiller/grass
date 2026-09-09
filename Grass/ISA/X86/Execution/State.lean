@@ -63,8 +63,8 @@ def statusMask : BitVec 64 := 0x8D5
 Replace only the six modeled status bits in `rflags`.
 
 This helper preserves the representation of every bit outside `statusMask`,
-including RF, IF, and DF. `State.withStatusFlags` is a representation update.
-Instruction-specific RFLAGS transfer remains a separate semantic obligation.
+including RF, IF, and DF. `State.withStatusFlags` is a representation helper;
+instruction-specific RFLAGS effects remain separate obligations.
 -/
 def State.withStatusFlags (state : State) (flags : RegisterSemantics.Flags Bool) : State :=
   { state with rflags := (state.rflags &&& ~~~statusMask) ||| flags.bits }
