@@ -242,6 +242,14 @@ by checked equality with production encoders after `decodeInsn` succeeds; its
 soundness law preserves the decoder's exact suffix. This bounded selector does
 not admit every legal alias or redundant prefix spelling.
 
+[`RegisterLaws`](../Grass/ISA/X86/RegisterLaws.lean) gives Hello-facing predicate
+and arithmetic laws without exposing flag bit calculations: same-register TEST
+is zero exactly when the selected-width value is zero; CMP32 unsigned-above is
+natural-number greater-than; SUB32 is exact natural subtraction when the count
+does not exceed the remaining value, with strict decrease for positive counts;
+ADD64 is exact natural addition under an explicit no-wrap premise. These are
+consequences of the existing transfers, not additional architectural axioms.
+
 These transfers are not yet `RawInstruction` machine-step realizations. Fetch,
 RIP/control successors, execution-profile admission, interruption and fault
 effects remain obligations at that boundary. Memory instructions must use the
