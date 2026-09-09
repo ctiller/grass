@@ -8,7 +8,8 @@ import Grass.Semantics.BehaviorModel
 
 This is the concrete status-bearing console wrapper.  A write result selects a
 fixed reporting record; a later abstract observation commits that already
-selected result.  Reporting cannot emit more bytes or revise the selection.
+selected result. `reporting_step_exact` proves reporting cannot emit more bytes
+or revise the selection.
 -/
 
 namespace Grass.Console.ObservedBehavior
@@ -167,7 +168,7 @@ def boundary (request : LineRequest Outcome) (rendering : LineRendering) :
       exact ⟨.observe selection (), .observed selection, .observed selection,
         (), rfl, pending ▸ ⟨rfl, rfl, rfl⟩⟩
 
-/-- The law-bearing whole-program model exposes an outcome only after observation. -/
+/-- `BehaviorModel.terminal_result` identifies outcome availability with committed observation. -/
 def model (request : LineRequest Outcome) (rendering : LineRendering) :
     BehaviorModel Outcome where
   Event := Event request rendering
@@ -239,6 +240,12 @@ def writingAt (request : LineRequest Outcome) (rendering : LineRendering)
   · cases zero
     rfl
   · rfl
+
+/-- A permanent output wait at any reached byte cut, including the full cut. -/
+def writingWait (request : LineRequest Outcome) (rendering : LineRendering)
+    (cut : OutputCut (rendering.bytes request.line)) :
+    PermanentWait (boundary request rendering) (writingAt request rendering cut) :=
+  ⟨.output cut, writingAt_state request rendering cut, trivial⟩
 
 /-- A concrete reporting history for every legal component terminal selection. -/
 def reportingAt (request : LineRequest Outcome) (rendering : LineRendering)
@@ -462,7 +469,7 @@ theorem history_accounting {request : LineRequest Outcome} {rendering : LineRend
   rw [empty, Vec.empty_append] at accounting
   exact accounting.symm
 
-/-- Reporting freezes bytes and the exact selection; its only step is observation. -/
+/-- `reporting_step_exact` proves reporting's only step observes the same selection. -/
 theorem reporting_step_exact {request : LineRequest Outcome} {rendering : LineRendering}
     (selection : Selection request rendering) {choice event next nextGraph}
     (step : (system request rendering).Step () (.reporting selection)
@@ -476,5 +483,30 @@ theorem reporting_step_exact {request : LineRequest Outcome} {rendering : LineRe
     cases origin
     cases reply
     exact ⟨rfl, eventEq, nextEq⟩
+
+/-- Commit observation by appending one step to the exact reached reporting history. -/
+def observeAt {request : LineRequest Outcome} {rendering : LineRendering}
+    (history : (system request rendering).History) (selection : Selection request rendering)
+    (located : history.state = .reporting selection) : (system request rendering).History :=
+  history.append (.snoc (Path.nil : (system request rendering).Path
+    history.state history.graph history.state history.graph)
+    (Choice.observe selection ()) (Event.observed selection) (State.observed selection) ()
+    (by cases history.graph; exact located ▸ observeStep request rendering selection))
+
+theorem observeAt_terminal {request : LineRequest Outcome} {rendering : LineRendering}
+    (history : (system request rendering).History) (selection : Selection request rendering)
+    (located : history.state = .reporting selection) :
+    (system request rendering).Terminal (observeAt history selection located).state
+      (observeAt history selection located).graph := ⟨selection, rfl⟩
+
+theorem observeAt_events {request : LineRequest Outcome} {rendering : LineRendering}
+    (history : (system request rendering).History) (selection : Selection request rendering)
+    (located : history.state = .reporting selection) :
+    (observeAt history selection located).path.events = history.path.events ++ [.observed selection] := rfl
+
+theorem observeAt_choices {request : LineRequest Outcome} {rendering : LineRendering}
+    (history : (system request rendering).History) (selection : Selection request rendering)
+    (located : history.state = .reporting selection) :
+    (observeAt history selection located).path.choices = history.path.choices ++ [.observe selection ()] := rfl
 
 end Grass.Console.ObservedBehavior

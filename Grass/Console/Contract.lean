@@ -19,10 +19,13 @@ def lineDemands {R Outcome : Type} [model : ResourceModel R] {resources : R}
         ObservedBehavior.emittedBytes history.path.events = ObservedBehavior.committed history.state,
       [⟨"Grass.Console", "logicalText"⟩, ⟨"Grass.Console", "responseLaw"⟩]⟩,
    ⟨.progress,
-      ∀ rendering (selection : ObservedBehavior.Selection request rendering),
+      ∀ rendering,
+        (∀ cut, Nonempty (PermanentWait (ObservedBehavior.boundary request rendering)
+          (ObservedBehavior.writingAt request rendering cut))) ∧
+        (∀ selection : ObservedBehavior.Selection request rendering,
         Nonempty (PermanentWait (ObservedBehavior.boundary request rendering)
-          (ObservedBehavior.reportingAt request rendering selection)),
-      [⟨"Grass.Console", "terminalObservation"⟩]⟩,
+          (ObservedBehavior.reportingAt request rendering selection))),
+      [⟨"Grass.Console", "responseLaw"⟩, ⟨"Grass.Console", "terminalObservation"⟩]⟩,
    ⟨.resource, snapshot.selectedAxes = [], [⟨"Grass.Console", "resourceSelection"⟩]⟩]
 
 /-- Console denotation uses writing, reporting, and observed phases. -/

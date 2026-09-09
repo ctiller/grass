@@ -91,6 +91,15 @@ theorem withLiveness_oldStatement (spec : SpecProcess resources) (fragment : Liv
   simp only [withLiveness_authorRows, oldKey]
   rw [List.getElem_append_left (show key.val < spec.authorRows.length from key.isLt)]
 
+theorem withLiveness_oldDependencies (spec : SpecProcess resources) (fragment : LivenessContract)
+    (key : spec.authorRequirements.Key) :
+    (spec.withLiveness fragment).dependencies (spec.oldKey fragment key) =
+      spec.dependencies key := by
+  change ((spec.withLiveness fragment).authorRows[(spec.oldKey fragment key).val]).dependencies =
+    (spec.authorRows[key.val]).dependencies
+  simp only [withLiveness_authorRows, oldKey]
+  rw [List.getElem_append_left (show key.val < spec.authorRows.length from key.isLt)]
+
 end SpecProcess
 
 /-- Author proof obligations are independent of implementation certificates. -/

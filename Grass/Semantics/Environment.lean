@@ -3,9 +3,8 @@ import Grass.Semantics.BehaviorModel
 /-!
 # Standard environment responsiveness for complete behavior models
 
-The strategy below cannot filter relational choices or histories. Its only
-selection is whether a protocol-permitted permanent nonresponse remains in the
-generated maximal continuations. Consequently difficult result values,
+`EnvironmentStrategy.Compatible` retains every terminal and infinite
+continuation and consults timing permission for permanent waits. Difficult result values,
 internal choices, terminal suffixes, and productive infinite executions are
 retained by construction.
 -/
@@ -28,8 +27,8 @@ inductive MaximalContinuation (history : model.History) : Type where
       (path : model.system.Path history.state history.graph state graph)
       (wait : RelationalSystem.PermanentWait model.boundary (history.append path))
 
-/-- Environment strategies select only a timing permission. They cannot prune
-any transition, response value, finite history, or infinite execution. -/
+/-- `EnvironmentStrategy.Compatible` consults this strategy for permanent waits;
+its terminal and infinite cases are unconditional. -/
 structure EnvironmentStrategy where
   permitsNonresponseAt : model.History → model.boundary.Occurrence → Prop
 
@@ -48,7 +47,7 @@ def permitsNonresponse (strategy : model.EnvironmentStrategy)
     (history : model.History) (wait : RelationalSystem.PermanentWait model.boundary history) : Prop :=
   strategy.permitsNonresponseAt history wait.occurrence
 
-/-- Compatibility changes only the permanent-wait constructor. -/
+/-- `Compatible` consults permission only in the permanent-wait constructor. -/
 def Compatible (strategy : model.EnvironmentStrategy) {history : model.History} :
     model.MaximalContinuation history → Prop
   | .terminal _ _ => True
@@ -83,8 +82,8 @@ for arbitrary relational systems. -/
 def ContinuationAdequate : Prop :=
   ∀ history : model.History, Nonempty (model.MaximalContinuation history)
 
-/-- Adequacy needed by the responding strategy: each history has a terminal or
-infinite continuation, rather than permanent nonresponse as its only maximal form. -/
+/-- The responding strategy needs a root and a terminal or infinite continuation
+from each reached history. -/
 structure RespondingContinuationAdequate : Prop where
   root : Nonempty model.History
   continuation : ∀ history : model.History,
@@ -94,7 +93,7 @@ structure RespondingContinuationAdequate : Prop where
       | .infinite _ => True
       | .waiting _ _ => False
 
-/-- Strategy adequacy cannot be made vacuous by an empty compatible tree. -/
+/-- `StrategyAdequate` requires a root and generated continuation at every history. -/
 structure StrategyAdequate (strategy : model.EnvironmentStrategy) : Prop where
   root : Nonempty model.History
   continuation : ∀ history : model.History,
