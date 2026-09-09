@@ -1,4 +1,5 @@
 import Lean
+import Grass.Assembly.LoadedFetchObservation
 import Grass.Disasm.Linear
 import Grass.Disasm.StoreAttempt
 import Grass.Disasm.Spatial
