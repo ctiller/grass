@@ -22,6 +22,10 @@ sufficient declaration-level anchors.
 
 ### Win32 x64 and PE/COFF
 
+- Microsoft, *Vectored Exception Handling* (native validation harness; retrieved
+  2026-09-09, handler ordering before stack unwinding):
+  https://learn.microsoft.com/en-us/windows/win32/debug/vectored-exception-handling
+
 - Microsoft, *x64 calling convention*:
   https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention
 - Microsoft, *PE Format* (PE/COFF structure, imports, relocations, exception

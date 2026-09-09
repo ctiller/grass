@@ -29,6 +29,11 @@ Validation challenges the formal/real-world connection at four layers:
 4. Proof gates: prove generators, shrinkers, interpreters, erasure, refinement,
    and artifact connections satisfy their formal interfaces.
 
+The current Windows x86 register/immediate campaign and its explicit observation
+limits are documented in [the native harness](../Tools/x86-native/README.md).
+Its generated predictions distinguish public register-model checks from
+test-local arithmetic references; observed but unmodeled flags are not passes.
+
 Tools and hardware are fallible oracles. Disagreement is preserved as a finding;
 majority vote does not establish truth.
 
