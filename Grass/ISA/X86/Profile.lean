@@ -19,45 +19,28 @@ names anchored to the declaration they constrain — `decodeMem.ripRelative`,
 
 ## State of these citations
 
-Every rule below is dual-cited. Nine of the eighteen anchors are confirmed, all
-of them Intel; the nine AMD anchors are not, because the AMD manual is
-unretrievable.
+Intel's nine anchors retain their recorded confirmations. AMD's existing nine
+subjects have been individually mapped to the official combined APM revision
+4.10, containing Volume 1 revision 3.25 and Volume 3 revision 3.38. Eight AMD
+anchors are confirmed on 2026-09-09. The REX layout anchor remains unconfirmed:
+its source specifies required prefix placement but does not establish the
+stronger misplaced-prefix behavior still present in that rule's statement.
 
-None claims `CommonBasis.agreed`, and none can while that is true:
-`CommonRule.agreedIsConfirmed` requires both citations to be
-`Citation.FullyChecked`, which carries a verified retrieval status, as well as
-requiring the constructor's dates to match both `Citation.confirmed` fields.
+This repairs the active ledger's dead-source locator, not every behavior or
+common-basis obligation. Eight rules still use assertedPendingConfirmation;
+registerWriteExtension retains weakerCommon. No native observation or Lean
+proof is used as citation evidence. The historical 4.09 identity remains dead
+and separate in Sources.lean. See docs/AMD_SOURCE_MIGRATION.md for revision,
+page and table mappings, source-scope corrections, and regression checks.
 
-That obligation used to be the date-matching alone, and a reviewer showed what
-it was worth: both the basis and the confirmation dates are fields the same
-author writes, so typing the same fabricated date twice discharged it over two
-dead documents. The `FullyChecked` conjuncts are what an author cannot type.
-Even so, the claim that agreement is *evidence* would still be too strong --
-nothing here witnesses a human opening a manual, and the anchor-following
-obligation stays open. Eight rules carry
-`assertedPendingConfirmation`; `registerWriteExtension` carries `weakerCommon`,
-because its carve-outs were settled on hardware and the BSF/BSR case is where
-the vendors are reported to differ. That is the honest current state and the
-ledger reports it rather than implying otherwise:
-
-- `Ledger.releaseBlockers` is non-empty, because the AMD APM's recorded
-  retrieval location is dead and the manual is `referenceOnly`. See
-  `Grass/ISA/X86/Sources.lean`.
-- `Ledger.unconfirmedAnchors` is every anchor here, because none has been
-  followed inside the manual from this working copy. The Intel anchors are
-  section-level and written against the SDM's stable structure; the AMD anchors
-  are coarser where the subsection numbering was not verifiable, and each
-  locator names the heading text to search for rather than a table number,
-  because captions survive revisions and numbers do not.
-
-What *is* proved here is what should hold regardless: the ledger is coherent,
-and it accounts for every rule this profile models. Confirming the anchors moves
-`confirmed` from `none` to a date and changes no other line.
 -/
 
 namespace Grass.ISA.X86
 
 open Grass.Core Grass.Cite
+
+-- Kernel decision checks traverse the detailed source locators below.
+set_option maxRecDepth 2048
 
 namespace Rules
 
@@ -132,20 +115,14 @@ def registerWriteExtension : CommonRule :=
       "as 63:16; and an instruction whose destination the architecture leaves " ++
       "undefined for some input, such as BSF or BSR with a zero source, is " ++
       "outside the rule."
-    -- Not `.agreed`: `CommonBasis.agreed` asserts that both manuals state the
-    -- same guarantee, and the AMD manual is currently unretrievable
-    -- (`Sources.lean`). All three carve-outs named in the statement were
-    -- settled on hardware instead: `Tests/ISA/X86/MachineProbes.lean` confirms
-    -- each on an Intel i9-13900H, including BSF with a zero source leaving the
-    -- destination entirely unwritten. That is one part from one vendor, which
-    -- is why this stays `weakerCommon`: the BSF/BSR case is exactly where the
-    -- vendors are reported to differ, and a single Intel measurement cannot
-    -- establish what AMD guarantees.
+    -- Keep the weaker common guarantee. AMD's BSF/BSR entries now directly
+    -- support its unchanged-destination behavior; no observation establishes
+    -- a portable guarantee or turns this into CommonBasis.agreed.
     basis := .weakerCommon
       ("clears bits 63:32 on a 32-bit destination write; BSF/BSR with a zero " ++
        "source leave the destination undefined")
       ("clears bits 63:32 on a 32-bit destination write; BSF/BSR with a zero " ++
-       "source are reported to leave the destination unmodified, which this " ++
+       "source leave the destination unmodified in AMD Vol. 3 rev. 3.38, which this " ++
        "rule does not rely on")
     citation := dual writeExtension
       (cite .intel Volume.intelBasic "3.4.1.1"
@@ -161,15 +138,13 @@ def registerWriteExtension : CommonRule :=
          "general-purpose register are not modified by the operation.\" That is " ++
          "exactly `writeBack` and its four preservation theorems. The section " ++
          "states none of the three carve-outs in this rule's statement, which " ++
-         "is why the basis stays `weakerCommon` on hardware evidence.")
+         "is why the existing basis is not promoted by this AMD source migration.")
         (confirmed := some intelAnchorCheckDate))
-      (cite .amd Volume.amdApplication "3.1"
-        "Registers" [writeExtension]
-        ("In the general-purpose register discussion of Volume 1, find the text " ++
-         "on 64-bit mode operand sizes and zero-extension of 32-bit results. " ++
-         "Section numbering below the chapter was not confirmed from this " ++
-         "working copy; locate by the zero-extension wording, and record the " ++
-         "exact subsection when confirming.")) }
+      (cite .amd Volume.amdApplication "3.1.2"
+        "64-Bit-Mode Registers" [writeExtension]
+        "Checked in Vol. 1 publication 24592 rev. 3.25, pp. 26-28: ordinary byte/word preservation and doubleword zero-extension; Figure 3-4 shows the high-byte overlay. In Vol. 3 publication 24594 rev. 3.38, NOP p. 272 and XCHG p. 370 distinguish opcode 90 from the ModRM exchange form. BSF and BSR pp. 123-124 specify an unchanged destination for a zero source. The common rule does not strengthen Intel's undefined-destination guarantee to AMD's stronger behavior."
+        (confirmed := some amdAnchorCheckDate)
+        (page := some 26)) }
 
 /-- The REX prefix is one of the sixteen bytes `0100WRXB`. -/
 def rexPrefixLayout : CommonRule :=
@@ -200,10 +175,8 @@ def rexPrefixLayout : CommonRule :=
         (confirmed := some intelAnchorCheckDate))
       (cite .amd Volume.amdInstructions "1.2.7"
         "REX Prefix" [rexLayout]
-        ("In the Instruction Formats chapter of Volume 3, find the REX prefix " ++
-         "subsection and its field table. Confirm the bit order W, R, X, B and " ++
-         "the high-nibble value. The subsection number was not confirmed from " ++
-         "this working copy; locate by heading.")) }
+        "Checked location in Vol. 3 rev. 3.38: Figure 1-3 p. 15, INC/DEC discussion p. 16, and section 1.4.4/Table 1-15 pp. 23-24 give the field layout and extensions. Page 15 requires one REX immediately before opcode/escape. It does not establish the statement's stronger ignored/stripped-effects behavior for a REX followed by a legacy prefix. That residual keeps this citation unconfirmed; canonical producers/decoder do not admit legacy prefixes."
+        (page := some 14)) }
 
 /-- A REX prefix removes the high-byte registers and reveals four low-byte
 ones. -/
@@ -234,11 +207,11 @@ def byteRegisterRexInteraction : CommonRule :=
          "reg column in Vol. 2A §2.1.5, which lists AH at 4, CH at 5, DH " ++
          "at 6 and BH at 7.")
         (confirmed := some intelAnchorCheckDate))
-      (cite .amd Volume.amdInstructions "1.2.7"
-        "REX Prefix" [rexByteRegisters]
-        ("In the REX prefix subsection of Volume 3, find the byte-register " ++
-         "table or accompanying text describing the AH/CH/DH/BH versus " ++
-         "SPL/BPL/SIL/DIL selection.")) }
+      (cite .amd Volume.amdInstructions "1.8.1"
+        "Byte-Register Addressing" [rexByteRegisters]
+        "Checked Vol. 3 rev. 3.38 p. 26 with the register-direct rows of Table 1-14 p. 22. Cross-check Vol. 1 rev. 3.25 section 3.1.2 and Figures 3-3/3-4 pp. 26-28: high-byte access is unavailable with any REX; the low bytes of SP/BP/SI/DI require REX. Read register encodings 4-7 rather than assuming the printed figure's display order."
+        (confirmed := some amdAnchorCheckDate)
+        (page := some 26)) }
 
 /-- The ModR/M byte is mod, reg and r/m in bit fields 7:6, 5:3 and 2:0. -/
 def modRmByteLayout : CommonRule :=
@@ -260,11 +233,12 @@ def modRmByteLayout : CommonRule :=
          "more bits of opcode information\". The bit ranges themselves are in " ++
          "the instruction-format figure earlier in the chapter.")
         (confirmed := some intelAnchorCheckDate))
-      (cite .amd Volume.amdInstructions "1.4"
-        "ModRM and SIB Bytes" [modRmLayout]
-        ("In the Instruction Formats chapter of Volume 3, find the ModRM and " ++
-         "SIB section and its ModRM field table. Confirm the bit ranges " ++
-         "7:6, 5:3 and 2:0.")) }
+      (cite .amd Volume.amdInstructions "1.4.1"
+        "ModRM Byte Format" [modRmLayout]
+        "Checked Vol. 3 rev. 3.38 Figure 1-4 p. 17 and named field descriptions/Table 1-10 p. 18. Read the bit ranges and distinguish mod=11 register-direct from memory forms; reg can extend an opcode instead of naming a register."
+        (table := some "Figure 1-4")
+        (confirmed := some amdAnchorCheckDate)
+        (page := some 17)) }
 
 /-- The SIB byte is scale, index and base in bit fields 7:6, 5:3 and 2:0. -/
 def sibByteLayout : CommonRule :=
@@ -284,16 +258,19 @@ def sibByteLayout : CommonRule :=
          "present only for rm=100 lives in §2.1.5's tables, where sibEscape is " ++
          "anchored.")
         (confirmed := some intelAnchorCheckDate))
-      (cite .amd Volume.amdInstructions "1.4"
-        "ModRM and SIB Bytes" [sibLayout]
-        ("In the ModRM and SIB section of Volume 3, find the SIB field table " ++
-         "and the scale-factor encoding.")) }
+      (cite .amd Volume.amdInstructions "1.4.2"
+        "SIB Byte Format" [sibLayout]
+        "Checked Vol. 3 rev. 3.38 Figure 1-5 and Table 1-11 p. 19 for fields and scale factors. SIB presence is the r/m=100 memory-form entry and note 3 of Table 1-10 p. 18; its register-direct column is different."
+        (table := some "Table 1-11")
+        (confirmed := some amdAnchorCheckDate)
+        (page := some 19)) }
 
 /-- `mod=00, rm=101` is RIP-relative in 64-bit mode. -/
 def ripRelativeForm : CommonRule :=
   { subject := ripRelative
     statement :=
-      "In 64-bit mode, a ModRM byte with mod=00 and rm=101 selects " ++
+      "With default 64-bit address size in 64-bit mode, a ModRM byte " ++
+      "with mod=00 and rm=101 selects " ++
       "RIP-relative addressing: the effective address is the 32-bit signed " ++
       "displacement added to the address of the next instruction. This " ++
       "encoding does not denote an absolute 32-bit displacement, which it does " ++
@@ -313,9 +290,9 @@ def ripRelativeForm : CommonRule :=
         (confirmed := some intelAnchorCheckDate))
       (cite .amd Volume.amdInstructions "1.7"
         "RIP-Relative Addressing" [ripRelative]
-        ("In the Instruction Formats chapter of Volume 3, find the RIP-relative " ++
-         "addressing section. Confirm the same three points, in particular that " ++
-         "the base is the address of the following instruction.")) }
+        "Checked Vol. 3 rev. 3.38 pp. 24-26: next-instruction RIP and signed disp32; section 1.7.1/Table 1-16 encodes mod=00,r/m=101; section 1.7.2 makes REX.B irrelevant. Section 1.7.3 adds truncation/zero-extension for address-size override, outside this decoder's default-64-bit-address-size scope."
+        (confirmed := some amdAnchorCheckDate)
+        (page := some 24)) }
 
 /-- `rm=100` selects a SIB byte rather than naming `rsp`. -/
 def sibEscapeForm : CommonRule :=
@@ -337,10 +314,12 @@ def sibEscapeForm : CommonRule :=
          "\"SIB byte required for ESP-based addressing\" with \"SIB byte also " ++
          "required for R12-based addressing.\"")
         (confirmed := some intelAnchorCheckDate))
-      (cite .amd Volume.amdInstructions "1.4"
-        "ModRM and SIB Bytes" [sibEscape]
-        ("In the ModRM and SIB section of Volume 3, find the text stating when " ++
-         "a SIB byte is present.")) }
+      (cite .amd Volume.amdInstructions "1.8.2"
+        "Special Encodings for Registers" [sibEscape]
+        "Checked Vol. 3 rev. 3.38 Table 1-17 p. 27, first row: memory-form r/m=100 requires SIB, including R12-based addressing. Table 1-10 p. 18 distinguishes the mod=11 register form, which does not consume SIB."
+        (table := some "Table 1-17")
+        (confirmed := some amdAnchorCheckDate)
+        (page := some 27)) }
 
 /-- `index=100` with `REX.X` clear means no index register. -/
 def noIndexForm : CommonRule :=
@@ -363,25 +342,30 @@ def noIndexForm : CommonRule :=
          "cases, and \"The expanded index field allows distinguishing RSP from " ++
          "R12, therefore R12 can be used as an index.\"")
         (confirmed := some intelAnchorCheckDate))
-      (cite .amd Volume.amdInstructions "1.4"
-        "ModRM and SIB Bytes" [noIndex]
-        ("In the SIB field table of Volume 3, find the index encoding that " ++
-         "specifies no index register and the accompanying REX.X note.")) }
+      (cite .amd Volume.amdInstructions "1.8.2"
+        "Special Encodings for Registers" [noIndex]
+        "Checked Vol. 3 rev. 3.38 Table 1-17 p. 27, SIB index row: the REX.X extension is decoded, permitting R12 as index but not RSP. Table 1-12 and note 1 p. 20 make the absent-index contribution zero regardless of scale."
+        (table := some "Table 1-17")
+        (confirmed := some amdAnchorCheckDate)
+        (page := some 27)) }
 
 /-- `base=101` with `mod=00` means no base register and a 32-bit
 displacement. -/
 def noBaseForm : CommonRule :=
   { subject := noBase
     statement :=
-      "A SIB byte whose base field is 101 in a ModRM byte with mod=00 " ++
+      "With default 64-bit address size in 64-bit mode, a SIB byte whose " ++
+      "base field is 101 in a ModRM byte with mod=00 " ++
       "specifies no base register, and a 32-bit displacement follows. With " ++
       "mod=01 or mod=10 the same base field denotes RBP, or R13 when REX.B is " ++
-      "set. Among ModRM-based memory operands this is the only encoding of an " ++
+      "set. With no index, this is the displacement-only form. Among " ++
+      "ModRM-based memory operands it is the only encoding of an " ++
       "absolute address in 64-bit mode, since mod=00 with rm=101 is " ++
       "RIP-relative. It is not the only absolute form in the instruction set: " ++
       "the direct-memory-offset MOVs take an absolute address that is not a " ++
       "ModRM operand at all, and this profile does not model them. The " ++
-      "displacement is sign-extended to 64 bits, so the form reaches the low " ++
+      "displacement is sign-extended to 64 bits, so the displacement-only form " ++
+      "with no index reaches the low " ++
       "and high 2 GiB of the address space rather than an arbitrary 32-bit " ++
       "address."
     basis := .assertedPendingConfirmation
@@ -398,11 +382,12 @@ def noBaseForm : CommonRule :=
          "sign-extended to 64bits\". The RIP-relative contrast is §2.2.1.6 " ++
          "and the direct-memory-offset carve-out is §2.2.1.4.")
         (confirmed := some intelAnchorCheckDate))
-      (cite .amd Volume.amdInstructions "1.4"
-        "ModRM and SIB Bytes" [noBase]
-        ("In the SIB field table of Volume 3, find the base encoding that " ++
-         "specifies no base register and its dependence on the ModRM mod " ++
-         "field.")) }
+      (cite .amd Volume.amdInstructions "1.8.2"
+        "Special Encodings for Registers" [noBase]
+        "Checked Vol. 3 rev. 3.38 Table 1-17 p. 27, final row: mod=00/SIB base=101 ignores REX.B and has no base. Table 1-13 p. 20 supplies disp32 and distinguishes mod=01/10. Section 1.5 p. 24 sign-extends displacement; Table 1-16 p. 25 identifies displacement-only addressing when index is absent. Address-size override's truncation in section 1.7.3 is outside the default-64-bit-address-size claim."
+        (table := some "Table 1-17")
+        (confirmed := some amdAnchorCheckDate)
+        (page := some 27)) }
 
 /--
 The citation names the document this corpus registered for its vendor.
@@ -412,7 +397,7 @@ binds an author only if the document is one whose retrieval status this corpus
 actually established. A reviewer invented a document carrying
 `retrieval := .verified` and rebuilt an attack that `FullyChecked` was added to
 stop. This is the missing pin: it ties a rule's two citations to
-`Vendor.document`, which is `intelSdm092` and `amd64Apm409` and nothing else.
+`Vendor.document`, which is `intelSdm092` and `amd64Apm410` and nothing else.
 -/
 def Registered (r : CommonRule) : Prop :=
   r.citation.intel.document = Vendor.intel.document ∧
@@ -481,8 +466,7 @@ here", which was false — adding a `def` to `Addressing.lean` changed nothing.
 route. The obligation now comes from the Lean environment in
 `Tests/ISA/X86/LedgerAudit.lean`, which enumerates the declarations of the
 modeled modules and holds the ledger to them. Nothing in this file can shrink
-it, and the honest current figure is that 6 of 73 modeled declarations carry a
-citation.
+it. Its build report supplies the current declaration and citation counts.
 -/
 
 /-! ## Open citation work
@@ -494,10 +478,10 @@ defect: these shrink to empty as the work is done, and
 -/
 
 /-- Sources whose recorded location does not serve them and which have no
-lawful cached copy. Currently the AMD APM; see `Grass/ISA/X86/Sources.lean`. -/
+lawful cached copy. The active AMD pin is now live; historical records remain separate. -/
 def openReleaseBlockers : List SourceDocument := commonProfileLedger.releaseBlockers
 
-/-- Anchors nobody has yet followed inside the manual. Currently all of them. -/
+/-- Anchors with unresolved confirmation. The misplaced-REX claim remains open. -/
 def openAnchorConfirmations : List Citation := commonProfileLedger.unconfirmedAnchors
 
 end Grass.ISA.X86

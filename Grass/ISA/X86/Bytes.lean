@@ -34,12 +34,12 @@ is silently backwards.
 ## Prefix order
 
 REX must be the **last** prefix before the opcode, after every legacy prefix and
-immediately before the opcode or its `0F` escape. A REX separated from the
-opcode by a `66`, `F2`, `F3`, `67`, segment or `LOCK` prefix is *ignored*, and
-the instruction then executes without the register extensions and without the
-64-bit operand size — a wrong instruction that still decodes. `toBytes` fixes
-the order by construction; there is no field that could hold a prefix in the
-wrong place.
+immediately before the opcode or its `0F` escape. The stronger claim that a
+misplaced REX is ignored remains unconfirmed in `Rules.rexPrefixLayout` after
+the AMD revision migration; see docs/AMD_SOURCE_MIGRATION.md. `toBytes` fixes
+the required order by construction; there is no legacy-prefix field. The
+supported decoder rejects legacy prefixes, including after REX, so this path
+does not depend on that unconfirmed behavior.
 
 Legacy prefixes are not modeled yet. That is a real gap rather than a decision:
 this profile has no instruction needing one, and adding them must preserve the
