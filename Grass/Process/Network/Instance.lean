@@ -151,8 +151,10 @@ one. What this bridges is inside
 `EndsInstance.nowEnded`, whose `ending` argument *is* at the slot's kind, in
 five of the six ending branches. `childDied` carries one too -- and is the case
 where the cast looks most needed, since its ending is literally `.died reason` --
-but closes through `wasChild` with no cast at all, which is the same shape as
-`detach` above. Those five are `died_cast`'s only uses anywhere. §10.134.
+but closes through `wasChild` with no cast at all -- the same shape as the
+`detach` branch, which
+`NetworkTransition.dying_was_supervised_or_untouched`'s docstring describes.
+Those five are `died_cast`'s only uses anywhere. §10.134.
 -/
 theorem died_cast {registry : ProtocolRegistry.{u, w, v}}
     {boundary : DriverBoundary.{u}}

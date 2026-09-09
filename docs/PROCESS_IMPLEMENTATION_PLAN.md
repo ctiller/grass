@@ -5283,9 +5283,24 @@ This section's own bullet says to resolve every backticked name *prefix
 included*. Round seventeen found `ProcessPlan.parentless_slot_survives` in a
 docstring; the declaration is inside `namespace NetworkTransition`, so its name
 is `ProcessPlan.NetworkTransition.parentless_slot_survives` and the citation
-resolves to nothing. The docstring audit passed it, because that gate matches a
-name's last component. Every wrong prefix over a real declaration is invisible to
-it, and the bullet was being followed by eye.
+resolves to nothing. The docstring audit passed it, and the entry's first account
+of *why* was wrong in both halves -- a claim about a tool's mechanism, asserted
+without reading the tool, in the section about claims asserted without checking.
+
+Round eighteen read `tools/grass-tools/src/bin/docstring_audit.rs` and corrected
+it. The gate does not match a name's last component: `known_names` registers
+every dotted *suffix*, and `ProcessPlan.parentless_slot_survives` is not a suffix
+of the real name, so suffix matching did not pass it. What passed it was the
+claim-word filter -- that sentence carries none, and `check` skips such sentences
+before resolving any name at all. Nor is every wrong prefix invisible: in a
+claim-word sentence whose backticked names all fail, the gate reports them.
+
+The two real gaps are narrower and worth stating exactly. A sentence passes as
+soon as *any one* of its backticked names resolves, so a wrong prefix beside a
+right name is never seen -- which is what would have saved this sentence had it
+carried a claim word, since `ProcessPlan.execution_holds_an_unkilled_root` sits
+in it and does resolve. And a dotted name can never be reported as *invented*,
+because the pattern for "looks like a Lean declaration" admits no dot.
 
 It is now followed by Lean. Generating one `#check @Name` per distinct dotted
 citation on the branch's added lines and elaborating the file is authoritative in
@@ -5324,6 +5339,34 @@ and was lost to a wrong count.
 And `dying_was_supervised_or_untouched`'s headline was still
 `dying_was_supervised`'s statement, one artefact over from where round fifteen
 found the same mismatch.
+
+**Round eighteen, and the correction to the paragraph above is its own
+example.** Two more findings of the same shape, both in text round seventeen
+wrote.
+
+*"So once a root ends, no field of `Restarts` refuses a restart at its slot"* was
+inferred from ten fields taken one at a time, and the refusal is a conjunction of
+two of them. `restartsAChild` forces the new incarnation to record a parent and
+`authorized` then demands `maySpawn` permit that parent for the kind, so where no
+kind may spawn the root's role the relation is uninhabited -- which
+`Tests/Process/PreservationFixtures.lean`'s `no_restart_at_the_root_slot` proves
+at `serverPlan`, eight lines from the sentence denying it. Round seventeen
+replaced "inferred from one of ten fields" with "inferred from ten fields
+individually" and kept the defect, because reading a structure field by field
+cannot see a refusal two fields make together.
+
+*"A step that kills a live instance"* was still `dying_was_supervised`'s
+headline, denying in bold the strengthening its own third paragraph advertises:
+the hypothesis is "not already dead of *that* reason", which an already-dead
+instance can satisfy. Third occurrence of this artefact -- rounds fifteen and
+seventeen each fixed it one declaration over.
+
+And two live wrong-prefix citations of exactly round seventeen's class,
+`WellFormed.SlotsAgree` where the field is `slotsAgree` and the predicate is
+`LogicalProcessNetworkCore.SlotsAgree`. They came from `main` rather than from
+this branch, which is why the `#check` harness did not see them: it runs over
+added lines only. That scope is now stated rather than left for a reader to infer
+from a clean result.
 
 ### 10.135 A role that may write no region owes nothing
 

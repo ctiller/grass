@@ -445,8 +445,14 @@ without a root. A plan at which that restart is unconstructible —
 reason — therefore holds a parentless undead instance in that slot along every
 run, which is what `Tests/Process/PreservationFixtures.lean` discharges at
 `serverPlan`. Whether that instance is the *root* is a further step: `.detached`
-is parentless too, and at `serverPlan` nothing can put a detached incarnation in
-the listener slot, but the predicate does not say so.
+is parentless too, and the predicate does not distinguish them. An earlier
+version added that nothing can put a detached incarnation in the listener slot at
+`serverPlan`, which has no theorem behind it and is false of the family --
+`Detaches` has three fields and no well-formedness requirement, so a `detach` is
+constructible from a hand-built world whose listener slot holds an attached
+incarnation. It may be true along every run; that is the further step, and this
+section's rule is that such a sentence should become the Lean rather than sit in
+a docstring.
 
 `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.132. The invariant is
 stated over an execution rather than over one step because a step-local fact

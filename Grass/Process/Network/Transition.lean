@@ -1109,7 +1109,8 @@ structure Spawns (before after : plan.LogicalProcessNetwork)
   `ProcessRef` has an `instanceId` as well as a generation, and
   `allocatesTheGeneration` constrains only the second — so a spawn could install
   an incarnation naming slot 3 into slot 7 and take a well-formed network to one
-  failing `WellFormed.SlotsAgree`. Local adversarial review built exactly that
+  failing `LogicalProcessNetworkCore.SlotsAgree`. Local adversarial review built
+  exactly that
   step, with the before-network well formed and the after-network not.
   -/
   slotAgrees : ∀ incarnation, after.instances kind slot = some incarnation →
@@ -1190,10 +1191,23 @@ structure Restarts (before after : plan.LogicalProcessNetwork)
 
   The intended reading is that if a root ends the program is over, and starting
   again is a new run — `ExactInitialNetwork`, not a transition. Nothing in this
-  family enforces that, and the argument is structural: of the ten fields,
-  `wasEnded` asks only that the old incarnation had ended, and no other mentions
-  it at all. So once a root ends, no field of `Restarts` refuses a restart at its
-  slot. `NetworkTransition.parentless_slot_survives` is the separate fact that
+  family enforces that, and the argument is structural but narrower than two
+  earlier versions of this sentence made it: of the ten fields, `wasEnded` asks
+  only that the old incarnation had ended, and no other mentions it at all. So
+  nothing here keys off the old incarnation's *rootness* -- no field refuses a
+  restart because the slot held the root.
+
+  Whether one is constructible is then a fact about the plan, not about this
+  structure, and the earlier versions said otherwise. `restartsAChild` and
+  `authorized` together refuse it wherever `ProcessGraph.maySpawn` permits no
+  parent for the root's role, which is a conjunction of two fields about the
+  *new* incarnation and is exactly what
+  `Tests/Process/PreservationFixtures.lean`'s `no_restart_at_the_root_slot`
+  proves at `serverPlan`. Reading "no field refuses it" off ten fields taken one
+  at a time cannot see the refusal `restartsAChild` and `authorized` make
+  together.
+
+  `NetworkTransition.parentless_slot_survives` is the separate fact that
   such a restart is the *only* way a parentless slot stops holding a *parentless*
   instance — it never stops holding an instance at all, since `nowLive` puts one
   there — which is why `ProcessPlan.execution_holds_an_unkilled_root` takes its
@@ -1229,7 +1243,8 @@ structure Restarts (before after : plan.LogicalProcessNetwork)
   `ProcessRef` has an `instanceId` as well as a generation, and
   `allocatesTheGeneration` constrains only the second — so a spawn could install
   an incarnation naming slot 3 into slot 7 and take a well-formed network to one
-  failing `WellFormed.SlotsAgree`. Local adversarial review built exactly that
+  failing `LogicalProcessNetworkCore.SlotsAgree`. Local adversarial review built
+  exactly that
   step, with the before-network well formed and the after-network not.
   -/
   slotAgrees : ∀ incarnation, after.instances kind slot = some incarnation →
@@ -2493,7 +2508,8 @@ theorem dying_was_supervised_or_untouched (transition : plan.NetworkTransition b
     | coalesce _ _ _ _ step => intro inScope; exact absurd inScope (by intro equal; cases equal)
 
 /--
-**A step that kills a *live* instance found it recording a current parent.**
+**A step that kills an instance not already dead of that reason found it
+recording a current parent.**
 
 `dying_was_supervised_or_untouched` with the right disjunct refused. This is the
 form `ProcessPlan.execution_holds_an_unkilled_root` consumes -- its only consumer
