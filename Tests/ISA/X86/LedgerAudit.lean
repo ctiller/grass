@@ -3,6 +3,7 @@ import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.BasicInstructions
 import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.ImmediateArithmetic
+import Grass.ISA.X86.RegisterDecode
 import Grass.ISA.X86.Decode
 import Grass.ISA.X86.Profile
 import Grass.ABI.Win64.UnwindBytes
@@ -95,6 +96,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.BasicInstructions,
    `Grass.ISA.X86.Rel32,
    `Grass.ISA.X86.ImmediateArithmetic,
+   `Grass.ISA.X86.RegisterSemantics, `Grass.ISA.X86.RegisterDecode,
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
@@ -120,7 +122,10 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Win32 signature tables. No existing citation debt is reclassified.
 -- WriteFile loan footprint and Prepared's DWORD/CPU profile contract are
 -- newly modeled API obligations. Source comments/probes are not ledger citations.
-def owedBaseline : Nat := 120
+-- Thirteen new register-transfer/flag/operand-selection facts. Manual headings
+-- are recorded in the module; formal subject/dual-anchor coverage remains owed.
+-- No existing debt is reclassified by this addition.
+def owedBaseline : Nat := 133
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -146,7 +151,8 @@ acquiring a citation.
 -- Four lookup-derived opcode selections and checked encoding-template wrappers.
 -- Ten WriteFile definitions are internal evidence/transport/sequence operations;
 -- Windows footprint and width/profile applicability remain owed separately.
-def notBehaviourBaseline : Nat := 93
+-- Fourteen new structural helpers over explicit semantic and decoder results.
+def notBehaviourBaseline : Nat := 107
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -303,6 +309,24 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.WriteFile.Prefix.output,
     `Grass.Platform.Win32.WriteFile.History.published,
     `Grass.Platform.Win32.WriteFile.History.brecOn.go,
+    -- Generic partial-result relations, serialization through the separately
+    -- owed bit layout, and accessors over Grass's own semantic record.
+    `Grass.ISA.X86.RegisterSemantics.Flags.map,
+    `Grass.ISA.X86.RegisterSemantics.Flags.Allows,
+    `Grass.ISA.X86.RegisterSemantics.Flags.definedMask,
+    `Grass.ISA.X86.RegisterSemantics.Flags.valueBits,
+    `Grass.ISA.X86.RegisterSemantics.Effect.destination,
+    `Grass.ISA.X86.RegisterSemantics.Effect.Allows,
+    `Grass.ISA.X86.RegisterSemantics.Instruction.effect,
+    -- Projections/defaults and checked equality search over existing encoders;
+    -- architectural operand reconstruction is separately owed below.
+    `Grass.ISA.X86.RegisterDecode.rexW,
+    `Grass.ISA.X86.RegisterDecode.rexR,
+    `Grass.ISA.X86.RegisterDecode.rexB,
+    `Grass.ISA.X86.RegisterDecode.selectKinds,
+    `Grass.ISA.X86.RegisterDecode.select,
+    `Grass.ISA.X86.RegisterDecode.decode,
+    `Grass.ISA.X86.RegisterDecode.Result.effect,
     -- Decoder-table lookup and packaging of independently checked encoding laws.
     `Grass.ISA.X86.ImmediateArithmetic.operandSpec,
     `Grass.ISA.X86.ImmediateArithmetic.template,
@@ -416,6 +440,19 @@ def owed : List Name :=
     -- still external. No loan or probe result discharges those obligations.
     `Grass.Platform.Win32.WriteFile.Request.loans,
     `Grass.Platform.Win32.WriteFile.Prepared,
+    `Grass.ISA.X86.RegisterSemantics.Flags.bits,
+    `Grass.ISA.X86.RegisterSemantics.Flags.fromBits,
+    `Grass.ISA.X86.RegisterSemantics.Flags.equal?,
+    `Grass.ISA.X86.RegisterSemantics.Flags.above?,
+    `Grass.ISA.X86.RegisterSemantics.parity,
+    `Grass.ISA.X86.RegisterSemantics.arithmeticFlags,
+    `Grass.ISA.X86.RegisterSemantics.logicalFlags,
+    `Grass.ISA.X86.RegisterSemantics.narrow,
+    `Grass.ISA.X86.RegisterSemantics.evaluate,
+    `Grass.ISA.X86.RegisterSemantics.evaluateImmediate,
+    `Grass.ISA.X86.RegisterSemantics.Instruction.encoding,
+    `Grass.ISA.X86.RegisterSemantics.Instruction.registersAfter,
+    `Grass.ISA.X86.RegisterDecode.reconstruct,
     `Grass.ISA.X86.ImmediateArithmetic.Immediate.opcode,
     `Grass.ISA.X86.ImmediateArithmetic.Kind.extension,
     `Grass.ISA.X86.ImmediateArithmetic.encode,

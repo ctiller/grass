@@ -5,7 +5,8 @@ with successful PUSH/allocation effects and complete declared scratch snapshots.
 
 This is the verification side lane following `spikes`, initially against main
 `28e5767b`. It exercises public encoders and register write-back on the host CPU.
-It does not certify instruction semantics or close citation/proof obligations.
+It checks bounded instruction-model predictions; it does not certify the ISA
+model or close citation/proof obligations.
 
 From Git Bash at the repository root, with the pinned Lean toolchain, Python 3
 and MSVC x64 (Visual Studio Installer must provide `vswhere.exe`):
@@ -41,22 +42,26 @@ The population is generated once in
 * 450 register MOV cases: every pair among 15 non-RSP GPRs, 32 and 64 bits,
   including aliasing and both REX register fields. Distinct initial register
   values expose wrong operand selection; nonzero high halves expose missed
-  zero-extension. Predictions call Grass's `writeBack`.
+  zero-extension. Predictions call Grass's `RegisterSemantics` transfer, which
+  reuses `writeBack`.
 * 420 SUB/CMP immediate cases: those 15 destinations, both widths, signed imm8
   endpoints (0, 127, -128, -1) and imm32 endpoints (maximum, minimum, -1).
   Emission calls `ImmediateArithmetic.encode`; interpretation calls its `toInt`.
-  The 210 SUB predictions use **test-local reference arithmetic**, not an
-  existing whole-instruction state transition. The 210 CMP cases check only
-  completion and GPR nonmutation; without flag predictions they cannot detect a
-  wrong immediate value or validate compare semantics. Reports separate them.
+  Both SUB and CMP now predict all six arithmetic flags through the public
+  `RegisterSemantics.evaluateImmediate` transfer.
+* 120 register boundary cases cover all six modeled families at both widths,
+  with zero, carry/borrow, nibble carry, signed overflow and high-half inputs.
+* Four cases use Hello's exact operand selections: TEST EAX,EAX; CMP EAX,R14D;
+  ADD R13,RAX; SUB R14D,EAX. Total population: 994.
 
 All 15 initialized GPRs are compared, including unchanged registers. RSP is
 captured at entry and exit and checked unchanged. It is not a corpus input.
 MOV cases compare CF/PF/AF/ZF/SF/OF preservation from a deliberately set initial
-pattern. Arithmetic flag results are recorded but unchecked: no arithmetic flag
-semantics is claimed. Other RFLAGS bits, SIMD/x87 state and memory are outside
-this campaign's declared observation surface. The single initial value pattern
-does not cover arithmetic zero/carry/overflow partitions exhaustively.
+pattern. ADD/SUB/CMP compare all six defined status flags (mask `0x8D5`);
+TEST/XOR compare CF/PF/ZF/SF/OF (mask `0x8C5`), leaving undefined AF unconstrained.
+Other RFLAGS bits, SIMD/x87 state and memory are outside this campaign's declared
+observation surface. Boundary cases are finite model validation, not exhaustive
+arithmetic coverage or a whole-machine transition proof.
 
 The legacy [`MachineProbes.lean`](../../Tests/ISA/X86/MachineProbes.lean) is a
 useful spare part, but is not imported: its BSF-zero expectation assigns a
@@ -93,7 +98,8 @@ citation ledger or repair the existing AMD retrieval debt.
 ## Adapter boundary and next work
 
 TSV v1 columns are label, instruction hex, 16 comma-separated input GPR values,
-16 expected GPR values, incoming flags, expected flags (`-` means unchecked),
+16 expected GPR values, incoming flags, expected flags (`value/mask`, legacy
+plain value uses `0x8D5`, and `-` means unchecked),
 and prediction basis. GPR order is RAX RCX RDX RBX RSP RBP RSI RDI R8..R15.
 Values are unsigned hex except RSP, which must be `-` in both state columns
 (serialized as JSON null in retained cases). It means host-controlled input and
@@ -113,10 +119,11 @@ exception/serial transport; do not count QEMU TCG as physical CPU evidence.
 Windows NTSTATUS must remain alongside any future normalized x86 fault class;
 Linux signal numbers alone are not a portable vector mapping.
 
-The next bounded additions follow `spikes`: a mapped scratch stack for RSP
-allocation and PUSH effects, mapped memory and access-fault snapshots for
-`movReg32Mem`/Store32, then flags compared against published instruction
-semantics. Such additions need entry/exit memory captures, permission maps,
+The bounded scratch-stack extension already covers successful allocation/PUSH
+effects; this register campaign now compares published status-flag semantics.
+Next additions follow `spikes`: shared semantic laws for those stack operations,
+mapped memory and access-fault snapshots for `movReg32Mem`/Store32. These need
+entry/exit memory captures, permission maps,
 address relocation and explicit undefined-bit masks. They cannot be obtained by
 simply allowing arbitrary RSP or memory operands in this version. Repeat on
 identified Intel and AMD hosts; microcode currently remains explicitly unknown,

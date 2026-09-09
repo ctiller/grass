@@ -231,3 +231,22 @@ variants, ARM, RISC-V, Wasm, SPIR-V, WGSL, Verilog, and other instruction-like
 targets. A new target may conservatively extend foundational vocabulary after
 review and must provide migration/refinement theorems for existing profiles. The
 initial interface is not presumed permanently sufficient for unlike targets.
+
+### Current executable register semantics
+
+[`RegisterSemantics`](../Grass/ISA/X86/RegisterSemantics.lean) supplies operand-local
+32/64-bit MOV, ADD, SUB, CMP, TEST and XOR transfers, with signed SUB/CMP
+immediates, explicit defined/undefined status flags, and register preservation
+laws. [`RegisterDecode`](../Grass/ISA/X86/RegisterDecode.lean) selects this family
+by checked equality with production encoders after `decodeInsn` succeeds; its
+soundness law preserves the decoder's exact suffix. This bounded selector does
+not admit every legal alias or redundant prefix spelling.
+
+These transfers are not yet `RawInstruction` machine-step realizations. Fetch,
+RIP/control successors, execution-profile admission, interruption and fault
+effects remain obligations at that boundary. Memory instructions must use the
+shared memory operation/substep and commit contracts, including ordered fault
+prefixes, rather than grow a second memory model here. The immediate consumer
+is Hello's TEST/CMP/ADD/SUB loop; PUSH/stack allocation, LEA, loads/stores and
+call/trap boundaries follow its production lowering needs. Native observations
+validate declared effects and never confer a proof or profile certificate.
