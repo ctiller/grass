@@ -47,6 +47,55 @@ rebuild cone. The command fails on any unresolved name. Pre-implementation
 burden classes are replaced by measured evidence; they are never copied into
 the report as if they were measurements.
 
+The report's retained Schematic Lean contract is:
+
+```lean
+structure OpenOwnerDependency where
+  event : BusEventId
+  owner : AgentId
+  closureCondition : String
+  targetsOwner : event.target = owner
+  openAtReportSnapshot : IsOpenBusDependency event
+
+structure AuthorityReportV1 where
+  declarationUses : Array DeclarationUse
+  declarationIdentitiesNodup :
+    declarationUses.toList.Pairwise
+      (fun left right => left.identity ≠ right.identity)
+  unresolvedNames : Array UnresolvedName
+  noUnresolvedNames : unresolvedNames.isEmpty = true
+
+inductive UnconsumedDeclaration where
+  | private (declaration : DeclarationUse)
+  | public
+      (declaration : DeclarationUse)
+      (futureGate : OpenOwnerDependency)
+
+inductive TemporaryBridgeClass where
+  | memoryCallFrameLoan
+  | isaEncoderDecoder
+  | abiCallFrameUnwind
+  | platformCallOutcome
+  | artifactWriterLinker
+
+structure TemporaryBridge where
+  bridgeClass : TemporaryBridgeClass
+  ownerDependency : OpenOwnerDependency
+  substituteContract : ContractId
+  omittedTheorems : Array DeclarationIdentity
+  removalGate : OpenOwnerDependency
+```
+
+`OpenOwnerDependency` is a durable, still-open bus issue or dependency naming
+the responsible owner and an objective closure condition. It does not mean an
+undefined "active roadmap", and a plan or prose promise without that durable
+reference cannot inhabit either public constructor. The five constructors of
+`TemporaryBridgeClass` are the complete initial bridge set. Adding another is a
+normative design change. A bridge outside this set, with a closed or missing
+owner dependency, with an empty substitute contract, or without a live removal
+gate is rejected. Any path containing a temporary bridge is provisional and
+cannot satisfy this proof-economy gate or the final `VerifiedProgram` gate.
+
 For the first vertical consumer it also emits this Schematic Lean report shape
 (the exact declaration belongs in the future tool signature module):
 
@@ -55,23 +104,31 @@ structure VerticalProofEconomyReportV1 where
   authority : AuthorityReportV1
   reusableWork : Array DeclarationUse
   programSpecificWork : Array DeclarationUse
+  workPartition :
+    authority.declarationUses.toList.Perm
+      (reusableWork.toList ++ programSpecificWork.toList)
   residualGoals : Array ResidualGoalDischarge
   editCones : SpecAsmLayoutEditCones
   unconsumedDeclarations : Array UnconsumedDeclaration
   temporaryBridges : Array TemporaryBridge
-  credit : ProofEconomyCredit
+
+def VerticalProofEconomyReportV1.credit
+    (report : VerticalProofEconomyReportV1) : ProofEconomyCredit :=
+  if report.temporaryBridges.isEmpty then .eligible else .provisional
 ```
 
 Every declaration use carries exactly one of the six authority classifications
-from `SPIKE_PROOF_BURDEN.md`; `reusableWork` and `programSpecificWork` are a
-disjoint exhaustive partition. Each residual goal names its discharging checked
-declaration. `editCones` records specification, assembly-only, and layout-only
-rebuilds. Each unconsumed public declaration names an active-roadmap future
-gate, or the report rejects it; private declarations are identified separately.
-Each temporary bridge names its owner dependency, substitute contract, omitted
-theorems, and scheduled removal gate. `credit` must be `provisional` whenever
-that bridge array is nonempty and only `eligible` when it is empty. This schema
-is the retained evidence for the five-way measurement; prose counts are not.
+from `SPIKE_PROOF_BURDEN.md`. `AuthorityReportV1` makes declaration identity
+unique, and `workPartition` is a multiplicity-preserving permutation of that
+exact declaration universe; together they make `reusableWork` and
+`programSpecificWork` disjoint and exhaustive rather than merely describing
+them that way. Each residual goal names its discharging checked declaration.
+`editCones` records specification, assembly-only, and layout-only rebuilds. The
+`UnconsumedDeclaration` constructors make visibility explicit and make the
+owner dependency mandatory only on the public arm. `credit` is derived from the
+bridge array, so an eligible report with a live bridge is not constructible.
+This schema is the retained evidence for the five-way measurement; prose counts
+are not.
 
 For constructor-heavy assembly, `elaborate` emits both the typed constructor
 tree and complete raw instruction hierarchy. Spike 4 additionally compares the
