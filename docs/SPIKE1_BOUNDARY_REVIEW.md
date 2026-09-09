@@ -58,6 +58,30 @@ composition still need explicit connections beyond format serialization laws.
 
 ## Evidence inspected
 
+### Milestone cleanup audit: structural source/image/unwind attachment
+
+Checkpoint: main `e084b408`, 2026-09-09. Spikes designated the completed structural
+attachment as a milestone for cleanup review. This disposition reuses the
+auditor's existing source inspection and supplier reviews; it is not a second
+audit campaign or a claim of Spike 1 acceptance.
+
+| Item | Disposition and owner | Revisit or completion evidence |
+|---|---|---|
+| Shared static packing and endian proofs | Completed library cleanup, integrated by spikes | Static packing `3bb27d4c`, 32-bit bridge `159b63fd`, and 64-bit inverse included by `e084b408`; supplier independent reviews and root integration gates passed |
+| Architecture documentation discoverability and boundary clarification | Completed documentation cleanup | Auditor verified prior discoverability finding closed; facade and canonical execution documents integrated by `e084b408` |
+| AUD-004: independent x86 encoding/boundary validation | Approved bounded replacement, deferred by spikes until the current x86 receipt checkpoint | Revisit when that checkpoint lands; x86 owns oracle contract and campaign, with retained replay and mutation evidence required for closure |
+| AUD-005: source/image diagnostic causes | Spikes dispatched a narrow diagnostic change to Sol | Preserve one construction pipeline and existing causes; review distinguishable negative-case diagnostics and unchanged success/rejection behavior before closure |
+| AUD-006: build observability | Auditor owns bounded passive sampling and retained-campaign inventory; no full-build profile or performance fix claimed | Review the resulting command, failure and resource evidence before proposing resource policy or optimization |
+| AUD-007: duplicate contributor build request | Spikes owns documentation correction | Remove the duplicate Tests target invocation while retaining all distinct checks; verify the final instructions before closure |
+
+Execution, semantic unwind reversal, sole-root migration and final certificate
+work remain active implementation and acceptance obligations. Their existence
+does not turn this structural milestone or its cleanup audit into final
+acceptance. Open cleanup items retain the dispositions above until actual
+delivery evidence changes them.
+
+### Initial boundary review
+
 The console capture is process checkpoint `3dbfa17f` (integrated by spikes as
 `ffcdc64e`), following history/wait and console denotation checkpoints. The
 lowering drafts inspected are on `codex/lowering-console-projection`:
