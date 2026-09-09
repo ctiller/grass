@@ -129,11 +129,36 @@ closure facts. The fixture constructs a five-loan quiet service edge and rejects
 a wrong observation; it is model evidence, not native reachability or adequacy.
 
 The relation is a partial union, not a public `BehaviorModel`, realization
-profile, or exhaustive Windows execution model. ApiDispatch strengthening,
-CPU/refusal/return/terminal cases and exhaustive coverage remain outstanding
-at `dd4c85d1`. In particular, `exitProcessEntry` is an entry case, not proof of
+profile, or exhaustive Windows execution model. At `dd4c85d1`, dispatch
+strengthening and CPU/refusal/return/terminal cases were still outstanding;
+the later dispatch delivery is described below. In particular,
+`exitProcessEntry` is an entry case, not proof of
 terminal observation. The supplied realization remains fixed across the
 derivation; graph agreement does not discharge native correspondence.
+
+### Computed entry dispatch binding
+
+Inspected architecture delivery `d83bdca1` strengthens all three entry
+constructors in `Grass/Platform/Win32/RawStep.lean`. Each now requires successful
+`ApiDispatch.select?` at the **same actual CALL** effective address
+(`fallthroughRip + displacement`) and target value read by its `CallNormal`
+receipt. The selected binding's `MatchesRequest` must match the API constructor
+in that entry choice; request payload correctness remains with the endpoint
+model. An independently supplied API label is no longer sufficient.
+
+`RawStep.entry_binding` inverts an entry choice to expose an address, target and
+binding, its successful computed selection, and matching request. The precise
+ties to the CALL receipt reside in the entry constructors; the inversion's
+existential conclusion does not separately return that receipt. Existing
+service cases and `service_receipt` inversion are unchanged by this delta.
+
+Use `git show d83bdca1:Grass/Platform/Win32/RawStep.lean` and
+`git show d83bdca1:Grass/Platform/Win32/ApiDispatch.lean` for the exact inspected
+implementation. This is logical dispatch from the loaded import layout, not
+native DLL/export adequacy. CPU, refusal, provider-resume and terminal cases,
+plus exhaustive public-profile coverage, remain outstanding in this relation
+at that delivery. Entry `EdgeAgreement` has not gained the service case's
+stronger causal-realization premises.
 
 ## Find a symbol without another inventory
 
