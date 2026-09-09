@@ -18,12 +18,10 @@ jobs:
           persist-credentials: false
 
       - name: Check spike source views
-        shell: pwsh
-        run: ./check-spike-sources.ps1
+        run: ./check-spike-sources.sh
 
       - name: Check local documentation links
-        shell: pwsh
-        run: ./check-doc-links.ps1
+        run: ./check-doc-links.sh
 
       # This job is where cross-file references are kept honest, so the retired
       # tool paths belong here too.

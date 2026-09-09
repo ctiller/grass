@@ -69,17 +69,13 @@ Build the foundation API without warnings (so `sorry` is an error), audit every
 concrete `VerifiedProgram` producer, and check the named public theorem roots
 with:
 
-```powershell
+```bash
 lake build
-pwsh ./audit-trust.ps1
+./audit-trust.sh
 ```
 
-The PowerShell checks support both PowerShell 7 and Windows PowerShell 5.1.
-On a Windows host without `pwsh`, run the same trust check with:
-
-```powershell
-powershell.exe -NoProfile -File .\audit-trust.ps1
-```
+The validation scripts require Bash and Perl. They run on Linux and in Git Bash
+on Windows.
 
 The trust script generates a temporary audit import over every library and test
 module. Its Lean command unfolds even irreducible result aliases to discover
@@ -97,16 +93,9 @@ warning-as-error setting independently rejects admission mechanisms.
 The corpus checks verify that annotated spike documents and their comment-free
 authored Lean views remain exact:
 
-```powershell
-pwsh ./check-spike-sources.ps1
-pwsh ./check-doc-links.ps1
-```
-
-The Windows PowerShell 5.1 equivalents are:
-
-```powershell
-powershell.exe -NoProfile -File .\check-spike-sources.ps1
-powershell.exe -NoProfile -File .\check-doc-links.ps1
+```bash
+./check-spike-sources.sh
+./check-doc-links.sh
 ```
 
 The last two commands are corpus consistency checks, not compilation or proof

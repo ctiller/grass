@@ -61,7 +61,7 @@ admitted local slots and declaration order determines their offsets.
 `Grass/Assembly/Store32.lean` derives the RSP-relative
 operand, encoded instruction, shifted range, and little-endian write bytes from
 that resolution. The actual-source fixtures are re-elaborated by
-`./check-source-input.ps1`, including when Lake would otherwise reuse a cached
+`./check-source-input.sh`, including when Lake would otherwise reuse a cached
 test. Its elaborator embeds the actual file as literal characters; it supplies
 data, while the Lean kernel checks the parsing and resolution result. No copied
 assembly listing supplies the store occurrence.

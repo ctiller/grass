@@ -14,7 +14,7 @@ open Grass.Assembly Grass.Assembly.SourceInput Grass.Assembly.SourceStore
 open Grass.ABI.Win64 Grass.ISA.X86
 open Grass.Tests.Spike1 Grass.Tests.Spike1Policy Tests.Memory.Spike1Block
 
--- This file must be directly re-elaborated by check-source-input.ps1; Lake
+-- This file must be directly re-elaborated by check-source-input.sh; Lake
 -- does not register the authored file below as an imported-module dependency.
 def authored : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
 

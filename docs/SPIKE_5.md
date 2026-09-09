@@ -1999,7 +1999,7 @@ but their displayed expansion is part of the evidence under review.
 ## Exact authored source snapshot
 
 This snapshot is the exact comment-free source maintained under
-`Spikes/5_Spinning_Cube/`. Run `./check-spike-sources.ps1 -Spike 5` to check the
+`Spikes/5_Spinning_Cube/`. Run `./check-spike-sources.sh --spike 5` to check the
 normalized cross-view equality and block classifications.
 
 ### `Assembly.lean`

@@ -11,8 +11,12 @@ This module is deliberately limited to the current execution vocabulary.
 Finite `ExecutionPrefix` values do not retain their sequence of choices;
 `Completion.infinite` does retain its choice stream. Surjectivity of these maps
 does not supply a missing branching-strategy model, a permanent-wait execution
-constructor, or a stuttering simulation. It is not the full equivalence gate
-required by decision 137 and is not added to `VerifiedProgram` as one.
+constructor, or a stuttering simulation. The certificate gate requires this
+backward coverage beside every adjacent refinement;
+`VerifiedProgram.histories_surjective` exposes coverage of histories represented
+by the current vocabulary. Decision 137's
+full-equivalence gate remains incomplete until the missing history forms are
+represented and covered.
 
 The predicate transport theorems quantify over arbitrary properties of these
 existing abstract objects. They do not inspect or create certificates for the
@@ -38,13 +42,6 @@ variable {spec : SpecProcess}
 def mapHistory (refinement : BehaviorRefinement concrete abstract)
     (history : concrete.CompletedHistory) : abstract.CompletedHistory :=
   ⟨refinement.mapPrefix history.1, refinement.mapCompletionAtPrefix history.1 history.2⟩
-
-/-- Backward existence for the exact prefix map and every mapped frontier's
-finite or infinite completion map. -/
-structure Coverage (refinement : BehaviorRefinement concrete abstract) : Prop where
-  prefixes : Function.Surjective refinement.mapPrefix
-  completions : ∀ execution : concrete.system.ExecutionPrefix,
-    Function.Surjective (refinement.mapCompletionAtPrefix execution)
 
 namespace Coverage
 

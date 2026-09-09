@@ -189,6 +189,7 @@ def portable : PortableProgramCertificate spec where
 def driver : ProjectedDriverCertificate portable where
   behavior := behavior
   refinement := behaviorRefinesItself
+  coverage := BehaviorRefinement.Coverage.refl behavior
   adequate := behaviorAdequate
   stage := noDerivedDemands
   requirements := noDemandCertificates
@@ -196,6 +197,7 @@ def driver : ProjectedDriverCertificate portable where
 def provider : ProviderCertificate driver where
   behavior := behavior
   refinement := behaviorRefinesItself
+  coverage := BehaviorRefinement.Coverage.refl behavior
   adequate := behaviorAdequate
   stage := noDerivedDemands
   requirements := noDemandCertificates
@@ -203,6 +205,7 @@ def provider : ProviderCertificate driver where
 def machine : MachineCertificate provider where
   behavior := behavior
   refinement := behaviorRefinesItself
+  coverage := BehaviorRefinement.Coverage.refl behavior
   adequate := behaviorAdequate
   stage := noDerivedDemands
   requirements := noDemandCertificates
@@ -221,6 +224,7 @@ def artifact : ArtifactCertificate machine where
   format := artifactFormat
   artifact := ()
   refinement := behaviorRefinesItself
+  coverage := BehaviorRefinement.Coverage.refl behavior
   adequate := behaviorAdequate
   stage := noDerivedDemands
   requirements := noDemandCertificates
@@ -258,6 +262,9 @@ example : Nonempty ((artifactFormat.loadedBehavior ByteArray.empty).system.Compl
 example : Nonempty (VerifiedProgram.CompletionRefinement verified
     (initialExecution true)) :=
   verified.completion_refinement_nonempty (initialExecution true)
+
+example : Function.Surjective verified.refinement.mapHistory :=
+  verified.histories_surjective
 
 example (completion : VerifiedProgram.CompletionRefinement verified
     (initialExecution true)) :
@@ -337,6 +344,7 @@ def driverStage : DerivedDemandFamily spec.requirements.identities :=
 def driver : ProjectedDriverCertificate portable where
   behavior := behavior
   refinement := .refl behavior
+  coverage := BehaviorRefinement.Coverage.refl behavior
   adequate := adequate
   stage := driverStage
   requirements := certificates "driver"
@@ -349,6 +357,7 @@ def providerStage : DerivedDemandFamily driver.stage.allKeys :=
 def provider : ProviderCertificate driver where
   behavior := behavior
   refinement := .refl behavior
+  coverage := BehaviorRefinement.Coverage.refl behavior
   adequate := adequate
   stage := providerStage
   requirements := certificates "provider"
@@ -361,6 +370,7 @@ def machineStage : DerivedDemandFamily provider.stage.allKeys :=
 def machine : MachineCertificate provider where
   behavior := behavior
   refinement := .refl behavior
+  coverage := BehaviorRefinement.Coverage.refl behavior
   adequate := adequate
   stage := machineStage
   requirements := certificates "machine"
@@ -385,6 +395,7 @@ def artifact : ArtifactCertificate machine where
   format := artifactFormat
   artifact := ()
   refinement := .refl behavior
+  coverage := BehaviorRefinement.Coverage.refl behavior
   adequate := adequate
   stage := artifactStage
   requirements := certificates "artifact"

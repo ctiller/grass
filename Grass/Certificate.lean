@@ -427,6 +427,14 @@ theorem mapCompletionAtPrefix_trans
         (lowerMiddle.mapCompletionAtPrefix execution completion) :=
   mapCompletion_trans lowerMiddle middleUpper completion
 
+/-- Backward coverage for the exact prefix map and every mapped frontier's
+finite or infinite completion map. Together with `BehaviorRefinement`, this
+prevents a concrete tier from deleting an abstract finite or divergent history. -/
+structure Coverage (refinement : BehaviorRefinement concrete abstract) : Prop where
+  prefixes : Function.Surjective refinement.mapPrefix
+  completions : ∀ execution : concrete.system.ExecutionPrefix,
+    Function.Surjective (refinement.mapCompletionAtPrefix execution)
+
 /-- Transport the concrete side of a refinement along exact behavior equality. -/
 def castConcrete {replacement : ProgramBehavior spec}
     (exact : concrete = replacement)
@@ -434,6 +442,16 @@ def castConcrete {replacement : ProgramBehavior spec}
     BehaviorRefinement concrete abstract := by
   cases exact
   exact refinement
+
+/-- Backward coverage transports with the concrete behavior equality used by
+canonical loading. -/
+theorem Coverage.castConcrete {replacement : ProgramBehavior spec}
+    (exact : concrete = replacement)
+    {refinement : BehaviorRefinement replacement abstract}
+    (coverage : Coverage refinement) :
+    Coverage (BehaviorRefinement.castConcrete exact refinement) := by
+  cases exact
+  exact coverage
 
 /-- Acceptance transfers from an abstraction to a refining behavior. -/
 theorem preservesAcceptance (refinement : BehaviorRefinement concrete abstract)
@@ -471,6 +489,7 @@ structure ProjectedDriverCertificate {spec : SpecProcess}
     (portable : PortableProgramCertificate spec) where
   behavior : ProgramBehavior spec
   refinement : BehaviorRefinement behavior portable.behavior
+  coverage : BehaviorRefinement.Coverage refinement
   adequate : behavior.Adequate
   stage : DerivedDemandFamily spec.requirements.identities
   requirements : DemandCertificateFamily stage.demands
@@ -481,6 +500,7 @@ structure ProviderCertificate {spec : SpecProcess}
     (driver : ProjectedDriverCertificate portable) where
   behavior : ProgramBehavior spec
   refinement : BehaviorRefinement behavior driver.behavior
+  coverage : BehaviorRefinement.Coverage refinement
   adequate : behavior.Adequate
   stage : DerivedDemandFamily driver.stage.allKeys
   requirements : DemandCertificateFamily stage.demands
@@ -492,6 +512,7 @@ structure MachineCertificate {spec : SpecProcess}
     (provider : ProviderCertificate driver) where
   behavior : ProgramBehavior spec
   refinement : BehaviorRefinement behavior provider.behavior
+  coverage : BehaviorRefinement.Coverage refinement
   adequate : behavior.Adequate
   stage : DerivedDemandFamily provider.stage.allKeys
   requirements : DemandCertificateFamily stage.demands
@@ -517,6 +538,7 @@ structure ArtifactCertificate {spec : SpecProcess}
   format : ArtifactFormat spec
   artifact : format.Artifact
   refinement : BehaviorRefinement (format.artifactBehavior artifact) machine.behavior
+  coverage : BehaviorRefinement.Coverage refinement
   adequate : (format.artifactBehavior artifact).Adequate
   stage : DerivedDemandFamily machine.stage.allKeys
   requirements : DemandCertificateFamily stage.demands

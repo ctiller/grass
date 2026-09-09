@@ -24,6 +24,9 @@ private def noDemands : DemandFamily where
   kind := fun key => nomatch key
   statement := fun key => nomatch key
 
+private theorem noDemandCertificates : DemandCertificateFamily noDemands where
+  discharge key := nomatch key
+
 private abbrev spec : SpecProcess where
   Input := Unit
   AuditEvent := Bool
@@ -102,6 +105,12 @@ private theorem concreteAdequate : concreteBehavior.Adequate where
     | true =>
         exact ⟨.finite .refl rfl⟩
 
+private def abstractPortable : PortableProgramCertificate spec where
+  behavior := abstractBehavior
+  requirements := noDemandCertificates
+  adequate := abstractAdequate
+  sound := fun _ _ _ => trivial
+
 /-- The surviving concrete behavior is forward-included in the portable one. -/
 private def forwardRefinement :
     BehaviorRefinement concreteBehavior abstractBehavior where
@@ -161,6 +170,21 @@ theorem forwardRefinement_not_covered :
   apply concrete_cannot_emit_true
   refine ⟨source, ?_⟩
   simpa only [BehaviorRefinement.observe_mapPrefix] using emitsTrue
+
+/-- No actual projected-driver certificate can use the adequate concrete
+behavior and forward-only deletion refinement. The contradiction is obtained
+from the certificate's mandatory `coverage` field, so removing that field makes
+this regression fail to elaborate. -/
+theorem forward_only_cannot_form_projected_driver :
+    ¬ ∃ driver : ProjectedDriverCertificate abstractPortable,
+      ∃ behaviorExact : driver.behavior = concreteBehavior,
+        BehaviorRefinement.castConcrete behaviorExact.symm driver.refinement =
+          forwardRefinement := by
+  rintro ⟨driver, behaviorExact, refinementExact⟩
+  have covered := BehaviorRefinement.Coverage.castConcrete
+    behaviorExact.symm driver.coverage
+  rw [refinementExact] at covered
+  exact forwardRefinement_not_covered covered
 
 /- Keep all three witnesses live in the fixture: both adequacy proofs and the
 forward refinement coexist with the differing may-execution properties. -/

@@ -15,8 +15,8 @@ validation work. Write “none” when this change adds none.
 
 ## Validation
 
-- [ ] `pwsh ./check-spike-sources.ps1` passes.
-- [ ] `pwsh ./check-doc-links.ps1` passes.
+- [ ] `bash ./check-spike-sources.sh` passes.
+- [ ] `bash ./check-doc-links.sh` passes.
 - [ ] No cache, local worktree, credential, generated binary, or editor state is included.
 - [ ] The change preserves first-class assembly authoring where applicable.
 - [ ] A distinct reviewer has reviewed the selected branch snapshot.
