@@ -59,6 +59,7 @@ import Grass.Platform.Win32.LoadedDataAccess
 import Grass.Platform.Win32.CpuVocabulary
 import Grass.Platform.Win32.CpuPolicy
 import Grass.Platform.Win32.ExecutionState
+import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
@@ -203,6 +204,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.LoadedDataAccess,
    `Grass.Platform.Win32.CpuPolicy,
    `Grass.Platform.Win32.ExecutionState, `Grass.Platform.Win32.WriteFileAbi,
+   `Grass.Platform.Win32.RawState,
    `Grass.Platform.Win32.WriteFileArguments,
    `Grass.Platform.Win32.ApiRequest,
    `Grass.Platform.Win32.WriteFileCallPlan,
@@ -329,7 +331,8 @@ acquiring a citation.
 -- Fixed dispatch and access factories add thirty checked structural helpers.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
-def notBehaviourBaseline : Nat := 272
+-- Five raw/checked view operations retain data and assert no target semantics.
+def notBehaviourBaseline : Nat := 277
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -470,6 +473,11 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    `Grass.Platform.Win32.ExecutionState.State.raw,
+    `Grass.Platform.Win32.ExecutionState.RawState.ProtocolValid,
+    `Grass.Platform.Win32.ExecutionState.RawState.checked?,
+    `Grass.Platform.Win32.ExecutionState.RawState.ControlConsistent,
+    `Grass.Platform.Win32.ExecutionState.RawState.withMachine,
     -- Exact table views, fixed-plan predicates and checked bookkeeping adapters;
     -- they assert no native provider or CPU adequacy beyond their premises.
     `Grass.Platform.Win32.WriteFile.EntryHandoff.after,
