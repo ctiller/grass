@@ -63,6 +63,7 @@ import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.RawStepSignature
+import Grass.Platform.Win32.RawStep
 import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.GetStdHandleRuntime
 import Grass.Platform.Win32.WriteFileAbi
@@ -214,6 +215,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawState,
    `Grass.Platform.Win32.CallRuntime,
    `Grass.Platform.Win32.RawStepSignature,
+   `Grass.Platform.Win32.RawStep,
    `Grass.Platform.Win32.ExitProcessRuntime,
    `Grass.Platform.Win32.GetStdHandleRuntime,
    `Grass.Platform.Win32.WriteFileArguments,
@@ -347,7 +349,8 @@ acquiring a citation.
 -- Thirteen custody predicates and checked adapters add no external behavior.
 -- Five raw/checked view operations retain data and assert no target semantics.
 -- Runtime, body and endpoint adapters retain checked receipts.
-def notBehaviourBaseline : Nat := 322
+-- One exact causal graph/provider-order agreement predicate adds no behavior.
+def notBehaviourBaseline : Nat := 323
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -515,6 +518,7 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.Raw.Graph.Extends,
     `Grass.Platform.Win32.Raw.Graph,
     `Grass.Platform.Win32.Raw.StepSignature,
+    `Grass.Platform.Win32.Raw.Graph.Realizes,
     `Grass.Platform.Win32.ExecutionState.State.raw,
     `Grass.Platform.Win32.ExecutionState.RawState.ProtocolValid,
     `Grass.Platform.Win32.ExecutionState.RawState.checked?,
