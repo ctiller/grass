@@ -185,7 +185,7 @@ theorem retry_ready (returned : Returned aligned selected result after)
   exact ⟨eq, congrArg (fun n => projection.target.payload.drop n) eq,
     respond_retry_decreases returned.cursor returned.nonempty returned.response next retry⟩
 
-/-- Retry remains proper; completion cannot silently become another write call. -/
+/-- `retry_proper` places the conditional retry endpoint strictly before payload end. -/
 theorem retry_proper (returned : Returned aligned selected result after)
     (next : WriteCursor projection.target.payload) (retry : returned.decision = .retry next) :
     aligned.endpoint.offset < projection.target.payload.length := by
