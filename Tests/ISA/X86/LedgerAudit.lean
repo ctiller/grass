@@ -22,6 +22,7 @@ import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Signatures
 import Grass.Platform.Win32.WriteFile
 import Grass.Platform.Win32.WriteFileNonresponse
+import Grass.Platform.Win32.WriteFileStabilization
 import Grass.Platform.Win32.WriteFileReturn
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
@@ -124,6 +125,7 @@ def auditedModules : List Name :=
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
    `Grass.Platform.Win32.Signatures, `Grass.Platform.Win32.WriteFile,
    `Grass.Platform.Win32.WriteFileNonresponse,
+   `Grass.Platform.Win32.WriteFileStabilization,
    `Grass.Platform.Win32.WriteFileResult, `Grass.Platform.Win32.WriteFileReturn,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
@@ -201,7 +203,8 @@ acquiring a citation.
 -- Ten exception helpers traverse, project or compare already selected values.
 -- Eight execution helpers represent state or select existing decoded constructors.
 -- One helper replaces the memory-machine field after a checked fetch.
-def notBehaviourBaseline : Nat := 160
+-- One continuation shift reindexes existing committed edges and histories.
+def notBehaviourBaseline : Nat := 161
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -345,6 +348,7 @@ def notBehaviour : List Name :=
     -- Derived accumulated histories and the type of an externally supplied
     -- observation relation, not new Windows behavior facts.
     `Grass.Platform.Win32.WriteFile.InfiniteContinuation.historyAt,
+    `Grass.Platform.Win32.WriteFile.InfiniteContinuation.shift,
     `Grass.Platform.Win32.WriteFile.StalledPredicate,
     `Grass.Platform.Win32.WriteFile.History.providerEvents,
     `Grass.Platform.Win32.WriteFile.ReturnInterpretation,
