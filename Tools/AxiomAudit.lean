@@ -1,4 +1,7 @@
 import Lean
+import Grass.Op.Completion
+import Grass.Op.CompletedAccess
+import Grass.Op.ReadCompletion
 import Grass.Semantics.OutputCut
 import Grass.Specification.TextLine
 import Grass.Console.Behavior
