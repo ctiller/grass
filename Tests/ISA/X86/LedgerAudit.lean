@@ -9,6 +9,7 @@ import Grass.ABI.Win64.UnwindBytes
 import Grass.ABI.Win64.FrameRanges
 import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Signatures
+import Grass.Platform.Win32.WriteFile
 
 /-!
 # Ledger coverage gate
@@ -97,7 +98,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
-   `Grass.Platform.Win32.Signatures]
+   `Grass.Platform.Win32.Signatures, `Grass.Platform.Win32.WriteFile]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -117,7 +118,9 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- decoder agreement still does not discharge the architecture citation debt.
 -- Reviewed additions: three immediate-arithmetic encoding facts and two
 -- Win32 signature tables. No existing citation debt is reclassified.
-def owedBaseline : Nat := 118
+-- WriteFile loan footprint and Prepared's DWORD/CPU profile contract are
+-- newly modeled API obligations. Source comments/probes are not ledger citations.
+def owedBaseline : Nat := 120
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -141,7 +144,9 @@ acquiring a citation.
 -/
 -- Nine new representation conversions, derived queries, and internal names.
 -- Four lookup-derived opcode selections and checked encoding-template wrappers.
-def notBehaviourBaseline : Nat := 83
+-- Ten WriteFile definitions are internal evidence/transport/sequence operations;
+-- Windows footprint and width/profile applicability remain owed separately.
+def notBehaviourBaseline : Nat := 93
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -282,6 +287,22 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Coordinate projection and metadata-only transport; no claim that a real
+    -- Windows allocation satisfies the Prepared applicability contract.
+    `Grass.Platform.Win32.WriteFile.Resolved.physical,
+    `Grass.Platform.Win32.WriteFile.Resolved.transport,
+    `Grass.Platform.Win32.WriteFile.Prepared.transport,
+    -- Relations over supplied model bytes/events, not API conformance facts.
+    `Grass.Platform.Win32.WriteFile.InputMatches,
+    `Grass.Platform.Win32.WriteFile.Confined,
+    `Grass.Platform.Win32.WriteFile.Represented,
+    -- Delegate to the existing checked machine transition; physical dispatch
+    -- and ordering remain separate external realization obligations.
+    `Grass.Platform.Win32.WriteFile.Action.Runs,
+    -- Pure output projection/fold and Lean's generated history recursion helper.
+    `Grass.Platform.Win32.WriteFile.Prefix.output,
+    `Grass.Platform.Win32.WriteFile.History.published,
+    `Grass.Platform.Win32.WriteFile.History.brecOn.go,
     -- Decoder-table lookup and packaging of independently checked encoding laws.
     `Grass.ISA.X86.ImmediateArithmetic.operandSpec,
     `Grass.ISA.X86.ImmediateArithmetic.template,
@@ -389,6 +410,12 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    -- Synchronous WriteFile's input-read/output-write footprint and four-byte
+    -- DWORD out-slot are vendor facts; Prepared also restricts CPU placement,
+    -- no-wrap and disjointness as a selected profile, whose applicability is
+    -- still external. No loan or probe result discharges those obligations.
+    `Grass.Platform.Win32.WriteFile.Request.loans,
+    `Grass.Platform.Win32.WriteFile.Prepared,
     `Grass.ISA.X86.ImmediateArithmetic.Immediate.opcode,
     `Grass.ISA.X86.ImmediateArithmetic.Kind.extension,
     `Grass.ISA.X86.ImmediateArithmetic.encode,
@@ -504,6 +531,13 @@ def modeledDeclarations : MetaM (Array Name) := do
     let some mname := env.header.moduleNames[midx.toNat]? | continue
     unless auditedModules.contains mname do continue
     if ← isGenerated n then continue
+    -- This selected API contract embeds the externally defined DWORD width
+    -- and CPU-profile restriction in structure fields. Include its type
+    -- explicitly instead of letting the generic structure filter hide them.
+    -- This exception adds coverage; it exempts no future declaration.
+    if n == ``Grass.Platform.Win32.WriteFile.Prepared then
+      out := out.push (userFacing n)
+      continue
     if ci.isCtor || ci.isInductive || ci.isTheorem then continue
     if ← Meta.isProp ci.type then continue
     -- An instance of a structural class says how a type is decided or printed.
