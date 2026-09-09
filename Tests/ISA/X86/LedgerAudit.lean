@@ -58,6 +58,7 @@ import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.RawStepSignature
+import Grass.Platform.Win32.GetStdHandleRuntime
 import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
@@ -198,6 +199,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawState,
    `Grass.Platform.Win32.CallRuntime,
    `Grass.Platform.Win32.RawStepSignature,
+   `Grass.Platform.Win32.GetStdHandleRuntime,
    `Grass.Platform.Win32.WriteFileArguments,
    `Grass.Platform.Win32.ApiRequest,
    `Grass.Platform.Win32.WriteFileCallPlan,
@@ -257,7 +259,7 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Twelve fixed CPU/ABI obligations, including executable/readable region
 -- selection and explicit Entry structure enrollment.
 -- Six fixed request/stack contracts are newly enrolled; no existing debt moves.
-def owedBaseline : Nat := 296
+def owedBaseline : Nat := 299
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -308,7 +310,7 @@ acquiring a citation.
 -- Nine runtime data/view operations use existing ABI data and assert no execution.
 -- Five runtime capture/update adapters introduce no additional ABI behavior.
 -- Seven logical import selectors/adapters derive existing layout and API data.
-def notBehaviourBaseline : Nat := 278
+def notBehaviourBaseline : Nat := 284
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -486,6 +488,14 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.ExecutionState.RawState.checked?,
     `Grass.Platform.Win32.ExecutionState.RawState.ControlConsistent,
     `Grass.Platform.Win32.ExecutionState.RawState.withMachine,
+    -- Checked GetStdHandle bookkeeping and projections add no provider or CPU
+    -- claim beyond the actual CALL, ABI and protocol receipts they retain.
+    `Grass.Platform.Win32.GetStdHandle.EntryHandoff.after,
+    `Grass.Platform.Win32.GetStdHandle.EntryHandoff.record,
+    `Grass.Platform.Win32.GetStdHandle.entryHandoff?,
+    `Grass.Platform.Win32.GetStdHandle.CallHandoff.frame,
+    `Grass.Platform.Win32.GetStdHandle.CallHandoff.afterRaw,
+    `Grass.Platform.Win32.GetStdHandle.RawCallHandoff.after,
     -- Exact table views, fixed-plan predicates and checked bookkeeping adapters;
     -- they assert no native provider or CPU adequacy beyond their premises.
     `Grass.Platform.Win32.WriteFile.EntryHandoff.after,
@@ -795,6 +805,9 @@ def owed : List Name :=
     `Grass.Platform.Win32.WriteFile.Abi.StackPlan.loanPlan,
     `Grass.Platform.Win32.WriteFile.Abi.StackPlan.requests,
     `Grass.Platform.Win32.WriteFile.Abi.stackRequests,
+    `Grass.Platform.Win32.GetStdHandle.selector,
+    `Grass.Platform.Win32.GetStdHandle.stackRequests,
+    `Grass.Platform.Win32.GetStdHandle.StackPlan.requests,
     -- Fixed operational choices and ABI widths require declaration-level
     -- authority; vendor prose links alone do not close the citation ledger.
     `Grass.Platform.Win32.Cpu.accessFaults,
