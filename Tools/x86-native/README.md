@@ -7,6 +7,45 @@ This is the verification side lane following `spikes`, initially against main
 `28e5767b`. It exercises public encoders and register write-back on the host CPU.
 It does not certify instruction semantics or close citation/proof obligations.
 
+## Implementation direction and bootstrap
+
+The intended implementation is a Grass program. The C worker and Python drivers
+are temporary bootstrap infrastructure and an independent comparison oracle,
+not the permanent verification architecture. The existing Lean corpus generators
+do not make the runner Grass-hosted: the target state setup, capture, comparison
+and reporting still execute outside Grass today.
+
+Move the protected execution/capture program onto the same authored-source,
+lowering and artifact path that `spikes` develops. Its specification should
+describe the capture boundary and permitted harness writes separately from the
+instruction being tested. No complete emitted PE/loaded-code certificate is
+available yet. The first native artifact should be a minimal Grass-generated PE
+using the same production entry/import/emission path as Hello World, with a
+bounded exit/status/output observation driven by the bootstrap process. Compare
+its exact emitted bytes, entry, imports and prologue against the current oracle.
+Move capture, process isolation, OS exception adapters, corpus driving and
+reporting into Grass as the required verified platform capabilities become
+available; do not expand every VEH/allocation provider ahead of that path.
+A hand-written
+PE writer or a second long-lived compiler path is not a substitute for those
+shared facilities. Linux and bare-metal adapters follow their platform owners.
+
+Bootstrap acceptance requires the old and new implementations to run the same
+cases and compare complete declared observations, including deliberately wrong
+expectations and harness-failure controls. Retain a small independently produced
+capture path and independent encoding/known-answer checks: producing the harness
+and test body with the same encoder can hide a shared defect. Running a
+Grass-generated harness validates an artifact; it does not prove the ISA model
+itself. Any initially unchecked Grass construction must retain its explicit
+missing-check status rather than acquire a `VerifiedProgram` certificate from
+successful tests. Retire bootstrap responsibilities only when the replacement
+has demonstrated the corresponding observation and failure behavior.
+
+While the shared artifact path is incomplete, prioritize its concrete missing
+capabilities with `spikes` and keep C/Python changes limited to fixes or the
+minimum oracle support needed to validate that transition. The current working
+campaign remains available throughout the bootstrap loop.
+
 From Git Bash at the repository root, with the pinned Lean toolchain, Python 3
 and MSVC x64 (Visual Studio Installer must provide `vswhere.exe`):
 
