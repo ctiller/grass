@@ -34,7 +34,7 @@ fails closed for every other descriptor. -/
 def oracle (resolved : Resolved) (descriptor : AccessDescriptor)
     (hrange : descriptor.range = resolved.range)
     (hintent : descriptor.intent = .write) : Oracle where
-  answer _ asked :=
+  answerResolved _ asked _ :=
     if h : asked = descriptor then
       some (h ▸ complete resolved descriptor hrange hintent)
     else none
@@ -88,16 +88,18 @@ theorem step_eq (base : StepPolicy) (state : MachineState) (resolved : Resolved)
 
 @[simp] theorem oracle_answer_self (resolved : Resolved) (descriptor : AccessDescriptor)
     (hrange : descriptor.range = resolved.range) (hintent : descriptor.intent = .write)
-    (state : MachineState) :
+    (state : MachineState) (hadmitted : denialOf state.memory descriptor = none) :
     (oracle resolved descriptor hrange hintent).answer state descriptor =
       some (complete resolved descriptor hrange hintent) := by
-  simp [oracle]
+  obtain ⟨access, hprepared⟩ := (denialOf_eq_none_iff state.memory descriptor).1 hadmitted
+  simp [Oracle.answer, hprepared, oracle]
 
 theorem oracle_answer_ne (resolved : Resolved) (descriptor asked : AccessDescriptor)
     (hrange : descriptor.range = resolved.range) (hintent : descriptor.intent = .write)
     (hne : asked ≠ descriptor) (state : MachineState) :
     (oracle resolved descriptor hrange hintent).answer state asked = none := by
-  simp [oracle, hne]
+  unfold Oracle.answer
+  split <;> simp [oracle, hne]
 
 @[simp] theorem complete_written (resolved : Resolved) (descriptor : AccessDescriptor)
     (hrange : descriptor.range = resolved.range) (hintent : descriptor.intent = .write) :

@@ -6,12 +6,12 @@ not implement a Win32 provider, discharge physical ABI applicability, or extend
 the common memory checker with happens-before.
 
 The request carries buffer/count-slot provenance and actual input bytes. Every
-frontier resolves both arguments against live CPU allocations, requires initialized
-input, and checks an explicit temporary profile: no aliases, nonwrapping placements,
-and physical separation of distinct live CPU allocations. The count slot and input
-range must be disjoint even within one allocation. This wrapper is intended to
-consume the shared state-bound resolver when the backing migration lands; it does
-not introduce another backing store.
+frontier uses the shared state-bound resolver for both arguments, including their
+live CPU allocation, provenance, backing identity, origin and bounded range. It
+requires initialized input and the temporary dedicated-backing profile. Windows
+separately requires nonwrapping placement and physical separation of distinct live
+CPU allocations; abstract backing identities do not prove physical separation.
+The count slot and input range must be disjoint even within one allocation.
 
 `History` starts at an actual `CallProtocol.handoff?` with zero accepted bytes and
 a valid causal graph. Each extension retains the same pending occurrence and exact
@@ -84,8 +84,9 @@ occurrence and loans, reject replay and preserve the count observation across
 bookkeeping. A separately supplied caller continuation must execute the actual
 generic checker and extend that graph. The model does not assert that a return
 or caller continuation exists, and graph evidence never bypasses access checks.
-The current allocation-preservation transport must migrate together with the
-memory model's planned backing-storage split.
+Return transport preserves both allocation mappings and backing storage exactly.
+These equalities are derived from the actual loan-return effects and preserve the
+checked count-slot bytes and their initialization.
 
 Architecture and an independent Terra reviewer approved this conditional
 return boundary. The [result fixtures](../Tests/Platform/Win32WriteFileReturn.lean)

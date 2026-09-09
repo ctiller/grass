@@ -54,6 +54,9 @@ open Grass.Core Grass.Memory Grass.Obligation Grass.Std.Logical
 
 /-- Why a step could not be taken. -/
 inductive StepRejection where
+  /-- The current execution profile admits only existing, bounded, dedicated
+  backings for live allocation views. -/
+  | backingLayoutUnsupported
   /-- The operation did not supply a facet the profile requires. -/
   | facetsNotClosed (missing : FacetName)
   /-- The operation declared memory effects that are not well formed in this
@@ -310,7 +313,25 @@ structure Oracle where
   and inventing bytes the machine did not supply is worse than refusing.
   `runAccesses` records `machineAnswerIncomplete` and stops.
   -/
-  answer : MachineState → (d : AccessDescriptor) → Option (CompleteCommitted d)
+  answerResolved : (state : MachineState) → (d : AccessDescriptor) →
+    state.memory.ResolvedAccess d.provenance d.range → Option (CompleteCommitted d)
+
+/-- Checked observation entry for callers outside the prepared execution path. -/
+def Oracle.answer (oracle : Oracle) (state : MachineState) (d : AccessDescriptor) :
+    Option (CompleteCommitted d) :=
+  match prepareAccess state.memory d with
+  | .error _ => none
+  | .ok resolved => oracle.answerResolved state d resolved
+
+theorem Oracle.prepared_of_answer {oracle : Oracle} {state : MachineState}
+    {d : AccessDescriptor} {complete : CompleteCommitted d}
+    (h : oracle.answer state d = some complete) :
+    ∃ resolved, prepareAccess state.memory d = .ok resolved ∧
+      oracle.answerResolved state d resolved = some complete := by
+  unfold Oracle.answer at h
+  split at h
+  · simp at h
+  · exact ⟨_, ‹_›, h⟩
 
 /--
 The oracle that commits the whole named range with zero-valued bytes.
@@ -321,7 +342,7 @@ M2's store replaces it. It is *not* a default — `StepPolicy` requires an oracl
 so a profile chooses this one deliberately.
 -/
 def Oracle.zeroed : Oracle where
-  answer _ d := some
+  answerResolved _ d _ := some
     { committed :=
         { observed :=
             if d.intent.reads then some (List.replicate d.range.size 0) else Option.none
@@ -367,26 +388,20 @@ would be `docs/FOUNDATION.md` law 8's permissive fallback wearing a plausible
 number: a program reading uninitialized memory would observe a definite value the
 machine never promised, and every proof downstream would inherit that promise.
 
-**Note what is not true here.** `runAccesses` builds `oracle.answer state d`
-before calling `performAccess`, so the oracle is consulted whether or not the
-access is refused. An earlier version of this comment said `denialOf` refuses an
-`.allBytesInitialized` access first; that is true of `Grass/Memory/Apply.lean`'s
-`applyAccess`, which does match on `denialOf` before reading, and false here.
-Review found it. What holds instead is that a refusal discards the answer:
-`refused_preserves_everything_but_the_ledger` says a refused access leaves memory,
-obligations, events, and the supply as they were and appends only a violation
-record, which carries no bytes.
+The prepared execution path checks the access before asking this oracle, and
+passes the same resolved backing span to observation and commit. The public
+`Oracle.answer` wrapper performs that check for standalone callers.
 -/
 def Oracle.ofMemory
     (writeData : MachineState → AccessDescriptor → ByteSeq)
     (indeterminate : MachineState → (d : AccessDescriptor) → Nat → Byte) : Oracle where
-  answer state d :=
+  answerResolved state d resolved :=
     if hfits : ¬ d.intent.writes ∨ d.range.size ≤ (writeData state d).length then
       some
         { committed :=
             { observed :=
                 if d.intent.reads then
-                  some (observedBytes state.memory d (indeterminate state d))
+                  some (observedBytes resolved (indeterminate state d))
                 else Option.none
               written :=
                 if d.intent.writes then some ((writeData state d).take d.range.size)
@@ -767,96 +782,46 @@ def ConflictsWithHistory (policy : StepPolicy) (state : MachineState)
     (event : MemoryEvent) : Prop :=
   ∃ earlier ∈ state.events,
     earlier.event.context.id ≠ event.context.id ∧
-    MemoryEvent.Conflicts state.memory.SharesBytes
+    MemoryEvent.Conflicts
       (fun a b => policy.compatible a b = true) earlier.event event
 
 instance (policy : StepPolicy) (state : MachineState) (event : MemoryEvent) :
     Decidable (ConflictsWithHistory policy state event) :=
   inferInstanceAs (Decidable (∃ earlier ∈ state.events,
     earlier.event.context.id ≠ event.context.id ∧
-    MemoryEvent.Conflicts state.memory.SharesBytes
+    MemoryEvent.Conflicts
       (fun a b => policy.compatible a b = true) earlier.event event))
 
-/--
-**A non-atomic overlapping pair conflicts under every policy.**
-
-The theorem this area was missing, and the direct analogue of
-`refusalOf_refuses_the_unauthorized`: it quantifies over `policy`, so no
-compatibility relation a profile writes can make a race disappear.
-
-`docs/MEMORY_MODEL.md` §7.3 exempts "compatible **atomic** accesses", and
-`StepPolicy.compatibleIsAtomic` is what makes the adjective load-bearing — without it
-`MemoryEvent.Conflicts` read `compatible` and nothing read `ordering.atomicity`, so a
-profile could declare two plain stores compatible and step them past each other.
-Review did exactly that on the fixture's own profile.
--/
-theorem conflicts_of_not_atomic {policy : StepPolicy}
-    {sharesBytes : AllocId → AllocId → Prop} {a b : MemoryEvent}
+/-- Non-atomic accesses with intersecting read/write footprints conflict under
+any policy. These footprints were captured when each event committed. -/
+theorem conflicts_of_not_atomic {policy : StepPolicy} {a b : MemoryEvent}
     (hatouch : a.kind.touchesMemory = true) (hbtouch : b.kind.touchesMemory = true)
-    (hshares : sharesBytes a.provenance.root b.provenance.root)
-    (hoverlap : a.committedRange.Overlaps b.committedRange)
-    (hwrites : a.kind.writes = true ∨ b.kind.writes = true)
+    (hfootprints : a.FootprintsConflict b)
     (hatomic : a.ordering.atomicity ≠ .atomic) :
-    MemoryEvent.Conflicts sharesBytes (fun x y => policy.compatible x y = true) a b := by
-  refine ⟨hatouch, hbtouch, hshares, hoverlap, hwrites, ?_⟩
+    MemoryEvent.Conflicts (fun x y => policy.compatible x y = true) a b := by
+  refine ⟨hatouch, hbtouch, hfootprints, ?_⟩
   intro hcompatible
   exact hatomic (policy.compatibleIsAtomic a b hcompatible).1
 
-/--
-**Conflict is symmetric under any policy.**
+/-- Conflict symmetry depends on captured footprints and policy compatibility,
+without consulting the current allocation map. -/
+theorem conflicts_symm {policy : StepPolicy} {a b : MemoryEvent}
+    (h : MemoryEvent.Conflicts (fun x y => policy.compatible x y = true) a b) :
+    MemoryEvent.Conflicts (fun x y => policy.compatible x y = true) b a :=
+  h.symm (fun x y hxy => policy.compatibleSymm x y hxy)
 
-`MemoryEvent.Conflicts.symm` takes symmetry of the compatibility relation as a
-hypothesis and nothing discharged it, so whether two events conflicted could depend on
-which one the trace saw first — review built a `compatible` keyed on the first
-argument's context and got two events and an empty ledger one way, one event and a
-violation the other. `StepPolicy.compatibleSymm` is what supplies it, and this is its
-consumer.
-
-The `sharesBytes` half is a hypothesis in the general form and discharged in the
-specialised one below. It was owed for a round: `MemoryState.SharesBytes` had no
-symmetry theorem, and when one was attempted the definition turned out not to admit
-it — the closure quantified its intermediate over the *allocation table*, so a
-one-hop path needed its far end allocated and the reversed path needed the near end
-allocated. `MemoryState.aliasIdentities` is the repair and `sharesBytes_symm` is the
-theorem.
--/
-theorem conflicts_symm {policy : StepPolicy} {sharesBytes : AllocId → AllocId → Prop}
-    {a b : MemoryEvent} (shareSymm : ∀ x y, sharesBytes x y → sharesBytes y x)
-    (h : MemoryEvent.Conflicts sharesBytes (fun x y => policy.compatible x y = true) a b) :
-    MemoryEvent.Conflicts sharesBytes (fun x y => policy.compatible x y = true) b a :=
-  h.symm shareSymm (fun x y hxy => policy.compatibleSymm x y hxy)
-
-/-- **And conflict over a real memory state is symmetric outright**, with nothing left
-to supply: `MemoryState.sharesBytes_symm` discharges the sharing half and
-`StepPolicy.compatibleSymm` the compatibility half. This is the form
-`ConflictsWithHistory` would use, and the reason the two fields exist. -/
-theorem conflicts_symm_of_state {policy : StepPolicy} {state : MemoryState}
-    {a b : MemoryEvent}
-    (h : MemoryEvent.Conflicts state.SharesBytes
-      (fun x y => policy.compatible x y = true) a b) :
-    MemoryEvent.Conflicts state.SharesBytes
-      (fun x y => policy.compatible x y = true) b a :=
-  conflicts_symm (fun _ _ hxy => MemoryState.sharesBytes_symm hxy) h
-
-/-- The same at the trace level: an earlier **non-atomic** event from another context
-that an access overlaps is a conflict, whatever the policy says.
-
-The hypothesis is about the *earlier* event, and this sentence named the access. The
-symmetric case — an atomic earlier event and a non-atomic access — is
-`conflicts_of_not_atomic` with the arguments swapped, through `conflicts_symm`. -/
+/-- An earlier non-atomic event from another context with a conflicting stored
+footprint is refused under every policy. -/
 theorem conflictsWithHistory_of_not_atomic {policy : StepPolicy} {state : MachineState}
     {event : MemoryEvent} {earlier : ValidMemoryEvent} (hmem : earlier ∈ state.events)
     (hcontext : earlier.event.context.id ≠ event.context.id)
     (hatouch : earlier.event.kind.touchesMemory = true)
     (hbtouch : event.kind.touchesMemory = true)
-    (hshares : state.memory.SharesBytes earlier.event.provenance.root
-      event.provenance.root)
-    (hoverlap : earlier.event.committedRange.Overlaps event.committedRange)
-    (hwrites : earlier.event.kind.writes = true ∨ event.kind.writes = true)
+    (hfootprints : earlier.event.FootprintsConflict event)
     (hatomic : earlier.event.ordering.atomicity ≠ .atomic) :
     ConflictsWithHistory policy state event :=
   ⟨earlier, hmem, hcontext,
-    conflicts_of_not_atomic hatouch hbtouch hshares hoverlap hwrites hatomic⟩
+    conflicts_of_not_atomic hatouch hbtouch hfootprints hatomic⟩
 
 /--
 Why this access is refused, or `none` if nothing refuses it.
@@ -866,76 +831,127 @@ recorded class names the first thing that was wrong. `docs/MEMORY_MODEL.md` §1
 requires the check to happen before anything commits; `performAccess` calls this
 first and commits only on `none`.
 
-`prospective` is the event the access *would* record, needed for the alias check.
+`prospective` is the event the access would record, including its captured backing footprints.
 -/
+def refusalOfResolved (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor)
+    (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (prospective : Option MemoryEvent) : Option AuditViolationClass :=
+  if ¬ LedgerEffectApplicable state.obligations state.contexts.domain d.context
+      d.ledgerEffect then
+    some .obligationNotAuthorized
+  else if (state.memory.applyAuthorityEffect? d.context d.authorityEffect).isNone then
+    some .authorityEffectRefused
+  else if ¬ (state.memory.authorityOfResolved d.context resolved).PermitsIntent
+            d.intent then
+    -- Classification considers other holders even when this context also holds
+    -- a grant. Possessing a grant does not override conflicting authority.
+    some .authorityUnavailable
+  else if MemoryState.AnyGrantOverResolved resolved ∧
+          ¬ state.memory.GrantedResolved d.context resolved d.intent ∧
+          ¬ (state.memory.OwnedBy d.context d.provenance ∧
+              ¬ state.memory.HeldBySelfResolved d.context resolved) then
+    -- §3's loan rule, asked by the transition rather than by a provider a
+    -- profile may or may not have listed. It used to live only in
+    -- `AuthorityProvider.loan`, and `StepPolicy.authorities` defaults to `[]` --
+    -- so a profile that declared no providers got no authority enforcement at
+    -- all, and review stepped `lendSlot` to mint a grant through `step` and then
+    -- walked over it with an ordinary store, no violation recorded. Every law in
+    -- `Grass/Memory/Loan.lean` was conditioned on a policy field a profile author
+    -- gets wrong by writing nothing, which is the ambient-authority shape
+    -- `docs/FOUNDATION.md` law 6 forbids read from the other side.
+    --
+    -- Providers remain, for authority the *profile* adds -- a frame rule, a
+    -- device rule -- and they may only add refusals. They cannot remove this one.
+    --
+    -- An owner holding no grant of its own is exempt, and this clause
+    -- over-refused until it could say so. The clause above already asked
+    -- `authorityOf ... PermitsIntent`, so an owner reaching here has an authority
+    -- state that permits what it is doing: `sharedImmutable` for a read while the
+    -- read loans it granted are outstanding, which §3 allows. Without the
+    -- exemption the lender of a read loan was refused its own read alongside a
+    -- stranger, because the two were the same context to a rule that could not
+    -- see who owned the bytes.
+    --
+    -- `HeldBySelf` is the second half and is not decoration: this conjunct is
+    -- also what bounds an owner that took a *narrower* grant over its own bytes.
+    -- `Tests/Op/StandardLoan.lean`'s `a_self_loan_bounds_its_holder` has a thread
+    -- holding a read-only loan over storage it owns; `authorityOf` calls that
+    -- `exclusive`, because the only grant is its own, so nothing above this line
+    -- refuses its write. A bare owner exemption let that write commit. Taking a
+    -- grant over your own bytes is a bound you chose; holding none leaves you the
+    -- owner. A stranger fails the ownership conjunct either way.
+    some .authorityNotHeld
+  else
+    match policy.authorities.find? (fun provider => provider.refuses state.memory d) with
+    | some provider => some provider.violationClass
+    | Option.none =>
+        match prospective with
+        | some event =>
+            if ConflictsWithHistory policy state event then some .conflictingAccess
+            else Option.none
+        | Option.none => Option.none
+
+/-- Checked authority entry for standalone provenance-facing queries. -/
 def refusalOf (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor)
     (prospective : Option MemoryEvent) : Option AuditViolationClass :=
-  match denialOf state.memory d with
-  | some class_ => some class_
-  | Option.none =>
-      if ¬ LedgerEffectApplicable state.obligations state.contexts.domain d.context
-          d.ledgerEffect then
-        some .obligationNotAuthorized
-      else if (state.memory.applyAuthorityEffect? d.context d.authorityEffect).isNone then
-        some .authorityEffectRefused
-      else if ¬ (state.memory.authorityOf d.context d.provenance d.range).PermitsIntent
-                d.intent then
-        -- §3's authority states, asked of *this* context: `frozen` while another
-        -- holds the bytes, `sharedImmutable` while they are read-shared.
-        --
-        -- Both halves of the loan rule are here, and the second is not enough on its
-        -- own. Two grants that did not conflict when issued are made to conflict by
-        -- an alias declared afterwards, and in that state each holder is `Granted` by
-        -- its own grant -- so the holder clause below passes for both, and the
-        -- previous commit's claim that it subsumed the provider was wrong. A probe
-        -- stepped exactly that: `aliasedAfterIssue` with no providers listed, and the
-        -- thread's write committed over bytes the engine also held. `authorityOf`
-        -- asks the question that sees the other holder.
-        some .authorityUnavailable
-      else if state.memory.AnyGrantOver d.provenance d.range ∧
-              ¬ state.memory.Granted d.context d.provenance d.range d.intent ∧
-              ¬ (state.memory.OwnedBy d.context d.provenance ∧
-                  ¬ state.memory.HeldBySelf d.context d.provenance d.range) then
-        -- §3's loan rule, asked by the transition rather than by a provider a
-        -- profile may or may not have listed. It used to live only in
-        -- `AuthorityProvider.loan`, and `StepPolicy.authorities` defaults to `[]` --
-        -- so a profile that declared no providers got no authority enforcement at
-        -- all, and review stepped `lendSlot` to mint a grant through `step` and then
-        -- walked over it with an ordinary store, no violation recorded. Every law in
-        -- `Grass/Memory/Loan.lean` was conditioned on a policy field a profile author
-        -- gets wrong by writing nothing, which is the ambient-authority shape
-        -- `docs/FOUNDATION.md` law 6 forbids read from the other side.
-        --
-        -- Providers remain, for authority the *profile* adds -- a frame rule, a
-        -- device rule -- and they may only add refusals. They cannot remove this one.
-        --
-        -- An owner holding no grant of its own is exempt, and this clause
-        -- over-refused until it could say so. The clause above already asked
-        -- `authorityOf ... PermitsIntent`, so an owner reaching here has an authority
-        -- state that permits what it is doing: `sharedImmutable` for a read while the
-        -- read loans it granted are outstanding, which §3 allows. Without the
-        -- exemption the lender of a read loan was refused its own read alongside a
-        -- stranger, because the two were the same context to a rule that could not
-        -- see who owned the bytes.
-        --
-        -- `HeldBySelf` is the second half and is not decoration: this conjunct is
-        -- also what bounds an owner that took a *narrower* grant over its own bytes.
-        -- `Tests/Op/StandardLoan.lean`'s `a_self_loan_bounds_its_holder` has a thread
-        -- holding a read-only loan over storage it owns; `authorityOf` calls that
-        -- `exclusive`, because the only grant is its own, so nothing above this line
-        -- refuses its write. A bare owner exemption let that write commit. Taking a
-        -- grant over your own bytes is a bound you chose; holding none leaves you the
-        -- owner. A stranger fails the ownership conjunct either way.
-        some .authorityNotHeld
-      else
-        match policy.authorities.find? (fun provider => provider.refuses state.memory d) with
-        | some provider => some provider.violationClass
-        | Option.none =>
-            match prospective with
-            | some event =>
-                if ConflictsWithHistory policy state event then some .conflictingAccess
-                else Option.none
-            | Option.none => Option.none
+  match prepareAccess state.memory d with
+  | .error class_ => some class_
+  | .ok resolved => refusalOfResolved policy state d resolved prospective
+
+theorem refusalOf_of_prepared (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (prospective : Option MemoryEvent)
+    (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (h : prepareAccess state.memory d = .ok resolved) :
+    refusalOf policy state d prospective = refusalOfResolved policy state d resolved prospective := by
+  simp only [refusalOf, h]
+
+/-- The checked wrapper retains the provenance-facing authority interface.
+The implementation itself consumes the prepared span. -/
+theorem refusalOf_eq_legacy (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (prospective : Option MemoryEvent) :
+    refusalOf policy state d prospective =
+    match denialOf state.memory d with
+    | some class_ => some class_
+    | Option.none =>
+        if ¬ LedgerEffectApplicable state.obligations state.contexts.domain d.context
+            d.ledgerEffect then
+          some .obligationNotAuthorized
+        else if (state.memory.applyAuthorityEffect? d.context d.authorityEffect).isNone then
+          some .authorityEffectRefused
+        else if ¬ (state.memory.authorityOf d.context d.provenance d.range).PermitsIntent
+                  d.intent then
+          some .authorityUnavailable
+        else if state.memory.AnyGrantOver d.provenance d.range ∧
+                ¬ state.memory.Granted d.context d.provenance d.range d.intent ∧
+                ¬ (state.memory.OwnedBy d.context d.provenance ∧
+                    ¬ state.memory.HeldBySelf d.context d.provenance d.range) then
+          some .authorityNotHeld
+        else
+          match policy.authorities.find? (fun provider => provider.refuses state.memory d) with
+          | some provider => some provider.violationClass
+          | Option.none =>
+              match prospective with
+              | some event =>
+                  if ConflictsWithHistory policy state event then some .conflictingAccess
+                  else Option.none
+              | Option.none => Option.none := by
+  unfold refusalOf denialOf
+  cases hp : prepareAccess state.memory d with
+  | error class_ => rfl
+  | ok resolved =>
+    have hr := resolveAccess?_of_prepareAccess hp
+    simp only []
+    unfold refusalOfResolved
+    simp only [← MemoryState.authorityOf_eq_resolved hr,
+      ← MemoryState.heldBySelf_iff_resolved hr]
+    have hany : MemoryState.AnyGrantOverResolved resolved ↔
+        state.memory.AnyGrantOver d.provenance d.range := by
+      simp [MemoryState.AnyGrantOverResolved, MemoryState.AnyGrantOver,
+        MemoryState.grantsOver, hr]
+    have hgranted : state.memory.GrantedResolved d.context resolved d.intent ↔
+        state.memory.Granted d.context d.provenance d.range d.intent := by
+      simp [MemoryState.Granted, hr]
+    simp only [hany, hgranted]
 
 /--
 **An access to bytes another context holds is refused, whatever providers the policy
@@ -965,7 +981,7 @@ theorem refusalOf_refuses_the_unauthorized {policy : StepPolicy} {state : Machin
     (howns : ¬ (state.memory.OwnedBy d.context d.provenance ∧
       ¬ state.memory.HeldBySelf d.context d.provenance d.range)) :
     refusalOf policy state d prospective = some .authorityNotHeld := by
-  unfold refusalOf
+  rw [refusalOf_eq_legacy]
   rw [hclean, if_neg (by simpa using hledger),
     if_neg (by simpa [Option.isNone_iff_eq_none, Option.isSome_iff_ne_none] using hauth),
     if_neg (by simpa using hstate), if_pos ⟨hheld, hnot, howns⟩]
@@ -991,7 +1007,7 @@ theorem refusalOf_allows_the_unheld {policy : StepPolicy} {state : MachineState}
                 some AuditViolationClass.conflictingAccess
               else Option.none
           | Option.none => Option.none := by
-  unfold refusalOf
+  rw [refusalOf_eq_legacy]
   rw [hclean, if_neg (by simpa using hledger),
     if_neg (by simpa [Option.isNone_iff_eq_none, Option.isSome_iff_ne_none] using hauth),
     if_neg (by simpa using hstate), if_neg (fun h => hunheld h.1)]
@@ -1006,15 +1022,34 @@ length `emittedByTransition_length` states, so its cost grows with the product. 
 said fifteen and the list has grown twice since; it names the theorem now, because a
 number in prose is the one thing in this layer no gate adjudicates. It crossed the
 default the round `provenanceSourceMismatch` was added. -/
+private theorem resolutionFailure_class_declared (failure : MemoryState.ResolveFailure) :
+    failure.auditClass ∈ AuditViolationClass.emittedByTransition := by
+  cases failure <;> decide
+
+set_option maxHeartbeats 1000000 in
+private theorem prepareAccess_error_class_declared {state : MemoryState}
+    {d : AccessDescriptor} {class_ : AuditViolationClass}
+    (h : prepareAccess state d = .error class_) :
+    class_ ∈ AuditViolationClass.emittedByTransition := by
+  unfold prepareAccess at h
+  split at h
+  · cases h
+    exact resolutionFailure_class_declared _
+  · repeat' split at h
+    all_goals
+      first
+        | (cases h; decide)
+        | exact absurd h (by simp)
+
 theorem denialOf_mem_emittedByTransition {state : MemoryState} {d : AccessDescriptor}
     {class_ : AuditViolationClass} (h : denialOf state d = some class_) :
     class_ ∈ AuditViolationClass.emittedByTransition := by
   unfold denialOf at h
-  repeat' split at h
-  all_goals
-    first
-      | (injection h with h; subst h; simp [AuditViolationClass.emittedByTransition])
-      | exact absurd h (by simp)
+  split at h
+  · rename_i class_ hp
+    cases h
+    exact prepareAccess_error_class_declared hp
+  · simp at h
 
 /--
 Every class `refusalOf` can return is one the policy's providers and the
@@ -1029,7 +1064,7 @@ theorem refusalOf_mem_emittedClasses {policy : StepPolicy} {state : MachineState
     {class_ : AuditViolationClass}
     (h : refusalOf policy state d prospective = some class_) :
     class_ ∈ AuthorityProvider.emittedClasses policy.authorities := by
-  unfold refusalOf at h
+  rw [refusalOf_eq_legacy] at h
   split at h
   · rename_i denied hd
     injection h with h
@@ -1083,7 +1118,7 @@ theorem ledger_effect_applies_when_nothing_refuses {policy : StepPolicy}
     (h : refusalOf policy state d prospective = Option.none) :
     (applyLedgerEffect? state.obligations state.contexts.domain d.context
       d.ledgerEffect).isSome := by
-  unfold refusalOf at h
+  rw [refusalOf_eq_legacy] at h
   split at h
   · exact absurd h (by simp)
   · split at h
@@ -1105,7 +1140,7 @@ theorem authority_effect_applies_when_nothing_refuses {policy : StepPolicy}
     {state : MachineState} {d : AccessDescriptor} {prospective : Option MemoryEvent}
     (h : refusalOf policy state d prospective = Option.none) :
     (state.memory.applyAuthorityEffect? d.context d.authorityEffect).isSome := by
-  unfold refusalOf at h
+  rw [refusalOf_eq_legacy] at h
   split at h
   · exact absurd h (by simp)
   · split at h
@@ -1170,6 +1205,28 @@ theorem transition_own_classes_declared (policy : StepPolicy) :
    policy.violationClassesDeclared _
     (AuthorityProvider.mem_emittedClasses_of_transition (by decide))⟩
 
+private theorem outcome_writtenFits {d : AccessDescriptor} (outcome : AccessOutcome d) :
+    Grass.Memory.WrittenFits d (outcome.committed?.bind Committed.written) := by
+  intro bytes hb
+  cases hc : outcome.committed? with
+  | none => simp [hc] at hb
+  | some c =>
+    rw [hc] at hb
+    simp only [Option.bind_some] at hb
+    exact c.writtenFits bytes hb
+
+/-- A prepared event snapshots the mapping found in the pre-access allocation
+table. Historical conflict checks can use it without consulting a later state. -/
+theorem prepared_event_records_authoritative_mapping {state : MachineState}
+    {d : AccessDescriptor} (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    {contextKind : ContextKind} {cause : EventCause} {space : AddressSpace}
+    {outcome : AccessOutcome d} {valid : ValidMemoryEvent}
+    (h : MemoryEvent.ofOutcome state.eventSupply.fresh.1 contextKind cause space d
+      outcome resolved.allocation.mapping = some valid) :
+    state.memory.allocations.lookup d.provenance.root = some resolved.allocation ∧
+    valid.event.mapping = resolved.allocation.mapping :=
+  ⟨resolved.allocationLookup, MemoryEvent.mapping_of_ofOutcome h⟩
+
 /--
 Perform one access, recording a certified event or a violation.
 
@@ -1179,7 +1236,9 @@ only on `none`.
 A refusal leaves memory, obligations, events, and the event supply exactly as they
 were and appends to the violation ledger — see `refused_preserves_everything_but_the_ledger`.
 -/
-def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor)
+def performPreparedAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor)
+    (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (_hprepared : prepareAccess state.memory d = .ok resolved)
     (outcome : AccessOutcome d) (contextKind : ContextKind) (cause : EventCause) :
     MachineState :=
   match policy.profile.vocabulary.addressSpaces.find? d.space with
@@ -1188,7 +1247,7 @@ def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescri
         violations := state.violations.append (violationOf d .wrongAddressSpace) }
   | some space =>
       match MemoryEvent.ofOutcome state.eventSupply.fresh.1 contextKind cause space d
-          outcome with
+          outcome resolved.allocation.mapping with
       | Option.none =>
           -- The outcome committed nothing, so there is no event. A denial carries
           -- its own violation; anything else touched no bytes.
@@ -1196,7 +1255,7 @@ def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescri
           | some violation => { state with violations := state.violations.append violation }
           | Option.none => state
       | some valid =>
-          match refusalOf policy state d (some valid.event) with
+          match refusalOfResolved policy state d resolved (some valid.event) with
           | some class_ =>
               { state with violations := state.violations.append (violationOf d class_) }
           | Option.none =>
@@ -1214,7 +1273,7 @@ def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescri
                   violations :=
                     state.violations.append (violationOf d .obligationNotAuthorized) }
             | some ledger =>
-            match state.memory.applyAuthorityEffect? d.context d.authorityEffect with
+            match hlent : state.memory.applyAuthorityEffect? d.context d.authorityEffect with
             | Option.none =>
                 -- Unreachable: `refusalOf` returned `none`, and its authority clause
                 -- runs this same function against this same state, which
@@ -1229,25 +1288,43 @@ def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescri
               { state with
                 eventSupply := state.eventSupply.fresh.2
                 events := state.events ++ [valid]
-                -- Through `MemoryState.commit`, which is also what
-                -- `Grass/Memory/Apply.lean`'s `applyAccess` writes through, so
-                -- the framing laws proved there are laws about this transition
-                -- rather than about a parallel implementation. An earlier
-                -- version wrote memory here directly and review found it.
-                --
-                -- The bytes are the ones the write actually completed, not the
-                -- ones it asked for: `Committed.writtenFits` bounds them by the
-                -- range, and `docs/MEMORY_MODEL.md` §4 credits initialization
-                -- only to the bytes a write completes. `producesInitialized`
-                -- rides along rather than gating the write, because a
-                -- non-initializing write still changes the values it wrote.
-                -- The declared authority changes land on the pre-access map, which
-                -- is the map `refusalOf` checked them against, and the bytes are
-                -- written on top. `MemoryState.commit` touches bytes only, so the
-                -- two commute; doing it the other way would check a lend against
-                -- one map and apply it to another.
-                memory := lent.commit d (outcome.committed?.bind Committed.written)
+                -- Authority effects preserve allocation and backing maps exactly,
+                -- so the original resolution transports to the resulting state.
+                -- Commit only the bytes actually written, with initialization
+                -- credited to that same prefix. Both ledger and authority effects
+                -- publish together with the event and backing write.
+                memory := lent.commitResolved d
+                  (resolved.transport
+                    (MemoryState.allocations_applyAuthorityEffect? hlent)
+                    (MemoryState.backings_applyAuthorityEffect? hlent))
+                  (outcome.committed?.bind Committed.written)
+                  (outcome_writtenFits outcome)
                 obligations := ledger }
+
+/-- Prepare an access before any observation-independent commit work. -/
+def performAccess (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor)
+    (outcome : AccessOutcome d) (contextKind : ContextKind) (cause : EventCause) :
+    MachineState :=
+  match hprepared : prepareAccess state.memory d with
+  | .error class_ =>
+      { state with violations := state.violations.append (violationOf d class_) }
+  | .ok resolved => performPreparedAccess policy state d resolved hprepared outcome contextKind cause
+
+theorem performAccess_of_prepared (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (outcome : AccessOutcome d) (contextKind : ContextKind) (cause : EventCause)
+    (h : prepareAccess state.memory d = .ok resolved) :
+    performAccess policy state d outcome contextKind cause =
+      performPreparedAccess policy state d resolved h outcome contextKind cause := by
+  unfold performAccess
+  split
+  · rename_i failure hfailed
+    rw [h] at hfailed
+    contradiction
+  · rename_i actual hactual
+    have same : actual = resolved := Except.ok.inj (hactual.symm.trans h)
+    subst actual
+    rfl
 
 /--
 Perform the accesses that survive, in order, stopping at the first denial.
@@ -1270,22 +1347,70 @@ def runAccesses (policy : StepPolicy) (state : MachineState)
   match accesses with
   | [] => state
   | d :: rest =>
-      match policy.oracle.answer state d with
+      match hprepared : prepareAccess state.memory d with
+      | .error class_ =>
+          { state with violations := state.violations.append (violationOf d class_) }
+      | .ok resolved =>
+        match policy.oracle.answerResolved state d resolved with
+        | Option.none =>
+            -- The machine cannot complete an access the profile admitted. Recorded
+            -- and stopped, exactly like a denial: an oracle that cannot supply the
+            -- bytes a store declared is a machine description that does not match
+            -- the access, and accepting a short answer as success was how a
+            -- malformed answer became a successful execution.
+            { state with
+              violations :=
+                state.violations.append (violationOf d .machineAnswerIncomplete) }
+        | some complete =>
+            let next := performPreparedAccess policy state d resolved hprepared (.completed complete) contextKind cause
+            if next.violations.recordCount = state.violations.recordCount then
+              runAccesses policy next rest contextKind cause
+            else
+              next
+
+/-- Expose the execution branch for an already checked access. -/
+theorem runAccesses_of_prepared (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (rest : List AccessDescriptor) (contextKind : ContextKind)
+    (cause : EventCause) (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (h : prepareAccess state.memory d = .ok resolved) :
+    runAccesses policy state (d :: rest) contextKind cause =
+      match policy.oracle.answerResolved state d resolved with
       | Option.none =>
-          -- The machine cannot complete an access the profile admitted. Recorded
-          -- and stopped, exactly like a denial: an oracle that cannot supply the
-          -- bytes a store declared is a machine description that does not match
-          -- the access, and accepting a short answer as success was how a
-          -- malformed answer became a successful execution.
           { state with
-            violations :=
-              state.violations.append (violationOf d .machineAnswerIncomplete) }
+            violations := state.violations.append (violationOf d .machineAnswerIncomplete) }
       | some complete =>
-          let next := performAccess policy state d (.completed complete) contextKind cause
+          let next :=
+            performPreparedAccess policy state d resolved h (.completed complete) contextKind cause
           if next.violations.recordCount = state.violations.recordCount then
             runAccesses policy next rest contextKind cause
           else
-            next
+            next := by
+  conv => lhs; unfold runAccesses
+  split
+  · rename_i failure hactual
+    rw [h] at hactual
+    contradiction
+  · rename_i actual hactual
+    have same : actual = resolved := Except.ok.inj (hactual.symm.trans h)
+    subst actual
+    rfl
+
+/-- Preparation refusal records the precise violation and stops execution. -/
+theorem runAccesses_of_prepare_error (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (rest : List AccessDescriptor) (contextKind : ContextKind)
+    (cause : EventCause) (failure : AuditViolationClass)
+    (h : prepareAccess state.memory d = .error failure) :
+    runAccesses policy state (d :: rest) contextKind cause =
+      { state with violations := state.violations.append (violationOf d failure) } := by
+  unfold runAccesses
+  split
+  · rename_i actual hactual
+    have same : actual = failure := Except.error.inj (hactual.symm.trans h)
+    subst actual
+    rfl
+  · rename_i resolved hactual
+    rw [h] at hactual
+    contradiction
 
 /--
 Where an operation faulted, if it did.
@@ -1360,15 +1485,20 @@ def runStep (policy : StepPolicy) (state : MachineState) (sequence : SubstepSequ
                 -- discarded its completed substeps and kept the faulting one's
                 -- prefix, which is the reverse of what `transactional` declares.
                 if sequence.faultingEffectVisible then
-                  match policy.oracle.answer faulted d with
-                  | Option.none =>
+                  match hprepared : prepareAccess faulted.memory d with
+                  | .error class_ =>
                       { faulted with
-                        violations := faulted.violations.append
-                          (violationOf d .machineAnswerIncomplete) }
-                  | some complete =>
-                      performAccess policy faulted d
-                        (.faulted fault (complete.committed.truncate reads writes))
-                        contextKind cause
+                        violations := faulted.violations.append (violationOf d class_) }
+                  | .ok resolved =>
+                    match policy.oracle.answerResolved faulted d resolved with
+                    | Option.none =>
+                        { faulted with
+                          violations := faulted.violations.append
+                            (violationOf d .machineAnswerIncomplete) }
+                    | some complete =>
+                        performPreparedAccess policy faulted d resolved hprepared
+                          (.faulted fault (complete.committed.truncate reads writes))
+                          contextKind cause
                 else faulted
             | _ => faulted
 
@@ -1426,6 +1556,7 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
     (context : ContextId) (contextKind : ContextKind) (cause : EventCause)
     (faultAt : (sequence : SubstepSequence) → FaultPlan sequence :=
       fun _ => .none) : StepOutcome :=
+  if ¬ state.memory.DedicatedBackings then .rejected .backingLayoutUnsupported else
   match policy.requiredFacets.find?
       (fun required => !operation.facets.supplied.contains required) with
   | some missing =>
@@ -1538,6 +1669,18 @@ def step (policy : StepPolicy) (state : MachineState) (operation : SomeOperation
                     .ran (runStep policy (state.noteContext context contextKind) sequence
                       context contextKind cause (.before index fault reads writes))
 
+/-- Every running operation starts within the selected backing layout profile,
+including operations without memory accesses. -/
+theorem step_requires_dedicatedBackings {policy : StepPolicy} {state : MachineState}
+    {operation : SomeOperation} {context : ContextId} {contextKind : ContextKind}
+    {cause : EventCause} {faultAt : (sequence : SubstepSequence) → FaultPlan sequence}
+    {next : MachineState}
+    (h : step policy state operation context contextKind cause faultAt = .ran next) :
+    state.memory.DedicatedBackings := by
+  by_cases hgood : state.memory.DedicatedBackings
+  · exact hgood
+  · simp [step, hgood] at h
+
 /-! ## The transition invariants
 
 These are the properties the docstrings elsewhere point at. Under the rule in
@@ -1549,17 +1692,19 @@ otherwise it is an intended invariant or an open obligation and says so. -/
 **A refused access changes nothing but the violation ledger.**
 
 Every refusal path `refusalOf` gathers. `refusalOf` gathers those — the state's own denial,
-an inapplicable ledger effect, an alias conflict — so a new refusal reason cannot
+an inapplicable ledger effect, a conflicting backing footprint — so a new refusal reason cannot
 acquire an unproved transition. `docs/MEMORY_MODEL.md` §1: "Denial preserves the
 state immediately before the denied substep."
 -/
 theorem refused_preserves_everything_but_the_ledger (policy : StepPolicy)
     (state : MachineState) (d : AccessDescriptor) (outcome : AccessOutcome d)
     (contextKind : ContextKind) (cause : EventCause) (space : AddressSpace)
+    (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (hprepared : prepareAccess state.memory d = .ok resolved)
     (hspace : policy.profile.vocabulary.addressSpaces.find? d.space = some space)
     (valid : ValidMemoryEvent)
     (hevent : MemoryEvent.ofOutcome state.eventSupply.fresh.1 contextKind cause space d
-      outcome = some valid)
+      outcome resolved.allocation.mapping = some valid)
     (class_ : AuditViolationClass)
     (hrefused : refusalOf policy state d (some valid.event) = some class_) :
     (performAccess policy state d outcome contextKind cause).memory = state.memory ∧
@@ -1568,7 +1713,10 @@ theorem refused_preserves_everything_but_the_ledger (policy : StepPolicy)
     (performAccess policy state d outcome contextKind cause).events = state.events ∧
     (performAccess policy state d outcome contextKind cause).eventSupply =
       state.eventSupply := by
-  unfold performAccess
+  rw [refusalOf_of_prepared policy state d (some valid.event) resolved hprepared] at hrefused
+  unfold performAccess performPreparedAccess
+  rw [hprepared]
+  simp only []
   rw [hspace]
   simp only []
   rw [hevent]
@@ -1587,24 +1735,29 @@ applicable" half that a fold could not give.
 theorem obligations_unchanged_unless_committed (policy : StepPolicy)
     (state : MachineState) (d : AccessDescriptor) (outcome : AccessOutcome d)
     (contextKind : ContextKind) (cause : EventCause)
-    (hrefused : ∀ space valid,
+    (hrefused : ∀ resolved space valid,
+      prepareAccess state.memory d = .ok resolved →
       policy.profile.vocabulary.addressSpaces.find? d.space = some space →
-      MemoryEvent.ofOutcome state.eventSupply.fresh.1 contextKind cause space d outcome
+      MemoryEvent.ofOutcome state.eventSupply.fresh.1 contextKind cause space d outcome resolved.allocation.mapping
         = some valid →
       (refusalOf policy state d (some valid.event)).isSome) :
     (performAccess policy state d outcome contextKind cause).obligations =
       state.obligations := by
-  unfold performAccess
+  unfold performAccess performPreparedAccess
   split
   · rfl
-  · rename_i space hspace
+  · rename_i resolved hprepared
     split
-    · split <;> rfl
-    · rename_i valid hevent
-      have := hrefused space valid hspace hevent
-      cases hr : refusalOf policy state d (some valid.event) with
-      | none => rw [hr] at this; simp at this
-      | some class_ => rfl
+    · rfl
+    · rename_i space hspace
+      split
+      · split <;> rfl
+      · rename_i valid hevent
+        have := hrefused resolved space valid hprepared hspace hevent
+        rw [refusalOf_of_prepared policy state d (some valid.event) resolved hprepared] at this
+        cases hr : refusalOfResolved policy state d resolved (some valid.event) with
+        | none => rw [hr] at this; simp at this
+        | some class_ => rfl
 
 /--
 **A refusal prevents every later effect of the operation.**
@@ -1624,14 +1777,18 @@ theorem runAccesses_stops_at_refusal (policy : StepPolicy) (state : MachineState
         contextKind cause).violations.recordCount ≠ state.violations.recordCount) :
     runAccesses policy state (d :: rest) contextKind cause =
       performAccess policy state d (.completed complete) contextKind cause := by
-  rw [runAccesses, hanswer]
+  obtain ⟨resolved, hprepared, hresolvedAnswer⟩ := Oracle.prepared_of_answer hanswer
+  rw [performAccess_of_prepared policy state d resolved _ contextKind cause hprepared]
+    at hrefused ⊢
+  rw [runAccesses_of_prepared policy state d rest contextKind cause resolved hprepared]
+  simp only [hresolvedAnswer]
   simp [hrefused]
 
 /--
 **An access the machine cannot complete is recorded and stops the operation.**
 
-The other way `runAccesses` refuses. `Oracle.answer` returning `none` means the
-machine cannot fill an access the profile admitted, and accepting a short answer
+For an already prepared access, `Oracle.answer` returning `none` means the
+machine cannot fill the admitted range, and accepting a short answer
 as success is how a malformed answer became a successful execution: an oracle
 supplying no bytes for a nonempty store produced a `completed` outcome that
 `AccessOutcome.status` relabelled `partialCommit 0 0`, committing nothing while
@@ -1640,12 +1797,16 @@ later substeps carried on. Review type-checked that against the seam fixture.
 theorem runAccesses_stops_when_the_machine_cannot_answer (policy : StepPolicy)
     (state : MachineState) (d : AccessDescriptor) (rest : List AccessDescriptor)
     (contextKind : ContextKind) (cause : EventCause)
+    (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (hprepared : prepareAccess state.memory d = .ok resolved)
     (hanswer : policy.oracle.answer state d = Option.none) :
     runAccesses policy state (d :: rest) contextKind cause =
       { state with
         violations :=
           state.violations.append (violationOf d .machineAnswerIncomplete) } := by
-  rw [runAccesses, hanswer]
+  simp only [Oracle.answer, hprepared] at hanswer
+  rw [runAccesses_of_prepared policy state d rest contextKind cause resolved hprepared]
+  simp only [hanswer]
 
 /--
 **A denial stops the operation on the faulting path too.**
@@ -1671,34 +1832,10 @@ theorem runStep_stops_at_refusal (policy : StepPolicy) (state : MachineState)
       ≠ state.violations.recordCount) :
     runStep policy state sequence context contextKind cause (.before index fault reads writes) =
       runAccesses policy state survivors contextKind cause := by
-  show (match sequence.visibleEffects? index.val with
-    | Option.none => state
-    | some survivors =>
-        let survived := runAccesses policy state survivors contextKind cause
-        if survived.violations.recordCount ≠ state.violations.recordCount then survived
-        else
-          let faulted :=
-            { survived with
-              faults := survived.faults ++
-                [({ fault := fault, context := context, cause := cause
-                    substep := index.val } : RaisedFault)] }
-          match sequence.substeps[index.val]? with
-          | some (.access d) =>
-              if sequence.faultingEffectVisible then
-                match policy.oracle.answer faulted d with
-                | Option.none =>
-                    { faulted with
-                      violations := faulted.violations.append
-                        (violationOf d .machineAnswerIncomplete) }
-                | some complete =>
-                    performAccess policy faulted d
-                      (.faulted fault (complete.committed.truncate reads writes))
-                      contextKind cause
-              else faulted
-          | _ => faulted) = _
-  rw [hvisible]
-  dsimp only
-  rw [if_pos hrefused]
+  simp only [runStep, hvisible]
+  split
+  · rfl
+  · contradiction
 
 /-- A denial on the faulting path records no fault, because the faulting substep
 was never reached. The complement of `runStep_records_the_fault`'s `hreached`. -/
@@ -1735,52 +1872,33 @@ harmless.
 theorem unknown_space_preserves_everything_but_the_ledger (policy : StepPolicy)
     (state : MachineState) (d : AccessDescriptor) (outcome : AccessOutcome d)
     (contextKind : ContextKind) (cause : EventCause)
+    (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (hprepared : prepareAccess state.memory d = .ok resolved)
     (hspace : policy.profile.vocabulary.addressSpaces.find? d.space = Option.none) :
     performAccess policy state d outcome contextKind cause =
       { state with
         violations := state.violations.append (violationOf d .wrongAddressSpace) } := by
-  unfold performAccess
+  unfold performAccess performPreparedAccess
+  rw [hprepared]
+  simp only []
   rw [hspace]
 
-/--
-The branch that refuses nothing and records nothing.
-
-When `MemoryEvent.ofOutcome` yields no event and the outcome carries no violation,
-`performAccess` returns the state untouched without consulting `refusalOf` at all.
-So this is a third path distinct from the two theorems above, and review found the
-docstring there claiming a pair covered every refusal.
-
-`MemoryEvent.ofOutcome` returns `none` for a committed outcome in two cases, and
-neither is reachable from `step`. One is an *inert* access — one that neither reads
-nor writes — which `AccessDescriptor.WellFormedIn.notInert` makes unadmittable. The
-other is a `space` whose identity disagrees with `d.provenance.space`, which
-`ValidMemoryEvent.WellFormed.spaceAgreesWithProvenance` requires and which `step`
-cannot produce because it resolves the space *from* the provenance. An earlier version
-of this docstring named only the first and said "only in that case"; the second
-arrived with the well-formedness field and the docstring did not.
-
-The theorem exists anyway, for the reason
-`unknown_space_preserves_everything_but_the_ledger` gives: `performAccess` is
-public, and unreachable-by-construction-elsewhere is not proved harmless. The space
-case is the less comfortable of the two, because a disagreement becomes a silent
-no-op rather than a violation; `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records
-what turning it into a rejection would take.
-
-Worth naming precisely, because it is the one place a *denial* goes unrecorded: an
-inert access over dead provenance is refused by `denialOf` and this branch returns
-before anything asks. Nothing commits either, so `docs/MEMORY_MODEL.md` §8's ban on
-erasing a violation is not broken by any reachable execution — but the branch is
-why `runStep`'s guard, which watches the violation count, cannot see it.
--/
+/-- An already prepared access with no event and no outcome violation leaves
+all state unchanged. Preparation still rejects invalid provenance and ranges
+before this branch, including inert descriptors over dead views. -/
 theorem no_event_records_nothing (policy : StepPolicy) (state : MachineState)
     (d : AccessDescriptor) (outcome : AccessOutcome d) (contextKind : ContextKind)
     (cause : EventCause) (space : AddressSpace)
+    (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (hprepared : prepareAccess state.memory d = .ok resolved)
     (hspace : policy.profile.vocabulary.addressSpaces.find? d.space = some space)
     (hnoevent : MemoryEvent.ofOutcome state.eventSupply.fresh.1 contextKind cause space d
-      outcome = Option.none)
+      outcome resolved.allocation.mapping = Option.none)
     (hnoviolation : outcome.violation? = Option.none) :
     performAccess policy state d outcome contextKind cause = state := by
-  unfold performAccess
+  unfold performAccess performPreparedAccess
+  rw [hprepared]
+  simp only []
   rw [hspace]
   simp only []
   rw [hnoevent, hnoviolation]
@@ -1796,23 +1914,28 @@ are `docs/OBLIGATIONS.md` §2's requirement that a forbidden change be refused
 theorem ledger_refusal_is_recorded (policy : StepPolicy) (state : MachineState)
     (d : AccessDescriptor) (outcome : AccessOutcome d) (contextKind : ContextKind)
     (cause : EventCause) (space : AddressSpace) (valid : ValidMemoryEvent)
+    (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (hprepared : prepareAccess state.memory d = .ok resolved)
     (hspace : policy.profile.vocabulary.addressSpaces.find? d.space = some space)
     (hevent : MemoryEvent.ofOutcome state.eventSupply.fresh.1 contextKind cause space d
-      outcome = some valid)
+      outcome resolved.allocation.mapping = some valid)
     (hallowed : denialOf state.memory d = Option.none)
     (hledger : ¬ LedgerEffectApplicable state.obligations state.contexts.domain d.context
       d.ledgerEffect) :
     (performAccess policy state d outcome contextKind cause).violations.recordCount =
       state.violations.recordCount + 1 := by
-  unfold performAccess
+  unfold performAccess performPreparedAccess
+  rw [hprepared]
+  simp only []
   rw [hspace]
   simp only []
   rw [hevent]
   simp only []
   have : refusalOf policy state d (some valid.event) = some .obligationNotAuthorized := by
-    unfold refusalOf
+    rw [refusalOf_eq_legacy]
     rw [hallowed]
     simp [hledger]
+  rw [refusalOf_of_prepared policy state d (some valid.event) resolved hprepared] at this
   rw [this]
   simp
 
@@ -1826,8 +1949,8 @@ effect is a point check through a fixture's `step`; this one is over an arbitrar
 policy, state, descriptor and outcome, which is what makes it a law about the
 transition rather than about six operations someone wrote.
 
-The proof is the whole reason `MemoryState.grantEntries_write` and
-`Grass.Memory.grantEntries_commit` exist: the committing branch applies the declared
+The proof is the whole reason `MemoryState.grantEntries_writeResolved` and
+`Grass.Memory.grantEntries_commitResolved` exist: the committing branch applies the declared
 effect and then writes bytes on top, so "no declaration" has to survive the write as
 well as the empty effect.
 -/
@@ -1836,17 +1959,27 @@ theorem performAccess_preserves_authority_of_no_effect (policy : StepPolicy)
     (contextKind : ContextKind) (cause : EventCause) (h : d.authorityEffect = []) :
     (performAccess policy state d outcome contextKind cause).memory.grantEntries =
       state.memory.grantEntries := by
-  unfold performAccess
-  split
-  · rfl
-  · split
-    · split <;> rfl
-    · split
-      · rfl
-      · split
-        · rfl
-        · rw [h, MemoryState.applyAuthorityEffect?_nil]
-          exact Grass.Memory.grantEntries_commit _ _ _
+  unfold performAccess performPreparedAccess
+  repeat' split
+  all_goals first
+    | rfl
+    | (rename_i lent hlent
+       have same : state.memory = lent := by
+         rw [h, MemoryState.applyAuthorityEffect?_nil] at hlent
+         exact Option.some.inj hlent
+       subst lent
+       exact Grass.Memory.grantEntries_commitResolved _ _ _ _ _)
+
+/-- The prepared execution path inherits the checked access invariant. -/
+theorem performPreparedAccess_preserves_authority_of_no_effect (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (hprepared : prepareAccess state.memory d = .ok resolved)
+    (outcome : AccessOutcome d) (contextKind : ContextKind) (cause : EventCause)
+    (h : d.authorityEffect = []) :
+    (performPreparedAccess policy state d resolved hprepared outcome contextKind cause).memory.grantEntries =
+      state.memory.grantEntries := by
+  rw [← performAccess_of_prepared policy state d resolved outcome contextKind cause hprepared]
+  exact performAccess_preserves_authority_of_no_effect policy state d outcome contextKind cause h
 
 /--
 **And a whole run of such accesses makes none.**
@@ -1856,11 +1989,8 @@ nothing leaves the authority map exactly as it found it, however many substeps i
 and wherever it stops — at the end, at a denial, or at an oracle that could not
 answer.
 
-`runStep` is not covered, because its faulting branches run
-`SubstepSequence.visibleEffects?`, and nothing in this layer relates a survivor list
-to the sequence's own accesses; without that the hypothesis cannot be discharged for
-the surviving prefix. That is a missing lemma rather than a missing law, and
-`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 records it.
+`runStep_preserves_authority_of_no_effects` carries the same property through
+fault visibility and the checked faulting access.
 -/
 theorem runAccesses_preserves_authority_of_no_effects (policy : StepPolicy)
     (contextKind : ContextKind) (cause : EventCause) :
@@ -1876,20 +2006,20 @@ theorem runAccesses_preserves_authority_of_no_effects (policy : StepPolicy)
     have hhead : d.authorityEffect = [] := hall d List.mem_cons_self
     have htail : ∀ x ∈ rest, x.authorityEffect = [] :=
       fun x hx => hall x (List.mem_cons_of_mem _ hx)
-    unfold runAccesses
-    cases hanswer : policy.oracle.answer state d with
-    | none => rfl
-    | some complete =>
-      simp only []
-      by_cases hstop : (performAccess policy state d (.completed complete) contextKind
-          cause).violations.recordCount = state.violations.recordCount
-      · rw [if_pos hstop]
-        exact (ih _ htail).trans
-          (performAccess_preserves_authority_of_no_effect policy state d _ contextKind
-            cause hhead)
-      · rw [if_neg hstop]
-        exact performAccess_preserves_authority_of_no_effect policy state d _ contextKind
-          cause hhead
+    cases hp : prepareAccess state.memory d with
+    | error class_ => rw [runAccesses_of_prepare_error policy state d rest contextKind cause class_ hp]
+    | ok resolved =>
+      rw [runAccesses_of_prepared policy state d rest contextKind cause resolved hp]
+      cases ha : policy.oracle.answerResolved state d resolved with
+      | none => rfl
+      | some complete =>
+        have hheadLaw := performAccess_preserves_authority_of_no_effect policy state d
+          (.completed complete) contextKind cause hhead
+        rw [performAccess_of_prepared policy state d resolved _ contextKind cause hp] at hheadLaw
+        dsimp only
+        split
+        · exact (ih _ htail).trans hheadLaw
+        · exact hheadLaw
 
 /--
 **And a whole step makes none**, however it faults.
@@ -1935,8 +2065,10 @@ theorem runStep_preserves_authority_of_no_effects (policy : StepPolicy)
           split
           · split
             · exact hrun
-            · exact (performAccess_preserves_authority_of_no_effect policy _ d _ contextKind
-                cause hd).trans hrun
+            · split
+              · exact hrun
+              · exact (performPreparedAccess_preserves_authority_of_no_effect policy _ d _ _ _
+                  contextKind cause hd).trans hrun
           · exact hrun
         · exact hrun
 
@@ -1948,20 +2080,21 @@ theorem performAccess_extends_violations (policy : StepPolicy) (state : MachineS
     (contextKind : ContextKind) (cause : EventCause) :
     (performAccess policy state d outcome contextKind cause).violations.Extends
       state.violations := by
-  unfold performAccess
-  split
-  · exact AuditViolationLedger.extends_append _ _
-  · split
-    · split
-      · exact AuditViolationLedger.extends_append _ _
-      · exact AuditViolationLedger.Extends.refl _
-    · split
-      · exact AuditViolationLedger.extends_append _ _
-      · split
-        · exact AuditViolationLedger.extends_append _ _
-        · split
-          · exact AuditViolationLedger.extends_append _ _
-          · exact AuditViolationLedger.Extends.refl _
+  unfold performAccess performPreparedAccess
+  repeat' split
+  all_goals first
+    | exact AuditViolationLedger.extends_append _ _
+    | exact AuditViolationLedger.Extends.refl _
+
+/-- The prepared execution path inherits the checked access invariant. -/
+theorem performPreparedAccess_extends_violations (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (hprepared : prepareAccess state.memory d = .ok resolved)
+    (outcome : AccessOutcome d) (contextKind : ContextKind) (cause : EventCause)
+    : (performPreparedAccess policy state d resolved hprepared outcome contextKind cause).violations.Extends
+      state.violations := by
+  rw [← performAccess_of_prepared policy state d resolved outcome contextKind cause hprepared]
+  exact performAccess_extends_violations policy state d outcome contextKind cause
 
 /-- Running a list of accesses extends the violation ledger, including when it
 stops early at a refusal. Built from the per-access form above. -/
@@ -1972,16 +2105,22 @@ theorem runAccesses_extends_violations (policy : StepPolicy) (state : MachineSta
   induction accesses generalizing state with
   | nil => exact AuditViolationLedger.Extends.refl _
   | cons d rest ih =>
-    rw [runAccesses]
-    split
-    · exact AuditViolationLedger.extends_append _ _
-    · rename_i complete _
-      have hp := performAccess_extends_violations policy state d
-        (.completed complete) contextKind cause
-      dsimp only
-      split
-      · exact AuditViolationLedger.Extends.trans hp (ih _)
-      · exact hp
+    cases hp : prepareAccess state.memory d with
+    | error class_ =>
+      rw [runAccesses_of_prepare_error policy state d rest contextKind cause class_ hp]
+      exact AuditViolationLedger.extends_append _ _
+    | ok resolved =>
+      rw [runAccesses_of_prepared policy state d rest contextKind cause resolved hp]
+      cases ha : policy.oracle.answerResolved state d resolved with
+      | none => exact AuditViolationLedger.extends_append _ _
+      | some complete =>
+        have hhead := performAccess_extends_violations policy state d
+          (.completed complete) contextKind cause
+        rw [performAccess_of_prepared policy state d resolved _ contextKind cause hp] at hhead
+        dsimp only
+        split
+        · exact AuditViolationLedger.Extends.trans hhead (ih _)
+        · exact hhead
 
 /-- Running a step extends the violation ledger, whichever shape the run takes:
 the whole sequence, a surviving prefix, or a prefix followed by the faulting
@@ -2003,15 +2142,15 @@ theorem runStep_extends_violations (policy : StepPolicy) (state : MachineState)
           | exact runAccesses_extends_violations _ _ _ _ _
           | exact AuditViolationLedger.Extends.trans
               (runAccesses_extends_violations _ _ _ _ _)
-              (performAccess_extends_violations _ _ _ _ _ _)
+              (performPreparedAccess_extends_violations _ _ _ _ _ _ _ _)
           | exact AuditViolationLedger.Extends.trans
               (runAccesses_extends_violations _ _ _ _ _)
               (AuditViolationLedger.extends_append _ _)
 
 /-! ## The memory framing laws apply to this transition
 
-`Grass/Memory/Apply.lean` proves framing over `MemoryState.commit`. Because
-every committing access goes through `commit`, those laws are laws about this
+`Grass/Memory/Apply.lean` proves framing over `MemoryState.commitResolved`. Because
+every committing access goes through `commitResolved`, those laws are laws about this
 transition. These theorems state that for `performAccess` and `runAccesses`, and
 they exist because review found the earlier arrangement — two write paths, framing
 proved about one of them, and prose claiming it covered both.
@@ -2039,23 +2178,38 @@ theorem performAccess_frames_untouched (policy : StepPolicy) (state : MachineSta
     (h : ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
     (performAccess policy state d outcome contextKind cause).memory.cellAt? id offset =
       state.memory.cellAt? id offset := by
-  have hfits : Grass.Memory.WrittenFits d (outcome.committed?.bind Committed.written) :=
-    fun bytes hb => by
-      cases hc : outcome.committed? with
-      | none => rw [hc] at hb; exact absurd hb (by simp)
-      | some c =>
-        rw [hc] at hb
-        simp only [Option.bind_some] at hb
-        exact c.writtenFits bytes hb
-  unfold performAccess
-  repeat' split
-  all_goals
-    first
+  cases hp : prepareAccess state.memory d with
+  | error class_ =>
+      unfold performAccess
+      split
+      · rfl
+      · rename_i resolved hresolved
+        rw [hp] at hresolved
+        contradiction
+  | ok resolved =>
+    have hdedicated := dedicatedBackings_of_prepareAccess hp
+    rw [performAccess_of_prepared policy state d resolved outcome contextKind cause hp]
+    unfold performPreparedAccess
+    repeat' split
+    all_goals first
       | rfl
       | (rename_i hlent
-         exact (Grass.Memory.cellAt?_commit_of_untouched _ d hfits h).trans
-           (MemoryState.cellAt?_applyAuthorityEffect? hlent id offset))
-      | exact Grass.Memory.cellAt?_commit_of_untouched state.memory d hfits h
+         have hlayout : _ := (MemoryState.dedicatedBackings_applyAuthorityEffect? hlent).2 hdedicated
+         exact (Grass.Memory.cellAt?_commitResolved_of_untouched _ d _
+           (outcome_writtenFits outcome) hlayout h).trans
+             (MemoryState.cellAt?_applyAuthorityEffect? hlent id offset))
+
+/-- The prepared execution path inherits the checked access invariant. -/
+theorem performPreparedAccess_frames_untouched (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (hprepared : prepareAccess state.memory d = .ok resolved)
+    (outcome : AccessOutcome d) (contextKind : ContextKind) (cause : EventCause)
+    {id : AllocId} {offset : Nat}
+    (h : ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
+    (performPreparedAccess policy state d resolved hprepared outcome contextKind cause).memory.cellAt? id offset =
+      state.memory.cellAt? id offset := by
+  rw [← performAccess_of_prepared policy state d resolved outcome contextKind cause hprepared]
+  exact performAccess_frames_untouched policy state d outcome contextKind cause h
 
 /--
 **A whole run of accesses frames every cell none of them declared.**
@@ -2072,30 +2226,22 @@ theorem runAccesses_frames_untouched (policy : StepPolicy) {id : AllocId} {offse
         state.memory.cellAt? id offset
   | [], _, _, _, _ => rfl
   | d :: rest, state, contextKind, cause, hall => by
-    show ((match policy.oracle.answer state d with
-            | Option.none =>
-                { state with
-                  violations :=
-                    state.violations.append (violationOf d .machineAnswerIncomplete) }
-            | some complete =>
-                if (performAccess policy state d (.completed complete)
-                      contextKind cause).violations.recordCount =
-                    state.violations.recordCount then
-                  runAccesses policy (performAccess policy state d (.completed complete)
-                    contextKind cause) rest contextKind cause
-                else performAccess policy state d (.completed complete)
-                  contextKind cause) : MachineState).memory.cellAt? id offset = _
-    split
-    · rfl
-    · rename_i complete _
-      have hhead := performAccess_frames_untouched policy state d
-        (AccessOutcome.completed complete) contextKind cause
-        (hall d List.mem_cons_self)
-      split
-      · rw [runAccesses_frames_untouched policy rest _ contextKind cause
-          (fun x hx => hall x (List.mem_cons_of_mem _ hx))]
-        exact hhead
-      · exact hhead
+    cases hp : prepareAccess state.memory d with
+    | error class_ => rw [runAccesses_of_prepare_error policy state d rest contextKind cause class_ hp]
+    | ok resolved =>
+      rw [runAccesses_of_prepared policy state d rest contextKind cause resolved hp]
+      cases ha : policy.oracle.answerResolved state d resolved with
+      | none => rfl
+      | some complete =>
+        have hhead := performAccess_frames_untouched policy state d
+          (.completed complete) contextKind cause (hall d List.mem_cons_self)
+        rw [performAccess_of_prepared policy state d resolved _ contextKind cause hp] at hhead
+        dsimp only
+        split
+        · rw [runAccesses_frames_untouched policy rest _ contextKind cause
+            (fun x hx => hall x (List.mem_cons_of_mem _ hx))]
+          exact hhead
+        · exact hhead
 
 /--
 **A whole step frames every cell no access it declares touches.**
@@ -2143,10 +2289,92 @@ theorem runStep_frames_untouched (policy : StepPolicy) (state : MachineState)
           split
           · split
             · exact hrun
-            · rw [performAccess_frames_untouched policy _ d _ contextKind cause (hall d hd)]
-              exact hrun
+            · split
+              · exact hrun
+              · rw [performPreparedAccess_frames_untouched policy _ d _ _ _ contextKind cause
+                  (hall d hd)]
+                exact hrun
           · exact hrun
         · exact hrun
+
+/-- `performPreparedAccess_preserves_dedicatedBackings` retains the executable backing profile. -/
+theorem performPreparedAccess_preserves_dedicatedBackings (policy : StepPolicy)
+    (state : MachineState) (d : AccessDescriptor)
+    (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (hprepared : prepareAccess state.memory d = .ok resolved)
+    (outcome : AccessOutcome d) (contextKind : ContextKind) (cause : EventCause) :
+    (performPreparedAccess policy state d resolved hprepared outcome contextKind cause).memory.DedicatedBackings := by
+  have hdedicated := dedicatedBackings_of_prepareAccess hprepared
+  unfold performPreparedAccess
+  repeat' split
+  all_goals first
+    | exact hdedicated
+    | (rename_i hlent
+       exact dedicatedBackings_commitResolved _ _ _ _ _
+         ((MemoryState.dedicatedBackings_applyAuthorityEffect? hlent).2 hdedicated))
+
+/-- `performAccess_preserves_dedicatedBackings` retains the profile even when preparation fails. -/
+theorem performAccess_preserves_dedicatedBackings (policy : StepPolicy)
+    (state : MachineState) (d : AccessDescriptor) (outcome : AccessOutcome d)
+    (contextKind : ContextKind) (cause : EventCause) (h : state.memory.DedicatedBackings) :
+    (performAccess policy state d outcome contextKind cause).memory.DedicatedBackings := by
+  unfold performAccess
+  split
+  · exact h
+  · exact performPreparedAccess_preserves_dedicatedBackings _ _ _ _ _ _ _ _
+
+/-- Successful prefixes and refused accesses both retain the backing profile. -/
+theorem runAccesses_preserves_dedicatedBackings (policy : StepPolicy) (state : MachineState)
+    (accesses : List AccessDescriptor) (contextKind : ContextKind) (cause : EventCause)
+    (h : state.memory.DedicatedBackings) :
+    (runAccesses policy state accesses contextKind cause).memory.DedicatedBackings := by
+  induction accesses generalizing state with
+  | nil => exact h
+  | cons d rest ih =>
+    cases hp : prepareAccess state.memory d with
+    | error class_ => rw [runAccesses_of_prepare_error policy state d rest contextKind cause class_ hp]; exact h
+    | ok resolved =>
+      rw [runAccesses_of_prepared policy state d rest contextKind cause resolved hp]
+      cases ha : policy.oracle.answerResolved state d resolved with
+      | none => exact h
+      | some complete =>
+        have hnext := performPreparedAccess_preserves_dedicatedBackings policy state d
+          resolved hp (.completed complete) contextKind cause
+        dsimp only
+        split
+        · exact ih _ hnext
+        · exact hnext
+
+/-- Fault recording and permitted partial commits preserve the backing profile. -/
+theorem runStep_preserves_dedicatedBackings (policy : StepPolicy) (state : MachineState)
+    (sequence : SubstepSequence) (context : ContextId) (contextKind : ContextKind)
+    (cause : EventCause) (plan : FaultPlan sequence) (h : state.memory.DedicatedBackings) :
+    (runStep policy state sequence context contextKind cause plan).memory.DedicatedBackings := by
+  unfold runStep
+  split
+  · exact runAccesses_preserves_dedicatedBackings _ _ _ _ _ h
+  · split
+    · exact h
+    · rename_i survivors hvisible
+      have hsurv := runAccesses_preserves_dedicatedBackings policy state survivors contextKind cause h
+      dsimp only
+      repeat' split
+      all_goals first
+        | exact hsurv
+        | exact performPreparedAccess_preserves_dedicatedBackings _ _ _ _ _ _ _ _
+
+/-- `step_preserves_dedicatedBackings` retains the profile admitted by `step_requires_dedicatedBackings`. -/
+theorem step_preserves_dedicatedBackings (policy : StepPolicy) (state : MachineState)
+    (operation : SomeOperation) (context : ContextId) (contextKind : ContextKind)
+    (cause : EventCause) (faultAt : (sequence : SubstepSequence) → FaultPlan sequence)
+    (final : MachineState)
+    (h : step policy state operation context contextKind cause faultAt = .ran final) :
+    final.memory.DedicatedBackings := by
+  have hdedicated := step_requires_dedicatedBackings h
+  unfold step at h
+  repeat' split at h
+  all_goals cases h
+  all_goals exact runStep_preserves_dedicatedBackings _ _ _ _ _ _ _ hdedicated
 
 /--
 **A whole `step` frames every cell no access it declares touches.**
@@ -2165,7 +2393,9 @@ theorem step_frames_untouched (policy : StepPolicy) (state : MachineState)
     (hall : ∀ sequence, operation.facets.substeps? = some sequence →
       ∀ d ∈ sequence.accesses, ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
     final.memory.cellAt? id offset = state.memory.cellAt? id offset := by
+  have hdedicated := step_requires_dedicatedBackings h
   unfold step at h
+  rw [if_neg (fun hnot => hnot hdedicated)] at h
   split at h
   · exact absurd h (by simp)
   · rename_i hfacets
@@ -2191,7 +2421,9 @@ theorem step_preserves_authority_of_no_effects (policy : StepPolicy)
     (effects : ∀ sequence, operation.facets.substeps? = some sequence →
       ∀ access ∈ sequence.accesses, access.authorityEffect = []) :
     final.memory.grantEntries = state.memory.grantEntries := by
+  have hdedicated := step_requires_dedicatedBackings ran
   unfold step at ran
+  rw [if_neg (fun hnot => hnot hdedicated)] at ran
   split at ran
   · exact absurd ran (by simp)
   · split at ran
@@ -2210,9 +2442,18 @@ theorem performAccess_preserves_faults (policy : StepPolicy) (state : MachineSta
     (d : AccessDescriptor) (outcome : AccessOutcome d) (contextKind : ContextKind)
     (cause : EventCause) :
     (performAccess policy state d outcome contextKind cause).faults = state.faults := by
-  unfold performAccess
+  unfold performAccess performPreparedAccess
   repeat' split
   all_goals rfl
+
+/-- The prepared execution path inherits the checked access invariant. -/
+theorem performPreparedAccess_preserves_faults (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (resolved : state.memory.ResolvedAccess d.provenance d.range)
+    (hprepared : prepareAccess state.memory d = .ok resolved)
+    (outcome : AccessOutcome d) (contextKind : ContextKind) (cause : EventCause)
+    : (performPreparedAccess policy state d resolved hprepared outcome contextKind cause).faults = state.faults := by
+  rw [← performAccess_of_prepared policy state d resolved outcome contextKind cause hprepared]
+  exact performAccess_preserves_faults policy state d outcome contextKind cause
 
 /--
 **A recorded fault is never discarded.**
@@ -2238,37 +2479,11 @@ theorem runStep_records_the_fault (policy : StepPolicy) (state : MachineState)
       state.violations.recordCount) :
     ∃ record ∈ (runStep policy state sequence context contextKind cause
       (.before index fault reads writes)).faults, record.fault = fault := by
-  show ∃ record ∈ (match sequence.visibleEffects? index.val with
-    | Option.none => state
-    | some survivors =>
-        let survived := runAccesses policy state survivors contextKind cause
-        if survived.violations.recordCount ≠ state.violations.recordCount then survived
-        else
-          let faulted :=
-            { survived with
-              faults := survived.faults ++
-                [({ fault := fault, context := context, cause := cause
-                    substep := index.val } : RaisedFault)] }
-          match sequence.substeps[index.val]? with
-          | some (.access d) =>
-              if sequence.faultingEffectVisible then
-                match policy.oracle.answer faulted d with
-                | Option.none =>
-                    { faulted with
-                      violations := faulted.violations.append
-                        (violationOf d .machineAnswerIncomplete) }
-                | some complete =>
-                    performAccess policy faulted d
-                      (.faulted fault (complete.committed.truncate reads writes))
-                      contextKind cause
-              else faulted
-          | _ => faulted).faults, record.fault = fault
-  rw [hvisible]
-  simp only [hreached, ne_eq, not_true_eq_false, if_false]
+  simp only [runStep, hvisible, hreached, ne_eq, not_true_eq_false, if_false]
   repeat' split
   all_goals
     first
-      | (rw [performAccess_preserves_faults]
+      | (rw [performPreparedAccess_preserves_faults]
          exact ⟨{ fault := fault, context := context, cause := cause, substep := index.val },
            by simp, rfl⟩)
       | exact ⟨{ fault := fault, context := context, cause := cause, substep := index.val },
@@ -2287,7 +2502,9 @@ theorem step_extends_violations (policy : StepPolicy) (state : MachineState)
     (faultAt : (sequence : SubstepSequence) → FaultPlan sequence) (final : MachineState)
     (h : step policy state operation context contextKind cause faultAt = .ran final) :
     final.violations.Extends state.violations := by
+  have hdedicated := step_requires_dedicatedBackings h
   unfold step at h
+  rw [if_neg (fun hnot => hnot hdedicated)] at h
   repeat' split at h
   all_goals
     first

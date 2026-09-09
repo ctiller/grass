@@ -31,28 +31,41 @@ example : ∀ count, failed.reportedCount ≠ some count := by
 /-- Explicitly initialize the four count-slot bytes with a zero DWORD. -/
 def zeroDword : BitVec 32 := 0
 
+private def encodedCount : ByteSeq :=
+  (Grass.Grammar.bitVecToLittleEndian (count := 4) zeroDword).1.toList
+
+/-- This fixture first prepares the exact count-slot range. It never writes
+through an allocation id or substitutes a fallback after failed resolution. -/
+private def countAccess? :=
+  memory.resolveAccess? request.countSlot.provenance request.countSlot.range
+
+private def countAccess : memory.ResolvedAccess request.countSlot.provenance
+    request.countSlot.range :=
+  countAccess?.toOption.get (by decide)
+
+theorem count_access_resolves : countAccess? = .ok countAccess := by rfl
+
+private theorem encodedCount_fits : encodedCount.length ≤ request.countSlot.range.size := by
+  decide
+
 def initializedMemory : MemoryState :=
-  memory.write stackAlloc 16
-    (Grass.Grammar.bitVecToLittleEndian (count := 4) zeroDword).1.toList true
+  memory.writeResolved countAccess encodedCount true encodedCount_fits
 
 theorem initialized_zero_dword : DwordAt initializedMemory request.countSlot zeroDword := by
   constructor
   · rfl
   · intro i
-    change (memory.write stackAlloc 16
-      (Grass.Grammar.bitVecToLittleEndian (count := 4) zeroDword).1.toList true).cellAt?
-      stackAlloc (16 + i.val) =
-      some ((Grass.Grammar.bitVecToLittleEndian (count := 4) zeroDword).1.toList[i.val]'_ , true)
-    rw [MemoryState.cellAt?_write_of_covers memory
-      (show memory.allocations.lookup stackAlloc = some allocation by decide)
-      (by
-        rw [ByteRange.covers_def]
-        have encodedLength := (Grass.Grammar.bitVecToLittleEndian (count := 4) zeroDword).2
-        change 16 ≤ 16 + i.val ∧
-          16 + i.val < 16 + (Grass.Grammar.bitVecToLittleEndian (count := 4) zeroDword).1.length
-        rw [encodedLength]
+    change initializedMemory.cellAt? request.countSlot.provenance.root
+      (request.countSlot.range.start + i.val) = _
+    rw [show initializedMemory = memory.writeResolved countAccess encodedCount true encodedCount_fits
+      by rfl]
+    rw [MemoryState.cellAt?_writeResolved_of_covers memory countAccess encodedCount true
+      encodedCount_fits (by
+        change 16 ≤ 16 + i.val ∧ 16 + i.val < 16 + encodedCount.length
+        have hlength : encodedCount.length = 4 := by decide
+        rw [hlength]
         omega)]
-    simp [zeroDword]
+    simp [encodedCount]
 
 /-- BOOL `2` is a success, not only BOOL `1`; it trusts an explicitly
 initialized synthetic zero count for a zero-accepted observation. -/
@@ -81,10 +94,9 @@ example : ¬ nonOneSuccess.Conforms memory request 0 := by
   rw [show nonOneSuccess.reportedCount = some zeroDword by rfl] at reported
   cases Option.some.inj reported
   have first := observed.2 ⟨0, by decide⟩
-  change allocation.bytes.cellAt? 16 =
-    some ((Grass.Grammar.bitVecToLittleEndian (count := 4) zeroDword).1.toList[0]'_, true) at first
-  rw [show allocation.bytes = ByteStore.empty.write 0 bytes.toList true by rfl] at first
-  rw [ByteStore.cellAt?_write_of_not_covers ByteStore.empty (by decide)] at first
-  simp [zeroDword] at first
+  change memory.cellAt? stackAlloc 16 = _ at first
+  have absent : memory.cellAt? stackAlloc 16 = none := by decide
+  rw [absent] at first
+  contradiction
 
 end Grass.Tests.Win32WriteFileReturn

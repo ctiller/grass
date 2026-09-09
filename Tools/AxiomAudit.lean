@@ -112,6 +112,7 @@ import Grass.Memory.Audit
 import Grass.Memory.Authority
 import Grass.Memory.Coordinates
 import Grass.Memory.StorageId
+import Grass.Memory.Backing
 import Grass.Memory.Event
 import Grass.Memory.Fault
 import Grass.Memory.Ordering

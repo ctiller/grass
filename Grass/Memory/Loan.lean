@@ -23,8 +23,7 @@ consequence is written where the type is declared.
 
 **Four and a half of the five entries** are derived here from state that already
 exists: exclusive and frozen from the grant map, shared-immutable and atomic-shared
-from the rights on the outstanding grants, and unavailable from allocation liveness
-and epoch.
+from the rights on the outstanding grants, and unavailable from failed provenance or backing resolution.
 
 §3's fifth entry is "transferred **or** unavailable authority". `unavailable`
 covers the second half and `MemoryState.transferGrant?` is the first: authority moved
@@ -473,58 +472,83 @@ theorem heldByAnother_of_nonAtomicHeldByAnother {state : MemoryState}
   obtain ⟨entry, hmem, hcond⟩ := h
   exact ⟨entry, hmem, ((Bool.and_eq_true _ _).mp hcond).1⟩
 
-/--
-The authority `context` holds over bytes that may be lent.
+/- Authority classification is derived from the grants meeting the resolved
+backing span. It is not a separate mutable authority field. -/
+/-- Whether the provenance and range resolve to live bounded backing storage. -/
+def HasResolution (state : MemoryState) (provenance : Provenance) (range : ByteRange) : Prop :=
+  match state.resolveAccess? provenance range with
+  | .ok _ => True
+  | .error _ => False
 
-Five cases, one per `AuthorityState` constructor — the type says that is a standing
-requirement, and this is where it is met. In the order the code asks them: dead, absent
-or stale-epoch storage is `unavailable`; nothing held by anyone else is `exclusive`;
-held by another but no other holder may write is `sharedImmutable`, which is §3's shared
-immutable access; another holder may write **and some other grant is not atomic-only**
-is `frozen`, which is §3's "frozen owner fragments while loans exist"; and another
-holder may write and **every** other grant is atomic-only is `atomicShared`.
+instance (state : MemoryState) (provenance : Provenance) (range : ByteRange) :
+    Decidable (state.HasResolution provenance range) := by
+  unfold HasResolution
+  split <;> infer_instance
 
-This paragraph said "four cases" and described `frozen` as "another context able to
-write", for the nine rounds since `atomicShared` was added as a fifth branch. Both
-halves were wrong in the same direction: a writable other holder whose grants are all
-atomic-only gives `atomicShared`, not `frozen`, and
-`Tests/Memory/AtomicAuthority.lean`'s `the_atomic_grant_gives_the_lender_atomic_shared`
-had been deciding exactly that case the whole time. The omitted constructor is the one
-`AuthorityState`'s own docstring records as having been *deleted once for being
-unreachable*, so the enumeration that exists to assert reachability was silent about
-the constructor with the history.
-
-**It takes the context, and an earlier version did not.** Without it a context that
-lent to itself was reported frozen while the access-time rule let its
-write through — the two halves of the model contradicting each other, which review
-demonstrated. A loan you hold yourself does not freeze you out of your own bytes;
-that is what holding it means.
-
-**`exclusive` here is not §3's sentence.** §3 says exclusive authority is restored
-only when the relevant map is empty, and `Exclusive` is that sentence. This is
-weaker: a context holding the only grant over the bytes gets `exclusive` while the
-map is non-empty. The two are deliberately different questions — one is about the
-map, one is about what this context may do — and `Grass/Op/Step.lean`'s `refusalOf`
-consults both, so neither substitutes for the other.
-
-Like `outstandingLoans` it is a function of the state, so lending freezes,
-returning thaws, freeing revokes, and an epoch bump revokes, with no field to keep
-in step.
--/
-def authorityOf (state : MemoryState) (context : ContextId) (provenance : Provenance)
-    (range : ByteRange) : AuthorityState :=
-  if ¬ state.Live provenance then .unavailable
-  else if ¬ state.HeldByAnother context provenance range then .exclusive
-  else if ¬ state.WritableByAnother context provenance range then .sharedImmutable
-  else if state.NonAtomicHeldByAnother context provenance range then .frozen
+private def authorityFromGrants (context : ContextId)
+    (entries : List (GrantId × AuthorityGrant)) : AuthorityState :=
+  if ¬ (entries.any (fun entry => entry.2.holder ≠ context) = true) then .exclusive
+  else if ¬ (entries.any
+      (fun entry => entry.2.holder ≠ context && entry.2.rights.write) = true) then
+    .sharedImmutable
+  else if entries.any
+      (fun entry => entry.2.holder ≠ context && !entry.2.rights.atomicOnly) = true then
+    .frozen
   else .atomicShared
 
-/-- **Unavailable exactly when the storage is dead, absent, or in another epoch.** -/
+/-- Classify authority using the same prepared backing span as byte execution. -/
+def authorityOfResolved (state : MemoryState) (context : ContextId)
+    {provenance : Provenance} {range : ByteRange}
+    (access : state.ResolvedAccess provenance range) : AuthorityState :=
+  authorityFromGrants context (state.grantsOverSpan access.span)
+
+/-- Whether this context itself holds any grant meeting the prepared span. -/
+def HeldBySelfResolved (state : MemoryState) (context : ContextId)
+    {provenance : Provenance} {range : ByteRange}
+    (access : state.ResolvedAccess provenance range) : Prop :=
+  (state.grantsOverSpan access.span).any (fun entry => entry.2.holder = context) = true
+
+instance (state : MemoryState) (context : ContextId)
+    {provenance : Provenance} {range : ByteRange}
+    (access : state.ResolvedAccess provenance range) :
+    Decidable (state.HeldBySelfResolved context access) := inferInstanceAs (Decidable (_ = _))
+
+/-- Checked wrapper for provenance-facing callers. An unresolved query conveys no
+usable authority even when no grants are installed. -/
+def authorityOf (state : MemoryState) (context : ContextId) (provenance : Provenance)
+    (range : ByteRange) : AuthorityState :=
+  if ¬ state.HasResolution provenance range then .unavailable
+  else authorityFromGrants context (state.grantsOver provenance range)
+
+private theorem authorityOf_def (state : MemoryState) (context : ContextId)
+    (provenance : Provenance) (range : ByteRange) :
+    state.authorityOf context provenance range =
+      if ¬ state.HasResolution provenance range then .unavailable
+      else if ¬ state.HeldByAnother context provenance range then .exclusive
+      else if ¬ state.WritableByAnother context provenance range then .sharedImmutable
+      else if state.NonAtomicHeldByAnother context provenance range then .frozen
+      else .atomicShared := rfl
+
+theorem authorityOf_eq_resolved {state : MemoryState} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange}
+    {access : state.ResolvedAccess provenance range}
+    (h : state.resolveAccess? provenance range = .ok access) :
+    state.authorityOf context provenance range = state.authorityOfResolved context access := by
+  simp [authorityOf, HasResolution, h, authorityOfResolved, grantsOver]
+
+theorem heldBySelf_iff_resolved {state : MemoryState} {context : ContextId}
+    {provenance : Provenance} {range : ByteRange}
+    {access : state.ResolvedAccess provenance range}
+    (h : state.resolveAccess? provenance range = .ok access) :
+    state.HeldBySelf context provenance range ↔ state.HeldBySelfResolved context access := by
+  simp [HeldBySelf, HeldBySelfResolved, grantsOver, h]
+
+/-- `authorityOf_eq_unavailable_iff` characterizes unavailability by failed resolution. -/
 @[simp] theorem authorityOf_eq_unavailable_iff (state : MemoryState) (context : ContextId)
     (provenance : Provenance) (range : ByteRange) :
-    state.authorityOf context provenance range = .unavailable ↔ ¬ state.Live provenance := by
-  unfold authorityOf
-  by_cases hlive : state.Live provenance
+    state.authorityOf context provenance range = .unavailable ↔ ¬ state.HasResolution provenance range := by
+  rw [authorityOf_def]
+  by_cases hlive : state.HasResolution provenance range
   · rw [if_neg (by simpa using hlive)]
     by_cases hheld : state.HeldByAnother context provenance range
     · rw [if_neg (by simpa using hheld)]
@@ -539,15 +563,14 @@ def authorityOf (state : MemoryState) (context : ContextId) (provenance : Proven
   · rw [if_pos hlive]
     simp [hlive]
 
-/-- **Exclusive exactly when the storage is live and nobody else holds a covering
-grant.** The `Live` conjunct is not decoration: without it the empty state reported
-exclusive ownership of an allocation that does not exist. -/
+/-- Exclusive exactly when the query resolves and nobody else holds a meeting
+grant, as characterized by `authorityOf_eq_exclusive_iff`. -/
 @[simp] theorem authorityOf_eq_exclusive_iff (state : MemoryState) (context : ContextId)
     (provenance : Provenance) (range : ByteRange) :
     state.authorityOf context provenance range = .exclusive ↔
-      state.Live provenance ∧ ¬ state.HeldByAnother context provenance range := by
-  unfold authorityOf
-  by_cases hlive : state.Live provenance
+      state.HasResolution provenance range ∧ ¬ state.HeldByAnother context provenance range := by
+  rw [authorityOf_def]
+  by_cases hlive : state.HasResolution provenance range
   · rw [if_neg (by simpa using hlive)]
     by_cases hheld : state.HeldByAnother context provenance range
     · rw [if_neg (by simpa using hheld)]
@@ -567,10 +590,10 @@ none that may modify them.** -/
 @[simp] theorem authorityOf_eq_sharedImmutable_iff (state : MemoryState)
     (context : ContextId) (provenance : Provenance) (range : ByteRange) :
     state.authorityOf context provenance range = .sharedImmutable ↔
-      state.Live provenance ∧ state.HeldByAnother context provenance range ∧
+      state.HasResolution provenance range ∧ state.HeldByAnother context provenance range ∧
         ¬ state.WritableByAnother context provenance range := by
-  unfold authorityOf
-  by_cases hlive : state.Live provenance
+  rw [authorityOf_def]
+  by_cases hlive : state.HasResolution provenance range
   · rw [if_neg (by simpa using hlive)]
     by_cases hheld : state.HeldByAnother context provenance range
     · rw [if_neg (by simpa using hheld)]
@@ -591,10 +614,10 @@ ordinary race, whatever the others declare. -/
 @[simp] theorem authorityOf_eq_frozen_iff (state : MemoryState) (context : ContextId)
     (provenance : Provenance) (range : ByteRange) :
     state.authorityOf context provenance range = .frozen ↔
-      state.Live provenance ∧ state.WritableByAnother context provenance range ∧
+      state.HasResolution provenance range ∧ state.WritableByAnother context provenance range ∧
         state.NonAtomicHeldByAnother context provenance range := by
-  unfold authorityOf
-  by_cases hlive : state.Live provenance
+  rw [authorityOf_def]
+  by_cases hlive : state.HasResolution provenance range
   · rw [if_neg (by simpa using hlive)]
     by_cases hheld : state.HeldByAnother context provenance range
     · rw [if_neg (by simpa using hheld)]
@@ -620,10 +643,10 @@ round, and the theorem about it was deleted for holding of an unreachable case;
 @[simp] theorem authorityOf_eq_atomicShared_iff (state : MemoryState)
     (context : ContextId) (provenance : Provenance) (range : ByteRange) :
     state.authorityOf context provenance range = .atomicShared ↔
-      state.Live provenance ∧ state.WritableByAnother context provenance range ∧
+      state.HasResolution provenance range ∧ state.WritableByAnother context provenance range ∧
         ¬ state.NonAtomicHeldByAnother context provenance range := by
-  unfold authorityOf
-  by_cases hlive : state.Live provenance
+  rw [authorityOf_def]
+  by_cases hlive : state.HasResolution provenance range
   · rw [if_neg (by simpa using hlive)]
     by_cases hheld : state.HeldByAnother context provenance range
     · rw [if_neg (by simpa using hheld)]
@@ -670,16 +693,24 @@ map over a freed allocation is not permission to write it. -/
 theorem not_permitsOrdinaryWrite_of_not_live {state : MemoryState} {context : ContextId}
     {provenance : Provenance} {range : ByteRange} (h : ¬ state.Live provenance) :
     ¬ (state.authorityOf context provenance range).PermitsOrdinaryWrite := by
-  rw [(authorityOf_eq_unavailable_iff state context provenance range).mpr h]
+  have hno : ¬ state.HasResolution provenance range := by
+    unfold HasResolution
+    split
+    · rename_i access _
+      exfalso
+      apply h
+      simp [Live, access.allocationLookup, access.allocationLive, access.epochAgrees]
+    · exact id
+  rw [(authorityOf_eq_unavailable_iff state context provenance range).mpr hno]
   exact fun hc => hc
 
-/-- Live storage nobody else holds may be written by this context.
+/-- A resolved range nobody else holds permits an ordinary write at this authority layer.
 
 The hypothesis is `¬ HeldByAnother` and **not** `Exclusive`: an empty loan map is
 not an empty grant map, and it was `Exclusive` here that let a `.frame` grant's
 bytes be reported writable. -/
 theorem permitsOrdinaryWrite_of_unheld {state : MemoryState} {context : ContextId}
-    {provenance : Provenance} {range : ByteRange} (hlive : state.Live provenance)
+    {provenance : Provenance} {range : ByteRange} (hlive : state.HasResolution provenance range)
     (h : ¬ state.HeldByAnother context provenance range) :
     (state.authorityOf context provenance range).PermitsOrdinaryWrite := by
   rw [AuthorityState.permitsOrdinaryWrite_iff_exclusive,

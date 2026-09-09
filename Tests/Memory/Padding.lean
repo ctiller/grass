@@ -77,6 +77,10 @@ def epoch : EpochId := (FreshSupply.initial (Tag := EpochTag)).fresh.1
 which is the state a fresh allocation is actually in — `docs/MEMORY_MODEL.md` §4
 does not hand out zeros. -/
 private def contexts : FreshSupply ContextTag := .initial
+private def backings : FreshSupply StorageTag := .initial
+
+private def stackBacking : StorageId := backings.fresh.1
+private def stackBackingRecord : BackingRecord := { capacity := 8, bytes := .empty }
 
 /-- The context the frame belongs to. Nothing here turns on who it is; the field has
 no default, so this file says whose storage it is rather than leaving it unowned by
@@ -87,22 +91,50 @@ def frameOwner : ContextId := contexts.fresh.1
 def stackRecord₀ : AllocationRecord :=
   { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual, source := .stack
     owners := [frameOwner]
-    permission := .readWrite, live := true, bytes := .empty
+    permission := .readWrite, live := true, backing := stackBacking, origin := 0
     base := some 0x1000 }
 
 /-- The state before anything is written. -/
-def state₀ : MemoryState := (MemoryState.empty.allocate? alloc stackRecord₀).getD .empty
+private def state₀? : Option MemoryState := do
+  let state ← MemoryState.empty.installBacking? stackBacking stackBackingRecord
+  state.allocate? alloc stackRecord₀
+
+def state₀ : MemoryState := state₀?.getD .empty
 
 /-- The allocation happened. -/
 theorem the_allocation_succeeds :
-    (MemoryState.empty.allocate? alloc stackRecord₀).isSome := by decide
+    state₀?.isSome := by decide
+
+/-- The provenance presented to checked shape writes records the complete live
+view; shape operations do not recover it from an allocation identifier. -/
+def provenance : Provenance :=
+  { space := .cpuVirtual, root := alloc, epoch := epoch, source := .stack
+    rootExtent := ⟨0, 8⟩, path := [] }
 
 /-- Writing both fields, with data of exactly each field's width. -/
 def writes : List (FieldFootprint × ByteSeq) :=
   [(fieldA, [0xAA]), (fieldB, [0xBB, 0xBB, 0xBB, 0xBB])]
 
-/-- Both fields written, in declaration order. -/
-def state₁ : MemoryState := state₀.writeFields alloc 0 writes
+/-- Both fields written, in declaration order, through a fresh checked
+resolution for each field. -/
+def state₁? : Except MemoryState.ResolveFailure MemoryState :=
+  state₀.writeFields provenance 0 writes
+
+/-- The fixture retains the successful result only after recording that the
+checked schedule succeeded. -/
+def state₁ : MemoryState := state₁?.toOption.getD .empty
+
+theorem writing_fields_succeeds : state₁? = .ok state₁ := rfl
+
+theorem state₀_is_dedicated : state₀.DedicatedBackings := by decide
+
+/-- The one-field control used by the single-write framing and readback laws. -/
+def stateA? : Except MemoryState.ResolveFailure MemoryState :=
+  state₀.writeField provenance 0 fieldA [0xAA]
+
+def stateA : MemoryState := stateA?.toOption.getD .empty
+
+theorem writing_a_succeeds : stateA? = .ok stateA := rfl
 
 /-- Every write in the schedule names a field of this footprint, which is the
 hypothesis the padding theorem takes. -/
@@ -126,19 +158,18 @@ theorem padding_bytes_are_uninitialized :
 /-- The field bytes, by contrast, are initialized — so the theorem above is about
 padding rather than about nothing having been written.
 
-By `initializedAt_writeField` rather than by `decide`: an earlier version decided
-it, which would have proved the arithmetic and left the theorem unused. -/
+By `initializedAt_writeField`: the checked success certificate is threaded into
+the generic initialization proof rather than replaced by a raw store fact. -/
 theorem field_a_is_initialized :
-    (state₀.writeField alloc 0 fieldA [0xAA]).InitializedAt alloc (0 + fieldA.range.start + 0) :=
-  MemoryState.initializedAt_writeField state₀ 0 (record := stackRecord₀) (by decide)
+    stateA.InitializedAt alloc (0 + fieldA.range.start + 0) :=
+  MemoryState.initializedAt_writeField state₀ provenance 0 writing_a_succeeds
     (by decide) (by decide)
 
 /-- And a field reads back what was written to it, by `byteAt?_writeField`. This
 is `docs/STDLIB.md`'s serialization law instantiated here. -/
 theorem field_a_reads_back :
-    (state₀.writeField alloc 0 fieldA [0xAA]).byteAt? alloc (0 + fieldA.range.start + 0)
-      = some 0xAA :=
-  MemoryState.byteAt?_writeField state₀ 0 (record := stackRecord₀) (by decide)
+    stateA.byteAt? alloc (0 + fieldA.range.start + 0) = some 0xAA :=
+  MemoryState.byteAt?_writeField state₀ provenance 0 writing_a_succeeds
     (by decide) (by decide)
 
 /--
@@ -149,10 +180,11 @@ footprint being well formed rather than from a hypothesis supplied here.
 -/
 theorem writing_a_returns_b_untouched (bytes : ByteSeq) (offset : Nat)
     (hcov : fieldB.range.Covers offset) :
-    (state₀.writeField alloc 0 fieldA bytes).cellAt? alloc (0 + offset) =
-      state₀.cellAt? alloc (0 + offset) :=
-  MemoryState.cellAt?_writeField_of_other_field layout_wellFormed state₀ alloc 0
-    (by decide) (by decide) (by decide) hcov
+    ∀ next, state₀.writeField provenance 0 fieldA bytes = .ok next →
+      next.cellAt? alloc (0 + offset) = state₀.cellAt? alloc (0 + offset) := by
+  intro next hwrite
+  exact MemoryState.cellAt?_writeField_of_other_field layout_wellFormed state₀ provenance 0
+    hwrite state₀_is_dedicated (by decide) (by decide) (by decide) hcov
 
 /-- Both fields still read back after both writes, which is the whole-struct
 version of the two field theorems above. -/
@@ -177,7 +209,8 @@ to still pass.
 -/
 theorem general_theorem_applies :
     ¬ state₁.InitializedAt alloc 2 :=
-  MemoryState.padding_uninitialized_after_writing_fields (f := layout) state₀ alloc 0
-    (offset := 2) (by decide) writes writes_are_fields (by decide)
+  MemoryState.padding_uninitialized_after_writing_fields (f := layout) state₀ state₁ provenance 0
+    (offset := 2) (by decide) writes writes_are_fields state₀_is_dedicated
+    writing_fields_succeeds (by decide)
 
 end Tests.Memory.Padding
