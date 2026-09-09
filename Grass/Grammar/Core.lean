@@ -249,6 +249,8 @@ theorem repeatOuterShape {α : Type} {format : Format α}
   | choiceRight => trivial
   | repeatZero => exact ⟨rfl, rfl⟩
   | repeatSucc head tail => exact ⟨_, _, _, rfl, head, tail⟩
+  | unaryZero => trivial
+  | unarySucc => trivial
   | refine => trivial
   | lift => trivial
   | iso => trivial
@@ -273,6 +275,8 @@ theorem seqOuterShape {α : Type} {format : Format α}
   | choiceRight => trivial
   | repeatZero => trivial
   | repeatSucc => trivial
+  | unaryZero => trivial
+  | unarySucc => trivial
   | refine => trivial
   | lift => trivial
   | iso => trivial

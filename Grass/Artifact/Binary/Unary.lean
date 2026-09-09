@@ -31,6 +31,92 @@ def readUnaryNatList : List Byte → Nat → ParseResult Nat
 def readUnaryNat (input : Std.Logical.ByteArray) : ParseResult Nat :=
   readUnaryNatList input.toList 0
 
+/-- Successful list-level unary parsing is exactly a run of continuation
+markers followed by the terminator and the returned suffix. -/
+theorem readUnaryNatList_done_iff (bytes : List Byte) (offset value : Nat)
+    (rest : Std.Logical.ByteArray) :
+    readUnaryNatList bytes offset = .done value rest ↔
+      ∃ count, bytes = List.replicate count 1 ++ 0 :: rest.toList ∧
+        value = offset + count := by
+  induction bytes generalizing offset value rest with
+  | nil => simp [readUnaryNatList]
+  | cons byte tail inductionHypothesis =>
+      by_cases isMore : byte = 1
+      · subst byte
+        simp only [readUnaryNatList, if_pos]
+        rw [inductionHypothesis]
+        constructor
+        · rintro ⟨count, tailShape, rfl⟩
+          refine ⟨Nat.succ count, ?_, by omega⟩
+          simp [List.replicate_succ, tailShape]
+        · rintro ⟨count, shape, valueShape⟩
+          cases count with
+          | zero => simp at shape
+          | succ count =>
+              simp only [List.replicate_succ, List.cons_append,
+                List.cons.injEq] at shape
+              exact ⟨count, shape.2, by omega⟩
+      · by_cases isStop : byte = 0
+        · subst byte
+          simp only [readUnaryNatList, if_neg isMore, if_pos]
+          constructor
+          · intro parsed
+            injection parsed with valueEq restEq
+            refine ⟨0, ?_, by omega⟩
+            simp only [List.replicate_zero, List.nil_append,
+              List.cons.injEq, true_and]
+            have lists := congrArg Vec.toList restEq
+            simpa using lists
+          · rintro ⟨count, shape, valueShape⟩
+            cases count with
+            | zero =>
+                simp only [List.replicate_zero, List.nil_append,
+                  List.cons.injEq, true_and] at shape
+                have restEq : Vec.fromList tail = rest := by
+                  apply Vec.toList_injective
+                  simpa using shape
+                subst value
+                exact congrArg (ParseResult.done offset) restEq
+            | succ count =>
+                simp only [List.replicate_succ, List.cons_append,
+                  List.cons.injEq] at shape
+                exact False.elim (isMore shape.1)
+
+        · rw [readUnaryNatList, if_neg isMore, if_neg isStop]
+          constructor
+          · intro parsed
+            contradiction
+          · rintro ⟨count, shape, _⟩
+            cases count with
+            | zero =>
+                simp only [List.replicate_zero, List.nil_append,
+                  List.cons.injEq] at shape
+                exact False.elim (isStop shape.1)
+            | succ count =>
+                simp only [List.replicate_succ, List.cons_append,
+                  List.cons.injEq] at shape
+                exact False.elim (isMore shape.1)
+
+/-- Arbitrary successful unary parsing is exactly the independent unary format
+derivation with the returned suffix. -/
+theorem readUnaryNat_done_iff (input : Std.Logical.ByteArray) (value : Nat)
+    (rest : Std.Logical.ByteArray) :
+    readUnaryNat input = .done value rest ↔
+      Derives unaryNatFormat input value rest := by
+  unfold readUnaryNat
+  rw [readUnaryNatList_done_iff]
+  rw [derives_unaryNatFormat_iff]
+  constructor
+  · rintro ⟨count, listShape, valueShape⟩
+    have countEq : value = count := by omega
+    subst value
+    apply Vec.toList_injective
+    simpa [Vec.replicate, Vec.singleton] using listShape
+  · intro shape
+    refine ⟨value, ?_, by omega⟩
+    have lists := congrArg Vec.toList shape
+    simpa [Vec.replicate, Vec.singleton] using lists
+
 /-- `length_writeUnaryNat` pins the exact continuation-plus-terminator width. -/
 @[simp] theorem length_writeUnaryNat (count : Nat) :
     (writeUnaryNat count).length = count + 1 := by
