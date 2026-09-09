@@ -1,4 +1,9 @@
 import Lean
+import Grass.Frontend.Target
+import Grass.Frontend.Source
+import Grass.Frontend.AssemblySyntax
+import Grass.Assembly.X86
+import Grass.Platform.Win32
 import Grass.Artifact.Encoding
 import Grass.Artifact.PE.Encoding
 import Grass.Refinement.BehaviorCorrespondence
