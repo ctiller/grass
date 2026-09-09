@@ -7,6 +7,11 @@ import Grass.Console.Accounting
 import Grass.Console.LineBehavior
 import Grass.Grammar.Canonical
 import Grass.Artifact.Binary.EndianLaws
+import Grass.Console.Resources
+import Grass.Semantics.BoundaryTiming
+import Grass.Console.Timing
+import Grass.Console.Captured
+import Grass.Console.CapturedDemands
 import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
 import Grass.Assembly.X86ControlFlow
