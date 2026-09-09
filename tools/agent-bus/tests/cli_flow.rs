@@ -60,6 +60,23 @@ fn path_str(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
+// ------------------------------------------------- the merge engine record
+
+/// The `merge_engine_version` every fixture in this file activates its bus
+/// with.
+///
+/// Deliberately a version no `git` release has ever carried and no build of
+/// this crate has ever pinned. `agent-bus` records this pair and judges it
+/// nowhere (g-design:249), so the entire end-to-end flow below --
+/// `prepare-merge`, `merge-ready`, `audit-main`, reconciliation -- runs on a
+/// bus whose declared engine version matches neither the constant this
+/// binary was built with nor the `git` on this host's PATH. If any equality
+/// gate against either ever returns, roughly a dozen tests here fail at once.
+///
+/// This file used to spell the pinned version instead, and skip fourteen
+/// tests outright on any host that did not run it. Nothing is skipped now.
+const FOREIGN_MERGE_ENGINE_VERSION: &str = "1.2.3-no-build-ever-pinned-this";
+
 /// A bare "origin" remote, empty until something is genesis'd and pushed to
 /// it.
 fn init_bare_origin() -> TempDir {
@@ -284,7 +301,7 @@ fn activate_merge_engine(repo: &Path, coordinator: &str) -> String {
     let data = serde_json::json!({
         "previous_epoch": format!("{coordinator}:0"),
         "merge_engine": "git-ort",
-        "merge_engine_version": "2.53.0",
+        "merge_engine_version": FOREIGN_MERGE_ENGINE_VERSION,
         "design_commit": "0".repeat(40),
         "helper_commit": "0".repeat(40),
     });
@@ -1219,6 +1236,237 @@ fn succeed_surfaces_a_rejected_candidate_from_the_resumed_outbox() {
     assert_eq!(succeeded["stream_not_attempted"], serde_json::json!([]));
 }
 
+// ----------------------------------------------------------- adding a host
+//
+// The two operations an operator actually performs to bring a host into the
+// fleet, driven end to end through the compiled binary from *two* checkouts
+// of one origin -- the only arrangement in which a host can be seen
+// reasoning about facts it did not itself create.
+
+/// The whole recipe: stand a coordinator up on the new host, then move an
+/// existing agent's stream custody to it.
+///
+/// Both halves are registry epoch transitions (section 2.1: "Registration,
+/// retirement, reassignment, and coordinator succession create a new
+/// epoch"), and each is proposed from the host that will hold the result --
+/// section 2.4 gives custody to the *taker*, so `succeed` runs on host2,
+/// never on host1's behalf.
+///
+/// This is also the recipe for the thirteen live bindings still carrying
+/// the `migration` placeholder: `succeed` is the operation that moves a
+/// binding from a wrong host to a right one, and nothing else is needed.
+#[test]
+fn a_new_host_takes_over_an_agents_custody_end_to_end() {
+    let origin = init_bare_origin();
+    let host1 = init_repo(origin.path());
+    genesis(host1.path(), "coord1", "host1");
+    register(host1.path(), "alice", "implementor", "host1");
+
+    // The new host, a checkout that has never run an agent-bus command.
+    let host2 = init_repo(origin.path());
+    status(host2.path(), true);
+    register(host2.path(), "coord2", "coordinator", "host2");
+
+    // host1 learns of the new host only by fetching.
+    let seen = status(host1.path(), true);
+    assert_eq!(status_agent(&seen, "coord2")["role"], "coordinator");
+    assert_eq!(status_agent(&seen, "coord2")["host"], "host2");
+
+    // host2's own coordinator takes custody of alice.
+    let succeeded = succeed(host2.path(), "coord2", "alice", "host2");
+    assert_eq!(succeeded["new_custody_epoch"], 1);
+    assert_eq!(succeeded["registry_rejected"], serde_json::json!([]));
+
+    // The new custodian publishes for alice.
+    submit(
+        host2.path(),
+        "alice",
+        "agent.status",
+        r#"{"status":"active","note":"running on host2 now"}"#,
+        "moved-1",
+    );
+    let out = coordinate(host2.path(), "alice", "host2", 1);
+    assert_eq!(out["published_events"], serde_json::json!(["alice:1"]));
+
+    // host1 reads the move back, and is then locked out by gate 7 -- under
+    // its own old host name and under the new host's name at a custody
+    // epoch it does not hold.
+    //
+    // The sync is load-bearing, not tidiness: `coordinate` authorizes
+    // custody against the *local* registry ref (`coordinator::drain_outbox`
+    // deliberately does not probe the remote for an ordinary candidate), so
+    // a host1 that had not yet fetched would still believe it held alice.
+    // See `a_stale_custodian_is_stopped_by_the_remote_not_by_its_own_check`
+    // for what happens in that window.
+    let after = status(host1.path(), true);
+    assert_eq!(status_agent(&after, "alice")["host"], "host2");
+    assert_eq!(
+        status_agent(&after, "alice")["coordinator_custody_epoch"],
+        1
+    );
+    assert_eq!(status_agent(&after, "alice")["next_seq"], 2);
+
+    for (host, custody) in [("host1", "0"), ("host1", "1"), ("host2", "0")] {
+        bin()
+            .current_dir(host1.path())
+            .args([
+                "coordinate",
+                "--agent",
+                "alice",
+                "--host",
+                host,
+                "--custody-epoch",
+                custody,
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("belongs to host"));
+    }
+}
+
+/// What actually stops a superseded custodian that has not yet fetched the
+/// registry: the remote, by refusing a non-fast-forward push.
+///
+/// `drain_outbox` checks custody against the local registry ref and never
+/// probes the remote for an ordinary candidate -- a deliberate choice
+/// (section 2.4 keeps local submission and publication working while
+/// disconnected), but it means the local check cannot see a succession this
+/// host has not fetched. Section 2.1 states the remaining mechanism
+/// exactly: "A non-fast-forward update of its stream therefore indicates
+/// stale or duplicate custody, not routine cross-agent contention. The
+/// loser stops and resolves custody; it must not renumber an already
+/// published event or force-push."
+///
+/// This pins that this is what happens -- the loser's events stay local,
+/// the remote keeps the real custodian's history, and nothing is
+/// force-pushed -- and it is deliberately a *two-checkout* test: with one
+/// repository the two custodians share a registry ref and the window does
+/// not exist at all, which is why the single-repository sibling
+/// `register_standby_then_succeed_moves_custody_and_locks_out_the_old_custodian`
+/// cannot show it.
+#[test]
+fn a_stale_custodian_is_stopped_by_the_remote_not_by_its_own_check() {
+    let origin = init_bare_origin();
+    let host1 = init_repo(origin.path());
+    genesis(host1.path(), "coord1", "host1");
+    register(host1.path(), "alice", "implementor", "host1");
+
+    let host2 = init_repo(origin.path());
+    status(host2.path(), true);
+    register(host2.path(), "coord2", "coordinator", "host2");
+    let succeeded = succeed(host2.path(), "coord2", "alice", "host2");
+    assert_eq!(succeeded["new_custody_epoch"], 1);
+
+    submit(
+        host2.path(),
+        "alice",
+        "agent.status",
+        r#"{"status":"active","note":"from the real custodian"}"#,
+        "real-1",
+    );
+    coordinate(host2.path(), "alice", "host2", 1);
+
+    // host1 has not fetched since the succession, so its own custody check
+    // still passes -- and it goes on to commit alice:1 locally.
+    submit(
+        host1.path(),
+        "alice",
+        "agent.status",
+        r#"{"status":"active","note":"from the superseded custodian"}"#,
+        "stale-1",
+    );
+    let stale = coordinate(host1.path(), "alice", "host1", 0);
+    assert_eq!(stale["published_events"], serde_json::json!(["alice:1"]));
+    // ...but the push is refused, so it never became a fact anyone else can
+    // see. `publish` never force-pushes, so this is the whole outcome.
+    assert_eq!(
+        stale["rejected"],
+        serde_json::json!(["refs/heads/agent-events/alice"]),
+        "{stale}"
+    );
+
+    // The remote still holds the real custodian's event, not the stale
+    // host's same-numbered one.
+    let remote_tip = git_out(
+        origin.path(),
+        &["rev-parse", "refs/heads/agent-events/alice"],
+    );
+    let host2_tip = git_out(
+        host2.path(),
+        &["rev-parse", "refs/heads/agent-events/alice"],
+    );
+    assert_eq!(remote_tip, host2_tip);
+
+    // And a fresh reader -- one that never took part -- reduces exactly one
+    // alice:1, the real custodian's.
+    let fresh = init_repo(origin.path());
+    let synced = status(fresh.path(), true);
+    assert_eq!(status_agent(&synced, "alice")["next_seq"], 2);
+    let events = tail(fresh.path(), "alice");
+    let last = events["events"].as_array().unwrap().last().unwrap();
+    assert_eq!(last["data"]["note"], "from the real custodian");
+}
+
+/// `register` must fail closed when its registry push is refused, rather
+/// than printing the rejection and exiting zero.
+///
+/// Two checkouts read the same registry epoch and both register; the
+/// registry is the fleet's one compare-and-swap point (section 2.1), so
+/// exactly one can win. The loser has already advanced its *local*
+/// `agent-registry` ref and committed the new agent's stream root, and a
+/// diverged local copy of a ref whose whole protection is "never
+/// force-pushed" is precisely the state an operator must be told about
+/// immediately -- otherwise the next `status --sync` fails its non-force
+/// fetch with no explanation, and the obvious-looking remedy is the one
+/// thing that is prohibited.
+///
+/// Falsification: dropping the receipt check at the end of `cli::register`
+/// makes this exit zero with `"rejected"` non-empty in its JSON.
+#[test]
+fn register_fails_closed_when_another_host_won_the_registry_transition() {
+    let origin = init_bare_origin();
+    let host1 = init_repo(origin.path());
+    genesis(host1.path(), "coord1", "host1");
+
+    let host2 = init_repo(origin.path());
+    status(host2.path(), true);
+
+    // host1 wins the epoch transition.
+    register(host1.path(), "alice", "implementor", "host1");
+
+    // host2, still holding the pre-transition epoch, loses.
+    bin()
+        .current_dir(host2.path())
+        .args([
+            "register",
+            "--agent",
+            "bob",
+            "--display-name",
+            "Bob",
+            "--role",
+            "reviewer",
+            "--purpose",
+            "reviews things",
+            "--host",
+            "host2",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("did not reach"))
+        .stderr(predicate::str::contains("do not force-push"));
+
+    // The remote is untouched by the loser: only host1's agent is there.
+    let remote_refs = git_out(origin.path(), &["for-each-ref", "--format=%(refname)"]);
+    assert!(
+        remote_refs.contains("refs/heads/agent-events/alice"),
+        "{remote_refs}"
+    );
+    assert!(
+        !remote_refs.contains("refs/heads/agent-events/bob"),
+        "the loser must not have published a stream root: {remote_refs}"
+    );
+}
+
 // ------------------------------------------------- freshness envelope tests
 //
 // docs/AGENT_COORDINATION_EVOLUTION.md section 2.4: "Every human and
@@ -2061,12 +2309,22 @@ fn merge_ready_rejects_main_advanced() {
 }
 
 /// The reviewed commit touches sneaky.txt too, but review_scope/
-/// reviewed_scope only ever name feature.txt -- `merge-ready`'s own diff
-/// check is what must catch this (nothing upstream of it inspects changed
-/// paths at all: neither `apply_review_merge_authorized` nor `prepare-merge`
-/// ever looks at the actual diff content).
+/// reviewed_scope only ever name feature.txt.
+///
+/// The publication gate is what catches this now, and catching it there is
+/// the point. Scope used to be checked only by `merge-ready`, on the
+/// reviewer's own host, because the coordinator's gate bounded a candidate's
+/// content by *rebuilding the merge* and comparing object ids -- which is
+/// the reader-build-sensitive check g-design:249 removed. Without a rebuild,
+/// scope is what bounds the tree, so the coordinator asks it directly, and a
+/// candidate carrying an unreviewed path is now refused before it is ever
+/// published rather than only before it is pushed.
+///
+/// (`merge-ready` still asks the same question -- it runs later, against
+/// live `main` -- and `merge_ready::tests::rejects_a_hand_pushed_candidate_
+/// whose_tree_leaves_the_reviewed_scope` covers that side directly.)
 #[test]
-fn merge_ready_rejects_a_changed_path_outside_reviewed_scope() {
+fn the_publication_gate_rejects_a_changed_path_outside_reviewed_scope() {
     let (_origin, repo) = fresh_bus();
     genesis(repo.path(), "coord1", "host1");
     register(repo.path(), "aiden", "reviewer", "host2");
@@ -2130,33 +2388,40 @@ fn merge_ready_rejects_a_changed_path_outside_reviewed_scope() {
     let candidate = prepared["candidate"].as_str().unwrap().to_string();
     // Authorized `reviewed_scope` matches the nomination's declared scope
     // exactly (["feature.txt"]) -- only the *actual* diff leaks sneaky.txt.
-    let authorization_id = authorize_merge(
+    // Submitted directly rather than through `authorize_merge`, which
+    // asserts the publication succeeds.
+    let data = serde_json::json!({
+        "nomination": nomination,
+        "product_branch": "refs/heads/agent/zoe/feature",
+        "previous_main": previous_main,
+        "reviewed_commit": feature_commit,
+        "candidate": candidate,
+        "merge_engine_epoch": merge_engine_epoch,
+        "checks": [{"command": "build", "result": "passed"}],
+        "finding_dispositions": [],
+        "evidence": [],
+        "reviewed_scope": ["feature.txt"],
+        "limitations": [],
+        "summary": "looks good",
+    });
+    submit(
         repo.path(),
         "aiden",
-        &nomination,
-        &previous_main,
-        &feature_commit,
-        &candidate,
-        &merge_engine_epoch,
-        &["feature.txt"],
+        "review.merge_authorized",
+        &data.to_string(),
+        "authorize",
     );
-
-    // `merge-ready` fetches `main` from `origin` (round-7 review); `main`
-    // itself is never otherwise pushed anywhere in this flow.
-    git(repo.path(), &["push", "origin", "refs/heads/main"]);
-
-    bin()
-        .current_dir(repo.path())
-        .args([
-            "merge-ready",
-            "--agent",
-            "aiden",
-            "--authorization",
-            &authorization_id,
-        ])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("is outside reviewed_scope"));
+    let coordinated = coordinate(repo.path(), "aiden", "host2", 0);
+    assert_eq!(
+        coordinated["published_events"],
+        serde_json::json!([]),
+        "{coordinated}"
+    );
+    assert_eq!(
+        coordinated["outbox_rejected"][0]["reason"],
+        serde_json::json!("changed path sneaky.txt is outside reviewed_scope"),
+        "{coordinated}"
+    );
 }
 
 // ---------------------------------------------------------------- audit-main
@@ -3056,5 +3321,258 @@ fn the_cli_refuses_an_auditor_issue_that_blocks_a_candidate() {
     assert!(
         drained["published_events"].as_array().unwrap().is_empty(),
         "nothing may publish: {drained}"
+    );
+}
+
+// ------------------------------------------------- mixed hosts, one candidate
+//
+// g-design:249. Validation must bind to the exact immutable candidate --
+// its tag, parents, tree, scope and trailer -- and must not reconstruct it
+// locally, because reconstructing it is what made one particular `git` build
+// protocol authority over history somebody else had already published.
+//
+// A host running a different git is the case that matters, and it cannot be
+// staged directly: CI installs one git, and so does a developer's machine.
+// So these fixtures stage the property that actually follows from it. A host
+// that cannot run the merge engine *at all* is strictly harder than a host
+// running a different version of it, and it is reproducible anywhere.
+
+/// Makes `repo` a clone that physically cannot construct a candidate.
+///
+/// `$GIT_COMMON_DIR/info/attributes` is consulted by git no matter what
+/// `merge_tree_write_tree` pins, so `gitrepo::refuse_ambient_attributes`
+/// refuses to run the merge engine in a clone that has one -- a real,
+/// pre-existing rule this fixture merely takes advantage of. Its content is
+/// irrelevant; its existence is the whole mechanism.
+///
+/// This is what makes the tests below falsifying rather than decorative. Any
+/// validation path that reaches `reconstruct_candidate` fails here, loudly
+/// and by construction, with no dependence on which git the test host has.
+fn forbid_candidate_construction(repo: &Path) {
+    let info = repo.join(".git").join("info");
+    std::fs::create_dir_all(&info).unwrap();
+    std::fs::write(
+        info.join("attributes"),
+        "# this clone deliberately cannot construct merge candidates\n",
+    )
+    .unwrap();
+}
+
+/// A second working clone of `origin`, configured with its own identity.
+fn second_checkout(origin: &Path) -> TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["clone", "--quiet", &path_str(origin), "."]);
+    git(dir.path(), &["config", "user.email", "other@example.com"]);
+    git(dir.path(), &["config", "user.name", "Other"]);
+    dir
+}
+
+/// The whole point of the ruling, end to end: one host prepares the
+/// candidate, a *different* host -- one that could not have produced that
+/// merge itself -- pulls it, coordinates the authorization, validates it,
+/// and lands it on `main`.
+///
+/// Every step the ruling names is exercised on the second host: pull (its
+/// own `sync`, plus fetching the candidate tag it deliberately does not
+/// have), coordinate (`review.merge_authorized` through the real publication
+/// gate), validate (`merge-ready`), and land (`git push` to `main`). None of
+/// them may run the merge engine, and this clone proves it: the same clone
+/// is asked to run `prepare-merge` first, and refuses.
+///
+/// The bus underneath also declares an engine version no host runs
+/// ([`FOREIGN_MERGE_ENGINE_VERSION`]), so nothing here can be passing
+/// because the recorded version happens to match something.
+#[test]
+fn a_host_that_cannot_run_the_merge_engine_can_still_coordinate_validate_and_land_a_candidate() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+
+    git(repo.path(), &["push", "origin", "refs/heads/main"]);
+
+    // Host B is cloned *before* the candidate exists anywhere, so it cannot
+    // be holding the object by accident -- fetching the candidate tag is the
+    // only way it can ever see one. It also cannot run the merge engine.
+    let other = second_checkout(origin.path());
+    forbid_candidate_construction(other.path());
+
+    // Host A -- the reviewer's own checkout -- builds and pushes the
+    // candidate tag, using whatever git it has.
+    let prepared = prepare_merge(repo.path(), "aiden", &nomination, &feature_commit);
+    let candidate = prepared["candidate"].as_str().unwrap().to_string();
+    assert!(
+        !StdCommand::new("git")
+            .arg("-C")
+            .arg(other.path())
+            .args(["cat-file", "-e", &candidate])
+            .status()
+            .unwrap()
+            .success(),
+        "the second host must start without the candidate object, or it proves nothing about \
+         fetching one"
+    );
+
+    // Pull: `sync` is how a host gets the bus at all.
+    let synced = status(other.path(), true);
+    assert_eq!(
+        synced["freshness"], "current-as-of-remote-probe",
+        "{synced}"
+    );
+
+    // Coordinate: the real publication gate, on the host that cannot rebuild
+    // the merge.
+    let authorization_id = authorize_merge(
+        other.path(),
+        "aiden",
+        &nomination,
+        &previous_main,
+        &feature_commit,
+        &candidate,
+        &merge_engine_epoch,
+        &["feature.txt"],
+    );
+
+    // Validate: the pre-merge gate, same host.
+    let out = merge_ready(other.path(), "aiden", &authorization_id);
+    assert_eq!(out["ready"], true, "{out}");
+    assert_eq!(out["candidate"], candidate, "{out}");
+
+    // And this clone genuinely cannot construct a candidate -- asked at the
+    // point where it demonstrably holds every object involved, so the
+    // refusal is about the merge engine and nothing else. If any step above
+    // had reconstructed the candidate, it would have hit exactly this.
+    bin()
+        .current_dir(other.path())
+        .args([
+            "prepare-merge",
+            "--agent",
+            "aiden",
+            "--nomination",
+            &nomination,
+            "--reviewed-commit",
+            &feature_commit,
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "candidate construction refuses to run",
+        ));
+
+    // Land: an ordinary non-force push of the exact candidate.
+    let push = StdCommand::new("git")
+        .arg("-C")
+        .arg(other.path())
+        .args(["push", "origin", &format!("{candidate}:refs/heads/main")])
+        .output()
+        .unwrap();
+    assert!(
+        push.status.success(),
+        "landing the candidate must be an ordinary push: {}",
+        String::from_utf8_lossy(&push.stderr)
+    );
+    let landed = StdCommand::new("git")
+        .arg("-C")
+        .arg(origin.path())
+        .args(["rev-parse", "refs/heads/main"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&landed.stdout).trim(),
+        candidate,
+        "`main` must be the exact candidate the reviewer authorized"
+    );
+}
+
+/// The same second host, now shown to *reject* a candidate that is wrong --
+/// so the test above is not passing because validation stopped checking.
+///
+/// The forged candidate has the right parents and the right reviewer
+/// trailer; only its tree carries a path the nomination never covered. That
+/// used to be caught incidentally, by the object id failing to match a local
+/// rebuild. There is no rebuild here -- this clone cannot perform one -- so
+/// the scope bound is what catches it.
+#[test]
+fn a_host_that_cannot_run_the_merge_engine_still_rejects_an_out_of_scope_candidate() {
+    let (origin, repo) = fresh_bus();
+    genesis(repo.path(), "coord1", "host1");
+    let (nomination, previous_main, feature_commit) = nominated_and_accepted_review(repo.path());
+    let merge_engine_epoch = activate_merge_engine(repo.path(), "coord1");
+
+    // A tree carrying an unreviewed path, and a forged "candidate" built on
+    // it with otherwise-correct parents and message.
+    git(
+        repo.path(),
+        &["checkout", "--quiet", "--detach", &feature_commit],
+    );
+    std::fs::write(repo.path().join("sneaky.txt"), "not reviewed\n").unwrap();
+    git(repo.path(), &["add", "."]);
+    git(
+        repo.path(),
+        &["commit", "-q", "-m", "sneaky\n\nAgent-Bus-Agent: zoe"],
+    );
+    let sneaky_tree = crate_rev_parse(repo.path(), "HEAD^{tree}");
+    git(repo.path(), &["checkout", "--quiet", "main"]);
+
+    let forged = StdCommand::new("git")
+        .arg("-C")
+        .arg(repo.path())
+        .args([
+            "commit-tree",
+            &sneaky_tree,
+            "-p",
+            &previous_main,
+            "-p",
+            &feature_commit,
+            "-m",
+            "agent-bus candidate\n\nAgent-Bus-Reviewer: aiden\n",
+        ])
+        .output()
+        .unwrap();
+    assert!(forged.status.success(), "{forged:?}");
+    let forged = String::from_utf8_lossy(&forged.stdout).trim().to_string();
+    let tag = format!("agent-candidate/aiden/{forged}");
+    git(repo.path(), &["tag", &tag, &forged]);
+    git(
+        repo.path(),
+        &["push", "origin", &format!("refs/tags/{tag}")],
+    );
+    git(repo.path(), &["push", "origin", "refs/heads/main"]);
+
+    let other = second_checkout(origin.path());
+    forbid_candidate_construction(other.path());
+    status(other.path(), true);
+
+    let data = serde_json::json!({
+        "nomination": nomination,
+        "product_branch": "refs/heads/agent/zoe/feature",
+        "previous_main": previous_main,
+        "reviewed_commit": feature_commit,
+        "candidate": forged,
+        "merge_engine_epoch": merge_engine_epoch,
+        "checks": [{"command": "build", "result": "passed"}],
+        "finding_dispositions": [],
+        "evidence": [],
+        "reviewed_scope": ["feature.txt"],
+        "limitations": [],
+        "summary": "looks good",
+    });
+    submit(
+        other.path(),
+        "aiden",
+        "review.merge_authorized",
+        &data.to_string(),
+        "authorize",
+    );
+    let coordinated = coordinate(other.path(), "aiden", "host2", 0);
+    assert_eq!(
+        coordinated["published_events"],
+        serde_json::json!([]),
+        "{coordinated}"
+    );
+    assert_eq!(
+        coordinated["outbox_rejected"][0]["reason"],
+        serde_json::json!("changed path sneaky.txt is outside reviewed_scope"),
+        "{coordinated}"
     );
 }

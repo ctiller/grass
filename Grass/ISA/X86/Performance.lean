@@ -456,8 +456,8 @@ That gap is now closed by `citationsRegistered`, which pins each fact's anchors
 to `Vendor.document` -- `intelSdm092` and `amd64Apm409` and nothing else. An
 invented document no longer satisfies the premises, so the claim above is a
 theorem: `no_justification_while_amd_unretrievable`. The two fields together buy
-what one could not, and `Tools/source-liveness.py` now reads the retrieval
-status that the second of them depends on.
+what one could not, and the `source-liveness` binary in `tools/grass-tools` now
+reads the retrieval status that the second of them depends on.
 -/
 structure JustifiedCostModel (Insn Vals : Type) where
   /-- The cost function. -/
@@ -503,7 +503,7 @@ structure JustifiedCostModel (Insn Vals : Type) where
   profile; the commit that added it recorded this one as owed, and this is it.
 
   `Vendor.document` is `intelSdm092` and `amd64Apm409` and nothing else, so
-  with `Tools/source-liveness.py` reading `livenessProbe`, the premise now
+  with the `source-liveness` binary reading `livenessProbe`, the premise now
   reaches a status something other than the author can check.
   -/
   citationsRegistered : ∀ i,
@@ -566,8 +566,8 @@ instructions justifies nothing -- but it is the reason this is stated for a
 given instruction rather than as non-inhabitation.
 
 This is the correct state for a security premise whose evidence is missing. It
-becomes constructible when the AMD manual is retrievable again, and
-`Tools/source-liveness.py` is what will notice.
+becomes constructible when the AMD manual is retrievable again, and the
+`source-liveness` binary is what will notice.
 -/
 theorem no_justification_while_amd_unretrievable
     (j : JustifiedCostModel Insn Vals) (i : Insn) : False := by

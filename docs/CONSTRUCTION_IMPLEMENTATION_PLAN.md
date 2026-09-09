@@ -124,6 +124,21 @@ Exit criteria:
 - straight-line single-predecessor blocks can inherit an entry contract; and
 - fixtures reject a missing target, duplicate label, and mismatched exit tag.
 
+`Graph.hasDirectEdgeTo_eq_true_iff` and `Graph.mem_predecessors_iff` expose the
+structural witnesses behind executable predecessor discovery: a reported source
+is an actual graph block carrying an actual direct edge to the requested target.
+`Graph.wellFormed_iff` eliminates the aggregate block and target Booleans into
+`BlockStructurallyClosed` and `TargetsResolved`, both quantified over the exact
+structural lists. Its four named projection theorems let certificate consumers
+recover identity uniqueness, entry resolution, local closure, and target closure
+without unfolding the executable checker.
+
+`Graph.locatedEdges`, `Graph.edgeKeys`, and `Graph.findEdge?` derive canonical
+edge identity directly from nested source blocks. Their membership, soundness,
+and existence theorems keep edge lookup proof-bearing even for raw malformed
+graphs with repeated block identities; graph well-formedness eliminates those
+duplicates rather than making lookup partial or block-first.
+
 ### C1 — Joins, loops, calls, and stack shapes
 
 Extend the CFG kernel without introducing an authored parallel manifest:
@@ -146,6 +161,13 @@ silently invents an outcome.
 Exit criteria include rejection fixtures for an uncovered back edge, a call
 made with an incompatible stack shape, a missing non-normal return, and an edge
 that bypasses stack-scope elimination.
+
+The initial C1 slice is `Grass.CFG.Join`. `Graph.discoverJoins` derives shared
+targets, predecessor order, and cycle participation from the graph's nested
+edges. `JoinSelection.wellFormed` accepts only the exact discovered identity
+list on a structurally well-formed graph, so selection cannot introduce a
+second contract value that disagrees with the selected block. Loop invariants,
+measures, and frontier admission remain the next separate C1 obligation.
 
 ### C2 — Logical placement and static layouts
 
@@ -311,7 +333,7 @@ lake env lean Tools/AxiomAudit.lean
 pwsh -NoProfile -File ./audit-trust.ps1
 pwsh -NoProfile -File ./check-doc-links.ps1
 pwsh -NoProfile -File ./check-spike-sources.ps1
-python Tools/DocstringAudit.py
+cargo run --release --manifest-path tools/grass-tools/Cargo.toml --bin docstring-audit
 git diff --check
 ```
 

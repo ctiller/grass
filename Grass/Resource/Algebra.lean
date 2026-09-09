@@ -4,9 +4,44 @@ import Grass.Resource.Axis
 # The generic resource algebra
 
 `docs/RESOURCES.md` §4: "Both tiers use the open resource algebra." This module
-is that algebra. It is imported by `Semantics`, which cannot state `SpecProcess`
-without it, and instantiated by `Process.Resource`, which builds network
-holdings and capacity credit on top.
+is that algebra. It is *intended* for a semantics layer that cannot state its
+process type without it, and for a process layer that builds network holdings and
+capacity credit on top — and neither exists. An earlier version of this sentence named
+both as present-tense importers; review checked and found the only importer is
+`Tests/Resource/CompositionSplit.lean`. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2
+records the consequence: `compatible` is the *partial* in partial commutative and the
+reason every law here is conditioned, and its only nontrivial instance is consumed by
+nothing, so no proof in this tree has discharged a nontrivial compatibility side
+condition.
+
+**The full extent, since a later review measured it and the paragraph above concedes
+only the importer question.** Of the twenty laws `OrderedPartialCommutativeResourceLaws`
+declares, three are ever projected — `combineCancel`, `alternativeIdem` and
+`alternativeLeCombine` — and all three uses are inside that one fixture; the other
+seventeen are discharged by `Counting.laws` and `Exclusive.laws` and read by nothing.
+`ResourceModel`, `HasResourceAxis`, `HasResourceLimit` and `ResourceLimit` have no
+values or instances anywhere under `Grass/` or `Tests/`. `Counting.algebra` is built
+and used by nothing, and `Exclusive` — the namespace that exists to show `compatible`
+is not a hedge — is used by nothing either.
+
+So this is a facility whose only safety property is that nothing calls it, which is
+the defect class this branch has spent eleven rounds finding elsewhere in the layer.
+It is kept rather than deleted because M7 and M9 are the stated consumers and
+rewriting a twenty-law bundle later is worse than carrying it; what is not acceptable
+is carrying it while a reader assumes it is load-bearing. Two audit blind spots hide
+the extent from the gates: `ResourceAlgebra.compatible` is invisible to
+`Tools/ConsultedAudit.py` because `StepPolicy.compatible` satisfies the same name,
+and **seven of the nine** lifecycle and exhaustion constructors are on
+`Tools/ReachabilityAudit.py`'s allowlist as declared-ahead-of-its-milestone.
+
+The other two are `ResourceExhaustionPolicy.profileSpecific` and
+`ResourceLifecyclePolicy.profileSpecific`, and they are worse off than the seven: they
+are on no allowlist and nothing reports them, because `FaultVisibility.profileSpecific`
+is built in `Tests/` and that tool matches short names. An allowlist entry at least
+leaves a record of a decision; same-name blindness leaves none, and entries for these
+two would be reported by `--inert` as suppressing nothing, so they are named here
+instead. This sentence said "every", which counted the constructors that leave a trace
+and not the two that do not.
 
 ## Reconciling two sketches
 
@@ -15,6 +50,16 @@ The corpus displays this idea twice with different shapes.
 `docs/PROCESS.md` shows `OrderedCommutativeResourceAlgebra (Value axis)
 (combine axis) (zero axis) (le axis)`, with a zero and a different name. They are
 sketches of one thing, and this module unifies them rather than shipping both.
+
+**Both sketches are being repaired to match this module rather than the other way
+round.** `g-design:308` reports the reconciliation above going stale once that
+lands: both documents then select the same five-argument bundle, with
+`docs/SEMANTICS.md` projecting the weave-independent model and `docs/PROCESS.md`
+adding network holdings and an explicit compatible premise on parallel
+composition. The shapes quoted above are what main carries today, so this section
+is accurate until then and becomes history the moment it is not; it is written
+this way because a module comment that describes an unlanded document is worse
+than one that describes an old one.
 
 ## Two compositions, not one
 
@@ -218,16 +263,28 @@ class HasResourceLimit (R : Type u) [ResourceModel R] (axis : ResourceAxisName)
 /--
 One axis's limit, as a structure rather than a class instance.
 
-**Why this exists.** `docs/SEMANTICS.md` sketches a multi-axis specification as
+**Why this exists.** `docs/SEMANTICS.md` sketched a multi-axis specification as
 `class WebServerResources (R) extends HasResourceLimit R .residentBytes,
 HasResourceLimit R .connections, ...`. That does not elaborate: Lean deduplicates
 parent structures by head constant, not by full type, so every axis after the
 first is silently dropped with a `Duplicate parent structure` warning — and under
-this repository's `warningAsError` it is a hard error. The sketch in the corpus
-is not implementable as written.
+this repository's `warningAsError` it is a hard error.
+
+**That sketch is being repaired to match this module rather than the other way
+round.** `g-design:399` rewrites it to hold `ResourceLimit R axis` values as
+fields, which is the shape below. The paragraph above describes what main carries
+today and becomes history the moment that lands; it is written this way for the
+reason the reconciliation section gives, that a module comment describing an
+unlanded document is worse than one describing an old one.
+
+Reported by `c-reviewer:253`, which found this paragraph after `c-mem:77` had
+repaired the reconciliation section above for the same reason. The two say the
+same thing in different words -- one about two sketches disagreeing, one about a
+single sketch not elaborating -- and share no phrase, which is why the first
+repair did not reach the second.
 
 A multi-axis specification therefore holds `ResourceLimit R axis` values as
-*fields*:
+*fields*, which is what `g-design:399` makes the document say too:
 
 ```lean
 class WebServerResources (R : Type) [ResourceModel R] where
@@ -365,8 +422,11 @@ theorem laws : OrderedPartialCommutativeResourceLaws compatible combine alternat
   alternativeMonotone := fun a b c _ => by simp only [alternative]; omega
   alternativeLeCombine := fun a b _ => by simp only [alternative, combine]; omega
 
-/-- Two held exclusive resources are incompatible. This is the fact that makes
-`h2.credit.double` fail rather than silently double count. -/
+/-- Two held exclusive resources are incompatible. This is the fact a
+double-counting demand would fail against, and an earlier version of this line named
+a specific corpus obligation as though that obligation consumed it. None does — this
+namespace has no consumer at all, which `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2
+records. -/
 theorem not_compatible_of_both_held {a b : Nat} (ha : a ≠ 0) (hb : b ≠ 0) :
     ¬ compatible a b := by
   rintro (h | h)

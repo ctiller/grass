@@ -214,44 +214,7 @@ pub(crate) fn check_merge_ready(
     // still unresolvable afterward, fail with a message that actually says
     // what to do, rather than the raw "bad object" a downstream git command
     // would otherwise surface first (round-7 adversarial review).
-    let candidate_tag =
-        crate::merge_candidate::candidate_tag_name(reviewer, auth.candidate.as_str());
-    let _ = crate::gitrepo::fetch_refspecs(
-        repo,
-        remote,
-        &[format!(
-            "refs/tags/{candidate_tag}:refs/tags/{candidate_tag}"
-        )],
-    );
-    if crate::gitrepo::rev_parse_opt(repo, auth.candidate.as_str())?.is_none() {
-        return Err(invalid(format!(
-            "candidate {} is not fetchable in this checkout, even after trying to fetch \
-             refs/tags/{candidate_tag} from {remote} -- has `prepare-merge` been run and its \
-             candidate tag actually reached {remote}?",
-            auth.candidate
-        )));
-    }
-    let parents = crate::gitrepo::parents_of(repo, auth.candidate.as_str())?;
-    if parents
-        != vec![
-            auth.previous_main.as_str().to_string(),
-            auth.reviewed_commit.as_str().to_string(),
-        ]
-    {
-        return Err(invalid(
-            "candidate parents do not match previous_main/reviewed_commit in order",
-        ));
-    }
-    let trailers = crate::gitrepo::commit_message_trailers(repo, auth.candidate.as_str())?;
-    let reviewer_trailers: Vec<&(String, String)> = trailers
-        .iter()
-        .filter(|(k, _)| k == "Agent-Bus-Reviewer")
-        .collect();
-    if reviewer_trailers.len() != 1 || reviewer_trailers[0].1 != reviewer.as_str() {
-        return Err(invalid(
-            "candidate must have exactly one matching Agent-Bus-Reviewer trailer",
-        ));
-    }
+    crate::merge_candidate::fetch_candidate_tag(repo, remote, reviewer, auth.candidate.as_str())?;
     // Section 8 lists two more checks by name that lived only in the
     // coordinator's publication gate: "selected commit authors match trailers
     // and exclude that reviewer", and the candidate having a "conflict-free
@@ -270,28 +233,26 @@ pub(crate) fn check_merge_ready(
         auth.previous_main.as_str(),
         auth.reviewed_commit.as_str(),
     )?;
-    crate::bootstrap::require_pinned_merge_engine(state)?;
-    let reconstructed = crate::merge_candidate::reconstruct_candidate(
+    // Binds to the immutable candidate -- its tag, parents, message and
+    // trailer -- rather than rebuilding the merge here and comparing object
+    // ids (g-design:249; see `merge_candidate::verify_candidate_object`).
+    // Reconstructing it locally is what made this gate refuse an honest
+    // reviewer's candidate whenever this host's `git` differed from theirs.
+    crate::merge_candidate::verify_candidate_object(
         repo,
+        reviewer,
         auth.previous_main.as_str(),
         auth.reviewed_commit.as_str(),
-        reviewer,
+        auth.candidate.as_str(),
     )?;
-    if reconstructed != auth.candidate.as_str() {
-        return Err(invalid(format!(
-            "candidate {} is not the deterministic clean merge of {} into {} -- this host              reconstructs {reconstructed}. A candidate that is not that merge carries content              no reviewer authorized.",
-            auth.candidate, auth.reviewed_commit, auth.previous_main
-        )));
-    }
-
-    let changed = crate::gitrepo::diff_name_status(repo, &current_main, auth.candidate.as_str())?;
-    for (_, path) in &changed {
-        if !auth.reviewed_scope.iter().any(|p| path_in_claim(path, p)) {
-            return Err(invalid(format!(
-                "changed path {path} is outside reviewed_scope"
-            )));
-        }
-    }
+    // `current_main` is `auth.previous_main` -- checked above -- so this is
+    // the candidate's own diff over the base it was authorized against.
+    crate::merge_candidate::verify_candidate_scope(
+        repo,
+        &current_main,
+        auth.candidate.as_str(),
+        auth.reviewed_scope.as_slice(),
+    )?;
     // `common::CheckOutcome` currently has `Passed` as its sole variant (a
     // failed check is reported through `progress.reported`, never recorded
     // in `checks` here -- see the enum's own doc comment), so this loop
@@ -340,12 +301,22 @@ mod tests {
         ObjectId::parse(format!("{n:040x}")).unwrap()
     }
 
+    /// A bus recording an engine version no host in the fleet runs and no
+    /// build of this crate has ever pinned.
+    ///
+    /// Every test in this module reaches `check_merge_ready` through this
+    /// config, so the whole module is a standing assertion that merge
+    /// readiness never consults the recorded version -- neither against a
+    /// compile-time constant nor against this host's installed `git`. The
+    /// gate that did consult it is exactly what forced the fleet onto one
+    /// git build; a fixture that recorded a version some host really runs
+    /// could not tell the difference.
     fn config() -> crate::bootstrap::BusConfig {
         crate::bootstrap::BusConfig {
             object_format: "sha1".to_string(),
             product_review_from: hash(1),
             merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: "1.2.3-no-build-ever-pinned-this".to_string(),
         }
     }
 
@@ -418,9 +389,9 @@ mod tests {
             accepted_nominations,
             decline_or_withdraw_or_reassign_status: ItemStatus::Open,
             findings: findings_map,
-            authorizations: vec![],
-            merged: vec![],
-            reconciled: vec![],
+            authorizations: Default::default(),
+            merged: Default::default(),
+            reconciled: Default::default(),
         };
         state.reviews.insert(nomination.clone(), chain);
         register_active(&mut state, reviewer, crate::events::Role::Reviewer);
@@ -468,7 +439,7 @@ mod tests {
             .review_chain_mut(&nomination)
             .unwrap()
             .authorizations
-            .push(auth_id.clone());
+            .insert(auth_id.clone());
 
         (state, nomination, auth_id)
     }
@@ -874,9 +845,9 @@ mod tests {
             accepted_nominations,
             decline_or_withdraw_or_reassign_status: ItemStatus::Open,
             findings: BTreeMap::new(),
-            authorizations: vec![],
-            merged: vec![],
-            reconciled: vec![],
+            authorizations: Default::default(),
+            merged: Default::default(),
+            reconciled: Default::default(),
         };
         state.reviews.insert(nomination.clone(), chain);
         register_active(&mut state, reviewer, crate::events::Role::Reviewer);
@@ -917,7 +888,7 @@ mod tests {
             .review_chain_mut(&nomination)
             .unwrap()
             .authorizations
-            .push(auth_id.clone());
+            .insert(auth_id.clone());
         (state, auth_id)
     }
 
@@ -1022,6 +993,65 @@ mod tests {
                 .contains("not one this nomination chain accepted"),
             "expected the never-accepted refusal, got: {err}"
         );
+    }
+
+    /// The gate never consults the recorded engine version, whatever it
+    /// says.
+    ///
+    /// This replaces a test that asserted the opposite -- that a bus whose
+    /// recorded version differed from this host's installed `git` could not
+    /// merge at all. That is the rule the repository owner rejected
+    /// (g-design:249): it made a Linux host on its distribution's git unable
+    /// to complete a merge an honest reviewer had already prepared, and its
+    /// only remedy was to make the whole fleet compile one particular git.
+    ///
+    /// Falsifying in the direction that matters: every value here is one no
+    /// host runs, so any comparison against a build constant *or* against
+    /// `git --version` fails this test immediately.
+    #[test]
+    fn the_gate_ignores_whatever_engine_version_the_bus_recorded() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+        let (dir, _origin, remote, previous_main, feature_commit, candidate) =
+            git_fixture(&author, &reviewer);
+        let (mut state, auth_id) = state_with_authorization(
+            &author,
+            &reviewer,
+            &previous_main,
+            &feature_commit,
+            &candidate,
+            &["feature.txt"],
+        );
+
+        for recorded in [
+            "0.0.0-not-a-real-git",
+            "2.51.0",
+            "2.53.0",
+            "unpinned",
+            "not-a-version-at-all",
+        ] {
+            state.config.merge_engine_version = recorded.to_string();
+            let ready = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+                .unwrap_or_else(|e| {
+                    panic!("a recorded engine version must not decide merge readiness ({recorded}): {e}")
+                });
+            assert_eq!(ready.as_str(), candidate);
+        }
+
+        // And the same through the *selected* engine epoch, which used to be
+        // the higher authority of the two.
+        let epoch = EventId::new(&a("coord1"), 7);
+        state.merge_engine_info.insert(
+            epoch.clone(),
+            (
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                short("0.0.0-not-a-real-git"),
+            ),
+        );
+        state.current_merge_engine_epoch = Some(epoch);
+        let ready = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+            .expect("a selected engine epoch is not a licence to refuse a host either");
+        assert_eq!(ready.as_str(), candidate);
     }
 
     /// AGENT_REVIEW.md section 3 ("a registered **active** agent") and
@@ -1270,19 +1300,19 @@ mod tests {
         );
     }
 
-    /// The section 7 fixture "a candidate differing from the one authorized",
-    /// at this gate rather than at the coordinator's.
+    /// The section 7 fixture "a candidate differing from the one
+    /// authorized", at this gate rather than at the coordinator's, and
+    /// without rebuilding the merge.
     ///
-    /// This is the forged candidate that gets *past* the shape checks: right
-    /// parents, in the right order, with exactly one correct
-    /// `Agent-Bus-Reviewer` trailer. It still is not the candidate, because
-    /// `reconstruct_candidate` fixes the identity, the timestamp and the
-    /// message, and a hand-run `commit-tree` matches none of them. Only the
-    /// reconstruction comparison can tell the difference, which is why the
-    /// three sibling tests above -- all of which fail earlier, on shape --
-    /// could not catch its removal.
+    /// This is a forged candidate that gets past the parent checks: right
+    /// parents, in the right order. What it is not is the candidate
+    /// `prepare-merge` writes, and the exact-message comparison is what says
+    /// so. A hand-run `commit-tree -m` produces a message that differs from
+    /// [`merge_candidate::candidate_message`] by so much as its trailing
+    /// newline, which is exactly the kind of "nearly right" object the old
+    /// reconstruction comparison used to catch by hashing.
     #[test]
-    fn rejects_a_hand_pushed_candidate_that_is_not_the_deterministic_reconstruction() {
+    fn rejects_a_hand_pushed_candidate_whose_message_is_not_the_candidate_message() {
         let author = a("zoe");
         let reviewer = a("aiden");
         let (dir, _origin, remote, previous_main, feature_commit, real_candidate) =
@@ -1291,9 +1321,7 @@ mod tests {
             dir.path(),
             &feature_commit,
             &[&previous_main, &feature_commit],
-            "agent-bus candidate
-
-Agent-Bus-Reviewer: aiden",
+            "agent-bus candidate\n\nAgent-Bus-Reviewer: aiden\nAgent-Bus-Agent: zoe",
         );
         assert_ne!(
             forged, real_candidate,
@@ -1309,11 +1337,68 @@ Agent-Bus-Reviewer: aiden",
             &["feature.txt"],
         );
         let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
-            .expect_err("a candidate that is not the deterministic merge must be refused");
+            .expect_err("a candidate carrying a message nobody authorized must be refused");
         assert!(
             err.to_string()
-                .contains("is not the deterministic clean merge"),
-            "expected the reconstruction refusal, got: {err}"
+                .contains("does not carry the exact candidate message"),
+            "expected the exact-message refusal, got: {err}"
+        );
+    }
+
+    /// The content bound that replaces the deleted reconstruction: a
+    /// candidate with the right parents, the right message and the right
+    /// trailer, whose *tree* nevertheless carries a path the nomination
+    /// never covered.
+    ///
+    /// Nothing rebuilds the merge any more, so scope is what bounds what a
+    /// candidate may contain. This is the test that fails if
+    /// `verify_candidate_scope` is not called from this gate.
+    #[test]
+    fn rejects_a_hand_pushed_candidate_whose_tree_leaves_the_reviewed_scope() {
+        let author = a("zoe");
+        let reviewer = a("aiden");
+        let (dir, _origin, remote, previous_main, feature_commit, _real) =
+            git_fixture(&author, &reviewer);
+
+        // A commit whose tree adds a second file outside the reviewed
+        // scope; used only for its tree.
+        git(
+            dir.path(),
+            &["checkout", "--quiet", "--detach", &feature_commit],
+        );
+        std::fs::write(dir.path().join("smuggled.txt"), "not reviewed\n").unwrap();
+        git(dir.path(), &["add", "."]);
+        git(
+            dir.path(),
+            &[
+                "commit",
+                "-q",
+                "-m",
+                &format!("smuggled\n\nAgent-Bus-Agent: {author}"),
+            ],
+        );
+        let smuggled = rev_parse(dir.path(), "HEAD");
+        git(dir.path(), &["checkout", "--quiet", "main"]);
+
+        let forged = commit_tree_with(
+            dir.path(),
+            &smuggled,
+            &[&previous_main, &feature_commit],
+            "agent-bus candidate\n\nAgent-Bus-Reviewer: aiden\n",
+        );
+        let (state, auth_id) = state_with_authorization(
+            &author,
+            &reviewer,
+            &previous_main,
+            &feature_commit,
+            &forged,
+            &["feature.txt"],
+        );
+        let err = check_merge_ready(dir.path(), &remote, &state, &reviewer, &auth_id)
+            .expect_err("a candidate touching an unreviewed path must be refused");
+        assert!(
+            err.to_string().contains("outside reviewed_scope"),
+            "expected the scope refusal, got: {err}"
         );
     }
 

@@ -5,6 +5,7 @@ import Grass.ABI.Win64.UnwindBytes
 import Grass.Build.Cache.Key
 import Grass.CFG.Contract
 import Grass.CFG.Graph
+import Grass.CFG.Join
 import Grass.Certificate
 import Grass.Core.Context
 import Grass.Core.Demand
@@ -34,6 +35,7 @@ import Grass.Memory.Profile
 import Grass.Memory.Provenance
 import Grass.Memory.Range
 import Grass.Memory.Rights
+import Grass.Memory.Shape
 import Grass.Memory.State
 import Grass.Memory.Substep
 import Grass.Obligation.Core
