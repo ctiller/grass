@@ -330,7 +330,8 @@ acquiring a citation.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- CALL and return-slot factories add six checked routing/projection helpers.
 -- Thirteen custody predicates and checked adapters add no external behavior.
-def notBehaviourBaseline : Nat := 272
+-- One adapter derives the Windows binding from retained actual CALL receipts.
+def notBehaviourBaseline : Nat := 273
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -471,6 +472,8 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Proof-bearing projection of the selected fixed CALL factory receipt.
+    `Grass.Platform.Win32.WriteFile.CallPolicy.ofFactory,
     -- Exact table views, fixed-plan predicates and checked bookkeeping adapters;
     -- they assert no native provider or CPU adequacy beyond their premises.
     `Grass.Platform.Win32.WriteFile.EntryHandoff.after,

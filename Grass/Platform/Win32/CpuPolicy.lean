@@ -88,6 +88,7 @@ def policy? {image : ImageInput} {inputs : EntryInputs}
       cause := instructionCause before.rip
       code := code.provenance
       stack := stack
+      data := dataProvenance? loaded
       faults := fun _ => accessFaults }
 
 /-- Success retains the exact computed roots, thread, cause, operational guards
@@ -100,11 +101,12 @@ theorem policy?_inputs {image : ImageInput} {inputs : EntryInputs}
       policy.code = code.provenance ∧ policy.stack = stack ∧
       policy.context = inputs.thread ∧ policy.contextKind = .thread ∧
       policy.cause = instructionCause before.rip ∧
-      policy.operationPolicy = operationPolicy ∧ policy.faults = (fun _ => accessFaults) := by
+      policy.operationPolicy = operationPolicy ∧ policy.faults = (fun _ => accessFaults) ∧
+      policy.data = dataProvenance? loaded := by
   unfold policy? at success
   obtain ⟨code, codeExact, rest⟩ := Option.bind_eq_some_iff.mp success
   obtain ⟨stack, stackExact, rest⟩ := Option.bind_eq_some_iff.mp rest
   cases Option.some.inj rest
-  exact ⟨code, stack, codeExact, stackExact, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+  exact ⟨code, stack, codeExact, stackExact, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 end Grass.Platform.Win32.Cpu
