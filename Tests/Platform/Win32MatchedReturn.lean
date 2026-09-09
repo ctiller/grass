@@ -11,7 +11,7 @@ open Grass.Platform.Win32.WriteFile Grass.Tests.Win32WriteFile
 def model : CausalModel := ⟨fun state a b =>
   a = .entry call ∧ b = .returned call ∧ Represented state a ∧ Represented state b⟩
 
-theorem model_valid (state : CallProtocol.State Request) : model.Valid state where
+theorem model_valid (state : ProtocolState) : model.Valid state where
   endpoints := by intro a b h; exact ⟨h.2.2.1, h.2.2.2⟩
   irreflexive := by intro node h; have bad := h.1.symm.trans h.2.1; cases bad
   transitive := by
@@ -32,7 +32,7 @@ theorem no_return_initial : ¬ Represented initial (.returned call) := by
   change _ ∈ [] at member
   contradiction
 
-def reached : History realized initial call record initialPrefix :=
+def reached : History plan realized initial call record initialPrefix :=
   .handoff initialPrefix rfl prepared {
     beforeValid := model_valid initial
     afterValid := model_valid pending

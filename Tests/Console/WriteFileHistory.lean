@@ -1,5 +1,7 @@
 import Grass.Refinement.Console.WriteFileNonresponse
 
+variable {plan : Grass.Platform.Win32.WriteFile.LoanPlan}
+
 /-! These are evidence consumers, not invented physical Windows executions.
 They pressure-test composition at arbitrary reached prefixes and reject erased
 context, caller history, or nonresponse distinctions at elaboration time. -/
@@ -13,16 +15,16 @@ open Grass.Refinement.Console.WriteFileHistory
 variable {R Outcome Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
   {spec : CapturedSpecification resources Outcome}
   {projection : CapturedTargetProjection spec Status}
-  {realization : Realization} {initial state : CallProtocol.State Request}
+  {realization : Realization} {initial state : ProtocolState}
   {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-  {frontier : Prefix state call record}
-  {history : History realization initial call record frontier}
-  {relation : HandoffRelation projection}
+  {frontier : Prefix plan state call record}
+  {history : History plan realization initial call record frontier}
+  {relation : HandoffRelation (plan := plan) projection}
 
 /-- A silent action followed by output retains the original prefix and order. -/
 example (aligned : Aligned relation history)
-    {middle last : CallProtocol.State Request}
-    {mid : Prefix middle call record} {post : Prefix last call record}
+    {middle last : ProtocolState}
+    {mid : Prefix plan middle call record} {post : Prefix plan last call record}
     (first second : Action) (silent bytes : Vec Byte)
     (zero : CommittedStep realization frontier mid first silent)
     (positive : CommittedStep realization mid post second bytes)
@@ -62,14 +64,14 @@ example (aligned : Aligned relation history) (response : FixedNonresponse aligne
 
 /-- Distinct provider contexts are explicit arguments of the selected relation. -/
 example (_aligned : Aligned relation history) (_otherRealization : Realization)
-    (_otherInitial : CallProtocol.State Request)
-    (_otherHistory : History _otherRealization _otherInitial call record frontier) : True := by
+    (_otherInitial : ProtocolState)
+    (_otherHistory : History plan _otherRealization _otherInitial call record frontier) : True := by
   fail_if_success
     have _wrong : Aligned relation _otherHistory := _aligned
   trivial
 
 /-- Changing the selected handoff relation needs a new alignment proof. -/
-example (_aligned : Aligned relation history) (_other : HandoffRelation projection) : True := by
+example (_aligned : Aligned relation history) (_other : HandoffRelation (plan := plan) projection) : True := by
   fail_if_success
     have _wrong : Aligned _other history := _aligned
   trivial

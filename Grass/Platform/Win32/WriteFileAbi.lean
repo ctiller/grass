@@ -1,6 +1,6 @@
 import Grass.ABI.Win64.Convention
 import Grass.ISA.X86.Execution.State
-import Grass.Platform.Win32.WriteFile
+import Grass.Platform.Win32.WriteFileArguments
 
 /-!
 # WriteFile x64 entry argument correspondence
