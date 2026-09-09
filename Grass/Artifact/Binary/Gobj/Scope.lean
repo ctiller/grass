@@ -24,6 +24,39 @@ abbrev StableScopeId := Grass.StableId
 def writeScopeComponent (value : String) : Std.Logical.ByteArray :=
   writeUnaryNat (Text.utf8 value).length ++ Text.utf8 value
 
+/-- Independent language for one canonical UTF-8 scope component, pairing its
+unary byte length with exactly those encoded bytes. -/
+def scopeComponentFormat : Format String :=
+  .lift
+    (.seq unaryNatFormat fun count => repeatedBytesFormat count)
+    fun value => ((Text.utf8 value).length, Text.utf8 value)
+
+/-- `derives_scopeComponent_iff` characterizes component derivations by the
+canonical writer bytes and an arbitrary retained suffix. -/
+theorem derives_scopeComponent_iff {input rest : Std.Logical.ByteArray}
+    {value : String} :
+    Derives scopeComponentFormat input value rest ↔
+      input = writeScopeComponent value ++ rest := by
+  constructor
+  · intro derivation
+    have sequence := derivation.lift_inner
+    rcases sequence.seqOuterShape with
+      ⟨middle, count, bytes, pairEq, lengthDerivation, bytesDerivation⟩
+    injection pairEq with countValue bytesValue
+    subst count
+    subst bytes
+    have lengthInput := derives_unaryNatFormat_iff.mp lengthDerivation
+    have bytesInput := (derives_repeatedBytes_iff.mp bytesDerivation).1
+    rw [lengthInput, bytesInput]
+    simp [writeScopeComponent, writeUnaryNat, Vec.append_assoc]
+  · intro equality
+    rw [equality]
+    apply Derives.lift
+    exact Derives.seq
+      (by simpa [writeScopeComponent, writeUnaryNat, Vec.append_assoc] using
+        unaryNat_derives (Text.utf8 value).length (Text.utf8 value ++ rest))
+      (by simpa using anyBytes_derives (Text.utf8 value) rest)
+
 /-- A component carries its bytes once plus an equally long unary prefix. -/
 @[simp] theorem length_writeScopeComponent (value : String) :
     (writeScopeComponent value).length = 2 * (Text.utf8 value).length + 1 := by
@@ -56,9 +89,107 @@ every suffix preserved. -/
   rw [takeExact_append (by rfl)]
   simp [Text.decode?_utf8]
 
+/-- Arbitrary successful component parsing is equivalent to the independent
+component format derivation. -/
+theorem readScopeComponent_done_iff (input : Std.Logical.ByteArray)
+    (value : String) (rest : Std.Logical.ByteArray) :
+    readScopeComponent input = .done value rest ↔
+      Derives scopeComponentFormat input value rest := by
+  rw [derives_scopeComponent_iff]
+  constructor
+  · intro parsed
+    unfold readScopeComponent at parsed
+    split at parsed
+    next count afterLength lengthParsed =>
+      split at parsed
+      next bytes suffix bytesParsed =>
+        split at parsed
+        next decodedValue decoded =>
+          injection parsed with valueEq restEq
+          subst value
+          subst rest
+          have lengthInput := derives_unaryNatFormat_iff.mp
+            ((readUnaryNat_done_iff input count afterLength).mp lengthParsed)
+          have bytesParts := takeExact_done bytesParsed
+          have encoded : Text.utf8 decodedValue = bytes := by
+            unfold Text.decode? at decoded
+            split at decoded
+            next valid =>
+              injection decoded with decodedEq
+              subst decodedValue
+              exact Text.utf8_decode bytes valid
+            next => contradiction
+          have countEq : count = (Text.utf8 decodedValue).length := by
+            calc
+              count = bytes.length := bytesParts.1.symm
+              _ = (Text.utf8 decodedValue).length :=
+                congrArg Vec.length encoded.symm
+          calc
+            input = writeUnaryNat count ++ afterLength := by
+              simpa [writeUnaryNat] using lengthInput
+            _ = writeUnaryNat count ++ (bytes ++ suffix) := by
+              rw [bytesParts.2]
+            _ = writeScopeComponent decodedValue ++ suffix := by
+              rw [← encoded, countEq]
+              simp [writeScopeComponent, Vec.append_assoc]
+        next => contradiction
+      next => contradiction
+      next => contradiction
+    next => contradiction
+    next => contradiction
+  · intro canonical
+    rw [canonical]
+    exact readScopeComponent_write_append value rest
+
 /-- Serialize both structural components; dotted display rendering is absent. -/
 def writeStableScopeId (scope : StableScopeId) : Std.Logical.ByteArray :=
   writeScopeComponent scope.owner ++ writeScopeComponent scope.localName
+
+/-- Independent language for the two nominal components of a stable scope. -/
+def stableScopeIdFormat : Format StableScopeId :=
+  .lift (.seq scopeComponentFormat fun _ : String => scopeComponentFormat)
+    fun scope => (scope.owner, scope.localName)
+
+/-- `derives_stableScopeId_iff` characterizes a scope derivation by its two
+canonical component encodings and retained suffix. -/
+theorem derives_stableScopeId_iff {input rest : Std.Logical.ByteArray}
+    {scope : StableScopeId} :
+    Derives stableScopeIdFormat input scope rest ↔
+      input = writeStableScopeId scope ++ rest := by
+  constructor
+  · intro derivation
+    have sequence := derivation.lift_inner
+    rcases sequence.seqOuterShape with
+      ⟨middle, owner, localName, pairEq, ownerDerivation, localDerivation⟩
+    injection pairEq with ownerValue localValue
+    subst owner
+    subst localName
+    have ownerInput := derives_scopeComponent_iff.mp ownerDerivation
+    have localInput := derives_scopeComponent_iff.mp localDerivation
+    rw [ownerInput, localInput]
+    simp [writeStableScopeId, Vec.append_assoc]
+  · intro equality
+    subst input
+    have ownerDerivation : Derives scopeComponentFormat
+        (writeScopeComponent scope.owner ++
+          (writeScopeComponent scope.localName ++ rest))
+        scope.owner (writeScopeComponent scope.localName ++ rest) :=
+      derives_scopeComponent_iff.mpr rfl
+    have localDerivation : Derives scopeComponentFormat
+        (writeScopeComponent scope.localName ++ rest) scope.localName rest :=
+      derives_scopeComponent_iff.mpr rfl
+    have pairDerivation :=
+      Derives.seq (next := fun _ : String => scopeComponentFormat)
+        ownerDerivation localDerivation
+    change Derives
+      (.lift (.seq scopeComponentFormat fun _ : String => scopeComponentFormat)
+        fun scope : StableScopeId => (scope.owner, scope.localName))
+      (writeStableScopeId scope ++ rest) scope rest
+    rw [show writeStableScopeId scope ++ rest =
+      writeScopeComponent scope.owner ++
+        (writeScopeComponent scope.localName ++ rest) by
+      simp [writeStableScopeId, Vec.append_assoc]]
+    exact Derives.lift (value := scope) pairDerivation
 
 /-- Scope width is derived from its two structured UTF-8 components. -/
 @[simp] theorem length_writeStableScopeId (scope : StableScopeId) :
@@ -93,6 +224,41 @@ def readStableScopeId (input : Std.Logical.ByteArray) : ParseResult StableScopeI
 @[simp] theorem readStableScopeId_write (scope : StableScopeId) :
     readStableScopeId (writeStableScopeId scope) = .done scope Vec.empty := by
   simpa using readStableScopeId_write_append scope Vec.empty
+
+/-- Arbitrary successful stable-scope parsing is equivalent to the independent
+two-component format derivation. -/
+theorem readStableScopeId_done_iff (input : Std.Logical.ByteArray)
+    (scope : StableScopeId) (rest : Std.Logical.ByteArray) :
+    readStableScopeId input = .done scope rest ↔
+      Derives stableScopeIdFormat input scope rest := by
+  rw [derives_stableScopeId_iff]
+  constructor
+  · intro parsed
+    unfold readStableScopeId at parsed
+    split at parsed
+    next owner afterOwner ownerParsed =>
+      split at parsed
+      next localName suffix localParsed =>
+        injection parsed with scopeEq restEq
+        subst scope
+        subst rest
+        have ownerInput := derives_scopeComponent_iff.mp
+          ((readScopeComponent_done_iff input owner afterOwner).mp ownerParsed)
+        have localInput := derives_scopeComponent_iff.mp
+          ((readScopeComponent_done_iff afterOwner localName suffix).mp localParsed)
+        rw [ownerInput, localInput]
+        simp [writeStableScopeId, Vec.append_assoc]
+      next => contradiction
+      next => contradiction
+    next _ hint _ =>
+      have impossible : requireAfter (α := StableScopeId) 1 (.needMore hint) ≠
+          .done scope rest := by
+        cases hint <;> simp [requireAfter]
+      exact (impossible parsed).elim
+    next => contradiction
+  · intro canonical
+    rw [canonical]
+    exact readStableScopeId_write_append scope rest
 
 /-- No digest, registry handle, or display rendering mediates scope identity. -/
 theorem writeStableScopeId_injective : Function.Injective writeStableScopeId := by

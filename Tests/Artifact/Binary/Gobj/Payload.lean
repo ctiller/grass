@@ -71,6 +71,15 @@ example : readStableScopeId
       .done (Grass.StableId.mk "" "") Vec.empty := by
   exact readStableScopeId_write (Grass.StableId.mk "" "")
 
+example : Derives stableScopeIdFormat
+    (writeStableScopeId scope ++ suffix) scope suffix := by
+  exact derives_stableScopeId_iff.mpr rfl
+
+example (input rest : Std.Logical.ByteArray) (value : StableScopeId) :
+    readStableScopeId input = .done value rest ↔
+      Derives stableScopeIdFormat input value rest := by
+  exact readStableScopeId_done_iff input value rest
+
 example : writeStableScopeId (Grass.StableId.mk "a.b" "c") ≠
     writeStableScopeId (Grass.StableId.mk "a" "b.c") := by decide
 
