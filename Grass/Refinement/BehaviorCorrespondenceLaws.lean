@@ -78,7 +78,7 @@ private theorem reflexiveCompleteMatch (complete : model.Complete) :
   | infinite history run => exact .infinite history history run run (reflexiveAlignment history run)
   | waiting history wait => exact .waiting history history wait wait (reflexiveWaitMatch history wait)
 
-/-- Every behavior model corresponds to itself while retaining its actual
+/-- `BehaviorCorrespondence.refl` retains the model's actual
 finite histories, reply extensions, infinite runs, and prefix indices. -/
 def refl (model : BehaviorModel Outcome) :
     Grass.BehaviorCorrespondence model model id (WaitTranslation.refl model) where

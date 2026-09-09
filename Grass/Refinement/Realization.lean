@@ -10,7 +10,7 @@ can support public target assurance. Authored theorem demands are not used. -/
 namespace Grass
 
 /-- An explicitly relative profile fixes all semantic and obligation functions.
-Certificates cannot choose a different execution or safety family per artifact.
+`RealizationCertificate` retains this exact profile as a type index.
 This record itself is not evidence that its definitions model a real target. -/
 structure RealizationProfile {R : Type} [Resource.ResourceModel R] {resources : R}
     (contract : BehaviorContract resources) where
@@ -25,9 +25,9 @@ structure RealizationProfile {R : Type} [Resource.ResourceModel R] {resources : 
     WaitTranslation (execution bytes input) (contract.denotation interpretation input)
   safety : Std.Logical.ByteArray → contract.Input → DemandFamily.{0}
 
-/-- The artifact is the result of the selected deterministic construction for
-the exact program. All admitted inputs receive loaded entry, safety and full
-correspondence evidence; author demands remain outside these fields. -/
+/-- `RealizationCertificate.compiled` binds the artifact to deterministic construction for
+the exact program. Its `entry`, `safety`, and `correspondence` fields cover all admitted inputs with
+loaded entry, safety and full correspondence evidence; author demands remain separate. -/
 structure RealizationCertificate {R : Type} [Resource.ResourceModel R] {resources : R}
     {contract : BehaviorContract resources} (profile : RealizationProfile contract)
     (program : profile.Program) where
