@@ -111,6 +111,32 @@ def parse_flags(field):
     return value, mask
 
 
+def parse_corpus_flags(label, field):
+    """The modeled campaign requires a prediction for every defined flag."""
+    value, mask = parse_flags(field)
+    require(value is not None, f'modeled flags required for {label}')
+    expected_mask = (FLAGS_MASK & ~0x10
+                     if label.startswith(('boundary-test-', 'boundary-xor-'))
+                     or label == 'hello-test-eax-eax' else FLAGS_MASK)
+    require(mask == expected_mask, f'flag mask for {label}')
+    return value, mask
+
+
+def corpus_controls(raw):
+    """Mutate a full-status row to the legacy unchecked marker before execution."""
+    row = raw.splitlines()[0].split('\t')
+    require(row[0].startswith('mov-'), 'full-status control row')
+    row[5] = '-'
+    try:
+        parse_corpus_flags(row[0], row[5])
+    except ValueError as error:
+        require(str(error) == f'modeled flags required for {row[0]}',
+                'unchecked flags rejected for unexpected reason')
+    else:
+        raise ValueError('unchecked flags negative control failed')
+    return 1
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--worker', type=Path, required=True)
@@ -128,6 +154,7 @@ def main():
                          for row in (line.split('\t') for line in raw.splitlines()))
     require(hashlib.sha256(coverage.encode()).hexdigest() == COVERAGE_SHA256,
             'coverage identity changed; review the population, inputs and prediction basis')
+    intake_controls = corpus_controls(raw)
     cases, seen = [], set()
     for line in raw.splitlines():
         label, code, before, after, flags_in, flags_out, basis = line.split('\t')
@@ -140,11 +167,7 @@ def main():
         require(all(type(x) is int and 0 <= x < 2**64
                     for row in (before, after) for i, x in enumerate(row) if i != 4), 'corpus register value')
         require(0 < len(bytes.fromhex(code)) <= 15, 'instruction length')
-        flags_out, flags_mask = parse_flags(flags_out)
-        expected_mask = (FLAGS_MASK & ~0x10
-                         if label.startswith(('boundary-test-', 'boundary-xor-'))
-                         or label == 'hello-test-eax-eax' else FLAGS_MASK)
-        require(flags_mask == expected_mask, f'flag mask for {label}')
+        flags_out, flags_mask = parse_corpus_flags(label, flags_out)
         cases.append(dict(label=label, code=code, before=before, expected=after,
                           flags_in=int(flags_in, 16), flags_out=flags_out,
                           flags_mask=flags_mask, basis=basis))
@@ -166,6 +189,7 @@ def main():
                                              ROOT/'Tests/ISA/X86/NativeCorpus.lean',
                                              *sorted((ROOT/'Grass/ISA/X86').glob('*.lean'))]})
     metadata['harness_controls'] = self_test(worker)
+    metadata['corpus_controls'] = intake_controls
     (args.output / 'host.json').write_text(json.dumps(metadata, indent=2), encoding='utf-8')
     failures = 0
     with (args.output / 'observations.jsonl').open('w', encoding='utf-8') as out:
@@ -181,7 +205,8 @@ def main():
                    hello_operation_cases=4, modeled_register_cases=994,
                    fully_defined_status_flag_cases=953,
                    logical_defined_status_flag_cases=41,
-                   logical_af_undefined_cases=41, harness_controls=12)
+                   logical_af_undefined_cases=41, harness_controls=12,
+                   corpus_controls=intake_controls)
     (args.output / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
     print(json.dumps(summary))
     return int(failures != 0)
