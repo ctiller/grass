@@ -31,6 +31,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--compiled-c", type=pathlib.Path,
                         help="validate real artifacts emitted by build-c.ps1")
+    parser.add_argument("--compiled-sequence", type=pathlib.Path,
+                        help="validate real two-store artifacts emitted by build-sequence.ps1")
     options = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="disasm-", dir=ROOT / ".lake") as directory:
         work = pathlib.Path(directory)
@@ -169,6 +171,42 @@ def main():
                                      "8192", "8", "16", expected=2)["report"]
                     assert refused["stage"] == "entry-bytes" and "ambiguous" in refused["reason"]
             print("Actual MSVC safe/OOB artifacts ingested; exact store bytes recovered; RET remains unsupported.")
+
+        if options.compiled_sequence:
+            for name, offset in (("sequence_safe", 4), ("sequence_oob", 8)):
+                for extension in (".exe", ".dll"):
+                    binary = options.compiled_sequence / (name + extension)
+                    container = invoke("pe", binary, expected=3)["report"]
+                    code = next(section for section in container["sections"] if section["executable"])
+                    report = invoke("stores", binary, code["rva"], 5368709120,
+                                    8192, 8, 16, expected=3)["report"]
+                    assert report["candidateProfileComplete"] is True
+                    candidates = [row["assessment"] for row in report["candidates"]]
+                    assert len(candidates) == 2
+                    assert [item["candidateAddress"] for item in candidates] == [8192, 8192 + offset]
+                    assert [item["assessment"] for item in candidates] == ["within-declared-object",
+                        "within-declared-object" if offset == 4 else "outside-declared-object"]
+                    assert candidates[0]["instructionBytes"] == "c7010b000000"
+                    assert candidates[1]["instructionBytes"] == "c741" + f"{offset:02x}" + "2a000000"
+                    assert candidates[1]["fileOffset"] == candidates[0]["fileOffset"] + 6
+                    assert report["wholeScopeSafety"] == "unresolved"
+                    assert report["linearRemainingBytes"] == "c3"
+                    assert reconstruct(report["linearListing"]) == reconstruct(code["listing"])
+                    # Unsupported candidate rows must not hide later decoded
+                    # stores in this explicitly independent-snapshot command.
+                    mutated = bytearray(binary.read_bytes())
+                    start = code["fileOffset"]
+                    mutated[start:start + 6] = b"\x53" * 6
+                    raw.write_bytes(mutated)
+                    mixed = invoke("stores", raw, code["rva"], 5368709120,
+                                   8192, 8, 16, expected=3)["report"]
+                    assert mixed["candidateProfileComplete"] is False
+                    assert len(mixed["candidates"]) == 7
+                    assert all(row["assessment"]["status"] == "unresolved"
+                               for row in mixed["candidates"][:6])
+                    assert mixed["candidates"][-1]["assessment"]["candidateAddress"] == 8192 + offset
+                    assert reconstruct(mixed["linearListing"]) == mutated[start:start + 14]
+            print("Actual two-store C artifacts inspected; second OOB candidate localized; execution remains unresolved.")
 
         print(f"Disasm CLI checks passed; actual structural Hello decoded {decoded} instructions.")
 

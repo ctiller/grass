@@ -152,16 +152,51 @@ def storeReport (input : _root_.ByteArray) (rva imageBase objectBase objectSize 
               "entry applicability and reachability", "history-consistent caller object association",
               "x86 attempted transition semantics"])], 0)
 
+def storesReport (input : _root_.ByteArray) (rva imageBase objectBase objectSize rootSize : Nat) :
+    Json × UInt32 := Id.run do
+  let refuse := fun reason => (Json.mkObj [("status", toJson "unresolved"),
+    ("reason", toJson reason)], 2)
+  if imageBase + rva ≥ 2^64 then return refuse "declared instruction address wraps"
+  match Grass.Artifact.PE.checkImportedImage (Vec.ofHostBytes input) with
+  | .needMore _ => return refuse "incomplete container"
+  | .invalid error => return refuse (reprStr error)
+  | .done parsed _ =>
+    match Entry.selectEntry parsed rva with
+    | .error error => return refuse (reprStr error)
+    | .ok entry =>
+      let listing := scan 4096 (BitVec.ofNat 64 (imageBase + rva)) entry.bytes
+      let (linearReport, _) := listingJson (imageBase + rva) entry.fileOffset entry.bytes
+      let mut reports : List Json := []
+      let mut accepted := true
+      for row in listing.rows do
+        let rowRva := row.pc.toNat - imageBase
+        let (report, status) := storeReport input rowRva imageBase objectBase objectSize rootSize
+        reports := reports ++ [Json.mkObj [("rva", toJson rowRva), ("assessment", report)]]
+        accepted := accepted && status == 0
+      return (Json.mkObj [
+        ("status", toJson "linear-conditional-candidate-inspection"),
+        ("snapshotPolicy", toJson "same declared caller data at each instruction; no executed state transition"),
+        ("candidates", toJson reports),
+        ("candidateProfileComplete", toJson accepted),
+        ("linearListing", linearReport),
+        ("linearRemainingBytes", toJson (bytesHex listing.remaining)),
+        ("linearStop", match listing.stop with | none => Json.null | some why => toJson (reprStr why)),
+        ("wholeScopeSafety", toJson "unresolved")],
+        if accepted && listing.stop.isNone then 0 else 3)
+
 def run (args : List String) : IO UInt32 := do
-  if let ["store", path, rva, imageBase, objectBase, objectSize, rootSize] := args then
+  if let [mode, path, rva, imageBase, objectBase, objectSize, rootSize] := args then
+    unless mode = "store" || mode = "stores" do
+      throw (IO.userError "seven-argument mode must be store or stores")
     let numbers ← [rva, imageBase, objectBase, objectSize, rootSize].mapM fun value =>
       match value.toNat? with
       | some number => pure number
       | none => throw (IO.userError "store parameters must be decimal unsigned integers")
     let input ← IO.FS.readBinFile path
-    let (report, code) := storeReport input numbers[0]! numbers[1]! numbers[2]! numbers[3]! numbers[4]!
+    let (report, code) := (if mode = "store" then storeReport else storesReport)
+      input numbers[0]! numbers[1]! numbers[2]! numbers[3]! numbers[4]!
     (← IO.getStdout).putStrLn (Json.mkObj [
-      ("schema", toJson "grass.disasm.store.v1"), ("input", toJson path),
+      ("schema", toJson (if mode = "store" then "grass.disasm.store.v1" else "grass.disasm.stores.v1")), ("input", toJson path),
       ("inputLength", toJson input.size),
       ("assurance", toJson "conditional decoded footprint only; binary memory safety unresolved"),
       ("report", report)]).pretty
@@ -174,7 +209,7 @@ def run (args : List String) : IO UInt32 := do
             if base < 2^64 then pure ("raw", path, base)
             else throw (IO.userError "base must fit an unsigned 64-bit address")
         | none => throw (IO.userError "base must be a decimal unsigned address")
-    | _ => throw (IO.userError "usage: grass-disasm pe FILE | raw FILE BASE | store FILE RVA IMAGE_BASE OBJECT_BASE OBJECT_SIZE ROOT_SIZE (decimal)")
+    | _ => throw (IO.userError "usage: grass-disasm pe FILE | raw FILE BASE | store/stores FILE RVA IMAGE_BASE OBJECT_BASE OBJECT_SIZE ROOT_SIZE (decimal)")
   let input ← IO.FS.readBinFile path
   let (report, code) := if mode = "pe" then peReport input else
     let (report, complete) := listingJson base 0 (Vec.ofHostBytes input).toList

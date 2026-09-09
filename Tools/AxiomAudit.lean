@@ -3,6 +3,8 @@ import Grass.Disasm.Linear
 import Grass.Disasm.StoreAttempt
 import Grass.Disasm.Spatial
 import Grass.Disasm.Entry
+import Grass.Disasm.FetchedEntry
+import Grass.ISA.X86.Execution.StoreCandidate
 import Grass.Disasm.CallerObject
 import Grass.Artifact.PE.Imported
 import Grass.Op.Completion

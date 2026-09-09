@@ -60,7 +60,8 @@ def observe(directory, case):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=pathlib.Path)
-    parser.add_argument("--case", choices=["store_safe", "store_oob"])
+    parser.add_argument("--case", choices=["store_safe", "store_oob", "sequence_safe", "sequence_oob"])
+    parser.add_argument("--family", choices=["store", "sequence"], default="store")
     options = parser.parse_args()
     if os.name != "nt" or ctypes.sizeof(ctypes.c_void_p) != 8:
         parser.error("this native corroboration harness requires 64-bit Windows Python")
@@ -68,13 +69,14 @@ def main():
         print(json.dumps(observe(options.directory, options.case)))
         return
     results = []
-    for case in ("store_safe", "store_oob"):
+    for case in (options.family + "_safe", options.family + "_oob"):
         child = subprocess.run([sys.executable, __file__, str(options.directory), "--case", case],
                                capture_output=True, text=True, timeout=15, check=True)
         results.append(json.loads(child.stdout))
-    require(results[0]["after"]["target"] == [10, 42], "safe target result mismatch")
+    first = 11 if options.family == "sequence" else 10
+    require(results[0]["after"]["target"] == [first, 42], "safe target result mismatch")
     require(not results[0]["adjacentObjectChanged"], "safe case changed adjacent object")
-    require(results[1]["after"]["target"] == [10, 11], "OOB case changed target")
+    require(results[1]["after"]["target"] == [first, 11], "OOB target result mismatch")
     require(results[1]["after"]["canary"] == [42, 0xABCDABCD],
             "OOB canary result mismatch")
     print(json.dumps({"schema": "grass.disasm.native-observation.v1",

@@ -89,3 +89,47 @@ status 2 means refusal. Neither result establishes whole-binary safety.
 The example RVA is specific to the generated fixture and is not an export
 resolver. Declared addresses and allocator provenance are assumptions, not
 facts inferred from the binary or observed native process.
+
+## Cleanup disposition after checkpoint 0badf267
+
+The checkpoint's independent reviews support these bounded maintenance actions.
+They are separate from the functional fetch, execution, history, and ELF/ARM
+obligations above.
+
+| Item | Disposition and revisit |
+|---|---|
+| Temporary C7 address/width model | Move the existing implementation into the x86 execution namespace with a compatibility adapter; retain explicit candidate-only scope. Disasm integrates and x86 reviews. Revisit when x86 exports general operand/attempt semantics, replacing this bounded implementation rather than adding another authority. |
+| Imported parser paths | Keep `CheckedImportedImage.readExact` in every entry/fetch consumer. No second raw parser is warranted; the canonical reader and bounded imported reader serve different documented contracts. Revisit when widening the imported container profile. |
+| Source-ledger debt | Preserve all new modeled PE/ISA declarations as explicit debt until formal source anchors are reviewed. Namespace migration must transfer coverage without deleting obligations or increasing apparent citation coverage. Revisit at the next ISA-source anchoring change. |
+| Corpus maintenance | Keep compiled EXE/DLL files, disassembly, hashes and local paths generated under `.lake`; retain authored C and exact byte-preservation tests. The handwritten MSVC prefix is a fixed parser regression specimen, not a generated golden image; no regeneration is warranted now. Revisit if its provenance or asserted fields change. |
+
+No broad rewrite is warranted by the checkpoint reviews. These actions preserve
+the existing proof and refusal boundaries while reducing duplicated ownership.
+
+## Two-store corpus and fetch connection
+
+`sequence_safe.c` and `sequence_oob.c` add a first write to `p[0]` before the
+safe `p[1]` or bad `p[2]` write. Volatile stores retain two separate instructions
+under the selected optimizing compiler. Build and inspect them with:
+
+```powershell
+./Tools/disasm/build-sequence.ps1 -CompilerDirectory '<MSVC>/bin/Hostx64/x64'
+lake exe grass-disasm stores .lake/disasm/c-sequence/sequence_oob.dll 4096 5368709120 8192 8 16
+python Tools/disasm/check.py --compiled-sequence .lake/disasm/c-sequence
+python Tools/disasm/observe-c.py .lake/disasm/c-sequence --family sequence
+```
+
+`stores` assesses each supported linear store candidate under the same declared
+caller data snapshot. It does not execute preceding stores or prove that the
+snapshots form a feasible trace. Every decoded row is assessed independently,
+including rows after a refused candidate, with that refusal retained. The linear
+decoder itself stops at its first unsupported instruction and retains the
+refused suffix; candidate inspection cannot cross that boundary. RET is still
+outside the selected decoder, so these examples return status 3 and leave
+whole-scope safety unresolved, including the example whose stores fit.
+
+The separate `FetchedEntry.Binding` proof adapter checks agreement between an
+imported entry and an actual initialized execute-access `FetchedSite` receipt.
+Its `original_event` theorem connects the event's observed instruction to the
+original PE bytes. It requires a supplied checked fetch; the CLI does not
+construct that receipt, establish an OS loader, or prove a store transition.

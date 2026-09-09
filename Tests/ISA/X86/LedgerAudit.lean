@@ -27,6 +27,8 @@ import Grass.Artifact.PE.LayoutBinding
 import Grass.Artifact.PE.ExceptionBinding
 import Grass.Artifact.PE.Imported
 import Grass.Disasm.StoreAttempt
+import Grass.Disasm.FetchedEntry
+import Grass.ISA.X86.Execution.StoreCandidate
 import Grass.Disasm.Entry
 import Grass.Disasm.CallerObject
 
@@ -138,7 +140,8 @@ def auditedModules : List Name :=
    `Grass.Artifact.PE.ImageReader, `Grass.Artifact.PE.ImageRoundTrip,
    `Grass.Artifact.PE.LayoutInvariance, `Grass.Artifact.PE.LayoutBinding,
    `Grass.Artifact.PE.Imported, `Grass.Disasm.StoreAttempt,
-   `Grass.Disasm.Entry, `Grass.Disasm.CallerObject]
+   `Grass.Disasm.Entry, `Grass.Disasm.CallerObject,
+   `Grass.Disasm.FetchedEntry, `Grass.ISA.X86.Execution.StoreCandidate]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -177,7 +180,7 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Entry selection adds eight mapping definitions and its contract type.
 -- The vendor URL is provenance; formal ledger anchors remain owed.
 -- Reviewed fetched normal SUB RSP adds one transfer obligation.
-def owedBaseline : Nat := 249
+def owedBaseline : Nat := 252
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -218,7 +221,7 @@ acquiring a citation.
 -- Nine caller-factory definitions construct an explicitly declared synthetic
 -- state via checked memory doors; they assert no recovered allocator behavior.
 -- Reviewed fetch helper replaces only the memory-machine field.
-def notBehaviourBaseline : Nat := 173
+def notBehaviourBaseline : Nat := 181
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -359,6 +362,16 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Compatibility delegates retain coverage; modeled behavior moved to ISA.
+    `Grass.Disasm.StoreAttempt.Error,
+    `Grass.Disasm.StoreAttempt.Evidence,
+    `Grass.Disasm.StoreAttempt.Evidence.address,
+    `Grass.Disasm.StoreAttempt.Evidence.width,
+    `Grass.Disasm.StoreAttempt.check,
+    -- Equality composition over an existing checked fetch adds no loader rule.
+    `Grass.Disasm.FetchedEntry.check,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence.operand,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence.productionEncoding,
     `Grass.Disasm.CallerObject.allocSupply,
     `Grass.Disasm.CallerObject.backingSupply,
     `Grass.Disasm.CallerObject.contextSupply,
@@ -585,10 +598,13 @@ def owed : List Name :=
     `Grass.Disasm.Entry.selectMappedSection,
     `Grass.Disasm.Entry.sectionBytes,
     `Grass.Disasm.Entry.selectEntry,
-    `Grass.Disasm.StoreAttempt.Evidence,
-    `Grass.Disasm.StoreAttempt.Evidence.address,
-    `Grass.Disasm.StoreAttempt.Evidence.width,
-    `Grass.Disasm.StoreAttempt.check,
+    `Grass.ISA.X86.Execution.StoreCandidate.BaseDisplacement.encoded,
+    `Grass.ISA.X86.Execution.StoreCandidate.BaseDisplacement.modBits,
+    `Grass.ISA.X86.Execution.StoreCandidate.BaseDisplacement.value,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence.address,
+    `Grass.ISA.X86.Execution.StoreCandidate.Evidence.width,
+    `Grass.ISA.X86.Execution.StoreCandidate.check,
     -- PE/COFF fixed field widths, offsets, alignments, and characteristic bits
     -- are source-defined format commitments. Their directly derived spans and
     -- the eight-byte section-name representation therefore remain debt too.
@@ -848,7 +864,7 @@ def modeledDeclarations : MetaM (Array Name) := do
     -- rather than letting the generic structure filter hide the obligation.
     -- This exception adds coverage; it exempts no future declaration.
     if n == ``Grass.Disasm.Entry.Entry ||
-        n == ``Grass.Disasm.StoreAttempt.Evidence ||
+        n == ``Grass.ISA.X86.Execution.StoreCandidate.Evidence ||
         n == ``Grass.Platform.Win32.WriteFile.Prepared ||
         n == ``Grass.Platform.Win32.WriteFile.ReturnResult ||
         n == ``Grass.Artifact.PE.SectionName ||
