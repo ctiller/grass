@@ -230,6 +230,21 @@ current initialized backing and clears the upper half of its destination.
 `MemoryAccess` retains the same non-oracle policy fields across phases and an
 explicit concrete memory oracle for the data step. This lets a fetch use its
 empty write callback while the later store uses its decoded payload.
+
+`CheckedExecution.normal` performs one actual fetch and dispatches to these
+constructors. Its typed success retains the normal receipt, including the full
+CALL evidence needed by a platform handoff; its typed failure retains the
+original factory diagnostic. Arithmetic status choices, including SUB RSP,
+must satisfy the instruction's constraints. A rejected choice yields no
+checked transition.
+
+`CheckedExecution.CheckedStep` is exactly the graph of
+`CheckedExecution.evaluate`. `normal_checked_cases` recovers the actual typed
+evaluation behind a normal checked edge, rather than accepting a standalone
+receipt as execution evidence. Fault, trap, interruption and abort choices
+currently expose the unchanged input prefix as an unimplemented transfer.
+Determinism is per explicit choice and covers this checker; it supplies no
+physical execution coverage, event priority or platform-delivery theorem.
 No total x86 execution or partial-unwind proof is claimed by these files.
 The [exact Hello coverage plan](X86_HELLO_COVERAGE.md) assigns the other emitted
 forms without replacing the production source with a second instruction list.
