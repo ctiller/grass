@@ -56,6 +56,8 @@ import Grass.Platform.Win32.CpuVocabulary
 import Grass.Platform.Win32.CpuPolicy
 import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.RawState
+import Grass.Platform.Win32.CallRuntime
+import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
@@ -190,6 +192,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.CpuPolicy,
    `Grass.Platform.Win32.ExecutionState, `Grass.Platform.Win32.WriteFileAbi,
    `Grass.Platform.Win32.RawState,
+   `Grass.Platform.Win32.CallRuntime,
+   `Grass.Platform.Win32.RawStepSignature,
    `Grass.Platform.Win32.WriteFileArguments,
    `Grass.Platform.Win32.ApiRequest,
    `Grass.Platform.Win32.WriteFileCallPlan,
@@ -289,7 +293,12 @@ acquiring a citation.
 -- One adapter derives the Windows binding from retained actual CALL receipts.
 
 -- Five raw/checked view operations retain data and assert no target semantics.
-def notBehaviourBaseline : Nat := 250
+
+-- Two fixed computation factories select existing instruction semantics.
+-- Six CALL/return-slot factory projections retain already computed evidence.
+-- Five agreement predicates and two signature/data aliases admit no transition.
+-- Nine runtime data/view operations use existing ABI data and assert no execution.
+def notBehaviourBaseline : Nat := 266
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -432,6 +441,22 @@ def notBehaviour : List Name :=
   [
     -- Proof-bearing projection of the selected fixed CALL factory receipt.
     `Grass.Platform.Win32.WriteFile.CallPolicy.ofFactory,
+    `Grass.Platform.Win32.NonvolatileSnapshot,
+    `Grass.Platform.Win32.captureNonvolatile,
+    `Grass.Platform.Win32.ReturnFrame.restoredRsp,
+    `Grass.Platform.Win32.WriteFileRuntime.loanPlan,
+    `Grass.Platform.Win32.CallRuntime.MatchesRequest,
+    `Grass.Platform.Win32.CallRuntimeTable,
+    `Grass.Platform.Win32.ExecutionState.RawState.RuntimeLinked,
+    `Grass.Platform.Win32.ExecutionState.RawState.setCall,
+    `Grass.Platform.Win32.ExecutionState.RawState.eraseCall,
+    `Grass.Platform.Win32.Raw.Event.Appends,
+    `Grass.Platform.Win32.Raw.Represented,
+    `Grass.Platform.Win32.Raw.Graph.Endpoints,
+    `Grass.Platform.Win32.Raw.Graph.WellFormed,
+    `Grass.Platform.Win32.Raw.Graph.Extends,
+    `Grass.Platform.Win32.Raw.Graph,
+    `Grass.Platform.Win32.Raw.StepSignature,
     `Grass.Platform.Win32.ExecutionState.State.raw,
     `Grass.Platform.Win32.ExecutionState.RawState.ProtocolValid,
     `Grass.Platform.Win32.ExecutionState.RawState.checked?,
