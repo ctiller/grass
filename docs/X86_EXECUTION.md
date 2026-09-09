@@ -146,6 +146,17 @@ normal receipt types still provide evidence, and their union is not exhaustive
 raw execution. Fault vocabularies alone establish no architectural fault
 conditions, priority or delivery behavior.
 
+`FetchFactory.fetch` takes only the fixed policy and current CPU state. It plans
+the execute range from actual code placement, then runs the computed access and
+classifies its actual observation. Bounded lookahead chooses the access width;
+it is not evidence of a completed read. Successful dispatch retains the raw
+descriptor and run metadata through `ObservedFetch.dispatch_metadata`.
+
+`ComputationFactory.move` constructs a normal register MOV result from those
+same two inputs, including the actual access-free operation step. Other selected
+families remain explicit unsupported prefixes. This first constructive path
+does not yet execute the full Hello program or settle fault applicability.
+
 Remaining work composes final emitted source, fixed factory results, CALL target
 reads and return-address writes, and actual prefix receipts for unwind reversal.
 Rejected, denied and permitted fault outcomes remain separate.
