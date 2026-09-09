@@ -41,9 +41,12 @@ lowering drafts inspected are on `codex/lowering-console-projection`:
 `Grass/Console/TargetProjection.lean`, `CapturedProjection.lean`, and
 `Grass/Refinement/Console/WriteFileProjection.lean` and `WriteWaitingGap.lean`.
 Lowering subsequently released these as checkpoint `f6908249`, with process
-review and supplier-reported gates passing. Windows' corrected nonresponse draft was
-`.lake/WriteFileNonresponse.lean`, also unpublished. Draft findings must be
-rechecked against the final supplier diff before integration.
+review and supplier-reported gates passing. Windows' corrected nonresponse was
+first inspected as `.lake/WriteFileNonresponse.lean`, then released as
+`Grass/Platform/Win32/WriteFileNonresponse.lean` in checkpoint `1fbadf19`.
+Windows reports independent final product review and passing build, trust,
+ledger and corpus checks. The backing-memory migration remains unpublished
+at this review; its integration still needs its own final supplier checks.
 
 The existing `Grass/Platform/Win32/WriteFile.lean`,
 `Grass/Semantics/SpecProcess.lean`, `Grass/Certificate.lean` and
@@ -112,8 +115,8 @@ those results do not establish provider adequacy.
    A supplied predicate, including a trivial one, cannot discharge provider
    adequacy. Its interpretation must be fixed by the selected realization/profile
    and connected at the consumer boundary. The corrected declaration was read
-   and independently compiled; production promotion still needs the final
-   supplier checks. Earlier progress may be any finite `History`, not only a
+   and independently compiled; Windows subsequently reports final reviewed
+   promotion in `1fbadf19`. Earlier progress may be any finite `History`, not only a
    restriction obtained from an infinite continuation.
 
 6. **Keep return separate from acceptance and loan bookkeeping.** Full
@@ -132,6 +135,17 @@ those results do not establish provider adequacy.
    memory fault-prefix bounds do not imply ISA atomic all-or-nothing writes.
    External causal evidence does not bypass the conservative generic step
    checker.
+
+   The pending memory migration's generic `DedicatedBackings` gate concerns
+   abstract backing identity and backing-relative bounds, not physical address separation. Windows
+   `Prepared` separately requires live CPU placement, nonwrapping extents and
+   physical separation in the prepared provider state; source/frame theorems
+   still have to connect authored geometry to those addresses. Symbolic or
+   unplaced generic models need no invented physical bases. A generic fixture
+   that reuses a numeric base across distinct abstract backings is not a
+   physical realization certificate. Preserve the placement connection in
+   concrete machine/certificate acceptance; this does not propose a new generic
+   physical-overlap checker.
 
 ## Remaining proof obligations
 
