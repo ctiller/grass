@@ -2,8 +2,8 @@
 
 Run the Grass-authored Hello World sample from the repository root on Windows:
 
-```powershell
-./probes/windows/run-grass-hello.ps1
+```bash
+./probes/windows/run-grass-hello.sh
 ```
 
 This emits the unchanged Grass source through the production source linker and
@@ -11,6 +11,12 @@ PE writer, launches the binary with a timeout, and compares exact stdout bytes
 and process exit status. Results and binary hashes are recorded under
 `.lake/grass-windows-probes`. See the [initialization checkpoint](../../docs/WINDOWS_LOADER_INITIALIZATION.md)
 for checked model facts, the first native result, and open correspondence work.
+Use `--emit-only` on Linux to generate the PE and input snapshots without native
+execution. PowerShell 7 is used solely by the Windows process-capture helper.
+Each invocation invalidates prior results before building. A failed invocation
+writes `result.json` with `passed: false`; `native-result.json` retains native
+observations or capture errors when launch was attempted. Emit-only results
+explicitly record that no native execution occurred.
 
 ## Auxiliary API campaign
 
