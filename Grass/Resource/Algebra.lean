@@ -51,6 +51,16 @@ The corpus displays this idea twice with different shapes.
 (combine axis) (zero axis) (le axis)`, with a zero and a different name. They are
 sketches of one thing, and this module unifies them rather than shipping both.
 
+**Both sketches are being repaired to match this module rather than the other way
+round.** `g-design:308` reports the reconciliation above going stale once that
+lands: both documents then select the same five-argument bundle, with
+`docs/SEMANTICS.md` projecting the weave-independent model and `docs/PROCESS.md`
+adding network holdings and an explicit compatible premise on parallel
+composition. The shapes quoted above are what main carries today, so this section
+is accurate until then and becomes history the moment it is not; it is written
+this way because a module comment that describes an unlanded document is worse
+than one that describes an old one.
+
 ## Two compositions, not one
 
 The bundle carries **two** binary operations, and conflating them is the error
@@ -253,16 +263,28 @@ class HasResourceLimit (R : Type u) [ResourceModel R] (axis : ResourceAxisName)
 /--
 One axis's limit, as a structure rather than a class instance.
 
-**Why this exists.** `docs/SEMANTICS.md` sketches a multi-axis specification as
+**Why this exists.** `docs/SEMANTICS.md` sketched a multi-axis specification as
 `class WebServerResources (R) extends HasResourceLimit R .residentBytes,
 HasResourceLimit R .connections, ...`. That does not elaborate: Lean deduplicates
 parent structures by head constant, not by full type, so every axis after the
 first is silently dropped with a `Duplicate parent structure` warning — and under
-this repository's `warningAsError` it is a hard error. The sketch in the corpus
-is not implementable as written.
+this repository's `warningAsError` it is a hard error.
+
+**That sketch is being repaired to match this module rather than the other way
+round.** `g-design:399` rewrites it to hold `ResourceLimit R axis` values as
+fields, which is the shape below. The paragraph above describes what main carries
+today and becomes history the moment that lands; it is written this way for the
+reason the reconciliation section gives, that a module comment describing an
+unlanded document is worse than one describing an old one.
+
+Reported by `c-reviewer:253`, which found this paragraph after `c-mem:77` had
+repaired the reconciliation section above for the same reason. The two say the
+same thing in different words -- one about two sketches disagreeing, one about a
+single sketch not elaborating -- and share no phrase, which is why the first
+repair did not reach the second.
 
 A multi-axis specification therefore holds `ResourceLimit R axis` values as
-*fields*:
+*fields*, which is what `g-design:399` makes the document say too:
 
 ```lean
 class WebServerResources (R : Type) [ResourceModel R] where

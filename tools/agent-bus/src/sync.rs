@@ -105,7 +105,6 @@ pub fn synced_snapshot(repo: &Path, git_common_dir: &Path, remote: &str) -> AbRe
 
     let registry_tip = crate::registry::read_registry_tip(repo)?
         .ok_or_else(|| invalid("no registry root exists on the remote"))?;
-    let epoch = crate::registry::read_epoch(repo, &registry_tip)?;
 
     // A member registered in this epoch may not have published its own
     // stream root yet (reduce_local's own comment: "a real, expected
@@ -113,9 +112,19 @@ pub fn synced_snapshot(repo: &Path, git_common_dir: &Path, remote: &str) -> AbRe
     // in its entirety -- nothing gets fetched, not even the members that DO
     // have a stream -- so existence is checked first and only refs that
     // actually exist remotely are fetched.
-    let candidate_refnames: Vec<String> = epoch
-        .active_members
-        .keys()
+    //
+    // Fetched for every agent in *any* epoch of the chain, matching
+    // `reduce_local` below. Fetching only the current roster would leave a
+    // dropped member's stream absent locally, which is the same outage as
+    // not loading it: the references into it stop resolving and reduction
+    // fails on the first one.
+    let known = crate::registry::read_epoch_chain(repo, &registry_tip)?;
+    let all_members: std::collections::BTreeSet<crate::scalars::Agent> = known
+        .values()
+        .flat_map(|e| e.active_members.keys().cloned())
+        .collect();
+    let candidate_refnames: Vec<String> = all_members
+        .iter()
         .map(|agent| crate::stream::stream_ref(agent).into_string())
         .collect();
     let existing = crate::gitrepo::remote_refs_existing(repo, remote, &candidate_refnames)?;
@@ -198,9 +207,35 @@ fn reduce_local(repo: &Path, freshness: Freshness) -> AbResult<Snapshot> {
     let known_epochs = crate::registry::read_epoch_chain(repo, &registry_tip)?;
     let config = crate::registry::read_bus_config_at(&reader, &registry_tip)?;
 
+    // Every agent named by *any* epoch in the chain, not just the current
+    // one's active set -- the same argument the comment above makes for
+    // epochs, which was never extended to the members inside them.
+    //
+    // A published stream is immutable and other agents' events reference it
+    // by id forever. Loading only the current roster means that the moment a
+    // roster transition drops a member, every `require_agent` naming them,
+    // every `require_role` on them as a co-author or reviewer, and every
+    // cross-stream `refs` lookup into their history stops resolving -- and
+    // those are `Err` inside `apply::reduce`, which propagates on the first
+    // one with no per-event isolation. An ordinary retirement would take the
+    // whole bus down, on every host, permanently, because the log is
+    // append-only and the references cannot be withdrawn.
+    //
+    // Latent rather than live today: `cli::register` is the only production
+    // caller of `registry::propose_transition` and it only ever inserts. But
+    // `propose_transition` takes an arbitrary member map, AGENT_BUS_SCHEMA.md
+    // section 2.1 names retirement as an epoch transition, and a test in
+    // `apply.rs` already constructs a removal. The set is a union over the
+    // chain, so it is a pure function of the registry history and identical
+    // on every host.
+    let all_members: std::collections::BTreeSet<crate::scalars::Agent> = known_epochs
+        .values()
+        .flat_map(|e| e.active_members.keys().cloned())
+        .collect();
+
     let mut streams = BTreeMap::new();
     let mut stream_tips = BTreeMap::new();
-    for agent in epoch.active_members.keys() {
+    for agent in &all_members {
         let tip = match crate::stream::read_stream_tip(repo, agent)? {
             Some(tip) => tip,
             // Registered in this epoch but has not yet published its own
@@ -837,6 +872,97 @@ mod tests {
             model: None,
         });
         Candidate::new(agent, &data, vec![])
+    }
+
+    /// A member dropped from the roster keeps its stream loaded, so the
+    /// events that reference it still reduce.
+    ///
+    /// Reduction used to load only `epoch.active_members`, the *current*
+    /// roster. A published stream is immutable and other agents' events cite
+    /// it by id forever, so the moment a roster transition drops a member,
+    /// every `require_agent` naming them, every `require_role` on them as a
+    /// co-author or reviewer, and every cross-stream `refs` lookup into their
+    /// history stops resolving. Those are `Err` inside `apply::reduce`, which
+    /// propagates on the first one with no per-event isolation -- so an
+    /// ordinary retirement would take the whole bus down, on every host,
+    /// permanently, since the log is append-only and the citing events cannot
+    /// be withdrawn.
+    ///
+    /// The file already made this argument for *epochs* -- "a complete
+    /// frontier authored against an older epoch must remain re-validatable
+    /// forever" -- and simply never extended it to the members inside them.
+    ///
+    /// `host_b` has never synchronized, so this exercises the fetch path as
+    /// well as the reduction: fetching only the current roster would leave
+    /// the dropped member's stream absent locally, which fails exactly the
+    /// same way as not loading a stream that is present.
+    #[test]
+    fn a_member_dropped_from_the_roster_still_has_its_stream_reduced() {
+        let fleet = two_host_fleet("host1");
+        let coord1 = a("coord1");
+        let alice = a("alice");
+
+        register_on_host(
+            &fleet,
+            fleet.host_a.path(),
+            &alice,
+            Role::Implementor,
+            "host1",
+        );
+
+        // coord1 publishes an event that names alice, so her absence is not
+        // merely a smaller state but an unresolvable reference.
+        let issue = EventData::IssueOpened(crate::events::IssueOpened {
+            target: alice.clone(),
+            issue_kind: crate::events::IssueKind::Bug,
+            severity: crate::common::Priority::Normal,
+            summary: text("an issue naming a member who is later dropped"),
+            code_commit: None,
+            locations: vec![],
+            expected: None,
+            observed_behavior: None,
+            reproduction: vec![],
+            blocks: Default::default(),
+            evidence: Default::default(),
+        });
+        crate::outbox::submit(
+            fleet.host_a.path(),
+            "client-issue",
+            &Candidate::new(&coord1, &issue, vec![]),
+        )
+        .unwrap();
+        let (drained, _receipt) = crate::coordinator::drain_and_publish(
+            fleet.host_a.path(),
+            fleet.host_a.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            &fleet.remote(),
+        )
+        .unwrap();
+        assert!(drained.rejected.is_empty(), "{:?}", drained.rejected);
+
+        // Now drop alice from the roster entirely -- an epoch transition that
+        // removes a member, which section 2.1 names as retirement.
+        let epoch = current_epoch(fleet.host_a.path());
+        let mut members = epoch.active_members.clone();
+        members.remove(&alice);
+        crate::registry::propose_transition(fleet.host_a.path(), &epoch, members).unwrap();
+        publish_registry(fleet.host_a.path(), &fleet.remote());
+
+        // A host that has never synchronized must still be able to read the
+        // bus. Before the fix this failed with "unregistered agent: alice".
+        let snap = synced_snapshot(fleet.host_b.path(), fleet.host_b.path(), &fleet.remote())
+            .expect("dropping a member must not make the bus unreadable");
+
+        assert!(
+            !snap.roster_epoch.is_active_member(&alice),
+            "alice really is off the current roster"
+        );
+        assert!(
+            snap.state.agents.contains_key(&alice),
+            "and her stream is still reduced, so events naming her resolve"
+        );
     }
 
     fn retired_candidate(

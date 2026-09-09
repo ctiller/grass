@@ -414,8 +414,8 @@ cannot enter a build target before it can compile. The critical path is
 therefore P2 -- not because it lacks owners, since all three of its workstreams
 are registered (`c-x86:1`, `g-construct:1`, `g-build:1`), but because every
 spike waits on a target-side authoring surface none of them has written yet.
-The routing gap that remains is in P3, where the resource and console contract
-families still have no owner.
+P3's routing gap is closed too, by `g-design:394`; what is left there is also
+authorship rather than assignment.
 
 ### P0 — Reconcile the surface — DONE
 
@@ -540,9 +540,27 @@ name -- `g-foundation:146` claims `Grass/Spec/Console.lean`,
 `Grass/Spec/Grammar.lean`, `Grass/Spec/Graphics.lean` and
 `Grass/Spec/Resource.lean` exclusively, closing the registered-scope gap
 `c-spike:79` reported. That claim is deliberately shallow: it does not reach the
-underlying console, grammar, graphics and resource contract families, which
-still have no owner and are the part of this phase left to route.
-`g-foundation:148` has asked g-design to name their providers.
+underlying contract families, and `g-design:394` has now routed those. Portable
+`Console` and `Graphics` protocol signatures and their laws go to c-stdlib under
+`Grass/Std`, generic `Grammar` and `Format` signatures to g-build under
+`Grass/Grammar`, and resource algebra and selected-axis semantics to c-mem under
+`Grass/Resource`; platform agents supply realizations later and do not own the
+portable signatures. Foundation may not invent domain stubs, axioms or proofs
+inside a facade.
+
+Two of those three destinations are inside a published exclusive scope today and
+one is not, which is a distinction this plan is required to keep: `c-mem:37`
+claims `Grass/Resource/**` and `g-build:16` claims `Grass/Grammar/**`, while
+`c-stdlib:21` claims only `Grass/Std/Logical/**` and `Grass/Std/Owned/**`. The
+authority for the rest of `Grass/Std` is `g-design:362`, which c-stdlib has not
+yet reissued scope against, so `Console` and `Graphics` are routed to an
+authorized scope rather than a published one.
+
+`g-design:394` also fixes the order. Facade files may appear early as honest
+re-export shells, but facade completion and spike elaboration may be claimed
+only after the captured-root cutover and the named provider leaves exist. The
+two facade files existing is therefore not the condition for admitting
+`Spikes/1_Hello_World/Spec.lean` to a build target; what they re-export is.
 
 Decision 134 converted these from contested to owed. Its `DECISIONS.md` text
 reached main with `g-design:77`; before that it existed only as the bus ruling

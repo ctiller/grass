@@ -5,7 +5,12 @@ import Grass.ABI.Win64.UnwindBytes
 import Grass.Build.Cache.Key
 import Grass.CFG.Contract
 import Grass.CFG.Graph
+import Grass.CFG.Join
+import Grass.CFG.Loop
 import Grass.Certificate
+import Grass.Construct.Fragment.Generator
+import Grass.Construct.Fragment.Source
+import Grass.Construct.Fragment.Verified
 import Grass.Construct.Layout.Core
 import Grass.Core.Context
 import Grass.Core.Demand
@@ -107,6 +112,7 @@ import Grass.Std.Logical.Order
 import Grass.Std.Logical.Text
 import Grass.Std.Logical.Vec
 import Grass.Trust.Audit
+import Grass.Unsafe.Construct
 import Grass.Verify.VerifiedProgram
 
 /-!
