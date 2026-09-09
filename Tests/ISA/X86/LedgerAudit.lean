@@ -339,7 +339,8 @@ acquiring a citation.
 -- Ten checked body constructors/projections and four fetch-reuse helpers.
 -- Seven checked memory-MOV selector/factory helpers reuse existing ISA rules.
 -- Thirteen checked-evaluator routing, diagnostic and graph helpers.
-def notBehaviourBaseline : Nat := 307
+-- One projection exposes the provenance of the retained memory-MOV data access.
+def notBehaviourBaseline : Nat := 308
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -659,6 +660,7 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.MemoryMoveSelection.displacement?,
     `Grass.ISA.X86.Execution.MemoryMoveSelection.select,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.Success.result,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.Success.provenance,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.reached,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.fromSite,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.fromFetched,
