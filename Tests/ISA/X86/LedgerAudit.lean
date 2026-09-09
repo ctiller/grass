@@ -62,6 +62,7 @@ import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.RawStepSignature
+import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
@@ -209,6 +210,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawState,
    `Grass.Platform.Win32.CallRuntime,
    `Grass.Platform.Win32.RawStepSignature,
+   `Grass.Platform.Win32.ExitProcessRuntime,
    `Grass.Platform.Win32.WriteFileArguments,
    `Grass.Platform.Win32.ApiRequest,
    `Grass.Platform.Win32.WriteFileCallPlan,
@@ -280,7 +282,7 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Arithmetic, branch, LEA and fixed access dispatch add twenty reviewed obligations.
 -- Twelve fixed CPU/ABI obligations, including executable/readable region selection.
 -- Six fixed request/stack contracts are newly enrolled; no existing debt moves.
-def owedBaseline : Nat := 324
+def owedBaseline : Nat := 325
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -338,7 +340,7 @@ acquiring a citation.
 -- Five raw/checked view operations retain data and assert no target semantics.
 -- One adapter derives the Windows binding from retained actual CALL receipts.
 -- Sixteen runtime operations and raw signature predicates assert no execution.
-def notBehaviourBaseline : Nat := 294
+def notBehaviourBaseline : Nat := 297
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -479,6 +481,9 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    `Grass.Platform.Win32.ExitProcess.entryHandoff?,
+    `Grass.Platform.Win32.ExitProcess.EntryHandoff.after,
+    `Grass.Platform.Win32.ExitProcess.EntryHandoff.initRaw,
     `Grass.Platform.Win32.NonvolatileSnapshot,
     `Grass.Platform.Win32.captureNonvolatile,
     `Grass.Platform.Win32.ReturnFrame.restoredRsp,
@@ -837,6 +842,7 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    `Grass.Platform.Win32.ExitProcess.status,
     -- Fixed request widths and callee stack custody retain external ABI debt.
     `Grass.Platform.Win32.ApiRequest,
     `Grass.Platform.Win32.WriteFile.Abi.InitializedReturnQword,
