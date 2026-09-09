@@ -20,6 +20,29 @@ Spikes receives consolidated actionable conclusions, review-ready commits with
 evidence, concrete integration blockers and decisions changing acceptance or
 priorities. Architecture is not an approval gate for sound bounded work.
 
+Spike demand determines implementation sequence; architecture is responsible
+for long-term coherence. Boundaries should accommodate later targets and
+consumers without duplicating semantic authority or embedding accidental
+Hello-specific assumptions in shared foundations. Future implementations need
+not be built now to preserve a sound place for them.
+
+Cleanup is legitimate planned work, including consolidating duplicate proofs,
+removing superseded staging surfaces, clarifying ownership and improving
+diagnostics. It need not unblock the current spike to be worthwhile. Proposals
+should identify the concrete debt, intended durable boundary and migration or
+validation scope so spikes can give them space alongside feature delivery.
+Long-term design and cleanup remain part of the shared sequence, with the same
+review and evidence standards as other changes.
+
+Major milestones trigger a cleanup audit. Architecture coordinates the audit
+with the affected owners, reviewing accumulated duplication, temporary or
+superseded interfaces, ownership drift, proof and validation debt, and stale
+documentation. The output is a concrete set of cleanup actions or an explicit
+finding that none is warranted. Spikes schedules the actions alongside further
+development; deferred items retain their rationale and a revisit point. The
+audit is a required milestone followup, not a requirement to complete every
+cleanup before any other work can proceed.
+
 | Boundary | Owner | Required consumer connection |
 |---|---|---|
 | Captured console denotation, resources, author theorem semantics and root migration | process | Exact captured request, resource model dictionary/value/snapshot and appended demand fragments |
