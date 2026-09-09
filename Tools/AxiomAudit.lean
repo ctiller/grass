@@ -24,6 +24,7 @@ import Grass.Platform.Win32.WriteFileReturn
 import Grass.Refinement.Console.WriteFilePolicy
 import Grass.Artifact.PE.ExceptionBinding
 import Grass.ISA.X86.EndianBridge
+import Grass.Assembly.SourceRuntimeFunction
 import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
 import Grass.Assembly.X86ControlFlow
