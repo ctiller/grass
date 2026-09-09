@@ -80,6 +80,8 @@ import Grass.Platform.Win32.WriteFileCallPreservation
 import Grass.Platform.Win32.WriteFileRuntime
 import Grass.Platform.Win32.WriteFileService
 import Grass.Platform.Win32.WriteFileServiceContinuation
+import Grass.Platform.Win32.WriteFileRuntimeLinked
+import Grass.Platform.Win32.ApiDispatch
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
 import Grass.Artifact.PE.ExceptionBinding
@@ -234,6 +236,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileRuntime,
    `Grass.Platform.Win32.WriteFileService,
    `Grass.Platform.Win32.WriteFileServiceContinuation,
+   `Grass.Platform.Win32.WriteFileRuntimeLinked,
+   `Grass.Platform.Win32.ApiDispatch,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
@@ -354,8 +358,8 @@ acquiring a citation.
 -- Fixed dispatch and access factories add thirty checked structural helpers.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
--- Runtime, graph and continuation adapters retain checked evidence.
-def notBehaviourBaseline : Nat := 339
+-- Runtime, graph, continuation and logical import adapters retain checked evidence.
+def notBehaviourBaseline : Nat := 346
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -501,6 +505,14 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.ExitProcess.entryHandoff?,
     `Grass.Platform.Win32.ExitProcess.EntryHandoff.after,
     `Grass.Platform.Win32.ExitProcess.EntryHandoff.initRaw,
+    -- Computed logical import bindings, not native DLL/export adequacy.
+    `Grass.Platform.Win32.ApiDispatch.requestApi,
+    `Grass.Platform.Win32.ApiDispatch.apiForBytes?,
+    `Grass.Platform.Win32.ApiDispatch.candidateAt?,
+    `Grass.Platform.Win32.ApiDispatch.candidates,
+    `Grass.Platform.Win32.ApiDispatch.select?,
+    `Grass.Platform.Win32.ApiDispatch.Binding.MatchesRequest,
+    `Grass.Platform.Win32.ApiDispatch.ofCall?,
     -- Actual receipt projections and computed runtime frontier updates.
     `Grass.Platform.Win32.WriteFile.CallHandoff.runtime,
     `Grass.Platform.Win32.WriteFile.CallHandoff.rawAfter,
