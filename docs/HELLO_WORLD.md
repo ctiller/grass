@@ -193,6 +193,12 @@ that each conforming response refines a portable console outcome.
 - Layout: abstract RIP/section-relative proof followed by relocation.
 - Unwind: generated `.pdata`/`.xdata` consistent with the realized prologue.
 
+The reviewed [Hello unwind and PE binding interpretation](HELLO_UNWIND_BOUNDARY.md)
+records the exact code/metadata placement, exception-directory connection,
+ownership and remaining semantic reversal obligations for this requirement.
+It applies this milestone and the normative ABI/artifact requirements; it does
+not replace their authority or waive unwind because the normal path exits.
+
 Frame allocation, local and argument offsets, and alignment padding are
 computed from the realized calls, local storage requirements, saved registers,
 and ABI rules. Instruction operands, memory proofs, and unwind metadata must
