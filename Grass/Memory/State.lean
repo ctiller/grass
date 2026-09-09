@@ -3320,10 +3320,14 @@ theorem not_granted_empty (context : ContextId) (provenance : Provenance)
 
 /-- Refusal predicate for allocation installation and replacement. It keeps a live
 allocation's backing/origin binding immutable, blocks record changes while authority
-is outstanding over the same backing, and admits only states satisfying the temporary
-`DedicatedBackings` runtime profile. -/
+is outstanding over the same backing, prevents a fresh allocation from adopting an
+identity still named as any grant's provenance root, and admits only states satisfying
+the temporary `DedicatedBackings` runtime profile. -/
 private def allocationRefused (state : MemoryState) (id : AllocId)
     (record : AllocationRecord) : Prop :=
+  (state.allocations.lookup id = Option.none ∧
+    state.grantEntries.any
+      (fun entry => decide (entry.2.provenance.root = id)) = true) ∨
   (state.allocations.lookup id).any (fun existing =>
       decide (existing.live = true ∧
         (existing.backing ≠ record.backing ∨ existing.origin ≠ record.origin))) = true ∨
@@ -3357,7 +3361,7 @@ theorem dedicatedBackings_allocate? {state next : MemoryState} {id : AllocId}
     by_cases hd : ({ state with allocations := state.allocations.insert id record } :
         MemoryState).DedicatedBackings
     · exact hd
-    · exact False.elim (hadmitted (Or.inr (Or.inr hd)))
+    · exact False.elim (hadmitted (Or.inr (Or.inr (Or.inr hd))))
 
 /-- Allocate several records in order, refusing if any is refused.
 
@@ -3391,15 +3395,39 @@ theorem allocate?_lookup_ne {state next : MemoryState} {id other : AllocId}
     subst h
     exact FiniteMap.lookup_insert_ne _ hne _
 
-/-- A fresh identity is allocatable when the resulting checked backing layout is
-supported by the temporary runtime profile. -/
+/-- A fresh identity with no grant still rooted in it is allocatable when the
+resulting checked backing layout is supported by the temporary runtime profile. -/
 theorem allocate?_isSome_of_fresh (state : MemoryState) (id : AllocId)
     (record : AllocationRecord) (h : state.allocations.lookup id = Option.none)
+    (hrootless : state.grantEntries.any
+      (fun entry => decide (entry.2.provenance.root = id)) = false)
     (hdedicated : ({ state with allocations := state.allocations.insert id record } :
       MemoryState).DedicatedBackings) :
     (state.allocate? id record).isSome := by
   have hrefuse : ¬ allocationRefused state id record := by
-    simp [allocationRefused, h, hdedicated]
+    intro hrefuse
+    rcases hrefuse with horphan | hmapping | hgranted | hlayout
+    · rw [hrootless] at horphan
+      simp at horphan
+    · simp [h] at hmapping
+    · simp [h] at hgranted
+    · exact hlayout hdedicated
+  simp [allocate?, hrefuse]
+
+/-- `allocate?_eq_none_of_orphan_grant` proves an absent allocation identity cannot be installed
+while any grant still names it as its provenance root. -/
+theorem allocate?_eq_none_of_orphan_grant {state : MemoryState} {id : AllocId}
+    {record : AllocationRecord} {entry : GrantId × AuthorityGrant}
+    (habsent : state.allocations.lookup id = Option.none)
+    (hmember : entry ∈ state.grantEntries)
+    (hroot : entry.2.provenance.root = id) :
+    state.allocate? id record = Option.none := by
+  have hrooted : state.grantEntries.any
+      (fun candidate => decide (candidate.2.provenance.root = id)) = true := by
+    apply List.any_eq_true.2
+    exact ⟨entry, hmember, by simp [hroot]⟩
+  have hrefuse : allocationRefused state id record :=
+    Or.inl ⟨habsent, hrooted⟩
   simp [allocate?, hrefuse]
 
 /-- **Reallocating under an outstanding grant is refused.** §5.1's precondition, as a
@@ -3412,6 +3440,7 @@ theorem allocate?_eq_none_of_outstanding {state : MemoryState} {id : AllocId}
       (fun entry => decide (state.SharesBytes entry.2.provenance.root id)) = true) :
     state.allocate? id record = Option.none := by
   have hrefuse : allocationRefused state id record := by
+    apply Or.inr
     apply Or.inr
     apply Or.inl
     exact ⟨by simp [hlook, hchange], hgrants⟩
@@ -3453,7 +3482,17 @@ theorem allocate?_isSome_of_nothing_outstanding {state : MemoryState} {id : Allo
   intro hstable hdedicated
   have hrefuse : ¬ allocationRefused state id record := by
     intro hrefuse
-    rcases hrefuse with hmapping | hgranted | hlayout
+    rcases hrefuse with horphan | hmapping | hgranted | hlayout
+    · obtain ⟨entry, hmember, hroot⟩ := List.any_eq_true.1 horphan.2
+      have rootEq : entry.2.provenance.root = id := of_decide_eq_true hroot
+      have shares : state.SharesBytes entry.2.provenance.root id := Or.inl rootEq
+      have outstanding : state.grantEntries.any
+          (fun candidate => decide
+            (state.SharesBytes candidate.2.provenance.root id)) = true := by
+        apply List.any_eq_true.2
+        exact ⟨entry, hmember, decide_eq_true shares⟩
+      rw [hgrants] at outstanding
+      contradiction
     · cases hlook : state.allocations.lookup id with
       | none => simp [hlook] at hmapping
       | some existing =>
@@ -3462,6 +3501,68 @@ theorem allocate?_isSome_of_nothing_outstanding {state : MemoryState} {id : Allo
       simp at hgranted
     · exact hlayout hdedicated
   simp [allocate?, hrefuse]
+
+/-- `orphanGrantAllocationDoorRegression` uses the sealed representation internally
+for a malformed orphan-grant pre-state; it does not assert a public construction
+sequence or expose an unchecked state-building door. The local pre-fix allocator
+admits and revives write authority. The repaired door refuses, while the same
+backing/record without the grant and an identical existing record still succeed. -/
+private theorem orphanGrantAllocationDoorRegression :
+    let allocs : FreshSupply AllocTag := .initial
+    let epochs : FreshSupply EpochTag := .initial
+    let contexts : FreshSupply ContextTag := .initial
+    let grants : FreshSupply GrantTag := .initial
+    let storages : FreshSupply StorageTag := .initial
+    let id : AllocId := allocs.fresh.1
+    let epoch : EpochId := epochs.fresh.1
+    let holder : ContextId := contexts.fresh.1
+    let lender : ContextId := contexts.fresh.2.fresh.1
+    let grantId : GrantId := grants.fresh.1
+    let backing : StorageId := storages.fresh.1
+    let record : AllocationRecord :=
+      { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
+        source := .virtualAlloc, owners := [lender]
+        permission := .readWrite, live := true, backing := backing
+        origin := 0, base := some 0x1000 }
+    let provenance : Provenance :=
+      { space := .cpuVirtual, root := id, epoch := epoch, source := .virtualAlloc
+        rootExtent := ⟨0, 8⟩, path := [] }
+    let grant : AuthorityGrant :=
+      { kind := .loan, holder := holder, lender := lender, provenance := provenance
+        range := ⟨0, 8⟩, rights := .readWrite }
+    let state : MemoryState :=
+      { allocations := .empty
+        backings := (FiniteMap.empty).insert backing ⟨8, .empty⟩
+        grants := (FiniteMap.empty).insert grantId grant }
+    let after : MemoryState :=
+      { state with allocations := state.allocations.insert id record }
+    let oldRefused : MemoryState → AllocId → AllocationRecord → Prop :=
+      fun before target candidate =>
+        (before.allocations.lookup target).any (fun existing =>
+            decide (existing.live = true ∧
+              (existing.backing ≠ candidate.backing ∨ existing.origin ≠ candidate.origin))) = true ∨
+        ((before.allocations.lookup target).any (fun existing => decide (existing ≠ candidate)) = true ∧
+          before.grantEntries.any
+            (fun entry => decide (before.SharesBytes entry.2.provenance.root target)) = true) ∨
+        ¬ ({ before with allocations := before.allocations.insert target candidate } :
+            MemoryState).DedicatedBackings
+    let oldAllocate? : MemoryState → AllocId → AllocationRecord → Option MemoryState :=
+      fun before target candidate =>
+        if oldRefused before target candidate then none
+        else some { before with allocations := before.allocations.insert target candidate }
+    oldAllocate? state id record = some after ∧
+      after.DedicatedBackings ∧
+      after.CurrentEpoch provenance ∧
+      after.Granted holder provenance ⟨0, 8⟩ .write ∧
+      state.allocate? id record = none ∧
+      (({ state with grants := .empty } : MemoryState).allocate? id record).isSome ∧
+      (after.allocate? id record).isSome ∧
+      (({ state with grants := (FiniteMap.empty).insert grantId (
+        { grant with provenance := { provenance with root := allocs.fresh.2.fresh.1 } }) } :
+          MemoryState).allocate? id record).isSome := by
+  constructor
+  · rfl
+  · decide
 
 /--
 Tear down several allocations at once, or refuse.
@@ -4363,8 +4464,9 @@ bare `Prop`; see `LoanMapLaws` for why that matters and
 `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1 for which milestone owes each of the nine
 that remain.
 
-Freshness is two conjuncts rather than one, and the pair is the point: an unused
-identity can always be allocated, and `MemoryState.allocate?` refuses an identity
+The allocator requirements couple two points: an identity absent from both the
+allocation table and every grant root can be allocated when its checked backing
+layout is supported, and `MemoryState.allocate?` refuses an identity
 whose *record would change at all* while authority is outstanding over its bytes --
 §5.1's precondition.
 
@@ -4383,6 +4485,8 @@ can close §10's allocator item by naming a weaker sentence.
 def AllocatorLaws : Prop :=
   (∀ (state : MemoryState) (id : AllocId) (record : AllocationRecord),
       state.allocations.lookup id = Option.none →
+      state.grantEntries.any
+        (fun entry => decide (entry.2.provenance.root = id)) = false →
       ({ state with allocations := state.allocations.insert id record } :
         MemoryState).DedicatedBackings →
       (state.allocate? id record).isSome) ∧
@@ -4418,7 +4522,7 @@ def AllocatorLaws : Prop :=
 `tearDown?_kills_every_name`, `tearDown?_lookup_of_not_mem`, `not_live_of_stale_epoch`
 and `not_live_of_dead`. -/
 theorem allocatorLaws : AllocatorLaws :=
-  ⟨fun state id record h hd => allocate?_isSome_of_fresh state id record h hd,
+  ⟨fun state id record h hr hd => allocate?_isSome_of_fresh state id record h hr hd,
    fun _ _ _ _ hl hc hg => allocate?_eq_none_of_outstanding hl hc hg,
    fun _ _ _ _ h => allocate?_lookup_self h,
    fun _ _ _ _ _ h hne => allocate?_lookup_ne h hne,

@@ -53,6 +53,10 @@ comments are historical provenance available in Git, not active instructions.
 
 ## Review and delivery
 
+- [DISASM.md](DISASM.md) proposes the imported-binary evidence pipeline and
+  memory-safety proof boundary; [DISASM_CORPUS.md](DISASM_CORPUS.md) proposes
+  acceptance using spike outputs followed by safe and unsafe compiled C fixtures.
+  These are feature proposals, not new normative owners or implementation claims.
 - [VISION.md](VISION.md) explains the large-system objective and the tradeoffs
   against which spike proof economy is judged.
 - [PROOF_FEASIBILITY.md](PROOF_FEASIBILITY.md) gives constructive proof sketches,
