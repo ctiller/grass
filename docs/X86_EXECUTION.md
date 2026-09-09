@@ -157,6 +157,12 @@ same two inputs, including the actual access-free operation step. Other selected
 families remain explicit unsupported prefixes. This first constructive path
 does not yet execute the full Hello program or settle fault applicability.
 
+`ComputationFactory.subRsp` constructs the generated stack-allocation instruction
+through that same fixed operation runner. `Success.extent_of_memory_prefix`
+derives the fetch width from pointwise bytes in current code memory and the
+production decoder law, so source consumers need not supply an independent
+instruction-width assumption.
+
 `PushFactory.push` uses the same fixed fetch path, checks stack underflow, and
 computes the eight-byte stack descriptor from the current placed allocation.
 Its actual store writes the selected register's pre-instruction value and

@@ -277,7 +277,7 @@ acquiring a citation.
 -- One access-free receipt projects the already completed memory state.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
-def notBehaviourBaseline : Nat := 236
+def notBehaviourBaseline : Nat := 238
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -596,6 +596,9 @@ def notBehaviour : List Name :=
     -- modeled fetch, dispatch, and MOV receipts.
     `Grass.ISA.X86.Execution.ComputationFactory.MoveSuccess.result,
     `Grass.ISA.X86.Execution.ComputationFactory.move,
+    -- Constructive SUB RSP routing and projection of its already-modeled receipt.
+    `Grass.ISA.X86.Execution.ComputationFactory.SubRspSuccess.result,
+    `Grass.ISA.X86.Execution.ComputationFactory.subRsp,
     -- Fixed PUSH routing constructs the separately modeled PushNormal receipt;
     -- its failure projection retains the actual already-reached machine.
     `Grass.ISA.X86.Execution.PushFactory.push,
