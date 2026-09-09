@@ -1,6 +1,8 @@
 import Grass.Platform.Win32.WriteFile
 import Grass.Console.Behavior
 
+variable {plan : Grass.Platform.Win32.WriteFile.LoanPlan}
+
 /-! Project the existing occurrence-indexed WriteFile evidence into the exact
 rendered console cut. The selected call writes the suffix at `start`; accepted
 bytes are provider evidence, never inferred from an application-visible DWORD.
@@ -12,12 +14,12 @@ namespace Grass.Refinement.Console.WriteFileProjection
 open Grass.Std.Logical Grass.Semantics Grass.Op
 open Grass.Platform.Win32.WriteFile
 
-variable {payload : Vec Byte} {state : CallProtocol.State Request}
+variable {payload : Vec Byte} {state : ProtocolState}
   {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
 
 /-- The same call and pending record determine the global output frontier. -/
 def cut (start : OutputCut payload) (suffix : record.request.bytes = start.remaining)
-    (frontier : Prefix state call record) : OutputCut payload where
+    (frontier : Prefix plan state call record) : OutputCut payload where
   offset := start.offset + frontier.accepted
   bounded := by
     have bounded := frontier.bounded
@@ -27,22 +29,22 @@ def cut (start : OutputCut payload) (suffix : record.request.bytes = start.remai
     omega
 
 theorem prefix_exact (start : OutputCut payload) (suffix : record.request.bytes = start.remaining)
-    (frontier : Prefix state call record) :
+    (frontier : Prefix plan state call record) :
     start.emitted ++ frontier.output = (cut start suffix frontier).emitted := by
   simp only [Prefix.output, suffix, OutputCut.remaining, OutputCut.emitted, cut]
   exact (Vec.take_add payload start.offset frontier.accepted).symm
 
 /-- Reachability uses the actual handoff history, not a free-standing Prefix. -/
-theorem history_prefix_exact {realization : Realization} {initial : CallProtocol.State Request}
-    {frontier : Prefix state call record} (start : OutputCut payload)
+theorem history_prefix_exact {realization : Realization} {initial : ProtocolState}
+    {frontier : Prefix plan state call record} (start : OutputCut payload)
     (suffix : record.request.bytes = start.remaining)
-    (history : History realization initial call record frontier) :
+    (history : History plan realization initial call record frontier) :
     start.emitted ++ history.published = (cut start suffix frontier).emitted := by
   rw [history.published_eq_output]
   exact prefix_exact start suffix frontier
 
-variable {before after : CallProtocol.State Request}
-  {pre : Prefix before call record} {post : Prefix after call record}
+variable {before after : ProtocolState}
+  {pre : Prefix plan before call record} {post : Prefix plan after call record}
   {realization : Realization} {action : Action} {output : Vec Byte}
 
 /-- A provider publication is exactly the interval between projected cuts. -/
@@ -82,7 +84,8 @@ theorem zero_step (start : OutputCut payload)
 
 /-- Both frontiers hold the original call's identical pending record. -/
 theorem same_occurrence (_step : CommittedStep realization pre post action output) :
-    before.pending.lookup call = some record ∧ after.pending.lookup call = some record :=
+    before.pending.lookup call = some (embedPending record) ∧
+      after.pending.lookup call = some (embedPending record) :=
   ⟨pre.pending.lookup, post.pending.lookup⟩
 
 end Grass.Refinement.Console.WriteFileProjection

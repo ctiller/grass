@@ -7,6 +7,8 @@ open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical
 open Grass.Platform.Win32.WriteFile
 open Grass.Tests.Spike1
 
+def plan : LoanPlan := ⟨[]⟩
+
 def bytes : Vec Byte := .fromList [11, 22, 33]
 
 private def fixtureBackings : FreshSupply StorageTag := .initial
@@ -96,20 +98,20 @@ def prepared : Prepared memory request where
     split at ha <;> split at hb <;> simp_all
   input := by decide
 
-def initial : CallProtocol.State Request :=
+def initial : ProtocolState :=
   CallProtocol.initial ((MachineState.initial memory).noteContext mainThread .thread)
     FreshSupply.initial (by decide)
-def handed := CallProtocol.handoff? initial mainThread apiAgent request request.loans
+def handed := CallProtocol.handoff? initial mainThread apiAgent (.writeFile request) request.loans
 
 theorem handoff_exists : handed.isSome := by decide
 
 def call := (handed.get handoff_exists).1
 def pending := (handed.get handoff_exists).2
 def record : CallProtocol.Pending Request :=
-  (pending.pending.lookup call).get (by decide)
+  ((pending.pending.lookup call).bind selectPending).get (by decide)
 
-def initialPrefix : Prefix pending call record where
-  pending := ⟨rfl, by decide, by decide⟩
+def initialPrefix : Prefix plan pending call record where
+  pending := ⟨rfl, by decide, ⟨by decide⟩⟩
   prepared := prepared.transport rfl rfl
   clean := by decide
   accepted := 0
@@ -121,7 +123,7 @@ def noEffects : Realization where
   executesFor := fun selected _ _ _ _ => selected = call
   publishes := fun _ _ _ _ _ before after output => before = after ∧ output = .fromList []
 
-theorem noEffects_valid (state : CallProtocol.State Request) : noEffects.causal.Valid state :=
+theorem noEffects_valid (state : ProtocolState) : noEffects.causal.Valid state :=
   ⟨by intros _ _ h; exact False.elim h,
    by intros _ h; exact h,
    by intros _ _ _ h; exact False.elim h⟩
@@ -133,7 +135,7 @@ theorem handoffCausality : HandoffCausality noEffects.causal call record initial
   entry := List.mem_cons_self
   callerEntry := by intro old present; change old ∈ [] at present; contradiction
 
-def startHistory : History noEffects initial call record initialPrefix :=
+def startHistory : History plan noEffects initial call record initialPrefix :=
   .handoff initialPrefix rfl prepared handoffCausality rfl
 
 theorem initial_output_empty : initialPrefix.output = .fromList [] := rfl
@@ -148,8 +150,8 @@ def quietAction : Action where
 def quietResult := CallProtocol.step? pending quietAction.policy quietAction.operation
   apiAgent quietAction.kind quietAction.cause quietAction.faultAt
 def quietState := quietResult.get (by decide)
-def quietPrefix : Prefix quietState call record where
-  pending := ⟨rfl, by decide, by decide⟩
+def quietPrefix : Prefix plan quietState call record where
+  pending := ⟨rfl, by decide, ⟨by decide⟩⟩
   prepared := prepared.transport rfl rfl
   clean := by decide
   accepted := 0
@@ -177,12 +179,12 @@ theorem quietStep : CommittedStep noEffects initialPrefix quietPrefix quietActio
     footprint := by intro event present; contradiction
     conflicts := by intro old present; change old ∈ [] at present; contradiction }⟩
 
-def quietHistory : History noEffects initial call record quietPrefix :=
+def quietHistory : History plan noEffects initial call record quietPrefix :=
   .step startHistory quietAction (.fromList []) quietStep
 
 theorem missing_entry_edge_rejected {added : List ValidMemoryEvent}
     (event : ValidMemoryEvent) (present : event ∈ added) :
-    ¬ CausalEvidence noEffects.causal call record quietAction pending quietState added := by
+    ¬ CausalEvidence plan noEffects.causal call record quietAction pending quietState added := by
   intro h
   exact (h.entryEffects event present).2
 
@@ -200,14 +202,14 @@ theorem cyclic_initial_graph_rejected :
   exact valid.irreflexive (.entry call) trivial
 
 theorem missing_loan_rejected :
-    ¬ PendingAt pending call { record with loans := [] } := by
+    ¬ PendingAt plan pending call { record with loans := [] } := by
   intro h
   have same := PendingAt.same_record initialPrefix.pending h
   have bad := congrArg (fun r => r.loans.length) same
   contradiction
 
 theorem invented_accepted_start_rejected :
-    ¬ ({ initialPrefix with accepted := 1, bounded := by decide } : Prefix pending call record).accepted = 0 := by
+    ¬ ({ initialPrefix with accepted := 1, bounded := by decide } : Prefix plan pending call record).accepted = 0 := by
   decide
 
 theorem wrong_call_rejected : ∀ call state, handed = some (call, state) →
@@ -248,8 +250,8 @@ theorem backwards_publication_rejected : ¬ Publication bytes 2 1 (.fromList [])
   omega
 
 /-- Abstractly setting an ordering relation to True fails its fixed obligations. -/
-theorem universal_order_rejected (state : CallProtocol.State Request) :
-    ¬ (∀ node : CausalNode, ¬ (fun (_ : CallProtocol.State Request) _ _ => True) state node node) := by
+theorem universal_order_rejected (state : ProtocolState) :
+    ¬ (∀ node : CausalNode, ¬ (fun (_ : ProtocolState) _ _ => True) state node node) := by
   intro h
   exact h (.entry FreshSupply.initial.fresh.1) trivial
 
@@ -276,9 +278,9 @@ def zeroPolicy : StepPolicy :=
 def zeroedOutcome := Grass.Op.step zeroPolicy initial.machine (SomeOperation.of CountOp.caller)
   mainThread .thread ⟨⟨"writefile.zero"⟩⟩
 def zeroedMachine := zeroedOutcome.state?.get (by decide)
-def zeroed : CallProtocol.State Request :=
+def zeroed : ProtocolState :=
   CallProtocol.initial zeroedMachine FreshSupply.initial (by decide)
-def handedAfterZero := CallProtocol.handoff? zeroed mainThread apiAgent request request.loans
+def handedAfterZero := CallProtocol.handoff? zeroed mainThread apiAgent (.writeFile request) request.loans
 def afterZero := (handedAfterZero.get (by decide)).2
 def denied := CallProtocol.step? afterZero zeroPolicy (SomeOperation.of CountOp.provider)
   apiAgent .externalAgent ⟨⟨"writefile.zero"⟩⟩ (fun _ => .none)
@@ -294,7 +296,7 @@ theorem provider_denial_is_the_ordering_blocker :
 
 theorem denied_not_a_prefix (occurrence : CallProtocol.CallId)
     (pendingRecord : CallProtocol.Pending Request) :
-    ¬ Nonempty (Prefix (denied.get (by decide)) occurrence pendingRecord) := by
+    ¬ Nonempty (Prefix plan (denied.get (by decide)) occurrence pendingRecord) := by
   rintro ⟨frontier⟩
   exact provider_step_some_but_denied.2 frontier.clean
 

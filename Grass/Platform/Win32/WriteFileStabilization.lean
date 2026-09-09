@@ -1,5 +1,7 @@
 import Grass.Platform.Win32.WriteFileNonresponse
 
+variable {plan : Grass.Platform.Win32.WriteFile.LoanPlan}
+
 /-! Every actual infinite WriteFile provider continuation eventually has a
 fixed accepted count because its counts are monotone and bounded by the finite
 request. `InfiniteContinuation.shift_historyAt` preserves the original history;
@@ -81,10 +83,10 @@ private theorem eventually_constant_of_bounded_monotone (bound : Nat) (f : Nat �
 
 /-- Reindex an actual continuation at its actual derived history. -/
 def InfiniteContinuation.shift
-    {realization : Realization} {initial : CallProtocol.State Request}
+    {realization : Realization} {initial : ProtocolState}
     {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-    {state : CallProtocol.State Request} {frontier : Prefix state call record}
-    {history : History realization initial call record frontier}
+    {state : ProtocolState} {frontier : Prefix plan state call record}
+    {history : History plan realization initial call record frontier}
     (continuation : InfiniteContinuation history) (offset : Nat) :
     InfiniteContinuation (continuation.historyAt offset) where
   point n := continuation.point (offset + n)
@@ -97,36 +99,36 @@ def InfiniteContinuation.shift
     exact continuation.committed (offset + n)
 
 @[simp] theorem InfiniteContinuation.shift_point
-    {realization : Realization} {initial : CallProtocol.State Request}
+    {realization : Realization} {initial : ProtocolState}
     {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-    {state : CallProtocol.State Request} {frontier : Prefix state call record}
-    {history : History realization initial call record frontier}
+    {state : ProtocolState} {frontier : Prefix plan state call record}
+    {history : History plan realization initial call record frontier}
     (continuation : InfiniteContinuation history) (offset n : Nat) :
     (continuation.shift offset).point n = continuation.point (offset + n) := rfl
 
 @[simp] theorem InfiniteContinuation.shift_action
-    {realization : Realization} {initial : CallProtocol.State Request}
+    {realization : Realization} {initial : ProtocolState}
     {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-    {state : CallProtocol.State Request} {frontier : Prefix state call record}
-    {history : History realization initial call record frontier}
+    {state : ProtocolState} {frontier : Prefix plan state call record}
+    {history : History plan realization initial call record frontier}
     (continuation : InfiniteContinuation history) (offset n : Nat) :
     (continuation.shift offset).action n = continuation.action (offset + n) := rfl
 
 @[simp] theorem InfiniteContinuation.shift_output
-    {realization : Realization} {initial : CallProtocol.State Request}
+    {realization : Realization} {initial : ProtocolState}
     {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-    {state : CallProtocol.State Request} {frontier : Prefix state call record}
-    {history : History realization initial call record frontier}
+    {state : ProtocolState} {frontier : Prefix plan state call record}
+    {history : History plan realization initial call record frontier}
     (continuation : InfiniteContinuation history) (offset n : Nat) :
     (continuation.shift offset).output n = continuation.output (offset + n) := rfl
 
 /-- Reindexing retains the exact accumulated history, including every stored
 action, output chunk, and committed-step proof. -/
 theorem InfiniteContinuation.shift_historyAt
-    {realization : Realization} {initial : CallProtocol.State Request}
+    {realization : Realization} {initial : ProtocolState}
     {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-    {state : CallProtocol.State Request} {frontier : Prefix state call record}
-    {history : History realization initial call record frontier}
+    {state : ProtocolState} {frontier : Prefix plan state call record}
+    {history : History plan realization initial call record frontier}
     (continuation : InfiniteContinuation history) (offset n : Nat) :
     HEq ((continuation.shift offset).historyAt n)
       (continuation.historyAt (offset + n)) := by
@@ -144,10 +146,10 @@ theorem InfiniteContinuation.shift_historyAt
 /-- The shifted root is the actual derived history and therefore retains the
 complete output prefix published before the stabilization point. -/
 theorem InfiniteContinuation.shift_root_published
-    {realization : Realization} {initial : CallProtocol.State Request}
+    {realization : Realization} {initial : ProtocolState}
     {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-    {state : CallProtocol.State Request} {frontier : Prefix state call record}
-    {history : History realization initial call record frontier}
+    {state : ProtocolState} {frontier : Prefix plan state call record}
+    {history : History plan realization initial call record frontier}
     (continuation : InfiniteContinuation history) (offset : Nat) :
     (continuation.historyAt offset).published = (continuation.point offset).2.output :=
   (continuation.historyAt offset).published_eq_output
@@ -155,10 +157,10 @@ theorem InfiniteContinuation.shift_root_published
 /-- Monotone bounded accepted counts stabilize along every supplied actual
 infinite provider continuation. -/
 theorem InfiniteContinuation.stabilizes
-    {realization : Realization} {initial : CallProtocol.State Request}
+    {realization : Realization} {initial : ProtocolState}
     {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-    {state : CallProtocol.State Request} {frontier : Prefix state call record}
-    {history : History realization initial call record frontier}
+    {state : ProtocolState} {frontier : Prefix plan state call record}
+    {history : History plan realization initial call record frontier}
     (continuation : InfiniteContinuation history) :
     ∃ index, FixedCut (continuation.shift index) := by
   let accepted : Nat → Nat := fun n => (continuation.point n).2.accepted
