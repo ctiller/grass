@@ -44,6 +44,24 @@ theorem accesses_exact {before after : MachineState} {descriptor : AccessDescrip
     (run : AccessRun before after descriptor) : run.sequence.accesses = [descriptor] := by
   simp [SubstepSequence.accesses, run.substeps_exact]
 
+/-- `wellFormed` extracts descriptor admission from the actual selected step. -/
+theorem wellFormed {before after : MachineState} {descriptor : AccessDescriptor}
+    (run : AccessRun before after descriptor) :
+    ∃ space, run.policy.profile.vocabulary.addressSpaces.find? descriptor.space = some space ∧
+      descriptor.WellFormedIn space :=
+  ran_selected_access_wellFormed run.policy before run.operation run.context run.contextKind
+    run.cause run.faultAt run.sequence after descriptor run.selected run.ran
+    (by simp [run.accesses_exact])
+
+/-- `prepared_result` reduces the actual singleton run to its prepared access. -/
+theorem prepared_result {before after : MachineState} {descriptor : AccessDescriptor}
+    (run : AccessRun before after descriptor) :
+    after = performPreparedAccess run.policy (before.noteContext run.context run.contextKind)
+      descriptor run.resolved run.prepared (.completed run.complete) run.contextKind run.cause :=
+  ran_singleton_prepared_eq_performPreparedAccess run.policy before run.operation run.context
+    run.contextKind run.cause run.faultAt run.sequence descriptor after run.selected
+    run.accesses_exact run.noFault run.ran run.resolved run.prepared run.complete run.answerResolved
+
 /-- The fresh completed event is derived from the actual selected run and clean
 ledger, not supplied by the caller as an output assertion. -/
 theorem completed_event {before after : MachineState} {descriptor : AccessDescriptor}

@@ -11,6 +11,9 @@ import Grass.ISA.X86.Execution.DecodedSite
 import Grass.ISA.X86.Execution.AccessRun
 import Grass.ISA.X86.Execution.Fetch
 import Grass.ISA.X86.Execution.SubRspNormal
+import Grass.ISA.X86.Execution.PushNormal
+import Grass.ISA.X86.Execution.AccessFree
+import Grass.ISA.X86.Execution.MoveNormal
 import Grass.ISA.X86.Execution.StackInstruction
 import Grass.ISA.X86.Execution.CompletionFlags
 import Grass.ISA.X86.Decode
@@ -122,6 +125,8 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.State, `Grass.ISA.X86.Execution.DecodedSite,
    `Grass.ISA.X86.Execution.AccessRun, `Grass.ISA.X86.Execution.Fetch,
    `Grass.ISA.X86.Execution.SubRspNormal,
+   `Grass.ISA.X86.Execution.PushNormal,
+   `Grass.ISA.X86.Execution.AccessFree, `Grass.ISA.X86.Execution.MoveNormal,
    `Grass.ISA.X86.Execution.StackInstruction, `Grass.ISA.X86.Execution.CompletionFlags,
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
@@ -180,7 +185,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Entry selection adds eight mapping definitions and its contract type.
 -- The vendor URL is provenance; formal ledger anchors remain owed.
 -- Reviewed fetched normal SUB RSP adds one transfer obligation.
-def owedBaseline : Nat := 252
+-- Reviewed PUSH/MOV add five instruction-transfer obligations.
+def owedBaseline : Nat := 257
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -221,7 +227,8 @@ acquiring a citation.
 -- Nine caller-factory definitions construct an explicitly declared synthetic
 -- state via checked memory doors; they assert no recovered allocator behavior.
 -- Reviewed fetch helper replaces only the memory-machine field.
-def notBehaviourBaseline : Nat := 181
+-- Reviewed AccessFree receipt adds one representation helper.
+def notBehaviourBaseline : Nat := 182
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -477,6 +484,7 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.State.withGpr,
     `Grass.ISA.X86.Execution.State.withStatusFlags,
     `Grass.ISA.X86.Execution.FetchedSite.afterState,
+    `Grass.ISA.X86.Execution.MoveInstruction.destination,
     `Grass.ISA.X86.Execution.DecodedSite.fallthroughRip,
     `Grass.ISA.X86.Execution.StackInstruction.selectPush,
     `Grass.ISA.X86.Execution.StackInstruction.selectSubRsp,
@@ -738,6 +746,11 @@ def owed : List Name :=
     -- Source inspection and representation tests do not settle that attachment.
     `Grass.ISA.X86.Execution.DecodedSite.check,
     `Grass.ISA.X86.Execution.SubRspNormal.result,
+    `Grass.ISA.X86.Execution.PushNormal.result,
+    `Grass.ISA.X86.Execution.completedMoveRflags,
+    `Grass.ISA.X86.Execution.MoveInstruction.encoding,
+    `Grass.ISA.X86.Execution.MoveInstruction.effect,
+    `Grass.ISA.X86.Execution.MoveNormal.result,
     `Grass.ISA.X86.Execution.StackInstruction.encoding,
     `Grass.ISA.X86.Execution.statusMask,
     `Grass.ISA.X86.Execution.resumeMask,
