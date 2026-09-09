@@ -79,6 +79,8 @@ import Grass.Platform.Win32.CpuVocabulary
 import Grass.Platform.Win32.CpuPolicy
 import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.RawState
+import Grass.Platform.Win32.CallRuntime
+import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
