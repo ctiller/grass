@@ -199,7 +199,8 @@ def Instruction.effect (instruction : Instruction) (registers : Gpr → BitVec 6
   evaluate instruction.kind instruction.width (registers instruction.destination)
     (registers instruction.source) flags
 
-/-- Frame the entire GPR file; CMP/TEST cannot clear even the destination's high half. -/
+/-- Update the GPR file. `Instruction.comparison_preserves_registers` proves
+CMP/TEST leave every register unchanged, including the destination's high half. -/
 def Instruction.registersAfter (instruction : Instruction) (registers : Gpr → BitVec 64)
     (flags : Flags Bool) : Gpr → BitVec 64 :=
   fun reg => if reg = instruction.destination then
