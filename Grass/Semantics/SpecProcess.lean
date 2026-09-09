@@ -11,9 +11,10 @@ and predicates; `ProgramBehavior` supplies one relational implementation of
 that interface; and `BehaviorContract` selects the canonical implementation.
 
 The final public `SpecProcess` remains temporarily in its legacy unindexed
-shape while the selected-resource and suite interfaces land. It extends the
-same behavior interface so existing certificate consumers use this split now,
-without creating an alternate behavior definition during the later cutover.
+shape while the selected-resource and suite interfaces land. It carries the
+same behavior interface as a field so existing certificate consumers use this
+split now, without creating an alternate behavior definition during the later
+cutover.
 -/
 
 namespace Grass
@@ -175,13 +176,17 @@ def refl (behavior : ProgramBehavior interface) : BehaviorEquivalent behavior be
   forward := .refl behavior
   backward := .refl behavior
 
-/-- Behavioral equivalence is symmetric. -/
+/-- Behavioral equivalence is symmetric. The endpoint types make the supplied
+`BehaviorEquivalent.backward` and `BehaviorEquivalent.forward` refinements point
+in the required reversed directions. -/
 def symm (equivalent : BehaviorEquivalent concrete abstract) :
     BehaviorEquivalent abstract concrete where
   forward := equivalent.backward
   backward := equivalent.forward
 
-/-- Behavioral equivalence is transitive. -/
+/-- Behavioral equivalence is transitive. When composing the supplied backward
+refinements, their endpoint types determine the reverse order from the forward
+path: highest through middle to lower. -/
 def trans {highest : ProgramBehavior interface}
     (lowerMiddle : BehaviorEquivalent lower middle)
     (middleHighest : BehaviorEquivalent middle highest) :

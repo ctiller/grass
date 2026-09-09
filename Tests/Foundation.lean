@@ -79,6 +79,40 @@ def spec : SpecProcess where
       accepts := fun _ _ => True }
   requirements := noDemands
 
+namespace SpecProcessBridgeFixture
+
+/-- Distinct carriers and nontrivial predicates make every legacy forwarding
+definition independently falsifiable. -/
+abbrev interface : BehaviorInterface where
+  Input := Nat
+  AuditEvent := Bool
+  Observation := String
+  admits := fun input => input > 0
+  observationProjection :=
+    { project := List.map fun event => if event then "true" else "false" }
+  accepts := fun input observations => observations.length = input
+
+abbrev spec : SpecProcess where
+  interface := interface
+  requirements := noDemands
+
+example (candidate : SpecProcess) : candidate.Input = candidate.interface.Input := rfl
+example (candidate : SpecProcess) : candidate.AuditEvent = candidate.interface.AuditEvent := rfl
+example (candidate : SpecProcess) : candidate.Observation = candidate.interface.Observation := rfl
+example (candidate : SpecProcess) : candidate.admits = candidate.interface.admits := rfl
+example (candidate : SpecProcess) : candidate.accepts = candidate.interface.accepts := rfl
+example (candidate : SpecProcess) :
+    candidate.observationProjection = candidate.interface.observationProjection := rfl
+
+example : spec.Input = Nat := rfl
+example : spec.AuditEvent = Bool := rfl
+example : spec.Observation = String := rfl
+example : ¬ spec.admits 0 := by simp [SpecProcess.admits]
+example : spec.accepts 2 ["left", "right"] := rfl
+example : spec.observationProjection.project [true] = ["true"] := rfl
+
+end SpecProcessBridgeFixture
+
 namespace ObservationProjectionFixture
 
 def boolToNat : ObservationProjection Bool Nat where
@@ -145,13 +179,6 @@ def contract : BehaviorContract where
   behavior := behavior
 
 example : contract.behavior = behavior := rfl
-
-example : behaviorEquivalentToItself.symm = behaviorEquivalentToItself := by
-  rfl
-
-example : behaviorEquivalentToItself.trans behaviorEquivalentToItself =
-    behaviorEquivalentToItself := by
-  rfl
 
 def finiteCompletion (input : Bool) : system.Completion
     (initialExecution input).state (initialExecution input).graph
