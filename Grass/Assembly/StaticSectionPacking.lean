@@ -1,7 +1,8 @@
 import Grass.Assembly.StaticObjects
 import Grass.Artifact.PE.Layout
 
-/-! Deterministic static packing and its structural guarantees, independent of PE placement. -/
+/-! Deterministic static packing. `packFrom_payload`, `packFrom_ordered` and
+`packFrom_contained` describe its output before section placement. -/
 namespace Grass.Assembly.StaticSection
 
 open Grass.Artifact.PE Grass.Assembly.StaticObjects Grass.Std.Logical
