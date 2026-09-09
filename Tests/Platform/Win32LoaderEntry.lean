@@ -111,9 +111,8 @@ private def check (label : String) (passed : Bool) : IO Unit :=
       Vec.fromList [42, 1, 2, 3, 4, 5, 6, 7, 8, 43]))
 /-- Production source linking is reused; no Python/C or handwritten instruction
 bytes stand in for the authored Grass program in this integration fixture. -/
-def helloPlan? : Option PE.ImagePlan := do
-  let body ← (Grass.Assembly.SourceInput.extractHelloSourceChars
-    Grass.Tests.Assembly.SourceResolve.authored).toOption
+def helloPlanFrom? (source : List Char) : Option PE.ImagePlan := do
+  let body ← (Grass.Assembly.SourceInput.extractHelloSourceChars source).toOption
   let frame ← Grass.Assembly.SourceFrame.derive? body
   let splice ← Grass.Assembly.SourceSplice.derive? frame 0
   let statics ← Grass.Assembly.StaticSection.layout?
@@ -126,6 +125,10 @@ def helloPlan? : Option PE.ImagePlan := do
       pdataName := Grass.Tests.Assembly.SourceLinkedImage.pdataName
       xdataName := Grass.Tests.Assembly.SourceLinkedImage.xdataName } requests
   pure linked.plan
+
+/-- Model fixture over the checked-in source embedding; the native exporter
+supplies freshly read source to `helloPlanFrom?` instead. -/
+def helloPlan? : Option PE.ImagePlan := helloPlanFrom? Grass.Tests.Assembly.SourceResolve.authored
 
 /-- Initialize the exact source-linked PE using explicit three-symbol target data. -/
 def helloEntry? : Option (Nat × Bool) := do

@@ -1,20 +1,16 @@
-# The program body is Grass. This host launcher records a bounded native sample.
+# Windows-only process capture; build/emission orchestration lives in Bash.
+param(
+    [Parameter(Mandatory)][string]$ImagePath,
+    [Parameter(Mandatory)][string]$ExpectedPath,
+    [Parameter(Mandatory)][string]$SourceSnapshotPath,
+    [Parameter(Mandatory)][string]$ResultPath
+)
 $ErrorActionPreference = 'Stop'
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     throw 'This launcher requires Windows.'
 }
-$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../..')).Path
-$probeDirectory = Join-Path $repoRoot '.lake/grass-windows-probes'
-[IO.Directory]::CreateDirectory($probeDirectory) | Out-Null
-$imagePath = Join-Path $probeDirectory 'hello.exe'
-$expectedPath = Join-Path $probeDirectory 'expected-stdout.bin'
-Push-Location -LiteralPath $repoRoot
-try {
-    & lake build Tests.Platform.Win32LoaderEntry
-    if ($LASTEXITCODE -ne 0) { throw 'Grass loader fixture build failed.' }
-    & lake env lean --run Tools/EmitGrassHello.lean $imagePath $expectedPath
-    if ($LASTEXITCODE -ne 0) { throw 'Grass PE emission failed.' }
-
+$ImagePath = (Resolve-Path -LiteralPath $ImagePath).Path
+$probeDirectory = Split-Path -Parent $ImagePath
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $imagePath
     $startInfo.WorkingDirectory = $probeDirectory
@@ -26,8 +22,11 @@ try {
     $process.StartInfo = $startInfo
     $outputBytes = [IO.MemoryStream]::new()
     $errorBytes = [IO.MemoryStream]::new()
+    $started = $false
+    $result = $null
     try {
         if (-not $process.Start()) { throw 'Windows did not start the Grass image.' }
+        $started = $true
         $byteLimit = 4096
         $readers = @(
             @{ stream = $process.StandardOutput.BaseStream; captured = $outputBytes; buffer = [byte[]]::new(1024); pending = $null; ended = $false },
@@ -64,9 +63,10 @@ try {
         $matches = [Convert]::ToBase64String($actual) -ceq [Convert]::ToBase64String($expected)
         $result = [ordered]@{
             kind = 'grass-source-native-loader-sample'
+            status = 'observed'
             os = [Runtime.InteropServices.RuntimeInformation]::OSDescription
             architecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
-            sourceSha256 = (Get-FileHash -LiteralPath (Join-Path $repoRoot 'Spikes/1_Hello_World/Program.lean')).Hash
+            sourceSha256 = (Get-FileHash -LiteralPath $sourceSnapshotPath).Hash
             imageSha256 = (Get-FileHash -LiteralPath $imagePath).Hash
             imageSize = (Get-Item -LiteralPath $imagePath).Length
             timedOut = $timedOut
@@ -78,14 +78,30 @@ try {
             stdoutMatches = $matches
             passed = (-not $timedOut) -and (-not $outputLimitExceeded) -and ($process.ExitCode -eq 0) -and $matches -and ($errorBytes.Length -eq 0)
         }
-        $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $probeDirectory 'result.json') -Encoding utf8
+        if ($result.passed) { $result.status = 'passed' }
+        $result | ConvertTo-Json | Set-Content -LiteralPath $ResultPath -Encoding utf8
         $result | ConvertTo-Json
         if (-not $result.passed) { throw 'Grass native sample disagreed with expected output/exit.' }
+    } catch {
+        $captureError = $_
+        $terminationError = $null
+        if ($started -and (-not $process.HasExited)) {
+            try {
+                $process.Kill($true)
+                if (-not $process.WaitForExit(2000)) { throw 'Probe termination did not complete.' }
+            } catch {
+                $terminationError = $_.Exception.Message
+            }
+        }
+        if ($null -eq $result) { $result = [ordered]@{ kind = 'grass-source-native-loader-sample' } }
+        $result['status'] = 'failed'
+        $result['passed'] = $false
+        $result['error'] = $captureError.Exception.Message
+        $result['terminationError'] = $terminationError
+        $result | ConvertTo-Json | Set-Content -LiteralPath $ResultPath -Encoding utf8
+        throw $captureError
     } finally {
         $process.Dispose()
         $outputBytes.Dispose()
         $errorBytes.Dispose()
     }
-} finally {
-    Pop-Location
-}
