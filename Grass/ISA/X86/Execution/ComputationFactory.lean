@@ -44,12 +44,10 @@ def result {before : State} (success : SubRspSuccess before) : State := success.
 
 end SubRspSuccess
 
-/-- Fetch and execute only the bounded register MOV family. Every other selected
+/-- Execute from an actual fetch for the bounded register MOV family. Every other selected
 family is retained as an explicit unsupported fetched prefix. -/
-def move (policy : CpuAccessPolicy) (before : State) : Except Failure (MoveSuccess before) :=
-  match FetchFactory.fetch policy before with
-  | .error reason => .error (.fetch reason)
-  | .ok fetched =>
+def moveFromFetched {policy : CpuAccessPolicy} (before : State)
+    (fetched : FetchFactory.Success policy before) : Except Failure (MoveSuccess before) :=
       let site := fetched.dispatched.fetch
       match selected : fetched.dispatched.selection.instruction with
       | .move instruction =>
@@ -81,12 +79,14 @@ def move (policy : CpuAccessPolicy) (before : State) : Except Failure (MoveSucce
       | instruction =>
           .error (.unsupported { before with machine := fetched.after } instruction)
 
-/-- Fetch and execute the typed `SUB RSP, immediate` stack instruction. -/
-def subRsp (policy : CpuAccessPolicy) (before : State) :
-    Except Failure (SubRspSuccess before) :=
+def move (policy : CpuAccessPolicy) (before : State) : Except Failure (MoveSuccess before) :=
   match FetchFactory.fetch policy before with
   | .error reason => .error (.fetch reason)
-  | .ok fetched =>
+  | .ok fetched => moveFromFetched before fetched
+
+/-- Execute the typed `SUB RSP, immediate` from its actual fetched receipt. -/
+def subRspFromFetched {policy : CpuAccessPolicy} (before : State)
+    (fetched : FetchFactory.Success policy before) : Except Failure (SubRspSuccess before) :=
       let site := fetched.dispatched.fetch
       match selected : fetched.dispatched.selection.instruction with
       | .stack (.subRsp immediate) =>
@@ -115,5 +115,11 @@ def subRsp (policy : CpuAccessPolicy) (before : State) :
                   receipt := receipt }
       | instruction =>
           .error (.unsupported { before with machine := fetched.after } instruction)
+
+def subRsp (policy : CpuAccessPolicy) (before : State) :
+    Except Failure (SubRspSuccess before) :=
+  match FetchFactory.fetch policy before with
+  | .error reason => .error (.fetch reason)
+  | .ok fetched => subRspFromFetched before fetched
 
 end Grass.ISA.X86.Execution.ComputationFactory
