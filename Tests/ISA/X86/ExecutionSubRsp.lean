@@ -149,6 +149,9 @@ private def allocation : Grass.Assembly.FrameAllocation.Resolved :=
 private def layoutReceipt : SubRspNormal before afterFetch afterCompute allocation.immediate :=
   receipt
 
+example : fetch.site.encoding = allocation.encoding :=
+  Grass.Assembly.FrameAllocation.allocation_encoding_of_observation allocation fetch (by decide)
+
 -- The actual fetched fixture accepts the operand derived from frame parameters.
 example : layoutReceipt.result.gpr .rsp = before.gpr .rsp -
     BitVec.ofNat 64 allocation.layout.callAllocationBytes :=

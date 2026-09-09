@@ -8,6 +8,20 @@ This does not establish entry reachability or exclude other execution branches. 
 namespace Grass.Assembly.FrameAllocation
 open Grass.ISA.X86 Grass.ISA.X86.Execution Grass.Memory
 
+/-- Actual observed allocation bytes determine the typed decoded instruction;
+the caller does not supply a second instruction-selection assertion. -/
+theorem allocation_encoding_of_observation (allocation : Resolved) {before : State}
+    {afterFetch : MachineState} (fetch : FetchedSite before afterFetch)
+    (observed : fetch.run.complete.committed.observed = some allocation.encoding.toBytes) :
+    fetch.site.encoding = allocation.encoding := by
+  have bytes := Option.some.inj (fetch.observed_exact.symm.trans observed)
+  have decoded := (congrArg decodeInsn fetch.site.bytesExact).symm.trans fetch.site.decoded
+  rw [fetch.noTrailing, List.append_nil] at decoded
+  rw [bytes] at decoded
+  have expected := encoding_decodes allocation []
+  rw [List.append_nil] at expected
+  exact congrArg Prod.fst (Except.ok.inj (decoded.symm.trans expected))
+
 /-- `rsp_allocation_exact` uses the resolved layout's signed-immediate proof. -/
 theorem rsp_allocation_exact (allocation : Resolved) {before : State}
     {afterFetch afterCompute : MachineState}
