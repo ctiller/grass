@@ -93,15 +93,16 @@ handler; and 12 bytes of unwind information. Those are existing fixture values,
 not new caller inputs. Derive them from the realized source and recompute when
 its encoding or frame changes.
 
-## Acceptance obligations that remain
+## Acceptance progress and remaining obligations
 
-1. Consume the checked PE exception-directory/table extension in the source
-   image composition. The writer, independent reader and malformed range,
-   alignment, payload and target controls are implemented; the same final plan
-   must carry the actual source-derived metadata.
-2. Bind the prologue result to the final code prefix and table range after
-   source resolution. Code offsets are relative to the function start, not the
-   image base or end of the generated prefix.
+1. Structural attachment is implemented in `SourceLinkedImage`: the final
+   checked plan carries a present exception table, a whole-code function extent
+   and exact source-derived unwind bytes in separate metadata sections. The
+   writer, independent reader and malformed range, alignment, payload and
+   target controls are implemented.
+2. `SourceLinkedImage.Result.unwind_source_prefix` binds the metadata header to
+   the final source-derived prologue prefix. Code offsets are derived relative
+   to the function start. This is a byte/layout theorem, not semantic reversal.
 3. Prove unwind reversal for the realized prologue: saved registers, stack
    contents and caller context, including permitted partial-prologue states.
    Body invariants must preserve the frame needed by that interpretation.

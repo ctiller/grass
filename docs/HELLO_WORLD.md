@@ -116,14 +116,16 @@ static addresses, sizes and external calls; the actual authored assembly fixture
 resolves all 44 outputs. `Grass/Assembly/SourceBytes.lean` proves decoding at
 every computed instruction position, including the exact remaining byte stream.
 
-`Grass/Assembly/SourceLinkedImage.lean` now composes code, static objects and
-source-derived imports through provisional placement and a checked final PE
-plan. Its final result retains exact code bytes and recomputed static/import
-symbol bindings. The integration fixture supplies explicit static bytes and
-also grows them across a section-alignment interval without new offset inputs.
-This does not yet elaborate the authored specification or complete the required
-unwind attachment, loaded-image applicability, machine-execution refinement,
-or final `VerifiedProgram`/`emitProgram` acceptance path.
+`Grass/Assembly/SourceLinkedImage.lean` now composes code, static objects,
+source-derived imports and unwind metadata through provisional placement and a
+checked final PE plan. Its final result retains exact code bytes, recomputed
+static/import bindings and a present exception table covering the whole code
+payload. `unwind_source_prefix` connects the metadata header to the final code
+prefix; `.pdata` and `.xdata` bytes use the existing checked serializers. The
+integration fixture also grows explicit static bytes across a section-alignment
+interval without new offset inputs. This does not yet elaborate the authored
+specification or establish semantic unwind reversal, loaded-image applicability,
+machine-execution refinement, or final `VerifiedProgram`/`emitProgram` acceptance.
 
 `Grass/Assembly/X86BranchLayout.lean` connects these laws to checked source
 programs containing closed operands and local branches. It derives every
