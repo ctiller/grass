@@ -472,13 +472,16 @@ implementation or a claim about an existing theorem name:
 
 ```text
 mapM f inputs = some outputs
-  iff List.Forall₂ (fun input output => f input = some output) inputs outputs
+  iff List.Forall2 (fun input output => f input = some output) inputs outputs
 ```
 
 Derive output length and indexed/member provenance from this correspondence.
 For order projection, a consumer supplies only its one-element law
 `f input = some output -> project output = input`; shared composition proves
-`outputs.map project = inputs`. Initialization still owns Store32.resolve?
+`outputs.map project = inputs` under the explicit mapM-success premise.
+SourceUnwindPrefix's existing private mapM_getElem? is the third-consumer
+challenge: adopt the shared indexed law and remove that separate proof.
+Initialization still owns Store32.resolve?
 correctness; import requests still own resolveName?_source. Neither should
 induct over lists again. Preserve the existing first-occurrence deduplication
 before import resolution; the all-or-none traversal does not replace it.
@@ -503,12 +506,45 @@ not establish loader acceptance or unwind validity. Counted-reader reuse also
 retains the exact needMore/invalid result from the failing element through
 continueRead. A zero-count case, two differently sized record types, a nonempty
 suffix, and an incomplete second record distinguish the required behavior.
+Also retain the exact needMore hint and invalid error, including an invalid
+second record; valid-writer round trips alone do not establish these laws.
 
 These source findings make DUP-03/04 concrete law-library migrations. They do
-not justify another DSL or a framework with caller-selected parser semantics.
+not justify another DSL. The general law correctly takes an explicit parser;
+production adapters must instantiate the existing parser and writer, rather
+than replacing them with convenient alternatives to discharge a proof.
 Library owns the shared law surface, grammar/artifact and source owners review
 their adapters, and spikes schedules the work. DUP-02 and DUP-05 remain the
 separate read-observation and receipt-construction migrations described above.
+
+### Jump targets and API bindings
+
+Lowering reviewed the proposed crossover and found existing shared construction,
+not a need for a new universal target resolver. SourceTemplates retains branch
+labels/targets and external-call symbols with continuations; SourceSplice maps
+them across inserted code; SourceResolve.Output retains exact source occurrence
+and detail equations. SignedRel32 and RipRelative already share displacement
+and translation laws. Real consumers include WriteFileLoad.source_branch_target
+and SourceImportBindings' source-to-IAT binding.
+
+Preserve the target kind: a ripImport target is an IAT slot address, not the
+provider code address read from that slot. SourceFetch/SourceFetched connect the
+selected source occurrence to actual fetched bytes; BranchNormal still needs
+actual flags and taken/fallthrough evidence, while CallNormal retains the actual
+target read and stack store. ApiDispatch and EvaluatedCall bind that same dynamic
+receipt. Repeated visits to one source index are distinct execution occurrences.
+
+Block/API annotations may name entry contracts and continuation shapes, but the
+checker must prove them over the actual reached state. Reuse exact-state/path
+composition; do not infer loop invariants from annotation text or apply call
+custody/return laws to jumps. Lowering's immediate two Hello trials are GetStd
+actual result through TEST/CMP to unavailable/head, and success/failure paths
+through the shared exit label to the actual ExitProcess CALL with correct ECX.
+Both reuse existing target laws and still owe endpoint semantics. Preserve the
+authored unexpected-return UD2 continuation; nonreturning classification cannot
+erase it from raw behavior or turn call entry into termination.
+
+The concrete endpoint decision is in [HELLO_ENDPOINT_MODEL](HELLO_ENDPOINT_MODEL.md).
 
 ## Acceptance and sequencing
 
