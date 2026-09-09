@@ -71,16 +71,6 @@ def BoundSymbols.symbols {plan : ImagePlan} {table : StaticObjects.Table}
     bindings.importBindings.sourceImports bindings.staticBindings.uniqueNames
     bindings.importBindings.source_import_names_unique
 
-def bindSymbols? (plan : ImagePlan) {table : StaticObjects.Table}
-    (statics : StaticSection.Layout table) (libraryName : String) (names : List String) :
-    Option (BoundSymbols plan statics libraryName names) := do
-  let staticBindings ← SourceStaticBindings.resolve? plan statics 1
-  match exact : SourceImportBindings.resolve? plan libraryName names with
-  | none => none
-  | some importBindings =>
-    pure ⟨staticBindings, importBindings, (SourceImportBindings.resolve?_inputs exact).1,
-      (SourceImportBindings.resolve?_inputs exact).2⟩
-
 private theorem prepareImage_requested {requested : ExecutableImageDescription}
     {plan : ImagePlan} (prepared : prepareImage requested = .ok plan) :
     plan.layout.requested = requested := by
@@ -127,62 +117,125 @@ structure Result {frame rootOffset} (splice : SourceSplice.Result frame rootOffs
   staticsExact : source.symbols.statics = bindings.staticBindings.sourceSymbols
   importsExact : source.symbols.imports = bindings.importBindings.sourceImports
 
-def build? {frame rootOffset} (splice : SourceSplice.Result frame rootOffset)
+inductive BuildError where
+  | unwind
+  | prototypeImage (cause : String)
+  | prototypeCodeBase
+  | prototypeStaticBinding
+  | prototypeImportBinding
+  | sourceResolution
+  | metadataLayout
+  | runtimeResolution
+  | finalImage (cause : String)
+  | pdataSelection
+  | pdataBytes
+  | xdataSelection
+  | xdataBytes
+  | finalCodeBinding
+  | finalStaticBinding
+  | finalImportBinding
+  | finalStaticsMismatch
+  | finalImportsMismatch
+deriving Repr, DecidableEq
+
+private def requireSome {α : Type} (error : BuildError) : Option α → Except BuildError α
+  | none => .error error
+  | some value => .ok value
+
+private def prepare (phase : String → BuildError) (requested : ExecutableImageDescription) :
+    Except BuildError ImagePlan :=
+  match prepareImage requested with
+  | .error cause => .error (phase cause)
+  | .ok plan => .ok plan
+
+private def bindSymbols (staticError importError : BuildError) (plan : ImagePlan)
+    {table : StaticObjects.Table} (statics : StaticSection.Layout table)
+    (libraryName : String) (names : List String) :
+    Except BuildError (BoundSymbols plan statics libraryName names) := do
+  let staticBindings ← requireSome staticError (SourceStaticBindings.resolve? plan statics 1)
+  match exact : SourceImportBindings.resolve? plan libraryName names with
+  | none => .error importError
+  | some importBindings =>
+      .ok ⟨staticBindings, importBindings, (SourceImportBindings.resolve?_inputs exact).1,
+        (SourceImportBindings.resolve?_inputs exact).2⟩
+
+/-- Erase only binding diagnostics from the shared binding implementation. -/
+def bindSymbols? (plan : ImagePlan) {table : StaticObjects.Table}
+    (statics : StaticSection.Layout table) (libraryName : String) (names : List String) :
+    Option (BoundSymbols plan statics libraryName names) :=
+  (bindSymbols .prototypeStaticBinding .prototypeImportBinding plan statics libraryName names).toOption
+/-- The single phase-bearing construction pipeline. -/
+def buildExcept {frame rootOffset} (splice : SourceSplice.Result frame rootOffset)
     {table : StaticObjects.Table} (statics : StaticSection.Layout table)
     (sections : Sections) (requests : SourceImportRequests.Result splice) :
-    Option (Result splice statics sections requests) := do
-  let unwind ← SourceUnwind.prepare? splice.prologue
+    Except BuildError (Result splice statics sections requests) := do
+  let unwind ← requireSome .unwind (SourceUnwind.prepare? splice.prologue)
   let imports := Vec.singleton requests.library
-  -- A checked no-exception plan supplies provisional code/import/static coordinates.
-  let prototype ← (prepareImage (description sections statics imports
-    (Vec.replicate splice.finalSizes.sum 0) placeholderTable unwind.bytes none)).toOption
-  let base ← prototype.resolveSectionBase? 0
-  let preliminary ← bindSymbols? prototype statics
-    requests.libraryName requests.sourceNames
+  let prototypeDescription := description sections statics imports
+    (Vec.replicate splice.finalSizes.sum 0) placeholderTable unwind.bytes none
+  let prototype ← prepare .prototypeImage prototypeDescription
+  let base ← requireSome .prototypeCodeBase (prototype.resolveSectionBase? 0)
+  let preliminary ← bindSymbols .prototypeStaticBinding .prototypeImportBinding
+    prototype statics requests.libraryName requests.sourceNames
   match resolved : SourceResolve.resolve? splice preliminary.symbols base.rva with
-  | none => none
+  | none => .error .sourceResolution
   | some source =>
     let exceptionTable := exceptionDescription source.bytes.length unwind
-    -- Layout is derived with final code and equal-length placeholder table bytes.
-    match provisionalLayout : resolveImageLayout? (description sections statics imports
-        source.bytes placeholderTable unwind.bytes (some exceptionTable)) with
-    | none => none
+    let metadataDescription := description sections statics imports source.bytes
+      placeholderTable unwind.bytes (some exceptionTable)
+    match provisionalLayout : resolveImageLayout? metadataDescription with
+    | none => .error .metadataLayout
     | some layout =>
       match runtimeExact : resolveRuntimeFunction? layout.placed
           (runtimeBinding source.bytes.length unwind) with
-      | none => none
+      | none => .error .runtimeResolution
       | some provisionalFunction =>
         let tableBytes := writeRuntimeFunction provisionalFunction
-        match prepared : prepareImage (description sections statics imports source.bytes
-            tableBytes unwind.bytes (some exceptionTable)) with
-        | .error _ => none
+        let finalDescription := description sections statics imports source.bytes
+          tableBytes unwind.bytes (some exceptionTable)
+        match prepared : prepareImage finalDescription with
+        | .error cause => .error (.finalImage cause)
         | .ok plan =>
           match pdataSelected : plan.layout.placed.get? pdataIndex with
-          | none => none
+          | none => .error .pdataSelection
           | some pdata =>
             if pdataBytesExact : pdata.source.contents = tableBytes then
               match xdataSelected : plan.layout.placed.get? xdataIndex with
-              | none => none
+              | none => .error .xdataSelection
               | some xdata => do
                 if xdataBytesExact : xdata.source.contents = unwind.bytes then
-                  let code ← SourceImage.bindCode? source plan 0
-                  let bindings ← bindSymbols? plan statics
+                  let code ← requireSome .finalCodeBinding (SourceImage.bindCode? source plan 0)
+                  let bindings ← bindSymbols .finalStaticBinding .finalImportBinding plan statics
                     requests.libraryName requests.sourceNames
-                  if staticsExact : source.symbols.statics = bindings.staticBindings.sourceSymbols then
+                  if staticsExact : source.symbols.statics =
+                      bindings.staticBindings.sourceSymbols then
                     if importsExact : source.symbols.imports =
                         bindings.importBindings.sourceImports then
                       have requestedException : plan.layout.requested.exceptionTable =
                           some exceptionTable := by
                         rw [prepareImage_requested prepared]
                         rfl
-                      some ⟨unwind, source, (SourceResolve.resolve?_inputs resolved).1,
+                      .ok ⟨unwind, source, (SourceResolve.resolve?_inputs resolved).1,
                         exceptionTable, rfl, provisionalFunction, tableBytes, rfl, plan, prepared,
                         requestedException, code, pdata, pdataSelected, pdataBytesExact,
                         xdata, xdataSelected, xdataBytesExact, bindings, staticsExact, importsExact⟩
-                    else none
-                  else none
-                else none
-            else none
+                    else .error .finalImportsMismatch
+                  else .error .finalStaticsMismatch
+                else .error .xdataBytes
+            else .error .pdataBytes
+
+/-- Compatibility erases the diagnostic and cannot diverge from construction. -/
+def build? {frame rootOffset} (splice : SourceSplice.Result frame rootOffset)
+    {table : StaticObjects.Table} (statics : StaticSection.Layout table)
+    (sections : Sections) (requests : SourceImportRequests.Result splice) :
+    Option (Result splice statics sections requests) :=
+  (buildExcept splice statics sections requests).toOption
+
+theorem build?_eq_toOption {frame rootOffset} (splice : SourceSplice.Result frame rootOffset)
+    {table : StaticObjects.Table} (statics : StaticSection.Layout table)
+    (sections : Sections) (requests : SourceImportRequests.Result splice) :
+    build? splice statics sections requests =
+      (buildExcept splice statics sections requests).toOption := rfl
 
 /-- The only runtime binding covers the entire final source code payload. -/
 theorem Result.full_code_extent {frame rootOffset}
