@@ -168,12 +168,15 @@ def Action.Runs (action : Action) (record : CallProtocol.Pending Request)
 
 inductive CausalNode where
   | entry (call : CallProtocol.CallId)
+  | returned (call : CallProtocol.CallId)
   | event (id : EventId)
 deriving DecidableEq
 
 def Represented (state : CallProtocol.State Request) : CausalNode → Prop
   | .entry call => ∃ caller agent loans,
       CallProtocol.Boundary.handoff call caller agent loans ∈ state.boundaries
+  | .returned call => ∃ caller agent loans,
+      CallProtocol.Boundary.returned call caller agent loans ∈ state.boundaries
   | .event id => ∃ event ∈ state.machine.events, event.event.id = id
 
 /-- Select once outside a whole prefix derivation. No default relation is supplied. -/
@@ -196,7 +199,7 @@ structure HandoffCausality (model : CausalModel) (call : CallProtocol.CallId)
     model.precedes after (.event old.event.id) (.entry call)
 
 /-- Fixed graph obligations, including actual matched entry and exact new events.
-There is deliberately no return node in this pending-prefix interface.
+Pending-prefix steps do not themselves establish a return edge.
 Integrating these premises with `Grass.Op.step` is an open obligation. -/
 structure CausalEvidence (model : CausalModel) (call : CallProtocol.CallId)
     (record : CallProtocol.Pending Request) (action : Action)

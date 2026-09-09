@@ -12,6 +12,7 @@ import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Signatures
 import Grass.Platform.Win32.WriteFile
 import Grass.Platform.Win32.WriteFileNonresponse
+import Grass.Platform.Win32.WriteFileReturn
 
 /-!
 # Ledger coverage gate
@@ -102,7 +103,8 @@ def auditedModules : List Name :=
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
    `Grass.Platform.Win32.Signatures, `Grass.Platform.Win32.WriteFile,
-   `Grass.Platform.Win32.WriteFileNonresponse]
+   `Grass.Platform.Win32.WriteFileNonresponse,
+   `Grass.Platform.Win32.WriteFileResult, `Grass.Platform.Win32.WriteFileReturn]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -127,7 +129,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Thirteen new register-transfer/flag/operand-selection facts. Manual headings
 -- are recorded in the module; formal subject/dual-anchor coverage remains owed.
 -- No existing debt is reclassified by this addition.
-def owedBaseline : Nat := 133
+-- Raw BOOL width, DWORD observation and result conformance remain owed.
+def owedBaseline : Nat := 136
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -156,7 +159,8 @@ acquiring a citation.
 -- Fourteen new structural helpers over explicit semantic and decoder results.
 -- Two nonresponse consumers derive finite histories or accept a selected
 -- external relation; neither asserts Windows adequacy or physical nonresponse.
-def notBehaviourBaseline : Nat := 109
+-- Three generic definitions derive events or name selected evidence.
+def notBehaviourBaseline : Nat := 112
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -300,6 +304,9 @@ def notBehaviour : List Name :=
     -- Derived history and selected external relation; no new Windows behavior.
     `Grass.Platform.Win32.WriteFile.InfiniteContinuation.historyAt,
     `Grass.Platform.Win32.WriteFile.StalledPredicate,
+    `Grass.Platform.Win32.WriteFile.History.providerEvents,
+    `Grass.Platform.Win32.WriteFile.ReturnInterpretation,
+    `Grass.Platform.Win32.WriteFile.CallerInterpretation,
     -- Coordinate projection and metadata-only transport; no claim that a real
     -- Windows allocation satisfies the Prepared applicability contract.
     `Grass.Platform.Win32.WriteFile.Resolved.physical,
@@ -446,6 +453,9 @@ def owed : List Name :=
     -- no-wrap and disjointness as a selected profile, whose applicability is
     -- still external. No loan or probe result discharges those obligations.
     `Grass.Platform.Win32.WriteFile.Request.loans,
+    `Grass.Platform.Win32.WriteFile.DwordAt,
+    `Grass.Platform.Win32.WriteFile.ReturnResult,
+    `Grass.Platform.Win32.WriteFile.ReturnResult.Conforms,
     `Grass.Platform.Win32.WriteFile.Prepared,
     `Grass.ISA.X86.RegisterSemantics.Flags.bits,
     `Grass.ISA.X86.RegisterSemantics.Flags.fromBits,
@@ -579,7 +589,8 @@ def modeledDeclarations : MetaM (Array Name) := do
     -- and CPU-profile restriction in structure fields. Include its type
     -- explicitly instead of letting the generic structure filter hide them.
     -- This exception adds coverage; it exempts no future declaration.
-    if n == ``Grass.Platform.Win32.WriteFile.Prepared then
+    if n == ``Grass.Platform.Win32.WriteFile.Prepared ||
+        n == ``Grass.Platform.Win32.WriteFile.ReturnResult then
       out := out.push (userFacing n)
       continue
     if ci.isCtor || ci.isInductive || ci.isTheorem then continue

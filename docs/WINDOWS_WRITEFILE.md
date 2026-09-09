@@ -70,6 +70,30 @@ fabricate an infinite quiet execution from the fixture's single committed edge.
 
 ## External validation
 
+The [matched-return consumer](../Grass/Platform/Win32/WriteFileReturn.lean)
+requires a reached `History`, the exact successful `CallProtocol.return?`, and
+explicit physical result correspondence. It preserves the raw 32-bit BOOL:
+any nonzero value requires an initialized little-endian DWORD at the count slot,
+equal to the accepted prefix length and bounded by the request. False exposes
+no trusted count and does not constrain already accepted output. Zero-byte
+success remains possible. These observations do not execute a caller read.
+
+Return ordering uses the same graph and the exact event suffix derived from
+this history's committed edges. Actual protocol effects remove the pending
+occurrence and loans, reject replay and preserve the count observation across
+bookkeeping. A separately supplied caller continuation must execute the actual
+generic checker and extend that graph. The model does not assert that a return
+or caller continuation exists, and graph evidence never bypasses access checks.
+The current allocation-preservation transport must migrate together with the
+memory model's planned backing-storage split.
+
+Architecture and an independent Terra reviewer approved this conditional
+return boundary. The [result fixtures](../Tests/Platform/Win32WriteFileReturn.lean)
+cover non-one success, wrong counts and uninitialized slots. The
+[matched fixture](../Tests/Platform/Win32MatchedReturn.lean) constructs an actual
+handoff/return with a synthetic interpretation and rejects false interpretation
+and absent return ordering. Neither fixture asserts physical Windows behavior.
+
 Probe programs are to be authored in Grass and emitted through Hello World's
 production PE entry/import/emitter path. The
 [semantic probe cases](../Tests/Platform/Win32ProbeCases.lean) currently check
