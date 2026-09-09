@@ -23,4 +23,4 @@ reporter or other affected person.
 
 Report conduct concerns through the private route described in
 [SECURITY.md](SECURITY.md). Do not place private or safety-sensitive details in
-a public issue or agent-bus event.
+a public issue or discussion.

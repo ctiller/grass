@@ -27,8 +27,7 @@ globs = ["Grass.+"]
 
 # Fixtures live outside the library and are built by the default target, so a
 # vocabulary change that breaks the Spike 1 reference cases fails the build
-# rather than being noticed later. See docs/MEMORY_IMPLEMENTATION_PLAN.md
-# section 3.2.
+# rather than being noticed later. See docs/HELLO_WORLD.md and Tests/Memory/Spike1Reference.lean.
 [[lean_lib]]
 name = "Tests"
 globs = ["Tests.+"]

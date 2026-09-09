@@ -1,8 +1,9 @@
 # Implementation ratchet for the design spikes
 
 Status: normative future command and evidence contract. None of the commands or
-outputs in this document is claimed to exist yet. Implementing them belongs to
-the library phase, which is explicitly outside the present design exercise.
+outputs in this document is claimed to exist yet. Implement them as the active
+spike reaches each phase under [CONTRIBUTING.md](../CONTRIBUTING.md);
+the original document-only design exercise is complete.
 
 ## Purpose
 

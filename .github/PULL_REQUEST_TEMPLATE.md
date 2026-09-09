@@ -21,6 +21,5 @@ validation work. Write “none” when this change adds none.
 - [ ] The change preserves first-class assembly authoring where applicable.
 - [ ] A distinct reviewer has reviewed the selected branch snapshot.
 
-Agent-authored changes still follow `docs/AGENT_REVIEW.md`; a pull request is an
-optional intake and discussion surface, not a substitute for reviewer ownership
-of the merge.
+Review follows `docs/REVIEW.md` and `CONTRIBUTING.md`. Record the reviewed
+snapshot, findings resolved, and checks performed.

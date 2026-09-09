@@ -16,12 +16,9 @@ function Get-PathUnder([string] $Base, [string] $Full) {
 }
 
 $failures = [System.Collections.Generic.List[string]]::new()
-# The exclusions are matched against the path *relative to the repository root*,
-# never against the absolute path. Every agent works in a Claude Code worktree at
-# <repo>/.claude/worktrees/<name>, so matching '.claude' against the absolute path
-# excluded the repository root itself and therefore every file beneath it: the
-# script reported success over zero documents and exited 0. A gate that fails open
-# is worse than no gate, and this one is a required_check on review nominations.
+# Match exclusions relative to the repository root. Absolute-path matching once
+# excluded an entire checkout because its parent path contained an excluded
+# directory name, producing a false pass over zero documents.
 $documents = Get-ChildItem -LiteralPath $repositoryRoot -Recurse -File -Filter '*.md' |
     Where-Object {
         $relative = Get-PathUnder $repositoryRoot $_.FullName

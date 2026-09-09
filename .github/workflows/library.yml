@@ -15,7 +15,7 @@ name: Library build
 # theorem that did not exist. The docstring-audit tool requires a strong claim in
 # a definition or module comment to name the type or theorem enforcing it.
 #
-# A fourth check is about laws. docs/STDLIB_IMPLEMENTATION_PLAN.md decision 6
+# A fourth check is about laws. docs/STDLIB.md observation coverage
 # requires every Vec-returning operation to carry a law computing its length and
 # a law computing its get?. That rule was stated in prose three times and
 # violated in the same commit that stated it each time - most recently by

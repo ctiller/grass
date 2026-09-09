@@ -203,7 +203,7 @@ byte-stable, but their theorem types and kernel-check results do. Any permitted
 nondeterministic build metadata has an explicit whitelist and normalization
 theorem.
 
-Before the library exists, the expansion laws are review obligations.
+For each unimplemented spike, the expansion laws remain review obligations.
 `./check-spike-sources.ps1` currently proves only the normalized authored-source
 snapshot equality; it must never be cited as evidence for expansion,
 certificate, or artifact reproducibility. The script accepts `-Spike N` for a
@@ -212,10 +212,10 @@ and enforces every phase independently.
 
 ### Pre-implementation design fixpoint
 
-The present corpus is explicitly forbidden from building the supporting
-library. Its design fixpoint therefore does not require fabricated generator
-output, proof terms, timings, executable mutations, or synthetic scale runs. It
-does require:
+The original document-only design phase did not build the supporting library.
+Its design fixpoint therefore did not require generator output, proof terms,
+timings, executable mutations, or synthetic scale runs. Its review requirements
+remain useful for spikes not yet implemented:
 
 - exact classified authored source;
 - a total interface and believable proof sketch for every unavailable phase;
@@ -284,6 +284,10 @@ Every external and smeller review must answer:
    does that failure occur before any stale downstream evidence can be reused?
 
 A review which examines only the document or only the directory is incomplete.
+
+Implementation now proceeds spike by spike under [CONTRIBUTING.md](../CONTRIBUTING.md).
+The historical design fixpoint is not a prohibition on building the libraries,
+and does not waive any implementation acceptance gate.
 
 ## Initial module expectations
 

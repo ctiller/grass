@@ -45,12 +45,13 @@ The comment-free expected Lean source for all five design spikes is in
 to the annotated spike documents and generated expansions is
 [docs/SPIKE_AUTHORING.md](docs/SPIKE_AUTHORING.md).
 
-Cross-provider implementation agents coordinate through the orphan-branch
-protocol in [docs/AGENT_BUS.md](docs/AGENT_BUS.md), with exact event types in
-[docs/AGENT_BUS_SCHEMA.md](docs/AGENT_BUS_SCHEMA.md). Product changes follow
-[docs/AGENT_REVIEW.md](docs/AGENT_REVIEW.md): an author nominates a distinct
-reviewer, and that reviewer—not the author—reviews and cleanly merges a selected
-snapshot of the named product branch.
+Development proceeds one spike at a time, beginning with the existing Hello
+World source. The Lean correctness specification and prose implementation brief
+are maintained inputs; implementation is rebuilt beneath them. See
+[docs/VISION.md](docs/VISION.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+Changes receive independent peer review under [docs/REVIEW.md](docs/REVIEW.md).
+The former agent coordination system and implementation plans are retired; Git
+history and the retained agent branches preserve their spare parts.
 
 ## Repository validation
 
@@ -106,7 +107,7 @@ checking. The implementation ratchet remains documented in
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change. Suspected
 vulnerabilities or sensitive disclosures must follow
-[SECURITY.md](SECURITY.md), not a public issue or agent-bus event.
+[SECURITY.md](SECURITY.md), not a public issue or discussion.
 
 ## License
 

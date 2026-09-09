@@ -399,3 +399,18 @@ select one profile and supply application behavior; they do not reconstruct
 parser requirements or protocol laws declaration by declaration. The candidate
 interface and HTTP/2/gRPC composition shape are specified in
 [PROTOCOL_STDLIB.md](PROTOCOL_STDLIB.md).
+
+## Observation coverage
+
+Each operation exposes laws computing the observable result: for a Vec-returning
+operation, both length and indexed `get?` in terms of its arguments, or a complete
+empty/push recursion. Laws do not expose `Vec.toList` or merely restate the
+operation's own body. A definitional alias may rely on an operation that already
+meets this requirement. Scalar consumers likewise need their relevant recursion
+or observation laws. Self-equalities are not coverage.
+
+The `coverage-audit` tool checks Vec-returning definitions for non-vacuous length
+and `get?` laws, with explicit reviewed exemptions for aliases or recursion laws.
+It does not infer recursion completeness or establish semantic adequacy; review
+checks exemptions and the meaning of the laws. Negative fixtures must reject a
+lawless operation, an operation with only a length law, and self-equality laws.

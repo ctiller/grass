@@ -1,5 +1,39 @@
 # Vision and scale target
 
+## Authorship and rebuilding
+
+Grass is an intelligent compiler targeting systems of tens of millions of lines:
+databases, games, operating systems, and similarly long-lived software. Authors
+develop intent in small increments, in tandem with an intelligence. Routine proof
+work and implementation construction happen mostly out of that conversation.
+
+Two maintained inputs express intent. The precious Lean specification states
+correctness. The prose implementation brief states the qualities of an acceptable
+realization: architecture, performance priorities, representation, dependencies,
+operational qualities, and places where the author wants direct machine control.
+An implementation may satisfy Lean while failing that brief. Prose requirements
+are reviewed and, where useful, measured or checked; they are not represented as
+kernel-proved merely because the functional theorem passes. A quality requiring a
+formal guarantee becomes an explicit Lean demand by a deliberate intent change.
+
+Rebuild is the normal verb. Previous implementation and proof output are useful
+spare parts and reusable evidence, not authority over the next build. The compiler
+may retain, adapt, or replace them. Exact assembly identity binds each selected
+build to its own emitted artifact; it does not make yesterday's assembly precious.
+
+Stable subsystem contracts, banked model proofs, typed construction, predictable
+proof procedures, and explicit residual goals guide reconstruction. An intent
+change invalidates the semantic dependents it actually changes; a prose-only
+change can require regeneration even when the Lean specification stays fixed.
+Track implementation choices against their brief as well as theorem dependencies.
+Reuse certificates only when their actual dependencies remain valid.
+
+A first build demonstrates feasibility. Deliberate changes to behavior, assembly,
+and implementation policy then test what must be regenerated, reproved, and
+rechecked. Rebuild evidence must distinguish those costs. Holding the initial
+spike source steady is an experiment in faithful construction, not a permanent
+requirement to preserve generated implementation.
+
 ## 1. What Grass is for
 
 Grass exists to build large, long-lived, high-assurance software systems whose

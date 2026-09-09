@@ -101,8 +101,8 @@ structure DeterministicProcess (v : ProcessVocabulary) where
 ```
 
 The interruption, fault, and environment-violation classes are fields of the
-vocabulary, not one global classification. `agent-bus` disposition `g-design:4`
-ratified that, because a single `LogicalFault` covering HTTP/2 error codes,
+vocabulary, not one global classification. A single `LogicalFault` covering
+HTTP/2 error codes,
 Vulkan device loss, zlib corruption, and a Win32 handle violation is the closed
 whole-program sum [PROCESS_SHARDING.md](PROCESS_SHARDING.md) §10 names as a
 foundational failure, and [FOUNDATION.md](FOUNDATION.md) law 8 forbids the
@@ -462,7 +462,7 @@ abbrev ChannelOccurrence (topology : ProcessTopologyCore registry boundary)
 ```
 
 The split between `ProcessTopologyCore` and `ProcessTopology` is
-`docs/DECISIONS.md` decision 122, ruling `agent-bus` issue `c-process:10`.
+specified by [DECISIONS.md](DECISIONS.md), decision 122.
 Cancellation and supervision are *optional imported facets*, not fields every
 topology carries, so a process with no lifecycle promise pays no ceremony for
 one. `ProcessTopologyCore` is the graph, channels, and spawn authority — what a
@@ -473,13 +473,12 @@ specification and exports the corresponding aggregate lifecycle theorems.
 **Implementation status.** The facet-carrying `ProcessTopology` above is target
 text, not current code. `Grass/`'s `ProcessPlan` carries a
 `topology : ProcessTopologyCore` field and there are no facet fields anywhere in
-the corpus. `agent-bus` ruling `g-design:67` deferred the facet family to an
-explicit later `c-process` milestone rather than expanding the M4 candidate, and
-recorded the consequence: until it lands, the implemented `ProcessPlan` is
-provisional. It may not claim to discharge cancellation or supervision
+the corpus. The implemented `ProcessPlan` remains provisional until the required facet
+family and its aggregate lifecycle theorems are connected. It may not claim to discharge cancellation or supervision
 requirements, and it may not be consumed as a complete `ProcessPlan` by
-`VerifiedProgram`. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §13 carries the owner
-and the acceptance gate. Decision 122 is unchanged; this is staging.
+`VerifiedProgram`. Acceptance requires exact coverage of the boundary-selected
+facets and their cancellation/supervision laws in the final certificate.
+Decision 122 is unchanged; this is staging.
 
 The weaker object may not carry the unqualified name. A consumer holding a value
 called `ProcessTopology` is entitled to assume the lifecycle authority its type
@@ -523,9 +522,8 @@ state partition is precisely the weave leakage
 [FOUNDATION.md](FOUNDATION.md) law 15 forbids. A root that wants to model
 logically shared behaviour models it in its own `State`, and the presentation
 relates that state to the chosen partition. A role with no writable region owes
-nothing. `agent-bus` ruling `g-design:84` settles this and
-[PROCESS_IMPLEMENTATION_PLAN.md](PROCESS_IMPLEMENTATION_PLAN.md) §10.128 records
-what it closes.
+nothing. The step certificate must enforce this relation over the exact before
+and after shared state; merely declaring it on the plan does not constrain a step.
 Nothing is shared merely because two transitions mention the same Lean value.
 The later memory realization maps this logical ownership/access graph to
 provenance, loans, synchronization, allocation identity, and race-freedom
@@ -767,10 +765,8 @@ permit buffered drain or half-close and `SessionStatus` has no state that
 distinguishes those from an ordinary close. A channel that wants a death to end
 its session says so in an explicit channel or session policy. What holds of every
 channel is the narrower fact, and it is where the check belongs: a dead sender
-cannot send. `agent-bus` ruling `g-design:83` settles this, and
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.125 records the world it closes — a
-sender present and dead, its death recorded against the session, the session
-still open, and an ordinary second send constructible from it.
+cannot send. A negative fixture must reject a second send from a present but
+dead sender whose death is recorded against a still-open session.
 
 The evidence is transition-certificate evidence: a constructor or macro emitting
 a send derives the sender's liveness from the world it is already stepping, and
