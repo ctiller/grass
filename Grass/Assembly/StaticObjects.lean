@@ -1,3 +1,4 @@
+import Grass.Std.Logical.ListLookup
 import Grass.Std.Logical.Vec
 import Lean.Parser
 
@@ -77,32 +78,11 @@ theorem Table.lookup?_member {table : Table} {name : String} {declaration : Decl
     declaration ∈ table.declarations := by
   exact List.mem_of_find?_eq_some found
 
-private theorem find_name_of_mem {declarations : List Declaration}
-    (unique : (declarations.map Declaration.name).Nodup)
-    {declaration : Declaration} (member : declaration ∈ declarations) :
-    declarations.find? (fun candidate => candidate.name = declaration.name) =
-      some declaration := by
-  induction declarations with
-  | nil => simp at member
-  | cons head tail ih =>
-      simp only [List.map_cons, List.nodup_cons] at unique
-      simp only [List.mem_cons] at member
-      rcases member with same | member
-      · subst declaration
-        simp
-      · have different : head.name ≠ declaration.name := by
-          intro same
-          exact unique.1 (by
-            apply List.mem_map.mpr
-            exact ⟨declaration, member, same.symm⟩)
-        rw [List.find?_cons_of_neg (by simpa using different)]
-        exact ih unique.2 member
-
 /-- Every declaration is retrieved by its unique authored name. -/
 theorem Table.lookup?_complete (table : Table) {declaration : Declaration}
     (member : declaration ∈ table.declarations) :
     table.lookup? declaration.name = some declaration := by
-  exact find_name_of_mem table.names_unique member
+  exact Grass.Std.Logical.find?_key_of_mem table.names_unique member
 
 end Grass.Assembly.StaticObjects
 

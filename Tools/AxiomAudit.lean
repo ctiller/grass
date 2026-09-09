@@ -22,6 +22,9 @@ import Grass.Refinement.Console.WriteFileHistory
 import Grass.Refinement.Console.WriteFileNonresponse
 import Grass.Platform.Win32.WriteFileReturn
 import Grass.Refinement.Console.WriteFilePolicy
+import Grass.Artifact.PE.ExceptionBinding
+import Grass.ISA.X86.EndianBridge
+import Grass.Assembly.SourceRuntimeFunction
 import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
 import Grass.Assembly.X86ControlFlow
@@ -109,6 +112,7 @@ import Grass.Memory.Audit
 import Grass.Memory.Authority
 import Grass.Memory.Coordinates
 import Grass.Memory.StorageId
+import Grass.Memory.Backing
 import Grass.Memory.Event
 import Grass.Memory.Fault
 import Grass.Memory.Ordering

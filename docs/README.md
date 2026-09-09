@@ -70,6 +70,9 @@ comments are historical provenance available in Git, not active instructions.
 - [SPIKE1_BOUNDARY_REVIEW.md](SPIKE1_BOUNDARY_REVIEW.md) records the console
   interface review, ownership and remaining proof obligations; it is a review
   snapshot, not a replacement normative contract.
+- [HELLO_FACADE_BOUNDARY.md](HELLO_FACADE_BOUNDARY.md) records the required
+  unchanged-source facade/root signatures, owners and reviewed terminal
+  observation direction; it does not claim the migration is implemented.
 - [SPIKE_1.md](SPIKE_1.md) is its annotated proof from portable specification to
   emitted Win32 PE bytes.
 - [SORT.md](SORT.md) defines the second acceptance milestone.

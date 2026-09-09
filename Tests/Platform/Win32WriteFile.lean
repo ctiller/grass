@@ -8,11 +8,34 @@ open Grass.Platform.Win32.WriteFile
 open Grass.Tests.Spike1
 
 def bytes : Vec Byte := .fromList [11, 22, 33]
+
+private def fixtureBackings : FreshSupply StorageTag := .initial
+private def fixtureBacking : StorageId := fixtureBackings.fresh.1
+private def fixtureBackingRecord : BackingRecord :=
+  { capacity := 4096, bytes := ByteStore.empty.write 0 bytes.toList true }
+
 def allocation : AllocationRecord :=
   { Tests.Memory.Spike1Block.stackRecord with
-    bytes := ByteStore.empty.write 0 bytes.toList true }
-def memory : MemoryState :=
-  (MemoryState.empty.allocate? stackAlloc allocation).getD .empty
+    backing := fixtureBacking, origin := 0 }
+
+private def installed? : Option MemoryState :=
+  MemoryState.empty.installBacking? fixtureBacking fixtureBackingRecord
+
+private def installed : MemoryState := installed?.getD .empty
+
+private def memory? : Option MemoryState := installed.allocate? stackAlloc allocation
+
+def memory : MemoryState := memory?.getD .empty
+
+private theorem installed_setup_succeeds : installed?.isSome := by decide
+theorem memory_setup_succeeds : memory?.isSome := by decide
+
+private theorem installed_from_door :
+    MemoryState.empty.installBacking? fixtureBacking fixtureBackingRecord = some installed := by
+  rfl
+
+private theorem memory_from_door : installed.allocate? stackAlloc allocation = some memory := by
+  rfl
 def request : Request :=
   { handle := 123, requested := 3, bytes := bytes
     buffer := ⟨stackProvenance, ⟨0, 3⟩⟩
@@ -20,19 +43,32 @@ def request : Request :=
 
 theorem lookup_exact (root : AllocId) :
     memory.allocations.lookup root = if root = stackAlloc then some allocation else none := by
-  simp [memory, MemoryState.allocate?, MemoryState.empty, FiniteMap.lookup_insert]
+  by_cases same : root = stackAlloc
+  · subst root
+    simp [MemoryState.allocate?_lookup_self memory_from_door]
+  · rw [if_neg same]
+    rw [MemoryState.allocate?_lookup_ne memory_from_door same]
+    rw [MemoryState.allocations_installBacking? installed_from_door]
+    rfl
 
 def resolved (range : ByteRange) (contained : stackProvenance.extent.Contains range) :
     Resolved memory ⟨stackProvenance, range⟩ where
   allocation := allocation
-  lookup := by change memory.allocations.lookup stackAlloc = some allocation; decide
-  live := rfl
-  epoch := rfl
-  space := rfl
-  source := rfl
-  extent := rfl
-  nested := by change stackProvenance.Nested; decide
-  contained := contained
+  backing := fixtureBackingRecord
+  allocationLookup := by change memory.allocations.lookup stackAlloc = some allocation; decide
+  backingLookup := by change memory.backings.lookup fixtureBacking = some fixtureBackingRecord; decide
+  allocationLive := rfl
+  epochAgrees := rfl
+  spaceAgrees := rfl
+  sourceAgrees := rfl
+  extentAgrees := rfl
+  provenanceNested := by change stackProvenance.Nested; decide
+  rangeInProvenance := contained
+  coordinates :=
+    { withinView := by
+        rw [show allocation.extent = stackProvenance.rootExtent by rfl]
+        exact (Provenance.extent_within_root (by decide)).trans contained
+      viewWithinBacking := by decide }
   base := stackBaseAddress
   placed := rfl
   noWrap := by decide
@@ -46,7 +82,7 @@ def prepared : Prepared memory request where
   bufferCPU := rfl
   countCPU := rfl
   separated := by decide
-  unaliased := rfl
+  dedicated := by decide
   placement := by
     intro root record found _ _
     rw [lookup_exact] at found

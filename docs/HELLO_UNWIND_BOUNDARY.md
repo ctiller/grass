@@ -80,11 +80,11 @@ extension unless spikes explicitly assigns it otherwise.
 * `Prologue.codes_stackDelta` in `Grass/ABI/Win64/Unwind.lean` equates total
   stack-depth arithmetic. Its comment explicitly leaves register restoration
   and ordering separate. It is not a full semantic unwind theorem.
-* The inspected Windows PE `OptionalHeader.writeDataDirectories` populates
-  imports and leaves other directories absent. Adding metadata as raw sections
-  without changing this directory path would not complete the connection.
-  The independent reader currently retains the later directory bytes opaquely;
-  its expected records and exact roundtrip proofs must track the extension.
+* Windows PE `OptionalHeader.writeDataDirectories` now populates the exception
+  directory from the checked layout. `exceptionTableValid` checks the actual
+  table and unwind slices, and `ImagePlan.exceptionTable_binding` connects the
+  directory to the independent runtime-table reader. These are container facts;
+  they do not establish source-prologue reversal or loaded execution.
 
 The current regression fixture encodes three two-byte pushes of `r12`, `r13`,
 `r14`, followed by four-byte allocation of 48 bytes. It expects instruction-end
@@ -93,14 +93,16 @@ handler; and 12 bytes of unwind information. Those are existing fixture values,
 not new caller inputs. Derive them from the realized source and recompute when
 its encoding or frame changes.
 
-## Acceptance obligations that remain
+## Acceptance progress and remaining obligations
 
-1. Extend the PE writer and independent reader/roundtrip to carry the exact
-   exception-directory entry, table bytes and unwind bytes. Check malformed
-   range, alignment and target cases as well as the successful fixture.
-2. Bind the prologue result to the final code prefix and table range after
-   source resolution. Code offsets are relative to the function start, not the
-   image base or end of the generated prefix.
+1. Structural attachment is implemented in `SourceLinkedImage`: the final
+   checked plan carries a present exception table, a whole-code function extent
+   and exact source-derived unwind bytes in separate metadata sections. The
+   writer, independent reader and malformed range, alignment, payload and
+   target controls are implemented.
+2. `SourceLinkedImage.Result.unwind_source_prefix` binds the metadata header to
+   the final source-derived prologue prefix. Code offsets are derived relative
+   to the function start. This is a byte/layout theorem, not semantic reversal.
 3. Prove unwind reversal for the realized prologue: saved registers, stack
    contents and caller context, including permitted partial-prologue states.
    Body invariants must preserve the frame needed by that interpretation.
@@ -113,13 +115,82 @@ its encoding or frame changes.
    about the modeled artifact, not by itself a proof of platform adequacy or
    safe emitted execution.
 
+## Canonical execution and receipt boundary
+
+Architecture, x86 and memory have aligned the next bounded execution interface.
+The proposed `Grass.ISA.X86.Execution.State` contains the existing
+`Grass.Memory.MachineState` exactly once, a `Gpr -> BitVec 64` file, `rip` and
+full `rflags`. The existing six-field `RegisterSemantics.Flags` is derived from
+`rflags`; it is not a second stored flags value or a full-RFLAGS serialization.
+Instruction laws must account for full-flag changes under the selected profile,
+including any RF/debug/fault effects. A default preservation claim for every
+non-status bit is not justified by arithmetic status-flag laws.
+
+ISA primitives must not import `Assembly`. A fetched-instruction witness binds
+checked code observation at the actual RIP to decoding, instruction length and
+nonwrapping next RIP. The source adapter then proves those bytes and operands
+are the final `SourceResolve` generated prefix, using its saved/allocation
+encoding and prologue/header identities. The register list and allocation
+immediate come from that result, not a second handwritten operation sequence.
+
+The proposed PUSH access derives the eight-byte slot at pre-RSP minus eight
+and the bytes of the selected pre-state register. It consumes the existing
+`Op.step`, prepared access and descriptor-scoped oracle; raw `writeResolved`
+does not execute an instruction. SUB reuses existing immediate arithmetic but
+still needs its actual admitted computation/outcome and full-state transfer.
+
+There is no existing generic instruction-completion receipt to alias. The
+bounded x86 receipt must retain the actual operation, descriptor, policy,
+context and selected fault plan. Completion requires the exact
+`Op.step = .ran after` equation, no selected fault for that sequence and a clean
+audit ledger. For PUSH and the saved-slot read, the actual selected sequence is
+exactly the single access; an advertised memory facet alone is insufficient.
+Preparation and the exact committed oracle answer are indexed by the actual
+reached execution state, including `noteContext`. Equal memory alone does not
+transport an arbitrary oracle callback across that context change. Read data
+must equal the prepared initialized backing observation. Compute-only SUB has
+no access answer requirement. The fresh completed event, read length and
+appropriate byte-preservation equations are derived from these actual receipts,
+not separately supplied output assumptions.
+Successful preparation, `.ran` or a standalone `CompleteCommitted` value alone
+does not establish instruction completion.
+
+Rejected, denied, permitted fault/interruption and completed outcomes remain
+distinct. Architectural register/PC/write effects on fault need ISA-specific
+authority; generic committed-prefix bounds do not supply all-or-nothing PUSH
+semantics. A completed-prefix reversal theorem may require completed receipts,
+but the surrounding execution correspondence must still retain faulted branches.
+
+The inverse saved-register read uses the same memory machine, actual checker,
+explicit reader authority/context and initialized bytes. Its completed read
+appends the actual read event; memory-byte preservation is a derived law.
+It is not new POP semantics or permission
+to bypass conflicts because the consumer is an unwinder. Shared endian proofs
+connect existing `le64` save bytes to the checked read interpretation.
+
+| Part | Owner |
+|---|---|
+| Canonical x86 carrier, decoded primitive transfer, full flags and architectural fault behavior | x86 |
+| Prepared/resolved access, actual memory-step evidence, byte/init preservation and untouched-frame laws | memory-model |
+| Exact final source/fetch connection, partial-prefix induction and body-preserves-frame composition | spikes/lowering |
+| Metadata-selected inverse operation and Windows interruption-PC interpretation | Windows/ABI |
+| Byte-representation equalities only | library specialist |
+
+The pending backing migration supplies `ResolvedAccess`, checked observation,
+`afterWrite` and span-disjoint preservation without another stack byte store.
+Physical stack placement and RSP/range correspondence remain explicit inputs.
+These are agreed interface requirements, not claims that the new x86 receipt,
+complete source execution or unwind reversal theorem has been implemented.
+
 Spikes owns dispatch and integration of this composition. Windows supplies the
 format-validity boundary; source/ABI and lowering supply exact instruction and
 frame semantics. Architecture resolves interface conflicts. A format-only
 checkpoint can proceed with these remaining obligations explicit; final Hello
 acceptance cannot omit them or replace them with a successful normal run.
 
-Validation: Windows independently reviewed the full document and relevant
-source declarations with no blocking findings. `check-doc-links.sh` passed for
-all 57 Markdown files; the staged diff passed `git diff --cached --check`.
+Validation: Windows independently reviewed the original document and relevant
+source declarations. x86 and memory-model independently reviewed the canonical
+execution addition; their receipt-indexing clarifications are incorporated.
+`check-doc-links.sh` passed for all 58 Markdown files; the diff passed
+`git diff --check`.
 No new implementation or semantic proof is claimed by this document checkpoint.

@@ -94,7 +94,7 @@ theorem ImageLayout.sourceLengths_eq_virtualSizes (layout : ImageLayout)
   rw [layout.placed_eq] at member
   exact (placed_virtualSize_eq _ _ _ _ _ placedSection member).symm
 
-/-- Same-length replacements retain every consumer-visible coordinate between
+/-- Same-length replacements retain section, entry and import coordinates between
 two independently checked layouts. Actual section contents remain in each layout;
 this theorem neither equates bytes nor asserts preparation succeeds. -/
 theorem ImageLayout.coordinates_eq_of_lengths_eq (left right : ImageLayout)
@@ -141,5 +141,24 @@ theorem ImagePlan.resolveSectionLocation?_rva (plan : ImagePlan) (location : Sec
   rename_i outside
   rw [Vec.get?_eq_none _ outside]
   rfl
+
+/-- Equal exception-table locations and sizes retain the directory coordinates
+across same-length payload replacements, including changed unwind/table bytes.
+Both final plans still require their own byte-coupling validation. -/
+theorem ImageLayout.exceptionDirectory_eq_of_lengths_eq (left right : ImageLayout)
+    (sizes : sectionSizes left.requested = sectionSizes right.requested)
+    (imports : left.requested.imports = right.requested.imports)
+    (table : left.requested.exceptionTable.map ExceptionTableDescription.table =
+      right.requested.exceptionTable.map ExceptionTableDescription.table) :
+    left.exceptionDirectory = right.exceptionDirectory := by
+  have spans := left.placementSpans_eq_of_lengths_eq right sizes imports
+  have resolveEq := fun location => resolveSectionLocation?_eq_of_placementSpans_eq
+    location spans left.sourceLengths_eq_virtualSizes right.sourceLengths_eq_virtualSizes
+  unfold ImageLayout.exceptionDirectory
+  cases lh : left.requested.exceptionTable <;>
+    cases rh : right.requested.exceptionTable <;> simp [lh, rh] at table ⊢
+  rename_i l r
+  rw [table, resolveEq]
+  exact ⟨rfl, rfl⟩
 
 end Grass.Artifact.PE

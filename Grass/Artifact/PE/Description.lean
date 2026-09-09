@@ -56,6 +56,26 @@ structure SectionLocation where
   offset : Nat
 deriving DecidableEq
 
+/-- A complete nonempty payload range, with an exclusive end allowed at section end. -/
+structure SectionExtent where
+  location : SectionLocation
+  size : Nat
+deriving DecidableEq
+
+/-- Format coupling for one runtime-function entry. ABI/source consumers retain
+the proof that `unwindBytes` describes the actual prologue; PE checks placement. -/
+structure RuntimeFunctionBinding where
+  code : SectionExtent
+  unwind : SectionExtent
+  unwindBytes : Std.Logical.ByteArray
+deriving DecidableEq
+
+/-- A table's actual section range and the ordered function bindings it encodes. -/
+structure ExceptionTableDescription where
+  table : SectionExtent
+  functions : Vec RuntimeFunctionBinding
+deriving DecidableEq
+
 /-- The instruction-independent input to PE image construction. Section and
 import order is part of the requested image. No caller-authored absolute RVA is
 accepted for the entry point. -/
@@ -63,6 +83,7 @@ structure ExecutableImageDescription where
   entryPoint : SectionLocation
   sections : Vec RawSection
   imports : Vec ImportLibrary
+  exceptionTable : Option ExceptionTableDescription := none
 deriving DecidableEq
 
 end Grass.Artifact.PE

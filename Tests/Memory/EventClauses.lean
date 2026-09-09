@@ -59,6 +59,7 @@ open Grass.Core Grass.Memory
 
 private def events : FreshSupply EventTag := .initial
 private def allocs : FreshSupply AllocTag := .initial
+private def storages : FreshSupply StorageTag := .initial
 private def contexts : FreshSupply ContextTag := .initial
 private def epochs : FreshSupply EpochTag := .initial
 
@@ -74,6 +75,9 @@ private def epoch : EpochId := epochs.fresh.1
 def prov : Provenance :=
   { space := .cpuVirtual, root := buffer, epoch := epoch, source := .virtualAlloc
     rootExtent := ⟨0, 64⟩, path := [] }
+
+/-- The captured backing mapping for the fixture events. -/
+def mapping : Coordinates.Mapping := ⟨storages.fresh.1, 0⟩
 
 /-- The device space this fixture uses, so the clause about space agreement has a real
 second space to disagree with rather than an invented one. -/
@@ -127,9 +131,9 @@ def sealClauses (e : MemoryEvent) : List String :=
    else ["writeValueAbsent"]) ++
   (if e.kind.touchesMemory = false → e.range.IsEmpty then []
    else ["noLocationWhenUntouched"]) ++
-  (if ∀ bytes ∈ e.valueWritten, bytes.length = e.committedWriteRange.size then []
+  (if (e.valueWritten.map List.length).getD 0 = e.writeCommitted then []
    else ["writtenLength"]) ++
-  (if ∀ bytes ∈ e.valueRead, bytes.length = e.committedReadRange.size then []
+  (if (e.valueRead.map List.length).getD 0 = e.readCommitted then []
    else ["readLength"]) ++
   (if e.status.WellFormed e.range.size then [] else ["statusWellFormed"]) ++
   (if e.status.committedReads = e.readCommitted then [] else ["statusAgreesWithReads"]) ++
@@ -145,7 +149,7 @@ def store : MemoryEvent :=
     context := { id := thread, kind := .thread }
     cause := ⟨⟨"fixture"⟩⟩
     space := AddressSpace.cpuVirtual64
-    provenance := prov, range := ⟨0, 8⟩, kind := .write
+    provenance := prov, range := ⟨0, 8⟩, mapping := mapping, kind := .write
     valueRead := Option.none, valueWritten := some (List.replicate 8 0xAB)
     ordering := .plain, status := .completed 0 8
     readCommitted := 0, writeCommitted := 8 }
@@ -186,7 +190,7 @@ to prevent. -/
 
 /-- `readValuePresent`: a reading event with no observed bytes. -/
 def readValuePresentNeighbour : MemoryEvent :=
-  { readStore with valueRead := Option.none }
+  { readStore with valueRead := Option.none, status := .completed 0 0, readCommitted := 0 }
 
 /-- `readValueAbsent`: a non-reading event carrying observed bytes.
 
@@ -198,7 +202,7 @@ def readValueAbsentNeighbour : MemoryEvent := { store with valueRead := some [] 
 
 /-- `writeValuePresent`: a writing event with no written bytes. -/
 def writeValuePresentNeighbour : MemoryEvent :=
-  { store with valueWritten := Option.none }
+  { store with valueWritten := Option.none, status := .completed 0 0, writeCommitted := 0 }
 
 /-- `writeValueAbsent`: a non-writing event carrying written bytes. Empty for the same
 reason as `readValueAbsentNeighbour`: the fence's committed write range is empty, so
@@ -224,17 +228,26 @@ def writtenLengthNeighbour : MemoryEvent :=
 def readLengthNeighbour : MemoryEvent :=
   { readStore with valueRead := some (List.replicate 4 0xAB) }
 
+/-- A raw read event cannot report a write prefix without a written value. -/
+def ghostWriteOnReadNeighbour : MemoryEvent :=
+  { readStore with status := .completed 8 4, writeCommitted := 4 }
+
+/-- Symmetrically, a raw write event cannot report an observed prefix without a
+read value. -/
+def ghostReadOnWriteNeighbour : MemoryEvent :=
+  { store with status := .completed 4 8, readCommitted := 4 }
+
 /-- `statusWellFormed`: neither the status nor, through it, the event's own counts
 exceed the range.
 
-The written value stays at eight bytes rather than growing with the count, because
-`committedWriteRange` is `range.take writeCommitted` and `take` is capped by the range
-— so a sixteen-byte value would fail `writtenLength` as well and this neighbour would
-prove nothing. There were two further clauses bounding `readCommitted` and
+The written value grows with the claimed count, so `writtenLength` keeps agreeing and
+the neighbour isolates the status bound. There were two further clauses bounding `readCommitted` and
 `writeCommitted` directly; no event can fail either without failing this one, which is
 why they are gone and `MemoryEvent.readCommitted_le_size` states what they said. -/
 def statusWellFormedNeighbour : MemoryEvent :=
-  { store with status := .completed 0 16, writeCommitted := 16 }
+  { store with
+    valueWritten := some (List.replicate 16 0xAB)
+    status := .completed 0 16, writeCommitted := 16 }
 
 /-- `statusAgreesWithReads`: the status and the counts are the same two facts. Review
 built an event whose status said it observed nothing while `readCommitted` said eight,
@@ -301,6 +314,14 @@ theorem a_short_written_value_is_refused : ¬ writtenLengthNeighbour.WellFormed 
 theorem a_short_observed_value_is_refused : ¬ readLengthNeighbour.WellFormed := by
   decide
 
+/-- A read's absent write value forces a zero committed write count. -/
+theorem a_read_with_a_ghost_write_prefix_is_refused :
+    ¬ ghostWriteOnReadNeighbour.WellFormed := by decide
+
+/-- A write's absent read value forces a zero committed read count. -/
+theorem a_write_with_a_ghost_read_prefix_is_refused :
+    ¬ ghostReadOnWriteNeighbour.WellFormed := by decide
+
 /-- The status does not claim more bytes than the range covers. -/
 theorem a_status_claiming_more_than_the_range_is_refused :
     ¬ statusWellFormedNeighbour.WellFormed := by decide
@@ -345,13 +366,15 @@ theorem each_neighbour_fails_exactly_one_clause :
     sealClauses noLocationWhenUntouchedControlNeighbour = ["noLocationWhenUntouched"] ∧
     sealClauses writtenLengthNeighbour = ["writtenLength"] ∧
     sealClauses readLengthNeighbour = ["readLength"] ∧
+    sealClauses ghostWriteOnReadNeighbour = ["writtenLength"] ∧
+    sealClauses ghostReadOnWriteNeighbour = ["readLength"] ∧
     sealClauses statusWellFormedNeighbour = ["statusWellFormed"] ∧
     sealClauses statusAgreesWithReadsNeighbour = ["statusAgreesWithReads"] ∧
     sealClauses statusAgreesWithWritesNeighbour = ["statusAgreesWithWrites"] ∧
     sealClauses spaceAgreesWithProvenanceNeighbour = ["spaceAgreesWithProvenance"] := by
   refine ⟨by decide, by decide, by decide, by decide, by decide, by decide, by decide,
     by decide, by decide, by decide, by decide, by decide, by decide, by decide,
-    by decide, by decide⟩
+    by decide, by decide, by decide, by decide⟩
 
 /-- **This function is the seal, and not a paraphrase of it.**
 
@@ -414,9 +437,9 @@ theorem each_label_names_its_clause (e : MemoryEvent) :
     ("noLocationWhenUntouched" ∈ sealClauses e ↔
       ¬ (e.kind.touchesMemory = false → e.range.IsEmpty)) ∧
     ("writtenLength" ∈ sealClauses e ↔
-      ¬ (∀ bytes ∈ e.valueWritten, bytes.length = e.committedWriteRange.size)) ∧
+      ¬ ((e.valueWritten.map List.length).getD 0 = e.writeCommitted)) ∧
     ("readLength" ∈ sealClauses e ↔
-      ¬ (∀ bytes ∈ e.valueRead, bytes.length = e.committedReadRange.size)) ∧
+      ¬ ((e.valueRead.map List.length).getD 0 = e.readCommitted)) ∧
     ("statusWellFormed" ∈ sealClauses e ↔ ¬ e.status.WellFormed e.range.size) ∧
     ("statusAgreesWithReads" ∈ sealClauses e ↔
       ¬ (e.status.committedReads = e.readCommitted)) ∧
@@ -425,5 +448,75 @@ theorem each_label_names_its_clause (e : MemoryEvent) :
     ("spaceAgreesWithProvenance" ∈ sealClauses e ↔
       ¬ (e.space.id = e.provenance.space)) := by
   refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> simp [sealClauses]
+
+/-! ## Historical backing footprints
+
+These examples exercise the event-local backing coordinate captured at emission.
+They do not consult `MemoryState`: relating a captured mapping to the state that
+emitted it belongs to execution, where the allocation table is available. -/
+
+def shiftedMapping : Coordinates.Mapping := { mapping with origin := 8 }
+def otherMapping : Coordinates.Mapping := ⟨storages.fresh.2.fresh.1, 0⟩
+def otherBuffer : AllocId := allocs.fresh.2.fresh.1
+def otherSpaceProv : Provenance :=
+  { prov with root := otherBuffer, space := .deviceHostVisible }
+
+/-- Equal local ranges can be disjoint when their captured view origins differ. -/
+def shiftedWriter : MemoryEvent := { store with mapping := mapping }
+def shiftedReader : MemoryEvent := { readStore with mapping := shiftedMapping }
+
+/-- The same physical bytes conflict even when local offsets are shifted between views. -/
+def shiftedOverlapWriter : MemoryEvent := { store with mapping := shiftedMapping }
+def shiftedOverlapReader : MemoryEvent :=
+  { readStore with range := ⟨8, 8⟩, mapping := mapping }
+
+/-- The same local offsets on distinct backings do not conflict. -/
+def otherBackingReader : MemoryEvent := { readStore with mapping := otherMapping }
+
+/-- A different allocation and address space can still describe the same historical
+backing bytes. Conflict checks use the captured span, never either of these labels. -/
+def sharedBackingOtherSpaceReader : MemoryEvent :=
+  { readStore with space := deviceHostVisible64, provenance := otherSpaceProv, mapping := mapping }
+
+/-- A partial RMW reads eight bytes but writes only its first four. -/
+def partialRmw : MemoryEvent :=
+  { readStore with
+    kind := .readModifyWrite
+    valueWritten := some (List.replicate 4 0xAB)
+    status := .completed 8 4
+    readCommitted := 8
+    writeCommitted := 4 }
+
+/-- This read overlaps only `partialRmw`'s read prefix, not its write prefix. -/
+def readOnlyRmwTail : MemoryEvent :=
+  { readStore with
+    range := ⟨4, 4⟩
+    valueRead := some (List.replicate 4 0xAB)
+    status := .completed 4 0
+    readCommitted := 4 }
+
+theorem shifted_local_ranges_are_disjoint :
+    ¬ shiftedWriter.FootprintsConflict shiftedReader := by decide
+
+theorem shifted_views_of_the_same_backing_overlap :
+    shiftedOverlapWriter.FootprintsConflict shiftedOverlapReader := by decide
+
+theorem distinct_backings_do_not_conflict :
+    ¬ shiftedWriter.FootprintsConflict otherBackingReader := by decide
+
+theorem same_captured_backing_conflicts_across_provenance_and_space :
+    shiftedWriter.provenance.root ≠ sharedBackingOtherSpaceReader.provenance.root ∧
+    shiftedWriter.space.id ≠ sharedBackingOtherSpaceReader.space.id ∧
+    MemoryEvent.Conflicts MemoryEvent.atomicsAreNever shiftedWriter sharedBackingOtherSpaceReader := by
+  decide
+
+theorem rmw_read_read_overlap_is_not_a_conflict :
+    ¬ MemoryEvent.Conflicts MemoryEvent.atomicsAreNever partialRmw readOnlyRmwTail := by decide
+
+/-- Changing another mapping value cannot rewrite an already-captured event mapping. -/
+theorem captured_mapping_is_historical :
+    shiftedWriter.committedWriteSpan = mapping.span shiftedWriter.committedWriteRange ∧
+    shiftedWriter.committedWriteSpan ≠
+      shiftedMapping.span shiftedWriter.committedWriteRange := by decide
 
 end Tests.Memory.EventClauses

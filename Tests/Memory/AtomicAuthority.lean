@@ -41,6 +41,20 @@ private def epochs : FreshSupply EpochTag := .initial
 private def contexts : FreshSupply ContextTag := .initial
 private def grants : FreshSupply GrantTag := .initial
 
+private def stores : FreshSupply StorageTag := .initial
+private def counterBacking : StorageId := stores.fresh.1
+private def atomicBacking : StorageId := stores.fresh.2.fresh.1
+private def readOnlyBacking : StorageId := stores.fresh.2.fresh.2.fresh.1
+
+private def backingState : MemoryState :=
+  ((MemoryState.empty.installBacking? counterBacking ⟨8, .empty⟩).bind
+    (fun s => (s.installBacking? atomicBacking ⟨8, .empty⟩).bind
+      (fun s => s.installBacking? readOnlyBacking ⟨8, .empty⟩))).getD .empty
+
+example : (backingState.backings.lookup counterBacking).isSome ∧
+    (backingState.backings.lookup atomicBacking).isSome ∧
+    (backingState.backings.lookup readOnlyBacking).isSome := by decide +kernel
+
 /-- The shared word. -/
 def counter : AllocId := allocs.fresh.1
 
@@ -81,18 +95,18 @@ def counterProv : Provenance :=
 
 /-- A state owning the word. -/
 def owned : MemoryState :=
-  (MemoryState.empty.allocate? counter
+  (backingState.allocate? counter
     { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
       source := .virtualAlloc, owners := [lender]
-      permission := .readWrite, live := true, bytes := .empty
+      permission := .readWrite, live := true, backing := counterBacking, origin := 0
       base := some 0x2000 }).getD .empty
 
 /-- The allocation happened, so `getD` did not fall back to the empty state. -/
 theorem the_allocation_succeeds :
-    (MemoryState.empty.allocate? counter
+    (backingState.allocate? counter
       { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
         source := .virtualAlloc, owners := [lender]
-        permission := .readWrite, live := true, bytes := .empty
+        permission := .readWrite, live := true, backing := counterBacking, origin := 0
         base := some 0x2000 }).isSome := by decide
 
 /-- Read/write conveyed for **atomic** access only. §3's atomic shared access,
@@ -318,7 +332,7 @@ def pagedAtomically : MemoryState :=
   (owned.allocate? atomicPage
     { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
       source := .virtualAlloc, owners := [lender]
-      permission := .atomicReadWrite, live := true, bytes := .empty
+      permission := .atomicReadWrite, live := true, backing := atomicBacking, origin := 0
       base := some 0x3000 }).getD owned
 
 /-- An ordinary write to it. Its declared permission is what the page grants. -/
@@ -362,7 +376,7 @@ def pagedReadOnly : MemoryState :=
   (pagedAtomically.allocate? readOnlyPage
     { extent := ⟨0, 8⟩, epoch := epoch, space := .cpuVirtual
       source := .virtualAlloc, owners := [lender]
-      permission := .readOnly, live := true, bytes := .empty
+      permission := .readOnly, live := true, backing := readOnlyBacking, origin := 0
       base := some 0x4000 }).getD pagedAtomically
 
 /-- An ordinary **read** of it, declaring more than the page carries. -/

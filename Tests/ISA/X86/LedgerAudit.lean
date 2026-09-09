@@ -1,5 +1,6 @@
 import Lean.Elab.Command
 import Grass.ISA.X86.Bytes
+import Grass.ISA.X86.EndianBridge
 import Grass.ISA.X86.BasicInstructions
 import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.ImmediateArithmetic
@@ -20,6 +21,7 @@ import Grass.Platform.Win32.WriteFileNonresponse
 import Grass.Platform.Win32.WriteFileReturn
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
+import Grass.Artifact.PE.ExceptionBinding
 
 /-!
 # Ledger coverage gate
@@ -103,7 +105,7 @@ The citation machinery itself is not modeled behaviour and is not audited: a
 def auditedModules : List Name :=
   [`Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.BasicInstructions,
-   `Grass.ISA.X86.Rel32,
+   `Grass.ISA.X86.Rel32, `Grass.ISA.X86.EndianBridge,
    `Grass.ISA.X86.ImmediateArithmetic,
    `Grass.ISA.X86.RegisterSemantics, `Grass.ISA.X86.RegisterDecode,
    `Grass.ISA.X86.RegisterLaws,
@@ -117,6 +119,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileResult, `Grass.Platform.Win32.WriteFileReturn,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
+   `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
+   `Grass.Artifact.PE.ExceptionBinding,
    `Grass.Artifact.PE.HeaderPrefix, `Grass.Artifact.PE.OptionalHeader,
    `Grass.Artifact.PE.SectionTable, `Grass.Artifact.PE.ReaderCore,
    `Grass.Artifact.PE.PrefixReader, `Grass.Artifact.PE.OptionalReader,
@@ -152,7 +156,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Matched-return adds raw BOOL width, DWORD observation and result conformance.
 -- Seven execution-foundation facts add length/flag/encoding obligations.
 -- No prior debt moves to notBehaviour or becomes cited through these tests.
-def owedBaseline : Nat := 214
+-- Exception tables add 18 schema, flag, serialization and validation obligations.
+def owedBaseline : Nat := 232
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -184,7 +189,8 @@ acquiring a citation.
 -- Two nonresponse consumers derive finite histories or accept a selected
 -- external relation; neither asserts Windows adequacy or physical nonresponse.
 -- Three new generic definitions derive history events or name selected evidence.
-def notBehaviourBaseline : Nat := 149
+-- Ten exception helpers traverse, project or compare already selected values.
+def notBehaviourBaseline : Nat := 159
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -332,6 +338,17 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.WriteFile.History.providerEvents,
     `Grass.Platform.Win32.WriteFile.ReturnInterpretation,
     `Grass.Platform.Win32.WriteFile.CallerInterpretation,
+    -- Exception traversal, masks and projections add no format policy.
+    `Grass.Artifact.PE.resolveExtent?,
+    `Grass.Artifact.PE.writeRuntimeFunctions,
+    `Grass.Artifact.PE.writeRuntimeFunctionTable,
+    `Grass.Artifact.PE.hasFlag,
+    `Grass.Artifact.PE.extentDisjoint,
+    `Grass.Artifact.PE.resolveRuntimeFunctions?,
+    `Grass.Artifact.PE.runtimeBindingsValid?,
+    `Grass.Artifact.PE.ImageLayout.ExceptionsValid,
+    `Grass.Artifact.PE.readRuntimeFunctions,
+    `Grass.Artifact.PE.ResolvedRuntimeFunction.expectedRecord,
     -- These project supplied spans and payload lengths. Invariance theorems
     -- transport coordinates without adding a format/loader applicability claim.
     `Grass.Artifact.PE.placementSpans,
@@ -608,6 +625,25 @@ def owed : List Name :=
     `Grass.Platform.Win32.WriteFile.DwordAt,
     `Grass.Platform.Win32.WriteFile.ReturnResult,
     `Grass.Platform.Win32.WriteFile.ReturnResult.Conforms,
+    -- PE exception record schema, flags, bounded resolution and profile checks.
+    `Grass.Artifact.PE.ParsedRuntimeFunction,
+    `Grass.Artifact.PE.resolveSectionExtent?,
+    `Grass.Artifact.PE.resolveRuntimeFunction?,
+    `Grass.Artifact.PE.writeRuntimeFunction,
+    `Grass.Artifact.PE.sectionReadable,
+    `Grass.Artifact.PE.sectionExecutable,
+    `Grass.Artifact.PE.sectionDiscardable,
+    `Grass.Artifact.PE.sectionWritable,
+    `Grass.Artifact.PE.sectionInitializedData,
+    `Grass.Artifact.PE.sectionContainsCode,
+    `Grass.Artifact.PE.codeSectionValid?,
+    `Grass.Artifact.PE.metadataSectionValid?,
+    `Grass.Artifact.PE.runtimeFunctionsAscending?,
+    `Grass.Artifact.PE.runtimeBindingValid?,
+    `Grass.Artifact.PE.exceptionTableValid,
+    `Grass.Artifact.PE.ImageLayout.exceptionDirectory,
+    `Grass.Artifact.PE.readRuntimeFunction,
+    `Grass.Artifact.PE.readRuntimeTable,
     `Grass.Platform.Win32.WriteFile.Prepared,
     `Grass.ISA.X86.RegisterSemantics.Flags.bits,
     `Grass.ISA.X86.RegisterSemantics.Flags.fromBits,
@@ -757,6 +793,7 @@ def modeledDeclarations : MetaM (Array Name) := do
         n == ``Grass.Artifact.PE.ParsedHeaderPrefix ||
         n == ``Grass.Artifact.PE.ParsedOptionalHeader ||
         n == ``Grass.Artifact.PE.ParsedSectionHeader ||
+        n == ``Grass.Artifact.PE.ParsedRuntimeFunction ||
         n == ``Grass.Artifact.PE.ResolvedSectionLocation then
       out := out.push (userFacing n)
       continue

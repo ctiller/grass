@@ -42,8 +42,9 @@ failure explicitly and use the theorem once it has the final checked plan.
 `readImage` decodes the DOS/COFF prefix, all optional-header bytes, every section
 header field, header padding and all raw section payloads. It checks the selected
 AMD64 PE32+ discriminators, the header extent and each declared raw offset against
-the sequential file cursor, and rejects trailing bytes. Fourteen unselected data
-directories are retained as 112 opaque bytes; `.idata` is retained as section
+the sequential file cursor, and rejects trailing bytes. Resource and exception
+directory fields are decoded explicitly; twelve later directories are retained
+as 96 opaque bytes. `.idata` is retained as section
 payload. This reader does not interpret the import subtree.
 
 `readImage_writeImage` proves, for every checked `ImagePlan`, that reading its
@@ -64,6 +65,40 @@ a Windows loader-acceptance proof, an import-resolution execution proof, or a
 zeroed directories also remain subject to loader applicability review before a
 production executable claim. Container conformance debt is not discharged by
 the structural round-trip proof.
+
+## Exception table binding
+
+`ExecutableImageDescription.exceptionTable` optionally names the actual table
+extent and ordered `RuntimeFunctionBinding` values. Each binding supplies a
+section-relative code extent, unwind extent and exact unwind bytes. All complete
+extents are nonempty and backed by section payload bytes; an exclusive code end
+may equal its section's payload end. Address arithmetic is checked before DWORD
+narrowing. Code requires readable executable code flags; metadata requires
+readable initialized data without write, execute or discardable flags.
+
+Root derives the unwind bytes from the selected source's typed `UnwindInfo` and
+retains that ABI validity/source equality. PE treats those bytes as opaque: it
+validates their exact placement, length and four-byte alignment, not semantic
+unwind reversal. Runtime records must be ordered and disjoint. The final table
+must equal every resolved begin/end/unwind triple in order, with no omitted
+failed resolution; its meaningful size is exactly twelve bytes per record.
+
+The prototype may reserve same-length table bytes with `exceptionTable := none`.
+Use `resolveRuntimeFunctions?` and `writeRuntimeFunctions` to derive final table
+bytes from its checked placement, then prepare the final `Some` description.
+Final preparation rejects stale table or unwind bytes. Existing coordinate
+invariance relates same-length replacements; exception-directory invariance
+additionally requires the same table location and size. Hello must retain its
+explicit `Some` binding at the final boundary.
+
+The same production writer emits exception-directory index 3 from the actual
+table extent. `ImagePlan.exceptionTable_binding` relates its decoded RVA/size
+to the checked table slice and `readRuntimeTable`'s independently decoded
+records. `readImage_writeImage` still recovers the entire image. These facts
+establish container coupling; they do not supply source prologue semantics,
+partial-prologue reversal, native loading or platform adequacy.
+The record format and alignment authority is Microsoft's
+[x64 exception handling](https://learn.microsoft.com/en-us/cpp/build/exception-handling-x64).
 
 ## Validation
 
@@ -86,6 +121,14 @@ slot observations against the semantic cases in
 binary and collect observations; its code must not supply the probe body or a
 parallel serializer. Native API applicability and execution evidence remain
 distinct from container recovery.
+
+The exception-table checkpoint received independent architecture and Terra
+review of the actual format path and tests. The
+[exception fixtures](../Tests/Artifact/PE/Exceptions.lean) build final table bytes
+from provisional resolved coordinates and challenge stale bytes, missing targets,
+permissions, overlapping functions, alignment and overflow. The existing image
+round-trip theorem and the checked directory/table binding remain distinct from
+the source/ABI and native execution obligations.
 
 PE field authority: Microsoft [PE Format](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format),
 especially DOS stub, signature, COFF header, PE32+ optional header, section table

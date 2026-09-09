@@ -224,14 +224,8 @@ theorem mem_issuedKinds_of_issue {effect : AuthorityEffect} {id : GrantId}
 
 end AuthorityEffect
 
-/-! Whether a grant authorizes an access is **not** decided here.
-
-It was: the deleted `Authorizes` function lived in this namespace and matched provenances
-with `Provenance.SameStorage`. Whether two allocations name the same bytes is a fact
-about the machine state — `MemoryState.aliases` and its transitive closure — and a
-pure function on provenances cannot see it, so a holder reaching its own lent bytes
-through a declared alias was authorized by nothing while being frozen by its own
-loan. `MemoryState.AuthorizedAt` is the test, and it takes the state.
--/
+/-! Grant authorization depends on the current state. `MemoryState.AuthorizedAt`
+resolves the query through the actual allocation and backing records, then checks
+the grant's translated span, holder, epoch and rights. -/
 
 end Grass.Memory

@@ -264,12 +264,27 @@ theorem ReturnEffects.unrelated_grant {Request : Type} {before after : State Req
   LoanBatch.grantAt?_return?_unrelated effects.loansReturned unrelated
 
 /-- `ReturnEffects.allocations_unchanged` states that loan return leaves allocation
-records, including their byte contents, unchanged. -/
+view records unchanged. Backing bytes are covered by `ReturnEffects.backings_unchanged`. -/
 theorem ReturnEffects.allocations_unchanged {Request : Type} {before after : State Request}
     {call : CallId} {caller agent : ContextId} {ids : List GrantId}
     {record : Pending Request} (effects : ReturnEffects before after call caller agent ids record) :
     after.machine.memory.allocations = before.machine.memory.allocations :=
   LoanBatch.allocations_return? effects.loansReturned
+
+/-- `ReturnEffects.backings_unchanged` proves loan return preserves backing contents and capacities. -/
+theorem ReturnEffects.backings_unchanged {Request : Type} {before after : State Request}
+    {call : CallId} {caller agent : ContextId} {ids : List GrantId}
+    {record : Pending Request} (effects : ReturnEffects before after call caller agent ids record) :
+    after.machine.memory.backings = before.machine.memory.backings :=
+  LoanBatch.backings_return? effects.loansReturned
+
+/-- `ReturnEffects.cells_unchanged` proves bookkeeping return preserves checked cells and initialization. -/
+theorem ReturnEffects.cells_unchanged {Request : Type} {before after : State Request}
+    {call : CallId} {caller agent : ContextId} {ids : List GrantId}
+    {record : Pending Request} (effects : ReturnEffects before after call caller agent ids record)
+    (id : AllocId) (offset : Nat) :
+    after.machine.memory.cellAt? id offset = before.machine.memory.cellAt? id offset :=
+  MemoryState.cellAt?_of_maps_eq effects.allocations_unchanged effects.backings_unchanged id offset
 
 /-- `return?_loans_removed` exposes exact loan consumption through the protocol. -/
 theorem return?_loans_removed {Request : Type} {state next : State Request}

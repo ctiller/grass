@@ -1,4 +1,4 @@
-import Grass.Artifact.PE.Imports
+import Grass.Artifact.PE.Exceptions
 
 /-!
 # PE image representability validation
@@ -53,14 +53,24 @@ theorem placementsFitU32_member {placements : List PlacedSection}
       · exact fits.1
       · exact ih fits.2 member
 
-/-- Arithmetic obligations for one resolved canonical executable layout. -/
+/-- Final table-byte validation when an exception table was requested. -/
+def ImageLayout.ExceptionsValid (layout : ImageLayout) : Prop :=
+  match layout.requested.exceptionTable with
+  | none => True
+  | some description => exceptionTableValid layout.placed description = true
+
+instance (layout : ImageLayout) : Decidable layout.ExceptionsValid := by
+  unfold ImageLayout.ExceptionsValid
+  split <;> infer_instance
+
+/-- Representability, import and exception-table obligations for one layout. -/
 def ImageLayout.Writable (layout : ImageLayout) : Prop :=
   importLibrariesValid layout.requested.imports.toList = true ∧
   layout.ImportsResolved ∧
   layout.materialized.sections.length < 2 ^ 16 ∧
   placementsFitU32 layout.placed.toList = true ∧
   layout.entryPointRva < 2 ^ 32 ∧
-  layout.sizeOfImage < 2 ^ 32
+  layout.sizeOfImage < 2 ^ 32 ∧ layout.ExceptionsValid
 
 instance (layout : ImageLayout) : Decidable layout.Writable := by
   unfold ImageLayout.Writable
@@ -132,6 +142,10 @@ structure ImagePlan where
   layout : ImageLayout
   writable : layout.Writable
 
+/-- The production plan validates any explicitly requested exception table. -/
+theorem ImagePlan.exceptionsValid (plan : ImagePlan) : plan.layout.ExceptionsValid :=
+  plan.writable.2.2.2.2.2.2
+
 /-- A checked section-relative address and the evidence needed by source and
 relocation consumers. -/
 structure ResolvedSectionLocation (plan : ImagePlan) (location : SectionLocation) where
@@ -185,7 +199,7 @@ def prepareImage (description : ExecutableImageDescription) : Except String Imag
   | none => .error "PE entry location is outside its requested section"
   | some layout =>
       if writable : layout.Writable then .ok ⟨layout, writable⟩
-      else .error "PE image layout or imports exceed the supported representation"
+      else .error "PE image layout, imports or exception table fail the supported profile"
 
 /-- A prepared image's raw payloads begin at the aligned header end and are
 contiguous in serialized section order. -/

@@ -57,6 +57,14 @@ open Grass.Core Grass.Memory Grass.Std.Logical Grass.Tests.Spike1
 
 /-! ## The machine the block runs on -/
 
+private def backings : FreshSupply StorageTag := .initial
+private def stackBacking : StorageId := backings.fresh.1
+private def imageBacking : StorageId := backings.fresh.2.fresh.1
+
+private def stackBackingRecord : BackingRecord := { capacity := 4096, bytes := .empty }
+private def imageBackingRecord : BackingRecord :=
+  { capacity := 8192, bytes := ByteStore.empty.write 2048 (List.replicate 8 0x40) true }
+
 /-- The stack reservation: four kilobytes, readable and writable, holding nothing
 yet. A fresh frame is uninitialized; `docs/MEMORY_MODEL.md` §4 does not hand out
 zeros, and starting from `ByteStore.empty` is what keeps `mov transferred, 0`
@@ -64,7 +72,7 @@ being the thing that initializes the slot. -/
 def stackRecord : AllocationRecord :=
   { extent := ⟨0, 4096⟩, epoch := epoch₀, space := .cpuVirtual, source := .stack
     owners := [mainThread]
-    permission := .readWrite, live := true, bytes := .empty
+    permission := .readWrite, live := true, backing := stackBacking, origin := 0
     base := some stackBaseAddress }
 
 /-- The loaded image. Only the import-table slot is given contents, because it is
@@ -72,19 +80,20 @@ the only part of the image this block reads. -/
 def imageRecord : AllocationRecord :=
   { extent := ⟨0, 8192⟩, epoch := epoch₀, space := .cpuVirtual
     source := .imageMapping, owners := [mainThread]
-    permission := .readOnly, live := true
-    bytes := ByteStore.empty.write 2048 (List.replicate 8 0x40) true
+    permission := .readOnly, live := true, backing := imageBacking, origin := 0
     base := some 0x2800 }
 
 /-- The state at the top of the block. -/
-def state₀ : MemoryState :=
-  (MemoryState.empty.allocateAll?
-    [(stackAlloc, stackRecord), (imageAlloc, imageRecord)]).getD .empty
+private def state₀? : Option MemoryState := do
+  let state ← MemoryState.empty.installBacking? stackBacking stackBackingRecord
+  let state ← state.installBacking? imageBacking imageBackingRecord
+  state.allocateAll? [(stackAlloc, stackRecord), (imageAlloc, imageRecord)]
+
+def state₀ : MemoryState := state₀?.getD .empty
 
 /-- Both allocations happened, so `getD` did not fall back. -/
 theorem the_allocations_succeed :
-    (MemoryState.empty.allocateAll?
-      [(stackAlloc, stackRecord), (imageAlloc, imageRecord)]).isSome := by decide
+    state₀?.isSome := by decide
 
 /-! ## The four accesses, as descriptors
 
