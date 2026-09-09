@@ -239,6 +239,30 @@ theorem step_accounting {payload : Vec Byte}
     simpa [bytesOf] using
       effect_bytes before.state occurrence.demand occurrence.resume decision answer
 
+/-- A written terminal decision exposes the cursor represented by its state. -/
+theorem terminal_prefix {payload : Vec Byte} (state : State payload)
+    (outcome : WriteOutcome) (cursor : WriteCursor payload)
+    (terminal : decide state = .terminal (.written outcome cursor)) :
+    emittedPrefix state = payload.take cursor.committed := by
+  cases state with
+  | acquire => simp [decide] at terminal
+  | writing before =>
+    simp only [decide] at terminal
+    split at terminal
+    · contradiction
+    · cases terminal; rfl
+  | publish before more response => simp [decide] at terminal
+  | finished result before => cases terminal; rfl
+  | unavailable => simp [decide] at terminal
+
+/-- Every state's recorded output is a bounded prefix of its payload. -/
+theorem state_prefix {payload : Vec Byte} (state : State payload) :
+    ∃ count, count ≤ payload.length ∧ emittedPrefix state = payload.take count := by
+  cases state with
+  | acquire | unavailable => exact ⟨0, Nat.zero_le _, (Vec.take_zero payload).symm⟩
+  | writing cursor | publish cursor _ _ | finished _ cursor =>
+    exact ⟨cursor.committed, cursor.within, rfl⟩
+
 /-- A successful terminal decision denotes the entire payload. -/
 theorem terminal_success {payload : Vec Byte} (state : State payload)
     (cursor : WriteCursor payload) (valid : Valid state)

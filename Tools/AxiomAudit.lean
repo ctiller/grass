@@ -99,6 +99,7 @@ import Grass.Process.Vocabulary
 import Grass.Process.Weave.Blend
 import Grass.Process.Weave.Lens
 import Grass.Process.Weave.Mixin
+import Grass.Refinement.Console.WriteHistory
 import Grass.Resource.Algebra
 import Grass.Resource.Axis
 import Grass.Semantics.Execution
@@ -106,6 +107,8 @@ import Grass.Semantics.Observation
 import Grass.Semantics.SpecProcess
 import Grass.Specification.Boundary
 import Grass.Specification.Scope
+import Grass.Std.Console.Process
+import Grass.Std.Console.WriteAll
 import Grass.Std.Logical.Bag
 import Grass.Std.Logical.Byte
 import Grass.Std.Logical.FiniteMap
