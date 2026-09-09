@@ -303,6 +303,7 @@ def spec : SpecProcess where
   observationProjection := .identity Bool
   accepts := fun _ _ => True
   requirements := keyed "portable"
+  evidenceRelevant := fun _ _ => false
 
 def system : RelationalSystem spec.AuditEvent where
   State := Bool
@@ -578,16 +579,17 @@ def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.g
   step := fun _ => trivial
   consistent := ⟨rfl, rfl⟩
 
-example : (toAbstract.mapInfinite continuation).prefixEvents 2 =
-    continuation.prefixEvents 2 :=
+example : exists concreteLength,
+    ((toAbstract.mapInfinite continuation).prefixEvents 2).IsPrefix
+      (toAbstract.lens.project (continuation.prefixEvents concreteLength)) :=
   toAbstract.mapInfinite_prefixEvents continuation 2
 
 example : abstractSystem.Steps
     (toAbstract.mapState samplePrefix.state)
     (toAbstract.mapGraph samplePrefix.graph)
-    (continuation.prefixEvents 2)
-    (toAbstract.mapState (continuation.stateAt 2))
-    (toAbstract.mapGraph (continuation.graphAt 2)) :=
+    ((toAbstract.mapInfinite continuation).prefixEvents 2)
+    ((toAbstract.mapInfinite continuation).stateAt 2)
+    ((toAbstract.mapInfinite continuation).graphAt 2) :=
   toAbstract.mapInfinite_prefixSteps continuation 2
 
 /-- A non-vacuous indexed continuation: state and graph both advance at every
@@ -724,6 +726,33 @@ def hideInternal : RefinementLens spec where
       | nil => simp
       | cons event events inductionHypothesis =>
           cases event <;> simp_all
+
+/-- A tempting functional projection that deletes the independent safety
+marker. It preserves the selected observation but cannot satisfy the evidence
+channel. -/
+def eraseSafety (events : List Event) : List Event :=
+  events.filter fun event => decide (event ≠ .safety)
+
+theorem eraseSafety_observationExact (events : List Event) :
+    observations.project (eraseSafety events) = observations.project events := by
+  induction events with
+  | nil => rfl
+  | cons event events inductionHypothesis =>
+      cases event <;> simpa [eraseSafety, observations] using inductionHypothesis
+
+/-- Observation exactness alone permits erasing the safety marker, while the
+independent evidence obligation rejects every lens with that projection. -/
+theorem eraseSafety_evidenceRejected
+    (claimed : RefinementLens spec)
+    (projectExact : claimed.project = eraseSafety) : False := by
+  have retained := claimed.evidenceNonErasing
+    (safetyDemands.identity .audit) [.safety]
+  rw [projectExact] at retained
+  simp [eraseSafety, spec, safetyDemands] at retained
+
+example : observations.project (eraseSafety [.safety]) =
+    observations.project [.safety] :=
+  eraseSafety_observationExact [.safety]
 
 abbrev ConcreteState := Nat × Nat
 
@@ -877,7 +906,7 @@ abbrev stoppedSystem : RelationalSystem Event where
   extendsTrans := fun _ _ => trivial
   stepExtends := fun impossible => False.elim impossible
 
-def loopBehavior : ProgramBehavior spec where
+abbrev loopBehavior : ProgramBehavior spec where
   system := loopSystem
   inputOf := fun _ => ()
 
@@ -1029,10 +1058,46 @@ def duplicateInternal : RefinementLens spec where
     rw [expandEvent_preservesEvidence]
     exact List.Sublist.refl _
 
-theorem duplicateInternal_prefix (length : Nat) :
-    duplicateInternal.project (internalLoop.prefixEvents length) =
+example : (RefinementLens.identity spec).comp hideInternal = hideInternal := by
+  simp
+
+example : duplicateInternal.comp (RefinementLens.identity spec) =
+    duplicateInternal := by
+  simp
+
+example : (hideInternal.comp duplicateInternal).comp hideInternal =
+    hideInternal.comp (duplicateInternal.comp hideInternal) := by
+  simp
+
+example (events : List Event) :
+    (hideInternal.comp duplicateInternal).project events =
+      duplicateInternal.project (hideInternal.project events) := by
+  simp
+
+theorem loopExecution_prefixEvents
+    {state : loopSystem.State} {graph : loopSystem.Graph}
+    {priorEvents : List Event}
+    (execution : loopSystem.InfiniteContinuation state graph priorEvents)
+    (length : Nat) :
+    execution.prefixEvents length = List.replicate length Event.internal := by
+  induction length with
+  | zero => rfl
+  | succ length inductionHypothesis =>
+      rw [RelationalSystem.InfiniteContinuation.prefixEvents,
+        inductionHypothesis]
+      have eventInternal := execution.step length
+      change execution.eventAt length = .internal at eventInternal
+      rw [eventInternal]
+      exact List.replicate_succ'.symm
+
+theorem duplicateLoopPrefix
+    {state : loopSystem.State} {graph : loopSystem.Graph}
+    {priorEvents : List Event}
+    (execution : loopSystem.InfiniteContinuation state graph priorEvents)
+    (length : Nat) :
+    duplicateInternal.project (execution.prefixEvents length) =
       List.replicate (length + length) Event.internal := by
-  rw [internalLoop_prefixEvents]
+  rw [loopExecution_prefixEvents execution]
   change List.flatMap expandEvent (List.replicate length Event.internal) = _
   induction length with
   | zero => rfl
@@ -1042,6 +1107,87 @@ theorem duplicateInternal_prefix (length : Nat) :
       rw [inductionHypothesis]
       rw [show length + 1 + (length + 1) = (length + length) + 2 by omega]
       simp [List.replicate_succ]
+
+def duplicatedExecution
+    {state : loopSystem.State} {graph : loopSystem.Graph}
+    {priorEvents : List Event}
+    (_execution : loopSystem.InfiniteContinuation state graph priorEvents) :
+    loopSystem.InfiniteContinuation () ()
+      (duplicateInternal.project priorEvents) where
+  stateAt := fun _ => ()
+  graphAt := fun _ => ()
+  choiceAt := fun _ => ()
+  eventAt := fun _ => .internal
+  stateZero := rfl
+  graphZero := rfl
+  step := fun _ => rfl
+  consistent := trivial
+
+def duplicateLoopInfinite
+    {state : loopSystem.State} {graph : loopSystem.Graph}
+    {priorEvents : List Event}
+    (execution : loopSystem.InfiniteContinuation state graph priorEvents) :
+    InfiniteRefinement (concrete := loopBehavior) (abstract := loopBehavior)
+      duplicateInternal (fun _ : loopSystem.State => ())
+        (fun _ : loopSystem.Graph => ()) execution where
+  abstractExecution := duplicatedExecution execution
+  abstractPrefix length := by
+    refine ⟨length, ?_⟩
+    rw [loopExecution_prefixEvents (duplicatedExecution execution),
+      duplicateLoopPrefix execution]
+    exact ⟨List.replicate length Event.internal, by simp⟩
+  concreteBoundary length := by
+    refine ⟨length + length, ?_, ?_, ?_⟩
+    · rw [loopExecution_prefixEvents (duplicatedExecution execution),
+        duplicateLoopPrefix execution]
+    · rfl
+    · rfl
+
+theorem duplicateLoopSteps
+    {state finalState : loopSystem.State}
+    {graph finalGraph : loopSystem.Graph} {events : List Event}
+    (steps : loopSystem.Steps state graph events finalState finalGraph) :
+    loopSystem.Steps () () (duplicateInternal.project events) () () := by
+  induction steps with
+  | refl => exact .refl
+  | step prior transition inductionHypothesis =>
+      rename_i prefixEvents current currentGraph choice event next nextGraph
+      have eventInternal : event = .internal := transition
+      subst event
+      rw [duplicateInternal.project_append]
+      have first : loopSystem.Steps () ()
+          (duplicateInternal.project prefixEvents ++ [.internal]) () () :=
+        .step (choice := ()) inductionHypothesis rfl
+      have second : loopSystem.Steps () ()
+          ((duplicateInternal.project prefixEvents ++ [.internal]) ++ [.internal])
+          () () :=
+        .step (choice := ()) first rfl
+      simpa [duplicateInternal, expandEvent, List.append_assoc] using second
+
+/-- A non-identity lens participates in a total weak refinement whose concrete
+system has genuine infinite executions. -/
+def duplicateLoopRefinement : BehaviorRefinement loopBehavior loopBehavior where
+  lens := duplicateInternal
+  mapState := fun _ => ()
+  mapGraph := fun _ => ()
+  input := fun _ => rfl
+  initial := id
+  segment := duplicateLoopSteps
+  terminal := id
+  infinite := duplicateLoopInfinite
+
+example : duplicateLoopRefinement.lens.project [.internal] =
+    [.internal, .internal] := rfl
+
+example : InfiniteRefinement duplicateLoopRefinement.lens
+    duplicateLoopRefinement.mapState duplicateLoopRefinement.mapGraph
+    internalLoop :=
+  duplicateLoopRefinement.mapInfinite_prefixes internalLoop
+
+theorem duplicateInternal_prefix (length : Nat) :
+    duplicateInternal.project (internalLoop.prefixEvents length) =
+      List.replicate (length + length) Event.internal :=
+  duplicateLoopPrefix internalLoop length
 
 theorem expandedPrefixEvents (length : Nat) :
     internalLoop.prefixEvents (length + length) =

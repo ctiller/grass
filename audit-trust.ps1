@@ -17,6 +17,11 @@ param(
         "Grass.ObservationProjection.identity_comp",
         "Grass.ObservationProjection.comp_identity",
         "Grass.ObservationProjection.comp_assoc",
+        "Grass.RefinementLens.identity_project",
+        "Grass.RefinementLens.comp_project",
+        "Grass.RefinementLens.identity_comp",
+        "Grass.RefinementLens.comp_identity",
+        "Grass.RefinementLens.comp_assoc",
         "Grass.RelationalSystem.Steps.trans",
         "Grass.RelationalSystem.Steps.graphExtends",
         "Grass.RelationalSystem.InfiniteContinuation.ext",
@@ -467,7 +472,7 @@ try {
     [System.IO.File]::WriteAllLines($temporaryPath, $runtimeConsumerProbe)
     $runtimeConsumerOutput = @(& lake env lean $temporaryPath 2>&1)
     if ($LASTEXITCODE -eq 0 -or
-        -not ($runtimeConsumerOutput -match "ExternalRuntimeAuditProbe.identityBytes.*implemented_by.*ExternalRuntimeAuditProbe.replacement")) {
+        -not ($runtimeConsumerOutput -match "ExternalRuntimeAuditProbe.(identityBytes.*implemented_by.*replacement|replacement.*unsafe)")) {
         $runtimeConsumerOutput | ForEach-Object { Write-Host $_ }
         throw "Trust audit ignored an implemented_by replacement in the runtime dependency closure."
     }

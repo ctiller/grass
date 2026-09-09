@@ -661,13 +661,16 @@ or several abstract steps may represent a lowering boundary. This is not a
 license for silent spinning: `InfiniteRefinement` requires every abstract
 prefix to occur within a projected concrete segment and every complete concrete
 boundary to match an abstract boundary exactly. Thus a zero-denotation SCC needs
-a well-founded exit argument or a genuinely matched abstract divergence.
+a well-founded exit argument; bounded projected prefixes are rejected outright,
+and an abstract divergence cannot make them cofinal.
 `BehaviorRefinement.lockstep` remains the convenient derived constructor for
 already aligned transition systems.
 
 Functional hiding never discharges a safety claim.
 `SpecProcess.evidenceRelevant` keys relevant audit occurrences by stable,
-open-world requirement identity (including derived stages), and
+open-world requirement identity. A specification must predeclare the stable key
+of any later derived-stage demand whose occurrences require this protection; a
+derived key absent from that predicate is not protected automatically.
 `RefinementLens.evidenceNonErasing` retains their order and
 multiplicity even when `RefinementLens.observationExact` proves that the
 functional view legitimately omits them. Assembly tooling may generate CFG

@@ -613,8 +613,8 @@ executions map through `InfiniteRefinement`, whose `abstractPrefix` and
 within a projected concrete segment and every complete concrete boundary to
 match an abstract boundary exactly, including mapped state and graph.
 Consequently an implementation cannot erase an infinite internal loop merely
-by assigning each finite step zero denotation: it must supply an actual matching
-abstract divergence. A terminating abstraction has no such witness. CFG path
+by assigning each finite step zero denotation: bounded projected prefixes are
+rejected outright, even if the abstraction diverges. CFG path
 and SCC discovery belong to assembly tooling; Foundation checks only the local
 segment summaries and their composition.
 
@@ -622,8 +622,10 @@ Optimization may change instruction traces, layout, timing, or internal API
 structure only if it preserves the selected functional observation and every
 independent mandatory demand. `RefinementLens.observationExact` handles the
 functional projection. `SpecProcess.evidenceRelevant` identifies the ordered
-audit occurrences belonging to each stable, open-world requirement key
-(including derived stages), and
+audit occurrences belonging to each stable, open-world requirement key. A
+specification must predeclare any later derived-stage key whose occurrences need
+this protection; a derived key absent from the predicate is not protected
+automatically. Then
 `RefinementLens.evidenceNonErasing` preserves that keyed subtrace with order and
 multiplicity. Thus a safety event hidden from functional output cannot disappear
 from its independent proof channel.

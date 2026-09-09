@@ -118,6 +118,38 @@ def comp (first second : RefinementLens spec) : RefinementLens spec where
     (first.evidenceNonErasing key events).trans
       (second.evidenceNonErasing key (first.project events))
 
+/-- Identity projection leaves an audit segment unchanged. -/
+@[simp]
+theorem identity_project (events : List spec.AuditEvent) :
+    (identity spec).project events = events := rfl
+
+/-- Composite projection applies the lower lens before the upper lens. -/
+@[simp]
+theorem comp_project (first second : RefinementLens spec)
+    (events : List spec.AuditEvent) :
+    (first.comp second).project events = second.project (first.project events) := rfl
+
+/-- The identity lens is a left identity for composition. -/
+@[simp]
+theorem identity_comp (lens : RefinementLens spec) :
+    (identity spec).comp lens = lens := by
+  apply ext
+  rfl
+
+/-- The identity lens is a right identity for composition. -/
+@[simp]
+theorem comp_identity (lens : RefinementLens spec) :
+    lens.comp (identity spec) = lens := by
+  apply ext
+  rfl
+
+/-- Refinement-lens composition is associative. -/
+@[simp]
+theorem comp_assoc (first second third : RefinementLens spec) :
+    (first.comp second).comp third = first.comp (second.comp third) := by
+  apply ext
+  rfl
+
 /-- A compositional projection maps a source prefix to an abstract prefix. -/
 theorem project_isPrefix (lens : RefinementLens spec)
     {left right : List spec.AuditEvent} (included : left.IsPrefix right) :
@@ -129,9 +161,9 @@ end RefinementLens
 
 /-- An abstract infinite execution matches a concrete one when every abstract
 prefix occurs within a projected concrete segment and every complete concrete
-boundary has an exact abstract boundary. The coverage direction rejects an
-infinite concrete zero-denotation loop unless the abstraction also supplies a
-genuinely matching divergence. -/
+boundary has an exact abstract boundary. `InfiniteRefinement.abstractPrefix`
+rejects every infinite concrete execution whose projected prefixes remain
+bounded; an abstract divergence cannot rescue a zero-denotation concrete loop. -/
 structure InfiniteRefinement {concrete abstract : ProgramBehavior spec}
     (lens : RefinementLens spec)
     {state : concrete.system.State} {graph : concrete.system.Graph}

@@ -24,7 +24,9 @@ structure SpecProcess where
   requirements : DemandFamily.{u}
   /-- Audit events whose ordered occurrences carry evidence for each exact
   independent demand. Refinement must not erase these occurrences even when
-  the functional observation projection hides them. -/
+  the functional observation projection hides them. `BehaviorRefinement.evidenceNonErasing`
+  protects a later derived demand only when `SpecProcess.evidenceRelevant`
+  predeclares its stable key here. -/
   evidenceRelevant : RequirementKey -> AuditEvent -> Bool
 
 end Grass
