@@ -49,9 +49,22 @@ def greatestVirtualEnd : List PlacedSection → Nat
 def sizeOfImage (placed : Vec PlacedSection) : Nat :=
   alignUp (greatestVirtualEnd placed.toList) canonicalSectionAlignment
 
-/-- Sixteen absent data-directory entries. `writeZeroDataDirectories` has the
-exact 128-byte extent required by a header declaring sixteen entries. -/
-def writeZeroDataDirectories : Std.Logical.ByteArray := Vec.replicate (16 * 8) 0
+/-- Serialize one RVA/size data-directory entry. -/
+def writeDataDirectory (rva size : Nat) : Std.Logical.ByteArray :=
+  writeLittleEndian (count := 4) (BitVec.ofNat 32 rva) ++
+    writeLittleEndian (count := 4) (BitVec.ofNat 32 size)
+
+/-- Sixteen data-directory entries. The import entry is populated exactly when
+imports were materialized; all other directories remain absent. -/
+def writeDataDirectories (description : ExecutableImageDescription)
+    (placed : Vec PlacedSection) : Std.Logical.ByteArray :=
+  let importRva :=
+    if description.imports.length = 0 then 0 else lastVirtualStart placed.toList
+  let importSize :=
+    if description.imports.length = 0 then 0
+    else importDescriptorTableSize description.imports.length
+  writeDataDirectory 0 0 ++ writeDataDirectory importRva importSize ++
+    Vec.replicate (14 * 8) 0
 
 /-- Serialize the 240-byte PE32+ optional header for placements already derived
 from `description`. -/
@@ -91,12 +104,13 @@ def writeOptionalHeader (description : ExecutableImageDescription)
   writeLittleEndian (count := 8) (0x1000 : BitVec 64) ++
   writeLittleEndian (count := 4) (0 : BitVec 32) ++
   writeLittleEndian (count := 4) (16 : BitVec 32) ++
-  writeZeroDataDirectories
+  writeDataDirectories description placed
 
 /-- `writeOptionalHeader` emits the exact PE32+ optional-header width. -/
 @[simp] theorem length_writeOptionalHeader (description : ExecutableImageDescription)
     (placed : Vec PlacedSection) :
     (writeOptionalHeader description placed).length = optionalHeader64Size := by
-  simp [writeOptionalHeader, writeZeroDataDirectories, optionalHeader64Size]
+  simp [writeOptionalHeader, writeDataDirectories, writeDataDirectory,
+    optionalHeader64Size]
 
 end Grass.Artifact.PE

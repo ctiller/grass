@@ -5,21 +5,20 @@ import Grass.Artifact.PE.SectionTable
 /-!
 # Canonical PE32+ image writer
 
-`writeImage` is the first complete-file adapter consumed by x86 executable
-fixtures. Its proof argument rejects narrowing overflow, and it currently
-rejects nonempty imports rather than emitting a zero directory for a requested
-import. The import-table builder will remove that explicit limitation.
+`writeImage` is the complete-file adapter consumed by x86 executable fixtures.
+Its proof argument rejects narrowing overflow. Requested imports are
+materialized into a generated `.idata` section before placement and header
+serialization.
 -/
 
 namespace Grass.Artifact.PE
 
 open Grass.Std.Logical
 
-/-- Current complete-writer precondition. Import requests fail closed until the
-owned import-directory serializer is connected. -/
+/-- Complete-writer precondition. -/
 def ExecutableImageDescription.WriteReady
     (description : ExecutableImageDescription) : Prop :=
-  description.Writable ∧ description.imports.length = 0
+  description.Writable
 
 instance (description : ExecutableImageDescription) : Decidable description.WriteReady := by
   unfold ExecutableImageDescription.WriteReady
@@ -88,8 +87,9 @@ theorem length_writePlacedContentsList
 the current empty-import limitation. -/
 private def writeImageBytes (description : ExecutableImageDescription) :
     Std.Logical.ByteArray :=
-  let placed := placeImageSections description
-  writeAlignedHeaders description placed ++ writePlacedContentsList placed.toList
+  let materialized := materializeImports description
+  let placed := placeImageSections materialized
+  writeAlignedHeaders materialized placed ++ writePlacedContentsList placed.toList
 
 /-- Emit a complete canonical PE32+ image from the instruction-independent
 adapter input. -/
@@ -102,11 +102,14 @@ payload extent. -/
 theorem length_writeImage (description : ExecutableImageDescription)
     (ready : description.WriteReady) :
     (writeImage description ready).length =
-      firstRawOffset canonicalPeOffset description.sections.length canonicalFileAlignment +
-        totalRawSize (placeImageSections description).toList := by
+      let materialized := materializeImports description
+      firstRawOffset canonicalPeOffset materialized.sections.length canonicalFileAlignment +
+        totalRawSize (placeImageSections materialized).toList := by
   unfold writeImage writeImageBytes
+  dsimp only
   simp only [Vec.length_append, length_writeAlignedHeaders]
-  rw [show description.sections.length = (placeImageSections description).length by simp]
+  rw [show (materializeImports description).sections.length =
+      (placeImageSections (materializeImports description)).length by simp]
   unfold placeImageSections
   rw [length_writePlacedContentsList]
 

@@ -34,4 +34,13 @@ private def crossingPlacement : PlacedSection :=
 the exclusive end rejects the interval that crosses the 32-bit boundary. -/
 example : placementFitsU32 crossingPlacement = false := by decide
 
+private def embeddedTerminator : ImportLibrary :=
+  { name := Vec.fromList [65, 0, 66]
+    symbols := Vec.fromList [⟨Vec.fromList [67]⟩] }
+
+private def invalidImportImage : ExecutableImageDescription :=
+  { smallImage with imports := Vec.fromList [embeddedTerminator] }
+
+example : ¬invalidImportImage.Writable := by decide
+
 end Grass.Tests.Artifact.PE.Validation

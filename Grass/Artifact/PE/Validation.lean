@@ -1,4 +1,4 @@
-import Grass.Artifact.PE.Layout
+import Grass.Artifact.PE.Imports
 
 /-!
 # PE image representability validation
@@ -29,8 +29,10 @@ def placementsFitU32 : List PlacedSection → Bool
 /-- Arithmetic obligations for the canonical executable adapter. -/
 def ExecutableImageDescription.Writable
     (description : ExecutableImageDescription) : Prop :=
-  description.sections.length < 2 ^ 16 ∧
-  placementsFitU32 (placeImageSections description).toList = true
+  let materialized := materializeImports description
+  importLibrariesValid description.imports.toList = true ∧
+  materialized.sections.length < 2 ^ 16 ∧
+  placementsFitU32 (placeImageSections materialized).toList = true
 
 instance (description : ExecutableImageDescription) : Decidable description.Writable := by
   unfold ExecutableImageDescription.Writable
@@ -39,14 +41,22 @@ instance (description : ExecutableImageDescription) : Decidable description.Writ
 /-- A writable description has a representable COFF section count. -/
 theorem ExecutableImageDescription.Writable.sectionCountFits
     {description : ExecutableImageDescription} (writable : description.Writable) :
-    description.sections.length < 2 ^ 16 :=
-  writable.1
+    (materializeImports description).sections.length < 2 ^ 16 :=
+  writable.2.1
 
 /-- A writable description has no placement that would truncate into its PE
 field. -/
 theorem ExecutableImageDescription.Writable.placementsFit
     {description : ExecutableImageDescription} (writable : description.Writable) :
-    placementsFitU32 (placeImageSections description).toList = true :=
-  writable.2
+    placementsFitU32
+      (placeImageSections (materializeImports description)).toList = true :=
+  writable.2.2
+
+/-- A writable description has only nonempty, terminator-free import names and
+at least one symbol per imported library. -/
+theorem ExecutableImageDescription.Writable.importsValid
+    {description : ExecutableImageDescription} (writable : description.Writable) :
+    importLibrariesValid description.imports.toList = true :=
+  writable.1
 
 end Grass.Artifact.PE

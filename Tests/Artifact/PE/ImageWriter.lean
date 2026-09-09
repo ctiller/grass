@@ -40,13 +40,29 @@ example : (image.drop 514).take 510 = Vec.replicate 510 0 := by decide
 
 private def requestedImport : ImportLibrary :=
   { name := Vec.fromList [1]
-    symbols := Vec.empty }
+    symbols := Vec.fromList [⟨Vec.fromList [2]⟩] }
 
-private def prematureImportImage : ExecutableImageDescription :=
+private def importedImage : ExecutableImageDescription :=
   { description with imports := Vec.fromList [requestedImport] }
 
-/-- A requested import cannot be silently replaced by the optional header's
-currently zero data-directory entries. -/
-example : ¬prematureImportImage.WriteReady := by decide
+set_option maxRecDepth 4096 in
+example : importedImage.WriteReady := by decide
+
+set_option maxRecDepth 10000 in
+private def importedBytes : Std.Logical.ByteArray :=
+  writeImage importedImage (by decide)
+
+example : importedBytes.length = 1536 := by
+  unfold importedBytes
+  rw [length_writeImage]
+  decide
+
+set_option maxRecDepth 10000 in
+example : (importedBytes.drop 208).take 8 =
+    Vec.fromList [0, 32, 0, 0, 40, 0, 0, 0] := by decide
+
+set_option maxRecDepth 10000 in
+example : (importedBytes.drop 1024).take 4 = Vec.fromList [0x38, 0x20, 0, 0] := by
+  decide
 
 end Grass.Tests.Artifact.PE.ImageWriter
