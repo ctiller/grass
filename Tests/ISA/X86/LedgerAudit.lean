@@ -882,6 +882,7 @@ def owed : List Name :=
     `Grass.Platform.Win32.ApiRequest,
     `Grass.Platform.Win32.WriteFile.Abi.InitializedReturnQword,
     `Grass.Platform.Win32.WriteFile.Abi.StackPlan,
+    `Grass.Platform.Win32.GetStdHandle.StackPlan,
     `Grass.Platform.Win32.WriteFile.Abi.StackPlan.loanPlan,
     `Grass.Platform.Win32.WriteFile.Abi.StackPlan.requests,
     `Grass.Platform.Win32.WriteFile.Abi.stackRequests,
@@ -1243,6 +1244,7 @@ def modeledDeclarations : MetaM (Array Name) := do
         n == ``Grass.Disasm.Entry.Entry ||
         n == ``Grass.ISA.X86.Execution.StoreCandidate.Evidence ||
         n == ``Grass.Platform.Win32.WriteFile.Abi.StackPlan ||
+        n == ``Grass.Platform.Win32.GetStdHandle.StackPlan ||
         n == ``Grass.Platform.Win32.WriteFile.Abi.InitializedReturnQword ||
         n == ``Grass.Platform.Win32.ApiRequest ||
         n == ``Grass.Platform.Win32.WriteFile.Abi.Entry ||
