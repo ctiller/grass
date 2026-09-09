@@ -67,13 +67,13 @@ example : readGobj
 
 /-! Split-prefix campaign at every fixed or length-delimited envelope field. -/
 
-example : readGobj (writeGobj payload |>.take 0) = .needMore (some 4) := by
+example : readGobj (writeGobj payload |>.take 0) = .needMore (some 30) := by
   rfl
 
-example : readGobj (writeGobj payload |>.take 4) = .needMore (some 2) := by
+example : readGobj (writeGobj payload |>.take 4) = .needMore (some 26) := by
   rfl
 
-example : readGobj (writeGobj payload |>.take 6) = .needMore (some 2) := by
+example : readGobj (writeGobj payload |>.take 6) = .needMore (some 24) := by
   rfl
 
 example : readGobj (writeGobj payload |>.take 8) = .needMore (some 22) := by
@@ -82,22 +82,22 @@ example : readGobj (writeGobj payload |>.take 8) = .needMore (some 22) := by
 example : readGobj (writeGobj payload |>.take 29) = .needMore (some 21) := by
   rfl
 
-example : readGobj (writeGobj payload |>.take 40) = .needMore (some 4) := by
+example : readGobj (writeGobj payload |>.take 40) = .needMore none := by
   rfl
 
-example : readGobj (writeGobj payload |>.take 44) = .needMore (some 1) := by
+example : readGobj (writeGobj payload |>.take 44) = .needMore (some 17) := by
   rfl
 
-example : readGobj (writeGobj payload |>.take 45) = .needMore (some 4) := by
+example : readGobj (writeGobj payload |>.take 45) = .needMore none := by
   rfl
 
-example : readGobj (writeGobj payload |>.take 49) = .needMore (some 4) := by
+example : readGobj (writeGobj payload |>.take 49) = .needMore none := by
   rfl
 
-example : readGobj (writeGobj payload |>.take 53) = .needMore (some 4) := by
+example : readGobj (writeGobj payload |>.take 53) = .needMore none := by
   rfl
 
-example : readGobj (writeGobj payload |>.take 57) = .needMore (some 4) := by
+example : readGobj (writeGobj payload |>.take 57) = .needMore none := by
   rfl
 
 example : readGobj (writeGobj payload |>.take 61) =

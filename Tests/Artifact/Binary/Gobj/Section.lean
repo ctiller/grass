@@ -66,22 +66,22 @@ example : readGobjSection (Vec.fromList [0, 0, 0, 0, 0, 0, 1, 0]) =
 /-! Split-prefix campaign at every section-entry field boundary. -/
 
 example : readGobjSection (writeGobjSection entry |>.take 0) =
-    .needMore (some 4) := by rfl
+    .needMore none := by rfl
 
 example : readGobjSection (writeGobjSection entry |>.take 4) =
-    .needMore (some 5) := by rfl
+    .needMore (some 13) := by rfl
 
 example : readGobjSection (writeGobjSection entry |>.take 9) =
-    .needMore (some 1) := by rfl
+    .needMore (some 8) := by rfl
 
 example : readGobjSection (writeGobjSection entry |>.take 10) =
-    .needMore (some 1) := by rfl
+    .needMore (some 7) := by rfl
 
 example : readGobjSection (writeGobjSection entry |>.take 11) =
-    .needMore (some 2) := by rfl
+    .needMore (some 6) := by rfl
 
 example : readGobjSection (writeGobjSection entry |>.take 13) =
-    .needMore (some 4) := by rfl
+    .needMore none := by rfl
 
 example : readGobjSection (writeGobjSection entry |>.take 17) =
     .needMore (some 2) := by rfl

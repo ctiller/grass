@@ -308,26 +308,26 @@ def readGobj (input : Std.Logical.ByteArray) : ParseResult GobjPayload :=
                             sourceMap := sourceMap } suffix
                         | .needMore hint => .needMore hint
                         | .invalid error => .invalid error
-                      | .needMore hint => .needMore hint
+                      | .needMore hint => requireAfter 4 (.needMore hint)
                       | .invalid error => .invalid error
-                    | .needMore hint => .needMore hint
+                    | .needMore hint => requireAfter 8 (.needMore hint)
                     | .invalid error => .invalid error
-                  | .needMore hint => .needMore hint
+                  | .needMore hint => requireAfter 12 (.needMore hint)
                   | .invalid error => .invalid error
-                | .needMore hint => .needMore hint
+                | .needMore hint => requireAfter 16 (.needMore hint)
                 | .invalid error => .invalid error
               | .needMore hint => requireAfter 20 (.needMore hint)
               | .invalid error => .invalid error
             else
               .invalid (.malformed "nonzero .gobj reserved field")
-          | .needMore hint => .needMore hint
+          | .needMore hint => requireAfter 22 (.needMore hint)
           | .invalid error => .invalid error
         | .error error => .invalid error
-      | .needMore hint => .needMore hint
+      | .needMore hint => requireAfter 24 (.needMore hint)
       | .invalid error => .invalid error
     else
       .invalid (.malformed "invalid .gobj magic")
-  | .needMore hint => .needMore hint
+  | .needMore hint => requireAfter 26 (.needMore hint)
   | .invalid error => .invalid error
 
 /-- Arbitrary successful envelope parsing is equivalent to the independent
@@ -431,11 +431,11 @@ theorem readGobj_done_iff (input : Std.Logical.ByteArray)
                                 rw [scopeInput, sectionsInput, symbolsInput,
                                   relocationsInput, importsInput, sourceMapInput]
                                 simp [writeGobj, Vec.append_assoc]
-                          all_goals contradiction
-                        all_goals contradiction
-                      all_goals contradiction
-                    all_goals contradiction
-                  all_goals contradiction
+                          all_goals simp_all
+                        all_goals simp_all
+                      all_goals simp_all
+                    all_goals simp_all
+                  all_goals simp_all
                 next _ hint _ =>
                   have impossible : requireAfter (α := GobjPayload) 20
                       (.needMore hint) ≠ .done payload rest := by
@@ -443,11 +443,11 @@ theorem readGobj_done_iff (input : Std.Logical.ByteArray)
                   exact (impossible parsed).elim
                 next => contradiction
               next => contradiction
-            all_goals contradiction
+            all_goals simp_all
           next => contradiction
-        all_goals contradiction
+        all_goals simp_all
       next => contradiction
-    all_goals contradiction
+    all_goals simp_all
   · intro canonical
     rw [canonical]
     unfold readGobj writeGobj

@@ -33,7 +33,7 @@ example : readU32LengthPrefixedBytes
   readU32LengthPrefixedBytes_done_iff _ _ _
 
 example : readU32LengthPrefixedBytes (Vec.fromList [0x03, 0x00]) =
-    .needMore (some 2) := by rfl
+    .needMore none := by rfl
 
 example : readU32LengthPrefixedBytes
     (Vec.fromList [0x03, 0x00, 0x00, 0x00, 0x10]) =

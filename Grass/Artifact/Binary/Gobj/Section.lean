@@ -229,15 +229,15 @@ def readGobjSection (input : Std.Logical.ByteArray) : ParseResult GobjSection :=
               else
                 .invalid (.malformed
                   "nonzero .gobj section reserved field")
-            | .needMore hint => .needMore hint
+            | .needMore hint => requireAfter 4 (.needMore hint)
             | .invalid error => .invalid error
           | .error error => .invalid error
-        | .needMore hint => .needMore hint
+        | .needMore hint => requireAfter 6 (.needMore hint)
         | .invalid error => .invalid error
       | .error error => .invalid error
-    | .needMore hint => .needMore hint
+    | .needMore hint => requireAfter 7 (.needMore hint)
     | .invalid error => .invalid error
-  | .needMore hint => .needMore hint
+  | .needMore hint => requireAfter 8 (.needMore hint)
   | .invalid error => .invalid error
 
 /-- Arbitrary successful section parsing is equivalent to the independent
@@ -323,14 +323,14 @@ theorem readGobjSection_done_iff (input : Std.Logical.ByteArray)
                           contents := contents } ++ suffix := by
                         rw [contentsInput]
                         simp [writeGobjSection, Vec.append_assoc]
-                  all_goals contradiction
+                  all_goals simp_all
                 next => contradiction
-              all_goals contradiction
+              all_goals simp_all
             next => contradiction
-          all_goals contradiction
+          all_goals simp_all
         next => contradiction
-      all_goals contradiction
-    all_goals contradiction
+      all_goals simp_all
+    all_goals simp_all
   · intro canonical
     rw [canonical]
     unfold readGobjSection writeGobjSection

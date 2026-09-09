@@ -279,6 +279,110 @@ structure ParserRealizes {α : Type} {format : Format α}
     parse input = .done value rest →
       semantics.selectedDerivation input value rest
 
+/-- Build a full realization of deterministic prefix semantics from the four
+operational obligations that are specific to an executable parser: successful
+derivation equivalence, attainable/minimal numeric deficits, and stable
+malformed rejection. -/
+theorem parserRealizes_deterministicPrefix {α : Type} (format : Format α)
+    (parse : Std.Logical.ByteArray → ParseResult α)
+    (deterministic : ∀ {input value₁ rest₁ value₂ rest₂},
+      Derives format input value₁ rest₁ →
+      Derives format input value₂ rest₂ →
+      value₁ = value₂ ∧ rest₁ = rest₂)
+    (doneIff : ∀ input value rest,
+      parse input = .done value rest ↔ Derives format input value rest)
+    (needMoreSome : ∀ input hint, parse input = .needMore hint →
+      ∃ count, hint = some count)
+    (needMoreCompletes : ∀ input count,
+      parse input = .needMore (some count) →
+      CompletesAfter (Derives format) input count)
+    (needMoreMinimal : ∀ input count,
+      parse input = .needMore (some count) →
+      ∀ candidate, CompletesAfter (Derives format) input candidate →
+        count ≤ candidate)
+    (invalidNoCompletion : ∀ input error,
+      parse input = .invalid error →
+      ¬HasSelectedCompletion (Derives format) input)
+    (invalidMalformed : ∀ input error,
+      parse input = .invalid error → error.class = .malformed) :
+    ParserRealizes (deterministicPrefixSemantics format deterministic) parse := by
+  let semantics := deterministicPrefixSemantics format deterministic
+  have selectedEq : ∀ input value rest,
+      semantics.selectedDerivation input value rest ↔
+        Derives format input value rest := by
+    simp [semantics, deterministicPrefixSemantics]
+  constructor
+  · intro input value rest selected
+    exact (doneIff input value rest).mpr (selectedEq input value rest |>.mp selected)
+  · intro input hint
+    change parse input = .needMore hint ↔
+      ¬HasSelection (Derives format) input ∧
+        HasSelectedCompletion (Derives format) input ∧
+        hint = some (minimumCompletionCount (Derives format) input)
+    constructor
+    · intro parsed
+      rcases needMoreSome input hint parsed with ⟨count, rfl⟩
+      have completion := needMoreCompletes input count parsed
+      have hasCompletion : HasSelectedCompletion (Derives format) input :=
+        (hasSelectedCompletion_iff_exists_count (Derives format) input).mpr
+          ⟨count, completion⟩
+      have noSelection : ¬HasSelection (Derives format) input := by
+        rintro ⟨value, rest, derivation⟩
+        have done := (doneIff input value rest).mpr derivation
+        rw [done] at parsed
+        contradiction
+      have minimumLe : minimumCompletionCount (Derives format) input ≤ count :=
+        minimumCompletionCount_le (Derives format) input hasCompletion completion
+      have countLe : count ≤ minimumCompletionCount (Derives format) input :=
+        needMoreMinimal input count parsed
+          (minimumCompletionCount (Derives format) input)
+          (minimumCompletionCount_spec (Derives format) input hasCompletion)
+      exact ⟨noSelection, hasCompletion, congrArg some (Nat.le_antisymm countLe minimumLe)⟩
+    · rintro ⟨noSelection, hasCompletion, rfl⟩
+      cases observed : parse input with
+      | done value rest =>
+          exfalso
+          apply noSelection
+          exact ⟨value, rest, (doneIff input value rest).mp observed⟩
+      | needMore hint =>
+          rcases needMoreSome input hint observed with ⟨count, rfl⟩
+          have completion := needMoreCompletes input count observed
+          have minimumLe : minimumCompletionCount (Derives format) input ≤ count :=
+            minimumCompletionCount_le (Derives format) input hasCompletion completion
+          have countLe : count ≤ minimumCompletionCount (Derives format) input :=
+            needMoreMinimal input count observed
+              (minimumCompletionCount (Derives format) input)
+              (minimumCompletionCount_spec (Derives format) input hasCompletion)
+          rw [Nat.le_antisymm countLe minimumLe]
+      | invalid error =>
+          exact False.elim (invalidNoCompletion input error observed hasCompletion)
+  · intro input error parsed
+    change ¬HasSelectedCompletion (Derives format) input ∧
+      error.class = .malformed
+    exact ⟨invalidNoCompletion input error parsed,
+      invalidMalformed input error parsed⟩
+  · intro input errorClass invalid
+    change ¬HasSelectedCompletion (Derives format) input ∧
+      errorClass = .malformed at invalid
+    cases observed : parse input with
+    | done value rest =>
+        exfalso
+        apply invalid.1
+        exact ⟨Vec.empty, value, rest, by
+          simpa using (doneIff input value rest).mp observed⟩
+    | needMore hint =>
+        exfalso
+        rcases needMoreSome input hint observed with ⟨count, rfl⟩
+        apply invalid.1
+        exact (hasSelectedCompletion_iff_exists_count (Derives format) input).mpr
+          ⟨count, needMoreCompletes input count observed⟩
+    | invalid error =>
+        refine ⟨error, ?_, rfl⟩
+        rw [invalid.2, invalidMalformed input error observed]
+  · intro input value rest parsed
+    apply (selectedEq input value rest).mpr
+    exact (doneIff input value rest).mp parsed
+
 /-- Successful parsing is sound because a realized parser selects a semantic
 derivation and the selected semantics is itself sound for the format. -/
 theorem ParserRealizes.successSound {α : Type} {format : Format α}

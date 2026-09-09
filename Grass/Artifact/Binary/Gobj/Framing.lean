@@ -25,6 +25,14 @@ def requireAfter {α : Type u} (minimumAfter : Nat) :
   | .needMore none => .needMore none
   | .invalid error => .invalid error
 
+/-- `requireAfter_needMore_ne_done` proves that adding a downstream minimum to
+an incomplete parse cannot manufacture a successful result. -/
+@[simp] theorem requireAfter_needMore_ne_done {α : Type u}
+    (minimumAfter : Nat) (hint : Option Nat) (value : α)
+    (rest : Std.Logical.ByteArray) :
+    requireAfter minimumAfter (.needMore hint) ≠ .done value rest := by
+  cases hint <;> simp [requireAfter]
+
 /-- Bytes whose length is representable by the `.gobj` 32-bit framing field. -/
 structure U32LengthPrefixedBytes where
   bytes : Std.Logical.ByteArray
@@ -105,7 +113,7 @@ def readU32LengthPrefixedBytes (input : Std.Logical.ByteArray) :
       .done (u32LengthPrefixedOfSized count bytes) suffix
     | .needMore hint => .needMore hint
     | .invalid error => .invalid error
-  | .needMore hint => .needMore hint
+  | .needMore _ => .needMore none
   | .invalid error => .invalid error
 
 /-- The framing width is four bytes plus the exact payload length. -/
