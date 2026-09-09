@@ -131,9 +131,6 @@ theorem fetched_source_width {frame rootOffset}
     (rip : before.rip.toNat =
       (SourceLoadedImage.codeRegion binding loaded).region.base.toNat +
         ByteLayout.offset source.splice.finalSizes index)
-    (lengthBound : 0 < source.outputs[index].encoding.size ∧
-      source.outputs[index].encoding.size ≤ 15)
-    (fallthroughFits : before.rip.toNat + source.outputs[index].encoding.size < 2 ^ 64)
     (cells : ∀ offset,
       before.machine.memory.cellAt?
         (SourceLoadedImage.codeRegion binding loaded).region.allocId offset =
@@ -149,8 +146,11 @@ theorem fetched_source_width {frame rootOffset}
     unfold AddressPlan.offset
     rw [fetched_code_base binding loaded contains selected fetched present, rip]
     omega
+  have fallthroughFits : before.rip.toNat + source.outputs[index].encoding.size < 2 ^ 64 := by
+    have low := LoadedCodeRoot.source_fallthrough_bound binding loaded index bounded before.rip rip
+    omega
   have width := fetched.extent_of_memory_prefix source.outputs[index].encoding
-    lengthBound fallthroughFits (by
+    ⟨source.outputs[index].encoding.size_pos, source.outputs[index].sizeBound⟩ fallthroughFits (by
       intro i bound
       rw [policy_code_root binding loaded contains selected, planOffset]
       unfold MemoryState.byteAt?

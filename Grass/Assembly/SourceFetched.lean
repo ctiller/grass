@@ -29,6 +29,18 @@ theorem instruction_bytes {frame rootOffset}
   simp only [SourceResolve.Result.encodings, List.getElem_map]
   simp
 
+/-- The complete resolved instruction lies within the emitted source bytes. -/
+theorem instruction_end {frame rootOffset}
+    (source : SourceResolve.Result frame rootOffset) (index : Nat)
+    (bounded : index < source.outputs.length) :
+    ByteLayout.offset source.splice.finalSizes index + source.outputs[index].encoding.size ≤
+      source.bytes.length := by
+  rw [source.bytes_length, ← source.encoding_sizes]
+  have bound : index < (source.encodings.map InsnEncoding.size).length := by
+    simpa [SourceResolve.Result.encodings] using bounded
+  simpa [SourceResolve.Result.encodings] using
+    ByteLayout.item_end_le_total (source.encodings.map InsnEncoding.size) index bound
+
 /-- Each byte in a resolved instruction occurs at its machine-derived source
 offset. This pointwise form feeds memory-backed instruction-width checks. -/
 theorem instruction_byte {frame rootOffset}
