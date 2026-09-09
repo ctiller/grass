@@ -1,5 +1,43 @@
 # Initial campaign and open finding
 
+## Scratch-stack follow-up
+
+The success-only extension described in [STACK.md](STACK.md) was validated on
+the same virtualized Intel Windows host, based on integrated `ed8db295`.
+
+```bash
+bash Tools/x86-native/build.sh target/x86-native/stack-parent-v2
+python -O Tools/x86-native/run_stack.py --worker target/x86-native/stack-parent-v2/windows.exe --output target/x86-native/stack-campaign-2
+python -O Tools/x86-native/run.py --worker target/x86-native/stack-parent-v2/windows.exe --output target/x86-native/stack-register-regression-3
+```
+
+Results: 21 stack cases, zero mismatches, seven execution/comparator controls
+and a footprint-identity negative control; the original 870 cases and nine
+controls also pass. The stack cases cover all sixteen PUSH GPRs, resolved
+allocations 112 and 128 (signed imm8 versus imm32), and three generated public
+prologues with total decreases 72, 72 and 120. Every scratch byte is compared;
+arithmetic flags, failed instruction memory and intermediate/out-of-region
+effects remain outside this evidence.
+
+Repository checks also passed: `lake build`, `lake build Tests`,
+`bash audit-trust.sh` (75 declarations, eight executable modules),
+`bash check-source-input.sh` (13 source embeddings),
+`bash check-spike-sources.sh`, `bash check-doc-links.sh` (53 documents), and
+`git diff --cached --check`.
+
+The memory-model owner and independent harness reviewer approved the final
+success-only boundary. Review fixed footprint identity, post-start unexpected
+exception handling, and self-validation of a mutable restore slot. The reviewer
+independently rebuilt the final worker, ran the controls, and verified a
+stack-mode UD2 failure produces unjudged memory. The restore source is now on a
+read-only page and completion uses an independent original-RSP value. The
+initial concurrent register campaign lost its worker executable while the same
+default build path was also used by the reviewer; it was retained as an incomplete run, then replaced
+by the successful isolated `stack-register-regression-3` above. Use distinct
+worker output directories for concurrent reviews and campaigns.
+
+## Original register campaign
+
 2026-09-09, integration base `28e5767b`. Windows 11 build 26200, x86-64,
 CPUID vendor `GenuineIntel`, leaf 1 EAX `722594` (`0x000b06a2`). The hypervisor
 bit is set. Microcode is unknown. This is virtualized host execution evidence,
@@ -54,6 +92,65 @@ Independent review also approved the Bash migration after a separate build to
 zero mismatches. Checks covered Bash syntax, missing discovery tool, excess
 arguments, rejected batch-expansion characters, Windows-form `VSWHERE`, an
 unsupported host, and propagation of a simulated compiler failure (exit 42).
+
+## Register semantics extension, 2026-09-09
+
+The public operand-local `RegisterSemantics` now supplies predictions for MOV,
+ADD, SUB, CMP, TEST and XOR at 32/64 bits, plus signed SUB/CMP immediates.
+The expanded campaign in `target/x86-native/semantics-review-campaign-v3/`
+completed 994 cases with zero mismatches and 12 independent harness controls.
+It retains the earlier 450 MOV and 420 immediate cases, adds 120 arithmetic
+value-boundary cases and four Hello operand selections. The 953 full-status
+masks are `0x8D5`; the 41 TEST/XOR masks are `0x8C5`, excluding undefined AF.
+The driver independently requires the expected mask by operation label and
+rejects weaker masks, unchecked results, and reserved mask bits.
+
+Coverage identity:
+`9bdf88e1e44543f42dd87e923e8d9ca0affd0a091f67c6248ff282273f50b643`.
+It still excludes bytes and predictions. Host: Windows 11 build 26200,
+GenuineIntel CPUID leaf 1 EAX `0xB06A2`, hypervisor bit set, microcode unknown.
+This is one hosted machine observation, not a physical Intel/AMD matrix.
+The existing scratch campaign also passed 21 cases and seven controls in
+`target/x86-native/stack-semantics-regression/`, checking compatibility with the
+driver's added optional mask parameter.
+
+The semantic selector retains production decoder errors and exact suffixes,
+and attaches effects only after equality with a production encoder. Its
+success soundness theorem does not establish full ISA decoding or a complete
+machine step. Kernel-checked canonical fixtures cover all 6 families × 2 widths
+× 16 destination × 16 source registers, plus unsupported/truncated/noncanonical
+cases. Register transfer laws remain separate from fetch, RIP, privilege,
+interruptions, memory, faults and call-provider realizations. Formal citation
+attachment for the new definitions remains visible ledger debt.
+
+Independent semantic review approved the actual implementation, fixtures,
+corpus, mask checks, ledger classification and documentation with no remaining
+findings. It re-elaborated both new library modules, both focused fixtures and
+`LedgerAudit`, built those five modules, and reproduced 994/0 with 12 controls
+in `target/x86-native/semantics-independent-review/`. The retained source hashes
+match the reviewed semantics, corpus and runner. The author also reran 994/0 in
+`target/x86-native/semantics-parent-confirmation/`. Full library/test builds and
+the trust audit passed (75 named declarations, eight executable modules).
+Source-input validation re-elaborated 16 embedding modules; spike-source and
+documentation-link checks also passed.
+The six exhaustive decoder fixture theorems and decoder soundness theorem use
+only the accepted `propext` and `Quot.sound` axioms.
+
+Driver integration review subsequently found a missed fail-open case: legacy
+`-` predictions had the full mask but skipped flag comparison, so 953 rows could
+silently lose their flag checks. Campaign intake now requires a non-`None`
+prediction before checking its mask. A separate corpus control replaces an
+actual full-status row's flag field with `-` and requires rejection through that
+same intake helper before any native execution. Legacy parsing remains available
+outside the modeled campaign. `python -O Tools/x86-native/run.py` completed
+994/0, 12 harness controls and one corpus control in
+`target/x86-native/semantics-required-flags/`; optimization cannot disable the
+explicit checks.
+Independent re-review approved this follow-up, reproduced the optimized 994/0
+campaign in `target/x86-native/semantics-required-flags-independent/`, and
+mutated the actual generated corpus through `main`: replacing the first MOV
+prediction with `-` preserved the coverage digest but failed before worker
+execution. All 994 retained rows had non-`None` flag predictions.
 
 ## Separate legacy BSF finding
 

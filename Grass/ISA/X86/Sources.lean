@@ -1,46 +1,22 @@
 import Grass.ISA.X86.DualCitation
 
 /-!
-# The two x86-64 architectural authorities
+# Pinned x86-64 architectural authorities
 
-`docs/REFERENCES.md` names the sources `docs/DECISIONS.md` 15 makes the common
-profile out of. This module turns those two entries into the values every rule
-in `Grass/ISA/X86/**` cites, so a revision bump or a moved URL is one reviewed
-edit here rather than an edit at every rule.
+Intel remains pinned to SDM revision 092. AMD's active citations migrate from
+unretrievable combined APM revision 4.09 to the official revision 4.10 PDF,
+retrieved on 2026-09-09. The old identity remains distinct and dead; it is not
+renamed or treated as an equivalent edition.
 
-## State of the two sources on 2026-09-02
+The retrieved 4.10 cover and component headers identify Volume 1 as publication
+24592 revision 3.25 (May 2026), and Volume 3 as publication 24594 revision 3.38
+(July 2026). Existing claim subjects are mapped individually in Profile.lean.
+The exact retrieval evidence, printed/PDF page mapping, limitations and negative
+checks are recorded in docs/AMD_SOURCE_MIGRATION.md. No PDF is redistributed.
 
-Both were checked from this working copy on 2026-09-02, in a full browser rather
-than by HTTP status, for the reasons in `Grass.Cite.RetrievalStatus`.
-
-- **Intel** is live. The collection page serves the combined volume set at
-  version **092**, page-dated 2026-08-19. `docs/REFERENCES.md` pinned no Intel
-  revision at all, which `docs/VALIDATION.md` §1 requires ("stable identity,
-  title, publisher, revision/date"); this module pins 092.
-
-- **AMD is dead.** The URL `docs/REFERENCES.md` pins,
-  `https://docs.amd.com/v/u/en-US/40332_4.09_APM_PUB`, renders a 404 and
-  redirects to the portal root. So does the `4.10` slug that search engines
-  still index, and so does every `www.amd.com/content/dam/.../40332*.pdf` path
-  tried. AMD appears to have retired the `/v/u/en-US/` scheme for the
-  Technical Information Portal.
-
-  The AMD APM is `referenceOnly`, so `docs/VALIDATION.md` §1 leaves exactly one
-  disposition: release blocker. `Ledger.releaseBlockers` reports it, and it is
-  recorded here as `.dead` rather than quietly left as a plausible-looking URL.
-
-## What the dead AMD link does and does not block
-
-It does not block *writing* the common profile. A `DualCitation` names a
-document, a volume, a section and a heading; those are properties of the manual,
-not of AMD's web hosting. The AMD anchors below are written against the APM's
-stable structure and carry `confirmed := none`.
-
-It does block *accepting* the profile: `Ledger.CitationsChecked` is false while
-any anchor is unconfirmed or any document is dead, and re-pinning the AMD URL is
-a single edit to `amd64Apm409` that lifts every rule at once. That is the whole
-reason `SourceDocument` is a shared value and not a string repeated at each
-citation.
+Retrieval verification is separate from anchor confirmation and common-basis
+agreement. In particular, rexPrefixLayout's behavior for a misplaced REX remains
+unconfirmed; moving its document does not settle that stronger claim.
 -/
 
 namespace Grass.ISA.X86
@@ -58,9 +34,12 @@ resolved to the passage a rule is modeled from. `Grass.Cite.Citation.confirmed`
 carries this one. -/
 def intelAnchorCheckDate : Date := ⟨2026, 9, 3⟩
 
-/-- When the AMD APM's retrieval was last re-attempted across every location
-this corpus knows of. See `amd64Apm409`. -/
-def amdRecheckDate : Date := ⟨2026, 9, 3⟩
+/-- Date of the historical AMD portal and indexed download recheck.
+See `amd64Apm409`; this is not an exhaustive archive search. -/
+def amdRecheckDate : Date := ⟨2026, 9, 9⟩
+
+/-- Date of the active AMD document retrieval and individual anchor inspection. -/
+def amdAnchorCheckDate : Date := ⟨2026, 9, 9⟩
 
 /--
 Intel 64 and IA-32 Architectures Software Developer's Manual, combined volume
@@ -112,16 +91,8 @@ def intelSdm092 : SourceDocument :=
     retrieval := .verified sourceCheckDate
     policy := .referenceOnly }
 
-/--
-AMD64 Architecture Programmer's Manual, Volumes 1-5, publication 40332,
-revision 4.09.
-
-Identity and revision are as `docs/REFERENCES.md` pins them. The retrieval
-location is recorded as dead; see this module's header for what was tried. The
-revision is left at 4.09 rather than advanced to a number seen only in search
-snippets, because `docs/VALIDATION.md` §1 wants the revision a theorem was
-written against, and an unverified newer number would be neither.
--/
+/-- Historical pin. Its exact portal route still fails; keep the old revision
+identity and reference-only policy rather than relabeling it as a new edition. -/
 def amd64Apm409 : SourceDocument :=
   { id := ⟨"amd64-apm-40332-4.09"⟩
     title := "AMD64 Architecture Programmer's Manual, Volumes 1-5"
@@ -130,32 +101,36 @@ def amd64Apm409 : SourceDocument :=
     published := none
     url := "https://docs.amd.com/v/u/en-US/40332_4.09_APM_PUB"
     livenessProbe := some "AMD64 Architecture Programmer"
-    retrieval :=
-      .dead amdRecheckDate
-        ("Re-attempted across every location this corpus knows of, and the " ++
-         "document is not retrievable from any of them. (1) The recorded URL " ++
-         "returns HTTP 200 with a 2575-byte client-routed shell, identical for " ++
-         "every path on that host including paths that render a 404. (2) " ++
-         "amd.com/system/files/TechDocs/<n>.pdf returns 200 with a " ++
-         "208804-byte redirect to the documentation hub, byte-identical for " ++
-         "40332, 24592, 24593 and 24594 alike. (3) The " ++
-         "processor-tech-docs/programmer-references tree returns 404 with a " ++
-         "150594-byte page, again identical for every document number and for " ++
-         "versioned filenames. (4) developer.amd.com's guides page is a 404. " ++
-         "(5) The AMD Technical Information Portal, which amd.com's own " ++
-         "redirect points at, hosts 45900 documents and none of them is this " ++
-         "one: its corpus is the Xilinx lineage -- UG, PG, XD, DS, AM, PB and " ++
-         "WP document numbers -- with zero AMD64 architecture manuals. An " ++
-         "earlier version of this note said to re-pin against that portal; " ++
-         "that advice was wrong and is retracted. There is no known public " ++
-         "location to re-pin to, which is why this is a release blocker rather " ++
-         "than a stale URL.")
+    retrieval := .dead amdRecheckDate
+      ("The exact historical portal route and its indexed PDF content endpoint " ++
+       "returned 404 on 2026-09-09. Search metadata advertising 4.09 is not a " ++
+       "retrieval. Active citations are individually migrated to amd64Apm410; " ++
+       "this record does not assert that every possible archive was searched.")
+    policy := .referenceOnly }
+
+/-- Official combined APM revision 4.10, with its own revision identity.
+
+The PDF content endpoint is the download linked by AMD's publication page
+https://docs.amd.com/v/u/en-US/40332_4.10_APM_Vol1-5_PUB. That page gives the
+posting date used by published. The PDF cover says July 2026. The title probe
+matches PDF metadata; it is only a liveness check, not revision/anchor proof.
+Cover, component headers, prose, figures and table footnotes were inspected
+separately. See docs/AMD_SOURCE_MIGRATION.md for exact reproducible locations. -/
+def amd64Apm410 : SourceDocument :=
+  { id := ⟨"amd64-apm-40332-4.10"⟩
+    title := "AMD64 Architecture Programmer's Manual, Volumes 1-5"
+    publisher := Vendor.amd.publisher
+    revision := "40332 rev. 4.10"
+    published := some ⟨2026, 7, 29⟩
+    url := "https://docs.amd.com/api/khub/documents/SLs_hsYJwsu9rrIjE0rGxA/content"
+    livenessProbe := some "AMD64 Architecture Programmer"
+    retrieval := .verified amdAnchorCheckDate
     policy := .referenceOnly }
 
 /-- The document a vendor's citations are written against. -/
 def Vendor.document : Vendor → SourceDocument
   | .intel => intelSdm092
-  | .amd => amd64Apm409
+  | .amd => amd64Apm410
 
 @[simp] theorem Vendor.document_publisher (v : Vendor) :
     v.document.publisher = v.publisher := by cases v <;> rfl
@@ -208,26 +183,26 @@ records that it was checked against the revision this document pins.
 -/
 def cite (v : Vendor) (volume section_ heading : String) (subjects : List Name)
     (locator : String) (table : Option String := none)
-    (confirmed : Option Date := none) : Citation :=
+    (confirmed : Option Date := none) (page : Option Nat := none) : Citation :=
   { document := v.document
     anchor :=
       { volume := some volume, section_ := section_, heading := some heading,
-        table := table, page := none }
+        table := table, page := page }
     subjects := subjects
     locator := locator
     confirmed := confirmed }
 
 @[simp] theorem cite_publisher (v : Vendor) (volume section_ heading : String)
     (subjects : List Name) (locator : String) (table : Option String)
-    (confirmed : Option Date) :
-    (cite v volume section_ heading subjects locator table confirmed).publisher =
+    (confirmed : Option Date) (page : Option Nat) :
+    (cite v volume section_ heading subjects locator table confirmed page).publisher =
       v.publisher := by
   simp [cite, Citation.publisher]
 
 @[simp] theorem cite_subjects (v : Vendor) (volume section_ heading : String)
     (subjects : List Name) (locator : String) (table : Option String)
-    (confirmed : Option Date) :
-    (cite v volume section_ heading subjects locator table confirmed).subjects =
+    (confirmed : Option Date) (page : Option Nat) :
+    (cite v volume section_ heading subjects locator table confirmed page).subjects =
       subjects := rfl
 
 end Grass.ISA.X86

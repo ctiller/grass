@@ -13,18 +13,45 @@ entries with machine-validated citation records as specified by
   current collection and revision history:
   https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html
 - AMD, *AMD64 Architecture Programmer's Manual, Volumes 1-5*, publication
-  40332, revision 4.09 at corpus creation:
-  https://docs.amd.com/v/u/en-US/40332_4.09_APM_PUB
+  40332, revision 4.10, retrieved 2026-09-09:
+  https://docs.amd.com/v/u/en-US/40332_4.10_APM_Vol1-5_PUB
+  See [the source migration](AMD_SOURCE_MIGRATION.md) for exact anchors and
+  the separate historical 4.09 record.
 
 The common x86 profile requires anchored citations to both relevant instruction
 and system/memory sections. These collection links are discovery roots, not
 sufficient declaration-level anchors.
+
+Register semantics anchors inspected on 2026-09-09:
+
+- Intel SDM revision 092,
+  [Volumes 2A–2D](https://cdrdv2-public.intel.com/922478/325383-092-sdm-vol-2abcd.pdf):
+  ADD 3-14–3-15; CMP 3-161–3-162; MOV 4-28–4-30; SUB 4-684–4-685;
+  TEST 4-720–4-721; XOR 6-40–6-41. Read the operation and flags-affected
+  sections, including signed immediate extension. Volume 1 §3.4.1.1 and
+  §3.4.3.1 supply register write width and status-flag definitions.
+- AMD APM publication 24594, revision 3.38 (July 2026),
+  [Volume 3](https://docs.amd.com/v/u/en-US/24594_3.38_APM_Vol3_PUB):
+  ADD 89–90; CMP 162–164; MOV 240–242; SUB 356–357; TEST 360–361;
+  XOR 373–374 (printed page numbers). The flags tables mark AF undefined for
+  TEST/XOR; their observed AF values must not become model requirements.
+
+These anchors support the bounded `RegisterSemantics` implementation. Formal
+declaration-to-ledger attachment remains explicit new debt in `LedgerAudit`.
+The separate [AMD source migration](AMD_SOURCE_MIGRATION.md) repairs the active
+profile's dead locator. It does not attach these additional instruction laws
+to the ledger or settle the remaining misplaced-REX claim.
 
 ### Win32 x64 and PE/COFF
 
 - Microsoft, *Vectored Exception Handling* (native validation harness; retrieved
   2026-09-09, handler ordering before stack unwinding):
   https://learn.microsoft.com/en-us/windows/win32/debug/vectored-exception-handling
+- Microsoft, `VirtualAlloc`, `VirtualProtect`, and `GetCurrentThreadStackLimits`
+  (scratch-stack validation harness; retrieved 2026-09-09):
+  https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualalloc
+  https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualprotect
+  https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentthreadstacklimits
 
 - Microsoft, *x64 calling convention*:
   https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention

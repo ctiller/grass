@@ -224,10 +224,37 @@ Primary reference families:
 - Intel 64 and IA-32 Software Developer's Manual, especially Volumes 2 and 3:
   https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html
 - AMD64 Architecture Programmer's Manual, Volumes 1-5:
-  https://docs.amd.com/v/u/en-US/40332_4.09_APM_PUB
+  https://docs.amd.com/v/u/en-US/40332_4.10_APM_Vol1-5_PUB
 
 The profile/refinement mechanism is a versioned extension point intended for x86
 variants, ARM, RISC-V, Wasm, SPIR-V, WGSL, Verilog, and other instruction-like
 targets. A new target may conservatively extend foundational vocabulary after
 review and must provide migration/refinement theorems for existing profiles. The
 initial interface is not presumed permanently sufficient for unlike targets.
+
+### Current executable register semantics
+
+[`RegisterSemantics`](../Grass/ISA/X86/RegisterSemantics.lean) supplies operand-local
+32/64-bit MOV, ADD, SUB, CMP, TEST and XOR transfers, with signed SUB/CMP
+immediates, explicit defined/undefined status flags, and register preservation
+laws. [`RegisterDecode`](../Grass/ISA/X86/RegisterDecode.lean) selects this family
+by checked equality with production encoders after `decodeInsn` succeeds; its
+soundness law preserves the decoder's exact suffix. This bounded selector does
+not admit every legal alias or redundant prefix spelling.
+
+[`RegisterLaws`](../Grass/ISA/X86/RegisterLaws.lean) gives Hello-facing predicate
+and arithmetic laws without exposing flag bit calculations: same-register TEST
+is zero exactly when the selected-width value is zero; CMP32 unsigned-above is
+natural-number greater-than; SUB32 is exact natural subtraction when the count
+does not exceed the remaining value, with strict decrease for positive counts;
+ADD64 is exact natural addition under an explicit no-wrap premise. These are
+consequences of the existing transfers, not additional architectural axioms.
+
+These transfers are not yet `RawInstruction` machine-step realizations. Fetch,
+RIP/control successors, execution-profile admission, interruption and fault
+effects remain obligations at that boundary. Memory instructions must use the
+shared memory operation/substep and commit contracts, including ordered fault
+prefixes, rather than grow a second memory model here. The immediate consumer
+is Hello's TEST/CMP/ADD/SUB loop; PUSH/stack allocation, LEA, loads/stores and
+call/trap boundaries follow its production lowering needs. Native observations
+validate declared effects and never confer a proof or profile certificate.

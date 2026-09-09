@@ -96,8 +96,8 @@ theorem wait_prefix {payload : Vec Byte} {mayWait : Demand payload → Prop}
       historyBytes history.path.events = payload.take count :=
   run_prefix history.erase
 
-/-- The concrete reply interpretation forbids an internal step at any held
-external occurrence. It cannot disguise spinning as external nonresponse. -/
+/-- `boundary.step_reply` and its concrete reply interpretation exclude an
+internal step at any held external occurrence. -/
 theorem wait_no_internal_step {payload : Vec Byte} {mayWait : Demand payload → Prop}
     {history : (system payload).History} (waiting : PermanentWait (boundary mayWait) history)
     (events : List (Vec Byte)) (next : (system payload).State) (graph : Unit) :

@@ -204,3 +204,29 @@ implementations and vendor/system behavior, but only forall proofs discharge
 The grammar front is successful only if changing parser organization or tuning
 does not change the precious specification, while changing the accepted
 language or semantic mapping does.
+
+## 8. Current shared implementation slice
+
+`Grass.Grammar.Core` implements typed derivations for pure values, bytes,
+dependent sequencing, unordered binary choice, fixed repetition, refinement,
+value lifting, and isomorphisms. `Grass.Grammar.Realization` supplies selected
+prefix semantics and parser/writer realization contracts. This slice does not
+yet implement the full algebra above: bit-level formats, guarded recursion,
+general executable sequencing, and whole-input consumption semantics remain
+separate work.
+
+`Grass.Artifact.Binary.Endian` provides readers and writers for arbitrary
+type-indexed byte widths, including PE's 1/2/4/8-byte little-endian fields.
+`Grass.Artifact.Binary.EndianLaws` exports suffix-preserving round trips and
+exact short-input deficits. `Derives.seqAppend` composes writer derivations;
+it does not by itself certify a sequenced executable parser. Windows owns the
+PE field descriptions, validation, and full-image reader/writer connection;
+the ISA owner retains instruction decoding and semantic equivalence.
+
+`Grass.Grammar.normalize` (in `Grass.Grammar.Canonical`) accepts only parser successes with an empty
+suffix and returns the selected writer's bytes. `normalize_preserves_value`
+and `normalize_idempotent` derive the reusable normalization laws. These laws
+do not assert exact reconstruction of accepted alternate encodings or agreement
+with an independently specified canonical policy. The module rejects trailing,
+incomplete, and invalid input by returning `none`; it is a normalization helper,
+not a replacement for the parser's three-way diagnostic result.

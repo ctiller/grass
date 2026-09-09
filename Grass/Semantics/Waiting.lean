@@ -72,12 +72,12 @@ namespace PermanentWait
 variable {protocol : WaitProtocol Request} {boundary : system.WaitBoundary protocol}
   {history : system.History}
 
-/-- A terminal boundary cannot also be an isolated permanent wait. -/
+/-- `WaitBoundary.nonterminal` excludes a terminal boundary from permanent waits. -/
 theorem not_terminal (waiting : PermanentWait boundary history) :
     ¬ system.Terminal history.state history.graph :=
   boundary.nonterminal history waiting.occurrence waiting.pending
 
-/-- Nonresponse permission cannot be inferred just from a pending predicate. -/
+/-- `PermanentWait.permitted` excludes waits when the selected protocol forbids them. -/
 theorem impossible_when_forbidden
     (forbidden : ∀ occurrence, boundary.Pending history occurrence →
       ¬ protocol.AllowsPermanentWait (boundary.request occurrence)) :

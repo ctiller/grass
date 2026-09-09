@@ -13,7 +13,7 @@ REGS = 'rax rcx rdx rbx rsp rbp rsi rdi r8 r9 r10 r11 r12 r13 r14 r15'.split()
 FLAGS_MASK = 0x8D5  # CF/PF/AF/ZF/SF/OF; OS-owned/reserved flags are not predictions.
 # Coverage identity excludes emitted bytes and expected outputs: changes to the
 # model must reach the hardware comparator, not ask users to bless a new digest.
-COVERAGE_SHA256 = 'c3ea5ec4c8356e7ba6c745684ce55faea505204104b8221986cdcc516a96ecd8'
+COVERAGE_SHA256 = '9bdf88e1e44543f42dd87e923e8d9ca0affd0a091f67c6248ff282273f50b643'
 
 
 def require(condition, detail):
@@ -21,10 +21,11 @@ def require(condition, detail):
         raise ValueError(detail)
 
 
-def observe(worker, code, before, flags, timeout=5):
+def observe(worker, code, before, flags, timeout=5, stack=False):
     try:
         result = subprocess.run([str(worker), code, *[f'{0 if x is None else x:x}' for x in before],
-                                 f'{flags:x}'], capture_output=True, text=True, timeout=timeout)
+                                 f'{flags:x}', *(['--stack'] if stack else [])],
+                                capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return {'status': 'timeout'}
     if result.returncode:
@@ -42,22 +43,23 @@ def observe(worker, code, before, flags, timeout=5):
         return {'status': 'protocol-error', 'stdout': result.stdout, 'stderr': result.stderr}
 
 
-def differences(actual, code, expected, flags):
+def differences(actual, code, expected, flags, rsp_decrease=0, terminal_extra=0,
+                flags_mask=FLAGS_MASK):
     if actual['status'] != 'completed':
         return [actual['status']]
     errors = []
     if actual['exception'] != 0x80000003:
         errors.append('completion-exception')
-    if actual['pc_offset'] != len(bytes.fromhex(code)):
+    if actual['pc_offset'] != len(bytes.fromhex(code)) + terminal_extra:
         errors.append('completion-address')
     # Windows CONTEXT reports the breakpoint instruction, not its successor.
-    if actual['rip_offset'] != len(bytes.fromhex(code)):
+    if actual['rip_offset'] != len(bytes.fromhex(code)) + terminal_extra:
         errors.append('completion-rip')
     for i, name in enumerate(REGS):
-        want = actual['entry_rsp'] if i == 4 else expected[i]
+        want = actual['entry_rsp'] - rsp_decrease if i == 4 else expected[i]
         if actual['registers'][i] != want:
             errors.append(name)
-    if flags is not None and (actual['flags'] ^ flags) & FLAGS_MASK:
+    if flags is not None and (actual['flags'] ^ flags) & flags_mask:
         errors.append('flags')
     return errors
 
@@ -75,6 +77,14 @@ def self_test(worker):
             ['completion-exception'], 'exception negative control')
     require(differences(dict(nop, rip_offset=999), '90', before, 0xAD7) ==
             ['completion-rip'], 'RIP negative control')
+    logical_mask = FLAGS_MASK & ~0x10
+    require(differences(nop, '90', before, 0xAD7 ^ 0x10,
+                        flags_mask=logical_mask) == [], 'logical AF mask control')
+    require(differences(nop, '90', before, 0xAD7 ^ 0x10) == ['flags'],
+            'defined AF negative control')
+    require(differences(nop, '90', before, 0xAD7 ^ 1,
+                        flags_mask=logical_mask) == ['flags'],
+            'defined CF negative control')
     # These are harness controls, never model-coverage rows.
     for code, status in [('0f0b', 0xC000001D), ('f4', 0xC0000096),
                          ('cc', 0x80000003)]:
@@ -83,7 +93,48 @@ def self_test(worker):
         require(actual['pc_offset'] == 0, actual)
         require(actual['registers'][0] == before[0], actual)
     require(observe(worker, 'ebfe', before, 0xAD7, timeout=0.25)['status'] == 'timeout', 'timeout control')
-    return 9
+    return 12
+
+
+def parse_flags(field):
+    """Accept legacy full-status hex/- fields and value/mask semantic fields."""
+    if field == '-':
+        return None, FLAGS_MASK
+    if '/' not in field:
+        value = int(field, 16)
+        require(0 <= value < 2**64, 'legacy flag value')
+        return value, FLAGS_MASK
+    value, mask = field.split('/', 1)
+    value, mask = int(value, 16), int(mask, 16)
+    require(0 <= value < 2**64 and 0 <= mask < 2**64 and not mask & ~FLAGS_MASK,
+            'flag value/mask')
+    return value, mask
+
+
+def parse_corpus_flags(label, field):
+    """The modeled campaign requires a prediction for every defined flag."""
+    value, mask = parse_flags(field)
+    require(value is not None, f'modeled flags required for {label}')
+    expected_mask = (FLAGS_MASK & ~0x10
+                     if label.startswith(('boundary-test-', 'boundary-xor-'))
+                     or label == 'hello-test-eax-eax' else FLAGS_MASK)
+    require(mask == expected_mask, f'flag mask for {label}')
+    return value, mask
+
+
+def corpus_controls(raw):
+    """Mutate a full-status row to the legacy unchecked marker before execution."""
+    row = raw.splitlines()[0].split('\t')
+    require(row[0].startswith('mov-'), 'full-status control row')
+    row[5] = '-'
+    try:
+        parse_corpus_flags(row[0], row[5])
+    except ValueError as error:
+        require(str(error) == f'modeled flags required for {row[0]}',
+                'unchecked flags rejected for unexpected reason')
+    else:
+        raise ValueError('unchecked flags negative control failed')
+    return 1
 
 
 def main():
@@ -103,6 +154,7 @@ def main():
                          for row in (line.split('\t') for line in raw.splitlines()))
     require(hashlib.sha256(coverage.encode()).hexdigest() == COVERAGE_SHA256,
             'coverage identity changed; review the population, inputs and prediction basis')
+    intake_controls = corpus_controls(raw)
     cases, seen = [], set()
     for line in raw.splitlines():
         label, code, before, after, flags_in, flags_out, basis = line.split('\t')
@@ -115,11 +167,15 @@ def main():
         require(all(type(x) is int and 0 <= x < 2**64
                     for row in (before, after) for i, x in enumerate(row) if i != 4), 'corpus register value')
         require(0 < len(bytes.fromhex(code)) <= 15, 'instruction length')
+        flags_out, flags_mask = parse_corpus_flags(label, flags_out)
         cases.append(dict(label=label, code=code, before=before, expected=after,
-                          flags_in=int(flags_in, 16),
-                          flags_out=None if flags_out == '-' else int(flags_out, 16), basis=basis))
-    # Independent population ratchet: 15*15*2 MOV + 15*2*7*2 SUB/CMP.
-    require(len(cases) == 870, f'unreviewed population change: {len(cases)}')
+                          flags_in=int(flags_in, 16), flags_out=flags_out,
+                          flags_mask=flags_mask, basis=basis))
+    # 450 MOV + 420 immediate arithmetic + 120 register boundaries + 4 Hello operations.
+    require(len(cases) == 994, f'unreviewed population change: {len(cases)}')
+    require(sum(case['flags_mask'] == FLAGS_MASK for case in cases) == 953 and
+            sum(case['flags_mask'] == FLAGS_MASK & ~0x10 for case in cases) == 41,
+            'modeled flag-mask population')
     metadata = dict(schema=1, adapter='windows-veh', os=platform.platform(),
                     started_utc=datetime.now(timezone.utc).isoformat(),
                     cpu=json.loads(subprocess.check_output([str(worker), '--host'], text=True)),
@@ -133,18 +189,24 @@ def main():
                                              ROOT/'Tests/ISA/X86/NativeCorpus.lean',
                                              *sorted((ROOT/'Grass/ISA/X86').glob('*.lean'))]})
     metadata['harness_controls'] = self_test(worker)
+    metadata['corpus_controls'] = intake_controls
     (args.output / 'host.json').write_text(json.dumps(metadata, indent=2), encoding='utf-8')
     failures = 0
     with (args.output / 'observations.jsonl').open('w', encoding='utf-8') as out:
         for case in cases:
             actual = observe(worker, case['code'], case['before'], case['flags_in'])
-            errors = differences(actual, case['code'], case['expected'], case['flags_out'])
+            errors = differences(actual, case['code'], case['expected'], case['flags_out'],
+                                 flags_mask=case['flags_mask'])
             failures += bool(errors)
             out.write(json.dumps(dict(case=case, actual=actual, differences=errors)) + '\n')
             out.flush()
-    summary = dict(cases=len(cases), mismatches=failures, writeBack_cases=450,
-                   sub_reference_cases=210, cmp_completion_nonmutation_cases=210,
-                   arithmetic_flags_unchecked=420)
+    summary = dict(cases=len(cases), mismatches=failures, mov_cases=470,
+                   immediate_arithmetic_cases=420, boundary_register_cases=120,
+                   hello_operation_cases=4, modeled_register_cases=994,
+                   fully_defined_status_flag_cases=953,
+                   logical_defined_status_flag_cases=41,
+                   logical_af_undefined_cases=41, harness_controls=12,
+                   corpus_controls=intake_controls)
     (args.output / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
     print(json.dumps(summary))
     return int(failures != 0)

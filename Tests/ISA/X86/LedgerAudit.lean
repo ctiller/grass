@@ -3,12 +3,20 @@ import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.BasicInstructions
 import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.ImmediateArithmetic
+import Grass.ISA.X86.RegisterDecode
+import Grass.ISA.X86.RegisterLaws
 import Grass.ISA.X86.Decode
 import Grass.ISA.X86.Profile
 import Grass.ABI.Win64.UnwindBytes
 import Grass.ABI.Win64.FrameRanges
 import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Signatures
+import Grass.Platform.Win32.WriteFile
+import Grass.Platform.Win32.WriteFileNonresponse
+import Grass.Platform.Win32.WriteFileReturn
+import Grass.Artifact.PE.ImageRoundTrip
+import Grass.Artifact.PE.LayoutBinding
+import Grass.Artifact.PE.ExceptionBinding
 
 /-!
 # Ledger coverage gate
@@ -29,12 +37,12 @@ citations.
 ## The obligation comes from the environment
 
 `auditedModules` is a hand-written list, and for most of this file's life it
-named only the five x86 encoding modules — so the whole Win64 ABI and Win32 API
-surface, 58 behaviour-modelling declarations, was outside the citation
-obligation entirely while `docs/VALIDATION.md` §1 names "API, ABI rule, binary
-structure" explicitly. A reviewer injected two false uncited ABI facts into
+named only the five x86 encoding modules — so the whole Win64 ABI, Win32 API,
+and PE/COFF artifact surface was outside the citation obligation while
+`docs/VALIDATION.md` §1 names "API, ABI rule, binary structure" explicitly. A
+reviewer injected two false uncited ABI facts into
 `Grass/ABI/Win64/Convention.lean` and the summary line came back byte-identical.
-The list now covers all three trees this profile owns. It is still a list rather
+The list now covers all four trees this profile owns. It is still a list rather
 than a disk walk, which is the hazard `Tools/AxiomAudit.lean` solves properly;
 closing that here is an open obligation.
 
@@ -94,10 +102,24 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.BasicInstructions,
    `Grass.ISA.X86.Rel32,
    `Grass.ISA.X86.ImmediateArithmetic,
+   `Grass.ISA.X86.RegisterSemantics, `Grass.ISA.X86.RegisterDecode,
+   `Grass.ISA.X86.RegisterLaws,
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
-   `Grass.Platform.Win32.Signatures]
+   `Grass.Platform.Win32.Signatures, `Grass.Platform.Win32.WriteFile,
+   `Grass.Platform.Win32.WriteFileNonresponse,
+   `Grass.Platform.Win32.WriteFileResult, `Grass.Platform.Win32.WriteFileReturn,
+   `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
+   `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
+   `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
+   `Grass.Artifact.PE.ExceptionBinding,
+   `Grass.Artifact.PE.HeaderPrefix, `Grass.Artifact.PE.OptionalHeader,
+   `Grass.Artifact.PE.SectionTable, `Grass.Artifact.PE.ReaderCore,
+   `Grass.Artifact.PE.PrefixReader, `Grass.Artifact.PE.OptionalReader,
+   `Grass.Artifact.PE.SectionReader, `Grass.Artifact.PE.ImageWriter,
+   `Grass.Artifact.PE.ImageReader, `Grass.Artifact.PE.ImageRoundTrip,
+   `Grass.Artifact.PE.LayoutInvariance, `Grass.Artifact.PE.LayoutBinding]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -117,7 +139,16 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- decoder agreement still does not discharge the architecture citation debt.
 -- Reviewed additions: three immediate-arithmetic encoding facts and two
 -- Win32 signature tables. No existing citation debt is reclassified.
-def owedBaseline : Nat := 118
+-- WriteFile loan footprint and Prepared's DWORD/CPU profile contract are
+-- newly modeled API obligations. Source comments/probes are not ledger citations.
+-- Thirteen new register-transfer/flag/operand-selection facts. Manual headings
+-- are recorded in the module; formal subject/dual-anchor coverage remains owed.
+-- No existing debt is reclassified by this addition.
+-- PE/COFF adds 71 format-schema, profile, serializer, and reader obligations.
+-- No PE declaration is treated as cited merely because a Lean roundtrip holds.
+-- Matched-return adds raw BOOL width, DWORD observation and result conformance.
+-- Exception tables add 18 schema, flag, serialization and validation obligations.
+def owedBaseline : Nat := 225
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -141,7 +172,16 @@ acquiring a citation.
 -/
 -- Nine new representation conversions, derived queries, and internal names.
 -- Four lookup-derived opcode selections and checked encoding-template wrappers.
-def notBehaviourBaseline : Nat := 83
+-- Ten WriteFile definitions are internal evidence/transport/sequence operations;
+-- Windows footprint and width/profile applicability remain owed separately.
+-- Fourteen new structural helpers over explicit semantic and decoder results.
+-- Twenty-nine PE coordinate, projection, and supplied-data transformations are
+-- implementation plumbing over the separately owed format schema/profile.
+-- Two nonresponse consumers derive finite histories or accept a selected
+-- external relation; neither asserts Windows adequacy or physical nonresponse.
+-- Three new generic definitions derive history events or name selected evidence.
+-- Ten exception helpers traverse, project or compare already selected values.
+def notBehaviourBaseline : Nat := 151
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -282,6 +322,91 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Derived accumulated histories and the type of an externally supplied
+    -- observation relation, not new Windows behavior facts.
+    `Grass.Platform.Win32.WriteFile.InfiniteContinuation.historyAt,
+    `Grass.Platform.Win32.WriteFile.StalledPredicate,
+    `Grass.Platform.Win32.WriteFile.History.providerEvents,
+    `Grass.Platform.Win32.WriteFile.ReturnInterpretation,
+    `Grass.Platform.Win32.WriteFile.CallerInterpretation,
+    -- Exception traversal, masks and projections add no format policy.
+    `Grass.Artifact.PE.resolveExtent?,
+    `Grass.Artifact.PE.writeRuntimeFunctions,
+    `Grass.Artifact.PE.writeRuntimeFunctionTable,
+    `Grass.Artifact.PE.hasFlag,
+    `Grass.Artifact.PE.extentDisjoint,
+    `Grass.Artifact.PE.resolveRuntimeFunctions?,
+    `Grass.Artifact.PE.runtimeBindingsValid?,
+    `Grass.Artifact.PE.ImageLayout.ExceptionsValid,
+    `Grass.Artifact.PE.readRuntimeFunctions,
+    `Grass.Artifact.PE.ResolvedRuntimeFunction.expectedRecord,
+    -- These project supplied spans and payload lengths. Invariance theorems
+    -- transport coordinates without adding a format/loader applicability claim.
+    `Grass.Artifact.PE.placementSpans,
+    `Grass.Artifact.PE.sectionContentLengths,
+    `Grass.Artifact.PE.sectionSizes,
+    -- PE coordinate arithmetic and supplied-data transformations. The PE field
+    -- widths, record writers/readers, and selected profile stay owed below.
+    `Grass.Artifact.PE.FileSpan.Disjoint,
+    `Grass.Artifact.PE.FileSpan.endOffset,
+    `Grass.Artifact.PE.alignUp,
+    `Grass.Artifact.PE.RawContiguous,
+    `Grass.Artifact.PE.PlacedSection.paddedContents,
+    `Grass.Artifact.PE.PlacedSection.expectedSectionHeader,
+    `Grass.Artifact.PE.PlacedSection.expectedContents,
+    `Grass.Artifact.PE.placeSectionsFrom,
+    `Grass.Artifact.PE.placeImageSections,
+    `Grass.Artifact.PE.sumRawSizeWith,
+    `Grass.Artifact.PE.firstVirtualStartWith,
+    `Grass.Artifact.PE.lastVirtualStart,
+    `Grass.Artifact.PE.greatestVirtualEnd,
+    `Grass.Artifact.PE.resolveSectionLocation?,
+    `Grass.Artifact.PE.resolveImageLayout?,
+    `Grass.Artifact.PE.ImageLayout.ImportsResolved,
+    `Grass.Artifact.PE.ImageLayout.importAddressRva?,
+    `Grass.Artifact.PE.ImagePlan.resolveSectionLocation?,
+    `Grass.Artifact.PE.ImagePlan.resolveSectionBase?,
+    `Grass.Artifact.PE.ImagePlan.expectedImage,
+    `Grass.Artifact.PE.writePlacedContentsList,
+    `Grass.Artifact.PE.totalRawSize,
+    `Grass.Artifact.PE.expectedHeaderPrefix,
+    `Grass.Artifact.PE.expectedOptionalHeader,
+    `Grass.Artifact.PE.continueRead,
+    `Grass.Artifact.PE.withImportSection,
+    -- Coordinate projection and metadata-only transport; no claim that a real
+    -- Windows allocation satisfies the Prepared applicability contract.
+    `Grass.Platform.Win32.WriteFile.Resolved.physical,
+    `Grass.Platform.Win32.WriteFile.Resolved.transport,
+    `Grass.Platform.Win32.WriteFile.Prepared.transport,
+    -- Relations over supplied model bytes/events, not API conformance facts.
+    `Grass.Platform.Win32.WriteFile.InputMatches,
+    `Grass.Platform.Win32.WriteFile.Confined,
+    `Grass.Platform.Win32.WriteFile.Represented,
+    -- Delegate to the existing checked machine transition; physical dispatch
+    -- and ordering remain separate external realization obligations.
+    `Grass.Platform.Win32.WriteFile.Action.Runs,
+    -- Pure output projection/fold and Lean's generated history recursion helper.
+    `Grass.Platform.Win32.WriteFile.Prefix.output,
+    `Grass.Platform.Win32.WriteFile.History.published,
+    `Grass.Platform.Win32.WriteFile.History.brecOn.go,
+    -- Generic partial-result relations, serialization through the separately
+    -- owed bit layout, and accessors over Grass's own semantic record.
+    `Grass.ISA.X86.RegisterSemantics.Flags.map,
+    `Grass.ISA.X86.RegisterSemantics.Flags.Allows,
+    `Grass.ISA.X86.RegisterSemantics.Flags.definedMask,
+    `Grass.ISA.X86.RegisterSemantics.Flags.valueBits,
+    `Grass.ISA.X86.RegisterSemantics.Effect.destination,
+    `Grass.ISA.X86.RegisterSemantics.Effect.Allows,
+    `Grass.ISA.X86.RegisterSemantics.Instruction.effect,
+    -- Projections/defaults and checked equality search over existing encoders;
+    -- architectural operand reconstruction is separately owed below.
+    `Grass.ISA.X86.RegisterDecode.rexW,
+    `Grass.ISA.X86.RegisterDecode.rexR,
+    `Grass.ISA.X86.RegisterDecode.rexB,
+    `Grass.ISA.X86.RegisterDecode.selectKinds,
+    `Grass.ISA.X86.RegisterDecode.select,
+    `Grass.ISA.X86.RegisterDecode.decode,
+    `Grass.ISA.X86.RegisterDecode.Result.effect,
     -- Decoder-table lookup and packaging of independently checked encoding laws.
     `Grass.ISA.X86.ImmediateArithmetic.operandSpec,
     `Grass.ISA.X86.ImmediateArithmetic.template,
@@ -389,6 +514,131 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    -- PE/COFF fixed field widths, offsets, alignments, and characteristic bits
+    -- are source-defined format commitments. Their directly derived spans and
+    -- the eight-byte section-name representation therefore remain debt too.
+    `Grass.Artifact.PE.SectionName,
+    `Grass.Artifact.PE.SectionName.ofBytes?,
+    `Grass.Artifact.PE.SectionName.write,
+    `Grass.Artifact.PE.amd64Machine,
+    `Grass.Artifact.PE.executableImageCharacteristics,
+    `Grass.Artifact.PE.canonicalPeOffset,
+    `Grass.Artifact.PE.peSignatureSize,
+    `Grass.Artifact.PE.coffHeaderSize,
+    `Grass.Artifact.PE.optionalHeader64Size,
+    `Grass.Artifact.PE.sectionHeaderSize,
+    `Grass.Artifact.PE.ntHeadersSize,
+    `Grass.Artifact.PE.ntHeadersSpan,
+    `Grass.Artifact.PE.firstRawOffset,
+    `Grass.Artifact.PE.firstSectionRva,
+    `Grass.Artifact.PE.canonicalSectionAlignment,
+    `Grass.Artifact.PE.canonicalFileAlignment,
+    `Grass.Artifact.PE.containsCode,
+    `Grass.Artifact.PE.containsInitializedData,
+    `Grass.Artifact.PE.importDescriptorSize,
+    `Grass.Artifact.PE.importDescriptorTableSize,
+    `Grass.Artifact.PE.thunkArraySize,
+    -- The import predicates, two-byte hint/name alignment, terminators, and
+    -- fixed eight-byte thunk stride select one PE import-table profile.
+    `Grass.Artifact.PE.importNameValid,
+    `Grass.Artifact.PE.importSymbolsValid,
+    `Grass.Artifact.PE.importLibrariesValid,
+    `Grass.Artifact.PE.writeHintName,
+    `Grass.Artifact.PE.hintNamesSize,
+    `Grass.Artifact.PE.hintNameOffsetsFrom,
+    `Grass.Artifact.PE.layoutImportLibraryAt,
+    `Grass.Artifact.PE.layoutImportLibrariesFrom,
+    `Grass.Artifact.PE.layoutImportLibraries,
+    `Grass.Artifact.PE.writeImportDescriptor,
+    `Grass.Artifact.PE.writeImportDescriptors,
+    `Grass.Artifact.PE.writeThunkArray,
+    `Grass.Artifact.PE.writeHintNames,
+    `Grass.Artifact.PE.writeImportLibraryBlock,
+    `Grass.Artifact.PE.writeImportBodiesFrom,
+    `Grass.Artifact.PE.writeImportSection,
+    `Grass.Artifact.PE.iatSlotRva,
+    -- These functions materialize that selected import profile into its
+    -- descriptor, IAT, ILT, and hint/name byte representation.
+    `Grass.Artifact.PE.importSectionName,
+    `Grass.Artifact.PE.makeImportSection,
+    `Grass.Artifact.PE.materializeImports,
+    `Grass.Artifact.PE.placementFitsU32,
+    `Grass.Artifact.PE.placementsFitU32,
+    -- Writable and resolved-location contracts put PE RVA/file-width bounds
+    -- directly in fields; the structure enrollment above keeps them visible.
+    `Grass.Artifact.PE.ImageLayout.Writable,
+    `Grass.Artifact.PE.ResolvedSectionLocation,
+    `Grass.Artifact.PE.writeCanonicalDosHeader,
+    `Grass.Artifact.PE.writePeSignature,
+    `Grass.Artifact.PE.writeImageCoffHeader,
+    -- Header, optional-header, and section-table serializers assert the exact
+    -- PE record schema and field order.
+    `Grass.Artifact.PE.writeHeaderPrefixLeading,
+    `Grass.Artifact.PE.writeHeaderPrefixTrailing,
+    `Grass.Artifact.PE.writeHeaderPrefix,
+    `Grass.Artifact.PE.writeDataDirectory,
+    `Grass.Artifact.PE.writeDataDirectories,
+    `Grass.Artifact.PE.writeOptionalHeader,
+    `Grass.Artifact.PE.writeSectionHeader,
+    `Grass.Artifact.PE.writeSectionTableList,
+    `Grass.Artifact.PE.writeSectionTable,
+    `Grass.Artifact.PE.writeUnpaddedHeaders,
+    `Grass.Artifact.PE.writeAlignedHeaders,
+    `Grass.Artifact.PE.writeImage,
+    `Grass.Artifact.PE.prepareImage,
+    -- Parsed records and readers accept the same PE schema. The selected
+    -- records are explicitly enrolled before the structure filter.
+    `Grass.Artifact.PE.ParsedHeaderPrefix,
+    `Grass.Artifact.PE.readHeaderPrefix,
+    `Grass.Artifact.PE.ParsedOptionalHeader,
+    `Grass.Artifact.PE.readOptionalHeader,
+    `Grass.Artifact.PE.ParsedSectionHeader,
+    `Grass.Artifact.PE.readSectionHeader,
+    `Grass.Artifact.PE.readSectionHeaders,
+    `Grass.Artifact.PE.readSectionContents,
+    `Grass.Artifact.PE.supportedImageHeader,
+    `Grass.Artifact.PE.readImage,
+    -- Synchronous WriteFile's input-read/output-write footprint and four-byte
+    -- DWORD out-slot are vendor facts; Prepared also restricts CPU placement,
+    -- no-wrap and disjointness as a selected profile, whose applicability is
+    -- still external. No loan or probe result discharges those obligations.
+    `Grass.Platform.Win32.WriteFile.Request.loans,
+    `Grass.Platform.Win32.WriteFile.DwordAt,
+    `Grass.Platform.Win32.WriteFile.ReturnResult,
+    `Grass.Platform.Win32.WriteFile.ReturnResult.Conforms,
+    -- PE exception record schema, flags, bounded resolution and profile checks.
+    `Grass.Artifact.PE.ParsedRuntimeFunction,
+    `Grass.Artifact.PE.resolveSectionExtent?,
+    `Grass.Artifact.PE.resolveRuntimeFunction?,
+    `Grass.Artifact.PE.writeRuntimeFunction,
+    `Grass.Artifact.PE.sectionReadable,
+    `Grass.Artifact.PE.sectionExecutable,
+    `Grass.Artifact.PE.sectionDiscardable,
+    `Grass.Artifact.PE.sectionWritable,
+    `Grass.Artifact.PE.sectionInitializedData,
+    `Grass.Artifact.PE.sectionContainsCode,
+    `Grass.Artifact.PE.codeSectionValid?,
+    `Grass.Artifact.PE.metadataSectionValid?,
+    `Grass.Artifact.PE.runtimeFunctionsAscending?,
+    `Grass.Artifact.PE.runtimeBindingValid?,
+    `Grass.Artifact.PE.exceptionTableValid,
+    `Grass.Artifact.PE.ImageLayout.exceptionDirectory,
+    `Grass.Artifact.PE.readRuntimeFunction,
+    `Grass.Artifact.PE.readRuntimeTable,
+    `Grass.Platform.Win32.WriteFile.Prepared,
+    `Grass.ISA.X86.RegisterSemantics.Flags.bits,
+    `Grass.ISA.X86.RegisterSemantics.Flags.fromBits,
+    `Grass.ISA.X86.RegisterSemantics.Flags.equal?,
+    `Grass.ISA.X86.RegisterSemantics.Flags.above?,
+    `Grass.ISA.X86.RegisterSemantics.parity,
+    `Grass.ISA.X86.RegisterSemantics.arithmeticFlags,
+    `Grass.ISA.X86.RegisterSemantics.logicalFlags,
+    `Grass.ISA.X86.RegisterSemantics.narrow,
+    `Grass.ISA.X86.RegisterSemantics.evaluate,
+    `Grass.ISA.X86.RegisterSemantics.evaluateImmediate,
+    `Grass.ISA.X86.RegisterSemantics.Instruction.encoding,
+    `Grass.ISA.X86.RegisterSemantics.Instruction.registersAfter,
+    `Grass.ISA.X86.RegisterDecode.reconstruct,
     `Grass.ISA.X86.ImmediateArithmetic.Immediate.opcode,
     `Grass.ISA.X86.ImmediateArithmetic.Kind.extension,
     `Grass.ISA.X86.ImmediateArithmetic.encode,
@@ -504,6 +754,20 @@ def modeledDeclarations : MetaM (Array Name) := do
     let some mname := env.header.moduleNames[midx.toNat]? | continue
     unless auditedModules.contains mname do continue
     if ← isGenerated n then continue
+    -- These selected contract records embed external widths, PE field schemas,
+    -- or address-profile bounds in their fields. Include each type explicitly
+    -- rather than letting the generic structure filter hide the obligation.
+    -- This exception adds coverage; it exempts no future declaration.
+    if n == ``Grass.Platform.Win32.WriteFile.Prepared ||
+        n == ``Grass.Platform.Win32.WriteFile.ReturnResult ||
+        n == ``Grass.Artifact.PE.SectionName ||
+        n == ``Grass.Artifact.PE.ParsedHeaderPrefix ||
+        n == ``Grass.Artifact.PE.ParsedOptionalHeader ||
+        n == ``Grass.Artifact.PE.ParsedSectionHeader ||
+        n == ``Grass.Artifact.PE.ParsedRuntimeFunction ||
+        n == ``Grass.Artifact.PE.ResolvedSectionLocation then
+      out := out.push (userFacing n)
+      continue
     if ci.isCtor || ci.isInductive || ci.isTheorem then continue
     if ← Meta.isProp ci.type then continue
     -- An instance of a structural class says how a type is decided or printed.
@@ -565,7 +829,7 @@ run_cmd liftTermElabM do
   -- And every module under the audited roots is classified, so a new file
   -- cannot be invisible to this gate the way `RedZone.lean` was.
   for root in [("Grass/ISA/X86", `Grass.ISA.X86), ("Grass/ABI", `Grass.ABI),
-               ("Grass/Platform", `Grass.Platform)] do
+                ("Grass/Platform", `Grass.Platform), ("Grass/Artifact/PE", `Grass.Artifact.PE)] do
     let onDisk ← modulesOnDisk (System.FilePath.mk root.1) root.2
     for m in onDisk do
       unless auditedModules.contains m || notModelling.contains m do

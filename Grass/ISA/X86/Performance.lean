@@ -441,23 +441,18 @@ record is data the author writes: the first reviewer built a
 recorded as dead, and proved every trace equicost with it. `citationsChecked`
 adds `SourceDocument.retrieval.isVerified`.
 
-An earlier version of this paragraph said that status is "set by probing the
-location rather than by an author asserting it". **That is false.** No probe
-exists anywhere in this repository: `SourceDocument.livenessProbe` has no
-consumer outside its own declaration, and no tool or CI job reads it. The
-retrieval status of the two registered documents was established by hand and
-recorded, which is evidence a reader can re-check but is not a mechanical
-check. And `SourceDocument` is an ordinary public structure, so an author can
-invent a document with `retrieval := .verified` as easily as a confirmation
-date -- the second reviewer built exactly that and refuted the claim below that
-no `JustifiedCostModel` can be built today.
+Retrieval status is recorded evidence, not a proof of publisher content.
+`SourceDocument` is an ordinary public structure, so an author can invent a
+document with `retrieval := .verified` as easily as a confirmation date.
 
 That gap is now closed by `citationsRegistered`, which pins each fact's anchors
-to `Vendor.document` -- `intelSdm092` and `amd64Apm409` and nothing else. An
-invented document no longer satisfies the premises, so the claim above is a
-theorem: `no_justification_while_amd_unretrievable`. The two fields together buy
-what one could not, and the `source-liveness` binary in `tools/grass-tools` now
-reads the retrieval status that the second of them depends on.
+to `Vendor.document` -- `intelSdm092` and `amd64Apm410` and nothing else. An
+invented document no longer satisfies the premises. The conditional theorem
+`no_justification_while_amd_unretrievable` rejects a justification when the
+registered source is unavailable. The active AMD pin is now retrievable; that
+does not supply architectural timing facts or confirmation of their anchors.
+The `source-liveness` binary checks recorded availability against title text,
+with revision and anchor inspection remaining separate obligations.
 -/
 structure JustifiedCostModel (Insn Vals : Type) where
   /-- The cost function. -/
@@ -502,7 +497,7 @@ structure JustifiedCostModel (Insn Vals : Type) where
   to stop. `Grass.ISA.X86.Rules.all_registered` is the same pin for the common
   profile; the commit that added it recorded this one as owed, and this is it.
 
-  `Vendor.document` is `intelSdm092` and `amd64Apm409` and nothing else, so
+  `Vendor.document` is `intelSdm092` and `amd64Apm410` and nothing else, so
   with the `source-liveness` binary reading `livenessProbe`, the premise now
   reaches a status something other than the author can check.
   -/
@@ -557,24 +552,24 @@ theorem citations_retrievable (j : JustifiedCostModel Insn Vals) (i : Insn) :
 An earlier commit claimed this in prose and a reviewer refuted it by inventing a
 `SourceDocument` carrying `retrieval := .verified`. With `citationsRegistered`
 pinning each fact's anchors to `Vendor.document`, the claim is now a theorem
-rather than a hope: the AMD document is `amd64Apm409`, its recorded retrieval is
-`.dead`, and `citationsChecked` demands `isVerified`.
+rather than a hope: `citationsChecked` demands `isVerified` of the registered
+AMD document. The premise is explicit because the active pin is now live.
 
 Note the hypothesis `(i : Insn)`. Over an empty instruction type the structure
 is vacuously inhabitable, which is not a loophole -- a cost model with no
 instructions justifies nothing -- but it is the reason this is stated for a
 given instruction rather than as non-inhabitation.
 
-This is the correct state for a security premise whose evidence is missing. It
-becomes constructible when the AMD manual is retrievable again, and the
-`source-liveness` binary is what will notice.
+Retrievability alone does not supply instruction timing facts or their anchors.
 -/
 theorem no_justification_while_amd_unretrievable
+    (hunretrievable : Vendor.amd.document.retrieval.isVerified = false)
     (j : JustifiedCostModel Insn Vals) (i : Insn) : False := by
   have hreg := (j.citationsRegistered i).2
   have hchk := (j.citationsChecked i).2.1
   rw [hreg] at hchk
-  exact absurd hchk (by decide)
+  rw [hunretrievable] at hchk
+  contradiction
 
 /-- A measured timing fact cannot justify a `JustifiedCostModel`.
 
