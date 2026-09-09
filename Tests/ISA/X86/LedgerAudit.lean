@@ -64,6 +64,7 @@ import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
 import Grass.Platform.Win32.WriteFileCallPlan
+import Grass.Platform.Win32.CallEntry
 import Grass.Platform.Win32.WriteFileHandoff
 import Grass.Platform.Win32.WriteFilePreservation
 import Grass.Platform.Win32.WriteFileCall
@@ -205,6 +206,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileArguments,
    `Grass.Platform.Win32.ApiRequest,
    `Grass.Platform.Win32.WriteFileCallPlan,
+   `Grass.Platform.Win32.CallEntry,
    `Grass.Platform.Win32.WriteFileHandoff,
    `Grass.Platform.Win32.WriteFilePreservation,
    `Grass.Platform.Win32.WriteFileCall,
@@ -312,7 +314,7 @@ acquiring a citation.
 -- Nine runtime data/view operations use existing ABI data and assert no execution.
 -- Five runtime capture/update adapters introduce no additional ABI behavior.
 -- Seven logical import selectors/adapters derive existing layout and API data.
-def notBehaviourBaseline : Nat := 284
+def notBehaviourBaseline : Nat := 287
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -453,6 +455,8 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    `Grass.Platform.Win32.CallEntry.CallPolicy.ofFactory,
+    `Grass.Platform.Win32.WriteFile.CallPolicy,
     -- Computed logical import bindings, not native DLL/export adequacy.
     `Grass.Platform.Win32.ApiDispatch.requestApi,
     `Grass.Platform.Win32.ApiDispatch.apiForBytes?,
@@ -511,6 +515,7 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.WriteFile.ProtocolState,
     `Grass.Platform.Win32.WriteFile.embedPending,
     `Grass.Platform.Win32.WriteFile.entryHandoff?,
+    `Grass.Platform.Win32.CallEntry.reachedCall?,
     `Grass.Platform.Win32.WriteFile.reachedCall?,
     `Grass.Platform.Win32.WriteFile.selectPending,
     -- Checked protocol projections and loader-table searches contain no new
