@@ -1,4 +1,4 @@
-import Grass.ISA.X86.Decode
+import Grass.ISA.X86.EncodingTemplate
 
 /-! Fixed-width encodings for the modeled near relative branches. -/
 namespace Grass.ISA.X86.Rel32
@@ -40,32 +40,42 @@ theorem size_eq (kind : Kind) (bits : BitVec 32) :
 @[simp] theorem encodedSize_equal : encodedSize .equal = 6 := rfl
 @[simp] theorem encodedSize_above : encodedSize .above = 6 := rfl
 
-theorem decode_encode (kind : Kind) (bits : BitVec 32) (rest : ByteSeq) :
-    decodeInsn ((encode kind bits).toBytes ++ rest) = .ok (encode kind bits, rest) := by
-  cases kind with
-  | jump =>
-    let spec : OpcodeSpec :=
+private theorem operandSpec_present (operand : Kind × BitVec 32) :
+    (findSpec (encode operand.1 operand.2).escape (encode operand.1 operand.2).opcode).isSome := by
+  cases operand with | mk kind bits => cases kind <;> rfl
+
+private def operandSpec (operand : Kind × BitVec 32) : OpcodeSpec :=
+  (findSpec (encode operand.1 operand.2).escape (encode operand.1 operand.2).opcode).get
+    (operandSpec_present operand)
+
+private theorem operandSpec_jump (bits : BitVec 32) :
+    operandSpec (.jump, bits) =
       { escape := false, opcode := 0xE9, hasModrm := false, immSize := .i32,
-        mnemonic := "jmp rel32" }
-    apply decodeInsn_toBytes (s := spec)
-    · rfl
-    · simp [MatchesSpec, spec, encode, OpcodeSpec.immSizeFor, Immediate.sizeOf]
-    · exact encode_wellFormed .jump bits
-  | equal =>
-    let spec : OpcodeSpec :=
+        mnemonic := "jmp rel32" } := rfl
+
+private theorem operandSpec_equal (bits : BitVec 32) :
+    operandSpec (.equal, bits) =
       { escape := true, opcode := 0x84, hasModrm := false, immSize := .i32,
-        mnemonic := "jz rel32" }
-    apply decodeInsn_toBytes (s := spec)
-    · rfl
-    · simp [MatchesSpec, spec, encode, OpcodeSpec.immSizeFor, Immediate.sizeOf]
-    · exact encode_wellFormed .equal bits
-  | above =>
-    let spec : OpcodeSpec :=
+        mnemonic := "jz rel32" } := rfl
+
+private theorem operandSpec_above (bits : BitVec 32) :
+    operandSpec (.above, bits) =
       { escape := true, opcode := 0x87, hasModrm := false, immSize := .i32,
-        mnemonic := "ja rel32" }
-    apply decodeInsn_toBytes (s := spec)
-    · rfl
-    · simp [MatchesSpec, spec, encode, OpcodeSpec.immSizeFor, Immediate.sizeOf]
-    · exact encode_wellFormed .above bits
+        mnemonic := "ja rel32" } := rfl
+
+private def template : EncodingTemplate (Kind × BitVec 32) where
+  encode operand := encode operand.1 operand.2
+  spec := operandSpec
+  registered operand := by cases operand with | mk kind bits => cases kind <;> rfl
+  matchesSpec operand := by
+    cases operand with
+    | mk kind bits =>
+      cases kind <;> simp [MatchesSpec, operandSpec_jump, operandSpec_equal,
+        operandSpec_above, encode, OpcodeSpec.immSizeFor, Immediate.sizeOf]
+  wellFormed operand := encode_wellFormed operand.1 operand.2
+
+theorem decode_encode (kind : Kind) (bits : BitVec 32) (rest : ByteSeq) :
+    decodeInsn ((encode kind bits).toBytes ++ rest) = .ok (encode kind bits, rest) :=
+  EncodingTemplate.decode_encode template (kind, bits) rest
 
 end Grass.ISA.X86.Rel32

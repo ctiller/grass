@@ -58,6 +58,11 @@ the call signature, typed local declarations, saved-register prefix, and frame
 layout from that source. `Grass/Assembly/FrameStore.lean` resolves a selected
 typed-AST store against that exact frame; the parsed header is the sole source of
 admitted local slots and declaration order determines their offsets.
+`Grass/Assembly/LocalAddress.lean` now owns the shared slot lookup, local-range
+check, and signed displacement calculation for stores and loads.
+`Grass/Assembly/FrameLoad.lean` connects the authored `mov eax, transferred`
+occurrence to that address and its decoder-checked encoding. The load's physical
+execution proof remains open; its frame positions are computed from the source.
 `Grass/Assembly/Store32.lean` derives the RSP-relative
 operand, encoded instruction, shifted range, and little-endian write bytes from
 that resolution. The actual-source fixtures are re-elaborated by

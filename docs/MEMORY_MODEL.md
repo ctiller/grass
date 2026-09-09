@@ -67,6 +67,34 @@ Pointers returned by an API acquire exactly the access rights, lifetime,
 ownership, aliasing, cleanup duties, and thread restrictions promised by that
 API's modeled postcondition.
 
+### 2.1 Shared storage and views
+
+Allocation identity answers which provenance and lifetime authorize an access;
+backing identity answers which bytes it reaches. Shared storage has one byte and
+initialization state per backing location. An allocation view maps its checked
+local range into that backing. For a contiguous view with origin `o`, local byte
+`i` denotes backing byte `o + i`. Aliasing follows from equal backing identities
+and overlapping translated ranges; a separate alias declaration cannot substitute
+for shared byte semantics.
+
+Reads, writes, loan overlap, grant coverage, lending, race checks, and framing
+must use this same translation. Sharing a backing alone does not imply overlapping
+ranges, and equal local offsets in different views need not denote equal bytes.
+For example, origin-zero range `[8, 16)` and origin-eight range `[0, 8)` reach
+the same bytes. A loan of either range constrains accesses through both views.
+
+Mapping changes are authority-checked transitions, not edits that silently
+retarget existing loans or historical events. An event retains the backing
+locations reached when it committed; later remapping cannot change its conflict
+footprint. Unmapping a view and destroying its backing are distinct lifetime
+operations, each preserving or resolving the affected loans and obligations.
+
+A profile may initially admit only unaliased storage. Its applicability and
+preservation theorems must enforce that restriction, including the connection
+between modeled storage and actual address placement. Distinct allocation IDs
+or an empty alias list alone do not prove physical separation. Shared mappings
+remain unsupported until their byte, authority, and event semantics agree.
+
 ## 3. Authority and loans
 
 The canonical authority states include:

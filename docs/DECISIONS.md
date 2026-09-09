@@ -854,9 +854,13 @@ to imitate compiler-selected storage or CFG structure.
     extension is needed. The correspondence must account for relevant finite,
     infinite, divergent, pending, scheduling, and choice behavior under the
     declared projection. One-way inclusion alone does not transport arbitrary
-    existential, availability, or choice-sensitive properties. The current
-    `BehaviorRefinement`/`VerifiedProgram` foundation proves only that inclusion,
-    so full abstract-behavior equivalence remains a known implementation gap.
+    existential, availability, or choice-sensitive properties.
+    `BehaviorRefinement` gives forward inclusion; `VerifiedProgram` additionally
+    requires backward coverage of the existing prefix/completion maps at every
+    adjacent tier. This covers currently represented histories of the selected
+    portable behavior. Capturing authoritative specification semantics and the
+    missing pending, branching, and stuttering representations remains necessary
+    for full abstract-behavior equivalence.
     Specification theorem keys and their proofs retain separate diagnostics
     and dependency facets from lowering obligations. Adding or reproving a
     theorem without changing the specification's behavior must not create a

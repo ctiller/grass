@@ -1,4 +1,5 @@
 import Grass.ISA.X86.BasicInstructions
+import Grass.ISA.X86.EncodingTemplate
 
 /-! Register-direct Group 1 arithmetic with typed immediate widths. -/
 namespace Grass.ISA.X86.ImmediateArithmetic
@@ -95,27 +96,55 @@ theorem encode_size (kind : Kind) (width : BasicInstructions.Width) (reg : Gpr)
       (if BasicInstructions.Width.rexW width || reg.rexBit then 1 else 0) + 2 + immediate.size := by
   cases width <;> cases reg <;> cases immediate <;> rfl
 
+private structure Operand where
+  kind : Kind
+  width : BasicInstructions.Width
+  reg : Gpr
+  immediate : Immediate
+
+private theorem operandSpec_present (operand : Operand) :
+    (findSpec (encode operand.kind operand.width operand.reg operand.immediate).escape
+      (encode operand.kind operand.width operand.reg operand.immediate).opcode).isSome := by
+  cases operand with
+  | mk kind width reg immediate => cases immediate <;> rfl
+
+private def operandSpec (operand : Operand) : OpcodeSpec :=
+  (findSpec (encode operand.kind operand.width operand.reg operand.immediate).escape
+    (encode operand.kind operand.width operand.reg operand.immediate).opcode).get
+      (operandSpec_present operand)
+
+private theorem operandSpec_i8 (kind : Kind) (width : BasicInstructions.Width)
+    (reg : Gpr) (bits : BitVec 8) :
+    operandSpec ⟨kind, width, reg, .i8 bits⟩ =
+      { escape := false, opcode := 0x83, hasModrm := true, immSize := .i8,
+        mnemonic := "group1 r/m, imm8" } := rfl
+
+private theorem operandSpec_i32 (kind : Kind) (width : BasicInstructions.Width)
+    (reg : Gpr) (bits : BitVec 32) :
+    operandSpec ⟨kind, width, reg, .i32 bits⟩ =
+      { escape := false, opcode := 0x81, hasModrm := true, immSize := .i32,
+        mnemonic := "group1 r/m, imm32" } := rfl
+
+private def template : EncodingTemplate Operand where
+  encode operand := encode operand.kind operand.width operand.reg operand.immediate
+  spec := operandSpec
+  registered operand := by cases operand with
+    | mk kind width reg immediate => cases immediate <;> rfl
+  matchesSpec operand := by
+    cases operand with
+    | mk kind width reg immediate =>
+      cases immediate with
+      | i8 bits => simp [MatchesSpec, operandSpec_i8, encode, Immediate.opcode,
+          Immediate.isa, OpcodeSpec.immSizeFor, Immediate.sizeOf]
+      | i32 bits => simp [MatchesSpec, operandSpec_i32, encode, Immediate.opcode,
+          Immediate.isa, OpcodeSpec.immSizeFor, Immediate.sizeOf]
+  wellFormed operand := encode_wellFormed operand.kind operand.width operand.reg operand.immediate
+
 /-- Every admitted constructor round-trips through the existing decoder table. -/
 theorem decode_encode (kind : Kind) (width : BasicInstructions.Width) (reg : Gpr)
     (immediate : Immediate) (rest : ByteSeq) :
     decodeInsn ((encode kind width reg immediate).toBytes ++ rest) =
-      .ok (encode kind width reg immediate, rest) := by
-  cases immediate with
-  | i8 bits =>
-    apply decodeInsn_toBytes (s :=
-      { escape := false, opcode := 0x83, hasModrm := true, immSize := .i8,
-        mnemonic := "group1 r/m, imm8" })
-    · rfl
-    · simp [MatchesSpec, encode, Immediate.opcode, Immediate.isa,
-        OpcodeSpec.immSizeFor, Immediate.sizeOf]
-    · exact encode_wellFormed kind width reg (.i8 bits)
-  | i32 bits =>
-    apply decodeInsn_toBytes (s :=
-      { escape := false, opcode := 0x81, hasModrm := true, immSize := .i32,
-        mnemonic := "group1 r/m, imm32" })
-    · rfl
-    · simp [MatchesSpec, encode, Immediate.opcode, Immediate.isa,
-        OpcodeSpec.immSizeFor, Immediate.sizeOf]
-    · exact encode_wellFormed kind width reg (.i32 bits)
+      .ok (encode kind width reg immediate, rest) :=
+  EncodingTemplate.decode_encode template ⟨kind, width, reg, immediate⟩ rest
 
 end Grass.ISA.X86.ImmediateArithmetic
