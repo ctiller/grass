@@ -14,6 +14,8 @@ import Grass.ISA.X86.Execution.FetchedEncoding
 import Grass.ISA.X86.Execution.MemoryAccess
 import Grass.ISA.X86.Execution.MemoryWrite
 import Grass.ISA.X86.Execution.ReadValue32
+import Grass.ISA.X86.Execution.MemoryMoveFactory
+import Grass.ISA.X86.Execution.MemoryMoveSelection
 import Grass.ISA.X86.Execution.MemoryMoveNormal
 import Grass.ISA.X86.Execution.SubRspNormal
 import Grass.ISA.X86.Execution.PushNormal
@@ -172,6 +174,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.FetchedEncoding,
    `Grass.ISA.X86.Execution.MemoryAccess, `Grass.ISA.X86.Execution.MemoryWrite,
    `Grass.ISA.X86.Execution.ReadValue32,
+   `Grass.ISA.X86.Execution.MemoryMoveFactory, `Grass.ISA.X86.Execution.MemoryMoveSelection,
    `Grass.ISA.X86.Execution.MemoryMoveNormal,
    `Grass.ISA.X86.Execution.SubRspNormal,
    `Grass.ISA.X86.Execution.PushNormal,
@@ -333,7 +336,8 @@ acquiring a citation.
 -- Thirteen custody predicates and checked adapters add no external behavior.
 -- One adapter derives the Windows binding from retained actual CALL receipts.
 -- Ten checked body constructors/projections and four fetch-reuse helpers.
-def notBehaviourBaseline : Nat := 287
+-- Seven checked memory-MOV selector/factory helpers reuse existing ISA rules.
+def notBehaviourBaseline : Nat := 294
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -649,6 +653,15 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.ReadValue32.bytes,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.displacement,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.LoadNormal.read,
+    -- Whole-production checks and actual fixed-operation construction, not new transfer rules.
+    `Grass.ISA.X86.Execution.MemoryMoveSelection.displacement?,
+    `Grass.ISA.X86.Execution.MemoryMoveSelection.select,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.Success.result,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.reached,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.fromSite,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.fromFetched,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.memoryMove,
+
     -- Checked packaging, projections and selectors over independently modeled
     -- encoders, decoders, fetches and machine transitions.
     `Grass.ISA.X86.Execution.ArithmeticInstruction.ofRegisterSelection,

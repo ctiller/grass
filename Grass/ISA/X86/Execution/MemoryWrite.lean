@@ -16,15 +16,15 @@ theorem written_exact {before : State} {afterFetch after : MachineState}
     {fetch : FetchedSite before afterFetch} (access : MemoryAccess fetch after)
     (payload : ByteSeq) (intent : access.descriptor.intent = .write)
     (width : payload.length = access.descriptor.range.size)
-    (supplied : fetch.writeData
+    (supplied : access.writeData
       (afterFetch.noteContext access.run.context access.run.contextKind) access.descriptor = payload) :
     access.run.complete.committed.written = some payload := by
-  have answer : (Oracle.ofMemory fetch.writeData fetch.indeterminate).answerResolved
+  have answer : (Oracle.ofMemory access.writeData access.indeterminate).answerResolved
       (afterFetch.noteContext access.run.context access.run.contextKind)
       access.descriptor access.run.resolved = some access.run.complete := by
     rw [← access.memoryOracle]
     exact access.run.answerResolved
-  have written := Oracle.ofMemory_written_of_answerResolved fetch.writeData fetch.indeterminate
+  have written := Oracle.ofMemory_written_of_answerResolved access.writeData access.indeterminate
     (afterFetch.noteContext access.run.context access.run.contextKind)
     access.descriptor access.run.resolved access.run.complete answer (by rw [intent]; rfl)
   simpa only [supplied, ← width, List.take_length] using written

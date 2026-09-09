@@ -1,4 +1,5 @@
 import Grass.ISA.X86.Execution.StackInstruction
+import Grass.ISA.X86.Execution.MemoryMoveSelection
 import Grass.ISA.X86.Execution.MoveSelection
 import Grass.ISA.X86.Execution.ArithmeticNormal
 import Grass.ISA.X86.Execution.BranchNormal
@@ -11,7 +12,7 @@ The alternatives are semantic families with existing production encoders, not
 another opcode table or a handwritten Hello sequence. Classification does not
 certify an instruction outcome. In particular, recognizing CALL or UD2 supplies
 neither a normal CALL receipt nor an invalid-opcode fault receipt. Memory MOV
-classification is pending the separately owned source-free memory adapter.
+classification delegates to the source-free memory adapter.
 -/
 
 namespace Grass.ISA.X86.Execution
@@ -20,6 +21,7 @@ namespace Grass.ISA.X86.Execution
 inductive Instruction where
   | stack (instruction : StackInstruction)
   | move (instruction : MoveInstruction)
+  | memoryMove (instruction : MemoryMoveNormal.Instruction)
   | arithmetic (instruction : ArithmeticInstruction)
   | branch (instruction : BranchInstruction)
   | lea (instruction : LeaInstruction)
@@ -33,6 +35,7 @@ namespace Instruction
 def encoding? : Instruction → Option InsnEncoding
   | .stack instruction => some instruction.encoding
   | .move instruction => some instruction.encoding
+  | .memoryMove instruction => instruction.encode?
   | .arithmetic instruction => some instruction.encoding
   | .branch instruction => some instruction.encoding
   | .lea instruction => instruction.encoding?
@@ -71,7 +74,11 @@ def select (encoding : InsnEncoding) : Option (Selection encoding) :=
         | none =>
           match selected : LeaInstruction.select encoding with
           | some instruction => some ⟨.lea instruction, LeaInstruction.select_sound selected⟩
-          | none => selectControl encoding
+          | none =>
+            match MemoryMoveSelection.select encoding with
+            | some selected => some ⟨.memoryMove selected.instruction,
+                MemoryMoveSelection.encoding_sound selected⟩
+            | none => selectControl encoding
 
 theorem Selection.encoding_sound {encoding : InsnEncoding} (selection : Selection encoding) :
     selection.instruction.encoding? = some encoding := selection.encoding_eq

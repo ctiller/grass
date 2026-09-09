@@ -23,10 +23,7 @@ private def inventory : Option (Nat × List Nat × List Nat) := do
     if (Instruction.select output.encoding).isSome then none else some output.index
   pure (result.outputs.length, selected, unsupported)
 
-example : inventory = some (44,
-    [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22,
-      23, 24, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
-      42, 43], [4, 16, 17, 25]) := by decide +kernel
+example : inventory = some (44, List.range 44, []) := by decide +kernel
 
 private inductive Case where | push | truncated | unsupported | trailing
 deriving DecidableEq, Repr
