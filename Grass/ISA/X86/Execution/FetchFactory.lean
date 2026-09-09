@@ -40,6 +40,9 @@ inductive Failure where
 structure Success (policy : CpuAccessPolicy) (before : State) where
   after : MachineState
   observed : ObservedFetch before after
+  plan : AddressPlan before.machine.memory policy.code before.rip
+  descriptor_exact : observed.descriptor =
+    plan.descriptor policy .fetch observed.descriptor.range.size
   dispatched : Dispatched before after
   dispatch_exact : observed.dispatch = .ok dispatched
   policy_exact : observed.run.policy = fetchPolicy policy
@@ -90,6 +93,8 @@ def fetch (policy : CpuAccessPolicy) (before : State) :
               .ok
                 { after := after
                   observed := observed
+                  plan := plan
+                  descriptor_exact := rfl
                   dispatched := selected
                   dispatch_exact := dispatched
                   policy_exact := result.policy_exact
