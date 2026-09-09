@@ -267,6 +267,17 @@ and every framing argument stated over `d.range` would be false. -/
 def WrittenFits (d : AccessDescriptor) (written : Option ByteSeq) : Prop :=
   ∀ bytes, written = some bytes → bytes.length ≤ d.range.size
 
+/-- A commit moves no allocation: it writes bytes, and bytes are not in the
+allocation table. What `Grass/Op/Step.lean` needs to carry a sharing hypothesis
+across an access, since sharing is a fact about that table. -/
+@[simp] theorem allocations_commit (state : MemoryState) (d : AccessDescriptor)
+    (written : Option ByteSeq) :
+    (state.commit d written).allocations = state.allocations := by
+  unfold MemoryState.commit
+  cases written with
+  | none => rfl
+  | some _ => exact MemoryState.allocations_write _ _ _ _ _
+
 /--
 **A commit frames every cell the access did not declare.**
 

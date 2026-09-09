@@ -3459,6 +3459,18 @@ theorem initializedAt_write_of_covers (state : MemoryState) {id : AllocId} {star
     exact absurd (List.getElem?_eq_none_iff.mp hb) (by simp at h ⊢; omega)
   | some b => simp
 
+/-- Sharing is a fact about the allocation table, so two states with the same table
+agree on it.
+
+The general form of `sharesBytes_write`: any transition that leaves `allocations`
+alone -- an authority effect, a store installation, a write -- carries a sharing
+hypothesis across itself. -/
+theorem sharesBytes_congr_of_allocations {a b : MemoryState}
+    (h : a.allocations = b.allocations) (x y : AllocId) :
+    a.SharesBytes x y ↔ b.SharesBytes x y := by
+  unfold SharesBytes backingOf?
+  rw [h]
+
 /-- A write moves no allocation, so it cannot change who shares bytes with whom.
 
 Sharing is a fact about the allocation table -- which records name which backing --

@@ -197,8 +197,10 @@ theorem cellAt?_writeField_of_not_covers (state : MemoryState) (id : AllocId) (b
     (h : ¬ field.range.Covers offset) :
     (state.writeField id base field bytes).cellAt? id (base + offset) =
       state.cellAt? id (base + offset) :=
+  -- Same allocation, so the `¬ Covers` disjunct is the sound one and carries the
+  -- identity condition `g-design:185` requires with it.
   cellAt?_write_of_not_covers state id
-    (Or.inr fun hin => h (writeField_covers_iff base field bytes offset hin))
+    (Or.inr ⟨rfl, fun hin => h (writeField_covers_iff base field bytes offset hin)⟩)
 
 /-- **A field write frames every other field of a well-formed footprint.**
 

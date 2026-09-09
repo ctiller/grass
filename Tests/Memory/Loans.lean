@@ -17,6 +17,21 @@ namespace Tests.Memory.Loans
 open Grass.Core Grass.Memory
 
 private def allocs : FreshSupply AllocTag := .initial
+
+private def stores : FreshSupply StorageTag := .initial
+
+/-- The buffer's storage. `view` below names this one too, which is what makes the
+two share bytes: under `g-design:185` sharing is naming one backing, not appearing
+together in an `aliases` list. -/
+def bufferBacking : StorageId := stores.fresh.1
+
+/-- Storage for the re-allocation in a later epoch. A *different* backing, because
+the buffer was freed first -- re-using the identity does not re-use the bytes, which
+is the whole content of `docs/MEMORY_MODEL.md` §5. -/
+def reusedBacking : StorageId := stores.fresh.2.fresh.1
+
+/-- The scratch block's storage, shared with nothing. -/
+def scratchBacking : StorageId := stores.fresh.2.fresh.2.fresh.1
 private def epochs : FreshSupply EpochTag := .initial
 private def contexts : FreshSupply ContextTag := .initial
 private def grants : FreshSupply GrantTag := .initial
@@ -63,16 +78,16 @@ def unlent : MemoryState :=
   (MemoryState.empty.allocate? buffer
     { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
       source := .virtualAlloc, owners := [owner]
-      permission := .readWrite, live := true, bytes := .empty
-      base := some 0x1000 }).getD .empty
+      permission := .readWrite, live := true, base := some 0x1000
+      backing := bufferBacking, origin := 0 }).getD .empty
 
 /-- The allocation happened, so `getD` did not fall back to the empty state. -/
 theorem the_allocation_succeeds :
     (MemoryState.empty.allocate? buffer
       { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
         source := .virtualAlloc, owners := [owner]
-        permission := .readWrite, live := true, bytes := .empty
-        base := some 0x1000 }).isSome := by decide
+        permission := .readWrite, live := true, base := some 0x1000
+        backing := bufferBacking, origin := 0 }).isSome := by decide
 
 /-- A write loan of the first eight bytes to the borrower. -/
 def loanOfHead : AuthorityGrant :=
@@ -361,8 +376,8 @@ def freed : MemoryState :=
   (MemoryState.empty.allocate? buffer
     { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
       source := .virtualAlloc, owners := [owner]
-      permission := .readWrite, live := false, bytes := .empty
-      base := some 0x1000 }).getD .empty
+      permission := .readWrite, live := false, base := some 0x1000
+      backing := bufferBacking, origin := 0 }).getD .empty
 
 /-- **A freed allocation is exclusive and unwritable.** Both halves matter: the
 loan map really is empty, and that really is not authority. -/
@@ -479,8 +494,8 @@ changed. The guard is the whole record now. -/
 def bufferRecord : AllocationRecord :=
   { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
     source := .virtualAlloc, owners := [owner]
-    permission := .readWrite, live := true, bytes := .empty
-    base := some 0x1000 }
+    permission := .readWrite, live := true, base := some 0x1000
+    backing := bufferBacking, origin := 0 }
 
 /-- The starting state really does hold that record, so the refusals below are about
 the change and not about the lookup. -/
@@ -498,10 +513,16 @@ theorem an_owner_list_may_not_be_rewritten_under_a_grant :
       Option.none := by decide
 
 /-- **Nor may its bytes be rewritten.** §1's chokepoint sentence names raw memory
-before permissions or provenance, and this was a second door onto it. -/
+before permissions or provenance, and a door onto the bytes is a door onto §3's
+authority.
+
+This used to test `allocate?`, because the bytes were a field of the record and so
+sat behind the record guard. `g-design:185` moved them to `MemoryState.backings`,
+out of that guard's reach, so the property is now `installStore?`'s to keep and this
+is where it is checked. The refusal is the point: `lentHead` has a grant outstanding
+over storage that is this backing. -/
 theorem bytes_may_not_be_rewritten_under_a_grant :
-    lentHead.allocate? buffer
-      { bufferRecord with bytes := ByteStore.empty.write 0 [0xde] true } =
+    lentHead.installStore? bufferBacking (ByteStore.empty.write 0 [0xde] true) =
       Option.none := by decide
 
 /-- And with nothing outstanding both are accepted, so the refusals are the grant and
@@ -510,8 +531,8 @@ nothing out may re-record whatever it likes. -/
 theorem both_are_accepted_with_nothing_outstanding :
     (unlent.allocate? buffer
       { bufferRecord with owners := [owner, stranger] }).isSome ∧
-    (unlent.allocate? buffer
-      { bufferRecord with bytes := ByteStore.empty.write 0 [0xde] true }).isSome ∧
+    (unlent.installStore? bufferBacking
+      (ByteStore.empty.write 0 [0xde] true)).isSome ∧
     ¬ unlent.AnyGrantOver bufferProv ⟨0, 8⟩ ∧
     lentHead.AnyGrantOver bufferProv ⟨0, 8⟩ := by
   exact ⟨by decide, by decide, by decide, by decide⟩
@@ -681,21 +702,28 @@ theorem a_grant_at_its_tail_field_is_accepted :
 def freedRecord : AllocationRecord :=
   { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
     source := .virtualAlloc, owners := [owner]
-    permission := .readWrite, live := false, bytes := .empty, base := some 0x1000 }
+    permission := .readWrite, live := false, base := some 0x1000
+    backing := bufferBacking, origin := 0 }
 
-/-- A second allocation over the same storage, declared an alias of the buffer. -/
+/-- A second allocation over the same storage. It names `bufferBacking`, so it *is*
+the same storage rather than being declared to be. -/
 def view : AllocId := allocs.fresh.2.fresh.1
 
 /-- Provenance of the view. -/
 def viewProv : Provenance := { bufferProv with root := view }
 
-/-- A state holding both, aliased. -/
+/-- A state holding both views of the one storage.
+
+No `alias` call: allocating the second record with the first's `backing` is what
+makes them share. The previous shape allocated a private `ByteStore` for the view and
+then declared the two aliased, which `Tests/Op/StandardLoan.lean`'s
+`the_alias_is_not_yet_a_byte_level_fact` proves the byte semantics did not implement. -/
 def aliasedPair : MemoryState :=
-  ((unlent.allocate? view
+  (unlent.allocate? view
       { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
         source := .virtualAlloc, owners := [owner]
-        permission := .readWrite, live := true, bytes := .empty
-        base := some 0x1000 }).getD unlent).alias buffer view
+        permission := .readWrite, live := true, base := some 0x1000
+        backing := bufferBacking, origin := 0 }).getD unlent
 
 /-- A loan over the *view*, not over the buffer. -/
 def viewLoan : AuthorityGrant := { loanOfHead with provenance := viewProv }
@@ -704,7 +732,8 @@ def viewLoan : AuthorityGrant := { loanOfHead with provenance := viewProv }
 def reusedRecord : AllocationRecord :=
   { extent := ⟨0, 64⟩, epoch := laterEpoch, space := .cpuVirtual
     source := .virtualAlloc, owners := [owner]
-    permission := .readWrite, live := true, bytes := .empty, base := some 0x1000 }
+    permission := .readWrite, live := true, base := some 0x1000
+    backing := reusedBacking, origin := 0 }
 
 /-- A state holding it. `bufferProv` names the *old* epoch. -/
 def reused : MemoryState := (MemoryState.empty.allocate? buffer reusedRecord).getD .empty
@@ -1022,8 +1051,8 @@ def arena : MemoryState :=
   (unlent.allocate? scratch
     { extent := ⟨0, 16⟩, epoch := epoch, space := .cpuVirtual
       source := .bumpAllocator, owners := [owner]
-      permission := .readWrite, live := true, bytes := .empty
-      base := some 0x2000 }).getD unlent
+      permission := .readWrite, live := true, base := some 0x2000
+      backing := scratchBacking, origin := 0 }).getD unlent
 
 /-- The same arena with the buffer's head lent out. -/
 def arenaWithLoan : MemoryState := (arena.issue? firstLoan loanOfHead).getD arena

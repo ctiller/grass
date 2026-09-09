@@ -2026,6 +2026,27 @@ a consumer following it would have had an unsound argument. The hypothesis
 quantifies over `sequence.accesses`, which `mem_accesses_of_visibleEffects?` shows
 contains every survivor and which contains the faulting substep's descriptor. -/
 
+/-- **An access moves no allocation.** It commits bytes and applies an authority
+effect, and neither touches the allocation table.
+
+`g-design:185` makes this load-bearing rather than incidental: sharing is a fact
+about that table, so this is what lets a sharing hypothesis about the state before a
+run of accesses be used at every state during it. -/
+@[simp] theorem allocations_performAccess (policy : StepPolicy) (state : MachineState)
+    (d : AccessDescriptor) (outcome : AccessOutcome d) (contextKind : ContextKind)
+    (cause : EventCause) :
+    (performAccess policy state d outcome contextKind cause).memory.allocations =
+      state.memory.allocations := by
+  unfold performAccess
+  repeat' split
+  all_goals
+    first
+      | rfl
+      | (rw [Grass.Memory.allocations_commit]
+         exact MemoryState.allocations_applyAuthorityEffect? (by assumption))
+      | rw [Grass.Memory.allocations_commit]
+      | exact MemoryState.allocations_applyAuthorityEffect? (by assumption)
+
 /--
 **Performing an access frames every cell it did not declare.**
 
@@ -2036,7 +2057,8 @@ promising it.
 theorem performAccess_frames_untouched (policy : StepPolicy) (state : MachineState)
     (d : AccessDescriptor) (outcome : AccessOutcome d) (contextKind : ContextKind)
     (cause : EventCause) {id : AllocId} {offset : Nat}
-    (h : ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
+    (h : ¬ state.memory.SharesBytes id d.provenance.root ∨
+      (id = d.provenance.root ∧ ¬ d.range.Covers offset)) :
     (performAccess policy state d outcome contextKind cause).memory.cellAt? id offset =
       state.memory.cellAt? id offset := by
   have hfits : Grass.Memory.WrittenFits d (outcome.committed?.bind Committed.written) :=
@@ -2053,9 +2075,39 @@ theorem performAccess_frames_untouched (policy : StepPolicy) (state : MachineSta
     first
       | rfl
       | (rename_i hlent
-         exact (Grass.Memory.cellAt?_commit_of_untouched _ d hfits h).trans
-           (MemoryState.cellAt?_applyAuthorityEffect? hlent id offset))
+         refine (Grass.Memory.cellAt?_commit_of_untouched _ d hfits ?_).trans
+           (MemoryState.cellAt?_applyAuthorityEffect? hlent id offset)
+         -- The effect changed the grant map and nothing else, so a sharing fact
+         -- about the state before it is a sharing fact about the state after.
+         rcases h with hshare | hsame
+         · exact Or.inl fun hx => hshare
+             ((MemoryState.sharesBytes_congr_of_allocations
+               (MemoryState.allocations_applyAuthorityEffect? hlent) _ _).mp hx)
+         · exact Or.inr hsame)
       | exact Grass.Memory.cellAt?_commit_of_untouched state.memory d hfits h
+
+/-- **A run of accesses moves no allocation.** The list form of
+`allocations_performAccess`, and what carries a sharing hypothesis across a whole
+run: `g-design:185` makes sharing a fact about the allocation table, so a hypothesis
+about the state a run starts in is usable at every state during it. -/
+@[simp] theorem allocations_runAccesses (policy : StepPolicy) :
+    ∀ (accesses : List AccessDescriptor) (state : MachineState)
+      (contextKind : ContextKind) (cause : EventCause),
+      (runAccesses policy state accesses contextKind cause).memory.allocations =
+        state.memory.allocations
+  | [], _, _, _ => rfl
+  | d :: rest, state, contextKind, cause => by
+    unfold runAccesses
+    repeat' split
+    all_goals
+      first
+        | rfl
+        | (dsimp only
+           split
+           · rw [allocations_runAccesses policy rest _ contextKind cause,
+               allocations_performAccess]
+           · rw [allocations_performAccess])
+        | rw [allocations_performAccess]
 
 /--
 **A whole run of accesses frames every cell none of them declared.**
@@ -2067,7 +2119,8 @@ every branch either performs an access or returns the state.
 theorem runAccesses_frames_untouched (policy : StepPolicy) {id : AllocId} {offset : Nat} :
     ∀ (accesses : List AccessDescriptor) (state : MachineState) (contextKind : ContextKind)
       (cause : EventCause),
-      (∀ d ∈ accesses, ¬ (d.provenance.root = id ∧ d.range.Covers offset)) →
+      (∀ d ∈ accesses, ¬ state.memory.SharesBytes id d.provenance.root ∨
+        (id = d.provenance.root ∧ ¬ d.range.Covers offset)) →
       (runAccesses policy state accesses contextKind cause).memory.cellAt? id offset =
         state.memory.cellAt? id offset
   | [], _, _, _, _ => rfl
@@ -2093,7 +2146,13 @@ theorem runAccesses_frames_untouched (policy : StepPolicy) {id : AllocId} {offse
         (hall d List.mem_cons_self)
       split
       · rw [runAccesses_frames_untouched policy rest _ contextKind cause
-          (fun x hx => hall x (List.mem_cons_of_mem _ hx))]
+          (fun x hx => by
+            -- The access moved no allocation, so sharing is what it was.
+            rcases hall x (List.mem_cons_of_mem _ hx) with hshare | hsame
+            · exact Or.inl fun hx' => hshare
+                ((MemoryState.sharesBytes_congr_of_allocations
+                  (allocations_performAccess policy state d _ contextKind cause) _ _).mp hx')
+            · exact Or.inr hsame)]
         exact hhead
       · exact hhead
 
@@ -2117,7 +2176,9 @@ which contains the faulting substep's descriptor too.
 theorem runStep_frames_untouched (policy : StepPolicy) (state : MachineState)
     (sequence : SubstepSequence) (context : ContextId) (contextKind : ContextKind)
     (cause : EventCause) (plan : FaultPlan sequence) {id : AllocId} {offset : Nat}
-    (hall : ∀ d ∈ sequence.accesses, ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
+    (hall : ∀ d ∈ sequence.accesses,
+      ¬ state.memory.SharesBytes id d.provenance.root ∨
+        (id = d.provenance.root ∧ ¬ d.range.Covers offset)) :
     (runStep policy state sequence context contextKind cause plan).memory.cellAt? id offset =
       state.memory.cellAt? id offset := by
   unfold runStep
@@ -2127,7 +2188,9 @@ theorem runStep_frames_untouched (policy : StepPolicy) (state : MachineState)
     split
     · rfl
     · rename_i survivors hvisible
-      have hsurv : ∀ d ∈ survivors, ¬ (d.provenance.root = id ∧ d.range.Covers offset) :=
+      have hsurv : ∀ d ∈ survivors,
+          ¬ state.memory.SharesBytes id d.provenance.root ∨
+            (id = d.provenance.root ∧ ¬ d.range.Covers offset) :=
         fun d hd => hall d (SubstepSequence.mem_accesses_of_visibleEffects? hvisible hd)
       have hrun := runAccesses_frames_untouched policy survivors state contextKind cause hsurv
       dsimp only
@@ -2143,7 +2206,16 @@ theorem runStep_frames_untouched (policy : StepPolicy) (state : MachineState)
           split
           · split
             · exact hrun
-            · rw [performAccess_frames_untouched policy _ d _ contextKind cause (hall d hd)]
+            · rw [performAccess_frames_untouched policy _ d _ contextKind cause (by
+                -- The survivors ran first, and running accesses moves no
+                -- allocation, so the sharing hypothesis about `state` still holds
+                -- of the state this access sees.
+                rcases hall d hd with hshare | hsame
+                · exact Or.inl fun hx => hshare
+                    ((MemoryState.sharesBytes_congr_of_allocations
+                      (allocations_runAccesses policy survivors state contextKind cause)
+                      _ _).mp hx)
+                · exact Or.inr hsame)]
               exact hrun
           · exact hrun
         · exact hrun
@@ -2163,7 +2235,8 @@ theorem step_frames_untouched (policy : StepPolicy) (state : MachineState)
     {id : AllocId} {offset : Nat}
     (h : step policy state operation context contextKind cause faultAt = .ran final)
     (hall : ∀ sequence, operation.facets.substeps? = some sequence →
-      ∀ d ∈ sequence.accesses, ¬ (d.provenance.root = id ∧ d.range.Covers offset)) :
+      ∀ d ∈ sequence.accesses, ¬ state.memory.SharesBytes id d.provenance.root ∨
+        (id = d.provenance.root ∧ ¬ d.range.Covers offset)) :
     final.memory.cellAt? id offset = state.memory.cellAt? id offset := by
   unfold step at h
   split at h
@@ -2178,7 +2251,10 @@ theorem step_frames_untouched (policy : StepPolicy) (state : MachineState)
       repeat' split at h
       all_goals cases h
       all_goals
-        rw [runStep_frames_untouched policy _ sequence context contextKind cause _ hacc,
+        rw [runStep_frames_untouched policy _ sequence context contextKind cause _
+            -- `noteContext` leaves memory alone, so the sharing hypothesis is
+            -- literally the same one, said of a state that differs elsewhere.
+            (by rw [MachineState.noteContext_memory]; exact hacc),
           MachineState.noteContext_memory]
 
 /-- Performing an access does not touch the fault record: a fault is raised by a

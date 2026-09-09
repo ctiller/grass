@@ -55,6 +55,22 @@ open Grass.Core Grass.Memory Grass.Std.Logical Grass.Tests.Spike1
 
 /-! ## The machine the block runs on -/
 
+private def stores : FreshSupply StorageTag := .initial
+
+/-- The stack's storage. -/
+def stackBacking : StorageId := stores.fresh.1
+
+/-- The image's storage. -/
+def imageBacking : StorageId := stores.fresh.2.fresh.1
+
+/-- What the loaded image holds. Only the import-table slot is given contents,
+because it is the only part of the image this block reads.
+
+Under `g-design:185` bytes live in `MemoryState.backings` rather than in the
+allocation record, so a fixture describing storage that already holds values
+installs the store and then allocates a view onto it. -/
+def imageStore : ByteStore := ByteStore.empty.write 2048 (List.replicate 8 0x40) true
+
 /-- The stack reservation: four kilobytes, readable and writable, holding nothing
 yet. A fresh frame is uninitialized; `docs/MEMORY_MODEL.md` §4 does not hand out
 zeros, and starting from `ByteStore.empty` is what keeps `mov transferred, 0`
@@ -62,21 +78,20 @@ being the thing that initializes the slot. -/
 def stackRecord : AllocationRecord :=
   { extent := ⟨0, 4096⟩, epoch := epoch₀, space := .cpuVirtual, source := .stack
     owners := [mainThread]
-    permission := .readWrite, live := true, bytes := .empty
-    base := some 0x1000 }
+    permission := .readWrite, live := true, base := some 0x1000
+    backing := stackBacking, origin := 0 }
 
 /-- The loaded image. Only the import-table slot is given contents, because it is
 the only part of the image this block reads. -/
 def imageRecord : AllocationRecord :=
   { extent := ⟨0, 8192⟩, epoch := epoch₀, space := .cpuVirtual
     source := .imageMapping, owners := [mainThread]
-    permission := .readOnly, live := true
-    bytes := ByteStore.empty.write 2048 (List.replicate 8 0x40) true
-    base := some 0x2800 }
+    permission := .readOnly, live := true, base := some 0x2800
+    backing := imageBacking, origin := 0 }
 
 /-- The state at the top of the block. -/
 def state₀ : MemoryState :=
-  (MemoryState.empty.allocateAll?
+  (((MemoryState.empty.installStore? imageBacking imageStore).getD .empty).allocateAll?
     [(stackAlloc, stackRecord), (imageAlloc, imageRecord)]).getD .empty
 
 /-- Both allocations happened, so `getD` did not fall back. -/
@@ -207,6 +222,9 @@ theorem the_slot_survives_the_call (indeterminate : Nat → Byte) (i : Nat) (hi 
   have hmain := byteAt?_write_survives_block state₀ transferredWrite zeros indeterminate
     betweenStoreAndReload hfound the_store_is_not_refused (by decide)
     (the_slot_is_inside_the_store i hi)
+    -- `g-design:185`'s side-condition: no step of the block is a view onto the
+    -- stack's backing. The image is a different backing, so this decides.
+    (by decide)
     (nothing_between_touches_the_slot i hi)
   rw [stateAtCall_eq indeterminate,
     show transferredWrite.provenance.root = stackAlloc from rfl] at hmain
