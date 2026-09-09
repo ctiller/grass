@@ -268,10 +268,20 @@ def materializeImports (description : ExecutableImageDescription) :
     let baseRva := lastVirtualStart (placeImageSections provisional).toList
     withImportSection description baseRva
 
-/-- Largest exclusive mapped end, retaining the header page for an empty image. -/
+/-- Largest exclusive mapped section end; header extent is accounted separately. -/
 def greatestVirtualEnd : List PlacedSection → Nat
-  | [] => canonicalSectionAlignment
+  | [] => 0
   | placed :: tail => max placed.virtualSpan.endOffset (greatestVirtualEnd tail)
+
+/-- Every section's exclusive end is included in `greatestVirtualEnd`. -/
+theorem le_greatestVirtualEnd (sections : List PlacedSection) {placed : PlacedSection}
+    (member : placed ∈ sections) : placed.virtualSpan.endOffset ≤ greatestVirtualEnd sections := by
+  induction sections with
+  | nil => simp at member
+  | cons head tail ih =>
+      rcases List.mem_cons.mp member with rfl | member
+      · exact Nat.le_max_left _ _
+      · exact Nat.le_trans (ih member) (Nat.le_max_right _ _)
 
 /-- Resolve a requested section-relative location against one placement. -/
 def resolveSectionLocation? (placed : Vec PlacedSection)
@@ -296,7 +306,9 @@ structure ImageLayout where
     resolveSectionLocation? placed requested.entryPoint = some entryPointRva
   sizeOfImage : Nat
   sizeOfImage_eq :
-    sizeOfImage = alignUp (greatestVirtualEnd placed.toList) canonicalSectionAlignment
+    sizeOfImage = alignUp
+      (max (firstRawOffset canonicalPeOffset placed.length canonicalFileAlignment)
+        (greatestVirtualEnd placed.toList)) canonicalSectionAlignment
   importSectionRva : Option Nat
   importSectionRva_eq : importSectionRva =
     if requested.imports.length = 0 then none
@@ -304,6 +316,33 @@ structure ImageLayout where
   importLayouts : Vec ImportLibraryLayout
   importLayouts_eq : importLayouts = layoutImportLibraries requested.imports
 deriving DecidableEq
+
+/-- `ImageLayout.sectionsAfterHeaders` separates every section from the mapped
+headers using this layout's actual materialized section count. -/
+theorem ImageLayout.sectionsAfterHeaders (layout : ImageLayout)
+    {placedSection : PlacedSection} (member : placedSection ∈ layout.placed.toList) :
+    firstRawOffset canonicalPeOffset layout.placed.length canonicalFileAlignment ≤
+      placedSection.virtualSpan.start := by
+  rw [layout.placed_eq] at member ⊢
+  rw [placeImageSections_length]
+  exact placeImageSections_headers_before layout.materialized member
+
+/-- `ImageLayout.headersWithinImage` includes all padded header bytes in the
+declared mapped image extent, independently of whether any section is nonempty. -/
+theorem ImageLayout.headersWithinImage (layout : ImageLayout) :
+    firstRawOffset canonicalPeOffset layout.placed.length canonicalFileAlignment ≤
+      layout.sizeOfImage := by
+  rw [layout.sizeOfImage_eq]
+  exact Nat.le_trans (Nat.le_max_left _ _) (le_alignUp _ _)
+
+/-- `ImageLayout.sectionsWithinImage` includes every section's exclusive mapped
+end in the same derived image extent. -/
+theorem ImageLayout.sectionsWithinImage (layout : ImageLayout)
+    {placedSection : PlacedSection} (member : placedSection ∈ layout.placed.toList) :
+    placedSection.virtualSpan.endOffset ≤ layout.sizeOfImage := by
+  rw [layout.sizeOfImage_eq]
+  exact Nat.le_trans (le_greatestVirtualEnd _ member)
+    (Nat.le_trans (Nat.le_max_right _ _) (le_alignUp _ _))
 
 /-- Materialize imports once, place the resulting sections once, and resolve all
 consumer-visible addresses from that placement. -/
@@ -326,7 +365,9 @@ def resolveImageLayout? (description : ExecutableImageDescription) : Option Imag
           placed_eq := rfl
           entryPointRva
           entryPointRva_eq := resolved
-          sizeOfImage := alignUp (greatestVirtualEnd placed.toList) canonicalSectionAlignment
+          sizeOfImage := alignUp
+            (max (firstRawOffset canonicalPeOffset placed.length canonicalFileAlignment)
+              (greatestVirtualEnd placed.toList)) canonicalSectionAlignment
           sizeOfImage_eq := rfl
           importSectionRva
           importSectionRva_eq := rfl

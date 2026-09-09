@@ -15,6 +15,13 @@ uses a provisional placement to discover its RVA, then validates that the final
 section bytes agree with the final placement. All file offsets are measured
 from the beginning of the complete DOS-aware file.
 
+The first section RVA is the section-aligned extent of the complete padded
+headers, rather than a fixed page. `ImageLayout.sectionsAfterHeaders` proves
+that every mapped section starts after those headers; `headersWithinImage` and
+`sectionsWithinImage` prove that the derived image size covers both. Regression
+fixtures include 96 section headers, where the headers occupy 4608 bytes and
+the first section must start at RVA 8192.
+
 `ImageLayout.Writable` checks names, import resolution, section count, field
 widths and exclusive endpoints before serialization narrows natural numbers.
 `writeImage` takes only a checked plan. Source instruction encoding and static

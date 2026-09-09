@@ -62,6 +62,30 @@ def resolvedTextEnd? : Option Nat := do
   let resolved ← plan.resolveSectionLocation? ⟨0, 2⟩
   some resolved.rva
 
+def oneByteSection : RawSection :=
+  { name := textName
+    contents := Vec.singleton 0xc3
+    characteristics := 0x60000020 }
+
+def manySectionsDescription : ExecutableImageDescription :=
+  { entryPoint := { sectionIndex := 0, offset := 0 }
+    sections := Vec.fromList (List.replicate 96 oneByteSection)
+    imports := Vec.empty }
+
+def importBoundaryDescription : ExecutableImageDescription :=
+  { entryPoint := { sectionIndex := 0, offset := 0 }
+    sections := Vec.fromList (List.replicate 95 oneByteSection)
+    imports := Vec.singleton kernel32 }
+
+/-- Header extent, first section RVA, and mapped image size for a prepared image. -/
+def layoutSummary? (input : ExecutableImageDescription) : Option (Nat × Nat × Nat) := do
+  let plan ← planFor input
+  let first ← plan.layout.placed.get? 0
+  some (
+    firstRawOffset canonicalPeOffset plan.layout.placed.length canonicalFileAlignment,
+    first.virtualSpan.start,
+    plan.layout.sizeOfImage)
+
 /-- Entry location is resolved from the placed `.text` section. -/
 example : preparedEntry? = some 0x1001 := by decide
 
@@ -84,5 +108,15 @@ example : badEntryError? = some "PE entry location is outside its requested sect
 example :
     generatedImportEntryError? =
       some "PE entry location is outside its requested section" := by decide
+
+/-- Ninety-six section headers exceed one virtual page, so payload placement
+starts at the next section-aligned page and the image covers every section. -/
+example : layoutSummary? manySectionsDescription = some (4608, 8192, 0x62000) := by
+  decide
+
+/-- A generated import section participates in the same header-size boundary:
+95 requested sections plus `.idata` produce 96 headers and the same safe start. -/
+example : layoutSummary? importBoundaryDescription = some (4608, 8192, 0x62000) := by
+  decide
 
 end Tests.Artifact.PE.ImageWriter

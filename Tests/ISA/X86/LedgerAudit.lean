@@ -135,9 +135,9 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Thirteen new register-transfer/flag/operand-selection facts. Manual headings
 -- are recorded in the module; formal subject/dual-anchor coverage remains owed.
 -- No existing debt is reclassified by this addition.
--- PE/COFF adds 70 format-schema, profile, serializer, and reader obligations.
+-- PE/COFF adds 71 format-schema, profile, serializer, and reader obligations.
 -- No PE declaration is treated as cited merely because a Lean roundtrip holds.
-def owedBaseline : Nat := 203
+def owedBaseline : Nat := 204
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -492,6 +492,7 @@ def owed : List Name :=
     `Grass.Artifact.PE.ntHeadersSize,
     `Grass.Artifact.PE.ntHeadersSpan,
     `Grass.Artifact.PE.firstRawOffset,
+    `Grass.Artifact.PE.firstSectionRva,
     `Grass.Artifact.PE.canonicalSectionAlignment,
     `Grass.Artifact.PE.canonicalFileAlignment,
     `Grass.Artifact.PE.containsCode,

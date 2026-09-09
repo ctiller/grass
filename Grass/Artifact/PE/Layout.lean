@@ -222,12 +222,41 @@ def canonicalSectionAlignment : Nat := 4096
 /-- Conventional PE32+ file alignment used by the executable adapter. -/
 def canonicalFileAlignment : Nat := 512
 
-/-- Place all requested sections after the complete canonical NT-header region
-and one virtual section-alignment unit from the image base. This function
+/-- Derive the first mapped section boundary from the complete padded headers. -/
+def firstSectionRva (sectionCount : Nat) : Nat :=
+  alignUp (firstRawOffset canonicalPeOffset sectionCount canonicalFileAlignment)
+    canonicalSectionAlignment
+
+/-- `headers_le_firstSectionRva` places the first section after all header bytes. -/
+theorem headers_le_firstSectionRva (sectionCount : Nat) :
+    firstRawOffset canonicalPeOffset sectionCount canonicalFileAlignment ≤
+      firstSectionRva sectionCount :=
+  le_alignUp _ _
+
+/-- Every section starts at or beyond the supplied virtual cursor. -/
+theorem placeSectionsFrom_virtualStart_ge
+    (virtualCursor rawCursor sectionAlignment fileAlignment : Nat)
+    (sections : List RawSection) :
+    ∀ placed ∈ placeSectionsFrom virtualCursor rawCursor sectionAlignment fileAlignment sections,
+      virtualCursor ≤ placed.virtualSpan.start := by
+  induction sections generalizing virtualCursor rawCursor with
+  | nil => simp [placeSectionsFrom]
+  | cons source tail ih =>
+      intro placed member
+      simp only [placeSectionsFrom, List.mem_cons] at member
+      rcases member with rfl | member
+      · exact le_alignUp _ _
+      · have tailBound := ih _ _ placed member
+        have startBound := le_alignUp virtualCursor sectionAlignment
+        simp only [FileSpan.endOffset] at tailBound
+        omega
+
+/-- Place all requested sections after the complete padded headers, using the
+next section-alignment boundary as the first virtual cursor. This function
 consumes `ExecutableImageDescription` without learning how any section's bytes
 were encoded. -/
 def placeImageSections (description : ExecutableImageDescription) : Vec PlacedSection :=
-  Vec.fromList <| placeSectionsFrom canonicalSectionAlignment
+  Vec.fromList <| placeSectionsFrom (firstSectionRva description.sections.length)
     (firstRawOffset canonicalPeOffset description.sections.length canonicalFileAlignment)
     canonicalSectionAlignment canonicalFileAlignment description.sections.toList
 
@@ -235,5 +264,14 @@ def placeImageSections (description : ExecutableImageDescription) : Vec PlacedSe
 @[simp] theorem placeImageSections_length (description : ExecutableImageDescription) :
     (placeImageSections description).length = description.sections.length := by
   simp [placeImageSections, Vec.length]
+
+/-- `placeImageSections_headers_before` separates every mapped section from the
+complete file-aligned header region, for arbitrary section counts. -/
+theorem placeImageSections_headers_before (description : ExecutableImageDescription)
+    {placed : PlacedSection} (member : placed ∈ (placeImageSections description).toList) :
+    firstRawOffset canonicalPeOffset description.sections.length canonicalFileAlignment ≤
+      placed.virtualSpan.start := by
+  exact Nat.le_trans (headers_le_firstSectionRva description.sections.length)
+    (placeSectionsFrom_virtualStart_ge _ _ _ _ _ placed member)
 
 end Grass.Artifact.PE
