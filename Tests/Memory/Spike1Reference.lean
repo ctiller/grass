@@ -1,6 +1,7 @@
 import Grass.Obligation.Disposition
 import Grass.Op.Facets
 import Grass.Memory.Profile
+import Grass.ABI.Win64.FrameRanges
 
 /-!
 # Spike 1 reference access declarations
@@ -14,25 +15,11 @@ The point is not that these are correct x86-64 models — the ISA agent owns tha
 and these deliberately do not claim a citation. The point is that each case is
 **expressible without an escape hatch**.
 
-**The frame geometry here is not `docs/SPIKE_1.md`'s, and that is a known divergence
-rather than a modelling choice.** That document's frame table puts the Win64 shadow
-space at `+0`–`32`, the fifth argument at `+32`, `bytesWritten` at `+40`, and saved
-`r14`/`r13`/`r12` at `+48`/`+56`/`+64`. This file has the frame at `⟨0, 64⟩`,
-`transferred` at `⟨32, 4⟩`, saved `r12` at `⟨0, 8⟩` and the return address at
-`⟨24, 8⟩` — so `transferred` sits on the `OVERLAPPED*` slot, the saved registers sit
-in the shadow space, and the frame cannot contain the table's saved `r12` at all.
-`arg WriteFile.overlapped, 0`, an eight-byte write the program performs, has no case
-here for the same reason: the fixture's `transferred` write is on its low half.
-
-Review found it. It is recorded rather than repaired because the repair is not an
-edit: the return address is pushed *below* the frame base, so it cannot descend
-through the frame step at all, and re-laying the frame to the table means
-restructuring the provenance paths and every offset and address in this file and its
-two siblings. Choosing that geometry is the ISA question this file disclaims, so it
-wants an owner who has one. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.4.1b carries it. If one of them could not be written, the
-descriptor is not sufficient and the freeze has not earned its name. That is the
-one question §9 risk 1 says must be answered before ISA authoring begins, and it
-is answered by elaboration rather than by assertion.
+The stack geometry is the one fixed by `docs/SPIKE_1.md`: three saved registers
+and the 48-byte call allocation place the body RSP 72 bytes below entry. All
+ranges below are root-relative and all numeric addresses are derived from the
+same stack base. The call's return address lies below the body frame, directly
+under the stack root rather than falsely nested inside that frame.
 
 Four cases are here specifically because they are the ones a weaker descriptor
 gets wrong:
@@ -93,19 +80,68 @@ def apiAgent : ContextId := contextSupply₀.fresh.2.fresh.1
 Two roots: the stack reservation, and the loaded image. The frame and its slots
 descend from the first; sections and symbols from the second. -/
 
+/-! ## Canonical stack geometry -/
+
+/-- Numerical base of the hand-built stack reservation. -/
+def stackBaseAddress : MachineAddress := 0x1000
+
+/-- Root-relative offset of RSP in the loop body and at each call site. -/
+def frameBaseOffset : Nat := 16
+
+/-- The ABI-derived layout consumed by every range in this fixture. -/
+def frameLayout : Grass.ABI.Win64.CallFrameLayout :=
+  Grass.ABI.Win64.spike1FrameLayout
+
+/-- One Win64 stack slot, derived from its four-register shadow area. -/
+def stackSlotBytes : Nat :=
+  Grass.ABI.Win64.shadowSpaceBytes / Grass.ABI.Win64.registerArgumentCount
+
+/-- Root-relative loaded entry RSP, before the three pushes and allocation. -/
+def entryStackOffset : Nat := frameBaseOffset + frameLayout.totalFrameBytes
+
+def savedR12Index : { i : Fin frameLayout.savedRegisters.length //
+    frameLayout.savedRegisters.get i = .r12 } := ⟨⟨0, by decide⟩, by decide⟩
+def savedR13Index : { i : Fin frameLayout.savedRegisters.length //
+    frameLayout.savedRegisters.get i = .r13 } := ⟨⟨1, by decide⟩, by decide⟩
+def savedR14Index : { i : Fin frameLayout.savedRegisters.length //
+    frameLayout.savedRegisters.get i = .r14 } := ⟨⟨2, by decide⟩, by decide⟩
+
+def shadowRange : ByteRange := frameLayout.shadowRange.shift frameBaseOffset
+def fifthArgumentRange : ByteRange :=
+  frameLayout.stackArgumentsRange.shift frameBaseOffset
+def transferredRange : ByteRange := frameLayout.localRange.shift frameBaseOffset
+def paddingRange : ByteRange := frameLayout.paddingRange.shift frameBaseOffset
+def savedR12Range : ByteRange :=
+  (frameLayout.savedRegisterRange savedR12Index.val).shift frameBaseOffset
+def savedR13Range : ByteRange :=
+  (frameLayout.savedRegisterRange savedR13Index.val).shift frameBaseOffset
+def savedR14Range : ByteRange :=
+  (frameLayout.savedRegisterRange savedR14Index.val).shift frameBaseOffset
+def returnAddressRange : ByteRange :=
+  ⟨frameBaseOffset - stackSlotBytes, stackSlotBytes⟩
+
+/-- Turn a root-relative stack offset into its concrete address. -/
+def stackAddress (offset : Nat) : MachineAddress :=
+  Grass.Memory.addressOf stackBaseAddress offset
+
 /-- Provenance of the whole stack reservation. -/
 def stackProvenance : Provenance :=
   { space := .cpuVirtual, root := stackAlloc, epoch := epoch₀
     source := .stack, rootExtent := ⟨0, 4096⟩, path := [] }
 
-/-- The `HelloWorld` call frame, 64 bytes of the reservation. -/
+/-- The `HelloWorld` body frame, from call-site RSP through the saved registers. -/
 def frameStep : ProvenanceStep :=
-  { kind := .frame, label := ⟨"helloFrame"⟩, extent := ⟨0, 64⟩ }
+  { kind := .frame, label := ⟨"helloFrame"⟩,
+    extent := frameLayout.frameRange.shift frameBaseOffset }
 
 /-- The `transferred : UInt32` slot the spike declares with `withStack`, at
-offset 32 of the frame. -/
+offset 40 from the body RSP. -/
 def transferredStep : ProvenanceStep :=
-  { kind := .slot, label := ⟨"transferred"⟩, extent := ⟨32, 4⟩ }
+  { kind := .slot, label := ⟨"transferred"⟩, extent := transferredRange }
+
+/-- The stack slot holding `WriteFile`'s null fifth argument. -/
+def fifthArgumentStep : ProvenanceStep :=
+  { kind := .slot, label := ⟨"writeFileOverlapped"⟩, extent := fifthArgumentRange }
 
 /-- The eight bytes `push r12` writes.
 
@@ -117,15 +153,18 @@ a saved nonvolatile register. `Spikes/1_Hello_World/Program.lean` pushes `r12`,
 a theorem below presented the collision as a property of the model rather than a
 defect in it. Review found it. -/
 def savedR12Step : ProvenanceStep :=
-  { kind := .slot, label := ⟨"savedR12"⟩, extent := ⟨0, 8⟩ }
+  { kind := .slot, label := ⟨"savedR12"⟩, extent := savedR12Range }
 
 /-- The return address the `call` writes: below the three saved registers. -/
 def returnSlotStep : ProvenanceStep :=
-  { kind := .slot, label := ⟨"returnAddress"⟩, extent := ⟨24, 8⟩ }
+  { kind := .slot, label := ⟨"returnAddress"⟩, extent := returnAddressRange }
 
 /-- Provenance of the `transferred` slot. -/
 def transferredProvenance : Provenance :=
   { stackProvenance with path := [frameStep, transferredStep] }
+
+def fifthArgumentProvenance : Provenance :=
+  { stackProvenance with path := [frameStep, fifthArgumentStep] }
 
 /-- Provenance of the slot `push r12` writes. -/
 def savedR12Provenance : Provenance :=
@@ -133,7 +172,7 @@ def savedR12Provenance : Provenance :=
 
 /-- Provenance of the slot the `call` writes the return address into. -/
 def returnSlotProvenance : Provenance :=
-  { stackProvenance with path := [frameStep, returnSlotStep] }
+  { stackProvenance with path := [returnSlotStep] }
 
 /-- A two-page reservation, so a store can straddle the boundary between them.
 
@@ -204,7 +243,7 @@ def access (provenance : Provenance) (range : ByteRange) (address : MachineAddre
     admittedFaults := [.pageFault, .generalProtection]
     authorityEffect := authority }
 
-/-! ## The eight reference cases -/
+/-! ## The reference cases -/
 
 /--
 `push r12` — writes eight bytes of stack the instruction never names.
@@ -214,7 +253,8 @@ Nothing about the instruction's operands mentions memory; a descriptor that coul
 only describe named operands could not express this.
 -/
 def pushR12 : SubstepSequence :=
-  .single (access savedR12Provenance ⟨0, 8⟩ 0x1000 .write .readWrite 8 false true)
+  .single (access savedR12Provenance savedR12Range
+    (stackAddress savedR12Range.start) .write .readWrite 8 false true)
 
 /--
 `mov ecx, STD_OUTPUT_HANDLE` — an operation with no memory effect at all.
@@ -240,6 +280,13 @@ def leaPayload : SubstepSequence := .none_
 def payloadPointer : PointerValue :=
   { address := .numeric 0x2000, provenance := payloadProvenance }
 
+/-- `arg WriteFile.overlapped, 0` initializes the fifth stack argument before
+the transferred-count store. It is a separate operation and is not between the
+count store and its later reload. -/
+def movWriteFileOverlappedZero : SubstepSequence :=
+  .single (access fifthArgumentProvenance fifthArgumentRange
+    (stackAddress fifthArgumentRange.start) .write .readWrite 8 false true)
+
 /--
 `mov transferred, 0` — a typed frame-slot write that produces initialization.
 
@@ -250,7 +297,8 @@ is `MemoryEvent.committedWriteRange`, through `Conflicts`. What actually carries
 claim is `MemoryState.commit`'s byte list, bounded by `Committed.writtenFits`.
 -/
 def movTransferredZero : SubstepSequence :=
-  .single (access transferredProvenance ⟨32, 4⟩ 0x1020 .write .readWrite 4 false true)
+  .single (access transferredProvenance transferredRange
+    (stackAddress transferredRange.start) .write .readWrite 4 false true)
 
 /--
 `lea r9, transferred.addr` — takes the address of a frame slot to pass to a
@@ -276,7 +324,8 @@ permissions.
 def callImportWriteFile : SubstepSequence :=
   { substeps :=
       [ .access (access importProvenance ⟨2048, 8⟩ 0x3000 .read .readOnly 8 true false),
-        .access (access returnSlotProvenance ⟨24, 8⟩ 0x1018 .write .readWrite 8 false true) ]
+        .access (access returnSlotProvenance returnAddressRange
+          (stackAddress returnAddressRange.start) .write .readWrite 8 false true) ]
     onFault := .priorEffectsVisible }
 
 /-- The identity of the loan the call passes. -/
@@ -302,10 +351,11 @@ no return point.
 def callWithLoan : SubstepSequence :=
   { substeps :=
       [ .access (access importProvenance ⟨2048, 8⟩ 0x3000 .read .readOnly 8 true false),
-        .access (access returnSlotProvenance ⟨24, 8⟩ 0x1018 .write .readWrite 8 false true
+        .access (access returnSlotProvenance returnAddressRange
+          (stackAddress returnAddressRange.start) .write .readWrite 8 false true
           [.issue slotLoan
             { kind := .loan, holder := apiAgent, lender := mainThread
-              provenance := transferredProvenance, range := ⟨32, 4⟩
+              provenance := transferredProvenance, range := transferredRange
               rights := .readWrite }]) ]
     onFault := .priorEffectsVisible }
 
@@ -319,7 +369,8 @@ bytes an external agent wrote, and the provider profile is what supplies that
 justification.
 -/
 def movEaxTransferred : SubstepSequence :=
-  .single (access transferredProvenance ⟨32, 4⟩ 0x1020 .read .readWrite 4 true false)
+  .single (access transferredProvenance transferredRange
+    (stackAddress transferredRange.start) .read .readWrite 4 true false)
 
 /-- `#UD`, the invalid-opcode fault `ud2` exists to raise. -/
 def invalidOpcode : FaultClassId := ⟨⟨"invalidOpcode"⟩⟩
@@ -368,7 +419,8 @@ it is index 1, and the read survives.
 -/
 def divMem : SubstepSequence :=
   { substeps :=
-      [ .access (access transferredProvenance ⟨32, 4⟩ 0x1020 .read .readWrite 4 true false),
+      [ .access (access transferredProvenance transferredRange
+          (stackAddress transferredRange.start) .read .readWrite 4 true false),
         .compute [divideError] ]
     onFault := .priorEffectsVisible }
 
@@ -390,7 +442,8 @@ def splitPageStore : SubstepSequence :=
 /-- The divisor read survives the divide-error fault. -/
 theorem div_read_survives_divide_error :
     divMem.visibleEffects? 1 =
-      some [access transferredProvenance ⟨32, 4⟩ 0x1020 .read .readWrite 4 true false] :=
+      some [access transferredProvenance transferredRange
+        (stackAddress transferredRange.start) .read .readWrite 4 true false] :=
   rfl
 
 /-- A compute step declares the fault it raises, so the fault is not floating
@@ -437,6 +490,9 @@ theorem ud2Containment_wellFormed : ud2Containment.WellFormedIn spaceTable := by
 theorem movTransferredZero_wellFormed :
     movTransferredZero.WellFormedIn spaceTable := by decide
 
+theorem movWriteFileOverlappedZero_wellFormed :
+    movWriteFileOverlappedZero.WellFormedIn spaceTable := by decide
+
 theorem movEaxTransferred_wellFormed :
     movEaxTransferred.WellFormedIn spaceTable := by decide
 
@@ -458,7 +514,8 @@ formed again, this file stops building. -/
 
 /-- A store that declares it needs only read-only permission. -/
 def writeThroughReadOnly : AccessDescriptor :=
-  access savedR12Provenance ⟨0, 8⟩ 0x1000 .write .readOnly 8 false true
+  access savedR12Provenance savedR12Range (stackAddress savedR12Range.start)
+    .write .readOnly 8 false true
 
 /--
 It is not well formed, because `WellFormedIn` now demands
@@ -473,7 +530,8 @@ theorem writeThroughReadOnly_not_wellFormed :
 
 /-- A descriptor naming an address space this profile never declared. -/
 def accessInUndeclaredSpace : AccessDescriptor :=
-  { access savedR12Provenance ⟨0, 8⟩ 0x1000 .write .readWrite 8 false true with
+  { access savedR12Provenance savedR12Range (stackAddress savedR12Range.start)
+      .write .readWrite 8 false true with
     space := .deviceLocal }
 
 /--
@@ -537,6 +595,22 @@ theorem ud2_discharges_nothing :
     ud2Containment.substeps.map Substep.faults = [[invalidOpcode]] := by
   exact ⟨by decide, by decide, rfl⟩
 
+/-- A fixed-size return slot immediately below a shifted frame is disjoint from
+the frame and ends exactly where the frame begins. -/
+private theorem range_immediately_below_shifted_frame
+    (base size total : Nat) (fitsBelow : size ≤ base) :
+    (ByteRange.mk (base - size) size).Disjoint
+        ((ByteRange.mk 0 total).shift base) ∧
+      (ByteRange.mk (base - size) size).stop =
+        ((ByteRange.mk 0 total).shift base).start := by
+  constructor
+  · rw [ByteRange.disjoint_def]
+    exact Or.inr (Or.inr (Or.inl (by
+      simp only [ByteRange.shift]
+      omega)))
+  · change base - size + size = base
+    exact Nat.sub_add_cancel fitsBelow
+
 /-- **`push` and `call`'s stack writes are distinct slots in the same storage.**
 
 They were one slot, `savedOrReturn` at `⟨0, 8⟩`, used by both — which puts the
@@ -548,8 +622,70 @@ allocation identity will not do it. -/
 theorem push_and_call_share_storage :
     savedR12Provenance.SameStorage returnSlotProvenance ∧
     savedR12Provenance ≠ returnSlotProvenance ∧
-    (ByteRange.mk 0 8).Disjoint ⟨24, 8⟩ := by
-  exact ⟨⟨rfl, rfl, rfl⟩, by decide, by decide⟩
+    savedR12Range.Disjoint returnAddressRange := by
+  refine ⟨⟨rfl, rfl, rfl⟩, by decide, ?_⟩
+  have below := (range_immediately_below_shifted_frame frameBaseOffset
+    stackSlotBytes frameLayout.totalFrameBytes (by decide)).1
+  have containsRelative := frameLayout.frame_contains_saved savedR12Index.val
+  have containsPlaced : frameStep.extent.Contains savedR12Range := by
+    rw [show frameStep.extent = frameLayout.frameRange.shift frameBaseOffset from rfl,
+      savedR12Range, ByteRange.shift_contains_iff]
+    exact containsRelative
+  exact (ByteRange.Disjoint.of_contains below containsPlaced).symm
+
+/-- The old layout bug cannot recur: the fifth argument and transferred count
+are disjoint rather than overlapping, and both are contained by the frame. -/
+theorem call_slots_are_disjoint_and_contained :
+    fifthArgumentRange.Disjoint transferredRange ∧
+    frameStep.extent.Contains fifthArgumentRange ∧
+    frameStep.extent.Contains transferredRange := by
+  refine ⟨?_, ?_, ?_⟩
+  · rw [fifthArgumentRange, transferredRange, ByteRange.shift_disjoint_iff]
+    exact frameLayout.stackArguments_disjoint_local
+  · rw [show frameStep.extent = frameLayout.frameRange.shift frameBaseOffset from rfl,
+      fifthArgumentRange, ByteRange.shift_contains_iff]
+    exact frameLayout.frame_contains_stackArguments
+  · rw [show frameStep.extent = frameLayout.frameRange.shift frameBaseOffset from rfl,
+      transferredRange, ByteRange.shift_contains_iff]
+    exact frameLayout.frame_contains_local
+
+/-- Regression rendering of the ABI-computed geometry. These numbers are
+checked outputs, never inputs to an access descriptor. -/
+theorem computed_stack_geometry :
+    fifthArgumentRange = ⟨48, 8⟩ ∧
+    transferredRange = ⟨56, 4⟩ ∧
+    savedR14Range = ⟨64, 8⟩ ∧
+    savedR13Range = ⟨72, 8⟩ ∧
+    savedR12Range = ⟨80, 8⟩ ∧
+    returnAddressRange = ⟨8, 8⟩ ∧
+    entryStackOffset = 88 := by decide
+
+/-- Every ABI-derived body slot is pairwise separated in the places where the
+old fixture overlapped the fifth argument, local, and saved registers. -/
+theorem body_stack_slots_are_disjoint :
+    fifthArgumentRange.Disjoint transferredRange ∧
+    transferredRange.Disjoint paddingRange ∧
+    paddingRange.Disjoint savedR14Range ∧
+    savedR14Range.Disjoint savedR13Range ∧
+    savedR13Range.Disjoint savedR12Range := by
+  refine ⟨?_, ?_, ?_, ?_, ?_⟩
+  · rw [fifthArgumentRange, transferredRange, ByteRange.shift_disjoint_iff]
+    exact frameLayout.stackArguments_disjoint_local
+  · rw [transferredRange, paddingRange, ByteRange.shift_disjoint_iff]
+    exact frameLayout.local_disjoint_padding
+  · rw [paddingRange, savedR14Range, ByteRange.shift_disjoint_iff]
+    exact frameLayout.padding_disjoint_saved savedR14Index.val
+  · rw [savedR14Range, savedR13Range, ByteRange.shift_disjoint_iff]
+    exact frameLayout.saved_disjoint_saved savedR14Index.val savedR13Index.val (by decide)
+  · rw [savedR13Range, savedR12Range, ByteRange.shift_disjoint_iff]
+    exact frameLayout.saved_disjoint_saved savedR13Index.val savedR12Index.val (by decide)
+
+/-- The return-address write is outside the body frame and immediately below it. -/
+theorem return_address_is_below_frame :
+    returnAddressRange.Disjoint frameStep.extent ∧
+    returnAddressRange.start + returnAddressRange.size = frameStep.extent.start := by
+  exact range_immediately_below_shifted_frame frameBaseOffset stackSlotBytes
+    frameLayout.totalFrameBytes (by decide)
 
 /-- The stack and the image are different allocations, so no offset coincidence
 can make an access to one authorize an access to the other. -/

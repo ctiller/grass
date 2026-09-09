@@ -958,10 +958,12 @@ end SearchablePdata
 The prologue `Grass/ABI/Win64/Unwind.lean` already checks at the vocabulary
 level, now placed and serialised.
 
-The offsets follow from the encodings. Spike 1 pushes `r12`, `r13` and `r14`,
+This is a manually placed encoding fixture, not a source-to-prologue lowering
+bridge. Production metadata must derive these offsets from the lengths of the
+actual encoded instructions. Spike 1 pushes `r12`, `r13` and `r14`,
 all of which need `REX.B`, so each `push` is *two* bytes rather than the one a
 push of `rbx` would take -- the offsets are 2, 4 and 6, not 1, 2 and 3. Then
-`sub rsp, 32` is `48 83 EC 20`, four bytes, ending at 10.
+`sub rsp, 48` is `48 83 EC 30`, four bytes, ending at 10.
 -/
 
 /-- Spike 1's prologue with offsets: three two-byte pushes ending at 2, 4 and 6,
@@ -971,7 +973,7 @@ def spike1Layout : Layout :=
       [ ⟨.pushNonvolatile .r12, 2⟩
       , ⟨.pushNonvolatile .r13, 4⟩
       , ⟨.pushNonvolatile .r14, 6⟩
-      , ⟨.allocSmall 32, 10⟩ ]
+      , ⟨.allocSmall spike1CallAllocationBytes, 10⟩ ]
     sizeOfProlog := 10 }
 
 /-- It satisfies every layout condition. -/
@@ -1035,7 +1037,7 @@ The exact `.xdata` bytes for Spike 1.
 
 Version 1 and no flags (`01`); a ten-byte prologue; four slots; no frame
 register. Then the four codes in descending order: the allocation ending at 10
-with `OpInfo = 3` for 32 bytes (`32`), then the three pushes ending at 6, 4 and
+with `OpInfo = 5` for 48 bytes (`52`), then the three pushes ending at 6, 4 and
 2 carrying register numbers 14, 13 and 12 in `OpInfo` (`E0`, `D0`, `C0`) -- the
 four-bit numbers, so the `REX.B` bit is part of them.
 
@@ -1046,7 +1048,7 @@ Microsoft's own assembler generates from the same prologue written with MASM's
 theorem spike1UnwindInfo_toBytes :
     spike1UnwindInfo.toBytes =
       [ 0x01, 0x0A, 0x04, 0x00
-      , 0x0A, 0x32
+      , 0x0A, 0x52
       , 0x06, 0xE0
       , 0x04, 0xD0
       , 0x02, 0xC0 ] := by

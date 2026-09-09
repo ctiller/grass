@@ -214,7 +214,8 @@ def frameRows : List Row :=
 /-- Spike 1's prologue, as the differential sees it. -/
 def spike1Rows : List Row :=
   [ rowOf "spike1"
-      [.push .r12, .push .r13, .push .r14, .alloc 32] ].reduceOption
+      [.push .r12, .push .r13, .push .r14,
+        .alloc spike1CallAllocationBytes] ].reduceOption
 
 /-- The whole corpus. -/
 def corpus : List Row :=
@@ -225,7 +226,7 @@ def corpus : List Row :=
 differential and the proof are checking the same bytes rather than two
 independently-computed ones. -/
 theorem spike1Row_matches_theorem :
-    (spike1Rows.map Row.xdata) = ["010a04000a3206e004d002c0"] := by
+    (spike1Rows.map Row.xdata) = ["010a04000a5206e004d002c0"] := by
   decide
 
 end Grass.Tests.ABI.Win64.Unwind

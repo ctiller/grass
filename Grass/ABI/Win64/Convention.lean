@@ -261,15 +261,160 @@ theorem even_pushes_misalign (k : Nat) : ¬ AlignedForCall (2 * k) 0 := by
   simp only [AlignedForCall, rspAfterPrologue, entryMisalignment, stackAlignment]
   omega
 
-/--
-Spike 1's prologue pushes `r12`, `r13` and `r14` — three registers — and then
-needs shadow space for its calls.
+/-! ## Computed call-frame layouts -/
+/-- Inputs to the bounded Win64 call-frame calculation.  Argument and local
+descriptions are supplied by the caller; this type does not extract them from a
+typed signature or generate machine instructions. -/
+structure CallFrameLayout where
+  argumentCount : Nat
+  localBytes : Nat
+  localAlignment : Nat
+  savedRegisters : List Gpr
 
-Three pushes align the stack, so the 32 bytes of shadow space are all that the
-`sub` has to provide, and they preserve alignment because 32 is a multiple of
-16.
--/
-theorem spike1_prologue_aligned : AlignedForCall 3 shadowSpaceBytes := by decide
+namespace CallFrameLayout
+
+/-- Valid local alignments are positive divisors of the ABI stack alignment. -/
+def Admissible (layout : CallFrameLayout) : Prop :=
+  0 < layout.localAlignment ∧ stackAlignment % layout.localAlignment = 0
+
+instance (layout : CallFrameLayout) : Decidable layout.Admissible :=
+  inferInstanceAs (Decidable (_ ∧ _))
+
+/-- Round an offset upward to the requested alignment. -/
+def alignUp (value alignment : Nat) : Nat :=
+  value + (alignment - value % alignment) % alignment
+
+/-- Stack-passed arguments beyond the four register positions. -/
+def stackArgumentBytes (layout : CallFrameLayout) : Nat :=
+  (layout.argumentCount - registerArgumentCount) * 8
+
+/-- The local begins after shadow space and all stack argument slots. -/
+def localOffset (layout : CallFrameLayout) : Nat :=
+  alignUp (shadowSpaceBytes + layout.stackArgumentBytes) layout.localAlignment
+
+/-- Bytes occupied before final call-alignment padding. -/
+def usedCallAllocationBytes (layout : CallFrameLayout) : Nat :=
+  layout.localOffset + layout.localBytes
+
+/-- The least adjustment represented by this calculation: occupied bytes plus
+the current `RSP` residue that must also be subtracted before a call. -/
+def callAllocationBytes (layout : CallFrameLayout) : Nat :=
+  let used := layout.usedCallAllocationBytes
+  used + (entryMisalignment + stackAlignment -
+    (layout.savedRegisters.length * 8 + used) % stackAlignment) % stackAlignment
+
+/-- Saved-register pushes plus the outgoing call allocation. -/
+def totalFrameBytes (layout : CallFrameLayout) : Nat :=
+  layout.savedRegisters.length * 8 + layout.callAllocationBytes
+
+/-- Offset from post-prologue `RSP` to a saved register, indexed in push order.
+The last register pushed is nearest the allocation. -/
+def savedRegisterOffset (layout : CallFrameLayout) (index : Nat) : Nat :=
+  layout.callAllocationBytes + 8 * (layout.savedRegisters.length - 1 - index)
+
+theorem stackArguments_end_before_local (layout : CallFrameLayout) :
+    shadowSpaceBytes + layout.stackArgumentBytes ≤ layout.localOffset := by
+  simp only [localOffset, alignUp]
+  omega
+
+theorem localOffset_aligned (layout : CallFrameLayout) (valid : layout.Admissible) :
+    layout.localOffset % layout.localAlignment = 0 := by
+  rcases valid with ⟨positive, _⟩
+  simp only [localOffset, alignUp]
+  let value := shadowSpaceBytes + layout.stackArgumentBytes
+  let remainder := value % layout.localAlignment
+  have remainder_lt : remainder < layout.localAlignment := Nat.mod_lt _ positive
+  by_cases zero : remainder = 0
+  · simp [value, remainder, zero]
+  · have padding_lt : layout.localAlignment - remainder < layout.localAlignment := by omega
+    have padding_mod :
+        (layout.localAlignment - remainder) % layout.localAlignment =
+          layout.localAlignment - remainder := Nat.mod_eq_of_lt padding_lt
+    change (value + (layout.localAlignment - remainder) %
+      layout.localAlignment) % layout.localAlignment = 0
+    rw [padding_mod]
+    have fills : remainder + (layout.localAlignment - remainder) =
+        layout.localAlignment := Nat.add_sub_of_le (Nat.le_of_lt remainder_lt)
+    have fillsMod : remainder +
+        (layout.localAlignment - remainder) % layout.localAlignment =
+        layout.localAlignment := by rw [padding_mod, fills]
+    rw [Nat.add_mod, show value % layout.localAlignment = remainder from rfl,
+      fillsMod, Nat.mod_self]
+
+theorem allocation_contains_local (layout : CallFrameLayout) :
+    layout.localOffset + layout.localBytes ≤ layout.callAllocationBytes := by
+  simp only [callAllocationBytes, usedCallAllocationBytes]
+  omega
+
+theorem callAllocation_aligned (layout : CallFrameLayout) :
+    AlignedForCall layout.savedRegisters.length layout.callAllocationBytes := by
+  simp only [AlignedForCall, callAllocationBytes, rspAfterPrologue,
+    entryMisalignment, stackAlignment]
+  omega
+
+theorem savedRegisterOffset_at_or_above_allocation (layout : CallFrameLayout)
+    (index : Nat) (_inRange : index < layout.savedRegisters.length) :
+    layout.callAllocationBytes ≤ layout.savedRegisterOffset index := by
+  simp only [savedRegisterOffset]
+  omega
+
+/-- Every in-range saved-register slot fits inside the computed total frame. -/
+theorem savedRegisterSlot_fits (layout : CallFrameLayout) (index : Nat)
+    (inRange : index < layout.savedRegisters.length) :
+    layout.savedRegisterOffset index + 8 ≤ layout.totalFrameBytes := by
+  simp only [savedRegisterOffset, totalFrameBytes]
+  omega
+
+/-- Later pushes occupy lower addresses than earlier pushes, with disjoint
+eight-byte slots. -/
+theorem savedRegisterSlots_ordered (layout : CallFrameLayout) {earlier later : Nat}
+    (ordered : earlier < later) (inRange : later < layout.savedRegisters.length) :
+    layout.savedRegisterOffset later + 8 ≤ layout.savedRegisterOffset earlier := by
+  simp only [savedRegisterOffset]
+  omega
+
+/-- Distinct in-range saved-register indices denote disjoint byte intervals. -/
+theorem savedRegisterSlots_disjoint (layout : CallFrameLayout) {left right : Nat}
+    (leftInRange : left < layout.savedRegisters.length)
+    (rightInRange : right < layout.savedRegisters.length) (distinct : left ≠ right) :
+    layout.savedRegisterOffset left + 8 ≤ layout.savedRegisterOffset right ∨
+      layout.savedRegisterOffset right + 8 ≤ layout.savedRegisterOffset left := by
+  rcases Nat.lt_or_gt_of_ne distinct with ordered | ordered
+  · exact Or.inr (layout.savedRegisterSlots_ordered ordered rightInRange)
+  · exact Or.inl (layout.savedRegisterSlots_ordered ordered leftInRange)
+
+end CallFrameLayout
+
+/-- Spike 1's saved registers, in machine push order. -/
+def spike1SavedRegisters : List Gpr := [.r12, .r13, .r14]
+
+/-- The manually supplied Spike 1 inputs to the generic frame calculation. -/
+def spike1FrameLayout : CallFrameLayout where
+  argumentCount := 5
+  localBytes := 4
+  localAlignment := 4
+  savedRegisters := spike1SavedRegisters
+
+theorem spike1FrameLayout_admissible : spike1FrameLayout.Admissible := by decide
+
+/-- The computed call allocation: shadow space, fifth-argument slot, separate
+four-byte local, and whatever final alignment the calculation requires. -/
+def spike1CallAllocationBytes : Nat := spike1FrameLayout.callAllocationBytes
+
+theorem spike1_stackArgumentBytes : spike1FrameLayout.stackArgumentBytes = 8 := by decide
+theorem spike1_localOffset : spike1FrameLayout.localOffset = 40 := by decide
+theorem spike1_callAllocationBytes : spike1CallAllocationBytes = 48 := by decide
+theorem spike1_totalFrameBytes : spike1FrameLayout.totalFrameBytes = 72 := by decide
+
+theorem spike1_savedRegisterOffsets :
+    spike1FrameLayout.savedRegisterOffset 0 = 64 ∧
+    spike1FrameLayout.savedRegisterOffset 1 = 56 ∧
+    spike1FrameLayout.savedRegisterOffset 2 = 48 := by decide
+
+/-- Spike 1's call alignment is an instance of the generic layout contract. -/
+theorem spike1_prologue_aligned : AlignedForCall 3 spike1CallAllocationBytes := by
+  simpa [spike1FrameLayout, spike1SavedRegisters, spike1CallAllocationBytes] using
+    spike1FrameLayout.callAllocation_aligned
 
 /-- The same prologue without the shadow space is still aligned, which is why
 the two concerns must be checked separately: alignment does not imply the

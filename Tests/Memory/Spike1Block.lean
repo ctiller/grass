@@ -24,13 +24,15 @@ not — it does now.
 The block is the one the spike's correctness argument turns on:
 
 ```text
-  mov transferred, 0                 write  stack  [32, 4)
-  call [rip + __imp_WriteFile]       read   image  [2048, 8)
-                                     write  stack  [0, 8)
-  mov eax, transferred               read   stack  [32, 4)
+  arg WriteFile.overlapped, 0        write  fifthArgumentRange
+  mov transferred, 0                write  transferredRange
+  call [rip + __imp_WriteFile]       read   import-table slot
+                                    write  returnAddressRange
+  mov eax, transferred               read   transferredRange
 ```
 
-The claim is that the last instruction observes what the first wrote. Nothing in
+The framing claim is that the transferred-count store survives the call's own
+accesses; the external agent's later write supplies the reloaded count. Nothing in
 between touches those four bytes: the import read is in a different allocation,
 and the return-address write is at frame offset zero, thirty-two bytes below.
 
@@ -63,7 +65,7 @@ def stackRecord : AllocationRecord :=
   { extent := ⟨0, 4096⟩, epoch := epoch₀, space := .cpuVirtual, source := .stack
     owners := [mainThread]
     permission := .readWrite, live := true, bytes := .empty
-    base := some 0x1000 }
+    base := some stackBaseAddress }
 
 /-- The loaded image. Only the import-table slot is given contents, because it is
 the only part of the image this block reads. -/
@@ -92,7 +94,13 @@ block is a list of accesses. -/
 
 /-- `mov transferred, 0` — the store whose bytes must survive. -/
 def transferredWrite : AccessDescriptor :=
-  access transferredProvenance ⟨32, 4⟩ 0x1020 .write .readWrite 4 false true
+  access transferredProvenance transferredRange (stackAddress transferredRange.start)
+    .write .readWrite 4 false true
+
+/-- The fifth stack argument initialized before the transferred-count slot. -/
+def fifthArgumentWrite : AccessDescriptor :=
+  access fifthArgumentProvenance fifthArgumentRange (stackAddress fifthArgumentRange.start)
+    .write .readWrite 8 false true
 
 /-- The import-table read inside `call`. -/
 def importRead : AccessDescriptor :=
@@ -100,11 +108,13 @@ def importRead : AccessDescriptor :=
 
 /-- The return-address write inside `call`. -/
 def returnAddressWrite : AccessDescriptor :=
-  access returnSlotProvenance ⟨24, 8⟩ 0x1018 .write .readWrite 8 false true
+  access returnSlotProvenance returnAddressRange (stackAddress returnAddressRange.start)
+    .write .readWrite 8 false true
 
 /-- `mov eax, transferred` — the reload. -/
 def transferredRead : AccessDescriptor :=
-  access transferredProvenance ⟨32, 4⟩ 0x1020 .read .readWrite 4 true false
+  access transferredProvenance transferredRange (stackAddress transferredRange.start)
+    .read .readWrite 4 true false
 
 /-- Four zero bytes: what `mov transferred, 0` stores. -/
 def zeros : ByteSeq := [0, 0, 0, 0]
@@ -134,7 +144,8 @@ acceptance program rather than the fourth. `runBlock` is the `applyAccess`-level
 executor and asks no such question, so this block can say what the program does while
 the transition cannot yet admit it. -/
 def agentWrite : AccessDescriptor :=
-  { access transferredProvenance ⟨32, 4⟩ 0x1020 .write .readWrite 4 false true with
+  { access transferredProvenance transferredRange (stackAddress transferredRange.start)
+      .write .readWrite 4 false true with
     context := apiAgent }
 
 /-- The thirteen bytes `WriteFile` reports having written. -/
@@ -152,16 +163,27 @@ one: `Grass.Memory.applyAccess_state_indep` says what an indeterminate read woul
 have observed stays in the observation and never reaches memory.
 `stateAtCall_eq` is that fact for this block.
 -/
+def stateAfterFifthArgument : MemoryState :=
+  (applyAccess state₀ fifthArgumentWrite (List.replicate 8 0) (fun _ => 0)).2
+
+/-- The stack allocation after the separate fifth-argument initialization. -/
+def stackRecordAfterFifthArgument : AllocationRecord :=
+  (stateAfterFifthArgument.allocations.lookup stackAlloc).getD stackRecord
+
+theorem stack_record_after_fifth_argument_present :
+    stateAfterFifthArgument.allocations.lookup stackAlloc =
+      some stackRecordAfterFifthArgument := by decide
+
 def stateAtCall : MemoryState :=
-  (runBlock (applyAccess state₀ transferredWrite zeros (fun _ => 0)).2 (fun _ => 0)
+  (runBlock (applyAccess stateAfterFifthArgument transferredWrite zeros (fun _ => 0)).2 (fun _ => 0)
     betweenStoreAndReload).2
 
 /-- Any choice of `indeterminate` leaves the same state. -/
 theorem stateAtCall_eq (indeterminate : Nat → Byte) :
-    (runBlock (applyAccess state₀ transferredWrite zeros indeterminate).2 indeterminate
+    (runBlock (applyAccess stateAfterFifthArgument transferredWrite zeros indeterminate).2 indeterminate
       betweenStoreAndReload).2 = stateAtCall := by
   rw [stateAtCall, runBlock_state_indep indeterminate (fun _ => 0),
-    applyAccess_state_indep state₀ transferredWrite zeros indeterminate (fun _ => 0)]
+    applyAccess_state_indep stateAfterFifthArgument transferredWrite zeros indeterminate (fun _ => 0)]
 
 /-- The state the reload runs against: after the agent has written the count.
 
@@ -176,20 +198,26 @@ def stateAtReload : MemoryState :=
 
 /-- The store is not refused: live allocation, matching epoch and space, in
 bounds, and the permission allows a write. -/
-theorem the_store_is_not_refused : denialOf state₀ transferredWrite = Option.none := by decide
+theorem the_fifth_argument_write_is_not_refused :
+    denialOf state₀ fifthArgumentWrite = Option.none := by decide
+
+theorem the_store_is_not_refused :
+    denialOf stateAfterFifthArgument transferredWrite = Option.none := by decide
 
 /-- Neither of the `call`'s steps touches the slot. The import read is in a
-different allocation; the return-address write is eight bytes wide at offset 24. The
+different allocation; the return-address write uses `returnAddressRange`. The
 agent's write *does* touch it, which is the point, and it is applied after this
 block rather than inside it. -/
 theorem nothing_between_touches_the_slot :
-    ∀ i < 4, ∀ step ∈ betweenStoreAndReload, ¬ Touches step stackAlloc (32 + i) := by decide
+    ∀ i < 4, ∀ step ∈ betweenStoreAndReload,
+      ¬ Touches step stackAlloc (transferredRange.start + i) := by decide
 
 /-- The slot really is inside what the store wrote, so the theorem below is not
 vacuous. -/
 theorem the_slot_is_inside_the_store :
     ∀ i < 4, (ByteRange.mk transferredWrite.range.start
-      (zeros.take transferredWrite.range.size).length).Covers (32 + i) := by decide
+      (zeros.take transferredWrite.range.size).length).Covers
+        (transferredRange.start + i) := by decide
 
 /-! ## The discharge -/
 
@@ -201,18 +229,19 @@ different allocation and writes a disjoint part of this one, and neither fact
 needed anything beyond its declared range.
 -/
 theorem the_slot_survives_the_call (indeterminate : Nat → Byte) (i : Nat) (hi : i < 4) :
-    stateAtCall.byteAt? stackAlloc (32 + i) = some 0 := by
-  have hfound : state₀.allocations.lookup transferredWrite.provenance.root =
-      some stackRecord := by decide
-  have hmain := byteAt?_write_survives_block state₀ transferredWrite zeros indeterminate
+    stateAtCall.byteAt? stackAlloc (transferredRange.start + i) = some 0 := by
+  have hfound : stateAfterFifthArgument.allocations.lookup transferredWrite.provenance.root =
+      some stackRecordAfterFifthArgument := by
+    exact stack_record_after_fifth_argument_present
+  have hmain := byteAt?_write_survives_block stateAfterFifthArgument transferredWrite zeros indeterminate
     betweenStoreAndReload hfound the_store_is_not_refused (by decide)
     (the_slot_is_inside_the_store i hi)
     (nothing_between_touches_the_slot i hi)
   rw [stateAtCall_eq indeterminate,
     show transferredWrite.provenance.root = stackAlloc from rfl] at hmain
   rw [hmain]
-  have hidx : 32 + i - transferredWrite.range.start = i := by
-    show 32 + i - 32 = i
+  have hidx : transferredRange.start + i - transferredWrite.range.start = i := by
+    show transferredRange.start + i - transferredRange.start = i
     omega
   rw [hidx]
   have hz : ∀ j < 4, (zeros.take transferredWrite.range.size)[j]? = some 0 := by decide
@@ -228,8 +257,9 @@ the program it reads the byte count `WriteFile` wrote and the loop's correctness
 turns on it. Review found it by reading `Program.lean` beside the fixture.
 -/
 theorem the_reload_observes_the_agents_count (i : Nat) (hi : i < 4) :
-    stateAtReload.byteAt? stackAlloc (32 + i) = transferredCount[i]? := by
-  have h : ∀ j < 4, stateAtReload.byteAt? stackAlloc (32 + j) = transferredCount[j]? := by
+    stateAtReload.byteAt? stackAlloc (transferredRange.start + i) = transferredCount[i]? := by
+  have h : ∀ j < 4, stateAtReload.byteAt? stackAlloc
+      (transferredRange.start + j) = transferredCount[j]? := by
     decide
   exact h i hi
 
@@ -237,7 +267,8 @@ theorem the_reload_observes_the_agents_count (i : Nat) (hi : i < 4) :
 from the program's store. Without this it would hold of a block in which the agent
 wrote zeros and nothing would have been shown. -/
 theorem the_agents_count_is_not_the_stored_zero :
-    stateAtReload.byteAt? stackAlloc 32 ≠ stateAtCall.byteAt? stackAlloc 32 := by decide
+    stateAtReload.byteAt? stackAlloc transferredRange.start ≠
+      stateAtCall.byteAt? stackAlloc transferredRange.start := by decide
 
 /-- The agent's write is not refused: the slot is live, in bounds, writable, and the
 agent's own context is not something `denialOf` reads — authority is the loan rule's
@@ -261,8 +292,8 @@ write was in this block, the only thing that had initialized the slot was the
 program's own store, so the declared justification and the discharged one were
 different facts. Review found that too. -/
 theorem the_initialization_came_from_the_agent :
-    stateAtReload.RangeInitialized stackAlloc ⟨32, 4⟩ ∧
-    stateAtReload.byteAt? stackAlloc 32 = some 13 := by
+    stateAtReload.RangeInitialized stackAlloc transferredRange ∧
+    stateAtReload.byteAt? stackAlloc transferredRange.start = some 13 := by
   exact ⟨by decide, by decide⟩
 
 /--

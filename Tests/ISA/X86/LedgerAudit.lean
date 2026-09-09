@@ -3,6 +3,7 @@ import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.Decode
 import Grass.ISA.X86.Profile
 import Grass.ABI.Win64.UnwindBytes
+import Grass.ABI.Win64.FrameRanges
 import Grass.Platform.Win32.Console
 
 /-!
@@ -87,7 +88,7 @@ The citation machinery itself is not modeled behaviour and is not audited: a
 def auditedModules : List Name :=
   [`Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.Decode,
-   `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.Unwind,
+   `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console]
 
 /--
@@ -102,7 +103,7 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 98
+def owedBaseline : Nat := 100
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -124,7 +125,7 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 54
+def notBehaviourBaseline : Nat := 70
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -280,9 +281,31 @@ def notBehaviour : List Name :=
     `Grass.ABI.Win64.RuntimeFunction.PointsOutside,
     `Grass.ABI.Win64.volatileRegisters, `Grass.ABI.Win64.nonvolatileRegisters,
     `Grass.ABI.Win64.rspAfterPrologue,
+    -- Reviewed frame construction: selected placement and arithmetic over the
+    -- ABI constants. Stack-argument and saved-register placement rules remain
+    -- explicit citation debt below; these helpers do not discharge that debt.
+    `Grass.ABI.Win64.CallFrameLayout.Admissible,
+    `Grass.ABI.Win64.CallFrameLayout.alignUp,
+    `Grass.ABI.Win64.CallFrameLayout.localOffset,
+    `Grass.ABI.Win64.CallFrameLayout.usedCallAllocationBytes,
+    `Grass.ABI.Win64.CallFrameLayout.callAllocationBytes,
+    `Grass.ABI.Win64.CallFrameLayout.totalFrameBytes,
+    -- Derived range presentations of shadowSpaceBytes, stackArgumentBytes,
+    -- and savedRegisterOffset, whose ABI content remains owed. Their laws
+    -- relate these presentations to the calculator, not to a new ABI rule.
+    `Grass.ABI.Win64.CallFrameLayout.shadowRange,
+    `Grass.ABI.Win64.CallFrameLayout.stackArgumentsRange,
+    `Grass.ABI.Win64.CallFrameLayout.localRange,
+    `Grass.ABI.Win64.CallFrameLayout.paddingRange,
+    `Grass.ABI.Win64.CallFrameLayout.callAllocationRange,
+    `Grass.ABI.Win64.CallFrameLayout.frameRange,
+    `Grass.ABI.Win64.CallFrameLayout.savedRegisterRange,
     -- Fixtures: Spike 1's prologue and a frame-pointer example, which are
     -- values this corpus chose rather than facts about Windows.
     `Grass.ABI.Win64.spike1Prologue, `Grass.ABI.Win64.spike1Layout,
+    `Grass.ABI.Win64.spike1SavedRegisters,
+    `Grass.ABI.Win64.spike1FrameLayout,
+    `Grass.ABI.Win64.spike1CallAllocationBytes,
     `Grass.ABI.Win64.spike1UnwindInfo, `Grass.ABI.Win64.framePointerLayout,
     `Grass.Platform.Win32.GetStdHandleResult.WellFormed,
     `Grass.Platform.Win32.UsableHandle.mk?,
@@ -358,6 +381,10 @@ def owed : List Name :=
     `Grass.ABI.Win64.registerArgumentCount,
     `Grass.ABI.Win64.shadowSpaceBytes, `Grass.ABI.Win64.stackAlignment,
     `Grass.ABI.Win64.entryMisalignment, `Grass.ABI.Win64.AlignedForCall,
+    -- New frame rules: stack-passed arguments occupy eight-byte slots; saved
+    -- register positions follow the downward stack in reverse push order.
+    `Grass.ABI.Win64.CallFrameLayout.stackArgumentBytes,
+    `Grass.ABI.Win64.CallFrameLayout.savedRegisterOffset,
     `Grass.ABI.Win64.regNibble,
     `Grass.ABI.Win64.UnwindOp.opcode, `Grass.ABI.Win64.UnwindOp.opInfo,
     `Grass.ABI.Win64.UnwindOp.slots, `Grass.ABI.Win64.UnwindOp.stackDelta,

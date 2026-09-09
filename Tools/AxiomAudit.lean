@@ -1,5 +1,6 @@
 import Lean
 import Grass.ABI.Win64.Convention
+import Grass.ABI.Win64.FrameRanges
 import Grass.ABI.Win64.Unwind
 import Grass.ABI.Win64.UnwindBytes
 import Grass.Build.Cache.Key

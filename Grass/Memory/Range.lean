@@ -164,6 +164,25 @@ theorem isEmpty_def (r : ByteRange) : r.IsEmpty ↔ r.size = 0 := Iff.rfl
 theorem withinBound_def (r : ByteRange) (limit : Nat) :
     r.WithinBound limit ↔ r.start + r.size ≤ limit := Iff.rfl
 
+/-- Place a relative range at an allocation-relative base offset.
+This operates on natural offsets; conversion to machine addresses still needs
+the allocation and address-width bounds. -/
+def shift (r : ByteRange) (base : Nat) : ByteRange :=
+  ⟨base + r.start, r.size⟩
+
+/-- `shift_contains_iff` transports containment through a common placement. -/
+theorem shift_contains_iff (r s : ByteRange) (base : Nat) :
+    (r.shift base).Contains (s.shift base) ↔ r.Contains s := by
+  simp only [contains_def, shift]
+  omega
+
+/-- `shift_disjoint_iff` transports disjointness through a common placement,
+including empty ranges. -/
+theorem shift_disjoint_iff (r s : ByteRange) (base : Nat) :
+    (r.shift base).Disjoint (s.shift base) ↔ r.Disjoint s := by
+  simp only [disjoint_def, shift]
+  omega
+
 instance (r : ByteRange) (offset : Nat) : Decidable (r.Covers offset) :=
   decidable_of_iff _ (covers_def r offset).symm
 

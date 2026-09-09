@@ -439,21 +439,27 @@ end Prologue
 /-! ## Spike 1's prologue -/
 
 /--
-`push r12; push r13; push r14`, then the shadow space allocation.
+`push r12; push r13; push r14`, then the complete outgoing call allocation.
 
 The prologue of `Spikes/1_Hello_World/Program.lean`, as the unwind language
 sees it.
 -/
 def spike1Prologue : Prologue :=
-  { ops := [.pushNonvolatile .r12, .pushNonvolatile .r13, .pushNonvolatile .r14,
-            .allocSmall shadowSpaceBytes] }
+  { ops := spike1SavedRegisters.map .pushNonvolatile ++
+      [.allocSmall spike1CallAllocationBytes] }
 
-/-- It is encodable: three nonvolatile pushes and a 32-byte allocation, which
+/-- It is encodable: three nonvolatile pushes and a 48-byte allocation, which
 is a multiple of 8 in the 8..128 range. -/
 theorem spike1Prologue_encodable : spike1Prologue.Encodable := by decide
 
-/-- It moves `RSP` down 56 bytes: three pushes and 32 bytes of shadow space. -/
-theorem spike1Prologue_stackDelta : spike1Prologue.stackDelta = 56 := by decide
+/-- The unwind model accounts for exactly the frame computed by the shared
+layout contract. -/
+theorem spike1Prologue_stackDelta_eq_totalFrameBytes :
+    spike1Prologue.stackDelta = spike1FrameLayout.totalFrameBytes := by decide
+
+/-- Numeric regression assertion for the selected Spike 1 fixture. -/
+theorem spike1Prologue_stackDelta : spike1Prologue.stackDelta = 72 := by
+  rw [spike1Prologue_stackDelta_eq_totalFrameBytes, spike1_totalFrameBytes]
 
 /-- Four operations, four slots, so a reported count of four and no padding
 slot. `ml64` agrees byte-for-byte; see `Tests/ABI/Win64/UnwindCorpus.lean`. -/
@@ -466,8 +472,9 @@ theorem spike1Prologue_no_framePointer :
 /--
 The stack it leaves is aligned for a call, agreeing with `Convention.lean`.
 
-Two independent routes to the same number — `AlignedForCall 3 shadowSpaceBytes`
-counts pushes and the adjustment separately, while this sums the unwind
+Two independent routes to the same number —
+`AlignedForCall 3 spike1CallAllocationBytes` counts pushes and the adjustment
+separately, while this sums the unwind
 operations' deltas — so a disagreement between the frame model and the unwind
 model would show up here rather than at run time.
 -/

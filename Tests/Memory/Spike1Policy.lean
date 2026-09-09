@@ -124,6 +124,8 @@ inductive Op where
   | movEcxImm
   /-- `lea r13, [rip + payload]`. -/
   | leaPayload
+  /-- `arg WriteFile.overlapped, 0`. -/
+  | movWriteFileOverlappedZero
   /-- `mov transferred, 0`. -/
   | movTransferredZero
   /-- `lea r9, transferred.addr`. -/
@@ -152,6 +154,10 @@ instance : HasOperationFacets Op where
           restartability := some .notRestartable, ordering := some .plain }
     | .leaPayload =>
         { memoryEffects := some leaPayload, faults := some []
+          restartability := some .notRestartable, ordering := some .plain }
+    | .movWriteFileOverlappedZero =>
+        { memoryEffects := some movWriteFileOverlappedZero
+          faults := some [.pageFault, .generalProtection]
           restartability := some .notRestartable, ordering := some .plain }
     | .movTransferredZero =>
         { memoryEffects := some movTransferredZero
@@ -332,6 +338,14 @@ theorem the_conforming_return_unblocks_the_reload :
 /-- **`mov transferred, 0` steps and records one event with no violation.** -/
 theorem the_store_steps :
     ∀ s, (stepThread machine₀ .movTransferredZero).state? = some s →
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
+  intro s hs
+  cases hs
+  exact ⟨by decide, by decide⟩
+
+/-- **The fifth-argument store steps independently before the count store.** -/
+theorem the_fifth_argument_store_steps :
+    ∀ s, (stepThread machine₀ .movWriteFileOverlappedZero).state? = some s →
       s.events.length = 1 ∧ s.violations.IsEmpty := by
   intro s hs
   cases hs

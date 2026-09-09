@@ -94,7 +94,7 @@ reversed.
 /// means substituting a same-length corpus fails. Changing the corpus requires
 /// updating this constant, which is the reviewed edit `docs/VALIDATION.md`
 /// section 7 asks for rather than a silent change to what is being checked.
-const EXPECTED_DIGEST: &str = "a9009d55a935a81f1ca90da712f308d2a5d34722dfa0bbe8fb7f331858755447";
+const EXPECTED_DIGEST: &str = "bb4a1d1cfebbe8ffface2e868be41614b0c399621ab74f6c6d9be3e8b3368a50";
 
 /// The coverage this tool was reviewed at. Shrinking the corpus must be a
 /// deliberate, reviewed edit rather than a side effect of regenerating it.
