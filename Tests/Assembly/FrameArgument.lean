@@ -69,4 +69,3 @@ example : fromChars? (sample (source_chars "WriteFile")
   decide +kernel
 
 end Grass.Tests.Assembly.FrameArgument
-
