@@ -130,6 +130,55 @@ operation, get-after-construction and get-after-update laws, order preservation
 for `append` and `map`, and `map` fusion. `abbrev ByteArray := Vec Byte`
 realizes the §1 name.
 
+#### What has landed since, and what each one cost to find
+
+Kept out of the paragraph above, because that paragraph describes the module's
+shape and this records how it got there.
+
+**This is not a roster and is not extended on every merge.** `git log` on
+`Grass/Std/Logical/Vec.lean` is the authoritative history; what a plan adds is
+the *reason*, which a commit subject cannot carry. Entries earn their place by
+having one — a defect that was invisible to every gate, or a claim in this
+document that turned out to be false — and the list stops being written when
+that stops being true of new merges. A section that lists "everything since"
+is a growing set with the same fuse as a count, and §3.2's fixture paragraph
+gives the argument.
+
+- **The notation bridges.** `Vec.emptyCollection_eq_empty`,
+  `Vec.default_eq_empty`, `Vec.get_eq_iff_get?_eq`, `Vec.forIn_eq_forIn_toList`
+  and `Vec.toList_empty`, with `Tests/Std/VecInstances.lean` proving each
+  load-bearing. An instance makes a notation typecheck without making `simp` see
+  through the instance projection, so a goal written with `∅`, `default`, `v[i]`
+  or `for` reached none of the laws stated about the underlying accessor.
+- **The cons fold laws** (`40c7c248`). `Vec.foldr_cons` and `Vec.foldl_cons`,
+  with `Tests/Std/FoldInduction.lean`. `Vec.recOnCons` had no fold law shaped
+  like the case it hands you, so cons-inducting a `foldr` goal reduced to a raw
+  `List.foldr` and the proof continued in `List` — the seam this module exists
+  to keep narrow, reached by a consumer doing everything right.
+- **The representation probe, moved into the build.** It was
+  `Tools/VecRepresentationProbe.lean`, which `lake` did not build, recording
+  measurements from harnesses that existed only in a scratch directory. It is
+  `Tests/Std/VecRepresentation.lean` now, with the harnesses compiled beside the
+  numbers. Re-running them falsified both tables; §3.2 carries the corrected
+  figures.
+- **Two repairs to what this library said about the spike corpus.**
+  `Grass/Std/Logical/Order.lean` quoted a `stableSorted` that `47da3f8`
+  superseded, and described two defects in it that the same commit had fixed. A
+  later paragraph in the same module kept the superseded spelling in the present
+  tense and was caught by `g-reviewer:75` after the first repair merged.
+- **Reading back what you just built** (`94fa4926`). `Vec.get?_push` states
+  `(v.push a).get? i` for every `i` rather than only the indices the two
+  earlier lemmas reached. `Vec.get?_push_lt` cannot be `@[simp]` at all, because
+  it carries the hypothesis `i < v.length`; `Vec.get?_push_self` is `@[simp]`
+  but fires only where the index is syntactically that vector's length. So a
+  goal that pushed twice and read once reached neither, and `simp` stopped on a
+  term about a sequence it had just constructed. Found by pushing every
+  operation twice and reading back, not by reading the module: `map`, `mem`,
+  `pop?`, `sum` and `set` all survive that, which is why the gap was invisible.
+
+None of this changes §3.11's exit criteria, which the S1 section reports against
+directly.
+
 Every operation carries laws that determine it up to extensional equality —
 decision 6, arrived at after the weaker rule this paragraph used to state ("every
 operation carries at least one law") was broken twice by adversarial review. The
@@ -161,12 +210,16 @@ on it.
 
 For the same reason the descriptions below are *illustrative, not exhaustive*:
 `Tests/Std/` is the authoritative list, and this section explains only the
-fixtures whose purpose is not obvious from their name. Fixtures added since it
-was written — the representation probe, the collection-instance bridges, the fold
-recursors — are described where they were introduced, in §3.1 and §3.2, rather
-than by growing this paragraph every time. `Tests/Std/VecVocabulary.lean` covers the type's own
-claims: that a `List Byte` and a host `_root_.ByteArray` are each rejected where
-a Grass `ByteArray` is required, that extensionality is usable in the shape a
+fixtures whose purpose is not obvious from their name. A fixture added later is
+described in the section that motivated it — the representation probe in §3.2,
+the literal probe in §3.5, the collection-instance bridges and fold recursors in
+§3.1 — rather than by growing this paragraph. That is not a style preference:
+a list of "the fixtures added since" is a roster of a growing set, carrying the
+same fuse as the count above and lit by the next merge.
+
+`Tests/Std/VecVocabulary.lean` covers the type's own claims: that a `List Byte`
+and a host `_root_.ByteArray` are each rejected where a Grass `ByteArray` is
+required, that extensionality is usable in the shape a
 consumer would use it, and that the update framing law composes the way the
 memory layer applies it. `Tests/Std/SpikeSurface.lean` covers the demand side:
 every `Vec` operation the authored spike sources call, compiled in the shape they
@@ -369,7 +422,7 @@ and `bitAccRep` is a physical bit-accumulator representation. None of the three
 is scheduled, and each becomes a demand on `Std.Owned` or on an algorithm owner
 if it becomes one at all.
 
-### 3.5 Open: `Vec` has no literal syntax, and the obvious fix is harmful
+### 3.5 Open: `Vec` has no literal syntax, and one mechanism does work
 
 The spike sources write `Vec` literals with array-literal syntax — seven ascribed
 sites such as `def deviceExtensionNames : Vec CString := #["VK_KHR_swapchain"]`,
@@ -387,15 +440,37 @@ correct until measured:
 | `instance : CoeTail (Array α) (Vec α)` | **Insufficient.** Ascribed non-empty literals work and `Array` literals are unaffected, but `def b : Vec Nat := #[]` fails, because the element type is a metavariable and the coercion does not fire; and `v ++ #[9]` fails, because the coercion does not reach into `HAppend`. The spike uses both. It also silently converts any `Array` value, not just a literal. |
 | `elab_rules : term <= expectedType` deferring to `Array` | **Does not fire.** `#[...]` is expanded by a macro, and macro expansion wins over a term elaborator for the same syntax kind, so the rule never runs. It would also require `import Lean` in `Grass/Std/Logical/Vec.lean`, putting Lean's metaprogramming frontend at the base of the dependency chain that [MODULES.md](MODULES.md) starts with `Core`. |
 
-Two conclusions. First, if notation is added it belongs in a separate module that
-consumers opt into, not in `Vec.lean`, because of the `import Lean` cost and
-because a global literal rule is not something a library at the bottom of the
-chain should impose. Second, the choice is not wholly this library's: the
+A fourth mechanism was not tried, and it works: **`scoped macro_rules`**. The
+row above is correct about the unscoped form and says nothing about this one, and
+the difference is the whole objection — a scoped rule activates only where it is
+opened, so `Array` literals are untouched in every module that does not ask for
+the notation, including modules that merely open the parent namespace to reach
+`Vec`. It handles all three shapes the spike sources use, including the two the
+coercion could not reach. It needs no `import Lean`, because `macro_rules` is core
+syntax.
+
+`Tests/Std/VecLiteral.lean` and `Tests/Std/VecLiteralImporter.lean` are that
+measurement, built rather than described. Deleting `scoped` from the declaration
+breaks both, which is how the row above is confirmed rather than assumed.
+
+**The cost is real and is why this is a decision rather than a fix.** A module
+that opts in cannot write an `Array` literal in that scope: `#[1, 2, 3]` means a
+`Vec` there. That is confined to modules that ask for it, but a module needing
+both containers cannot have literal syntax for both.
+
+Two conclusions, which the fourth mechanism sharpens rather than overturns.
+First, if notation is added it belongs in a separate module that consumers opt
+into, not in `Vec.lean` — the scoped rule makes that not merely advisable but
+the mechanism itself. Second, the choice is not wholly this library's: the
 authored spike surface is governed by [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md),
 so "the spikes should write `Vec.fromList [...]`" is as available an answer as
-"the library should support `#[...]`", and it is a cheaper one. Breaking `Array`
-literals repository-wide to save this library some punctuation is not a trade
-this owner takes quietly.
+"the library should support `#[...]`", and it is a cheaper one.
+
+What has changed is the ground the second conclusion stands on. This section
+used to be able to say that supporting `#[...]` would break `Array` literals
+repository-wide, which settled it. It would not: the cost is now known to be a
+local trade a consumer chooses. So the question is genuinely open on its merits
+and this plan is not going to close it alone.
 
 This interacts with §3.2's open question. If `Vec α := Array α` were adopted,
 this section would be moot — array-literal syntax would work by construction, as

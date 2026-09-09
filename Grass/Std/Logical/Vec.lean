@@ -197,7 +197,7 @@ def get (v : Vec α) (i : Nat) (h : i < v.length) : α := v.toList[i]'h
 @[simp] theorem length_replicate (n : Nat) (a : α) : (replicate n a).length = n := by
   simp [length, replicate]
 
-theorem get?_replicate (n : Nat) (a : α) (i : Nat) :
+@[simp] theorem get?_replicate (n : Nat) (a : α) (i : Nat) :
     (replicate n a).get? i = if i < n then some a else none := by
   simp [get?, replicate, List.getElem?_replicate]
 
@@ -244,7 +244,7 @@ theorem get?_eq_none (v : Vec α) {i : Nat} (h : v.length ≤ i) : v.get? i = no
 /-- Both directions. A consumer review needed the converse twice while writing a
 byte cursor and had to derive it each time; a read failing is exactly a read past
 the end. -/
-theorem get?_eq_none_iff (v : Vec α) (i : Nat) : v.get? i = none ↔ v.length ≤ i := by
+@[simp] theorem get?_eq_none_iff (v : Vec α) (i : Nat) : v.get? i = none ↔ v.length ≤ i := by
   simp [get?, length]
 
 /--
@@ -265,6 +265,21 @@ theorem get?_eq_some_iff {v : Vec α} {i : Nat} {a : α} :
     · rw [get?_eq_none v hge] at h; exact absurd h (by simp)
   · rintro ⟨hlt, rfl⟩
     exact get?_eq_some_get v i hlt
+
+/--
+Readability as a `Bool`, which is the half `Vec.get?_eq_none_iff` leaves behind.
+
+With that law `@[simp]`, a goal of the form `v.get? i = none` normalises to an
+arithmetic one and a goal of the form `(v.get? i).isSome` does not, which is an
+asymmetry in the predicate rather than in the sequence. `Vec.pop?_isSome_iff` is
+the same statement about the other accessor and was added for the same reason: an
+operation a consumer can call and cannot reason about gets reasoned about through
+`Vec.toList` instead.
+-/
+@[simp] theorem get?_isSome_iff (v : Vec α) (i : Nat) :
+    (v.get? i).isSome = true ↔ i < v.length := by
+  rw [Option.isSome_iff_ne_none, ne_eq, get?_eq_none_iff]
+  omega
 
 /-- A successful read is in range. -/
 theorem lt_of_get?_eq_some {v : Vec α} {i : Nat} {a : α} (h : v.get? i = some a) :
@@ -367,7 +382,7 @@ theorem get?_set_ne (v : Vec α) {i j : Nat} (h : j ≠ i) (a : α) :
 
 /-- The combined framing law, in the shape a consumer applies it: an update is
 visible at its own index and nowhere else. -/
-theorem get?_set (v : Vec α) (i j : Nat) (a : α) :
+@[simp] theorem get?_set (v : Vec α) (i j : Nat) (a : α) :
     (v.set i a).get? j =
       if j = i then (if i < v.length then some a else none) else v.get? j := by
   by_cases h : j = i
@@ -758,6 +773,16 @@ theorem length_drop_lt_of_pos (v : Vec α) {n k : Nat} (hk : 0 < k) (hn : n < v.
 
 @[simp] theorem isPrefix_refl (v : Vec α) : v.IsPrefix v := ⟨empty, append_empty v⟩
 
+/--
+The introduction rule. `Vec.isPrefix_refl` covers the degenerate case and this
+covers every other one: `IsPrefix` is defined as the existence of a remainder, so
+a consumer producing one exhibits the remainder, and an append is where it comes
+from. Written because the goal `u.IsPrefix (u ++ v)` — a streaming consumer
+asking whether what it has committed is still a prefix of what it has seen —
+reached no law at all.
+-/
+@[simp] theorem isPrefix_append (u v : Vec α) : u.IsPrefix (u ++ v) := ⟨v, rfl⟩
+
 theorem IsPrefix.trans {u v w : Vec α} (h₁ : u.IsPrefix v) (h₂ : v.IsPrefix w) :
     u.IsPrefix w := by
   obtain ⟨r₁, hr₁⟩ := h₁
@@ -879,7 +904,7 @@ theorem map_map (g : β → γ) (f : α → β) (v : Vec α) :
   apply toList_injective
   simp [map]
 
-theorem map_append (f : α → β) (v w : Vec α) : (v ++ w).map f = v.map f ++ w.map f := by
+@[simp] theorem map_append (f : α → β) (v w : Vec α) : (v ++ w).map f = v.map f ++ w.map f := by
   apply toList_injective
   simp [map]
 
@@ -1170,7 +1195,7 @@ is the leak the rule exists to catch. Adversarial review found it. -/
 @[simp] theorem sum_push (v : Vec Nat) (a : Nat) : sum (v.push a) = sum v + a := by
   simp [sum, foldl, push]
 
-theorem sum_append (v w : Vec Nat) : sum (v ++ w) = sum v + sum w := by
+@[simp] theorem sum_append (v w : Vec Nat) : sum (v ++ w) = sum v + sum w := by
   induction w using recOnPush with
   | empty => simp [sum, foldl, empty]
   | push u a ih =>

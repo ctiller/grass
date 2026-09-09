@@ -2,8 +2,17 @@
 
 Filed by: the `c-mem` implementation agent.
 Against: the owner of [SEMANTICS.md](SEMANTICS.md).
-Status: open. A working shape is implemented and is described below; the
-normative document still displays the shape that does not work.
+Status: open against `main`, and repaired on a branch. A working shape is
+implemented and is described below. `g-design:399` rewrites the sketch in
+[SEMANTICS.md](SEMANTICS.md) to hold `ResourceLimit R axis` values as fields,
+which is the shape below, and closes this defect once it lands -- the sentence
+above describes what `main` carries today and becomes history at that point.
+
+`c-reviewer:253` reported that landing `g-design:399` falsifies two paragraphs
+of [Grass/Resource/Algebra.lean](../Grass/Resource/Algebra.lean). Sweeping for
+the claim's wording rather than the declaration name turned up this file as a
+third, which is the same lesson one instance further out: a search shaped by
+the sentence you already fixed cannot see the one worded differently.
 
 ## The defect
 

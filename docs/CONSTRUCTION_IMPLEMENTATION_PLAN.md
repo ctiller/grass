@@ -162,6 +162,13 @@ Exit criteria include rejection fixtures for an uncovered back edge, a call
 made with an incompatible stack shape, a missing non-normal return, and an edge
 that bypasses stack-scope elimination.
 
+The initial C1 slice is `Grass.CFG.Join`. `Graph.discoverJoins` derives shared
+targets, predecessor order, and cycle participation from the graph's nested
+edges. `JoinSelection.wellFormed` accepts only the exact discovered identity
+list on a structurally well-formed graph, so selection cannot introduce a
+second contract value that disagrees with the selected block. Loop invariants,
+measures, and frontier admission remain the next separate C1 obligation.
+
 ### C2 — Logical placement and static layouts
 
 Build layout and placement values under `Grass/Construct/`:
@@ -207,6 +214,13 @@ Exit criteria: exact expansion, total exit coverage, source-location coverage,
 reference closure, citation coverage, complete effect derivation, and mutation
 fixtures showing that a changed expansion, omitted clobber, or dropped fault
 exit breaks the certificate.
+
+The first C3 review slice implements the instruction-polymorphic hierarchical
+`Source`, `VerifiedFragment`, and dependent `Generator` foundation. Its public
+theorems expose exact expansion-derived effects, contract closure, instruction
+counts, and all-exit classification without treating generator evaluation as
+proof authority. Structural source locations, composition, and registry closure
+remain separate successor slices so each can be reviewed against one invariant.
 
 ### C4 — Authored source and checked lowering
 

@@ -205,6 +205,28 @@ Adversarial review caught it. Adding a law can break a proof, and a one-sided
   apply Array.ext'
   simp [toHostBytes]
 
+/--
+The base case of the pair above, in the direction that leaves this library.
+
+`Vec.toHostBytes_append` is the inductive step of a homomorphism whose base was
+never stated, and the two are wanted together: a consumer folding a crossing over
+a sequence of runs reaches the empty run and stops. It is `rfl`, and it was found
+by asking `simp` for the goal a consumer writes rather than by reading the
+module — `(∅ : Vec Byte).toHostBytes = ByteArray.empty` reaches the
+`Vec.emptyCollection_eq_empty` bridge and then nothing.
+-/
+@[simp] theorem toHostBytes_empty : toHostBytes (empty : Vec Byte) = _root_.ByteArray.empty :=
+  rfl
+
+/--
+The same base case in the direction that enters it, stated for the reason
+`Vec.toHostBytes_append`'s docstring gives about its own pair: a one-sided
+`@[simp]` law on a two-sided crossing strands goals on the other side.
+-/
+@[simp] theorem ofHostBytes_empty :
+    ofHostBytes _root_.ByteArray.empty = (empty : Vec Byte) :=
+  rfl
+
 /-- `Vec.toHostBytes` loses nothing, so two Grass byte arrays that cross to the
 same host value were equal. -/
 theorem toHostBytes_injective {a b : Vec Byte}
