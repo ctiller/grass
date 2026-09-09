@@ -405,6 +405,61 @@ theorem handoff?_records {Request : Type} {state next : State Request}
                 rfl, fields.1⟩
               rw [fields.2.2.2.1, FiniteMap.lookup_insert_self]
 
+/-- `handoff?_pending` exposes the complete pending-table update made by a
+successful handoff, including the actual minted loan entries. -/
+theorem handoff?_pending {Request : Type} {state next : State Request}
+    {caller agent : ContextId} {request : Request} {loans : List LoanRequest}
+    {call : CallId} (success : handoff? state caller agent request loans = some (call, next)) :
+    next.pending = state.pending.insert call
+      ⟨caller, agent, request,
+        (GrantMint.mint state.grantSupply
+          (loans.map (fun loan => loan.grant caller agent))).1⟩ := by
+  unfold handoff? at success
+  split at success
+  · simp at success
+  · skip
+    cases issued : LoanBatch.issue? state.machine.memory caller
+        (GrantMint.mint state.grantSupply
+          (loans.map fun loan => loan.grant caller agent)).1 with
+    | none => simp [issued] at success
+    | some memory =>
+        simp only [issued, Option.bind_eq_bind, Option.bind_some] at success
+        simp only [Pending.ids] at success
+        split at success
+        · simp at success
+        · cases checked : checked? { state.machine with memory := memory }
+              state.callSupply.fresh.2
+              (GrantMint.mint state.grantSupply
+                (loans.map fun loan => loan.grant caller agent)).2
+              (state.pending.insert state.callSupply.fresh.1
+                ⟨caller, agent, request,
+                  (GrantMint.mint state.grantSupply
+                    (loans.map fun loan => loan.grant caller agent)).1⟩)
+              (state.boundaries ++ [.handoff state.callSupply.fresh.1 caller agent
+                ((GrantMint.mint state.grantSupply
+                  (loans.map fun loan => loan.grant caller agent)).1.map Prod.fst)]) with
+          | none =>
+              rw [checked] at success
+              simp at success
+          | some checkedState =>
+              rw [checked] at success
+              simp only [Option.bind_some] at success
+              rcases success with ⟨rfl, rfl⟩
+              exact (checked?_fields checked).2.2.2.1
+
+/-- `handoff?_fresh` rules out a prior pending occurrence at the returned call ID,
+using the issued-ID invariant and the actual fresh supply result. -/
+theorem handoff?_fresh {Request : Type} {state next : State Request}
+    {caller agent : ContextId} {request : Request} {loans : List LoanRequest}
+    {call : CallId} (success : handoff? state caller agent request loans = some (call, next)) :
+    state.pending.lookup call = none := by
+  rw [(handoff?_records success).1]
+  cases found : state.pending.lookup state.callSupply.fresh.1 with
+  | none => rfl
+  | some record =>
+      have issued := (state.pendingValid.2 _ (FiniteMap.mem_of_lookup found)).1
+      exact False.elim (state.callSupply.fresh_not_issued issued)
+
 /-- Successful handoff advances both nominal supplies along their mint histories. -/
 theorem handoff?_supplies_reachable {Request : Type} {state next : State Request}
     {caller agent : ContextId} {request : Request} {loans : List LoanRequest}
