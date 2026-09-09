@@ -1,4 +1,4 @@
-import Grass.ISA.X86.Execution.State
+import Grass.ISA.X86.Execution.AccessPolicy
 import Grass.ISA.X86.Execution.DecodedSite
 import Grass.Op.Step
 
@@ -49,6 +49,15 @@ inductive ApplicabilityFailure where
   | trapTransfer (class_ : Grass.Memory.FaultClassId)
   | interruptionTransfer (vector : BitVec 8)
   | abortTransfer (class_ : Grass.Memory.FaultClassId)
+  /-- A checked address-plan refusal, not an architectural exception. -/
+  | addressPlanning (reason : AddressPlanFailure)
+  | accessViolations
+  | accessPreparation (reason : Grass.Memory.AuditViolationClass)
+  | accessAnswerUnavailable
+  | stackUnderflow
+  | missingData (address : BitVec 64)
+  | branchTargetOutOfRange
+  | unsupportedSelection
 deriving DecidableEq, Repr
 
 /-- A CPU outcome or an explicitly uncovered prefix.

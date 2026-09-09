@@ -40,6 +40,7 @@ import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
 import Grass.ISA.X86.Execution.CallNormal
 import Grass.ISA.X86.Execution.CallFactory
+import Grass.ISA.X86.Execution.CheckedStep
 import Grass.ISA.X86.Execution.CheckedChoice
 import Grass.ISA.X86.Execution.ReturnSlotRead
 import Grass.ISA.X86.Execution.ReturnSlotFactory
@@ -202,7 +203,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.PushFactory,
    `Grass.ISA.X86.Execution.CallNormal,
    `Grass.ISA.X86.Execution.CallFactory, `Grass.ISA.X86.Execution.ReturnSlotRead,
-   `Grass.ISA.X86.Execution.CheckedChoice,
+   `Grass.ISA.X86.Execution.CheckedStep, `Grass.ISA.X86.Execution.CheckedChoice,
    `Grass.ISA.X86.Execution.ReturnSlotFactory,
    `Grass.ISA.X86.LinearAddress,
    `Grass.ISA.X86.Execution.StackInstruction, `Grass.ISA.X86.Execution.CompletionFlags,
@@ -358,8 +359,8 @@ acquiring a citation.
 -- Fixed dispatch and access factories add thirty checked structural helpers.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
--- Runtime, graph, continuation and logical import adapters retain checked evidence.
-def notBehaviourBaseline : Nat := 346
+-- Runtime, import and checked-evaluator adapters retain actual evidence.
+def notBehaviourBaseline : Nat := 359
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -803,6 +804,21 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.CallFactory.Success.result,
     `Grass.ISA.X86.Execution.CallFactory.reachedAfterAccess,
     `Grass.ISA.X86.Execution.CallFactory.call,
+    -- The graph of checked constructors supplies no new physical adequacy claim.
+    `Grass.ISA.X86.Execution.CheckedExecution.Success.outcome,
+    `Grass.ISA.X86.Execution.CheckedExecution.accessReason,
+    `Grass.ISA.X86.Execution.CheckedExecution.fetchFailure,
+    `Grass.ISA.X86.Execution.CheckedExecution.computationFailure,
+    `Grass.ISA.X86.Execution.CheckedExecution.pushFailure,
+    `Grass.ISA.X86.Execution.CheckedExecution.callFailure,
+    `Grass.ISA.X86.Execution.CheckedExecution.bodyFailure,
+    `Grass.ISA.X86.Execution.CheckedExecution.memoryMoveFailure,
+    `Grass.ISA.X86.Execution.CheckedExecution.normal,
+    `Grass.ISA.X86.Execution.CheckedExecution.Failure.outcome,
+    `Grass.ISA.X86.Execution.CheckedExecution.resultOutcome,
+    `Grass.ISA.X86.Execution.CheckedExecution.evaluate,
+    `Grass.ISA.X86.Execution.CheckedExecution.CheckedStep,
+
     `Grass.ISA.X86.Execution.ReturnSlotFactory.readPolicy,
     `Grass.ISA.X86.Execution.ReturnSlotFactory.accessReached,
     `Grass.ISA.X86.Execution.ReturnSlotFactory.read,
