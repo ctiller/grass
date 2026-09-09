@@ -58,7 +58,9 @@ reported full build and review passed, with fresh trust/source checks pending.
 
 ## API construction framework
 
-Extract a protocol-level checked handoff producer beneath API-specific modules.
+For the first Windows implementation, extract a protocol-level checked handoff
+producer beneath API-specific modules. The following carrier/control checks are
+Windows adapter requirements, not requirements of every target's descriptor.
 Its inputs are the exact reached `ExecutionState.State ApiRequest`, concrete
 `ApiRequest`, ordered `List LoanRequest`, and agent. Its result is indexed by all
 four inputs and retains the actual projection and `CallProtocol.handoff?`
@@ -83,8 +85,8 @@ The proposed API declaration interface supplies:
 |---|---|
 | Request decoder from the reached machine | Actual ABI arguments equal the semantic request |
 | Checked loan-plan producer | API-specific sizes, separation, protection and loan order |
-| Logical import identity | Fixed dispatch selection and request-kind agreement |
-| Returning or nonreturning classification | Returning declarations use the common ReturnHome producer; nonreturning declarations acquire no fabricated return frame |
+| Typed target binding | Actual selected import, syscall or component binding and nominal operation agreement |
+| Entry/continuation realization and completion classification | Target-specific checked continuation; Win64 returning calls use ReturnHome, while nonreturning declarations acquire no fabricated return frame |
 | Runtime payload constructor | Payload-specific data is derived from the same entry receipt and plan |
 | Provider semantic adapter | Service, result, failure and temporal obligations specific to this API |
 
@@ -209,6 +211,8 @@ construction. These are separate dimensions: an ISA alone does not select a
 platform contract, and WASI is not the semantics of all Wasm instructions.
 The existing four specialists are asked for bounded design input, not new work
 streams. Their reviews must precede ratifying a supposedly cross-target kernel.
+Craig further clarified through Linux that direct syscalls are an explicit
+supported declaration use case, not only a future compatibility concern.
 
 Separate a portable demanded operation from each target's concrete endpoint
 declaration and checked realization. A console operation may have several target
@@ -270,6 +274,24 @@ two differing instruction examples from each specialist and compare remaining
 authored obligations with the LEA/branch/arithmetic worksheet. The shared result
 should be laws and checked composition over real receipts, not a universal
 record that hides target-specific validation, control or refusal behavior.
+
+WASI's initial review proposes a design trial pinned to WASI 0.1/Preview 1,
+wasm32 core command, one selected unshared memory and no memory growth during a
+synchronous import: fd_write plus proc_exit. This is a review fixture proposal,
+not a port/profile release. The real instantiated function, module/field, core
+signature and memory identity must be retained. Derive iovec and buffer spans
+with bounds, initialization, footprint and descriptor-lifetime evidence; stdout
+authority is explicit. Keep errno, traps, partial output and zero progress
+distinct. A void result signature does not prove proc_exit never returns, and
+entry or a trap does not prove host-observed termination. See the versioned
+[WASI 0.1 interface](https://github.com/WebAssembly/WASI/blob/wasi-0.1/preview1/docs.md).
+
+A separately version-pinned component challenge must account for typed resource
+ownership/borrowing and actual canonical lift/lower adaptation. It cannot merely
+rename Preview 1 imports or inherit a synchronous discipline automatically.
+Both platform reviews agree that occurrence/custody laws are reusable only when
+the selected protocol discipline and concrete transition evidence satisfy their
+premises; physical return, host identity and terminal fidelity remain separate.
 
 ## Instruction construction framework
 
