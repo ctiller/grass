@@ -12,4 +12,11 @@ example :
   rw [← le32_writeLittleEndian]
   decide
 
+/- Reversing the canonical eight-byte sequence changes a non-palindromic
+value, guarding the byte order used for saved 64-bit register values. -/
+example :
+    Vec.fromList (le64 (0x0123456789abcdef : BitVec 64)) ≠
+      Vec.fromList [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef] := by
+  decide
+
 end Grass.Tests.ISA.X86.EndianBridge
