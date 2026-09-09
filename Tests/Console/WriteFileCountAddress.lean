@@ -41,11 +41,19 @@ example {image : Loader.ImageInput} {inputs : Loader.EntryInputs}
     (loadSelected : Cpu.policy? loaded loadBefore = some loadPolicy)
     (load : SourceResolve.LoadSelection source)
     (sameSlot : lea.resolved.slot = load.result.slot)
+    {fetched : FetchFactory.Success loadPolicy loadBefore}
+    {instruction : MemoryMoveNormal.Instruction}
+    {encoded : MemoryMoveNormal.Instruction.Encoding instruction} {afterData : MachineState}
+    {receipt : MemoryMoveNormal.LoadNormal instruction encoded loadBefore fetched.after afterData}
+    {fetchExact : receipt.fetch = fetched.dispatched.fetch}
+    (ran : MemoryMoveFactory.memoryMove loadPolicy loadBefore =
+      .ok ⟨fetched, .load encoded receipt fetchExact⟩)
     (spatial : Resolved before.machine.memory lea.argument)
     (rsp : before.gpr .rsp = addressOf spatial.base lea.resolved.address.rootOffset) :
     lea.success.result.gpr lea.resolved.destination = addressOf spatial.base load.result.address.range.start ∧
-    loadPolicy.stack = lea.argument.provenance := by
-  refine ⟨?_, lea.load_stack_same selected loadSelected⟩
+    loadPolicy.stack = lea.argument.provenance ∧
+    receipt.access.descriptor.provenance = lea.argument.provenance := by
+  refine ⟨?_, lea.load_stack_same selected loadSelected, lea.load_provenance selected loadSelected ran⟩
   rw [← lea.load_range_same load sameSlot]
   exact lea.argument_address spatial.base rsp
 
