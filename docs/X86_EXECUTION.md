@@ -204,6 +204,21 @@ Windows supplies the provider and register correspondence.
 Remaining work composes final emitted source, fixed factory results, CALL target
 reads and return-address writes, and actual prefix receipts for unwind reversal.
 Rejected, denied and permitted fault outcomes remain separate.
+
+`BodyComputationFactory.arithmetic`, `branch` and `lea` construct the bounded
+body instructions from actual fetches and fixed access-free operation steps.
+Arithmetic checks the supplied six status bits against the production partial
+flags relation, then computes the full RFLAGS image while clearing RF. An
+incompatible status choice is a checker rejection, not a physical fault.
+The branch helper checks the signed target bound only when the branch is taken.
+
+The `arithmeticFromFetched`, `branchFromFetched` and `leaFromFetched` helpers
+reuse an existing `FetchFactory.Success`. The MOV, SUB RSP, PUSH and CALL
+factories also expose `moveFromFetched`, `subRspFromFetched`, `pushFromFetched`
+and `callFromFetched`; their existing entry points still perform their own fetch.
+These helpers support one shared checked dispatcher without a second fetch
+event. They remain constructive normal-case helpers, not exhaustive CPU
+execution semantics.
 No total x86 execution or partial-unwind proof is claimed by these files.
 The [exact Hello coverage plan](X86_HELLO_COVERAGE.md) assigns the other emitted
 forms without replacing the production source with a second instruction list.

@@ -33,10 +33,8 @@ private def reachedAfterAccess (before : State) {descriptor : AccessDescriptor} 
   | .violations after | .preparationUnavailable after _ | .answerUnavailable after =>
       { before with machine := after }
 
-def push (policy : CpuAccessPolicy) (before : State) : Except Failure (Success before) :=
-  match FetchFactory.fetch policy before with
-  | .error reason => .error (.fetch reason)
-  | .ok fetched =>
+def pushFromFetched {policy : CpuAccessPolicy} (before : State)
+    (fetched : FetchFactory.Success policy before) : Except Failure (Success before) :=
       let site := fetched.dispatched.fetch
       match selected : fetched.dispatched.selection.instruction with
       | .stack (.push register) =>
@@ -106,5 +104,10 @@ def push (policy : CpuAccessPolicy) (before : State) : Except Failure (Success b
           else .error (.stackUnderflow { before with machine := fetched.after })
       | instruction =>
           .error (.unsupported { before with machine := fetched.after } instruction)
+
+def push (policy : CpuAccessPolicy) (before : State) : Except Failure (Success before) :=
+  match FetchFactory.fetch policy before with
+  | .error reason => .error (.fetch reason)
+  | .ok fetched => pushFromFetched before fetched
 
 end Grass.ISA.X86.Execution.PushFactory
