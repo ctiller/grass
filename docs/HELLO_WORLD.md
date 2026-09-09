@@ -126,6 +126,11 @@ prologue. No instruction is silently omitted to obtain an accepted layout.
 
 ## Specification
 
+The reviewed [facade and terminal-observation boundary](HELLO_FACADE_BOUNDARY.md)
+and decision 138 distinguish a selected console result from committed
+whole-program terminal observation. They record the unchanged-source migration
+and its proof gates under the semantic and platform owners below.
+
 The high-level Lean specification requests one fixed byte string on the standard
 output stream. It accepts every outcome allowed by the portable
 `Console.writeStdout` contract.
