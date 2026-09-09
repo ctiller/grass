@@ -93,6 +93,49 @@ zero mismatches. Checks covered Bash syntax, missing discovery tool, excess
 arguments, rejected batch-expansion characters, Windows-form `VSWHERE`, an
 unsupported host, and propagation of a simulated compiler failure (exit 42).
 
+## Register semantics extension, 2026-09-09
+
+The public operand-local `RegisterSemantics` now supplies predictions for MOV,
+ADD, SUB, CMP, TEST and XOR at 32/64 bits, plus signed SUB/CMP immediates.
+The expanded campaign in `target/x86-native/semantics-review-campaign-v3/`
+completed 994 cases with zero mismatches and 12 independent harness controls.
+It retains the earlier 450 MOV and 420 immediate cases, adds 120 arithmetic
+value-boundary cases and four Hello operand selections. The 953 full-status
+masks are `0x8D5`; the 41 TEST/XOR masks are `0x8C5`, excluding undefined AF.
+The driver independently requires the expected mask by operation label and
+rejects weaker masks, unchecked results, and reserved mask bits.
+
+Coverage identity:
+`9bdf88e1e44543f42dd87e923e8d9ca0affd0a091f67c6248ff282273f50b643`.
+It still excludes bytes and predictions. Host: Windows 11 build 26200,
+GenuineIntel CPUID leaf 1 EAX `0xB06A2`, hypervisor bit set, microcode unknown.
+This is one hosted machine observation, not a physical Intel/AMD matrix.
+The existing scratch campaign also passed 21 cases and seven controls in
+`target/x86-native/stack-semantics-regression/`, checking compatibility with the
+driver's added optional mask parameter.
+
+The semantic selector retains production decoder errors and exact suffixes,
+and attaches effects only after equality with a production encoder. Its
+success soundness theorem does not establish full ISA decoding or a complete
+machine step. Kernel-checked canonical fixtures cover all 6 families × 2 widths
+× 16 destination × 16 source registers, plus unsupported/truncated/noncanonical
+cases. Register transfer laws remain separate from fetch, RIP, privilege,
+interruptions, memory, faults and call-provider realizations. Formal citation
+attachment for the new definitions remains visible ledger debt.
+
+Independent semantic review approved the actual implementation, fixtures,
+corpus, mask checks, ledger classification and documentation with no remaining
+findings. It re-elaborated both new library modules, both focused fixtures and
+`LedgerAudit`, built those five modules, and reproduced 994/0 with 12 controls
+in `target/x86-native/semantics-independent-review/`. The retained source hashes
+match the reviewed semantics, corpus and runner. The author also reran 994/0 in
+`target/x86-native/semantics-parent-confirmation/`. Full library/test builds and
+the trust audit passed (75 named declarations, eight executable modules).
+Source-input validation re-elaborated 16 embedding modules; spike-source and
+documentation-link checks also passed.
+The six exhaustive decoder fixture theorems and decoder soundness theorem use
+only the accepted `propext` and `Quot.sound` axioms.
+
 ## Separate legacy BSF finding
 
 `Tests/ISA/X86/MachineProbes.lean`, `bsfZeroSource`, requires RAX preservation
