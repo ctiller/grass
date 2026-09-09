@@ -259,7 +259,7 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Twelve fixed CPU/ABI obligations, including executable/readable region
 -- selection and explicit Entry structure enrollment.
 -- Six fixed request/stack contracts are newly enrolled; no existing debt moves.
-def owedBaseline : Nat := 299
+def owedBaseline : Nat := 300
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -802,6 +802,7 @@ def owed : List Name :=
     `Grass.Platform.Win32.ApiRequest,
     `Grass.Platform.Win32.WriteFile.Abi.InitializedReturnQword,
     `Grass.Platform.Win32.WriteFile.Abi.StackPlan,
+    `Grass.Platform.Win32.GetStdHandle.StackPlan,
     `Grass.Platform.Win32.WriteFile.Abi.StackPlan.loanPlan,
     `Grass.Platform.Win32.WriteFile.Abi.StackPlan.requests,
     `Grass.Platform.Win32.WriteFile.Abi.stackRequests,
@@ -1130,6 +1131,7 @@ def modeledDeclarations : MetaM (Array Name) := do
     -- rather than letting the generic structure filter hide the obligation.
     -- This exception adds coverage; it exempts no future declaration.
     if n == ``Grass.Platform.Win32.WriteFile.Abi.StackPlan ||
+        n == ``Grass.Platform.Win32.GetStdHandle.StackPlan ||
         n == ``Grass.Platform.Win32.WriteFile.Abi.InitializedReturnQword ||
         n == ``Grass.Platform.Win32.ApiRequest ||
         n == ``Grass.Platform.Win32.WriteFile.Abi.Entry ||
