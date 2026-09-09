@@ -257,7 +257,19 @@ claim. The aggregate root is always rechecked. Timestamps and search durations
 do not enter theorem identity. Measure proof-author effort and rebuild cost,
 not only the number of decoded instructions.
 
-## 7. Ownership and implementation boundaries
+## 7. Implementation checkpoint
+
+The [development tools](../Tools/disasm/README.md) now provide bounded AMD64
+PE ingestion, exact linear decode evidence, and a conditional store-footprint
+assessment connected to the shared memory checker. The initial corpus includes
+a structural Hello assembly projection and actual compiled safe/OOB C pairs.
+Controlled native canary observations corroborate the C pair independently.
+These are implementation steps toward this design, not imported safety or
+concrete-execution violation certificates. Fetch, reachability, coherent caller
+history, attempted-transition semantics, ELF/ARM, and broader C coverage remain
+open.
+
+## 8. Ownership and implementation boundaries
 
 | Owner | Requested responsibility |
 |---|---|

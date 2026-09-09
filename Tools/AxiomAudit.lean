@@ -1,4 +1,10 @@
 import Lean
+import Grass.Disasm.Linear
+import Grass.Disasm.StoreAttempt
+import Grass.Disasm.Spatial
+import Grass.Disasm.Entry
+import Grass.Disasm.CallerObject
+import Grass.Artifact.PE.Imported
 import Grass.Semantics.OutputCut
 import Grass.Specification.TextLine
 import Grass.Console.Behavior

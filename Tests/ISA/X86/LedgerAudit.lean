@@ -22,6 +22,10 @@ import Grass.Platform.Win32.WriteFileReturn
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
 import Grass.Artifact.PE.ExceptionBinding
+import Grass.Artifact.PE.Imported
+import Grass.Disasm.StoreAttempt
+import Grass.Disasm.Entry
+import Grass.Disasm.CallerObject
 
 /-!
 # Ledger coverage gate
@@ -127,7 +131,9 @@ def auditedModules : List Name :=
    `Grass.Artifact.PE.PrefixReader, `Grass.Artifact.PE.OptionalReader,
    `Grass.Artifact.PE.SectionReader, `Grass.Artifact.PE.ImageWriter,
    `Grass.Artifact.PE.ImageReader, `Grass.Artifact.PE.ImageRoundTrip,
-   `Grass.Artifact.PE.LayoutInvariance, `Grass.Artifact.PE.LayoutBinding]
+   `Grass.Artifact.PE.LayoutInvariance, `Grass.Artifact.PE.LayoutBinding,
+   `Grass.Artifact.PE.Imported, `Grass.Disasm.StoreAttempt,
+   `Grass.Disasm.Entry, `Grass.Disasm.CallerObject]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -158,7 +164,14 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Exception tables add 18 schema, flag, serialization and validation obligations.
 -- Seven execution-foundation facts add length/flag/encoding obligations.
 -- No prior debt moves to notBehaviour or becomes cited through these tests.
-def owedBaseline : Nat := 232
+-- Imported PE field traversal adds readImportedPrefix/readImportedImage and
+-- factors readSignatureAndCoff. Microsoft source is recorded in Imported.lean;
+-- formal subject/anchor enrollment remains explicit debt, not a citation claim.
+-- Imported C7 candidate evidence/check/address/width add four modeled facts.
+-- Decoder/encoder reuse does not discharge their separate external enrollment.
+-- Entry selection adds eight mapping definitions and its contract type.
+-- The vendor URL is provenance; formal ledger anchors remain owed.
+def owedBaseline : Nat := 248
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -192,7 +205,13 @@ acquiring a citation.
 -- Three new generic definitions derive history events or name selected evidence.
 -- Ten exception helpers traverse, project or compare already selected values.
 -- Eight execution helpers represent state or select existing decoded constructors.
-def notBehaviourBaseline : Nat := 159
+-- sectionSlicesMatch and checkImportedImage add only exact-data/proof plumbing
+-- over the separately owed external parser; neither defines a platform fact.
+-- Store operand and productionEncoding are projections/delegation to the
+-- separately modeled existing memory operand and encoder, not new ISA rules.
+-- Nine caller-factory definitions construct an explicitly declared synthetic
+-- state via checked memory doors; they assert no recovered allocator behavior.
+def notBehaviourBaseline : Nat := 172
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -333,6 +352,17 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    `Grass.Disasm.CallerObject.allocSupply,
+    `Grass.Disasm.CallerObject.backingSupply,
+    `Grass.Disasm.CallerObject.contextSupply,
+    `Grass.Disasm.CallerObject.epochSupply,
+    `Grass.Disasm.CallerObject.allocation,
+    `Grass.Disasm.CallerObject.backing,
+    `Grass.Disasm.CallerObject.caller,
+    `Grass.Disasm.CallerObject.epoch,
+    `Grass.Disasm.CallerObject.check,
+    `Grass.Disasm.StoreAttempt.Evidence.operand,
+    `Grass.Disasm.StoreAttempt.Evidence.productionEncoding,
     -- Derived accumulated histories and the type of an externally supplied
     -- observation relation, not new Windows behavior facts.
     `Grass.Platform.Win32.WriteFile.InfiniteContinuation.historyAt,
@@ -340,6 +370,9 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.WriteFile.History.providerEvents,
     `Grass.Platform.Win32.WriteFile.ReturnInterpretation,
     `Grass.Platform.Win32.WriteFile.CallerInterpretation,
+    -- Exact-input/proof projections add no external field interpretation.
+    `Grass.Artifact.PE.sectionSlicesMatch,
+    `Grass.Artifact.PE.checkImportedImage,
     -- Exception traversal, masks and projections add no format policy.
     `Grass.Artifact.PE.resolveExtent?,
     `Grass.Artifact.PE.writeRuntimeFunctions,
@@ -535,6 +568,19 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    `Grass.Disasm.Entry.Entry,
+    `Grass.Disasm.Entry.virtualExtent,
+    `Grass.Disasm.Entry.fileBackedExtent,
+    `Grass.Disasm.Entry.fileBackedOffset,
+    `Grass.Disasm.Entry.mapsRva,
+    `Grass.Disasm.Entry.mappedSections,
+    `Grass.Disasm.Entry.selectMappedSection,
+    `Grass.Disasm.Entry.sectionBytes,
+    `Grass.Disasm.Entry.selectEntry,
+    `Grass.Disasm.StoreAttempt.Evidence,
+    `Grass.Disasm.StoreAttempt.Evidence.address,
+    `Grass.Disasm.StoreAttempt.Evidence.width,
+    `Grass.Disasm.StoreAttempt.check,
     -- PE/COFF fixed field widths, offsets, alignments, and characteristic bits
     -- are source-defined format commitments. Their directly derived spans and
     -- the eight-byte section-name representation therefore remain debt too.
@@ -611,6 +657,9 @@ def owed : List Name :=
     -- records are explicitly enrolled before the structure filter.
     `Grass.Artifact.PE.ParsedHeaderPrefix,
     `Grass.Artifact.PE.readHeaderPrefix,
+    `Grass.Artifact.PE.readSignatureAndCoff,
+    `Grass.Artifact.PE.readImportedPrefix,
+    `Grass.Artifact.PE.readImportedImage,
     `Grass.Artifact.PE.ParsedOptionalHeader,
     `Grass.Artifact.PE.readOptionalHeader,
     `Grass.Artifact.PE.ParsedSectionHeader,
@@ -789,7 +838,9 @@ def modeledDeclarations : MetaM (Array Name) := do
     -- or address-profile bounds in their fields. Include each type explicitly
     -- rather than letting the generic structure filter hide the obligation.
     -- This exception adds coverage; it exempts no future declaration.
-    if n == ``Grass.Platform.Win32.WriteFile.Prepared ||
+    if n == ``Grass.Disasm.Entry.Entry ||
+        n == ``Grass.Disasm.StoreAttempt.Evidence ||
+        n == ``Grass.Platform.Win32.WriteFile.Prepared ||
         n == ``Grass.Platform.Win32.WriteFile.ReturnResult ||
         n == ``Grass.Artifact.PE.SectionName ||
         n == ``Grass.Artifact.PE.ParsedHeaderPrefix ||
