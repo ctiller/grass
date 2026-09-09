@@ -224,7 +224,7 @@ Primary reference families:
 - Intel 64 and IA-32 Software Developer's Manual, especially Volumes 2 and 3:
   https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html
 - AMD64 Architecture Programmer's Manual, Volumes 1-5:
-  https://docs.amd.com/v/u/en-US/40332_4.09_APM_PUB
+  https://docs.amd.com/v/u/en-US/40332_4.10_APM_Vol1-5_PUB
 
 The profile/refinement mechanism is a versioned extension point intended for x86
 variants, ARM, RISC-V, Wasm, SPIR-V, WGSL, Verilog, and other instruction-like

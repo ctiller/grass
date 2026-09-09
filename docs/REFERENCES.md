@@ -13,8 +13,10 @@ entries with machine-validated citation records as specified by
   current collection and revision history:
   https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html
 - AMD, *AMD64 Architecture Programmer's Manual, Volumes 1-5*, publication
-  40332, revision 4.09 at corpus creation:
-  https://docs.amd.com/v/u/en-US/40332_4.09_APM_PUB
+  40332, revision 4.10, retrieved 2026-09-09:
+  https://docs.amd.com/v/u/en-US/40332_4.10_APM_Vol1-5_PUB
+  See [the source migration](AMD_SOURCE_MIGRATION.md) for exact anchors and
+  the separate historical 4.09 record.
 
 The common x86 profile requires anchored citations to both relevant instruction
 and system/memory sections. These collection links are discovery roots, not
@@ -36,8 +38,9 @@ Register semantics anchors inspected on 2026-09-09:
 
 These anchors support the bounded `RegisterSemantics` implementation. Formal
 declaration-to-ledger attachment remains explicit new debt in `LedgerAudit`.
-They do not change the pinned 40332 revision 4.09 retrieval record or discharge
-the existing dual-citation release blocker; migrating that source is separate.
+The separate [AMD source migration](AMD_SOURCE_MIGRATION.md) repairs the active
+profile's dead locator. It does not attach these additional instruction laws
+to the ledger or settle the remaining misplaced-REX claim.
 
 ### Win32 x64 and PE/COFF
 

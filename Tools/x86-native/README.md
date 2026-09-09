@@ -132,7 +132,8 @@ Microsoft documents that VEH runs before stack unwinding in
 The ISA reference is Intel's [SDM collection](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html),
 Volume 1 section 3.4.1.1 (general-purpose registers), Volume 2 MOV/SUB/CMP/INT/UD
 entries. These links explain this harness; they do not change Grass's pinned
-citation ledger or repair the existing AMD retrieval debt.
+citation ledger. The separate [AMD source migration](../../docs/AMD_SOURCE_MIGRATION.md)
+repairs the active retrieval pin and records the remaining confirmation debt.
 
 ## Adapter boundary and next work
 

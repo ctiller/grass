@@ -5,9 +5,10 @@ Operand-local x86-64 register semantics for the Hello arithmetic family.
 
 Authority: Intel SDM Vol. 1 §3.4.1.1/§3.4.3.1 and Vol. 2 ADD, SUB, CMP,
 TEST, XOR, MOV instruction entries; AMD APM Vol. 1 flags/register sections and
-Vol. 3 corresponding instruction entries. The existing profile's AMD retrieval
-and dual-citation confirmation debt remain open. This module does not discharge
-those obligations with executable tests.
+Vol. 3 corresponding instruction entries. The AMD source migration repairs the
+active retrieval pin, but this module's declaration-to-ledger attachment and
+the profile's remaining confirmation debt stay open. Executable tests do not
+discharge those obligations. See docs/AMD_SOURCE_MIGRATION.md.
 
 Only ordinary register-direct 32/64-bit forms are admitted here. These are
 operand/flag transfers, not a complete machine step: instruction fetch,
