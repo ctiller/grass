@@ -94,6 +94,44 @@ application. Add syntax only if it removes repeated authoring beyond that API.
 No author-supplied arbitrary success proposition or replaceable safety relation
 may stand in for the computed handoff or fixed platform semantics.
 
+### Attribute-shaped API declarations
+
+Craig suggests attribute annotations on API calls as a promising DSL shape.
+Use attributes on the reusable API declaration to register its import identity,
+request decoder, checked ABI/loan-plan producer, return mode and semantic adapter.
+The attribute elaborator resolves those names into an ordinary typed declaration
+consumed by the shared constructors above. Registration is not evidence that any
+particular call satisfies the ABI or that a native provider implements it.
+
+An illustrative shape, not implemented Lean syntax, is:
+
+```text
+@[grass_api
+  import := ("KERNEL32.dll", "WriteFile")
+  request := WriteFile.decodeRequest?
+  abi := WriteFile.checkedPlan?
+  returns := win64
+  semantics := WriteFile.contract]
+def writeFileApi := ...
+```
+
+Names in this sketch describe roles, not existing declarations. Prefer one
+attribute referencing a typed descriptor if a long attribute merely duplicates
+its fields. Keep provider semantics independently readable and reviewable.
+
+At a call site, an annotation may select this declaration or provide operands
+and specialization inputs. The checker still derives the request and plan from
+the actual call state, binds the actual dispatch target, and checks the concrete
+loan batch. Do not repeat the API contract at each call site, infer a contract
+from a convenient result, or let annotations discharge safety by assertion.
+If multiple declarations match an import, require explicit disambiguation rather
+than registration-order selection. Unannotated custom assembly remains usable
+through the same explicit checked constructors.
+
+Evaluate this front with GetStdHandle and WriteFile, then ExitProcess as above.
+Success means authoring API-specific facts once and removing the repeated
+handoff machinery; a shorter spelling for unchanged duplicate proofs fails.
+
 ## Instruction construction framework
 
 Use distinct execution shapes over the existing semantic receipts: access-free
@@ -134,7 +172,8 @@ definition, rather than adding a reverse dependency to AccessFree or RunFactory.
 These two already share BodyComputationFactory's private builder, so they test
 interface fit but do not by themselves close DUP-05. That migration must also
 adopt the shared builder in the existing ComputationFactory MOV consumer and
-remove its independently repeated receipt construction. This distinction keeps
+remove its independently repeated `AccessFree` receipt construction. Its typed
+`MoveNormal` construction remains instruction-specific. This distinction keeps
 a successful DSL demonstration from being mistaken for duplication removal.
 
 Arithmetic is the third-consumer challenge: retain caller-supplied flags,
