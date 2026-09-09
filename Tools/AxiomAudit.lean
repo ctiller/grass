@@ -93,6 +93,10 @@ import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.ImmediateArithmetic
 import Grass.ISA.X86.RegisterDecode
 import Grass.ISA.X86.RegisterLaws
+import Grass.ISA.X86.Execution.State
+import Grass.ISA.X86.Execution.DecodedSite
+import Grass.ISA.X86.Execution.StackInstruction
+import Grass.ISA.X86.Execution.CompletionFlags
 import Grass.ISA.X86.Citation
 import Grass.ISA.X86.Decode
 import Grass.ISA.X86.DualCitation

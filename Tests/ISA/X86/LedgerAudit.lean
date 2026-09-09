@@ -5,6 +5,10 @@ import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.ImmediateArithmetic
 import Grass.ISA.X86.RegisterDecode
 import Grass.ISA.X86.RegisterLaws
+import Grass.ISA.X86.Execution.State
+import Grass.ISA.X86.Execution.DecodedSite
+import Grass.ISA.X86.Execution.StackInstruction
+import Grass.ISA.X86.Execution.CompletionFlags
 import Grass.ISA.X86.Decode
 import Grass.ISA.X86.Profile
 import Grass.ABI.Win64.UnwindBytes
@@ -104,6 +108,8 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.ImmediateArithmetic,
    `Grass.ISA.X86.RegisterSemantics, `Grass.ISA.X86.RegisterDecode,
    `Grass.ISA.X86.RegisterLaws,
+   `Grass.ISA.X86.Execution.State, `Grass.ISA.X86.Execution.DecodedSite,
+   `Grass.ISA.X86.Execution.StackInstruction, `Grass.ISA.X86.Execution.CompletionFlags,
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
@@ -148,7 +154,9 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- No PE declaration is treated as cited merely because a Lean roundtrip holds.
 -- Matched-return adds raw BOOL width, DWORD observation and result conformance.
 -- Exception tables add 18 schema, flag, serialization and validation obligations.
-def owedBaseline : Nat := 225
+-- Seven execution-foundation facts add length/flag/encoding obligations.
+-- No prior debt moves to notBehaviour or becomes cited through these tests.
+def owedBaseline : Nat := 232
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -181,7 +189,8 @@ acquiring a citation.
 -- external relation; neither asserts Windows adequacy or physical nonresponse.
 -- Three new generic definitions derive history events or name selected evidence.
 -- Ten exception helpers traverse, project or compare already selected values.
-def notBehaviourBaseline : Nat := 151
+-- Eight execution helpers represent state or select existing decoded constructors.
+def notBehaviourBaseline : Nat := 159
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -407,6 +416,16 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.RegisterDecode.select,
     `Grass.ISA.X86.RegisterDecode.decode,
     `Grass.ISA.X86.RegisterDecode.Result.effect,
+    -- Representation updates and checked selection over the existing decoder
+    -- and production constructors. These do not execute memory or an instruction.
+    `Grass.ISA.X86.Execution.State.statusFlags,
+    `Grass.ISA.X86.Execution.State.withGpr,
+    `Grass.ISA.X86.Execution.State.withStatusFlags,
+    `Grass.ISA.X86.Execution.DecodedSite.fallthroughRip,
+    `Grass.ISA.X86.Execution.StackInstruction.selectPush,
+    `Grass.ISA.X86.Execution.StackInstruction.selectSubRsp,
+    `Grass.ISA.X86.Execution.StackInstruction.select,
+    `Grass.ISA.X86.Execution.StackInstruction.decode,
     -- Decoder-table lookup and packaging of independently checked encoding laws.
     `Grass.ISA.X86.ImmediateArithmetic.operandSpec,
     `Grass.ISA.X86.ImmediateArithmetic.template,
@@ -639,6 +658,16 @@ def owed : List Name :=
     `Grass.ISA.X86.RegisterSemantics.Instruction.encoding,
     `Grass.ISA.X86.RegisterSemantics.Instruction.registersAfter,
     `Grass.ISA.X86.RegisterDecode.reconstruct,
+    -- Bounded execution foundation: architectural length/bit positions and
+    -- completed flag transfers retain debt until declaration-level attachment.
+    -- Source inspection and representation tests do not settle that attachment.
+    `Grass.ISA.X86.Execution.DecodedSite.check,
+    `Grass.ISA.X86.Execution.StackInstruction.encoding,
+    `Grass.ISA.X86.Execution.statusMask,
+    `Grass.ISA.X86.Execution.resumeMask,
+    `Grass.ISA.X86.Execution.completedPushRflags,
+    `Grass.ISA.X86.Execution.completedSubStatus,
+    `Grass.ISA.X86.Execution.completedSubRflags,
     `Grass.ISA.X86.ImmediateArithmetic.Immediate.opcode,
     `Grass.ISA.X86.ImmediateArithmetic.Kind.extension,
     `Grass.ISA.X86.ImmediateArithmetic.encode,
