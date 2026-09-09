@@ -5,6 +5,7 @@ import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.ImmediateArithmetic
 import Grass.ISA.X86.RegisterDecode
 import Grass.ISA.X86.RegisterLaws
+import Grass.ISA.X86.EndianBridge
 import Grass.ISA.X86.Execution.State
 import Grass.ISA.X86.Execution.DecodedSite
 import Grass.ISA.X86.Execution.StackInstruction
@@ -108,6 +109,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.ImmediateArithmetic,
    `Grass.ISA.X86.RegisterSemantics, `Grass.ISA.X86.RegisterDecode,
    `Grass.ISA.X86.RegisterLaws,
+   `Grass.ISA.X86.EndianBridge,
    `Grass.ISA.X86.Execution.State, `Grass.ISA.X86.Execution.DecodedSite,
    `Grass.ISA.X86.Execution.StackInstruction, `Grass.ISA.X86.Execution.CompletionFlags,
    `Grass.ISA.X86.Decode,
