@@ -30,10 +30,10 @@ error: Type mismatch
 has type
   CapturedSpecification ConsoleResourceModel.singleLine Bool
 of sort `Type` but is expected to have type
-  SpecProcess
-of sort `Type 1`
+  SpecProcess ConsoleResourceModel.singleLine
+of sort `Type 2`
 -/
 #guard_msgs in
-#check (base : Grass.SpecProcess.{0})
+#check (base : Grass.SpecProcess ConsoleResourceModel.singleLine)
 
 end Grass.Tests.Console.Captured
