@@ -21,6 +21,7 @@ import Grass.Op.ReadCompletion
 import Grass.Op.PreparedPlacement
 import Grass.ISA.X86.Execution.AccessRun
 import Grass.ISA.X86.Execution.Fetch
+import Grass.ISA.X86.Execution.FetchedEncoding
 import Grass.ISA.X86.Execution.SubRspNormal
 import Grass.Semantics.OutputCut
 import Grass.Specification.TextLine
@@ -83,6 +84,7 @@ import Grass.Assembly.SourceImportBindings
 import Grass.Assembly.SourceImportRequests
 import Grass.Assembly.SourceLinkedImage
 import Grass.Assembly.FrameAllocationExecution
+import Grass.Assembly.SourceFetched
 import Grass.Assembly.SourceUnwind
 import Grass.Assembly.SourceUnwindPrefix
 import Grass.Assembly.SourceStore

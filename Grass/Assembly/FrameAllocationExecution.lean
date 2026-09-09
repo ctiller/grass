@@ -1,5 +1,6 @@
 import Grass.Assembly.SourcePrologue
 import Grass.ISA.X86.Execution.SubRspNormal
+import Grass.ISA.X86.Execution.FetchedEncoding
 
 /-! Connect an actual fetched normal SUB RSP receipt to the allocation computed
 by the frame layout. No literal frame amount or instruction offset is supplied.
@@ -14,13 +15,19 @@ theorem allocation_encoding_of_observation (allocation : Resolved) {before : Sta
     {afterFetch : MachineState} (fetch : FetchedSite before afterFetch)
     (observed : fetch.run.complete.committed.observed = some allocation.encoding.toBytes) :
     fetch.site.encoding = allocation.encoding := by
-  have bytes := Option.some.inj (fetch.observed_exact.symm.trans observed)
-  have decoded := (congrArg decodeInsn fetch.site.bytesExact).symm.trans fetch.site.decoded
-  rw [fetch.noTrailing, List.append_nil] at decoded
-  rw [bytes] at decoded
-  have expected := encoding_decodes allocation []
-  rw [List.append_nil] at expected
-  exact congrArg Prod.fst (Except.ok.inj (decoded.symm.trans expected))
+  apply fetch.encoding_of_observation allocation.encoding _ observed
+  simpa only [List.append_nil] using encoding_decodes allocation []
+
+/-- All generated prologue instructions use the same fetched-byte selection
+law, including saved-register pushes. Membership comes from the generator. -/
+theorem prologue_encoding_of_observation (prologue : SourcePrologue.Result)
+    {before : State} {afterFetch : MachineState}
+    (fetch : FetchedSite before afterFetch) (encoding : InsnEncoding)
+    (member : encoding ∈ prologue.generated)
+    (observed : fetch.run.complete.committed.observed = some encoding.toBytes) :
+    fetch.site.encoding = encoding := by
+  apply fetch.encoding_of_observation encoding _ observed
+  simpa only [List.append_nil] using prologue.every_instruction_decodes encoding member []
 
 /-- `rsp_allocation_exact` uses the resolved layout's signed-immediate proof. -/
 theorem rsp_allocation_exact (allocation : Resolved) {before : State}
