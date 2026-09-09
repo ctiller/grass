@@ -14,6 +14,9 @@ both the annotated document and its comment-free authored source.
 
 ## Making a change
 
+The [endpoint index](docs/ENDPOINT_INDEX.md) helps locate code and its design
+owner; the [validation command map](docs/CHECKS.md) explains check coverage.
+
 1. Keep the precious portable specification minimal. Generated expansions,
    routine adapters, manifests, and bookkeeping do not belong in it.
 2. Keep first-class assembly visible and authorable. Helpers may remove proof

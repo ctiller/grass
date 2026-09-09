@@ -57,6 +57,7 @@ import Grass.ISA.X86.Execution.RawOutcome
 import Grass.ISA.X86.Execution.ReadValue64
 import Grass.ISA.X86.Execution.RunFactory
 import Grass.ISA.X86.Execution.FetchFactory
+import Grass.ISA.X86.Execution.BodyComputationFactory
 import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
 import Grass.ISA.X86.Execution.CallNormal
@@ -97,6 +98,8 @@ import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.RawStepSignature
+import Grass.Platform.Win32.ExitProcessRuntime
+import Grass.Platform.Win32.GetStdHandleRuntime
 import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
@@ -105,6 +108,8 @@ import Grass.Platform.Win32.WriteFileHandoff
 import Grass.Platform.Win32.WriteFilePreservation
 import Grass.Platform.Win32.WriteFileCall
 import Grass.Platform.Win32.WriteFileCallPreservation
+import Grass.Platform.Win32.WriteFileRuntime
+import Grass.Platform.Win32.WriteFileService
 import Grass.Refinement.Console.WriteFilePolicy
 import Grass.Artifact.PE.ExceptionBinding
 import Grass.ISA.X86.EndianBridge

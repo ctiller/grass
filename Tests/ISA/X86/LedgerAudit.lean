@@ -33,6 +33,7 @@ import Grass.ISA.X86.Execution.RawOutcome
 import Grass.ISA.X86.Execution.ReadValue64
 import Grass.ISA.X86.Execution.RunFactory
 import Grass.ISA.X86.Execution.FetchFactory
+import Grass.ISA.X86.Execution.BodyComputationFactory
 import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
 import Grass.ISA.X86.Execution.CallNormal
@@ -62,6 +63,8 @@ import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.RawStepSignature
+import Grass.Platform.Win32.ExitProcessRuntime
+import Grass.Platform.Win32.GetStdHandleRuntime
 import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
@@ -70,6 +73,8 @@ import Grass.Platform.Win32.WriteFileHandoff
 import Grass.Platform.Win32.WriteFilePreservation
 import Grass.Platform.Win32.WriteFileCall
 import Grass.Platform.Win32.WriteFileCallPreservation
+import Grass.Platform.Win32.WriteFileRuntime
+import Grass.Platform.Win32.WriteFileService
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.Encoding
 import Grass.Artifact.PE.LayoutBinding
@@ -186,7 +191,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.MoveSelection, `Grass.ISA.X86.Execution.ObservedFetch,
    `Grass.ISA.X86.Execution.PushSavedRead, `Grass.ISA.X86.Execution.RawOutcome,
    `Grass.ISA.X86.Execution.ReadValue64, `Grass.ISA.X86.Execution.RunFactory,
-   `Grass.ISA.X86.Execution.FetchFactory, `Grass.ISA.X86.Execution.ComputationFactory,
+   `Grass.ISA.X86.Execution.FetchFactory, `Grass.ISA.X86.Execution.BodyComputationFactory, `Grass.ISA.X86.Execution.ComputationFactory,
    `Grass.ISA.X86.Execution.PushFactory,
    `Grass.ISA.X86.Execution.CallNormal,
    `Grass.ISA.X86.Execution.CallFactory, `Grass.ISA.X86.Execution.ReturnSlotRead,
@@ -210,6 +215,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawState,
    `Grass.Platform.Win32.CallRuntime,
    `Grass.Platform.Win32.RawStepSignature,
+   `Grass.Platform.Win32.ExitProcessRuntime,
+   `Grass.Platform.Win32.GetStdHandleRuntime,
    `Grass.Platform.Win32.WriteFileArguments,
    `Grass.Platform.Win32.ApiRequest,
    `Grass.Platform.Win32.WriteFileCallPlan,
@@ -217,6 +224,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFilePreservation,
    `Grass.Platform.Win32.WriteFileCall,
    `Grass.Platform.Win32.WriteFileCallPreservation,
+   `Grass.Platform.Win32.WriteFileRuntime,
+   `Grass.Platform.Win32.WriteFileService,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
@@ -281,7 +290,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Arithmetic, branch, LEA and fixed access dispatch add twenty reviewed obligations.
 -- Twelve fixed CPU/ABI obligations, including executable/readable region selection.
 -- Six fixed request/stack contracts are newly enrolled; no existing debt moves.
-def owedBaseline : Nat := 324
+-- ExitProcess's argument and four GetStdHandle ABI declarations retain debt.
+def owedBaseline : Nat := 329
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -337,9 +347,8 @@ acquiring a citation.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
 -- Five raw/checked view operations retain data and assert no target semantics.
--- One adapter derives the Windows binding from retained actual CALL receipts.
--- Sixteen runtime operations and raw signature predicates assert no execution.
-def notBehaviourBaseline : Nat := 295
+-- Runtime, body and endpoint adapters retain checked receipts.
+def notBehaviourBaseline : Nat := 323
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -483,6 +492,17 @@ def notBehaviour : List Name :=
     -- Packages the existing checked PE writer, reader and roundtrip theorem.
     -- It introduces no alternate serialization, loader rule or format fact.
     `Grass.Artifact.PE.encoding,
+    -- Bind the fixed policy to an existing successful CALL factory receipt.
+    `Grass.Platform.Win32.WriteFile.CallPolicy.ofFactory,
+    `Grass.Platform.Win32.ExitProcess.entryHandoff?,
+    `Grass.Platform.Win32.ExitProcess.EntryHandoff.after,
+    `Grass.Platform.Win32.ExitProcess.EntryHandoff.initRaw,
+    -- Actual receipt projections and computed runtime frontier updates.
+    `Grass.Platform.Win32.WriteFile.CallHandoff.runtime,
+    `Grass.Platform.Win32.WriteFile.CallHandoff.rawAfter,
+    `Grass.Platform.Win32.WriteFile.ServiceReceipt.nextRuntime,
+    `Grass.Platform.Win32.WriteFile.ServiceReceipt.after,
+    `Grass.Platform.Win32.WriteFile.ServiceEdge,
     `Grass.Platform.Win32.NonvolatileSnapshot,
     `Grass.Platform.Win32.captureNonvolatile,
     `Grass.Platform.Win32.ReturnFrame.restoredRsp,
@@ -504,8 +524,14 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.ExecutionState.RawState.checked?,
     `Grass.Platform.Win32.ExecutionState.RawState.ControlConsistent,
     `Grass.Platform.Win32.ExecutionState.RawState.withMachine,
-    -- Proof-bearing projection of the selected fixed CALL factory receipt.
-    `Grass.Platform.Win32.WriteFile.CallPolicy.ofFactory,
+    -- Checked GetStdHandle bookkeeping and projections add no provider or CPU
+    -- claim beyond the actual CALL, ABI and protocol receipts they retain.
+    `Grass.Platform.Win32.GetStdHandle.EntryHandoff.after,
+    `Grass.Platform.Win32.GetStdHandle.EntryHandoff.record,
+    `Grass.Platform.Win32.GetStdHandle.entryHandoff?,
+    `Grass.Platform.Win32.GetStdHandle.CallHandoff.frame,
+    `Grass.Platform.Win32.GetStdHandle.CallHandoff.afterRaw,
+    `Grass.Platform.Win32.GetStdHandle.RawCallHandoff.after,
     -- Exact table views, fixed-plan predicates and checked bookkeeping adapters;
     -- they assert no native provider or CPU adequacy beyond their premises.
     `Grass.Platform.Win32.WriteFile.EntryHandoff.after,
@@ -716,6 +742,21 @@ def notBehaviour : List Name :=
     -- Factory packaging and explicit applicability routing over separately
     -- modeled fetch, dispatch, and MOV receipts.
     `Grass.ISA.X86.Execution.ComputationFactory.MoveSuccess.result,
+    -- Checked constructors reuse the separately modeled instruction receipts; no new ISA rule.
+    `Grass.ISA.X86.Execution.BodyComputationFactory.execution,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.ArithmeticSuccess.result,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.arithmeticFromFetched,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.arithmetic,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.BranchSuccess.result,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.branchFromFetched,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.branch,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.LeaSuccess.result,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.leaFromFetched,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.lea,
+    `Grass.ISA.X86.Execution.ComputationFactory.moveFromFetched,
+    `Grass.ISA.X86.Execution.ComputationFactory.subRspFromFetched,
+    `Grass.ISA.X86.Execution.PushFactory.pushFromFetched,
+    `Grass.ISA.X86.Execution.CallFactory.callFromFetched,
     `Grass.ISA.X86.Execution.ComputationFactory.move,
     -- Constructive SUB RSP routing and projection of its already-modeled receipt.
     `Grass.ISA.X86.Execution.ComputationFactory.SubRspSuccess.result,
@@ -841,13 +882,18 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    `Grass.Platform.Win32.ExitProcess.status,
     -- Fixed request widths and callee stack custody retain external ABI debt.
     `Grass.Platform.Win32.ApiRequest,
     `Grass.Platform.Win32.WriteFile.Abi.InitializedReturnQword,
     `Grass.Platform.Win32.WriteFile.Abi.StackPlan,
+    `Grass.Platform.Win32.GetStdHandle.StackPlan,
     `Grass.Platform.Win32.WriteFile.Abi.StackPlan.loanPlan,
     `Grass.Platform.Win32.WriteFile.Abi.StackPlan.requests,
     `Grass.Platform.Win32.WriteFile.Abi.stackRequests,
+    `Grass.Platform.Win32.GetStdHandle.selector,
+    `Grass.Platform.Win32.GetStdHandle.stackRequests,
+    `Grass.Platform.Win32.GetStdHandle.StackPlan.requests,
     -- Fixed operational choices and ABI widths require declaration-level
     -- authority; vendor prose links alone do not close the citation ledger.
     `Grass.Platform.Win32.Cpu.accessFaults,
@@ -1203,6 +1249,7 @@ def modeledDeclarations : MetaM (Array Name) := do
         n == ``Grass.Disasm.Entry.Entry ||
         n == ``Grass.ISA.X86.Execution.StoreCandidate.Evidence ||
         n == ``Grass.Platform.Win32.WriteFile.Abi.StackPlan ||
+        n == ``Grass.Platform.Win32.GetStdHandle.StackPlan ||
         n == ``Grass.Platform.Win32.WriteFile.Abi.InitializedReturnQword ||
         n == ``Grass.Platform.Win32.ApiRequest ||
         n == ``Grass.Platform.Win32.WriteFile.Abi.Entry ||

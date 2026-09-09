@@ -7,6 +7,9 @@ in the build. Complete them in spike order under
 [CONTRIBUTING.md](../CONTRIBUTING.md), preserving their authored surface except
 for demonstrated defects or an unreasonable realization.
 
+To follow an authored output into implementation evidence and remaining proof
+connections, use the [endpoint index](../docs/ENDPOINT_INDEX.md).
+
 The normative two-view and expansion rules are in
 [`docs/SPIKE_AUTHORING.md`](../docs/SPIKE_AUTHORING.md). In particular, a review
 which reads this directory without its annotated document, or the document
