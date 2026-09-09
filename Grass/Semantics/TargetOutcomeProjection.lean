@@ -26,11 +26,20 @@ def successOrFailure [DecidableEq Outcome] (success : Outcome)
     TargetOutcomeProjection Outcome Status where
   status outcome := if outcome = success then successCode else failureCode
 
-/-- The named target convention whose selected success status is zero and
-whose status for every other portable outcome is one. -/
+/-- The generic zero-on-success, one-on-failure convention for any status type
+that provides those two numeric literals. -/
+def successZeroFailureOneAs [DecidableEq Outcome] [OfNat Status 0]
+    [OfNat Status 1] (success : Outcome) :
+    TargetOutcomeProjection Outcome Status :=
+  successOrFailure success 0 1
+
+/-- The UInt32 form of the zero-on-success, one-on-failure convention.
+
+This wrapper preserves the result inferred for existing unannotated calls;
+targets with another status type use `successZeroFailureOneAs`. -/
 def successZeroFailureOne [DecidableEq Outcome] (success : Outcome) :
     TargetOutcomeProjection Outcome UInt32 :=
-  successOrFailure success 0 1
+  successZeroFailureOneAs success
 
 @[simp] theorem successOrFailure_status_success [DecidableEq Outcome]
     (success : Outcome) (successCode failureCode : Status) :
@@ -48,12 +57,24 @@ def successZeroFailureOne [DecidableEq Outcome] (success : Outcome) :
 @[simp] theorem successZeroFailureOne_status_success [DecidableEq Outcome]
     (success : Outcome) :
     (successZeroFailureOne success).status success = 0 := by
-  simp [successZeroFailureOne]
+  simp [successZeroFailureOne, successZeroFailureOneAs]
 
 @[simp] theorem successZeroFailureOne_status_failure [DecidableEq Outcome]
     (success outcome : Outcome) (notSuccess : outcome ≠ success) :
     (successZeroFailureOne success).status outcome = 1 := by
-  simp [successZeroFailureOne, notSuccess]
+  simp [successZeroFailureOne, successZeroFailureOneAs, notSuccess]
+
+@[simp] theorem successZeroFailureOneAs_status_success [DecidableEq Outcome]
+    [OfNat Status 0] [OfNat Status 1]
+    (success : Outcome) :
+    (successZeroFailureOneAs (Status := Status) success).status success = 0 := by
+  simp [successZeroFailureOneAs]
+
+@[simp] theorem successZeroFailureOneAs_status_failure [DecidableEq Outcome]
+    [OfNat Status 0] [OfNat Status 1]
+    (success outcome : Outcome) (notSuccess : outcome ≠ success) :
+    (successZeroFailureOneAs (Status := Status) success).status outcome = 1 := by
+  simp [successZeroFailureOneAs, notSuccess]
 
 end TargetOutcomeProjection
 
