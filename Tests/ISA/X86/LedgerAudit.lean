@@ -11,6 +11,10 @@ import Grass.ISA.X86.Execution.DecodedSite
 import Grass.ISA.X86.Execution.AccessRun
 import Grass.ISA.X86.Execution.Fetch
 import Grass.ISA.X86.Execution.FetchedEncoding
+import Grass.ISA.X86.Execution.MemoryAccess
+import Grass.ISA.X86.Execution.MemoryWrite
+import Grass.ISA.X86.Execution.ReadValue32
+import Grass.ISA.X86.Execution.MemoryMoveNormal
 import Grass.ISA.X86.Execution.SubRspNormal
 import Grass.ISA.X86.Execution.PushNormal
 import Grass.ISA.X86.Execution.AccessFree
@@ -120,6 +124,9 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.State, `Grass.ISA.X86.Execution.DecodedSite,
    `Grass.ISA.X86.Execution.AccessRun, `Grass.ISA.X86.Execution.Fetch,
    `Grass.ISA.X86.Execution.FetchedEncoding,
+   `Grass.ISA.X86.Execution.MemoryAccess, `Grass.ISA.X86.Execution.MemoryWrite,
+   `Grass.ISA.X86.Execution.ReadValue32,
+   `Grass.ISA.X86.Execution.MemoryMoveNormal,
    `Grass.ISA.X86.Execution.SubRspNormal,
    `Grass.ISA.X86.Execution.PushNormal,
    `Grass.ISA.X86.Execution.AccessFree, `Grass.ISA.X86.Execution.MoveNormal,
@@ -173,7 +180,9 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- The fetched normal SUB RSP constructor adds one instruction-transfer obligation.
 -- The fetched normal register PUSH adds one instruction-transfer obligation.
 -- Normal MOV adds its encoding, effect, flags and architectural result obligations.
-def owedBaseline : Nat := 238
+-- Memory MOV completion adds eight architectural value, operand, width, payload,
+-- encoding, address, and result obligations. No existing debt is reclassified.
+def owedBaseline : Nat := 246
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -208,7 +217,9 @@ acquiring a citation.
 -- Ten exception helpers traverse, project or compare already selected values.
 -- Eight execution helpers represent state or select existing decoded constructors.
 -- One helper replaces the memory-machine field after a checked fetch.
-def notBehaviourBaseline : Nat := 161
+-- Four memory-completion helpers project or package already selected evidence.
+-- This addition moves no existing declaration from owed or cited coverage.
+def notBehaviourBaseline : Nat := 165
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -446,6 +457,12 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.StackInstruction.selectSubRsp,
     `Grass.ISA.X86.Execution.StackInstruction.select,
     `Grass.ISA.X86.Execution.StackInstruction.decode,
+    -- Structural projections and proof-indexed packaging over an already selected
+    -- access completion or memory-MOV constructor.
+    `Grass.ISA.X86.Execution.ReadValue32.observed,
+    `Grass.ISA.X86.Execution.ReadValue32.bytes,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.displacement,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.LoadNormal.read,
     -- Decoder-table lookup and packaging of independently checked encoding laws.
     `Grass.ISA.X86.ImmediateArithmetic.operandSpec,
     `Grass.ISA.X86.ImmediateArithmetic.template,
@@ -694,6 +711,16 @@ def owed : List Name :=
     `Grass.ISA.X86.Execution.completedPushRflags,
     `Grass.ISA.X86.Execution.completedSubStatus,
     `Grass.ISA.X86.Execution.completedSubRflags,
+    -- Normal memory MOV semantics: value decoding, operand/width/payload/encoder
+    -- selection, effective address, and the two architectural result states.
+    `Grass.ISA.X86.Execution.ReadValue32.value,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.operand,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.width,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.payload?,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.encode?,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.effectiveAddress,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.StoreNormal.result,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.LoadNormal.result,
     `Grass.ISA.X86.ImmediateArithmetic.Immediate.opcode,
     `Grass.ISA.X86.ImmediateArithmetic.Kind.extension,
     `Grass.ISA.X86.ImmediateArithmetic.encode,
