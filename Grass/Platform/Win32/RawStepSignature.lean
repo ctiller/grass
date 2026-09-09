@@ -6,6 +6,7 @@ import Grass.ISA.X86.Execution.CallFactory
 import Grass.ISA.X86.Execution.ReturnSlotFactory
 import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
+import Grass.ISA.X86.Execution.CheckedStep
 
 /-!
 # Fixed Windows raw-step interface
@@ -43,6 +44,7 @@ inductive Observation where
 
 /-- A reached applicability diagnostic does not assert a physical outcome. -/
 inductive Failure where
+  | checked (reason : CheckedExecution.Failure)
   | cpu (reason : ApplicabilityFailure)
   | fetch (reason : FetchFactory.Failure)
   | computation (reason : ComputationFactory.Failure)
