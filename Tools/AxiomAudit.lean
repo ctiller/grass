@@ -41,6 +41,9 @@ import Grass.Assembly.SourceInitialization
 import Grass.Assembly.SourceTemplates
 import Grass.Assembly.StaticObjects
 import Grass.Assembly.SourceSplice
+import Grass.Assembly.SourceSpliceDecode
+import Grass.Assembly.SourceResolve
+import Grass.Assembly.SourceBytes
 import Grass.Assembly.SourceStore
 import Grass.Assembly.Store32
 import Grass.Assembly.Store32Execution

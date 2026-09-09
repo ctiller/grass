@@ -3,8 +3,8 @@ import Grass.Console.Accounting
 
 /-! Representation and public-status selection for the exact authored request.
 This is projection data, not a replacement certificate gate or a provider proof.
-The complete history carrier is unchanged, so selection cannot discard a choice,
-an unfavorable result, or a permitted permanent wait. Actual OS status observation
+`TargetProjection.complete_exact` retains the complete history carrier, including
+choices, unfavorable results, and permitted permanent waits. Actual OS status observation
 must still be connected to `status` by the provider/terminal bridge.
 -/
 

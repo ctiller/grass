@@ -45,7 +45,8 @@ theorem no_full_output_wait {payload : Vec Byte} (nonempty : 0 < payload.length)
   rw [same] at proper
   exact Nat.lt_irrefl _ proper
 
-/-- The upper behavior that the existing driver cannot cover is inhabited. -/
+/-- `full_output_wait` constructs the upper behavior excluded by `no_full_output_wait`
+for a nonempty payload. -/
 def full_output_wait (payload : Vec Byte) :
     PermanentWait (Grass.Console.Behavior.boundary payload)
       (Grass.Console.Behavior.pendingAt payload (Grass.Semantics.OutputCut.full payload)) :=
