@@ -2,6 +2,8 @@ import Grass.Refinement.Console.WriteFileHistory
 import Grass.Platform.Win32.WriteFileReturn
 import Grass.Std.Console.WriteAll
 
+variable {plan : Grass.Platform.Win32.WriteFile.LoanPlan}
+
 /-! Conditional caller-policy classification of one exact matched return.
 The write-all kernel is reused; its emission witness is already accounted for
 by the aligned provider history and is NEVER published again here. Logical
@@ -17,16 +19,16 @@ open Grass.Platform.Win32.WriteFile
 variable {R Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
   {spec : SpecProcess resources}
   {projection : CapturedTargetProjection spec Status}
-  {realization : Realization} {initial before after : CallProtocol.State Request}
+  {realization : Realization} {initial before after : ProtocolState}
   {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-  {frontier : Prefix before call record}
-  {history : History realization initial call record frontier}
-  {relation : HandoffRelation projection}
+  {frontier : Prefix plan before call record}
+  {history : History plan realization initial call record frontier}
+  {relation : HandoffRelation (plan := plan) projection}
 
 /-- This caller issues writes only while output remains. That is a call-site
 premise, not a restriction on generic zero-length Windows WriteFile requests. -/
 structure Returned (aligned : Aligned relation history) (selected : ReturnInterpretation)
-    (result : ReturnResult) (after : CallProtocol.State Request) : Prop where
+    (result : ReturnResult) (after : ProtocolState) : Prop where
   matched : MatchedReturn selected history result after
   nonempty : aligned.start.cut.offset < projection.target.payload.length
 

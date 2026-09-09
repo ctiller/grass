@@ -157,16 +157,35 @@ same two inputs, including the actual access-free operation step. Other selected
 families remain explicit unsupported prefixes. This first constructive path
 does not yet execute the full Hello program or settle fault applicability.
 
+`ComputationFactory.subRsp` constructs the generated stack-allocation instruction
+through that same fixed operation runner. `Success.extent_of_memory_prefix`
+derives the fetch width from pointwise bytes in current code memory and the
+production decoder law, so source consumers need not supply an independent
+instruction-width assumption.
+
 `PushFactory.push` uses the same fixed fetch path, checks stack underflow, and
 computes the eight-byte stack descriptor from the current placed allocation.
 Its actual store writes the selected register's pre-instruction value and
 constructs `PushNormal`; callers supply no receipt or store payload. This adds
 the first Hello instruction family to the constructive path.
 
-The shared x86 canonical linear-address predicate is still absent. The memory
-space's 64-bit representation check is weaker than architectural address
-validity. Physical adequacy must cover effective addresses and control-transfer
-targets under the admitted address mode; the normal receipts alone do not.
+`LinearAddress` supplies shared canonicality predicates for unmasked linear
+addresses in 48-bit and 57-bit modes, with a sign-extension equivalence and
+nonwrapping byte spans. Addresses below 2^47 satisfy both modes; no active mode
+is inferred from executable bitness. See the
+[Intel paging reference](https://cdrdv2-public.intel.com/671442/5-level-paging-white-paper.pdf).
+The memory space's 64-bit representation check remains weaker than architectural
+address validity. This additive leaf does not change receipt admission: physical
+adequacy still must cover effective addresses and control-transfer targets under
+the admitted environment, including any pointer-masking applicability.
+
+`CallNormal` now connects a fetched RIP-relative indirect CALL to an actual
+initialized eight-byte target read and an actual return-address store. The
+result RIP comes from the observed target value; the stack store contains the
+fetched fallthrough address. Its three events and exact memory mutation follow
+from those continuous accesses. Windows still owns the exact IAT/API identity,
+provider handoff and actual return-slot read; this receipt supplies no provider
+return or terminality theorem.
 
 Remaining work composes final emitted source, fixed factory results, CALL target
 reads and return-address writes, and actual prefix receipts for unwind reversal.

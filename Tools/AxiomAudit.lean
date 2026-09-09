@@ -22,8 +22,10 @@ import Grass.Op.PreparedPlacement
 import Grass.ISA.X86.Execution.AccessRun
 import Grass.ISA.X86.Execution.Fetch
 import Grass.ISA.X86.Execution.FetchedEncoding
+import Grass.Assembly.CodeWriteFrame
 import Grass.Assembly.LoadedCodeRoot
 import Grass.Assembly.LoadedFetchObservation
+import Grass.Assembly.SourceFetchPolicy
 import Grass.Disasm.Linear
 import Grass.Disasm.StoreAttempt
 import Grass.Disasm.Spatial
@@ -56,6 +58,8 @@ import Grass.ISA.X86.Execution.RunFactory
 import Grass.ISA.X86.Execution.FetchFactory
 import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
+import Grass.ISA.X86.Execution.CallNormal
+import Grass.ISA.X86.LinearAddress
 import Grass.Semantics.OutputCut
 import Grass.Specification.TextLine
 import Grass.Console.Behavior
@@ -86,6 +90,13 @@ import Grass.Platform.Win32.CpuVocabulary
 import Grass.Platform.Win32.CpuPolicy
 import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.WriteFileAbi
+import Grass.Platform.Win32.WriteFileArguments
+import Grass.Platform.Win32.ApiRequest
+import Grass.Platform.Win32.WriteFileCallPlan
+import Grass.Platform.Win32.WriteFileHandoff
+import Grass.Platform.Win32.WriteFilePreservation
+import Grass.Platform.Win32.WriteFileCall
+import Grass.Platform.Win32.WriteFileCallPreservation
 import Grass.Refinement.Console.WriteFilePolicy
 import Grass.Artifact.PE.ExceptionBinding
 import Grass.ISA.X86.EndianBridge
@@ -208,6 +219,7 @@ import Grass.Obligation.Disposition
 import Grass.Op.Facets
 import Grass.Op.Step
 import Grass.Op.CallProtocol
+import Grass.Op.CallProtocolCustody
 import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Signatures
 import Grass.Platform.Win32.WriteFile

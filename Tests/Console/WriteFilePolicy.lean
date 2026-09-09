@@ -1,5 +1,7 @@
 import Grass.Refinement.Console.WriteFilePolicy
 
+variable {plan : Grass.Platform.Win32.WriteFile.LoanPlan}
+
 namespace Grass.Tests.Console.WriteFilePolicy
 
 open Grass.Console Grass.Semantics Grass.Std.Logical Grass.Std.Console Grass.Op
@@ -9,11 +11,11 @@ open Grass.Refinement.Console.WriteFileHistory
 variable {R Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
   {spec : SpecProcess resources}
   {projection : CapturedTargetProjection spec Status}
-  {realization : Realization} {initial before after : CallProtocol.State Request}
+  {realization : Realization} {initial before after : ProtocolState}
   {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-  {frontier : Prefix before call record}
-  {history : History realization initial call record frontier}
-  {relation : HandoffRelation projection} {aligned : Aligned relation history}
+  {frontier : Prefix plan before call record}
+  {history : History plan realization initial call record frontier}
+  {relation : HandoffRelation (plan := plan) projection} {aligned : Aligned relation history}
   {selected : ReturnInterpretation} {result : ReturnResult}
 
 /-- Failure at full output retains failure and does not emit the payload twice. -/
@@ -70,7 +72,7 @@ example (_matched : MatchedReturn selected history result after) : True := by
 
 /-- Return evidence cannot be substituted from another reached history. -/
 example (_returned : Returned aligned selected result after)
-    (_other : History realization initial call record frontier)
+    (_other : History plan realization initial call record frontier)
     (_otherAligned : Aligned relation _other) : True := by
   fail_if_success
     have _wrong : Returned _otherAligned selected result after := _returned
@@ -84,7 +86,7 @@ example (_returned : Returned aligned selected result after) (_other : ReturnInt
 
 /-- Logical policy classification cannot be reused as a physical caller step. -/
 example (_returned : Returned aligned selected result after)
-    (_correspondence : CallerInterpretation) (_action : Action) (_next : CallProtocol.State Request) : True := by
+    (_correspondence : CallerInterpretation) (_action : Action) (_next : ProtocolState) : True := by
   fail_if_success
     have _wrong : CallerContinuation _returned.matched _correspondence _action _next := _returned
   trivial

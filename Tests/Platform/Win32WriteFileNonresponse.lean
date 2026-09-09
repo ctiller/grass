@@ -37,10 +37,10 @@ theorem wrongOccurrence_rejected : ¬ StalledNonresponse wrongOccurrenceStall qu
 /-- Fixed-cut continuations add no output at any next derived history. This is
 generic over a supplied continuation and makes no claim that one exists. -/
 theorem fixedCut_historyAt_succ_published
-    {realization : Realization} {initial : CallProtocol.State Request}
+    {realization : Realization} {initial : ProtocolState}
     {occurrence : CallProtocol.CallId} {pending : CallProtocol.Pending Request}
-    {state : CallProtocol.State Request} {frontier : Prefix state occurrence pending}
-    {history : History realization initial occurrence pending frontier}
+    {state : ProtocolState} {frontier : Prefix plan state occurrence pending}
+    {history : History plan realization initial occurrence pending frontier}
     {continuation : InfiniteContinuation history} (fixed : FixedCut continuation) (n : Nat) :
     (continuation.historyAt (n + 1)).published = (continuation.historyAt n).published := by
   rw [InfiniteContinuation.historyAt_succ]
@@ -50,11 +50,11 @@ theorem fixedCut_historyAt_succ_published
 when a caller supplies a predicate and a reachable history. It supplies neither
 history existence nor a claim that a synchronous API may fail to return. -/
 theorem fullAccepted_endpoint_requires_only_witness
-    {realization : Realization} {initial : CallProtocol.State Request}
+    {realization : Realization} {initial : ProtocolState}
     {occurrence : CallProtocol.CallId} {pending : CallProtocol.Pending Request}
-    {state : CallProtocol.State Request} {frontier : Prefix state occurrence pending}
+    {state : ProtocolState} {frontier : Prefix plan state occurrence pending}
     (selected : StalledPredicate)
-    (history : History realization initial occurrence pending frontier)
+    (history : History plan realization initial occurrence pending frontier)
     (_full : frontier.accepted = pending.request.requested)
     (observed : selected realization occurrence pending state frontier.accepted) :
     StalledNonresponse selected history :=

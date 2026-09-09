@@ -36,7 +36,6 @@ theorem observed_source {frame rootOffset}
         ¬ (patch.rva ≤ source.codeBase + offset ∧
           source.codeBase + offset < patch.rva + 8)) :
     fetch.run.complete.committed.observed = some source.outputs[index].encoding.toBytes := by
-  have slice := SourceFetched.instruction_bytes source index bounded
   have cells : ∀ offset, fetch.descriptor.range.Covers offset →
       before.machine.memory.cellAt? fetch.descriptor.provenance.root offset =
         (source.outputs[index].encoding.toBytes[offset - fetch.descriptor.range.start]?).map
@@ -48,13 +47,11 @@ theorem observed_source {frame rootOffset}
         source.outputs[index].encoding.toBytes.length := by
       simp only [InsnEncoding.length_toBytes]
       omega
-    have sizeBound : offset - fetch.descriptor.range.start < source.outputs[index].encoding.size := by simpa using byteBound
-    have atByte := congrArg (fun bytes : List Byte =>
-      bytes[offset - fetch.descriptor.range.start]?) slice
-    simp only [List.getElem?_take, List.getElem?_drop] at atByte
     have sourceByte : source.bytes.get? offset =
         some source.outputs[index].encoding.toBytes[offset - fetch.descriptor.range.start] := by
-      simpa [Vec.get?, ← start, size, byteBound, sizeBound, Nat.add_sub_of_le bounds.1] using atByte
+      simpa [← start, Nat.add_sub_of_le bounds.1] using
+        SourceFetched.instruction_byte source index bounded
+          (offset - fetch.descriptor.range.start) byteBound
     rw [root, memory offset covered, SourceLoadedImage.selected_code_byte_initialized
       binding loaded sourceByte (outside offset covered)]
     rw [List.getElem?_eq_getElem byteBound]

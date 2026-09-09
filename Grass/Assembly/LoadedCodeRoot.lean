@@ -1,5 +1,6 @@
 import Grass.Assembly.SourceLoadedImage
 import Grass.Platform.Win32.LoadedAccess
+import Grass.Assembly.SourceFetched
 
 /-! Identify the loader's searched code root with the exact source-bound region.
 This establishes storage provenance at a supplied instruction address, not
@@ -9,6 +10,28 @@ namespace Grass.Assembly.LoadedCodeRoot
 
 open Grass.Std.Logical Grass.Memory Grass.Artifact
 open Grass.Platform.Win32 Grass.Platform.Win32.Loader
+
+/-- Every resolved instruction's fallthrough stays in the loader's checked
+low address range, even when it is the final instruction in the section. -/
+theorem source_fallthrough_bound {frame rootOffset}
+    {source : SourceResolve.Result frame rootOffset} {image : ImageInput}
+    {inputs : EntryInputs} {sectionIndex : Nat}
+    (binding : SourceImage.CodeSection source image.plan sectionIndex)
+    (loaded : LoadedImage image inputs) (index : Nat)
+    (bounded : index < source.outputs.length) (address : MachineAddress)
+    (atSource : address.toNat =
+      (SourceLoadedImage.codeRegion binding loaded).region.base.toNat +
+        ByteLayout.offset source.splice.finalSizes index) :
+    address.toNat + source.outputs[index].encoding.size < 2 ^ 47 := by
+  let selected := SourceLoadedImage.codeRegion binding loaded
+  obtain ⟨region, _, _, _, regionBound⟩ := loaded.regionPlacement_exact selected.member
+  have length : selected.region.bytes.length = source.bytes.length := by
+    rw [selected.bytesExact, length_patchContents]
+  rw [length] at regionBound
+  have instruction := SourceFetched.instruction_end source index bounded
+  have imageBound := loaded.entry.1
+  change address.toNat = selected.region.base.toNat + _ at atSource
+  omega
 
 /-- The checked loader placement makes every selected source-code byte's
 allocation-local address nonwrapping. -/
