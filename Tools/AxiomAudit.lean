@@ -49,6 +49,12 @@ import Grass.Refinement.Console.WriteFileHistory
 import Grass.Refinement.Console.WriteFileNonresponse
 import Grass.Platform.Win32.WriteFileReturn
 import Grass.Platform.Win32.LoaderEntry
+import Grass.Platform.Win32.LoadedAccess
+import Grass.Platform.Win32.LoadedDataAccess
+import Grass.Platform.Win32.CpuVocabulary
+import Grass.Platform.Win32.CpuPolicy
+import Grass.Platform.Win32.ExecutionState
+import Grass.Platform.Win32.WriteFileAbi
 import Grass.Refinement.Console.WriteFilePolicy
 import Grass.Artifact.PE.ExceptionBinding
 import Grass.ISA.X86.EndianBridge
