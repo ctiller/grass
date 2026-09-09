@@ -12,6 +12,7 @@ import Grass.ABI.Win64.FrameRanges
 import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Signatures
 import Grass.Platform.Win32.WriteFile
+import Grass.Platform.Win32.WriteFileNonresponse
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
 
@@ -105,6 +106,7 @@ def auditedModules : List Name :=
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
    `Grass.Platform.Win32.Signatures, `Grass.Platform.Win32.WriteFile,
+   `Grass.Platform.Win32.WriteFileNonresponse,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.HeaderPrefix, `Grass.Artifact.PE.OptionalHeader,
@@ -168,7 +170,9 @@ acquiring a citation.
 -- Fourteen new structural helpers over explicit semantic and decoder results.
 -- Twenty-nine PE coordinate, projection, and supplied-data transformations are
 -- implementation plumbing over the separately owed format schema/profile.
-def notBehaviourBaseline : Nat := 136
+-- Two nonresponse consumers derive finite histories or accept a selected
+-- external relation; neither asserts Windows adequacy or physical nonresponse.
+def notBehaviourBaseline : Nat := 138
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -309,6 +313,10 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Derived accumulated histories and the type of an externally supplied
+    -- observation relation, not new Windows behavior facts.
+    `Grass.Platform.Win32.WriteFile.InfiniteContinuation.historyAt,
+    `Grass.Platform.Win32.WriteFile.StalledPredicate,
     -- These project supplied spans and payload lengths. Invariance theorems
     -- transport coordinates without adding a format/loader applicability claim.
     `Grass.Artifact.PE.placementSpans,
