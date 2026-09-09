@@ -104,6 +104,134 @@ theorem stream_loanPlan
         _ = (receipt n).runtime.loanPlan := (receipt n).after_loanPlan
         _ = (receipt 0).runtime.loanPlan := ih
 
+/-- Reindex each receipt's ABI-derived plan to an externally supplied plan
+whose equality with the first receipt has been established at the boundary. -/
+private theorem stream_loanPlan_from
+    (raw : Nat → RawState) (action : Nat → Action) (output : Nat → Vec Byte)
+    (receipt : ∀ n, ServiceReceipt realization (raw n) call record (action n) (output n))
+    (advances : ∀ n, (receipt n).after = raw (n + 1))
+    {plan : LoanPlan} (initialPlan : plan = (receipt 0).runtime.loanPlan) (n : Nat) :
+    (receipt n).runtime.loanPlan = plan :=
+  (stream_loanPlan raw action output receipt advances n).trans initialPlan.symm
+
+/-- Extract an infinite service continuation while retaining an externally
+supplied reachable frontier as its literal initial point. The receipt stream
+supplies the subsequent points, after plan-only reindexing; no equality between
+the original frontier and a receipt's `Prepared` witness is required. -/
+def extractInfiniteContinuationFrom
+    (raw : Nat → RawState) (action : Nat → Action) (output : Nat → Vec Byte)
+    (receipt : ∀ n, ServiceReceipt realization (raw n) call record (action n) (output n))
+    (advances : ∀ n, (receipt n).after = raw (n + 1))
+    {plan : LoanPlan} {initial state : ProtocolState}
+    {frontier : Prefix plan state call record}
+    (history : History plan realization initial call record frontier)
+    (initialPlan : plan = (receipt 0).runtime.loanPlan)
+    (initialState : state = (receipt 0).protocol)
+    (initialAccepted : frontier.accepted = (receipt 0).pre.accepted) :
+    InfiniteContinuation history where
+  point
+    | 0 => ⟨state, frontier⟩
+    | n + 1 => ⟨(receipt (n + 1)).protocol,
+      castPrefixPlan (stream_loanPlan_from raw action output receipt advances initialPlan (n + 1))
+        (receipt (n + 1)).pre⟩
+  start := rfl
+  action := action
+  output := output
+  committed n := by
+    cases n with
+    | zero =>
+      have continuity := stream_continuity raw action output receipt advances 0
+      have nextAccepted : (receipt 0).post.accepted =
+          (receipt 1).pre.accepted := by
+        calc
+          (receipt 0).post.accepted = (receipt 0).nextRuntime.accepted :=
+            (receipt 0).after_accepted.symm
+          _ = (receipt 1).runtime.accepted :=
+            congrArg Grass.Platform.Win32.WriteFileRuntime.accepted continuity.2.symm
+          _ = (receipt 1).pre.accepted := (receipt 1).accepted.symm
+      apply CommittedStep.reindex (receipt 0).committed
+        (stream_loanPlan_from raw action output receipt advances initialPlan 0)
+        initialState.symm continuity.1.symm
+      · exact initialAccepted.symm
+      · simpa only [castPrefixPlan_accepted] using nextAccepted
+    | succ n =>
+      have continuity := stream_continuity raw action output receipt advances (n + 1)
+      have nextAccepted : (receipt (n + 1)).post.accepted =
+          (receipt (n + 2)).pre.accepted := by
+        calc
+          (receipt (n + 1)).post.accepted = (receipt (n + 1)).nextRuntime.accepted :=
+            (receipt (n + 1)).after_accepted.symm
+          _ = (receipt (n + 2)).runtime.accepted :=
+            congrArg Grass.Platform.Win32.WriteFileRuntime.accepted continuity.2.symm
+          _ = (receipt (n + 2)).pre.accepted := (receipt (n + 2)).accepted.symm
+      apply CommittedStep.reindex (receipt (n + 1)).committed
+        (stream_loanPlan_from raw action output receipt advances initialPlan (n + 1))
+        rfl continuity.1.symm
+      · simp only [castPrefixPlan_accepted]
+      · simpa only [castPrefixPlan_accepted] using nextAccepted
+
+@[simp] theorem extractInfiniteContinuationFrom_point_state
+    (raw : Nat → RawState) (action : Nat → Action) (output : Nat → Vec Byte)
+    (receipt : ∀ n, ServiceReceipt realization (raw n) call record (action n) (output n))
+    (advances : ∀ n, (receipt n).after = raw (n + 1))
+    {plan : LoanPlan} {initial state : ProtocolState}
+    {frontier : Prefix plan state call record}
+    (history : History plan realization initial call record frontier)
+    (initialPlan : plan = (receipt 0).runtime.loanPlan)
+    (initialState : state = (receipt 0).protocol)
+    (initialAccepted : frontier.accepted = (receipt 0).pre.accepted) (n : Nat) :
+    ((extractInfiniteContinuationFrom raw action output receipt advances history initialPlan
+      initialState initialAccepted).point n).1 = (receipt n).protocol := by
+  cases n with
+  | zero => exact initialState
+  | succ n => rfl
+
+@[simp] theorem extractInfiniteContinuationFrom_point_accepted
+    (raw : Nat → RawState) (action : Nat → Action) (output : Nat → Vec Byte)
+    (receipt : ∀ n, ServiceReceipt realization (raw n) call record (action n) (output n))
+    (advances : ∀ n, (receipt n).after = raw (n + 1))
+    {plan : LoanPlan} {initial state : ProtocolState}
+    {frontier : Prefix plan state call record}
+    (history : History plan realization initial call record frontier)
+    (initialPlan : plan = (receipt 0).runtime.loanPlan)
+    (initialState : state = (receipt 0).protocol)
+    (initialAccepted : frontier.accepted = (receipt 0).pre.accepted) (n : Nat) :
+    ((extractInfiniteContinuationFrom raw action output receipt advances history initialPlan
+      initialState initialAccepted).point n).2.accepted = (receipt n).runtime.accepted := by
+  cases n with
+  | zero => exact initialAccepted.trans (receipt 0).accepted
+  | succ n =>
+      change (castPrefixPlan
+        (stream_loanPlan_from raw action output receipt advances initialPlan (n + 1))
+        (receipt (n + 1)).pre).accepted = (receipt (n + 1)).runtime.accepted
+      simpa only [castPrefixPlan_accepted] using (receipt (n + 1)).accepted
+
+@[simp] theorem extractInfiniteContinuationFrom_action
+    (raw : Nat → RawState) (action : Nat → Action) (output : Nat → Vec Byte)
+    (receipt : ∀ n, ServiceReceipt realization (raw n) call record (action n) (output n))
+    (advances : ∀ n, (receipt n).after = raw (n + 1))
+    {plan : LoanPlan} {initial state : ProtocolState}
+    {frontier : Prefix plan state call record}
+    (history : History plan realization initial call record frontier)
+    (initialPlan : plan = (receipt 0).runtime.loanPlan)
+    (initialState : state = (receipt 0).protocol)
+    (initialAccepted : frontier.accepted = (receipt 0).pre.accepted) (n : Nat) :
+    (extractInfiniteContinuationFrom raw action output receipt advances history initialPlan
+      initialState initialAccepted).action n = action n := rfl
+
+@[simp] theorem extractInfiniteContinuationFrom_output
+    (raw : Nat → RawState) (action : Nat → Action) (output : Nat → Vec Byte)
+    (receipt : ∀ n, ServiceReceipt realization (raw n) call record (action n) (output n))
+    (advances : ∀ n, (receipt n).after = raw (n + 1))
+    {plan : LoanPlan} {initial state : ProtocolState}
+    {frontier : Prefix plan state call record}
+    (history : History plan realization initial call record frontier)
+    (initialPlan : plan = (receipt 0).runtime.loanPlan)
+    (initialState : state = (receipt 0).protocol)
+    (initialAccepted : frontier.accepted = (receipt 0).pre.accepted) (n : Nat) :
+    (extractInfiniteContinuationFrom raw action output receipt advances history initialPlan
+      initialState initialAccepted).output n = output n := rfl
+
 /-- Extract the existing infinite-continuation evidence from a supplied stream
 of consecutive service receipts. No equality between the receipts' `Prepared`
 witnesses is assumed or proved; `CommittedStep.reindex` changes only those
