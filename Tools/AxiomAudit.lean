@@ -12,6 +12,7 @@ import Grass.Console.Timing
 import Grass.Console.Captured
 import Grass.Console.CapturedDemands
 import Grass.Artifact.PE.ImageRoundTrip
+import Grass.Artifact.PE.LayoutBinding
 import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
 import Grass.Assembly.X86ControlFlow

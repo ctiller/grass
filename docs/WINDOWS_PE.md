@@ -28,6 +28,15 @@ widths and exclusive endpoints before serialization narrows natural numbers.
 symbol binding remain separate consumers of this layout; this module owns no
 instruction encoding table.
 
+`ImageLayout.coordinates_eq_of_lengths_eq` compares independently prepared
+prototype and final layouts. Equal ordered source payload lengths, imports and
+entry location imply equal section spans, entry RVA, image size, import-section
+RVA, IAT queries and section-relative resolution. The proof includes import
+materialization and its size independence under rebasing. Section bytes remain
+those of each actual plan; no equality of payloads or implicit preparation
+success is asserted. The source resolver can therefore handle final preparation
+failure explicitly and use the theorem once it has the final checked plan.
+
 ## Independent reader and exact recovery
 
 `readImage` decodes the DOS/COFF prefix, all optional-header bytes, every section

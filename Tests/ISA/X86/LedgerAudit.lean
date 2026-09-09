@@ -13,6 +13,7 @@ import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Signatures
 import Grass.Platform.Win32.WriteFile
 import Grass.Artifact.PE.ImageRoundTrip
+import Grass.Artifact.PE.LayoutBinding
 
 /-!
 # Ledger coverage gate
@@ -110,7 +111,8 @@ def auditedModules : List Name :=
    `Grass.Artifact.PE.SectionTable, `Grass.Artifact.PE.ReaderCore,
    `Grass.Artifact.PE.PrefixReader, `Grass.Artifact.PE.OptionalReader,
    `Grass.Artifact.PE.SectionReader, `Grass.Artifact.PE.ImageWriter,
-   `Grass.Artifact.PE.ImageReader, `Grass.Artifact.PE.ImageRoundTrip]
+   `Grass.Artifact.PE.ImageReader, `Grass.Artifact.PE.ImageRoundTrip,
+   `Grass.Artifact.PE.LayoutInvariance, `Grass.Artifact.PE.LayoutBinding]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -164,9 +166,9 @@ acquiring a citation.
 -- Ten WriteFile definitions are internal evidence/transport/sequence operations;
 -- Windows footprint and width/profile applicability remain owed separately.
 -- Fourteen new structural helpers over explicit semantic and decoder results.
--- Twenty-six PE coordinate, projection, and supplied-data transformations are
+-- Twenty-nine PE coordinate, projection, and supplied-data transformations are
 -- implementation plumbing over the separately owed format schema/profile.
-def notBehaviourBaseline : Nat := 133
+def notBehaviourBaseline : Nat := 136
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -307,6 +309,11 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- These project supplied spans and payload lengths. Invariance theorems
+    -- transport coordinates without adding a format/loader applicability claim.
+    `Grass.Artifact.PE.placementSpans,
+    `Grass.Artifact.PE.sectionContentLengths,
+    `Grass.Artifact.PE.sectionSizes,
     -- PE coordinate arithmetic and supplied-data transformations. The PE field
     -- widths, record writers/readers, and selected profile stay owed below.
     `Grass.Artifact.PE.FileSpan.Disjoint,
