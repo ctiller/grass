@@ -1,4 +1,5 @@
 import Grass.ISA.X86.Execution.SubRspNormal
+import Grass.Assembly.FrameAllocationExecution
 import Tests.Op.FakeIsa
 
 namespace Grass.Tests.ISA.X86.ExecutionSubRsp
@@ -138,6 +139,24 @@ example : receipt.result.rflags = 0x602 := by decide
 
 example : receipt.result.gpr .r12 = before.gpr .r12 :=
   receipt.gpr_frame .r12 (by decide)
+
+private def layout : Grass.ABI.Win64.CallFrameLayout :=
+  ⟨5, 4, 4, [.r12, .r13, .r14]⟩
+
+private def allocation : Grass.Assembly.FrameAllocation.Resolved :=
+  (Grass.Assembly.FrameAllocation.resolve? layout).get (by decide)
+
+private def layoutReceipt : SubRspNormal before afterFetch afterCompute allocation.immediate :=
+  receipt
+
+-- The actual fetched fixture accepts the operand derived from frame parameters.
+example : layoutReceipt.result.gpr .rsp = before.gpr .rsp -
+    BitVec.ofNat 64 allocation.layout.callAllocationBytes :=
+  Grass.Assembly.FrameAllocation.rsp_allocation_exact allocation layoutReceipt
+
+example : (layoutReceipt.result.gpr .rsp).toNat =
+    (before.gpr .rsp).toNat - allocation.layout.callAllocationBytes :=
+  Grass.Assembly.FrameAllocation.rsp_allocation_natural allocation layoutReceipt (by decide)
 
 /-- An immediate different from the fetched byte cannot satisfy the constructor's
 encoding equality. -/

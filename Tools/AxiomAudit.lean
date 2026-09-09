@@ -80,6 +80,7 @@ import Grass.Assembly.SourceStaticBindings
 import Grass.Assembly.SourceImportBindings
 import Grass.Assembly.SourceImportRequests
 import Grass.Assembly.SourceLinkedImage
+import Grass.Assembly.FrameAllocationExecution
 import Grass.Assembly.SourceUnwind
 import Grass.Assembly.SourceUnwindPrefix
 import Grass.Assembly.SourceStore
