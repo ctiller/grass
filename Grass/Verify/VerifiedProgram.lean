@@ -27,7 +27,9 @@ def emitProgram (verified : VerifiedProgram spec) : ByteArray :=
 namespace VerifiedProgram
 
 /-- Stable identities of every keyed demand declared by the five certificate
-tiers from the portable specification through the artifact stage. -/
+tiers from the portable specification through the artifact stage. Adding a
+later keyed tier must re-terminate this definition there and add its membership
+theorem. -/
 def requirementKeys (verified : VerifiedProgram spec) : List RequirementKey :=
   verified.artifact.stage.allKeys
 
