@@ -47,6 +47,10 @@ import Grass.Assembly.SourceResolve
 import Grass.Assembly.SourceBytes
 import Grass.Assembly.SourceImage
 import Grass.Assembly.StaticSection
+import Grass.Assembly.SourceStaticBindings
+import Grass.Assembly.SourceImportBindings
+import Grass.Assembly.SourceImportRequests
+import Grass.Assembly.SourceLinkedImage
 import Grass.Assembly.SourceStore
 import Grass.Assembly.Store32
 import Grass.Assembly.Store32Execution
