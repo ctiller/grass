@@ -4,8 +4,8 @@ import Grass.Op.Step
 /-!
 # Fixed inputs and address planning for the CPU factory
 
-The policy names code and stack provenance, the execution context, and the
-already admitted generic operation policy. `planAddress` obtains the allocation
+The policy names code and stack provenance, a data-span provenance selector,
+the execution context, and the admitted generic operation policy. `planAddress` obtains the allocation
 and base from the current memory state. `AddressPlan.descriptor` computes the
 descriptor from that placement and the requested physical address and width;
 the caller does not supply an independent range or operation.
@@ -21,11 +21,12 @@ open Grass.Core Grass.Memory Grass.Op
 
 inductive AccessPurpose where
   | fetch
+  | dataRead
   | stackRead
   | stackWrite
 deriving DecidableEq, Repr
 
-/-- Fixed profile inputs for the code/stack portion of the instruction factory. -/
+/-- Fixed profile inputs for instruction fetches and stack/data accesses. -/
 structure CpuAccessPolicy where
   operationPolicy : StepPolicy
   context : ContextId
@@ -33,6 +34,8 @@ structure CpuAccessPolicy where
   cause : EventCause
   code : Provenance
   stack : Provenance
+  /-- The fixed platform resolves a readable data span; absence is an applicability gap. -/
+  data : MachineAddress → Nat → Option Provenance := fun _ _ => none
   /-- The target's declared access-fault vocabulary; declaration is not fault exclusion. -/
   faults : AccessPurpose → List FaultClassId
 
@@ -80,12 +83,12 @@ def descriptor {memory : MemoryState} {provenance : Provenance} {address : Machi
     provenance := provenance
     range := ⟨plan.offset, width⟩
     intent := match purpose with
-      | .fetch => .execute | .stackRead => .read | .stackWrite => .write
+      | .fetch => .execute | .dataRead | .stackRead => .read | .stackWrite => .write
     requiredPermission := match purpose with
-      | .fetch => .readExecute | .stackRead => .readOnly | .stackWrite => .readWrite
+      | .fetch => .readExecute | .dataRead | .stackRead => .readOnly | .stackWrite => .readWrite
     alignment := 1
     initialization := match purpose with
-      | .fetch | .stackRead => .allBytesInitialized | .stackWrite => .readsNothing
+      | .fetch | .dataRead | .stackRead => .allBytesInitialized | .stackWrite => .readsNothing
     producesInitialized := match purpose with | .stackWrite => true | _ => false
     ordering := .plain
     admittedFaults := policy.faults purpose

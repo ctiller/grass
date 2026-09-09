@@ -184,8 +184,22 @@ initialized eight-byte target read and an actual return-address store. The
 result RIP comes from the observed target value; the stack store contains the
 fetched fallthrough address. Its three events and exact memory mutation follow
 from those continuous accesses. Windows still owns the exact IAT/API identity,
-provider handoff and actual return-slot read; this receipt supplies no provider
+provider handoff and binding the slot read to the provider return; this receipt supplies no provider
 return or terminality theorem.
+
+`CallFactory.call` constructs that receipt from the fixed policy and current CPU
+state. The policy selects the data provenance for the computed target address;
+actual preparation checks the target span before the return-address store.
+The result retains the full fetch witness and exact data/stack provenance ties.
+
+`ReturnSlotFactory.read` serves the opaque provider-return boundary. It starts
+with the current post-provider memory and a CPU stack cursor still at the CALL
+slot, checks that slot's identity and context, then reads its actual initialized
+bytes. A changed target retains the completed read state as a checked mismatch.
+`ReturnSlotRead` proves the target equals the original continuation and that
+adding eight to the stack cursor restores the original caller RSP. These are
+read and arithmetic facts, not a fetched RET or physical ABI-return theorem;
+Windows supplies the provider and register correspondence.
 
 Remaining work composes final emitted source, fixed factory results, CALL target
 reads and return-address writes, and actual prefix receipts for unwind reversal.

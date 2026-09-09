@@ -28,6 +28,10 @@ import Grass.ISA.X86.Execution.FetchFactory
 import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
 import Grass.ISA.X86.Execution.CallNormal
+import Grass.ISA.X86.Execution.CallFactory
+import Grass.ISA.X86.Execution.CheckedChoice
+import Grass.ISA.X86.Execution.ReturnSlotRead
+import Grass.ISA.X86.Execution.ReturnSlotFactory
 import Grass.ISA.X86.LinearAddress
 import Grass.Semantics.OutputCut
 import Grass.Specification.TextLine
