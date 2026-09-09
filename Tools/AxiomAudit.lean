@@ -196,6 +196,8 @@ import Grass.Refinement.Console.WriteHistory
 import Grass.Refinement.Console.WriteWaiting
 import Grass.Refinement.Coverage
 import Grass.Refinement.FinitePathMap
+import Grass.Refinement.FiniteHistoryRelation
+import Grass.Semantics.InfiniteHistory
 import Grass.Resource.Algebra
 import Grass.Resource.Axis
 import Grass.Semantics.Execution
