@@ -856,6 +856,14 @@ def Holds (package : RequiredProofPackage) : Prop :=
 
 end RequiredProofPackage
 
+/-- Operational memory vocabulary and identity. This data selects admission
+checks, not an adequacy proof. Execution-specific adequacy belongs above the
+operation and target semantics and must name this exact operational profile. -/
+structure OperationalProfile where
+  id : Name
+  vocabularyVersion : Nat
+  vocabulary : AdmittedVocabulary
+
 /--
 A memory profile: what a target admits, and the proofs that make it usable.
 
@@ -876,6 +884,30 @@ structure MemoryProfile where
   package : RequiredProofPackage
 
 namespace MemoryProfile
+
+/-- Extract only the operational data from the legacy proof-checklist record.
+This projection makes no claim about `RequiredProofPackage.Holds`. -/
+def operational (profile : MemoryProfile) : OperationalProfile :=
+  ⟨profile.id, profile.vocabularyVersion, profile.vocabulary⟩
+
+/-- Compatibility for existing profile constructors used by operational clients.
+No proof-package obligation is discharged by this coercion. -/
+instance : Coe MemoryProfile OperationalProfile := ⟨operational⟩
+
+@[simp] theorem operational_vocabulary (profile : MemoryProfile) :
+    profile.operational.vocabulary = profile.vocabulary := rfl
+
+@[simp] theorem operational_id (profile : MemoryProfile) :
+    profile.operational.id = profile.id := rfl
+
+@[simp] theorem operational_vocabularyVersion (profile : MemoryProfile) :
+    profile.operational.vocabularyVersion = profile.vocabularyVersion := rfl
+
+/-- Legacy checklist replacement does not change any operational policy data. -/
+@[simp] theorem operational_set_package (profile : MemoryProfile)
+    (package : RequiredProofPackage) :
+    ({ profile with package := package } : MemoryProfile).operational =
+      profile.operational := rfl
 
 /-!
 `MemoryProfile.Admits` used to be here, as `profile.vocabulary.Admits d`, and it is
