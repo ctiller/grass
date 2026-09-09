@@ -1,10 +1,11 @@
 import Grass.Process.Correct
+import Grass.Process.Progress
 
 /-!
 # An acceptance that actually accepts something
 
-`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.62: of `ProcessCorrect`'s ten fields —
-`Invariant` and nine laws — five had no non-vacuous instance anywhere in this
+`docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.62: of `ProcessCorrect`'s nine fields —
+`Invariant` and eight laws — five had no non-vacuous instance anywhere in this
 repository. Every `ProcessAcceptance` in the corpus set `TraceAccepts`,
 `DemandsWellFormed`, `TerminalAccepts` and `ViewAccepts` to the constantly-true
 predicate, so `initialDemands`,
@@ -286,11 +287,12 @@ def hiccupProgress (request : Nat) :
 /-! ## And it is correct -/
 
 /--
-**`hiccup` is correct, and five of the nine laws do work.**
+**`hiccup` is correct, and its substantive acceptance laws do work.**
 
 `initialDemands` and `demandsWellFormed` check a bound; `terminal` checks the
-result; `observationsAccept` runs on `no_blips`; `progress` runs on
-`hiccupProgress`. Only `viewAccepts` is vacuous, and §10.56 is why.
+result; and `observationsAccept` runs on `no_blips`. The separate
+`hiccupProgress` theorem establishes progress. Only `viewAccepts` is vacuous,
+and §10.56 is why.
 -/
 def hiccupCorrect : ProcessCorrect hiccup hiccupAcceptance where
   Invariant := fun _ => True
@@ -320,7 +322,7 @@ def hiccupCorrect : ProcessCorrect hiccup hiccupAcceptance where
   observationsAccept := by
     intro _ _ _ reached
     exact no_blips reached
-  progress := hiccupProgress
+
 
 /-! ## What the fixture is for, stated -/
 

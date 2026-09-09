@@ -1,4 +1,5 @@
 import Grass.Process.Correct
+import Grass.Process.Progress
 
 /-!
 # The livelock that logs
@@ -14,8 +15,8 @@ prevent.
 demands, and has no external events — so the entropy escape is unavailable to it
 and so is the no-initial-state one. What it does have is a `Demanded` that picks
 out one of two observation values, and a step that emits that value. Every step
-therefore satisfies `StepProgresses`'s emission disjunct, and `chatterCorrect` is
-a full `ProcessCorrect`.
+therefore satisfies `StepProgresses`'s emission disjunct. `chatterCorrect`
+establishes the base contract, and `chatterProgress` establishes progress.
 
 `Demanded`'s docstring says the field exists so that "every process could satisfy
 progress by logging" is false. This is a process satisfying progress by logging,
@@ -216,7 +217,7 @@ def chatterCorrect : ProcessCorrect chatter chatterAcceptance where
     intro facet hasView
     exact absurd hasView (by simp [chatter])
   observationsAccept := by intros; trivial
-  progress := chatterProgress
+
 
 /-! ## Why the livelock theorems do not see it -/
 

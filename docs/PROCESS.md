@@ -1344,7 +1344,7 @@ Supervisors consume this contract when shutting down, restarting, or isolating
 children.
 
 This sophistication is capability-driven. `ProcessCorrect` itself retains only
-ordinary invariant, terminal, observation, demand, and progress facts. A
+ordinary invariant, terminal, observation, and demand/acceptance facts. A
 process plan attaches `TerminationFacet` only when the process exports a
 cancellation/restart/upgrade promise or another component relies on one. The
 ordinary facet is derived from the existing terminal/lifecycle proof. Pure
@@ -1502,7 +1502,12 @@ These patterns enrich one process algebra rather than create an Erlang backend.
 
 ## 4. Application proof package
 
-The application author supplies only semantic facts specific to the process:
+The application author supplies semantic facts specific to the process.
+`ProcessCorrect` contains invariant, acceptance, and demand-accounting facts;
+standalone progress lemmas are not fields of this record. They may help prove
+a property of a specification or justify a particular realization abstraction,
+but do not become per-author-theorem `VerifiedProgram` certificates (decision 137).
+This process record alone is not a complete lowering or instruction-safety proof.
 
 ```lean
 structure ProcessCorrect (p : ProcessSpec) where
@@ -1520,7 +1525,6 @@ structure ProcessCorrect (p : ProcessSpec) where
   observationsAccept : ∀ run,
     ProcessRun p run -> TraceAccepts p run.observations
   demandsWellFormed : ∀ step, StepOf p step -> DemandsWellFormed step.demands
-  progress : EveryDeclaredProcessProgressDemandIsMet p
 
 theorem ProcessRun.observationCausality
     (run : ProcessRun p request) :
@@ -2606,8 +2610,8 @@ behaviors. Universal prefix safety quantifies over that model.
 Conditional responsiveness is separate. Its coherent strategy may constrain
 only named timing/scheduling dimensions and remains complete for every allowed
 result value, as required by [SEMANTICS.md](SEMANTICS.md). These are selected
-specification demands, not universal compilation prerequisites. When the
-specification requires progress between frontiers, a process cycle must:
+specification properties, not compiler certificate fields. When proving
+progress between frontiers for a selected process model, a process cycle must:
 
 - decrease a well-founded internal measure;
 - reach a law-bearing external/demand-result frontier in finite internal

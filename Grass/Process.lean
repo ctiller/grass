@@ -44,8 +44,10 @@ nothing. This module is not it and must not become it.
 The four imports are the four things a process-author module names, as
 `Spikes/4_Web_Server/Process.lean` and its siblings actually write them:
 
-* `Correct` — `ProcessSpec`, and the `ProcessCorrect` record an author
-  discharges, together with the run and progress relations it is stated over.
+* `Correct` — `ProcessSpec`, and the base `ProcessCorrect` record an author
+  discharges, together with the run relation it is stated over. Standalone
+  progress proofs have their own `Grass.Process.Progress` import and are not
+  added to this facade.
 * `Acceptance` — the acceptance predicate a specification consumes.
 * `Network.Plan` — `ProcessPlan`, `LogicalProcessNetwork`, and the channel
   contracts a plan installs.

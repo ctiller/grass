@@ -1,4 +1,5 @@
 import Grass.Process.Correct
+import Grass.Process.Progress
 import Tests.Process.M1Fixtures
 
 /-!
@@ -155,7 +156,7 @@ def oneShotCorrect : ProcessCorrect oneShot oneShotAcceptance where
     intro facet hasView
     exact absurd hasView (by simp [oneShot])
   observationsAccept := by intros; trivial
-  progress := oneShotProgress
+
 
 /--
 And the correctness proof composes: every reachable state satisfies the

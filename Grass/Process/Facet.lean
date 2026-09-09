@@ -7,7 +7,7 @@ import Grass.Process.Termination
 `docs/PROCESS.md` §3 attaches a facet just where a process makes a promise:
 
 > This sophistication is capability-driven. `ProcessCorrect` itself retains only
-> ordinary invariant, terminal, observation, demand, and progress facts. A
+> ordinary invariant, terminal, observation, and demand/acceptance facts. A
 > process plan attaches `TerminationFacet` only when the process exports a
 > cancellation/restart/upgrade promise or another component relies on one. The
 > ordinary facet is derived from the existing terminal/lifecycle proof. Pure

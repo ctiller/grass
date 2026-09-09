@@ -832,14 +832,40 @@ to imitate compiler-selected storage or CFG structure.
     progress property is demanded. The existing Hello liveness demand remains
     authored intent and is not removed by this decision. Implementation migration
     keeps the current certificate adequacy fields and local helper proofs.
-    The current `ProcessCorrect` package unconditionally bundles process
-    progress and must be split or indexed by selected demands before it can
-    serve as a universal root prerequisite; it is not yet wired to that root.
+    At ratification, `ProcessCorrect` unconditionally bundled progress.
+    Its base package now excludes that field; standalone progress proofs remain
+    in the library. Decision 137 clarifies that these are not optional compiler
+    certificates for the author's theorem demands.
     The progress-certified CFG loop helper has the same restricted scope;
     future root/certificate work must not promote those helper preconditions
     into universal progress obligations. This adds no new proof burden or
     dependency and avoids requiring termination machinery for specifications
     without progress demands.
+
+137. Author specification proofs and lowering proofs have separate roles.
+    Authors prove properties of the specification's own abstract behavior:
+    liveness, no dropped tasks, fairness, or any other desired theorem.
+    `VerifiedProgram` proves safe emitted code and semantic correspondence to
+    that specification. It does not inspect the author theorem family to
+    generate optional per-theorem lowering certificates. This sharpens decision
+    136 and supersedes its possible interpretation as a conditional progress
+    checklist in the compiler gate. Properties expressed in the matched abstract
+    semantics transfer through the correspondence; no theorem-specific compiler
+    extension is needed. The correspondence must account for relevant finite,
+    infinite, divergent, pending, scheduling, and choice behavior under the
+    declared projection. One-way inclusion alone does not transport arbitrary
+    existential, availability, or choice-sensitive properties. The current
+    `BehaviorRefinement`/`VerifiedProgram` foundation proves only that inclusion,
+    so full abstract-behavior equivalence remains a known implementation gap.
+    Specification theorem keys and their proofs retain separate diagnostics
+    and dependency facets from lowering obligations. Adding or reproving a
+    theorem without changing the specification's behavior must not create a
+    new lowering obligation. Semantic edits can invalidate correspondence and
+    affected author proofs. Local rank, progress, and provider-strategy lemmas
+    may still justify a particular abstraction; their necessity follows from
+    that abstraction, not from enumeration of author properties. Migration
+    separates `ProcessCorrect` from existing standalone progress proofs now;
+    captured-root and full-equivalence work must preserve this separation.
 
 ## Explicitly rejected shortcuts
 

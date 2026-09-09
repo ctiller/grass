@@ -1,7 +1,8 @@
 import Grass.Process.Correct
+import Grass.Process.Progress
 
 /-!
-# A total livelock, and the proof that it is excluded
+# A total livelock, accepted by safety but excluded by progress
 
 `spin` consumes one demand and reissues the same demand, forever: the state is
 untouched, nothing is emitted, and its vocabulary has no external event at all.
@@ -9,7 +10,8 @@ Its run state is bit-for-bit identical after every transition —
 `spin_loops` exhibits the cycle and `spin_loop_is_reachable` shows it is not a
 statement about an empty class.
 
-This file is here because for one commit `spin` had a full `ProcessCorrect`.
+`spin` has a `ProcessCorrect`: the base record expresses its safety and
+acceptance properties. It cannot satisfy the separate progress contract.
 
 `Grass/Process/Progress.lean`'s `StepProgresses` had gained a demand-result
 disjunct that fired on the event's label alone — "an outstanding demand was
@@ -196,7 +198,23 @@ theorem spin_is_never_stuck {segmented : Segmented spin.Observation}
   cases demand
   exact spin_live reached
 
-/-! ## And what it does not -/
+/-! ## Its base correctness, and what it does not satisfy -/
+
+/-- `spin` satisfies the safety and acceptance contract despite diverging. -/
+def spinCorrect : ProcessCorrect spin spinAcceptance where
+  Invariant := fun _ => True
+  initial := by intros; trivial
+  initialDemands := by intros; trivial
+  preserved := by intros; trivial
+  demandsWellFormed := by intros; trivial
+  terminal := by intros; trivial
+  terminalNoStep := by
+    rintro _ _ result _ _ _ _
+    exact result.elim
+  viewAccepts := by
+    intro facet hasView
+    exact absurd hasView (by simp [spin])
+  observationsAccept := by intros; trivial
 
 /-- The bag `spin` holds is what it holds again: consume the one occurrence,
 issue one back. -/
@@ -257,16 +275,14 @@ theorem spin_has_no_progress_record (Invariant : spin.State → Prop)
     (progress.silent_step_descends spin_loop_is_reachable holds spin_steps_silently)
 
 /--
-**And therefore no correctness record either.**
+**And therefore its correctness invariant cannot satisfy progress.**
 
-`ProcessCorrect` carries `progress` as a field, so the exclusion propagates
-without a separate argument. Worth stating: it is the headline the attack
-produced — "this livelock is a correct process" — and it is the sentence that is
-now false.
+The base correctness record is deliberately inhabited. What the cycle rules out
+is the separate progress property instantiated with that record's invariant.
 -/
-theorem spin_is_not_correct : ¬ Nonempty (ProcessCorrect spin spinAcceptance) := by
-  rintro ⟨correct⟩
-  exact spin_has_no_progress_record correct.Invariant
-    (correct.initial () () (Bag.ofList [()]) [] ⟨rfl, rfl, rfl⟩) ⟨correct.progress ()⟩
+theorem spin_correct_has_no_progress :
+    ¬ Nonempty (MeetsProcessProgress spin spinAcceptance spinCorrect.Invariant ()) :=
+  spin_has_no_progress_record spinCorrect.Invariant
+    (spinCorrect.initial () () (Bag.ofList [()]) [] ⟨rfl, rfl, rfl⟩)
 
 end Grass.Process.Tests.Spin

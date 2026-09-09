@@ -1,4 +1,5 @@
 import Grass.Process.Correct
+import Grass.Process.Progress
 
 /-!
 # Two descent orders are not an order
@@ -19,8 +20,8 @@ started.
 bag grows — but the state rank falls, and the measure disjunct fires. From `true`
 it answers its demand and issues **none**, so the bag shrinks and the
 demand-result disjunct fires, leaving the rank free to climb back. `osc_cycles`
-exhibits the two steps returning the run state bit-for-bit, and `osc` had a full
-`ProcessCorrect`.
+exhibits the two steps returning the run state bit-for-bit. The base
+`ProcessCorrect` is inhabited; the separate progress property is not.
 
 Everything else about it is strict, so nothing else can be blamed:
 `ExternalEvent := PEmpty` (no entropy escape), `Demanded := fun _ => False` (no
@@ -195,7 +196,23 @@ theorem osc_is_never_stuck :
   · exact eventDeliverable_of_successorBag osc_expand_bag
   · exact eventDeliverable_of_successorBag osc_contract_bag
 
-/-! ## Why it is excluded -/
+/-! ## Its base correctness, and why progress excludes it -/
+
+/-- `osc` satisfies the safety and acceptance contract despite cycling. -/
+def oscCorrect : ProcessCorrect osc oscAcceptance where
+  Invariant := fun _ => True
+  initial := by intros; trivial
+  initialDemands := by intros; trivial
+  preserved := by intros; trivial
+  demandsWellFormed := by intros; trivial
+  terminal := by intros; trivial
+  terminalNoStep := by
+    rintro _ _ result _ _ _ _
+    exact result.elim
+  viewAccepts := by
+    intro facet hasView
+    exact absurd hasView (by simp [osc])
+  observationsAccept := by intros; trivial
 
 /-- Nothing `osc` emits is demanded. -/
 theorem osc_never_observes (segment : osc.Segment) :
@@ -237,19 +254,17 @@ theorem osc_has_no_progress_record (Invariant : osc.State → Prop)
     atFalse atTrue osc_expands_silently osc_contracts_silently
 
 /--
-**And therefore no correctness record either.**
+**And therefore its correctness invariant cannot satisfy progress.**
 
-The sentence the attack produced — "this livelock is a correct process" — and
-the one that is now false. The invariant hypotheses are discharged from
-`ProcessCorrect`'s own fields: `initial` at `false`, and `preserved` across the
-expanding step.
+The base correctness record is inhabited. Its `initial` and `preserved` fields
+supply the invariant hypotheses needed to refute the separate progress property.
 -/
-theorem osc_is_not_correct : ¬ Nonempty (ProcessCorrect osc oscAcceptance) := by
-  rintro ⟨correct⟩
-  have atFalse : correct.Invariant false :=
-    correct.initial () false one [] ⟨rfl, rfl, rfl⟩
-  have atTrue : correct.Invariant true :=
-    correct.preserved false true (.result () ()) two [] atFalse osc_expand
-  exact osc_has_no_progress_record correct.Invariant atFalse atTrue ⟨correct.progress ()⟩
+theorem osc_correct_has_no_progress :
+    ¬ Nonempty (MeetsProcessProgress osc oscAcceptance oscCorrect.Invariant ()) := by
+  have atFalse : oscCorrect.Invariant false :=
+    oscCorrect.initial () false one [] ⟨rfl, rfl, rfl⟩
+  have atTrue : oscCorrect.Invariant true :=
+    oscCorrect.preserved false true (.result () ()) two [] atFalse osc_expand
+  exact osc_has_no_progress_record oscCorrect.Invariant atFalse atTrue
 
 end Grass.Process.Tests.Oscillate

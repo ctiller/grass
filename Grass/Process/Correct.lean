@@ -1,15 +1,16 @@
-import Grass.Process.Progress
+import Grass.Process.Acceptance
 import Grass.Process.Run
 
 /-!
 # The application proof package
 
-This existing package bundles progress as well as functional process facts.
-Decision 136 does not make it a universal `VerifiedProgram` prerequisite.
-Before root integration, its progress component must be separated or indexed
-by the specification's selected demands. Existing consumers of this stronger
-helper retain their proofs; this module does not yet provide the general
-package without unconditional progress.
+This package carries invariant, acceptance, and demand-accounting facts without
+an unconditional progress requirement. The standalone `MeetsProcessProgress`
+proofs in `Grass.Process.Progress` are independent mathematical results, not
+additional `VerifiedProgram` certificate fields.
+Neither package alone is a `VerifiedProgram`: lower-layer safety, adequacy,
+complete behavioral refinement, and exact artifact correspondence remain
+separate obligations. Decision 136 fixes that distinction.
 
 `docs/PROCESS.md` §4. This is the record an application author fills in, and its
 size is the whole point: everything else in the process layer exists so that
@@ -82,7 +83,8 @@ The facts an application proves about one process.
 irrelevant-event stuttering, result correlation, cancellation, invariant framing,
 and deterministic `update` simplification. A functional update proof normally
 reduces to initial invariant, invariant preservation, view correctness, and
-process progress."
+any demanded process progress." Progress is a separate property, not a field
+of this base record or a per-property lowering certificate.
 -/
 structure ProcessCorrect (p : ProcessSpec.{u, w}) (accept : ProcessAcceptance p) :
     Type (max (u + 1) (w + 1)) where
@@ -157,9 +159,6 @@ structure ProcessCorrect (p : ProcessSpec.{u, w}) (accept : ProcessAcceptance p)
       (segmented : Segmented p.Observation) (runState : ProcessRunState p request),
     Reachable accept.terminalRemainder request segmented runState →
     accept.TraceAccepts runState.history
-  /-- The process meets its progress contract, for every request. -/
-  progress : ∀ request : p.Request,
-    MeetsProcessProgress p accept Invariant request
 
 namespace ProcessCorrect
 
@@ -171,7 +170,7 @@ Every reachable state satisfies the invariant.
 
 This is the induction an author does not write. `docs/PROCESS.md` §4 promises
 that "a functional update proof normally reduces to initial invariant, invariant
-preservation, view correctness, and process progress"; this theorem is what
+preservation, view correctness, and any demanded process progress"; this theorem is what
 turns the first two of those into a statement about runs.
 -/
 theorem invariant_of_reachable (correct : ProcessCorrect p accept)

@@ -1,4 +1,5 @@
 import Grass.Process.Correct
+import Grass.Process.Progress
 import Tests.Process.M1Fixtures
 
 /-!
@@ -303,7 +304,7 @@ def countdownCorrect : ProcessCorrect countdown countdownAcceptance where
     intro facet hasView
     exact absurd hasView (by simp [countdown])
   observationsAccept := by intros; trivial
-  progress := countdownProgress
+
 
 /--
 **`countdown` cannot tell the weakened terminal law from the strong one.**

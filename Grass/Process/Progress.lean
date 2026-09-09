@@ -4,23 +4,17 @@ import Grass.Process.Run
 /-!
 # Per-process progress
 
-`docs/PROCESS.md` §7:
+This module supplies standalone lemmas about one particular process progress
+property: a step consumes external entropy, emits a demanded observation, or
+decreases a well-founded measure. It does not establish whole-network liveness.
+Decisions 136–137 separate these mathematical results from `ProcessCorrect`
+and from the `VerifiedProgram` lowering certificate.
 
-> A process cycle must:
->
-> - decrease a well-founded internal measure;
-> - reach a law-bearing external/demand-result frontier in finite internal
->   work; or
-> - produce an independently specified observation.
-
-and, immediately after:
-
-> Local progress is necessary but insufficient. `ProcessNetworkAdequate` proves
-> the corresponding theorem over every maximal network execution.
-
-This module owns the first statement only. The network theorem is M4 work in
-`docs/PROCESS_IMPLEMENTATION_PLAN.md`, and nothing here should be mistaken for
-it.
+The development history below predates that separation. References to a
+"full `ProcessCorrect`" or exclusion from that record describe its former
+progress-bearing shape. The current spin and oscillation fixtures have base
+correctness proofs and separately refute `MeetsProcessProgress`; they are not
+rejected merely for diverging.
 
 ## Reading the three disjuncts at this layer
 

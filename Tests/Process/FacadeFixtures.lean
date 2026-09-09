@@ -186,4 +186,12 @@ error: Unknown identifier `Grass.Process.CancellationPolicy`
 #guard_msgs in
 example := Grass.Process.CancellationPolicy
 
+/-! Standalone progress proofs are not part of the base correctness facade. -/
+
+/--
+error: Unknown identifier `Grass.Process.MeetsProcessProgress`
+-/
+#guard_msgs in
+example := Grass.Process.MeetsProcessProgress
+
 end Grass.Process.Tests.Facade

@@ -1,4 +1,5 @@
 import Grass.Process.Correct
+import Grass.Process.Progress
 
 /-!
 # A process whose terminality depends on its request
@@ -185,6 +186,6 @@ def uptoCorrect : ProcessCorrect upto uptoAcceptance where
     intro facet hasView
     exact absurd hasView (by simp [upto])
   observationsAccept := by intros; trivial
-  progress := uptoProgress
+
 
 end Grass.Process.Tests.Prefix

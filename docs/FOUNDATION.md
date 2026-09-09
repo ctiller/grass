@@ -3,9 +3,12 @@
 ## 1. Mission
 
 `VerifiedProgram spec` means that the emitted code is safe and matches `spec`.
-Termination, responsiveness, productivity, and latency are required only when
-the specification demands them. They are not universal prerequisites of
-verified emission. Applicable platform, memory, ABI, and obligation safety
+Authors prove termination, responsiveness, productivity, latency, and other
+desired properties of the specification itself. These specification theorems
+are separate from the lowering certificate, not optional per-property fields
+of `VerifiedProgram` (decision 137). The lowering proves semantic correspondence
+and applicable safety; properties of the selected abstract behavior transfer
+through that correspondence. Applicable platform, memory, ABI, and obligation safety
 remain mandatory, including during divergence or indefinite waiting.
 
 Adequacy, faithful treatment of finite and infinite behavior, and the exact
@@ -29,7 +32,7 @@ artifact:
 - respects memory provenance, initialization, permissions, and race rules;
 - satisfies ABI and CFG entry contracts;
 - preserves, transfers, or closes every linear obligation lawfully;
-- meets any progress and liveness contract demanded by its specification; and
+- preserves the specified behavior on which the author's theorems depend; and
 - is the same program connected to the serialized executable bytes.
 
 Proof by running one execution is prohibited. Theorems over inputs, API results,

@@ -440,11 +440,12 @@ structure RequirementFamily where
   unique : demands.Keys.Nodup
 ```
 
-`VerifiedProgram` discharges every key separately and records the semantic
-facets actually consumed by its proof. Composition may derive a new demand from
-several old ones, but it cannot conflate them into one opaque “program correct”
-field. This is the basis for surgical invalidation and for diagnostics which
-name the unmet guarantee.
+The author proves these properties of the captured specification through
+`MeetsAllSpecificationTheorems spec`. Their keys and consumed semantic facets
+support local proof invalidation and diagnostics. They are not copied into
+`VerifiedProgram` as per-property lowering obligations. Lowering has its own
+keyed obligations for semantic correspondence and applicable safety. Shared
+keying infrastructure does not merge the two proof roles (decision 137).
 
 Grass deliberately does not freeze all future requirements into four permanent
 functional/resource/time/diagnostic buckets. Memory provenance, race freedom,
@@ -479,8 +480,9 @@ a first event in a finite prefix.
 
 Safety does not imply progress, and verified emission does not require a
 universal progress policy. `VerifiedProgram spec` requires safe code matching
-the selected specification (decision 136). Termination, responsiveness,
-productivity, and latency are authored demands. A specification may permit
+the selected specification (decisions 136–137). Termination, responsiveness,
+productivity, and latency are properties proved about the specification.
+They do not create optional `VerifiedProgram` certificates. A specification may permit
 internal divergence or indefinite waiting; refinement must retain those
 behaviors rather than silently discard them. Applicable safety obligations
 hold throughout them.
@@ -619,9 +621,13 @@ discharges the demand.
 
 For a deterministic specification, every conforming execution must produce its
 specified projected observation for the same environmental choices. For a
-permissive specification, implementation observations must be a subset of the
-allowed behavior relation. Infinite traces use coinductive/trace refinement;
-finite terminating cases may use ordinary equality or simulation.
+permissive specification, absence of extra implementation behavior is only one
+direction of the required correspondence. Decision 137 requires equivalence of
+the selected abstract behavior after projection so that author theorems about
+that behavior transfer without separate lowering obligations. Relevant choice,
+scheduling, divergence, pending, and complete-history structure must be retained;
+equality of terminating outputs alone is insufficient. The current foundation's
+forward `BehaviorRefinement` does not yet establish this equivalence.
 
 Optimization may change instruction traces, layout, timing, or internal API
 structure only if it preserves the selected functional observation and every

@@ -5,8 +5,9 @@ may evolve, but no implementation may merge independent demands in a way that
 makes a weaker theorem appear to discharge a stronger one.
 
 `VerifiedProgram spec` means safe emitted code matching `spec` (decision 136).
-Termination, responsiveness, productivity, and latency are certified when
-demanded by `spec`; they are not additional universal compilation conditions.
+Author theorems about termination, responsiveness, productivity, fairness,
+latency, or other properties are proved against `spec`, outside this certificate
+(decision 137). They are not even optional per-property lowering fields.
 Applicable safety, non-vacuous execution semantics, faithful treatment of
 divergence and waiting, and the exact emitted-byte connection remain mandatory.
 
@@ -20,7 +21,7 @@ captured into that value; implementation process graphs merely realize it.
 structure VerifiedProgram {R : Type u} [ResourceModel R]
     {resources : R} (spec : SpecProcess resources) where
   process               : ProcessRealization spec
-  portableCorrectness   : ProcessModelSatisfiesSpecification
+  portableCorrectness   : ProcessModelEquivalentToSpecification
                              process.model spec
   realization           : PlatformPlan process.boundary.requirements
   machineSource         : MachineSource realization
@@ -48,9 +49,7 @@ structure VerifiedProgram {R : Type u} [ResourceModel R]
   requirementClosure    : AllRequirementsDischarged ghostProgram realization
   stepApplicability     : AllReachableStepsApplicable ghostProgram realization
   prefixSafety          : EveryPermittedPrefixSafe ghostProgram realization
-  progressCertificates  : CertificatesForDeclaredProgressDemands spec ghostProgram
-  livenessCertificates  : CertificatesForDeclaredLivenessDemands spec realization
-  functionalRefinement  : Refines ghostProgram spec
+  semanticCorrespondence : AbstractBehaviorEquivalent ghostProgram spec
   abiCorrectness        : EveryBoundarySatisfiesABI ghostProgram realization
   obligationCorrectness : ObligationsMatchSpecification ghostProgram spec realization
   terminalProtocols     : TerminalProtocolsFor
@@ -70,21 +69,27 @@ structure VerifiedProgram {R : Type u} [ResourceModel R]
   loadDomainsIndependent : IndependentLoadDomains realization linkedArtifact
   loadable              : EveryAdmissibleEnvironmentLoads
                              (write linkedArtifact) realization
-  endToEnd               : LoadedBytesBehaviorIncluded
+  endToEnd               : LoadedBytesAbstractBehaviorEquivalent
                              (write linkedArtifact) ghostProgram spec realization
 ```
 
 The listing above is the **audit inventory of independent demands**, not a
-mandate for one flat elaboration telescope. `livenessCertificates` denotes only
-the selected keyed demands; it requires no liveness theorem when there are
-none. The implementation groups the inventory
+mandate for one flat elaboration telescope. It contains lowering obligations,
+not certificates for the author's theorem collection. The implementation groups the inventory
 behind stratified exported certificates:
 
-`requirementClosure` is not a handwritten theorem checklist. Each specification
-DSL contributes portable keyed demands while the suite is captured. Projection,
+`requirementClosure` is not a checklist of author theorems. Each specification
+DSL exposes the semantic boundary that lowering must implement. Projection,
 provider, machine, and artifact stages then derive disjoint obligation families
 with total origin maps. Target-specific facts are never inserted into the
 precious `SpecProcess.requirements`:
+
+Here `spec.requirements` denotes obligations arising from implementation of the
+semantic boundary, not the author proofs in `spec.suite.theorems`. Adding a new
+theorem about an unchanged denotation does not extend this lowering inventory.
+The current minimal Lean root still exposes a generic `DemandFamily`; the
+captured-root migration must make these two roles explicit rather than treating
+that generic field as permission to import the author's theorem checklist.
 
 ```lean
 structure StagedObligationFamily
@@ -188,12 +193,13 @@ reuses machine behavior. Exact witnesses remain inside the tiers and the final
 theorem consumes all of them, so stratification does not weaken adjacency or
 permit an extensionally similar source to replace the authored one.
 
-`DemandCertificateFamily` retains the separately keyed functional, safety,
-memory, concurrency, progress, termination, resource, obligation,
-applicability, diagnostic, and artifact theorems. Grouping them by dependency
-tier does not conflate their statements or make one theorem discharge another.
-Progress and termination entries occur when demanded by the specification;
-enumerating their kinds does not mandate an entry of every kind.
+`DemandCertificateFamily` retains separately keyed lowering obligations:
+semantic correspondence, safety, memory, concurrency, resource custody,
+applicability, and exact artifact connection. Grouping them by dependency tier
+does not conflate their statements or make one theorem discharge another.
+A local progress lemma may justify a simulation or an abstraction, but the
+compiler does not generate one obligation for each author theorem about progress.
+The specification's theorem family has a separate owner and proof consumer.
 
 `VerifiedProgram` remains indexed only by the precious `spec`. `portable.model.origin`
 records whether the plan was synthesized from a sequential relational program
@@ -206,8 +212,8 @@ does not mean ambiguity.
 
 `portableCorrectness` is the independently reusable high-level theorem. It is
 proved over the portable process/model semantics before platform selection or
-machine realization. `functionalRefinement` is not a duplicate of it: it shows
-that the selected ghost-bearing machine behavior refines that proved process
+machine realization. `semanticCorrespondence` is not a duplicate of it: it shows
+that the selected ghost-bearing machine behavior has the same abstract behavior as that proved process
 model. `endToEnd` composes this adjacency with exact source and artifact
 identity. Implementations may package these fields into stratified certificates
 to keep rebuild cones narrow; the conceptual interface lists the independent
@@ -247,9 +253,12 @@ and starting the exact bytes returned by `write linkedArtifact` is matched by a
 permitted ghost-program execution and therefore satisfies the independently
 proved mandatory demands.
 
-For a specification selecting the standard `environmentResponsive` contract,
-its selected liveness certificate contains the following witnesses. These are
-not unconditional fields of `VerifiedProgram`.
+The standard `environmentResponsive` proof library may use the witnesses below
+to prove a property of a specification or establish the semantic correspondence
+of a particular provider abstraction. They do not form a separate liveness
+certificate demanded by `VerifiedProgram`. A lowering must faithfully implement
+the chosen environment semantics whether or not an author has proved a theorem
+about those semantics.
 
 `concreteLivenessInhabited` proves the selected providers' assumptions are
 jointly satisfiable. `livenessProjection` names the abstract branching strategy
@@ -262,16 +271,15 @@ those satisfying the named timing/fairness premise,
 value or dependent response branch, and
 `livenessResponsive` proves responsiveness of every compatible maximal
 continuation. A constant unrelated abstract strategy cannot discharge the
-coupling. Abstract inhabitance is derived from that selected certificate's
-concrete witness and projection laws. It is not a theorem available from an
-arbitrary `VerifiedProgram spec` without the corresponding demand.
+coupling. Abstract inhabitance is derived from the concrete witness and
+projection laws. It is not a theorem available from an arbitrary
+`VerifiedProgram spec`.
 
-The fields remain separate theorem demands, but ordinary sequential providers
+The witnesses remain separately stated lemmas, but ordinary sequential providers
 use one library constructor which produces them from “every external call
 settles” plus the program's between-frontier measure. The public application
-theorem consumes the selected demand's certificate, its concrete strategy, and
-each compatible execution. It establishes the liveness property named by that
-demand for every such execution. Other authored liveness properties use their
+theorem consumes the relevant library lemmas, its concrete strategy, and
+each compatible execution. Other authored liveness properties use their
 own statements and proofs; this standard strategy construction is not imposed
 on them merely because they concern progress.
 
@@ -291,8 +299,10 @@ functional refinement or generic response adequacy.
 receive the complete guarantee above; environment-violation executions receive
 only the maximal matched safe-prefix result defined below.
 
-Behavioral inclusion is from loaded bytes to the proved program; the raw or
-loaded machine may not acquire extra behavior. The matching relation covers
+The required correspondence is equivalence of the selected abstract behavior
+after the declared projection, not instruction-trace identity. The raw or
+loaded machine may not acquire extra behavior or lose behavior needed by that
+equivalence. The matching relation covers
 admissible initial states and load bases, coupled environment/oracle choices,
 finite and infinite executions, divergence, terminal results, faults,
 interruptions, complete audit events, projected observations, ABI state, and
@@ -304,8 +314,11 @@ substitutes for any field.
 
 ## 2. Fundamental theorem
 
-The public theorem has this shape, with profile-specific details hidden behind
-named definitions rather than omitted:
+The forward soundness theorem has this shape, with profile-specific details
+hidden behind named definitions rather than omitted. It is one direction of
+the abstract-behavior equivalence required by decision 137; backward behavior
+and choice coverage remain a separate necessary part of that correspondence.
+The current Lean foundation implements forward inclusion only.
 
 ```lean
 theorem emitted_sound
@@ -337,7 +350,7 @@ context, base, imports, loaded machine, trace, and modeled-execution occurrence;
 it is not an opaque escape hatch:
 
 - `conforming` supplies a matching ghost execution, coinductive trace/observation
-  refinement, universal prefix safety, applicable progress/liveness, ABI
+  refinement, universal prefix safety, ABI
   correctness, and matching obligation behavior. If and only if the trace has a
   finite specified terminal result, it additionally supplies terminal
   specification acceptance; or
@@ -353,9 +366,10 @@ prefix plus the exact first violating step. Neither may switch to a different
 loaded machine, oracle history, or occurrence with extensionally similar data.
 
 For an infinite conforming `trace`, no completed result or terminal observation
-is fabricated. It carries coinductive trace refinement and the applicable
-progress fact. A conditional-liveness theorem excludes that trace only when its
-universally quantified responsive-strategy premise holds. The trace-matching relation is not
+is fabricated. It carries coinductive trace correspondence. An author theorem
+may exclude that behavior under a stated premise; its consequence transfers
+through the same semantic correspondence rather than a new compiler progress
+field. The trace-matching relation is not
 arbitrary: its owner proves preservation/reflection of mandatory audit events,
 faults, termination/divergence, environment coupling, ABI states, and
 observations.

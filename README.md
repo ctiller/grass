@@ -19,11 +19,12 @@ The public goal is deliberately simple:
 emitProgram : VerifiedProgram spec → ByteArray
 ```
 
-The intended contract is safe emitted code matching `spec`. Termination,
-responsiveness, productivity, and latency are required when the specification
-demands them, not as universal conditions for compilation. Verification must
-still account for divergence and waiting, and connect its proofs to the exact
-emitted bytes.
+The intended contract is safe emitted code matching `spec`. Authors prove
+properties such as termination, responsiveness, fairness, and latency about
+the specification. Those proofs are separate from the lowering certificate:
+the compiler proves safety and semantic correspondence, not a new certificate
+for each author theorem. Correspondence must account for divergence and waiting
+and connect the proofs to the exact emitted bytes.
 
 `emitProgram v` produces an executable artifact for `v`'s selected platform.
 The current minimal `VerifiedProgram` certificate composes exact adjacent
@@ -32,7 +33,10 @@ continuation available from every finite frontier, selected demand
 certificates, and the connection between the
 modeled loaded artifact and the bytes that were emitted. This is a non-stuck
 may-completion property, not universal termination or liveness: a relational
-system may still admit other infinite executions. Concrete memory, concurrency,
+system may still admit other infinite executions. The current forward-inclusion
+proof is not yet the full abstract-behavior equivalence required to transport
+arbitrary authored properties; in particular it does not reflect all portable
+choices or possible executions. Concrete memory, concurrency,
 ABI, and other domain guarantees become part of the result only when a domain
 layer exposes them as explicit demands and supplies their certificates.
 

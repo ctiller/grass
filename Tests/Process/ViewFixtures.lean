@@ -1,4 +1,5 @@
 import Tests.Process.M1CorrectFixtures
+import Grass.Process.Progress
 
 /-!
 # A process that has a view
@@ -211,7 +212,7 @@ def gaugeCorrect : ProcessCorrect gauge gaugeAcceptance where
     show remaining.render state = intendedView state
     cases state <;> rfl
   observationsAccept := by intros; trivial
-  progress := gaugeProgress
+
 
 /--
 The obligation, spent at the facet the specification actually carries.
