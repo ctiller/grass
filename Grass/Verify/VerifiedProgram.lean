@@ -1,4 +1,4 @@
-import Grass.Certificate
+import Grass.Refinement.Coverage
 
 /-!
 # VerifiedProgram composition
@@ -99,6 +99,19 @@ def refinement (verified : VerifiedProgram spec) :
   BehaviorRefinement.castConcrete verified.loadedBehavior_exact
     (((verified.artifact.refinement.trans verified.machine.refinement).trans
       verified.provider.refinement).trans verified.driver.refinement)
+
+/-- Loaded and portable behaviors cover the same represented finite and
+divergent histories. Author liveness and fairness remain separate demands. -/
+theorem coverage (verified : VerifiedProgram spec) :
+    BehaviorRefinement.Coverage verified.refinement :=
+  BehaviorRefinement.Coverage.castConcrete verified.loadedBehavior_exact
+    (((verified.artifact.coverage.trans verified.machine.coverage).trans
+      verified.provider.coverage).trans verified.driver.coverage)
+
+/-- Every portable prefix/completion history has an exact loaded preimage. -/
+theorem histories_surjective (verified : VerifiedProgram spec) :
+    Function.Surjective verified.refinement.mapHistory :=
+  verified.coverage.histories
 
 /-- Fundamental behavioral inclusion for every admitted loaded execution. -/
 theorem sound (verified : VerifiedProgram spec)
