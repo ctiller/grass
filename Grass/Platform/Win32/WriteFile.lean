@@ -136,7 +136,7 @@ theorem Publication.append_prefix {bytes output : Vec Byte} {before after : Nat}
   congr 1
   omega
 
-/-- Exact observed prefixes cannot publish a duplicate leading chunk. -/
+/-- `Publication.output_unique` fixes the output at a chosen pair of endpoints. -/
 theorem Publication.output_unique {bytes left right : Vec Byte} {before after : Nat}
     (a : Publication bytes before after left) (b : Publication bytes before after right) :
     left = right := a.suffix.trans b.suffix.symm
@@ -196,8 +196,8 @@ structure HandoffCausality (model : CausalModel) (call : CallProtocol.CallId)
     model.precedes after (.event old.event.id) (.entry call)
 
 /-- Fixed graph obligations, including actual matched entry and exact new events.
-There is deliberately no return node in this pending-prefix interface. These
-premises cannot alter today's checker, which does not consume causal evidence. -/
+There is deliberately no return node in this pending-prefix interface.
+Integrating these premises with `Grass.Op.step` is an open obligation. -/
 structure CausalEvidence (model : CausalModel) (call : CallProtocol.CallId)
     (record : CallProtocol.Pending Request) (action : Action)
     (before after : CallProtocol.State Request) (added : List ValidMemoryEvent) : Prop where
@@ -227,8 +227,8 @@ structure CausalEvidence (model : CausalModel) (call : CallProtocol.CallId)
 the exact occurrence, action, worlds, counts and bytes; no default is supplied. -/
 structure Realization where
   causal : CausalModel
-  /-- Physical dispatch of this action to this occurrence. The generic protocol
-  step cannot establish this, especially when an agent serves multiple calls. -/
+  /-- `Realization.executesFor` is an open physical-dispatch obligation,
+  including when an agent serves multiple calls. -/
   executesFor : CallProtocol.CallId → CallProtocol.Pending Request → Action →
     CallProtocol.State Request → CallProtocol.State Request → Prop
   publishes : CallProtocol.CallId → CallProtocol.Pending Request → Action →

@@ -85,6 +85,7 @@ import Grass.Op.Step
 import Grass.Op.CallProtocol
 import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Signatures
+import Grass.Platform.Win32.WriteFile
 import Grass.Process
 import Grass.Process.Acceptance
 import Grass.Process.Bag
