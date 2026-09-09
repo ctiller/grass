@@ -92,6 +92,7 @@ import Grass.Platform.Win32.RawServiceMetadata
 import Grass.Platform.Win32.RawServiceContinuation
 import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.GetStdHandleRuntime
+import Grass.Platform.Win32.GetStdHandleStackPlan
 import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
