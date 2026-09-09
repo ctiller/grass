@@ -252,8 +252,11 @@ which breaks under a replacement that produces the same observations in a
 different number of steps. Deleting it left `docs/PROCESS.md` §4's observation
 causality with nothing to be stated over — the module was 186 lines with no
 consumer. Carrying it as an index gives `Reachable.observationCausality` without making it
-state; acceptance never reaches it either way, since
-`Grass/Process/Acceptance.lean` does not mention `Segmented`.
+state; acceptance never reaches it either way, because
+`ProcessAcceptance.TraceAccepts` takes the flat `Trace p.Observation`, so no
+clause can be handed a segmentation whatever carries it. (An earlier version of
+this sentence gave the reason as `Grass/Process/Acceptance.lean` not mentioning
+`Segmented`, which is true of the tree today rather than of the type. §10.137.)
 
 **Decided — `ProcessCorrect.progress` is indexed by request.**
 [PROCESS.md](PROCESS.md) §4 writes `progress : MeetsProcessProgress p`. The
@@ -5164,7 +5167,7 @@ have componentwise agreements. What it lacks is narrower, and naming it took two
 more attempts.
 
 The fourth round's fix said *separating*: no agreement reading distinct
-components at distinct fragments. The fifth round refuted that too, and again
+components at distinct fragments. The next round refuted that too, and again
 by compiling — `orderedSplitAgreement` reads one component at one fragment and
 the other at another, in the plainest sense of reading, and glues. Gluing needs a
 mixture that *agrees* with each argument on its side of the split; it does not
@@ -5179,7 +5182,7 @@ fixture, because the distinction is exactly what three rounds of prose kept
 getting wrong and no sentence had ever been made answerable for.
 
 The witness changed too. It was a TangledWorld whose two components were
-pinned *equal*, and the fifth round showed that made every determining agreement
+pinned *equal*, and a later round showed that made every determining agreement
 over it an instance of the equality degeneracy
 `WorldAgreement.subsingleton_of_forced_equality` already covered — so the theorem
 was that theorem in disguise and its hypotheses were `forcesEqual` wearing
@@ -5191,7 +5194,7 @@ its premises standing, and grep finds that. A correction can also *overshoot*,
 and grep cannot find that, because nothing it contradicts is left in the tree to
 contradict it. Three consecutive rounds found an overshoot here, each one a
 narrowing of the last, and each was caught by somebody writing the
-counterexample rather than by reading. The fifth round found two more of the
+counterexample rather than by reading. That round found two more of the
 same shape: `agreesGlue` "excludes the equality agreement and no more than
 that", which `orderedComponentwise_is_not_equality` refutes in the other
 direction, and "the degenerate agreement is no longer a `WorldAgreement`", which
@@ -5211,7 +5214,7 @@ And the file's title said "The footprint is a bound, not a label" for all five
 rounds, three lines above a bullet the third round corrected and in the file that
 now contains `leakyLeak`, whose footprint *is* a label.
 
-**The sixth round, and the quantifier nobody had looked at.** Three rounds
+**And then the quantifier nobody had looked at.** Three rounds
 narrowed the predicate on the *agreement* -- componentwise, separating,
 determining. None touched the quantifier over *worlds*, and that is where the
 claim was false, in both directions at once.
@@ -5249,6 +5252,58 @@ exhibits a non-equality agreement rather than the one showing the law rejects it
 `Grass/Process/Observation.lean` carried two consecutive sentences pointing at
 the same note; and one event was dated by two incompatible round numberings, this
 entry's and the fixture's.
+
+**And then the theorem, which had been available the whole time.** The round
+after the four cases went looking for it rather than for a sixth adjective, and
+found that for an agreement *determining* two components at two fragments,
+gluing holds exactly when those components range over a **rectangle** -- when
+every combination of one world's first and another's second is realised by some
+world. `determining_glue_forces_rectangle` is the forward direction,
+`rectangle_gives_glue` the converse.
+
+So the previous round's conclusion -- "what decides `agreesGlue` is whether the
+mixture exists, a fact about the world and the agreement together, reducing to
+neither" -- was a tautology in its first clause and false in its second. For a
+determining agreement it reduces exactly to a property of the world alone.
+
+Two things fall out that five rounds of prose had missed.
+`ordered_is_not_a_rectangle` and `bounded_is_a_rectangle` make the first two
+cases one criterion rather than an unexplained pair. And `BoundedTiedWorld`'s
+`tie` being implied by its per-component bounds is *forced*, not a lucky choice
+of fixture: by the forward direction, no world whose invariant genuinely
+constrains the pair can admit a determining agreement at all. The case therefore
+witnesses something much narrower than "carrying a cross-fragment invariant costs
+a world nothing" -- it witnesses that a *redundant* one costs nothing.
+
+**The instructive part is that the shape was not the problem.** The previous
+round concluded that "no witness can be built" was the wrong shape of claim and
+withdrew it. Half right: the claim was wrong because nobody had looked for the
+criterion, and "no implication exists between these two properties" is itself a
+class-level claim, weaker than what the tree can prove. Withdrawing a claim is
+not the same as finding the right one.
+
+Six smaller findings, all in the previous round's fix again. The four cases were
+named over three different property pairs in three files, and the axis the
+fixture header listed first -- whether the world carries an invariant -- is
+constant across all four, so "all four combinations" was false of the axes it had
+just listed. Corner three against corner four varied two things at once and then
+named one of them as the difference; `orderedParity_glues` and `mirrorHalf_glues`
+hold each fixed in turn and show neither is. "Determines neither component" had a
+witness for one of the two. `MirrorWorld` readmits the shape `OrderedWorld`'s
+docstring rejects, legitimately but without saying so. One event was dated by two
+incompatible round numberings for the second round running -- the fixture's
+ordinals are now driven from this entry rather than counted separately. And
+§10.13's own paragraph at the top of this file still gave the reason this entry
+demotes.
+
+**One of my own, and the worst kind.** `Grass/Process/Function/Serial.lean` said
+`footprintSeparates` is "unsatisfiable outright" at a subsingleton `State`. It is
+not: nothing requires `footprintAgrees` to be reflexive, so a contract with an
+uninhabited `Post` and `footprintAgrees := fun _ _ => False` satisfies it at
+`Unit`, and a reviewer compiled one. The true statement is conditional on `Post`
+holding somewhere, which is what `agent-bus` `g-design:152` actually found and
+what my restatement dropped. That is a claim that no witness can be built, made
+in the same commit whose ledger entry says not to make them.
 
 **On the script, which an earlier version of this entry overclaimed.** It said
 the sweep "has to be a script ... the script is what the next round is

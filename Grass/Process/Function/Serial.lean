@@ -196,9 +196,13 @@ structure SerialFunctionContract (State : Type w) : Type (w + 1) where
   the footprint that separates nothing, which `agreesGlue` permits —
   `Tests/Process/AssertionFixtures.lean`'s `blindAgreement` is that agreement and
   satisfies the law. `agreesGlue` rules out the equality agreement, which this
-  permits wherever `State` has two inhabitants -- at a subsingleton `State`
-  `footprintSeparates` is unsatisfiable outright, which is `agent-bus`
-  `g-design:152`'s finding against this very field. Neither forces the declared
+  permits wherever `State` has two inhabitants. At a subsingleton `State` this
+  field is unsatisfiable for any contract whose `Post` holds anywhere, since
+  `postWithinFootprint` then pins the only pair there is -- that condition is
+  `agent-bus` `g-design:152`'s finding, and an earlier version of this sentence
+  dropped it and said "unsatisfiable outright", which is false: a contract with
+  an uninhabited `Post` and `footprintAgrees := fun _ _ => False` satisfies it at
+  `Unit`. Neither forces the declared
   footprint to be the real one; §10.137.
 
   Doing better needs the footprint

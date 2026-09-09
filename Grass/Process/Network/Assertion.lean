@@ -72,22 +72,29 @@ there — but ease is not demand.
 world of any shape, and `orderedAgreement` is it instantiated at one carrying a
 cross-fragment invariant as a field.
 
-**What a badly shaped world costs is not stated here**, because five attempts
-to state it were all refuted by somebody compiling a witness, and the fifth was
-refuted in both directions at once.
+**What a world costs an agreement that determines two of its components** is a
+theorem, and three attempts to state it as a property of the world's *shape* were
+each refuted by somebody compiling a witness. The attempts went: a world carrying
+a cross-fragment invariant has no componentwise agreement; no *separating* one;
+no *determining* one. All false.
 
-The attempts went: such a world has no componentwise agreement; no *separating*
-one; no *determining* one. All false. Carrying a cross-fragment invariant as a
-field costs a world nothing by itself — `Tests/Process/AssertionFixtures.lean`'s
-`boundedAgreement` determines two components of such a world at two fragments and
-glues — and an agreement that merely looks at two components is not thereby safe,
-since `mirrorLooks` determines neither and has no glue.
+The criterion is not about invariants. For an agreement whose clauses determine
+two components at two fragments, gluing holds exactly when those components range
+over a **rectangle** — when every combination of one world's first and another's
+second is realised by some world.
+`Tests/Process/AssertionFixtures.lean`'s `determining_glue_forces_rectangle` is
+the forward direction and `rectangle_gives_glue` the converse, so this reduces to
+a property of the world alone, which the previous version of this paragraph said
+it did not.
 
-What decides `agreesGlue` is whether the mixture it asks for exists, which is a
-fact about the world and the agreement *together*. That file's four corners
-exhibit all four combinations, which is why no implication between the two
-properties holds. Where a mixture does not exist, the assertions that agreement
-would frame have to be framed some other way. §10.137.
+Two consequences worth stating, because five rounds of prose here missed them.
+A cross-fragment field costs nothing when it is *implied* by per-component
+bounds, since the world is then still a rectangle — and by the forward direction
+that is the only kind such a field can be, so `boundedAgreement`'s existence is
+forced rather than lucky. And an agreement that merely *looks* at two components
+is not thereby safe: `mirrorLooks` determines neither and still has no glue, so
+the criterion says nothing about non-determining agreements, of which the file
+holds one on each side. §10.137.
 
 ## The world is abstract on purpose
 
@@ -231,7 +238,8 @@ An interface rather than a definition, because the world is
 module supports.
 
 The first three laws are what a framing argument uses. `agreesGlue` excludes
-the *equality* agreement, under which framing would say nothing at all. It does
+the *equality* agreement wherever the world has two distinct inhabitants, under
+which framing would say nothing at all. It does
 not make a footprint a bound in general —
 `Tests/Process/AssertionFixtures.lean`'s `leakyLeak` is an assertion framed by a
 footprint it reads past, and `leaky_footprint_reads_outside_it` is the
@@ -256,7 +264,10 @@ structure WorldAgreement {registry : ProtocolRegistry.{u, w, v}}
   /--
   **Any two worlds can be mixed along any set of fragments.**
 
-  This is what excludes the *equality* agreement, under which agreeing on a
+  This is what excludes the *equality* agreement — at any world with two
+  distinct inhabitants; at a subsingleton it stays a `WorldAgreement`, and
+  `subsingleton_of_forced_equality` states the conclusion with that case
+  included — under which agreeing on a
   proper footprint would force agreement everywhere: gluing at that footprint
   would have to produce a world agreeing with `left` inside and `right` outside,
   and under equality no such world exists unless `left = right`.
