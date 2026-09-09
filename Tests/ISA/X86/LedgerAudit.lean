@@ -429,7 +429,9 @@ def notModelling : List Name :=
   [`Grass.ISA.X86.Citation, `Grass.ISA.X86.DualCitation,
    `Grass.ISA.X86.Sources, `Grass.ISA.X86.Ledger,
    `Grass.ISA.X86.Profile, `Grass.ISA.X86.Performance,
-   `Grass.ISA.X86.EncodingTemplate]
+   `Grass.ISA.X86.EncodingTemplate,
+   -- Import-only frontend facade; it declares no platform behavior.
+   `Grass.Platform.Win32]
 
 /--
 Every Lean module found under `root` on disk, as a module name.
