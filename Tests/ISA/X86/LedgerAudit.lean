@@ -36,6 +36,10 @@ import Grass.ISA.X86.Execution.FetchFactory
 import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
 import Grass.ISA.X86.Execution.CallNormal
+import Grass.ISA.X86.Execution.CallFactory
+import Grass.ISA.X86.Execution.CheckedChoice
+import Grass.ISA.X86.Execution.ReturnSlotRead
+import Grass.ISA.X86.Execution.ReturnSlotFactory
 import Grass.ISA.X86.LinearAddress
 import Grass.ISA.X86.Execution.StackInstruction
 import Grass.ISA.X86.Execution.CompletionFlags
@@ -55,6 +59,7 @@ import Grass.Platform.Win32.LoadedDataAccess
 import Grass.Platform.Win32.CpuVocabulary
 import Grass.Platform.Win32.CpuPolicy
 import Grass.Platform.Win32.ExecutionState
+import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest
@@ -182,6 +187,9 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.FetchFactory, `Grass.ISA.X86.Execution.ComputationFactory,
    `Grass.ISA.X86.Execution.PushFactory,
    `Grass.ISA.X86.Execution.CallNormal,
+   `Grass.ISA.X86.Execution.CallFactory, `Grass.ISA.X86.Execution.ReturnSlotRead,
+   `Grass.ISA.X86.Execution.CheckedChoice,
+   `Grass.ISA.X86.Execution.ReturnSlotFactory,
    `Grass.ISA.X86.LinearAddress,
    `Grass.ISA.X86.Execution.StackInstruction, `Grass.ISA.X86.Execution.CompletionFlags,
    `Grass.ISA.X86.Decode,
@@ -197,6 +205,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.LoadedDataAccess,
    `Grass.Platform.Win32.CpuPolicy,
    `Grass.Platform.Win32.ExecutionState, `Grass.Platform.Win32.WriteFileAbi,
+   `Grass.Platform.Win32.RawState,
    `Grass.Platform.Win32.WriteFileArguments,
    `Grass.Platform.Win32.ApiRequest,
    `Grass.Platform.Win32.WriteFileCallPlan,
@@ -323,7 +332,9 @@ acquiring a citation.
 -- Fixed dispatch and access factories add thirty checked structural helpers.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
-def notBehaviourBaseline : Nat := 267
+-- Five raw/checked view operations retain data and assert no target semantics.
+-- One adapter derives the Windows binding from retained actual CALL receipts.
+def notBehaviourBaseline : Nat := 279
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -467,6 +478,13 @@ def notBehaviour : List Name :=
     -- Packages the existing checked PE writer, reader and roundtrip theorem.
     -- It introduces no alternate serialization, loader rule or format fact.
     `Grass.Artifact.PE.encoding,
+    `Grass.Platform.Win32.ExecutionState.State.raw,
+    `Grass.Platform.Win32.ExecutionState.RawState.ProtocolValid,
+    `Grass.Platform.Win32.ExecutionState.RawState.checked?,
+    `Grass.Platform.Win32.ExecutionState.RawState.ControlConsistent,
+    `Grass.Platform.Win32.ExecutionState.RawState.withMachine,
+    -- Proof-bearing projection of the selected fixed CALL factory receipt.
+    `Grass.Platform.Win32.WriteFile.CallPolicy.ofFactory,
     -- Exact table views, fixed-plan predicates and checked bookkeeping adapters;
     -- they assert no native provider or CPU adequacy beyond their premises.
     `Grass.Platform.Win32.WriteFile.EntryHandoff.after,
@@ -681,6 +699,14 @@ def notBehaviour : List Name :=
     -- Constructive SUB RSP routing and projection of its already-modeled receipt.
     `Grass.ISA.X86.Execution.ComputationFactory.SubRspSuccess.result,
     `Grass.ISA.X86.Execution.ComputationFactory.subRsp,
+    -- Fixed CALL and return-slot routing delegates to the modeled access and
+    -- CALL receipts; projections and read-policy plumbing add no CPU transfer.
+    `Grass.ISA.X86.Execution.CallFactory.Success.result,
+    `Grass.ISA.X86.Execution.CallFactory.reachedAfterAccess,
+    `Grass.ISA.X86.Execution.CallFactory.call,
+    `Grass.ISA.X86.Execution.ReturnSlotFactory.readPolicy,
+    `Grass.ISA.X86.Execution.ReturnSlotFactory.accessReached,
+    `Grass.ISA.X86.Execution.ReturnSlotFactory.read,
     -- Fixed PUSH routing constructs the separately modeled PushNormal receipt;
     -- its failure projection retains the actual already-reached machine.
     `Grass.ISA.X86.Execution.PushFactory.push,

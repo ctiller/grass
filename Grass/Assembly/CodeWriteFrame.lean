@@ -9,7 +9,7 @@ namespace Grass.Assembly.CodeWriteFrame
 
 open Grass.Memory Grass.ISA.X86 Grass.ISA.X86.Execution
 
-/-- PUSH preserves every allocation record, including the selected code record. -/
+/-- `push_allocation` preserves every allocation record across an actual PUSH. -/
 theorem push_allocation {before : State} {afterFetch afterStore : MachineState}
     {register : Gpr} (receipt : PushNormal before afterFetch afterStore register)
     {code : AllocId} {record : AllocationRecord}
@@ -47,7 +47,7 @@ theorem push_cell {before : State} {afterFetch afterStore : MachineState}
         exact distinct touched.1
     _ = _ := by rw [fetchMemory]
 
-/-- CALL's return-address stack write preserves every allocation record. -/
+/-- `call_allocation` preserves every allocation record across the actual CALL write. -/
 theorem call_allocation {before : State} {afterFetch afterRead afterStore : MachineState}
     {displacement : BitVec 32}
     (receipt : CallNormal before afterFetch afterRead afterStore displacement)

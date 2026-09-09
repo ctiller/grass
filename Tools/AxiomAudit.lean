@@ -22,6 +22,7 @@ import Grass.Op.PreparedPlacement
 import Grass.ISA.X86.Execution.AccessRun
 import Grass.ISA.X86.Execution.Fetch
 import Grass.ISA.X86.Execution.FetchedEncoding
+import Grass.Assembly.PrologueFactory
 import Grass.Assembly.CodeWriteFrame
 import Grass.Assembly.LoadedCodeRoot
 import Grass.Assembly.LoadedFetchObservation
@@ -59,6 +60,10 @@ import Grass.ISA.X86.Execution.FetchFactory
 import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
 import Grass.ISA.X86.Execution.CallNormal
+import Grass.ISA.X86.Execution.CallFactory
+import Grass.ISA.X86.Execution.CheckedChoice
+import Grass.ISA.X86.Execution.ReturnSlotRead
+import Grass.ISA.X86.Execution.ReturnSlotFactory
 import Grass.ISA.X86.LinearAddress
 import Grass.Semantics.OutputCut
 import Grass.Specification.TextLine
@@ -89,6 +94,7 @@ import Grass.Platform.Win32.LoadedDataAccess
 import Grass.Platform.Win32.CpuVocabulary
 import Grass.Platform.Win32.CpuPolicy
 import Grass.Platform.Win32.ExecutionState
+import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.WriteFileAbi
 import Grass.Platform.Win32.WriteFileArguments
 import Grass.Platform.Win32.ApiRequest

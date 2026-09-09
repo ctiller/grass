@@ -11,6 +11,29 @@ namespace Grass.Assembly.LoadedCodeRoot
 open Grass.Std.Logical Grass.Memory Grass.Artifact
 open Grass.Platform.Win32 Grass.Platform.Win32.Loader
 
+/-- The installed source code and checked entry stack are distinct allocations.
+Their authoritative records have different allocation sources. -/
+theorem code_stack_distinct {frame rootOffset}
+    {source : SourceResolve.Result frame rootOffset} {image : ImageInput}
+    {inputs : EntryInputs} {sectionIndex : Nat}
+    (binding : SourceImage.CodeSection source image.plan sectionIndex)
+    (loaded : LoadedImage image inputs) :
+    (SourceLoadedImage.codeRegion binding loaded).region.allocId ≠ inputs.stack.allocation := by
+  let selected := SourceLoadedImage.codeRegion binding loaded
+  have codePresent := (loaded.imagePresent selected.region selected.member).1
+  obtain ⟨stack, stackAt, _, _, _, stackSource, _⟩ := loaded.stackProvenance_present
+  have codeSource : selected.region.allocationRecord.source = .imageMapping := by
+    have member := selected.member
+    obtain ⟨⟨region, identity⟩, _, equal⟩ := List.mem_map.mp member
+    rw [← equal]
+    rfl
+  intro same
+  change selected.region.allocId = inputs.stack.allocation at same
+  rw [same, stackAt] at codePresent
+  have recordEq := Option.some.inj codePresent
+  rw [← recordEq, stackSource] at codeSource
+  exact (by decide : AllocationSourceId.stack ≠ AllocationSourceId.imageMapping) codeSource
+
 /-- Every resolved instruction's fallthrough stays in the loader's checked
 low address range, even when it is the final instruction in the section. -/
 theorem source_fallthrough_bound {frame rootOffset}
