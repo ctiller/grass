@@ -1,5 +1,6 @@
 import Grass.Platform.Win32.ApiRequest
 import Grass.Platform.Win32.WriteFileCallPlan
+import Grass.Platform.Win32.ReturnHome
 
 /-!
 # Data retained across a pending Windows call
@@ -31,6 +32,14 @@ structure ReturnFrame where
   returnSlot : WriteFile.Argument
   homeSlot : WriteFile.Argument
   saved : NonvolatileSnapshot
+
+def ReturnFrame.ofPlan {state : Grass.ISA.X86.Execution.State}
+    (plan : ReturnHome.Plan state) : ReturnFrame where
+  entryRsp := state.gpr .rsp
+  continuation := plan.continuation
+  returnSlot := plan.returnSlot
+  homeSlot := plan.homeSlot
+  saved := captureNonvolatile state.gpr
 
 /-- Compute the expected post-pop RSP. The endpoint must prove nonwrapping
 addition and agreement with the actual pre-CALL RSP before using it. -/

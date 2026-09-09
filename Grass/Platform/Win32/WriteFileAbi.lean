@@ -1,6 +1,7 @@
 import Grass.ABI.Win64.Convention
 import Grass.ISA.X86.Execution.State
 import Grass.Platform.Win32.WriteFileArguments
+import Grass.Platform.Win32.ReturnHome
 
 /-!
 # WriteFile x64 entry argument correspondence
@@ -27,10 +28,10 @@ open Grass.Platform.Win32.WriteFile
 /-- Bytes occupied by the near `CALL` return address in 64-bit mode. This is
 derived from the x86 architectural 64-bit operand width; the numerically equal
 Win64 entry-alignment residue is a separate convention fact. -/
-def returnAddressBytes : Nat := Grass.ISA.X86.Width.bits .w64 / 8
+abbrev returnAddressBytes : Nat := Grass.Platform.Win32.ReturnHome.returnAddressBytes
 
 /-- The Win64 caller-provided register home area. -/
-abbrev homeSpaceBytes : Nat := Win64.shadowSpaceBytes
+abbrev homeSpaceBytes : Nat := Grass.Platform.Win32.ReturnHome.homeSpaceBytes
 
 /-- Offset of `WriteFile`'s fifth argument from callee-entry RSP. -/
 def overlappedSlotOffset : Nat := returnAddressBytes + homeSpaceBytes
