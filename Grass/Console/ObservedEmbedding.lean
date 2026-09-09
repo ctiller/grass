@@ -61,29 +61,35 @@ structure HistoryEmbedding
   trace : TraceMap request rendering history.path.choices history.path.events
     observed.path.choices observed.path.events
 
-/-- Fold the supplied choice-bearing component path into writing/reporting steps. -/
-noncomputable def embedHistory (history : (Behavior.system (Payload request rendering)).History) :
-    HistoryEmbedding request rendering history := by
-  have initialEq : history.initialState = .pending (OutputCut.zero _) := history.validInitial
-  cases history with
-  | mk initialState initialGraph state graph validInitial path =>
-    cases initialEq; cases initialGraph; cases graph
+/-- Fold an initialized choice-bearing component path into writing/reporting steps. -/
+noncomputable def embedPath {initialState componentState}
+    {initialGraph componentGraph : Unit}
+    (initial : (Behavior.system (Payload request rendering)).Initial initialState initialGraph)
+    (path : (Behavior.system (Payload request rendering)).Path
+      initialState initialGraph componentState componentGraph) :
+    Σ observed : (ObservedBehavior.system request rendering).History,
+      Corresponds request rendering componentState observed.state ×
+      TraceMap request rendering path.choices path.events
+        observed.path.choices observed.path.events := by
     let motive := fun componentState componentGraph
         (componentPath : (Behavior.system (Payload request rendering)).Path
-          (.pending (OutputCut.zero _)) () componentState componentGraph) =>
+          initialState initialGraph componentState componentGraph) =>
       Σ observed : (ObservedBehavior.system request rendering).History,
         Corresponds request rendering componentState observed.state ×
         TraceMap request rendering componentPath.choices componentPath.events
           observed.path.choices observed.path.events
-    have built : motive state () path := Path.rec (motive := motive)
-      ⟨ObservedBehavior.initial request rendering, .pending _, .nil⟩
+    exact Path.rec (motive := motive)
+      ⟨ObservedBehavior.initial request rendering,
+        initial.symm ▸ .pending (OutputCut.zero _), .nil⟩
       (by
         intro current currentGraph prior choice event next nextGraph step ih
-        rcases ih with ⟨observed, endpoint, trace⟩
+        let observed := ih.1
+        let endpoint := ih.2.1
+        let trace := ih.2.2
         rcases choice with ⟨cut, response⟩
         cases response with
         | advance after strict =>
-          rcases Behavior.step_iff.mp step with ⟨origin, eventEq, nextEq⟩
+          rcases step with ⟨origin, eventEq, nextEq⟩
           subst event; subst next
           cases currentGraph; cases nextGraph
           have observedOrigin := endpoint.pending_observed request rendering origin
@@ -101,7 +107,7 @@ noncomputable def embedHistory (history : (Behavior.system (Payload request rend
               (observed.path.events ++ [.emitted (cut.between after)])
             exact TraceMap.advance trace strict⟩
         | finish cause =>
-          rcases Behavior.step_iff.mp step with ⟨origin, allowed, eventEq, nextEq⟩
+          rcases step with ⟨origin, allowed, eventEq, nextEq⟩
           subst event; subst next
           cases currentGraph; cases nextGraph
           have observedOrigin := endpoint.pending_observed request rendering origin
@@ -120,8 +126,12 @@ noncomputable def embedHistory (history : (Behavior.system (Payload request rend
               (observed.path.events ++ [.reported selection])
             exact TraceMap.finish trace allowed⟩)
       path
-    rcases built with ⟨observed, endpoint, trace⟩
-    exact ⟨observed, endpoint, trace⟩
+
+/-- Fold the supplied choice-bearing component history into an exact observed prefix. -/
+noncomputable def embedHistory (history : (Behavior.system (Payload request rendering)).History) :
+    HistoryEmbedding request rendering history := by
+  let built := embedPath request rendering history.validInitial history.path
+  exact ⟨built.1, built.2.1, built.2.2⟩
 
 /-- Transfer the same output cut's nonresponse to the embedded reached history. -/
 noncomputable def embedPermanentWait {history : (Behavior.system (Payload request rendering)).History}
@@ -132,6 +142,14 @@ noncomputable def embedPermanentWait {history : (Behavior.system (Payload reques
   have endpoint := (embedHistory request rendering history).endpoint
   have observedPending := endpoint.pending_observed request rendering pending
   exact ⟨.output cut, observedPending, permitted⟩
+
+/-- The wait transfer retains the original output occurrence. -/
+@[simp] theorem embedPermanentWait_occurrence
+    {history : (Behavior.system (Payload request rendering)).History}
+    (waiting : PermanentWait (Behavior.boundary (Payload request rendering)) history) :
+    (embedPermanentWait request rendering waiting).occurrence = .output waiting.occurrence := by
+  cases waiting
+  rfl
 
 theorem terminal_embeds_reporting {history : (Behavior.system (Payload request rendering)).History}
     (terminal : (Behavior.system (Payload request rendering)).Terminal history.state history.graph) :
