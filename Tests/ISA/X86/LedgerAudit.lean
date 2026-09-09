@@ -66,6 +66,8 @@ import Grass.Platform.Win32.WriteFileHandoff
 import Grass.Platform.Win32.WriteFilePreservation
 import Grass.Platform.Win32.WriteFileCall
 import Grass.Platform.Win32.WriteFileCallPreservation
+import Grass.Platform.Win32.WriteFileRuntime
+import Grass.Platform.Win32.WriteFileService
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
 import Grass.Artifact.PE.ExceptionBinding
@@ -201,6 +203,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFilePreservation,
    `Grass.Platform.Win32.WriteFileCall,
    `Grass.Platform.Win32.WriteFileCallPreservation,
+   `Grass.Platform.Win32.WriteFileRuntime,
+   `Grass.Platform.Win32.WriteFileService,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
@@ -298,7 +302,8 @@ acquiring a citation.
 -- Six CALL/return-slot factory projections retain already computed evidence.
 -- Five agreement predicates and two signature/data aliases admit no transition.
 -- Nine runtime data/view operations use existing ABI data and assert no execution.
-def notBehaviourBaseline : Nat := 266
+-- Five runtime capture/update adapters introduce no additional ABI behavior.
+def notBehaviourBaseline : Nat := 271
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -439,6 +444,12 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Actual receipt projections and computed runtime frontier updates.
+    `Grass.Platform.Win32.WriteFile.CallHandoff.runtime,
+    `Grass.Platform.Win32.WriteFile.CallHandoff.rawAfter,
+    `Grass.Platform.Win32.WriteFile.ServiceReceipt.nextRuntime,
+    `Grass.Platform.Win32.WriteFile.ServiceReceipt.after,
+    `Grass.Platform.Win32.WriteFile.ServiceEdge,
     -- Proof-bearing projection of the selected fixed CALL factory receipt.
     `Grass.Platform.Win32.WriteFile.CallPolicy.ofFactory,
     `Grass.Platform.Win32.NonvolatileSnapshot,
