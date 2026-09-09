@@ -19,7 +19,8 @@ The source-free x86 interpretation lives in
 RSP-relative immediate DWORD stores, sign-extended immediate QWORD stores, and
 DWORD loads. The Assembly wrappers construct this interpretation's receipts;
 they do not define another architectural transfer. The actual fetch and data
-run share one policy, context, and cause, and the data descriptor uses ordinary
+run share all non-oracle policy fields, context, and cause. Each phase retains
+its own concrete memory oracle, and the data descriptor uses ordinary
 ordering with no authority or obligation transfers.
 
 `StoreNormal.written_exact` derives the payload from the actual memory-oracle
@@ -33,7 +34,8 @@ instruction's fallthrough, and apply the common MOV completion flags.
 
 These receipts define conditional clean normal branches. They do not exclude
 faults, traps, rejected accesses, or interruptions, and do not constitute a
-total CPU step dispatcher. A future checked classifier can select the shared
-x86 interpretation; source correspondence remains in Assembly. Ordinary
+total CPU step dispatcher. `MemoryMoveSelection.select` checks equality with
+the production encoders, and `MemoryMoveFactory.memoryMove` constructs the
+actual fetch and operand-derived data access. Source correspondence remains in Assembly. Ordinary
 integer bytes do not create pointer provenance or prove an API argument's
 authority merely because its source declaration names a pointer parameter.

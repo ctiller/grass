@@ -9,12 +9,15 @@ open Grass.Core Grass.Memory Grass.Op Grass.ISA.X86 Grass.ISA.X86.Execution
 open Grass.Std.Logical
 
 /-- The actual data step starts at the actual fetch result, with the same
-policy and execution context. Source-specific adapters supply operand facts. -/
+non-oracle policy fields and execution context; its concrete oracle is phase-specific. Source-specific adapters supply operand facts. -/
 structure MemoryAccess {before : State} {afterFetch : MachineState}
     (fetch : FetchedSite before afterFetch) (after : MachineState) where
   descriptor : AccessDescriptor
   run : AccessRun afterFetch after descriptor
-  policy : run.policy = fetch.run.policy
+  policy : run.policy = { fetch.run.policy with oracle := run.policy.oracle }
+  writeData : MachineState → AccessDescriptor → ByteSeq
+  indeterminate : MachineState → (d : AccessDescriptor) → Nat → Byte
+  memoryOracle : run.policy.oracle = Oracle.ofMemory writeData indeterminate
   context : run.context = fetch.run.context
   contextKind : run.contextKind = fetch.run.contextKind
   cause : run.cause = fetch.run.cause
@@ -26,12 +29,6 @@ structure MemoryAccess {before : State} {afterFetch : MachineState}
   authorityEffect : descriptor.authorityEffect = []
 
 namespace MemoryAccess
-
-/-- `memoryOracle` transports the fetch policy to the continuous data run. -/
-theorem memoryOracle {before : State} {afterFetch after : MachineState}
-    {fetch : FetchedSite before afterFetch} (access : MemoryAccess fetch after) :
-    access.run.policy.oracle = Oracle.ofMemory fetch.writeData fetch.indeterminate := by
-  rw [access.policy, fetch.memoryOracle]
 
 /-- `address_of_rsp` derives operand/address agreement from the actual prepared
 allocation placement. Typed source adapters supply the displacement and its
