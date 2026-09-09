@@ -4,6 +4,8 @@ import Grass.Specification.TextLine
 import Grass.Console.Behavior
 import Grass.Console.Accounting
 import Grass.Console.LineBehavior
+import Grass.Grammar.Canonical
+import Grass.Artifact.Binary.EndianLaws
 import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
 import Grass.Assembly.X86ControlFlow
