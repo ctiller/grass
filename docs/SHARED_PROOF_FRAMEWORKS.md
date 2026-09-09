@@ -50,6 +50,12 @@ Windows reports dual ReturnHome adoption under validation; library reports
 reviewed Push/Call access-failure adoption in `c13468d1` with broad checks still
 running. Those reports are not treated here as completed integration evidence.
 
+Follow-up inspection at main `71cf80bf` verifies that RunFactory owns the
+access-failure mapping and Push/Call now invoke it. This establishes those two
+consumers' adoption, not migration of the other three factory consumers.
+Windows subsequently published dual ReturnHome adoption in `2e391f29`; its
+reported full build and review passed, with fresh trust/source checks pending.
+
 ## API construction framework
 
 Extract a protocol-level checked handoff producer beneath API-specific modules.
@@ -131,6 +137,64 @@ through the same explicit checked constructors.
 Evaluate this front with GetStdHandle and WriteFile, then ExitProcess as above.
 Success means authoring API-specific facts once and removing the repeated
 handoff machinery; a shorter spelling for unchanged duplicate proofs fails.
+
+### Authoring contract and trial worksheet
+
+The API descriptor is indexed by the existing API constructor. Its decoder
+returns a request of that constructor together with ABI evidence tied to the
+actual reached machine. Its plan producer returns a plan indexed by that same
+machine and request. Merely naming arbitrary functions in an attribute is not
+enough: their dependent result types and retained success equations enforce the
+connections. The fixed profile chooses the provider model; an attribute cannot
+replace that model with a contract selected by the caller.
+
+Since the existing `ApiRequest` is a sum, the decoder's API index can be retained
+as `{ request : ApiRequest // ApiDispatch.requestApi request = api }`, with the
+ABI evidence indexed by that exact request and reached machine. The notation
+describes the required connection; it does not introduce a second request model.
+
+| Trial | Authored once | Derived by shared machinery | Still owed outside the declaration |
+|---|---|---|---|
+| GetStdHandle | RCX low-DWORD selector, API identity and result meaning | Actual CALL binding, common return/home plan, checked handoff, fresh occurrence, record and logs | Actual result/return connection and provider adequacy |
+| WriteFile | Handle/buffer/count/fifth-argument ABI checks, semantic loans, partial-output model | Same CALL and ReturnHome construction, whole-batch handoff and general preservation laws | API-specific separation/protection, service/output correspondence, actual return connection |
+| ExitProcess | RCX low-DWORD status and nonreturning classification | Same checked handoff with the selected slice's empty loan batch, occurrence and logs | Terminal observation and native teardown behavior; entry success proves neither |
+
+For all three, neither caller nor attribute author supplies a free CallId,
+before/after log, continuation address, pending record or shared preservation
+proof. Those come from actual checked construction. Distinct API semantics
+remain readable declarations and laws; the common receipt packages their
+application without duplicating protocol mechanics.
+
+The implementation review must compare the authoring surface with these exact
+existing names: `entryHandoff?`, `EntryHandoff.after`, `recorded`,
+`storage_unchanged`, and the per-API CALL/log adapters. A new descriptor that
+leaves each API reimplementing those mechanics has not delivered this design.
+Typed aliases and semantic projections may remain when they contain no second
+implementation of the guarantee.
+
+Current dispatch needs a deliberate extension before a DLL attribute can be
+treated as a checked constraint. At inspected main revision `71cf80bf`,
+`ApiDispatch.Binding.libraryNameExact` records the actual image library name,
+but `Binding.MatchesRequest` checks the API constructor only. It does not compare
+that name to a descriptor's declared DLL. The attribute implementation must
+check the declared logical library identity against that actual name, or clearly
+omit a DLL constraint. Keep normalization explicit in the fixed target rules;
+do not silently accept aliases or claim native DLL identity from string equality.
+
+Trial rejection cases must demonstrate that annotations cannot bypass checks:
+
+* Correct symbol under a different declared library fails the declared logical
+  library constraint, even if the API constructor matches.
+* A valid plan from another reached machine or request cannot inhabit the
+  required indexed result; a stale CALL receipt cannot authorize a new occurrence.
+* A rejected full loan batch yields no successful handoff or inserted runtime
+  occurrence. Existing refusal behavior remains unchanged.
+* ExitProcess entry cannot produce a returning frame or a terminal observation.
+* Conflicting descriptor registrations require explicit resolution; both the
+  attribute and explicit-constructor paths use the same checked implementation.
+
+These are acceptance requirements for the proposed implementation, not claims
+that these tests exist. Syntax-only compilation is insufficient evidence.
 
 ## Instruction construction framework
 
