@@ -16,6 +16,7 @@ import Grass.Console.TargetProjection
 import Grass.Console.CapturedProjection
 import Grass.Refinement.Console.WriteWaitingGap
 import Grass.Refinement.Console.WriteFileProjection
+import Grass.Platform.Win32.WriteFileNonresponse
 import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
 import Grass.Assembly.X86ControlFlow

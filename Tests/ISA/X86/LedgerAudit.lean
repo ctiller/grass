@@ -11,6 +11,7 @@ import Grass.ABI.Win64.FrameRanges
 import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Signatures
 import Grass.Platform.Win32.WriteFile
+import Grass.Platform.Win32.WriteFileNonresponse
 
 /-!
 # Ledger coverage gate
@@ -100,7 +101,8 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
-   `Grass.Platform.Win32.Signatures, `Grass.Platform.Win32.WriteFile]
+   `Grass.Platform.Win32.Signatures, `Grass.Platform.Win32.WriteFile,
+   `Grass.Platform.Win32.WriteFileNonresponse]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -152,7 +154,9 @@ acquiring a citation.
 -- Ten WriteFile definitions are internal evidence/transport/sequence operations;
 -- Windows footprint and width/profile applicability remain owed separately.
 -- Fourteen new structural helpers over explicit semantic and decoder results.
-def notBehaviourBaseline : Nat := 107
+-- Two nonresponse consumers derive finite histories or accept a selected
+-- external relation; neither asserts Windows adequacy or physical nonresponse.
+def notBehaviourBaseline : Nat := 109
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -293,6 +297,9 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Derived history and selected external relation; no new Windows behavior.
+    `Grass.Platform.Win32.WriteFile.InfiniteContinuation.historyAt,
+    `Grass.Platform.Win32.WriteFile.StalledPredicate,
     -- Coordinate projection and metadata-only transport; no claim that a real
     -- Windows allocation satisfies the Prepared applicability contract.
     `Grass.Platform.Win32.WriteFile.Resolved.physical,

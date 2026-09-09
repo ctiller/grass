@@ -28,7 +28,7 @@ Windows/ISA ordering soundness, and `publishes` still needs a connection to the
 selected provider-accepted-byte observation. There is no default realization or
 proof that these external premises cover all Windows executions. Synchronous
 handle rights/mode/lifetime, physical argument values, return, failure outcomes,
-permanent-wait interpretation and violation envelopes remain downstream work.
+physical permanent-wait interpretation and violation envelopes remain downstream work.
 
 [`Win32WriteFile.lean`](../Tests/Platform/Win32WriteFile.lean) exercises initialized
 request preparation, exact handoff, and an actual no-memory provider step. It
@@ -37,6 +37,36 @@ overlap, repeated prefixes, excessive/backward counts and missing causal edges.
 Its actual caller-zero/handoff/provider-zero fixture still receives a denial from
 the current checker; the evidence layer rejects that result even though `step?`
 returns `some`. It does not claim a conforming provider write exists yet.
+
+## Conditional nonresponse evidence
+
+[`WriteFileNonresponse.lean`](../Grass/Platform/Win32/WriteFileNonresponse.lean)
+consumes a reached `History` in two separate ways. `InfiniteContinuation` carries
+actual `CommittedStep` evidence at every edge for the same occurrence, record and
+realization. `historyAt` recursively extends the exact supplied root history;
+it does not choose unrelated histories for later points. `FixedCut` adds the
+premise that all accepted counts remain at the reached cut, from which
+`FixedCut.output_empty` proves each publication is empty.
+
+`StalledNonresponse` instead takes only a selected observation relation and
+evidence at the exact reached realization, call, record, state and accepted
+count. It needs no further action or infinite continuation. Any supplied finite
+history, including one at a full accepted cut, can serve as this endpoint when
+the selected observation is also supplied. This does not assert that possible
+reply transitions are disabled.
+
+The relation is fixed by the consumer and receives the realization explicitly;
+no default relation or physical witness is supplied. These types consume
+conditional evidence rather than prove Windows nonresponse or protocol
+permission. Reachability at every output cut, physical adequacy, conforming
+return, and eventual stabilization of arbitrary infinite continuations remain
+separate obligations. The fixed-cut result alone proves none of them.
+
+[`Win32WriteFileNonresponse.lean`](../Tests/Platform/Win32WriteFileNonresponse.lean)
+uses an explicitly synthetic identity relation over the existing reached quiet
+history, rejects false and wrong-occurrence relations, and checks endpoint
+construction from supplied evidence without any continuation. It does not
+fabricate an infinite quiet execution from the fixture's single committed edge.
 
 ## External validation
 
