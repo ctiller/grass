@@ -5,8 +5,8 @@ import Grass.Artifact.PE.Validation
 # Canonical PE32+ optional header
 
 This module synthesizes the fixed PE32+ fields from the typed image description
-and its checked placements. Import-directory entries remain zero until the
-owned import-table builder supplies a measured `.idata` directory.
+and its checked placements. Import-directory entries use the measured `.idata`
+directory supplied by the import-table builder, or zero when no imports exist.
 
 Format authority: Microsoft, [PE Format](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format),
 sections "Optional Header Standard Fields (Image Only)", "Optional Header
