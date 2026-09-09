@@ -332,7 +332,8 @@ acquiring a citation.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
 -- Five raw/checked view operations retain data and assert no target semantics.
-def notBehaviourBaseline : Nat := 277
+-- One adapter derives the Windows binding from retained actual CALL receipts.
+def notBehaviourBaseline : Nat := 278
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -478,6 +479,8 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.ExecutionState.RawState.checked?,
     `Grass.Platform.Win32.ExecutionState.RawState.ControlConsistent,
     `Grass.Platform.Win32.ExecutionState.RawState.withMachine,
+    -- Proof-bearing projection of the selected fixed CALL factory receipt.
+    `Grass.Platform.Win32.WriteFile.CallPolicy.ofFactory,
     -- Exact table views, fixed-plan predicates and checked bookkeeping adapters;
     -- they assert no native provider or CPU adequacy beyond their premises.
     `Grass.Platform.Win32.WriteFile.EntryHandoff.after,
