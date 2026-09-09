@@ -223,7 +223,7 @@ it does not by itself certify a sequenced executable parser. Windows owns the
 PE field descriptions, validation, and full-image reader/writer connection;
 the ISA owner retains instruction decoding and semantic equivalence.
 
-`Grass.Grammar.Canonical.normalize` accepts only parser successes with an empty
+`Grass.Grammar.normalize` (in `Grass.Grammar.Canonical`) accepts only parser successes with an empty
 suffix and returns the selected writer's bytes. `normalize_preserves_value`
 and `normalize_idempotent` derive the reusable normalization laws. These laws
 do not assert exact reconstruction of accepted alternate encodings or agreement
