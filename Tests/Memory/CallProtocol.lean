@@ -1,4 +1,5 @@
 import Grass.Op.CallProtocol
+import Grass.Op.CallProtocolCustody
 import Tests.Memory.Spike1Policy
 
 /-! Concrete acceptance and refusal checks for occurrence-bound Spike 1 loans. -/
@@ -155,5 +156,45 @@ theorem pending_steps_and_authority_effects_are_rejected :
   intro call pending h
   cases h
   exact ⟨by decide, by decide⟩
+
+private def reached := handoff.get the_two_loan_handoff_succeeds
+
+private def recorded : Pending Nat :=
+  (reached.2.pending.lookup reached.1).get (by decide)
+
+private theorem partition : recorded.LoanPartition [transferredLoan] [fifthArgumentLoan] :=
+  handoff?_loanPartition (state := state₀) (next := reached.2)
+    (caller := mainThread) (agent := apiAgent) (request := request)
+    (call := reached.1) (by rfl) (by rfl)
+
+example : partition.semanticEntries =
+    [(firstGrant, transferredLoan.grant mainThread apiAgent)] := by rfl
+
+example : partition.additionalEntries =
+    [(secondGrant, fifthArgumentLoan.grant mainThread apiAgent)] := by rfl
+
+example : partition.semanticEntries ++ partition.additionalEntries = recorded.loans :=
+  partition.entries_append
+
+example : ¬ recorded.LoanPartition [fifthArgumentLoan] [transferredLoan] := by
+  intro swapped
+  have different : recorded.loans.map Prod.snd ≠
+      ([fifthArgumentLoan] ++ [transferredLoan]).map
+        (fun loan => loan.grant recorded.caller recorded.agent) := by decide
+  exact different swapped.grantsExact
+
+example : CallProtocol.return? reached.2 reached.1 mainThread apiAgent
+    (partition.semanticEntries.map Prod.fst) = none := by decide
+
+private def fullyReturned :=
+  (CallProtocol.return? reached.2 reached.1 mainThread apiAgent recorded.ids).get (by decide)
+
+example : ∀ id ∈ recorded.ids, fullyReturned.2.machine.memory.grantAt? id = none :=
+  CallProtocol.return?_loans_removed (state := reached.2) (call := reached.1)
+    (caller := mainThread) (agent := apiAgent) (ids := recorded.ids) (by rfl)
+
+example : fullyReturned.2.pending.lookup reached.1 = none :=
+  CallProtocol.return?_removes_pending (state := reached.2) (call := reached.1)
+    (caller := mainThread) (agent := apiAgent) (ids := recorded.ids) (by rfl)
 
 end Grass.Tests.CallProtocol
