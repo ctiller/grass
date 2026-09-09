@@ -38,7 +38,7 @@ structure TextEncoding where
   decode : Vec Byte → Option String
   /-- Encoding empty text emits no bytes. -/
   encode_empty : encode "" = Vec.empty
-  /-- Encoding preserves text concatenation. -/
+  /-- `TextEncoding.encode_append` is the required text-concatenation law. -/
   encode_append : ∀ a b, encode (a ++ b) = encode a ++ encode b
   /-- Every encoded string decodes to that same string. -/
   decode_encode : ∀ text, decode (encode text) = some text
@@ -65,7 +65,7 @@ def utf8 : TextEncoding where
     · contradiction
 
 /--
-A lawful encoding cannot map two distinct strings to the same bytes.
+`TextEncoding.encode_injective` derives injectivity from the decoding law.
 
 This strong claim is enforced by `decode_encode`: applying the same decoder to
 equal encodings recovers the two original strings.
