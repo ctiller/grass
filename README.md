@@ -48,6 +48,9 @@ Grass is a clean-slate successor to experiments in `gasm` and `wsc`. Their code
 and ideas are spare parts, not compatibility constraints.
 
 Start review at [docs/README.md](docs/README.md).
+For code and implementation evidence, start at the
+[endpoint index](docs/ENDPOINT_INDEX.md); use the
+[validation command map](docs/CHECKS.md) to find the appropriate checks.
 Constructive feasibility arguments for the disputed proof machinery are in
 [docs/PROOF_FEASIBILITY.md](docs/PROOF_FEASIBILITY.md).
 The comment-free expected Lean source for all five design spikes is in
