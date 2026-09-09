@@ -855,7 +855,8 @@ theorem cellAt?_applyAccess_of_untouched (state : MemoryState) (d : AccessDescri
     · exact Or.inl (hshare hid)
   · rfl
 
-/-- An access moves no allocation, so it cannot change who shares bytes with whom.
+/-- An access moves no allocation, so it cannot change who shares bytes with whom:
+`sharesBytes_applyAccess` below, resting on `MemoryState.sharesBytes_write`.
 
 The block law needs this: its hypothesis is about the state the block starts in, and
 its induction hands each step a state some prefix of the block has already run. -/

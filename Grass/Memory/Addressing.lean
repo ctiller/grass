@@ -24,8 +24,8 @@ several rounds. `docs/MEMORY_MODEL.md` §7.5 makes address spaces
 non-interchangeable and a logical space has allocations with no machine address at
 all, so a mandatory base would force every profile to invent one. And placement is
 not authority in §2's sense: provenance decides what an access may touch, and two
-allocations sharing a base are still distinct storage unless `MemoryState.aliases`
-says otherwise. It is *read* by `denialOf`, in `placementWraps` and
+allocations sharing a base are still distinct storage unless their records name one
+`AllocationRecord.backing`. It is *read* by `denialOf`, in `placementWraps` and
 `addressDisagreesWithPlacement` — this sentence said "reads none of this" for two
 milestones after those clauses landed.
 

@@ -11,7 +11,7 @@ The storage half of the memory model, written fresh rather than migrated.
 `g-design:185` replaced the previous design, in which every allocation owned its own
 `ByteStore` and a separate list declared which allocations were "the same storage".
 That declaration was an authority-level claim the byte semantics did not implement:
-`Tests/Op/StandardLoan.lean`'s `the_alias_is_not_yet_a_byte_level_fact` stores through
+`Tests/Op/StandardLoan.lean`'s `the_alias_is_a_byte_level_fact` stores through
 one allocation and reads the old value from the one declared aliased to it.
 
 Here bytes live once per `StorageId`. An allocation is a **view**: a backing identity,
@@ -139,7 +139,7 @@ Three, and the first is the one the previous design could not state.
 /--
 **A write through one view is visible through any view onto the same backing.**
 
-This is what `the_alias_is_not_yet_a_byte_level_fact` refuted for the old model,
+This is what `the_alias_is_a_byte_level_fact` refuted for the old model,
 here as a fact. There is no propagation step and no hypothesis relating the two views
 beyond their sharing a backing: the write went to the bytes, and both views read the
 bytes.

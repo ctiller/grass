@@ -175,7 +175,7 @@ structure AllocationRecord where
 
   The previous shape gave every record its own `ByteStore` and declared sharing
   separately in an `aliases` list. `Tests/Op/StandardLoan.lean`'s
-  `the_alias_is_not_yet_a_byte_level_fact` is the proof that this was an
+  `the_alias_is_a_byte_level_fact` is the proof that this was an
   authority-level claim the byte semantics did not implement: it stores through one
   allocation and reads the stale value through the one declared aliased to it.
 
@@ -198,7 +198,7 @@ structure AllocationRecord where
   `Private` storage class, say — has allocations with no machine address at all, so
   a mandatory base would force every profile to invent one. Placement is also not
   authority in §2's sense: provenance decides what an access may touch, and two
-  allocations at one base are distinct storage unless `aliases` says otherwise. It is
+  allocations at one base are distinct storage unless they name one `backing`. It is
   *not* invisible to `denialOf`, which reads this field in `placementWraps` and
   `addressDisagreesWithPlacement`; this docstring said "nothing in `denialOf` reads
   this" for two milestones after those clauses landed, thirty-two lines above its own
@@ -2122,9 +2122,18 @@ existed beside this one, `Granted` moved off it, and it kept its four safety the
 gate. Review found it. There is one predicate now and the negatives below are stated
 over it.
 
-`Contains` compares offsets relative to a root, and aliased allocations are assumed
-to agree offset for offset — `MemoryState.aliases` records no offset mapping.
-`docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records that.
+`Contains` compares offsets relative to a root, and views of one backing are assumed
+here to agree offset for offset -- that is, to sit at the same
+`AllocationRecord.origin`.
+
+**The mapping is recorded now and this does not yet use it.** `g-design:185` gives
+each record an origin into its backing, so two views at different origins are
+expressible and `ByteRange.translate` is the arithmetic; what has not been done is
+translating through it *here*, in the authority comparison. The previous shape could
+not have done it at all, because the alias list recorded no offset mapping to
+translate through, so this is a smaller gap than the one it replaces rather than a
+closed one. `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2 records it as owed, and every
+view in the fixtures sits at origin zero, which is why nothing has forced it yet.
 
 **Two epoch conjuncts, and only one is reachable.** `CurrentEpoch provenance` is the
 *access's* epoch and `not_authorizedAt_of_stale_epoch` states it. `CurrentEpoch
@@ -2981,7 +2990,7 @@ views' translated spans overlap. Under that design a declared alias graph is not
 authority source at all, and the offset relating two views is derived from their
 origins rather than declared anywhere.
 
-`Tests/Op/StandardLoan.lean`'s `the_alias_is_not_yet_a_byte_level_fact` is c-mem's
+`Tests/Op/StandardLoan.lean`'s `the_alias_is_a_byte_level_fact` is c-mem's
 own proof of why the declaring door had to go: it declared two allocations to be the
 same storage while `MemoryState.write` wrote only the named one, so the claim had no
 byte-level counterpart.
@@ -3017,9 +3026,9 @@ else too. Without that, `RangeInitialized` read `False` for the absent case whil
 `ByteStore.Initialized` -- a forall over covered offsets -- held vacuously on an
 empty range for the empty case, and `rangeInitialized_congr_of_agrees` was false.
 
-Collapsing them here rather than case-splitting at each use is what keeps the
-framing lemmas free of a store-existence hypothesis their callers cannot always
-discharge. -/
+Collapsing them here rather than case-splitting at each use is what keeps
+`storeOf_write_self` and `storeOf_write_of_backing_ne` free of a store-existence
+hypothesis their callers cannot always discharge. -/
 def storeOf (state : MemoryState) (record : AllocationRecord) : ByteStore :=
   (state.backings.lookup record.backing).getD .empty
 
@@ -3471,7 +3480,8 @@ theorem sharesBytes_congr_of_allocations {a b : MemoryState}
   unfold SharesBytes backingOf?
   rw [h]
 
-/-- A write moves no allocation, so it cannot change who shares bytes with whom.
+/-- A write moves no allocation, so it cannot change who shares bytes with whom:
+`sharesBytes_write` below, which follows from `allocations_write`.
 
 Sharing is a fact about the allocation table -- which records name which backing --
 and a write touches only `MemoryState.backings`. Callers need this because

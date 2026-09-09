@@ -2026,8 +2026,10 @@ a consumer following it would have had an unsound argument. The hypothesis
 quantifies over `sequence.accesses`, which `mem_accesses_of_visibleEffects?` shows
 contains every survivor and which contains the faulting substep's descriptor. -/
 
-/-- **An access moves no allocation.** It commits bytes and applies an authority
-effect, and neither touches the allocation table.
+/-- **An access moves no allocation**, which `allocations_performAccess` states: it
+commits bytes and applies an authority effect, and `Grass.Memory.allocations_commit`
+and `MemoryState.allocations_applyAuthorityEffect?` say neither touches the
+allocation table.
 
 `g-design:185` makes this load-bearing rather than incidental: sharing is a fact
 about that table, so this is what lets a sharing hypothesis about the state before a

@@ -150,25 +150,28 @@ theorem a_loan_cannot_be_bypassed_through_an_alias :
   cases hs
   exact ⟨by decide, by decide⟩
 
-/-- **And what "the same bytes" does not yet mean.**
+/-- **And what "the same bytes" now means.**
 
 `MemoryState.SharesBytes` is what the whole authority layer keys on — `grantsOver`,
-`AuthorizedAt`, `MemoryEvent.Conflicts` — and `MemoryState.write` writes the bytes of
-the *named* allocation only. So a store through the view leaves the buffer's bytes
-unchanged, and a read of the buffer afterwards sees the old value. "Same storage" is
-an authority-level fiction with no byte-level counterpart, which means the theorem
-above guards a relation the memory semantics does not implement.
+`AuthorizedAt`, `MemoryEvent.Conflicts` — so what it claims had better be what the
+bytes do. **A store through the view is visible through the buffer**, because there
+is one `ByteStore` and both allocations are views of it.
 
-Stated here rather than only in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2, because a
-reader meeting the theorem above should meet this in the same file. Closing it is
-either write-propagation across the alias set, which needs the offset mapping
-`MemoryState.aliases` does not record, or allocations sharing one byte store by
-identity — the second removes `SharesAfter` and `AliasHop` entirely and is the
-better shape, and both change `MemoryState`. -/
-theorem the_alias_is_not_yet_a_byte_level_fact :
+This theorem used to say the opposite, and that is why the model changed. Its
+previous form asserted `bufferAlloc`'s byte was still `0x00` after the store: every
+allocation owned a private `ByteStore`, `MemoryState.write` wrote the named one, and
+"same storage" was an authority-level fiction with no byte-level counterpart. The
+authority layer was guarding a relation the memory semantics did not implement, and
+this fixture is where that was demonstrated. `g-design:185` replaced the design; the
+only change needed here was the second conjunct, from `0x00` to `0xab`.
+
+The middle line is the whole of it. Nothing propagates the write: `viewAlloc` and
+`bufferAlloc` name one `StorageId`, so there is one store to write and one store to
+read. `Grass/Memory/Backing.lean`'s `sharing_is_real` is the general statement. -/
+theorem the_alias_is_a_byte_level_fact :
     ∀ s, (step state₀ .storeThroughView).state? = some s →
       s.memory.byteAt? viewAlloc 0 = some 0xab ∧
-      s.memory.byteAt? bufferAlloc 0 = some 0x00 ∧
+      s.memory.byteAt? bufferAlloc 0 = some 0xab ∧
       state₀.memory.SharesBytes viewAlloc bufferAlloc := by
   intro s hs
   cases hs
@@ -297,17 +300,22 @@ def separatelyLent : MemoryState :=
       { kind := .loan, holder := engine₀, lender := thread₀, provenance := borrowedProv
         range := ⟨0, 8⟩, rights := .readWrite }).getD lentToThread
 
-/-- Then the profile declares the mapping. `docs/MEMORY_MODEL.md` §7.5 makes that a
-real transition, and nothing re-examines the grants already issued. -/
+/-- Then the profile maps one onto the other. `docs/MEMORY_MODEL.md` §7.5 makes that
+a real transition, and nothing re-examines the grants already issued.
+
+`mapOnto` re-points `borrowedAlloc`'s view at `bufferAlloc`'s backing, so after it
+the two are one storage in the sense the bytes implement — where the door it
+replaces only said so. That makes this fixture sharper than it was: the conflict it
+demonstrates now follows from the allocations actually sharing bytes. -/
 def aliasedAfterIssue : MachineState :=
-  { state₀ with memory := separatelyLent.alias bufferAlloc borrowedAlloc }
+  { state₀ with memory := separatelyLent.mapOnto bufferAlloc borrowedAlloc }
 
 /-- Both lends succeeded, and they became conflicting only once the alias was
 declared: issued in the other order, `issue?` refuses the second. -/
 theorem the_conflict_appears_after_issue :
     (separatelyLent.grantAt? bufferLoan).isSome ∧
     (separatelyLent.grantAt? secondBufferLoan).isSome ∧
-    ((state₀.memory.alias bufferAlloc borrowedAlloc).issue? bufferLoan
+    ((state₀.memory.mapOnto bufferAlloc borrowedAlloc).issue? bufferLoan
         { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
           range := ⟨0, 8⟩, rights := .readWrite }).isSome := by
   exact ⟨by decide, by decide, by decide⟩

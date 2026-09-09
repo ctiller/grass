@@ -81,7 +81,8 @@ range moves by `origin` and keeps its size.
 were declared aliased in a list and `MemoryState.SharesBytes` walked it, while
 `MemoryState.write` wrote only the named allocation -- an authority-level claim with
 no byte-level counterpart, which `Tests/Op/StandardLoan.lean`'s
-`the_alias_is_not_yet_a_byte_level_fact` proves. Two views into one backing store
+`the_alias_is_a_byte_level_fact` recorded before it was
+repaired. Two views into one backing store
 share bytes exactly where their translated spans overlap, which is arithmetic rather
 than a declaration, and nothing can assert it falsely.
 
@@ -125,8 +126,9 @@ disjuncts are exactly what makes that agreement hold.
 def Disjoint (r s : ByteRange) : Prop :=
   r.size = 0 ∨ s.size = 0 ∨ r.stop ≤ s.start ∨ s.stop ≤ r.start
 
-/-- **Translation preserves disjointness.** Two local ranges that do not overlap do
-not overlap in the backing store either, because both move by the same origin.
+/-- **Translation preserves disjointness**, as `translate_disjoint_of_disjoint`
+states below: two local ranges whose `ByteRange.Disjoint` holds still satisfy it
+after `translate`, because both move by the same origin.
 
 The framing lemmas need exactly this: a write and a read through one view are
 disjoint in the view's own coordinates, and what `ByteStore` sees is both of them

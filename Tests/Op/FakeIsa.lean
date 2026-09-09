@@ -32,6 +32,25 @@ open Grass.Core Grass.Memory Grass.Obligation Grass.Op Grass.Std.Logical
 /-! ## Shared setting -/
 
 private def allocs₀ : FreshSupply AllocTag := .initial
+
+private def stores₀ : FreshSupply StorageTag := .initial
+
+/-- One storage, four views. `bufferAlloc`, `viewAlloc`, `chainedAlloc` and
+`deviceViewAlloc` all name this backing, which is what makes them the same bytes.
+The previous fixture gave each its own `ByteStore` and declared the sharing in an
+`aliases` list, which `Tests/Op/StandardLoan.lean`'s
+`the_alias_is_a_byte_level_fact` proves the byte semantics did not
+implement. -/
+def sharedBacking : StorageId := stores₀.fresh.1
+
+/-- The read-only image's storage. -/
+def constBacking : StorageId := stores₀.fresh.2.fresh.1
+
+/-- The stack's storage. -/
+def stackBacking : StorageId := stores₀.fresh.2.fresh.2.fresh.1
+
+/-- The borrowed allocation's storage. -/
+def borrowedBacking : StorageId := stores₀.fresh.2.fresh.2.fresh.2.fresh.1
 private def allocs₁ := allocs₀.fresh.2
 private def allocs₂ := allocs₁.fresh.2
 
@@ -935,56 +954,73 @@ rather than assembled by hand, so the fixture's notion of initialized is the sam
 one `RangeInitialized` reads. -/
 def zeroed64 : ByteStore := ByteStore.empty.write 0 (List.replicate 64 0) true
 
-/-- The buffer, its aliasing view, and a read-only allocation. The alias is
-declared here, in the state, because whether two allocations name the same bytes
-is a fact about the machine and not about provenance. -/
+/-- The buffer, its views, and a read-only allocation.
+
+Sharing is not declared here: `bufferAlloc`, `viewAlloc`, `chainedAlloc` and
+`deviceViewAlloc` name `sharedBacking`, so they *are* one storage. Whether two
+allocations name the same bytes is still a fact about the machine rather than about
+provenance -- it is now a fact the record carries directly. -/
 def allocations₀ : List (AllocId × AllocationRecord) :=
   [ (bufferAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
                     source := .virtualAlloc, owners := [engine₀, thread₀]
                     permission := .readWrite, live := true
-                    bytes := zeroed64, base := some 0x1000 })
+                    base := some 0x1000
+                    backing := sharedBacking, origin := 0 })
   , (viewAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
                   source := .mappedFile, owners := [engine₀, thread₀]
                   permission := .readWrite, live := true
-                  bytes := zeroed64, base := some 0x1000 })
+                  base := some 0x1000
+                  backing := sharedBacking, origin := 0 })
   , (constAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
                    source := .imageMapping, owners := [thread₀]
                    permission := .readOnly, live := true
-                   bytes := zeroed64, base := some 0x2000 })
+                   base := some 0x2000
+                   backing := constBacking, origin := 0 })
   , (stackAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
                    source := .stack, owners := [engine₀, thread₀]
-                   permission := .readWrite, live := true, bytes := zeroed64
-                   base := some 0x3000 })
+                   permission := .readWrite, live := true, base := some 0x3000
+                   backing := stackBacking, origin := 0 })
   , (borrowedAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
                       source := .virtualAlloc, owners := [engine₀, thread₀]
-                      permission := .readWrite, live := true, bytes := zeroed64
-                      base := some 0x4000 })
+                      permission := .readWrite, live := true, base := some 0x4000
+                      backing := borrowedBacking, origin := 0 })
   , (chainedAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
                      source := .mappedFile, owners := [thread₀]
-                     permission := .readWrite, live := true, bytes := zeroed64
-                     base := some 0x1000 })
+                     permission := .readWrite, live := true, base := some 0x1000
+                     backing := sharedBacking, origin := 0 })
   , (deviceViewAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀
                         space := .deviceHostVisible
                         source := .deviceMemory, owners := [engine₀, thread₀]
-                        permission := .readWrite, live := true, bytes := zeroed64
-                        base := some 0x1000 }) ]
+                        permission := .readWrite, live := true, base := some 0x1000
+                        backing := sharedBacking, origin := 0 }) ]
 
+/-- Seed a backing with the fixture's starting contents. Installing into a state
+with nothing lent out is always accepted, which is what `installStore?`'s guard
+says. -/
+private def seed (state : MemoryState) (backing : StorageId) : MemoryState :=
+  (state.installStore? backing zeroed64).getD state
+
+/-- The four stores, before anything is allocated over them.
+
+There are four rather than seven because four of the allocations are views of one
+storage. No `alias` calls: the sharing is in the records. -/
 def memory₀ : MemoryState :=
-  (((MemoryState.empty.allocateAll? allocations₀).getD .empty).alias bufferAlloc viewAlloc).alias
-    bufferAlloc deviceViewAlloc
+  seed (seed (seed (seed MemoryState.empty sharedBacking) constBacking)
+    stackBacking) borrowedBacking
 
 /-- Every allocation happened, so `getD` did not fall back to the empty state. -/
 theorem the_allocations_succeed :
-    (MemoryState.empty.allocateAll? allocations₀).isSome := by decide
+    (memory₀.allocateAll? allocations₀).isSome := by decide
 
 /-- The stack reservation the frame provider guards.
 
-`viewAlloc` and `chainedAlloc` share `bufferAlloc`'s base, which is the point of
-an alias: distinct allocation identities over the same storage. Placement does not
-decide aliasing — `MemoryState.aliases` does, and `docs/MEMORY_MODEL.md` §2 makes
-provenance rather than address the authority — so the two facts are declared
-separately and agreeing here is the fixture being realistic rather than a rule. -/
-def memory₁ : MemoryState := memory₀.alias viewAlloc chainedAlloc
+`viewAlloc` and `chainedAlloc` share `bufferAlloc`'s base, and they share its
+storage — but those are still two facts. Placement does not decide sharing:
+`AllocationRecord.backing` does, and `docs/MEMORY_MODEL.md` §2 makes provenance
+rather than address the authority. Agreeing here is the fixture being realistic
+rather than a rule, and `Tests/Memory/Placement.lean` holds the case where two
+allocations share a base and are not the same storage. -/
+def memory₁ : MemoryState := (memory₀.allocateAll? allocations₀).getD .empty
 
 /-- The starting machine state: allocations exist, but no authority is held. -/
 def state₀ : MachineState := .initial memory₁
@@ -2507,14 +2543,23 @@ theorem chained_alias_store_is_denied :
   cases hs; cases ht
   exact ⟨by decide, by decide⟩
 
-/-- The chain really is two hops: the buffer and `chainedAlloc` are not directly
-declared aliased, so the theorem above is about transitivity and not about a
-declaration that was there all along. -/
-theorem the_chain_is_two_hops :
-    ¬ (state₀.memory.AliasHop bufferAlloc chainedAlloc) ∧
-    state₀.memory.AliasHop bufferAlloc viewAlloc ∧
-    state₀.memory.AliasHop viewAlloc chainedAlloc ∧
-    state₀.memory.SharesBytes bufferAlloc chainedAlloc := by decide
+/-- **There is no chain to walk.**
+
+This used to check that the buffer and `chainedAlloc` were not *directly* declared
+aliased, so that the theorem above was about the transitive closure rather than
+about a declaration that was there all along. The closure is gone with the
+declarations: under `g-design:185` all three name one `StorageId`, so they share
+pairwise because there is one store. What was a two-hop path is now an equality, and
+the failure the old shape was guarding against -- a chain whose ends were treated as
+unrelated -- cannot be written.
+
+Stated over all three pairs rather than just the ends, because the content of the
+claim is now that sharing is an equivalence and not that a search terminated. -/
+theorem the_views_are_one_storage :
+    state₀.memory.SharesBytes bufferAlloc viewAlloc ∧
+    state₀.memory.SharesBytes viewAlloc chainedAlloc ∧
+    state₀.memory.SharesBytes bufferAlloc chainedAlloc ∧
+    state₀.memory.SharesBytes bufferAlloc deviceViewAlloc := by decide
 
 /-- The same two accesses, one context apart, are *not* denied: program order
 sequences a context against itself, and refusing that would refuse ordinary

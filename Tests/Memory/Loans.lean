@@ -717,7 +717,7 @@ def viewProv : Provenance := { bufferProv with root := view }
 No `alias` call: allocating the second record with the first's `backing` is what
 makes them share. The previous shape allocated a private `ByteStore` for the view and
 then declared the two aliased, which `Tests/Op/StandardLoan.lean`'s
-`the_alias_is_not_yet_a_byte_level_fact` proves the byte semantics did not implement. -/
+`the_alias_is_a_byte_level_fact` proves the byte semantics did not implement. -/
 def aliasedPair : MemoryState :=
   (unlent.allocate? view
       { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual

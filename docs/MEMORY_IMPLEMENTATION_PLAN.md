@@ -999,7 +999,7 @@ one outright defect that had already merged — see §3.11's denial row.
 
   This is the largest thing on this list, and it is now visible in the test suite
   as well as here: `Tests/Op/StandardLoan.lean`'s
-  `the_alias_is_not_yet_a_byte_level_fact` stores through the view and reads the old
+  `the_alias_is_a_byte_level_fact`, in the form it had then, stored through the view and reads the old
   value from the buffer.
 
   Two shapes close it, and the choice is a design decision rather than a repair:

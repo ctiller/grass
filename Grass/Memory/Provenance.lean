@@ -54,7 +54,7 @@ identity, a nonnegative origin into it, and their own local extent. Two views al
 exactly where their translated spans overlap, which makes byte coherence definitional
 rather than something a separate relation asserts and the byte semantics does not
 implement -- the defect `Tests/Op/StandardLoan.lean`'s
-`the_alias_is_not_yet_a_byte_level_fact` proves against the old shape.
+`the_alias_is_a_byte_level_fact` proves against the old shape.
 
 **Distinct from `AllocId` on purpose.** An allocation identity names a view; a storage
 identity names bytes. One backing store may carry several views -- a buffer and a

@@ -71,6 +71,8 @@ theorem spill_survives_the_intervening_store {record : AllocationRecord}
     {offset : Nat}
     (hcov : (ByteRange.mk spill.range.start
       (spillData.take spill.range.size).length).Covers offset)
+    (hshare : spill.provenance.root ≠ scratch.provenance.root →
+      ¬ state.SharesBytes spill.provenance.root scratch.provenance.root)
     (hdisjoint : ¬ (scratch.provenance.root = spill.provenance.root ∧
       scratch.range.Covers offset)) :
     (runBlock (applyAccess state spill spillData indeterminate).2 indeterminate
@@ -78,6 +80,10 @@ theorem spill_survives_the_intervening_store {record : AllocationRecord}
       (spillData.take spill.range.size)[offset - spill.range.start]? :=
   byteAt?_write_survives_block state spill spillData indeterminate
     [(scratch, scratchData)] hfound hden hwrites hcov
+    (fun step hstep hid => by
+      rw [List.mem_singleton] at hstep
+      subst hstep
+      exact hshare hid)
     (fun step hstep => by
       rw [List.mem_singleton] at hstep
       subst hstep
@@ -97,12 +103,14 @@ theorem spill_survives_any_block {record : AllocationRecord} (rest : List (Acces
     {offset : Nat}
     (hcov : (ByteRange.mk spill.range.start
       (spillData.take spill.range.size).length).Covers offset)
+    (hshare : ∀ step ∈ rest, spill.provenance.root ≠ step.1.provenance.root →
+      ¬ state.SharesBytes spill.provenance.root step.1.provenance.root)
     (hall : ∀ step ∈ rest, ¬ Touches step spill.provenance.root offset) :
     (runBlock (applyAccess state spill spillData indeterminate).2 indeterminate
         rest).2.byteAt? spill.provenance.root offset =
       (spillData.take spill.range.size)[offset - spill.range.start]? :=
   byteAt?_write_survives_block state spill spillData indeterminate rest hfound hden
-    hwrites hcov hall
+    hwrites hcov hshare hall
 
 /--
 Disjoint ranges are what a caller actually has, so this is the hypothesis in the
@@ -139,8 +147,10 @@ over.
 -/
 theorem untouched_bytes_survive_regardless (block : List (AccessDescriptor × ByteSeq))
     (id : AllocId) (offset : Nat)
+    (hshare : ∀ step ∈ block, id ≠ step.1.provenance.root →
+      ¬ state.SharesBytes id step.1.provenance.root)
     (hall : ∀ step ∈ block, ¬ Touches step id offset) :
     (runBlock state indeterminate block).2.cellAt? id offset = state.cellAt? id offset :=
-  cellAt?_runBlock_of_untouched indeterminate block state hall
+  cellAt?_runBlock_of_untouched indeterminate block state hshare hall
 
 end Tests.Memory.StraightLineBlock
