@@ -1,0 +1,277 @@
+import Grass.Artifact.PE.Description
+
+/-!
+# Absolute PE file coordinates
+
+Every span in this module is measured from byte zero of the complete file.
+The NT headers therefore begin at the DOS header's `e_lfanew` value, never at
+zero of a detached header fragment. This is the coordinate discipline required
+before a PE writer or reader may claim section-layout validity.
+
+Format authority: Microsoft, [PE Format](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format),
+sections "MS-DOS Stub (Image Only)", "Signature (Image Only)", "COFF File
+Header (Object and Image)", "Optional Header (Image Only)", and "Section Table
+(Section Headers)"; retrieved 2026-09-01 in `docs/REFERENCES.md`.
+-/
+
+namespace Grass.Artifact.PE
+
+open Grass.Std.Logical
+
+/-- A half-open absolute byte span `[start, start + size)` in a complete file. -/
+structure FileSpan where
+  start : Nat
+  size : Nat
+deriving DecidableEq
+
+/-- The exclusive end of an absolute file span. -/
+def FileSpan.endOffset (span : FileSpan) : Nat := span.start + span.size
+
+/-- Two half-open spans do not overlap. -/
+def FileSpan.Disjoint (left right : FileSpan) : Prop :=
+  left.endOffset ≤ right.start ∨ right.endOffset ≤ left.start
+
+instance (left right : FileSpan) : Decidable (left.Disjoint right) := by
+  unfold FileSpan.Disjoint
+  infer_instance
+
+/-- Round `value` upward to the next multiple boundary. A zero alignment is
+left unchanged here; image validation rejects zero before serialization. -/
+def alignUp (value alignment : Nat) : Nat :=
+  if alignment = 0 then value
+  else if value % alignment = 0 then value
+  else value + (alignment - value % alignment)
+
+/-- Alignment never moves an offset backward. -/
+theorem le_alignUp (value alignment : Nat) : value ≤ alignUp value alignment := by
+  unfold alignUp
+  split
+  · simp_all
+  · split <;> simp_all
+
+/-- Positive alignment produces an exact multiple boundary. -/
+theorem alignUp_mod_eq_zero (value : Nat) {alignment : Nat}
+    (positive : 0 < alignment) : alignUp value alignment % alignment = 0 := by
+  unfold alignUp
+  rw [if_neg (Nat.ne_of_gt positive)]
+  split
+  next aligned => exact aligned
+  next unaligned =>
+    rw [Nat.add_mod]
+    have remainderLt : value % alignment < alignment := Nat.mod_lt value positive
+    have fillLt : alignment - value % alignment < alignment := by omega
+    rw [Nat.mod_eq_of_lt fillLt]
+    have fillsBoundary : value % alignment + (alignment - value % alignment) = alignment := by
+      omega
+    rw [fillsBoundary, Nat.mod_self]
+
+/-- Alignment increases a value by less than one positive alignment unit. -/
+theorem alignUp_lt_add (value : Nat) {alignment : Nat} (positive : 0 < alignment) :
+    alignUp value alignment < value + alignment := by
+  unfold alignUp
+  rw [if_neg (Nat.ne_of_gt positive)]
+  split
+  · omega
+  · have remainderLt : value % alignment < alignment := Nat.mod_lt value positive
+    omega
+
+/-- Microsoft PE Format, "MS-DOS Stub (Image Only)": the canonical adapter DOS
+header stores `e_lfanew` at byte 60 and ends at byte 64. -/
+def canonicalPeOffset : Nat := 64
+
+/-- Microsoft PE Format, "Signature (Image Only)". -/
+def peSignatureSize : Nat := 4
+
+/-- Microsoft PE Format, "COFF File Header (Object and Image)". -/
+def coffHeaderSize : Nat := 20
+
+/-- Microsoft PE Format, "Optional Header (Image Only)" and PE32+ layout. -/
+def optionalHeader64Size : Nat := 240
+
+/-- Microsoft PE Format, "Section Table (Section Headers)". -/
+def sectionHeaderSize : Nat := 40
+
+/-- Size of the complete NT-header region, including the section table. -/
+def ntHeadersSize (sectionCount : Nat) : Nat :=
+  peSignatureSize + coffHeaderSize + optionalHeader64Size + sectionHeaderSize * sectionCount
+
+/-- The absolute NT-header span rooted at the DOS `e_lfanew` value. -/
+def ntHeadersSpan (peOffset sectionCount : Nat) : FileSpan :=
+  ⟨peOffset, ntHeadersSize sectionCount⟩
+
+/-- First legal raw-data offset for a synthesized image. -/
+def firstRawOffset (peOffset sectionCount fileAlignment : Nat) : Nat :=
+  alignUp (ntHeadersSpan peOffset sectionCount).endOffset fileAlignment
+
+/-- Synthesized raw data begins at or after the absolute end of the NT headers. -/
+theorem ntHeaders_end_le_firstRawOffset (peOffset sectionCount fileAlignment : Nat) :
+    (ntHeadersSpan peOffset sectionCount).endOffset ≤
+      firstRawOffset peOffset sectionCount fileAlignment :=
+  le_alignUp _ _
+
+/-- One requested section paired with its absolute raw-data span. -/
+structure PlacedSection where
+  source : RawSection
+  /-- Loader-relative virtual extent, measured as an RVA from the image base. -/
+  virtualSpan : FileSpan
+  /-- Complete-file raw extent, including file-alignment padding. -/
+  rawSpan : FileSpan
+deriving DecidableEq
+
+/-- Place section payloads in request order while advancing the virtual and raw
+coordinate chains independently. -/
+def placeSectionsFrom (virtualCursor rawCursor sectionAlignment fileAlignment : Nat) :
+    List RawSection → List PlacedSection
+  | [] => []
+  | source :: tail =>
+      let virtualStart := alignUp virtualCursor sectionAlignment
+      let rawStart := alignUp rawCursor fileAlignment
+      let placed : PlacedSection :=
+        { source
+          virtualSpan := ⟨virtualStart, source.contents.length⟩
+          rawSpan := ⟨rawStart, alignUp source.contents.length fileAlignment⟩ }
+      placed :: placeSectionsFrom placed.virtualSpan.endOffset placed.rawSpan.endOffset
+        sectionAlignment fileAlignment tail
+
+/-- Raw spans start at the supplied cursor and continue without holes. -/
+def RawContiguous : Nat → List PlacedSection → Prop
+  | _, [] => True
+  | cursor, placed :: tail =>
+      placed.rawSpan.start = cursor ∧ RawContiguous placed.rawSpan.endOffset tail
+
+/-- Placement is raw-contiguous when its initial cursor is already aligned.
+Every recursive cursor stays aligned because each generated raw extent is an
+aligned start plus an aligned size. -/
+theorem placeSectionsFrom_rawContiguous
+    (virtualCursor rawCursor sectionAlignment fileAlignment : Nat)
+    (sections : List RawSection) (positive : 0 < fileAlignment)
+    (aligned : rawCursor % fileAlignment = 0) :
+    RawContiguous rawCursor
+      (placeSectionsFrom virtualCursor rawCursor sectionAlignment fileAlignment sections) := by
+  induction sections generalizing virtualCursor rawCursor with
+  | nil => trivial
+  | cons source tail ih =>
+      simp only [placeSectionsFrom, RawContiguous]
+      have start : alignUp rawCursor fileAlignment = rawCursor := by
+        simp [alignUp, Nat.ne_of_gt positive, aligned]
+      constructor
+      · exact start
+      · apply ih
+        rw [FileSpan.endOffset, start, Nat.add_mod, aligned,
+          alignUp_mod_eq_zero source.contents.length positive]
+        simp
+
+@[simp] theorem placeSectionsFrom_length
+    (virtualCursor rawCursor sectionAlignment fileAlignment : Nat)
+    (sections : List RawSection) :
+    (placeSectionsFrom virtualCursor rawCursor sectionAlignment fileAlignment sections).length =
+      sections.length := by
+  induction sections generalizing virtualCursor rawCursor with
+  | nil => rfl
+  | cons source tail ih =>
+      simp only [placeSectionsFrom, List.length_cons]
+      exact congrArg Nat.succ (ih _ _)
+
+/-- Raw payload bytes followed by the zero padding declared by `rawSpan`. -/
+def PlacedSection.paddedContents (placed : PlacedSection) : Std.Logical.ByteArray :=
+  placed.source.contents ++
+    Vec.replicate (placed.rawSpan.size - placed.source.contents.length) 0
+
+/-- Padding has exactly the declared raw extent whenever that extent contains
+the source bytes. -/
+theorem PlacedSection.length_paddedContents (placed : PlacedSection)
+    (contains : placed.source.contents.length ≤ placed.rawSpan.size) :
+    placed.paddedContents.length = placed.rawSpan.size := by
+  simp only [PlacedSection.paddedContents, Vec.length_append, Vec.length_replicate]
+  omega
+
+/-- Every placement produced by `placeSectionsFrom` contains its source bytes. -/
+theorem placed_rawSize_ge
+    (virtualCursor rawCursor sectionAlignment fileAlignment : Nat)
+    (sections : List RawSection) :
+    ∀ placed ∈ placeSectionsFrom virtualCursor rawCursor sectionAlignment fileAlignment sections,
+      placed.source.contents.length ≤ placed.rawSpan.size := by
+  induction sections generalizing virtualCursor rawCursor with
+  | nil => simp [placeSectionsFrom]
+  | cons source tail ih =>
+      intro placed member
+      simp only [placeSectionsFrom, List.mem_cons] at member
+      rcases member with rfl | member
+      · exact le_alignUp _ _
+      · exact ih _ _ placed member
+
+/-- `placed_virtualSize_eq` proves the exact unpadded virtual extent of every
+source section. -/
+theorem placed_virtualSize_eq
+    (virtualCursor rawCursor sectionAlignment fileAlignment : Nat)
+    (sections : List RawSection) :
+    ∀ placed ∈ placeSectionsFrom virtualCursor rawCursor sectionAlignment fileAlignment sections,
+      placed.virtualSpan.size = placed.source.contents.length := by
+  induction sections generalizing virtualCursor rawCursor with
+  | nil => simp [placeSectionsFrom]
+  | cons source tail ih =>
+      intro placed member
+      simp only [placeSectionsFrom, List.mem_cons] at member
+      rcases member with rfl | member
+      · rfl
+      · exact ih _ _ placed member
+
+/-- Conventional PE32+ image section alignment used by the executable adapter. -/
+def canonicalSectionAlignment : Nat := 4096
+
+/-- Conventional PE32+ file alignment used by the executable adapter. -/
+def canonicalFileAlignment : Nat := 512
+
+/-- Derive the first mapped section boundary from the complete padded headers. -/
+def firstSectionRva (sectionCount : Nat) : Nat :=
+  alignUp (firstRawOffset canonicalPeOffset sectionCount canonicalFileAlignment)
+    canonicalSectionAlignment
+
+/-- `headers_le_firstSectionRva` places the first section after all header bytes. -/
+theorem headers_le_firstSectionRva (sectionCount : Nat) :
+    firstRawOffset canonicalPeOffset sectionCount canonicalFileAlignment ≤
+      firstSectionRva sectionCount :=
+  le_alignUp _ _
+
+/-- Every section starts at or beyond the supplied virtual cursor. -/
+theorem placeSectionsFrom_virtualStart_ge
+    (virtualCursor rawCursor sectionAlignment fileAlignment : Nat)
+    (sections : List RawSection) :
+    ∀ placed ∈ placeSectionsFrom virtualCursor rawCursor sectionAlignment fileAlignment sections,
+      virtualCursor ≤ placed.virtualSpan.start := by
+  induction sections generalizing virtualCursor rawCursor with
+  | nil => simp [placeSectionsFrom]
+  | cons source tail ih =>
+      intro placed member
+      simp only [placeSectionsFrom, List.mem_cons] at member
+      rcases member with rfl | member
+      · exact le_alignUp _ _
+      · have tailBound := ih _ _ placed member
+        have startBound := le_alignUp virtualCursor sectionAlignment
+        simp only [FileSpan.endOffset] at tailBound
+        omega
+
+/-- Place all requested sections after the complete padded headers, using the
+next section-alignment boundary as the first virtual cursor. This function
+consumes `ExecutableImageDescription` without learning how any section's bytes
+were encoded. -/
+def placeImageSections (description : ExecutableImageDescription) : Vec PlacedSection :=
+  Vec.fromList <| placeSectionsFrom (firstSectionRva description.sections.length)
+    (firstRawOffset canonicalPeOffset description.sections.length canonicalFileAlignment)
+    canonicalSectionAlignment canonicalFileAlignment description.sections.toList
+
+/-- `placeImageSections` preserves the requested number of sections. -/
+@[simp] theorem placeImageSections_length (description : ExecutableImageDescription) :
+    (placeImageSections description).length = description.sections.length := by
+  simp [placeImageSections, Vec.length]
+
+/-- `placeImageSections_headers_before` separates every mapped section from the
+complete file-aligned header region, for arbitrary section counts. -/
+theorem placeImageSections_headers_before (description : ExecutableImageDescription)
+    {placed : PlacedSection} (member : placed ∈ (placeImageSections description).toList) :
+    firstRawOffset canonicalPeOffset description.sections.length canonicalFileAlignment ≤
+      placed.virtualSpan.start := by
+  exact Nat.le_trans (headers_le_firstSectionRva description.sections.length)
+    (placeSectionsFrom_virtualStart_ge _ _ _ _ _ placed member)
+
+end Grass.Artifact.PE
