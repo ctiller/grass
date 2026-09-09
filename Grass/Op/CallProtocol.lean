@@ -177,6 +177,24 @@ private theorem checked?_fields {Request : Type} {machine : MachineState}
     · simp at success
   · simp at success
 
+/-- `step?_metadata` states that every successful ordinary protocol step preserves
+the call supply, grant supply, pending occurrences, and boundary trace exactly. -/
+theorem step?_metadata {Request : Type} {state next : State Request}
+    {policy : StepPolicy} {operation : SomeOperation} {context : ContextId}
+    {kind : ContextKind} {cause : EventCause}
+    {faultAt : (sequence : SubstepSequence) → FaultPlan sequence}
+    (success : step? state policy operation context kind cause faultAt = some next) :
+    next.callSupply = state.callSupply ∧
+      next.grantSupply = state.grantSupply ∧
+      next.pending = state.pending ∧
+      next.boundaries = state.boundaries := by
+  unfold step? at success
+  repeat' split at success
+  all_goals try contradiction
+  rename_i machine ran
+  have fields := checked?_fields success
+  exact ⟨fields.2.1, fields.2.2.1, fields.2.2.2.1, fields.2.2.2.2⟩
+
 /-- A successful return identifies the exact pending occurrence it consumed. -/
 theorem return?_matches_occurrence {Request : Type} {state next : State Request}
     {call : CallId} {caller agent : ContextId} {ids : List GrantId}
