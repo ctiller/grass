@@ -8,11 +8,11 @@ open Grass.Refinement.Console.WriteFileHistory
 
 variable {R Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
   {spec : SpecProcess resources} {projection : CapturedTargetProjection spec Status}
-  {realization : Realization} {initial before after : CallProtocol.State Request}
+  {plan : LoanPlan} {realization : Realization} {initial before after : ProtocolState}
   {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-  {frontier : Prefix before call record}
-  {history : History realization initial call record frontier}
-  {relation : HandoffRelation projection} {aligned : Aligned relation history}
+  {frontier : Prefix plan before call record}
+  {history : History plan realization initial call record frontier}
+  {relation : HandoffRelation (plan := plan) projection} {aligned : Aligned relation history}
 
 /-- Provider output, including a full suffix, stays a writing wait until reply. -/
 example {predicate : StalledPredicate} (stalled : Stalled predicate aligned)
@@ -31,7 +31,7 @@ example (response : FixedNonresponse aligned) (n : Nat) :
   congrArg (fun h : (observedModel projection).History => h.path.choices) (response.observed_at n)
 
 /-- Zero provider publication preserves the complete history, not just a cut. -/
-example {nextState : CallProtocol.State Request} {post : Prefix nextState call record}
+example {nextState : ProtocolState} {post : Prefix plan nextState call record}
     (action : Action) (output : Vec Byte)
     (step : CommittedStep realization frontier post action output)
     (same : post.accepted = frontier.accepted) :
@@ -40,8 +40,8 @@ example {nextState : CallProtocol.State Request} {post : Prefix nextState call r
 
 /-- A positive publication after a zero action appends to the original full
 observed history; the zero action cannot invent a prefix event. -/
-example {middle final : CallProtocol.State Request}
-    {mid : Prefix middle call record} {post : Prefix final call record}
+example {middle final : ProtocolState}
+    {mid : Prefix plan middle call record} {post : Prefix plan final call record}
     (zeroAction action : Action) (zeroOutput output : Vec Byte)
     (zeroStep : CommittedStep realization frontier mid zeroAction zeroOutput)
     (same : mid.accepted = frontier.accepted)
@@ -94,7 +94,7 @@ example (_other : Aligned relation history) (_sameCut : _other.endpoint = aligne
 example {selected : ReturnInterpretation} {result : ReturnResult}
     (_returned : Returned aligned selected result after) (_outcome : WriteOutcome)
     (_next : WriteCursor projection.target.payload) (_done : _returned.decision = .done _outcome _next)
-    (_correspondence : CallerInterpretation) (_action : Action) (_state : CallProtocol.State Request) : True := by
+    (_correspondence : CallerInterpretation) (_action : Action) (_state : ProtocolState) : True := by
   fail_if_success
     have _wrong : CallerContinuation _returned.matched _correspondence _action _state :=
       _returned.reportingHistory _outcome _next _done
