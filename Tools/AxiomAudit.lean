@@ -153,6 +153,7 @@ import Grass.Assembly.SourceStaticBindings
 import Grass.Assembly.SourceImportBindings
 import Grass.Assembly.SourceImportRequests
 import Grass.Assembly.SourceLinkedImage
+import Grass.Assembly.SourceWitness
 import Grass.Assembly.FrameAllocationExecution
 import Grass.Assembly.SourceFetched
 import Grass.Assembly.SourceLoadedImage
