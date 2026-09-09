@@ -72,6 +72,8 @@ import Grass.Platform.Win32.WriteFileHandoff
 import Grass.Platform.Win32.WriteFilePreservation
 import Grass.Platform.Win32.WriteFileCall
 import Grass.Platform.Win32.WriteFileCallPreservation
+import Grass.Platform.Win32.WriteFileRuntime
+import Grass.Platform.Win32.WriteFileService
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
 import Grass.Artifact.PE.ExceptionBinding
@@ -219,6 +221,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFilePreservation,
    `Grass.Platform.Win32.WriteFileCall,
    `Grass.Platform.Win32.WriteFileCallPreservation,
+   `Grass.Platform.Win32.WriteFileRuntime,
+   `Grass.Platform.Win32.WriteFileService,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
@@ -339,10 +343,9 @@ acquiring a citation.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
 -- Five raw/checked view operations retain data and assert no target semantics.
--- One adapter derives the Windows binding from retained actual CALL receipts.
--- Sixteen runtime operations and raw signature predicates assert no execution.
--- Ten checked body constructors/projections and four fetch-reuse helpers.
-def notBehaviourBaseline : Nat := 311
+-- Runtime, CALL binding and body factories retain checked receipts.
+-- Five runtime capture/update adapters introduce no additional ABI behavior.
+def notBehaviourBaseline : Nat := 316
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -486,6 +489,12 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.ExitProcess.entryHandoff?,
     `Grass.Platform.Win32.ExitProcess.EntryHandoff.after,
     `Grass.Platform.Win32.ExitProcess.EntryHandoff.initRaw,
+    -- Actual receipt projections and computed runtime frontier updates.
+    `Grass.Platform.Win32.WriteFile.CallHandoff.runtime,
+    `Grass.Platform.Win32.WriteFile.CallHandoff.rawAfter,
+    `Grass.Platform.Win32.WriteFile.ServiceReceipt.nextRuntime,
+    `Grass.Platform.Win32.WriteFile.ServiceReceipt.after,
+    `Grass.Platform.Win32.WriteFile.ServiceEdge,
     `Grass.Platform.Win32.NonvolatileSnapshot,
     `Grass.Platform.Win32.captureNonvolatile,
     `Grass.Platform.Win32.ReturnFrame.restoredRsp,
@@ -507,8 +516,6 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.ExecutionState.RawState.checked?,
     `Grass.Platform.Win32.ExecutionState.RawState.ControlConsistent,
     `Grass.Platform.Win32.ExecutionState.RawState.withMachine,
-    -- Proof-bearing projection of the selected fixed CALL factory receipt.
-    `Grass.Platform.Win32.WriteFile.CallPolicy.ofFactory,
     -- Exact table views, fixed-plan predicates and checked bookkeeping adapters;
     -- they assert no native provider or CPU adequacy beyond their premises.
     `Grass.Platform.Win32.WriteFile.EntryHandoff.after,
