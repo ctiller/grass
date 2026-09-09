@@ -5,6 +5,11 @@ param(
     [string[]]$Declaration = @(
         "Grass.StableId.render_of_empty_namespace",
         "Grass.RequirementKind.extension_injective",
+        "Grass.DemandFamily.identity_mem_identities",
+        "Grass.DemandFamily.identities_nodup",
+        "Grass.DerivedDemandFamily.prior_mem_allKeys",
+        "Grass.DerivedDemandFamily.identity_mem_allKeys",
+        "Grass.DerivedDemandFamily.allKeys_nodup",
         "Grass.DemandCertificateFamily.get",
         "Grass.ObservationProjection.ext",
         "Grass.ObservationProjection.identity_project",
@@ -32,6 +37,8 @@ param(
         "Grass.BehaviorRefinement.trans_assoc",
         "Grass.BehaviorRefinement.mapSteps",
         "Grass.BehaviorRefinement.mapInfinite",
+        "Grass.BehaviorRefinement.mapInfinite_prefixEvents",
+        "Grass.BehaviorRefinement.mapInfinite_prefixSteps",
         "Grass.BehaviorRefinement.mapInfinite_refl",
         "Grass.BehaviorRefinement.mapInfinite_trans",
         "Grass.BehaviorRefinement.mapCompletion",
@@ -52,6 +59,17 @@ param(
         "Grass.BehaviorRefinement.mapCompletionAtPrefix_refl",
         "Grass.BehaviorRefinement.mapCompletionAtPrefix_trans",
         "Grass.BehaviorRefinement.preservesAcceptance",
+        "Grass.ProjectedDriverCertificate.allKeys_nodup",
+        "Grass.ProviderCertificate.allKeys_nodup",
+        "Grass.MachineCertificate.allKeys_nodup",
+        "Grass.ArtifactCertificate.allKeys_nodup",
+        "Grass.VerifiedProgram.requirementKeys",
+        "Grass.VerifiedProgram.requirementKeys_nodup",
+        "Grass.VerifiedProgram.artifact_identity_mem_requirementKeys",
+        "Grass.VerifiedProgram.driver_identity_mem_requirementKeys",
+        "Grass.VerifiedProgram.machine_identity_mem_requirementKeys",
+        "Grass.VerifiedProgram.portable_identity_mem_requirementKeys",
+        "Grass.VerifiedProgram.provider_identity_mem_requirementKeys",
         "Grass.VerifiedProgram.loadedBehavior_exact",
         "Grass.VerifiedProgram.loadedAdequate",
         "Grass.VerifiedProgram.sound",
@@ -179,6 +197,10 @@ $csimpProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$csimpPro
 $runtimeConsumerModule = "AuditRuntimeConsumer$([System.Guid]::NewGuid().ToString('N'))"
 $runtimeConsumerPath = Join-Path (Get-Location).Path "$runtimeConsumerModule.lean"
 $runtimeConsumerOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/$runtimeConsumerModule.olean"
+$moduleOwnershipProbeLeaf = "AuditModuleOwnershipProbe$([System.Guid]::NewGuid().ToString('N'))"
+$moduleOwnershipProbeModule = "Grass.Trust.$moduleOwnershipProbeLeaf"
+$moduleOwnershipProbePath = Join-Path (Get-Location).Path "$moduleOwnershipProbeLeaf.lean"
+$moduleOwnershipProbeOlean = Join-Path (Get-Location).Path ".lake/build/lib/lean/Grass/Trust/$moduleOwnershipProbeLeaf.olean"
 $auditNonce = [System.Guid]::NewGuid().ToString('N')
 $auditCommand = "grass_trust_audit_$auditNonce"
 $auditMarker = "grass-trust-audit-complete:$auditNonce"
@@ -359,6 +381,39 @@ try {
         -not ($underscoreAxiomNegativeOutput -match "Grass\._unauditedFalse.*rejected axioms")) {
         $underscoreAxiomNegativeOutput | ForEach-Object { Write-Host $_ }
         throw "Trust audit ignored an authored underscore-prefixed axiom."
+    }
+
+    # Module ownership is authoritative. A declaration imported as a Grass
+    # module must not escape merely by choosing a non-Grass namespace. Keep the
+    # poison source at the project root, outside the enumerated Grass/ and Tests/
+    # roots, so concurrent or interrupted runs cannot discover one another's
+    # negative fixtures while Lake can still compile it under the project root.
+    $moduleOwnershipProbe = @(
+        "namespace OutsideGrassNamespace",
+        "@[extern `"grass_trust_module_ownership_probe`"]",
+        "def identityBytes (bytes : ByteArray) : ByteArray := bytes",
+        "end OutsideGrassNamespace"
+    )
+    [System.IO.File]::WriteAllLines($moduleOwnershipProbePath, $moduleOwnershipProbe)
+    $moduleOwnershipBuildOutput = @(
+        & lake env lean $moduleOwnershipProbePath -o $moduleOwnershipProbeOlean 2>&1
+    )
+    if ($LASTEXITCODE -ne 0) {
+        $moduleOwnershipBuildOutput | ForEach-Object { Write-Host $_ }
+        throw "Could not compile the module-ownership trust-audit probe."
+    }
+    $moduleOwnershipConsumerProbe = @(
+        "import Tests.Foundation",
+        "import $moduleOwnershipProbeModule",
+        "#audit_verified_programs"
+    )
+    [System.IO.File]::WriteAllLines($temporaryPath, $moduleOwnershipConsumerProbe)
+    $moduleOwnershipConsumerOutput = @(& lake env lean $temporaryPath 2>&1)
+    if ($LASTEXITCODE -eq 0 -or
+        -not ($moduleOwnershipConsumerOutput -match
+            "OutsideGrassNamespace\.identityBytes.*compiled override.*@\[extern\]")) {
+        $moduleOwnershipConsumerOutput | ForEach-Object { Write-Host $_ }
+        throw "Trust audit ignored a compiled override outside the owning Grass module's namespace."
     }
 
     $externalProbe = @(
@@ -547,4 +602,30 @@ finally {
     if ([System.IO.File]::Exists($runtimeConsumerOlean)) {
         [System.IO.File]::Delete($runtimeConsumerOlean)
     }
+    if ([System.IO.File]::Exists($moduleOwnershipProbePath)) {
+        [System.IO.File]::Delete($moduleOwnershipProbePath)
+    }
+    if ([System.IO.File]::Exists($moduleOwnershipProbeOlean)) {
+        [System.IO.File]::Delete($moduleOwnershipProbeOlean)
+    }
 }
+
+# Every failure path above terminates with `throw`, so reaching here means the
+# audit passed -- and it must say so with an exit code, not just a message.
+#
+# `shell: pwsh` in .github/workflows/library.yml runs this script and then
+# exits with `$LASTEXITCODE`. This script never called `exit`, so that code
+# was whatever the last native command left behind, and the last native
+# command on the success path is the scoped-csimp probe's `lake env lean`,
+# which the audit requires to *fail*: the check immediately above passes only
+# when `$LASTEXITCODE -ne 0`. Passing therefore guaranteed a non-zero exit.
+#
+# The `finally` block only calls .NET file methods, which do not touch
+# `$LASTEXITCODE`, so nothing reset it before the wrapper read it.
+#
+# This gate had never once been green on main -- 39 of the last 39 runs
+# failed -- while printing "Trust audit passed" as its final line every time.
+# A gate that always fails hides a real regression exactly as well as a gate
+# that always passes: there was no state it could report that anyone could
+# tell apart from the state it was already in.
+exit 0

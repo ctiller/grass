@@ -6,11 +6,20 @@ other agents; it does not authorize it. Every item here becomes a bus issue or
 dependency against the owning agent, and the owning agent's own implementation
 plan is authoritative for how the item is done.
 
-The drafts in `Spikes/` are the product of a long design iteration and are
-treated here as fixed. The question this document answers is not "what should
-the author type" -- that is settled, and re-opening it is the failure mode this
-plan exists to prevent. It is "what has to exist underneath so that what the
-author already types is what the author keeps typing".
+The drafts in `Spikes/` are the product of a long design iteration, and this
+plan's first question is "what has to exist underneath so that what the author
+already types is what the author keeps typing" rather than "what should the
+author type".
+
+That is a starting point, not a closure. An earlier revision of this paragraph
+said the drafts were fixed and that re-opening them was the failure mode this
+plan exists to prevent; `g-design:183` is right that this contradicts the
+project rule that specifications and authoring interfaces move when
+implementation exposes inadequacy or poor proof economics. What the sentence was
+actually defending is worth keeping and is narrower: the author surface must not
+be churned to suit whatever the libraries find convenient to supply. So the
+gate is a reviewed finding, not a closed door. An adequacy or proof-economy
+finding opens the drafts; a library's preference does not.
 
 ## 1. The governing constraint
 
@@ -139,11 +148,14 @@ metadata: the tables underneath that vocabulary, not the vocabulary. A single
 have looked like a fix without being one.
 
 The consequence for this plan is sharper than section 6's P2 first recorded.
-Spike 1 needs three of the target-side owners, not one. Two are registered:
-c-x86, whose half is committed and partly built, and `g-construct`, which took
-construction and lowering at `g-construct:1` and is the recipient of the
-`Grass.Assembly.X86` obligation `g-design:71` assigns it. The third, the
-artifact owner that `g-design:71` assigns `Grass.Emit`, is still unregistered.
+Spike 1 needs three of the target-side owners, not one, and all three are
+registered: c-x86, whose half is committed and partly built; `g-construct`,
+which took construction and lowering at `g-construct:1` and is the recipient
+of the `Grass.Assembly.X86` obligation `g-design:71` assigns it. The third, the
+artifact owner that `g-design:71` assigns `Grass.Emit`, is g-build, whose latest
+published scope `g-build:16` claims `Grass/Emit.lean` exclusively along with
+`Grass/Artifact/PE/**`, `Grass/Artifact/COFF/**`, `Grass/Build/Manifest/**` and
+`Grass/Grammar/**`.
 
 One risk under this layer is worth recording because it is a release blocker
 rather than a scheduling one, and it is not c-spike's to solve. c-x86's ledger
@@ -222,8 +234,10 @@ report named `c-x86:1`, which was accurate when read and stale when acted on.
 All four roots are now owned, checked against every agent's latest `scope.set`
 rather than against any owner's description of it: `ISA/X86.lean` and
 `Platform/Win32.lean` by `c-x86:12`, `Assembly/X86.lean` by `g-construct:49`,
-and `Emit.lean` by `g-build:10`, which `g-build:14` records as constrained to
-the checked `VerifiedProgram`/`emitProgram` surface `g-design:71` describes.
+and `Emit.lean` by `g-build:16`, each of those being that agent's latest
+published scope. `g-build:10` claimed `Emit.lean` first and `g-build:14` records
+it as constrained to the checked `VerifiedProgram`/`emitProgram` surface
+`g-design:71` describes.
 `Emit.lean` mattered most of the four and came last: it is the only module all
 five spikes import, so it is where the corpus terminates, and by the time it was
 claimed a second consumer was waiting on the same seam in `g-construct:65`.
@@ -302,7 +316,7 @@ an authored spike declaration, and source discovery must derive the exit family
 and the effect and clobber facts from annotations and instruction facets. The
 same event accepts the facade split -- g-construct owning the signature-only
 `Grass.Assembly.X86` facade plus raw `Unsafe` emission, admission and stepping,
-with the future artifact owner holding the safe `Grass.Emit` facade -- and names
+with the artifact owner, now g-build, holding the safe `Grass.Emit` facade -- and names
 Spike 1 as its first end-to-end acceptance target. The risk in this section is
 therefore now a commitment that can be checked against a deliverable rather than
 a concern a consumer is carrying alone.
@@ -397,8 +411,11 @@ P2, P3 and P4 are now unblocked and independent of one another; they should run
 in parallel across their owning agents, and the spike order inside P4 is what
 serializes. P1 follows P2 by necessity rather than by choice, since a spike
 cannot enter a build target before it can compile. The critical path is
-therefore P2, which is also the only phase whose owners are not yet
-registered.
+therefore P2 -- not because it lacks owners, since all three of its workstreams
+are registered (`c-x86:1`, `g-construct:1`, `g-build:1`), but because every
+spike waits on a target-side authoring surface none of them has written yet.
+P3's routing gap is closed too, by `g-design:394`; what is left there is also
+authorship rather than assignment.
 
 ### P0 — Reconcile the surface — DONE
 
@@ -432,7 +449,7 @@ provide.
 
 ### P2 — The target side (blocking every spike)
 
-Owner: routed by `coord1:43` into three workstreams, of which two have
+Owner: routed by `coord1:43` into three workstreams, all of which have
 registered. The bus registry is authoritative for who owns what; what follows
 records the split and the obligations, not a running census.
 
@@ -442,22 +459,30 @@ encoder, a decoder and a byte-level round-trip theorem. `g-construct` took
 construction and lowering at `g-construct:1` -- `Grass/CFG/**`,
 `Grass/Construct/**`, `Grass/Unsafe/**` -- with the explicit purpose of
 implementing the normative authored assembly surface, and is the current
-recipient of the `Grass.Assembly.X86` author-surface obligation. Only the
-artifact and build owner remains unregistered, and `Grass.Emit` is its
-obligation rather than `g-construct`'s: `g-design:71` is explicit that raw
-erasure, admission, linking and byte writing stay in `Unsafe` and `Artifact`
-while the checked `Grass.Emit` facade belongs to the artifact owner.
+recipient of the `Grass.Assembly.X86` author-surface obligation. The artifact
+and build layer is g-build's, and `Grass.Emit` is its obligation rather than
+`g-construct`'s: `g-design:71` is explicit that raw erasure, admission, linking
+and byte writing stay in `Unsafe` and `Artifact` while the checked `Grass.Emit`
+facade belongs to the artifact owner.
 
-Assigned delivery and published scope are not the same thing, and one gap
-between them is worth recording because it will block a delivery rather than a
-plan. `g-design:71` assigns `Grass.ISA.X86` and `Grass.Platform.Win32` to c-x86,
-but `c-x86:1`'s globs are `Grass/ISA/X86/**` and `Grass/Platform/Win32/**`,
-which match paths *underneath* those directories and not the root facade files
-`Grass/ISA/X86.lean` and `Grass/Platform/Win32.lean` themselves. Both facade
-roots therefore fall outside c-x86's published exclusive scope. c-x86 needs to
-extend that scope, or receive an explicit handoff, before writing either file.
-This is scope bookkeeping, not an ownership dispute: the assignment is settled
-and only the glob does not reach it. Raised with c-x86 rather than left here.
+An earlier revision of this section said that owner remained unregistered, 224
+lines after section 3.0.1 of this same document recorded `Grass/Emit.lean` as
+owned by `g-build:10`. Both sentences were c-spike's. The contradiction survived
+because the resolution was appended as a new section instead of replacing the
+claim it falsified -- twenty lines above the correct statement, this document
+records that one of c-spike's own reports "named `c-x86:1`, which was accurate
+when read and stale when acted on". `g-design:183` found the stale half. The
+method that prevents a repeat is the one that ruling prescribes: delete the
+prose a finding falsifies rather than appending a correction beside it, and
+re-read the whole document after a ruling lands rather than only the section
+being edited.
+
+Assigned delivery and published scope are not the same thing, and the gap this
+section used to record here is closed. `c-x86:1`'s globs `Grass/ISA/X86/**` and
+`Grass/Platform/Win32/**` did not reach the root facade files `g-design:71`
+assigns, and `c-x86:12` names both explicitly. Section 3.0.1 tells that story
+once, for all four roots; it does not need a second present-tense copy in this
+phase, which is the failure this revision exists to end.
 
 The split itself, decided by the user and recorded in `coord1:43`, is by layer
 rather than one owner: machine and platform authority (`ISA/X86`, `ABI/Win64`,
@@ -465,10 +490,12 @@ rather than one owner: machine and platform authority (`ISA/X86`, `ABI/Win64`,
 `Unsafe`) consuming the first, and artifact and build (`Grammar`, `Artifact/*`,
 `Build/*`). Registration of these workstreams had been held until the agent-bus
 contention work landed, since a bus then taking minutes per publish would not
-have survived fifteen concurrent pushers. That work has landed and the first two
-registered on the strength of it; the artifact and build owner has not yet.
-Two things coord1 flagged rather than decided: `Effect` and `Weave` are not target-side at
-all and may belong with g-foundation, and `Programs/` is unassigned on purpose,
+have survived fifteen concurrent pushers. That work has landed and all three
+registered on the strength of it, the artifact and build owner at `g-build:1`.
+Two things coord1 flagged rather than decided: `Effect` and `Weave` are not
+target-side at all and may belong with g-foundation -- `Grass/Weave/**` has
+since become g-foundation's under `g-foundation:69` while `Effect` remains
+unrouted -- and `Programs/` is unassigned on purpose,
 since `HelloWin64` and its siblings are the productionized form of exactly the
 end-to-end demonstrations c-spike owns -- whether that makes them c-spike's is a
 question for the user.
@@ -507,9 +534,33 @@ Exit: `Spikes/1_Hello_World/Program.lean` elaborates and emits a PE.
 
 ### P3 — The specification front end
 
-Owner: `Grass.Semantics.SpecProcess` and the facade modules are g-foundation's
-by its existing `Grass/Semantics/**` claim; the resource and console contract
-families have no owner yet and are the part of this phase still to route.
+Owner: `Grass.Semantics.SpecProcess` is g-foundation's under its
+`Grass/Semantics/**` claim, and the four facade modules are g-foundation's by
+name -- `g-foundation:146` claims `Grass/Spec/Console.lean`,
+`Grass/Spec/Grammar.lean`, `Grass/Spec/Graphics.lean` and
+`Grass/Spec/Resource.lean` exclusively, closing the registered-scope gap
+`c-spike:79` reported. That claim is deliberately shallow: it does not reach the
+underlying contract families, and `g-design:394` has now routed those. Portable
+`Console` and `Graphics` protocol signatures and their laws go to c-stdlib under
+`Grass/Std`, generic `Grammar` and `Format` signatures to g-build under
+`Grass/Grammar`, and resource algebra and selected-axis semantics to c-mem under
+`Grass/Resource`; platform agents supply realizations later and do not own the
+portable signatures. Foundation may not invent domain stubs, axioms or proofs
+inside a facade.
+
+Two of those three destinations are inside a published exclusive scope today and
+one is not, which is a distinction this plan is required to keep: `c-mem:37`
+claims `Grass/Resource/**` and `g-build:16` claims `Grass/Grammar/**`, while
+`c-stdlib:21` claims only `Grass/Std/Logical/**` and `Grass/Std/Owned/**`. The
+authority for the rest of `Grass/Std` is `g-design:362`, which c-stdlib has not
+yet reissued scope against, so `Console` and `Graphics` are routed to an
+authorized scope rather than a published one.
+
+`g-design:394` also fixes the order. Facade files may appear early as honest
+re-export shells, but facade completion and spike elaboration may be claimed
+only after the captured-root cutover and the named provider leaves exist. The
+two facade files existing is therefore not the condition for admitting
+`Spikes/1_Hello_World/Spec.lean` to a build target; what they re-export is.
 
 Decision 134 converted these from contested to owed. Its `DECISIONS.md` text
 reached main with `g-design:77`; before that it existed only as the bus ruling
@@ -639,11 +690,42 @@ Worth recording about the ruling itself, because it is the constraint this plan
 exists to defend: it says combinators and standard constructors should thread
 the request implicitly, and that ordinary authors must not duplicate it in
 `State` or pay new proof fields. The defect was fixed without charging the
-authoring surface for it. It does not
-implement the libraries. Where a phase above is unowned, the deliverable is a
-routing decision from the coordinator, not c-spike quietly taking the work: an
-agent that both authored the demonstration and the thing being demonstrated
-cannot report that the demonstration failed.
+authoring surface for it.
+
+c-spike files and tracks the tickets this plan generates; it does not implement
+the libraries. Where a phase above is unowned, the deliverable is a routing
+decision from the coordinator, not c-spike quietly taking the work: an agent
+that both authored the demonstration and the thing being demonstrated cannot
+report that the demonstration failed. That sentence had lost its subject and its
+paragraph break somewhere in an earlier merge, leaving an `It` attached to the
+preceding ruling; restored here because a document that cannot be read
+accurately cannot be checked accurately.
+
+How this document's own changes reach main is now ruled rather than
+conventional, and both halves are recorded because c-spike got the second one
+wrong. `g-design:144` makes cross-model reviewer independence the default
+eligibility rule, with the `c-`/`g-`/`e-` prefixes as the explicit fleet
+convention until the registry carries `model_family`. That ratifies the
+e-reviewer/g-reviewer rotation this plan has used, and it means `c-reviewer` is
+not eligible for c-spike's work at all. Queue depth is advisory rather than an
+algorithm, and reviewer unavailability is handled by decline, reassignment or
+succession.
+
+The half c-spike had wrong: when a nomination sat unacknowledged, c-spike told
+g-design that every remedy was the reviewer's to exercise and that its own only
+lever was withdrawal. `g-design:154` corrected that. `docs/AGENT_BUS_SCHEMA.md`
+authorizes any author named in the original request to emit `review.reassigned`
+directly, so no decline and no coordinator action are required. Withdrawal is
+the wrong instrument for a different reason than availability: findings die with
+a withdrawn nomination, while a reassignment inherits them.
+
+The mechanical part is worth stating because it is where this goes wrong
+quietly. The reassigned request must equal the replaced one except for
+`reviewer`, and `inherited_findings` must carry every still-open finding exactly
+once. An empty list is correct only when it has been checked to be empty --
+`g-construct:114` wedged the bus reducer with an empty one that should not have
+been -- so c-spike scans every agent stream for references to the replaced
+nomination before claiming there is nothing to inherit.
 
 The one exception this plan admits is refactoring inside `Spikes/` when a phase
 is agreed to be unworkable as drafted. That is a change to a reviewed design

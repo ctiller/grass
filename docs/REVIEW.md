@@ -290,6 +290,86 @@ evidence: record instruction mix, proof/elaboration work, cache reuse, generated
 files, kernel checks, and runtime probes under the structural, graph-simulation,
 and calibrated-build ratchet in [OLEAN_SHARDING.md](OLEAN_SHARDING.md).
 
+### 4.1 Authority of documented Lean
+
+Normative prose may use Lean-shaped blocks for two different jobs, and review
+must not confuse them:
+
+- An **exact Lean interface** fixes the complete binders, indexes, field types,
+  and result type which an implementation or another owner may consume. The
+  introducing sentence labels it `Exact Lean interface` and cites the actual
+  dependency-minimal Lean signature module. Nominal structures, classes,
+  inductives, constructors, fields, projections, universes, and public
+  attributes are declared once in that module; documentation does not restate
+  them as an independently authoritative shadow declaration. A not-yet-defined
+  function type or theorem proposition may be exported there as a closed
+  signature alias. The later declaration is typed by that alias directly, or
+  the signature or test module contains a checked inhabitation such as
+  `example : Alias := declaration`; prose comparison of two restated types is
+  not evidence of identity. A checked inhabitation lives in a signature module
+  under the owning `Grass/**` tree or a test module under `Tests/**`; both trees
+  are included by the ordinary Lake build. A Lean file outside those Lake-built
+  module trees is not checked evidence merely because it has a `.lean` suffix.
+  In particular, `Spikes/**` files are authored-source mirrors unless a separate
+  gate actually elaborates them. The checking module pins its imports,
+  namespace, open scopes, notation and relevant options, uses
+  `set_option autoImplicit false`, and contains no holes, metavariables,
+  ellipses, admissions, axioms, or unresolved names. Review records the checked
+  declaration names, normalized types, attributes, and referenced-name set.
+  Proof bodies may be described outside the block, but their propositions are
+  complete. If the required vocabulary does not yet exist sufficiently to build
+  that module, the block remains schematic. The signature module fixes types;
+  it does not assert that a promised proof or implementation exists.
+- **Schematic Lean** displays a construction, proof route, law family, or
+  possible spelling without freezing binder order or proof plumbing. The
+  introducing sentence labels it `Schematic Lean`. An ellipsis anywhere in a
+  binder, field type, result type, or declaration header makes a block
+  schematic whether or not it was labelled. Its normative content is the
+  surrounding stated obligation and proof sketch, not an exact Lean API.
+
+The language tag ``lean`` is syntax highlighting, not an authority class. A
+block without ellipses is not automatically exact. New or materially edited
+blocks must carry one of the two labels. A new or materially edited unlabelled
+block is treated as schematic and the missing label is a review defect the
+author must repair; it cannot be used as exact evidence while that defect is
+open. Every pre-existing unlabelled documentation block is schematic by
+default, regardless of how complete it looks; an already
+implemented API obtains authority from its checked module, not its duplicate
+prose rendering. No repository-wide relabelling is required. New cross-owner
+reliance on a documented future boundary requires its owner to supply the exact
+classification and signature module first.
+
+An author may not nominate elaboratability, normalized type identity, or any
+other exactness-dependent review target over a schematic block. The nomination
+instead names the exact declaration or alias and its `Grass/**` signature
+module. If that checked surface does not exist yet, the honest target is the
+schematic design's semantic adequacy and constructive feasibility, not a claim
+that Lean has accepted its spelling.
+
+Design approval may accept a schematic block only under the complete checklist
+in [PROOF_FEASIBILITY.md](PROOF_FEASIBILITY.md) and the unavailable-phase rules
+in [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md): it states the fully quantified
+semantic theorem family and proof-relevant inputs, constructive route, reusable
+automation boundary, finite falsifying fixture, non-weakening fallback, total
+construction/rejection path, and named implementation ratchet. Schematic status
+relaxes Lean binder spelling, not the meaning, quantification, or acceptance
+criteria. Review may not report the block as elaborated or use shape inspection
+to close an elaboratability target. Conversely, review must not force
+replaceable helper binders into the precious interface merely to remove an
+ellipsis.
+
+Authority classification is not implementation approval and creates no
+exception to [FOUNDATION.md](FOUNDATION.md), the trust audit, non-vacuity rules,
+connection checks, mutation suite, or applicable implementation ratchet. Before
+an implementor publishes a cross-owner consumer of a schematic boundary, the
+boundary owner supplies a separately reviewed exact interface and signature
+module. Implementation acceptance then includes an elaborating positive
+consumer and a negative rejection or mutation fixture which fails for the named
+reason where the applicable ratchet demands one; it also includes transitive
+axiom/unsafe auditing and every relevant non-vacuity and end-to-end connection
+gate. Review summaries state which authority class was checked and carry
+forward only the evidence appropriate to that class.
+
 ## 5. Sign-off
 
 For a pre-implementation spike review, sign-off distinguishes `design approve`
