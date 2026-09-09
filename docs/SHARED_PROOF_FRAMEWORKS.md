@@ -293,7 +293,33 @@ Both platform reviews agree that occurrence/custody laws are reusable only when
 the selected protocol discipline and concrete transition evidence satisfy their
 premises; physical return, host identity and terminal fidelity remain separate.
 
+### Consolidated decision and implementation boundary
+
+Spikes accepts the bounded framework proposal. Its next dispatched API change
+is shared checked CP entry adopted by GetStdHandle and WriteFile; attribute
+syntax is deferred until that producer is real. Generic evaluated-CALL
+preparation remains separately owned. ReturnHome dual adoption is reported
+integrated in main `d2dfacde`, with full build and fresh declaration audit passed.
+
+Represent continuation/completion capabilities with dependent variants or
+capabilities whose constructors require the relevant evidence, not a runtime
+enum that allows nonsensical field combinations. Keep ABI continuation separate
+from response/termination guarantees. Review the elaborated ordinary term: the
+attribute must select the same checked constructor as explicit code.
+
+Linux, WASI, AArch64 and Wasm reviews accept the checked-constructor direction,
+subject to the target-specific obligations recorded here. This accepts a design
+boundary, not a completed cross-target implementation. Do not create a universal
+state or semantic relation to satisfy the syntax. An extensible collection of
+construction families is sufficient; each new family must retain its fixed
+semantics, checker equations and genuine intermediate states.
+
 ## Instruction construction framework
+
+The post-FetchedSite producer below is x86-local. Cross-target reuse begins with
+composition over each target's selected fixed relation and exact receipts, not
+with a common CPU-shaped receipt. Generalize an implementation only after two
+actual consumers share its premises; similar English descriptions do not suffice.
 
 Use distinct execution shapes over the existing semantic receipts: access-free
 computation, initialized read, write, and multi-stage control transfer. Share
@@ -309,6 +335,8 @@ The initial reusable pieces are:
   observed-byte, backing, initialization and decoding library. Existing 32/64
   names become aliases at four/eight bytes. Register writes, extension rules,
   effective addresses and return-target semantics remain instruction-specific.
+  Share byte observation independently of interpretation: decoding requires the
+  selected representation/endianness law, rather than inferring it from width.
 * One access-failure reached-state mapping. A rejected access preserves its
   supplied stage input; a failure after execution retains that actual reached
   memory with the corresponding CPU frame. CALL store rejection starts after
@@ -345,6 +373,71 @@ reconstruct those indices has erased too much. Do not abstract whole family
 factories into a common success record that loses their typed Normal receipts.
 Repeated proofs of fetch equality, observation length or context-only state
 change fail acceptance.
+
+### AArch64 review and discriminating trials
+
+AArch64 review accepts shared exact-state composition, checker equations and
+receipt packing, while keeping fetch/decode, flag rules, address interpretation
+and architectural exceptions in its adapter. The x86 Flags.Allows and
+targetOutOfRange cases are not mandatory fields in every instruction family.
+Access ordering, faults and partial completion retain their target/profile
+semantics even when completed-byte observation laws can be reused.
+
+The first paper trial is ADDS W0, W1, W2. The author supplies encoding/operand
+legality, 32-bit arithmetic with X0 upper-half zeroing, NZCV effects and control/
+register framing. Shared construction retains the actual A64 fetch/decode and
+reached body state. Reject witnesses that retain old upper X0 bits or supply
+incorrect flags; do not request x86 undefined-flag evidence. Generalizing operand
+forms must preserve their distinct interpretation of register 31.
+
+The second is SVC #0 at a selected Linux userspace boundary. Its ISA receipt
+establishes an actual exception transition. The Linux adapter separately derives
+the request and occurrence from that same boundary under the selected ABI and
+profile. Exception execution is neither checker refusal nor API completion.
+Identical SVC bytes under a bare-metal environment cannot authorize a Linux
+operation; a stale receipt cannot authorize a fresh one. The adapter still owes
+exception/continuation adequacy, raw result and clobber interpretation, memory
+rights and provider observation, including partial output and restart behavior.
+No CALL stack store or Win64 home space is constructed.
+
+These are specialist-reviewed paper trials, not implemented producers. Exact
+normative citations and profile admission remain implementation requirements.
+
+### Wasm review and discriminating trials
+
+Wasm specialist review accepts the construction direction with target-local
+builders. A future receipt must retain exact module artifact/decoded body,
+instantiated module identity, instruction occurrence, reached store/frame,
+operand stack/control context and actual reduction equation. Linear memory is
+not a substitute executable-byte fetch source; no RIP, flags or native return
+slot belongs in the common requirements. Pin Core version and enabled features
+when selecting a profile.
+
+Use i32.add and br_if as the Wasm trials. A stack-computation producer for add
+derives the actual two-i32 suffix and preserves the untouched prefix, frame and
+store; the author supplies modular arithmetic meaning and selected-instruction
+connection. A control producer for br_if derives condition, label and carried
+arguments from the same reached configuration. Zero continues after consuming
+the condition; nonzero takes the structured branch. Block exits and loop
+backedges retain their different continuations and arities. Neither case should
+be flattened into a generic memory-free computation receipt.
+
+Static validation rejection, runtime trap, host outcome and unsupported-fragment
+refusal are separate. Typing alone is not evidence of normal completion. For a
+host call, resolve the actual function address through the current instance and
+store to the provider; matching import strings/signatures are insufficient.
+Retain same-invocation return evidence, with explicit treatment of host store
+effects and reentrancy before claiming frames are preserved. Returning does not
+imply responsiveness or exclude traps/divergence.
+
+Trial checks distinguish identical indices in different instances, matching
+names with the wrong runtime host binding, zero/nonzero branches, loop/block
+targets, validation failure/runtime trap, and stale invocation/fresh completion.
+Stack-prefix and control transport should first be Wasm-local shared laws;
+exact-state composition and trace concatenation may be shared only over the
+fixed selected semantics. These are specialist-reviewed design obligations,
+not implemented tests. The reviewed [Core execution reference](https://webassembly.github.io/spec/core/exec/instructions.html)
+is background; its moving URL does not pin a profile authority.
 
 ## Other stack-wide proof libraries
 
