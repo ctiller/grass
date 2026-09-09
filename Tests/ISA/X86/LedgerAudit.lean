@@ -70,6 +70,7 @@ import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.RawStep
 import Grass.Platform.Win32.RawServiceMetadata
 import Grass.Platform.Win32.RawServiceContinuation
+import Grass.Platform.Win32.RawEntryEvent
 import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.GetStdHandleRuntime
 import Grass.Platform.Win32.GetStdHandleStackPlan
@@ -234,6 +235,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawStep,
    `Grass.Platform.Win32.RawServiceMetadata,
    `Grass.Platform.Win32.RawServiceContinuation,
+   `Grass.Platform.Win32.RawEntryEvent,
    `Grass.Platform.Win32.ExitProcessRuntime,
    `Grass.Platform.Win32.GetStdHandleRuntime,
    `Grass.Platform.Win32.GetStdHandleStackPlan,
@@ -373,9 +375,9 @@ acquiring a citation.
 -- Fixed dispatch and access factories add thirty checked structural helpers.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
--- Runtime and compatibility adapters retain actual evidence.
--- Shared spatial aliases and frame projection add six structural adapters.
-def notBehaviourBaseline : Nat := 369
+-- Runtime, compatibility and shared spatial adapters retain actual evidence.
+-- One canonical log suffix projection asserts no transition by itself.
+def notBehaviourBaseline : Nat := 370
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -559,6 +561,7 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.ProviderResume.returnSlotReached,
     `Grass.Platform.Win32.ProviderResume.Failure.reached,
     `Grass.Platform.Win32.Raw.Event.Appends,
+    `Grass.Platform.Win32.Raw.Event.between,
     `Grass.Platform.Win32.Raw.Represented,
     `Grass.Platform.Win32.Raw.Graph.Endpoints,
     `Grass.Platform.Win32.Raw.Graph.WellFormed,
