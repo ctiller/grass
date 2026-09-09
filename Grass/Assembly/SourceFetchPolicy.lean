@@ -1,5 +1,6 @@
 import Grass.Assembly.LoadedCodeRoot
 import Grass.Platform.Win32.CpuPolicy
+import Grass.ISA.X86.Execution.FetchFactory
 
 /-! Connect the fixed Windows CPU policy to the source-bound loaded code region.
 Policy construction derives provenance; it does not establish execution success. -/
@@ -40,5 +41,75 @@ theorem policy_code_root {frame rootOffset}
   obtain ⟨code, stack, codeAt, _, codeExact, _⟩ := Cpu.policy?_inputs selected
   rw [codeExact]
   exact LoadedCodeRoot.codeRoot?_provenance_root binding loaded contains codeAt
+
+/-- The actual dispatched fetch uses the source allocation selected by the
+fixed Windows policy, rather than an independently supplied descriptor root. -/
+theorem fetched_code_root {frame rootOffset}
+    {source : SourceResolve.Result frame rootOffset} {image : ImageInput}
+    {inputs : EntryInputs} {sectionIndex : Nat}
+    (binding : SourceImage.CodeSection source image.plan sectionIndex)
+    (loaded : LoadedImage image inputs) {before : State}
+    (contains : ContainsCodeAddress
+      (SourceLoadedImage.codeRegion binding loaded).region before.rip)
+    {policy : CpuAccessPolicy} (selected : Cpu.policy? loaded before = some policy)
+    (fetched : FetchFactory.Success policy before) :
+    fetched.dispatched.fetch.descriptor.provenance.root =
+      (SourceLoadedImage.codeRegion binding loaded).region.allocId := by
+  have metadata := fetched.observed.dispatch_metadata fetched.dispatched fetched.dispatch_exact
+  have descriptor := congrArg (fun d : AccessDescriptor => d.provenance.root)
+    fetched.descriptor_exact
+  change fetched.observed.descriptor.provenance.root = policy.code.root at descriptor
+  rw [metadata.2.2.2.2, descriptor]
+  exact policy_code_root binding loaded contains selected
+
+/-- Current code-allocation preservation identifies the factory's actual base
+with the loaded source base. Stack writes need not preserve the whole memory. -/
+theorem fetched_code_base {frame rootOffset}
+    {source : SourceResolve.Result frame rootOffset} {image : ImageInput}
+    {inputs : EntryInputs} {sectionIndex : Nat}
+    (binding : SourceImage.CodeSection source image.plan sectionIndex)
+    (loaded : LoadedImage image inputs) {before : State}
+    (contains : ContainsCodeAddress
+      (SourceLoadedImage.codeRegion binding loaded).region before.rip)
+    {policy : CpuAccessPolicy} (selected : Cpu.policy? loaded before = some policy)
+    (fetched : FetchFactory.Success policy before)
+    (present : before.machine.memory.allocations.lookup
+      (SourceLoadedImage.codeRegion binding loaded).region.allocId =
+      some (SourceLoadedImage.codeRegion binding loaded).region.allocationRecord) :
+    fetched.plan.base = (SourceLoadedImage.codeRegion binding loaded).region.base := by
+  have lookup := fetched.plan.lookup
+  rw [policy_code_root binding loaded contains selected, present] at lookup
+  have allocation := Option.some.inj lookup
+  have placed := fetched.plan.placed
+  rw [← allocation] at placed
+  exact (Option.some.inj placed).symm
+
+/-- A reached source RIP determines the actual descriptor offset through the
+factory's retained address plan. No authored numeric displacement is copied. -/
+theorem fetched_source_start {frame rootOffset}
+    {source : SourceResolve.Result frame rootOffset} {image : ImageInput}
+    {inputs : EntryInputs} {sectionIndex : Nat}
+    (binding : SourceImage.CodeSection source image.plan sectionIndex)
+    (loaded : LoadedImage image inputs) {before : State}
+    (contains : ContainsCodeAddress
+      (SourceLoadedImage.codeRegion binding loaded).region before.rip)
+    {policy : CpuAccessPolicy} (selected : Cpu.policy? loaded before = some policy)
+    (fetched : FetchFactory.Success policy before)
+    (present : before.machine.memory.allocations.lookup
+      (SourceLoadedImage.codeRegion binding loaded).region.allocId =
+      some (SourceLoadedImage.codeRegion binding loaded).region.allocationRecord)
+    (index : Nat)
+    (rip : before.rip.toNat =
+      (SourceLoadedImage.codeRegion binding loaded).region.base.toNat +
+        ByteLayout.offset source.splice.finalSizes index) :
+    fetched.dispatched.fetch.descriptor.range.start =
+      ByteLayout.offset source.splice.finalSizes index := by
+  have metadata := fetched.observed.dispatch_metadata fetched.dispatched fetched.dispatch_exact
+  have descriptor := congrArg (fun d : AccessDescriptor => d.range.start)
+    fetched.descriptor_exact
+  change fetched.observed.descriptor.range.start = fetched.plan.offset at descriptor
+  rw [metadata.2.2.2.2, descriptor, AddressPlan.offset,
+    fetched_code_base binding loaded contains selected fetched present, rip]
+  omega
 
 end Grass.Assembly.SourceFetchPolicy
