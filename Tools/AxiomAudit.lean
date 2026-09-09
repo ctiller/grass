@@ -58,6 +58,7 @@ import Grass.ISA.X86.Execution.ReadValue64
 import Grass.ISA.X86.Execution.RunFactory
 import Grass.ISA.X86.Execution.FetchFactory
 import Grass.ISA.X86.Execution.BodyComputationFactory
+import Grass.ISA.X86.Execution.MemoryMoveFactory
 import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
 import Grass.ISA.X86.Execution.CallNormal
@@ -97,6 +98,7 @@ import Grass.Platform.Win32.CpuPolicy
 import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
+import Grass.Platform.Win32.ProviderResume
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.GetStdHandleRuntime

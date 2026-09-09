@@ -134,9 +134,10 @@ initialized read immediately after the PUSH store; it is not a POP or unwind.
 `ObservedFetch` and `Dispatch` select only from actual fetched bytes. Decode,
 trailing-byte and unsupported-instruction failures retain the reached fetch
 state. `InstructionDispatch` embeds the authored source directly and computes
-the production pipeline inventory; its four unsupported entries are the memory
-MOV forms owned by the memory implementation. CALL and UD2 recognition supplies
-syntax only, with no execution or event-delivery theorem.
+the production pipeline inventory, including the four memory MOV occurrences.
+All 44 authored outputs are classified. Classification alone supplies no
+execution or event-delivery theorem; CALL execution uses `CallFactory.call`,
+while UD2 delivery remains unmodeled.
 
 `CpuAccessPolicy` and `AddressPlan.descriptor` compute access ranges from current
 allocation placement and fixed code/stack provenance. `RunFactory` constructs
@@ -219,6 +220,16 @@ and `callFromFetched`; their existing entry points still perform their own fetch
 These helpers support one shared checked dispatcher without a second fetch
 event. They remain constructive normal-case helpers, not exhaustive CPU
 execution semantics.
+
+`MemoryMoveSelection.select` adds the bounded RSP-relative memory MOV forms to
+the fixed classifier. The source inventory now classifies all 44 unchanged
+Hello outputs; recognition of UD2 still supplies no invalid-opcode transfer.
+`MemoryMoveFactory.memoryMove` constructs the actual fetch and data operation.
+The immediate operand supplies store bytes, while a DWORD load observes the
+current initialized backing and clears the upper half of its destination.
+`MemoryAccess` retains the same non-oracle policy fields across phases and an
+explicit concrete memory oracle for the data step. This lets a fetch use its
+empty write callback while the later store uses its decoded payload.
 No total x86 execution or partial-unwind proof is claimed by these files.
 The [exact Hello coverage plan](X86_HELLO_COVERAGE.md) assigns the other emitted
 forms without replacing the production source with a second instruction list.

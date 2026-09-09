@@ -14,6 +14,8 @@ import Grass.ISA.X86.Execution.FetchedEncoding
 import Grass.ISA.X86.Execution.MemoryAccess
 import Grass.ISA.X86.Execution.MemoryWrite
 import Grass.ISA.X86.Execution.ReadValue32
+import Grass.ISA.X86.Execution.MemoryMoveFactory
+import Grass.ISA.X86.Execution.MemoryMoveSelection
 import Grass.ISA.X86.Execution.MemoryMoveNormal
 import Grass.ISA.X86.Execution.SubRspNormal
 import Grass.ISA.X86.Execution.PushNormal
@@ -62,6 +64,7 @@ import Grass.Platform.Win32.CpuPolicy
 import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
+import Grass.Platform.Win32.ProviderResume
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.GetStdHandleRuntime
@@ -180,6 +183,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.FetchedEncoding,
    `Grass.ISA.X86.Execution.MemoryAccess, `Grass.ISA.X86.Execution.MemoryWrite,
    `Grass.ISA.X86.Execution.ReadValue32,
+   `Grass.ISA.X86.Execution.MemoryMoveFactory, `Grass.ISA.X86.Execution.MemoryMoveSelection,
    `Grass.ISA.X86.Execution.MemoryMoveNormal,
    `Grass.ISA.X86.Execution.SubRspNormal,
    `Grass.ISA.X86.Execution.PushNormal,
@@ -214,6 +218,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.ExecutionState, `Grass.Platform.Win32.WriteFileAbi,
    `Grass.Platform.Win32.RawState,
    `Grass.Platform.Win32.CallRuntime,
+   `Grass.Platform.Win32.ProviderResume,
    `Grass.Platform.Win32.RawStepSignature,
    `Grass.Platform.Win32.ExitProcessRuntime,
    `Grass.Platform.Win32.GetStdHandleRuntime,
@@ -346,9 +351,8 @@ acquiring a citation.
 -- Fixed dispatch and access factories add thirty checked structural helpers.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
--- Five raw/checked view operations retain data and assert no target semantics.
--- Runtime, body and endpoint adapters retain checked receipts.
-def notBehaviourBaseline : Nat := 323
+-- Runtime, body, memory-MOV and resume adapters retain checked receipts.
+def notBehaviourBaseline : Nat := 337
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -512,6 +516,15 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.ExecutionState.RawState.RuntimeLinked,
     `Grass.Platform.Win32.ExecutionState.RawState.setCall,
     `Grass.Platform.Win32.ExecutionState.RawState.eraseCall,
+    -- The provider resume reads the actual retained slot and packages the
+    -- reached platform state; it does not claim that an x86 RET was fetched.
+    `Grass.Platform.Win32.ProviderResume.returnFrame?,
+    `Grass.Platform.Win32.ProviderResume.PreservesNonvolatile,
+    `Grass.Platform.Win32.ProviderResume.WriteFileOutput,
+    `Grass.Platform.Win32.ProviderResume.resumedState,
+    `Grass.Platform.Win32.ProviderResume.resume,
+    `Grass.Platform.Win32.ProviderResume.returnSlotReached,
+    `Grass.Platform.Win32.ProviderResume.Failure.reached,
     `Grass.Platform.Win32.Raw.Event.Appends,
     `Grass.Platform.Win32.Raw.Represented,
     `Grass.Platform.Win32.Raw.Graph.Endpoints,
@@ -705,6 +718,15 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.ReadValue32.bytes,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.displacement,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.LoadNormal.read,
+    -- Whole-production checks and actual fixed-operation construction, not new transfer rules.
+    `Grass.ISA.X86.Execution.MemoryMoveSelection.displacement?,
+    `Grass.ISA.X86.Execution.MemoryMoveSelection.select,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.Success.result,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.reached,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.fromSite,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.fromFetched,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.memoryMove,
+
     -- Checked packaging, projections and selectors over independently modeled
     -- encoders, decoders, fetches and machine transitions.
     `Grass.ISA.X86.Execution.ArithmeticInstruction.ofRegisterSelection,
