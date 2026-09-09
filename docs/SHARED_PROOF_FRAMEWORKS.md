@@ -196,6 +196,55 @@ Trial rejection cases must demonstrate that annotations cannot bypass checks:
 These are acceptance requirements for the proposed implementation, not claims
 that these tests exist. Syntax-only compilation is insufficient evidence.
 
+## Linux and WASI as design participants
+
+Craig requests Linux and WASI participation in this discussion. Their specialists
+are reviewing the declaration boundary; this section is a proposed cross-target
+test, not authorization to start ports or a claim that their implementations exist.
+It follows the versioned provider boundaries in [PLATFORM_ABI](PLATFORM_ABI.md).
+
+Separate a portable demanded operation from each target's concrete endpoint
+declaration and checked realization. A console operation may have several target
+realizations; that does not make WriteFile, a Linux write syscall and a WASI
+operation interchangeable contracts. Each proves its own observation/refinement
+connection, including failure, partial progress and terminal behavior.
+
+| Target binding | Declaration-specific data | Obligations that cannot be Windows defaults |
+|---|---|---|
+| Win32 import | Logical library/symbol, selected Win64 ABI, API request/loan plan | Actual IAT/CALL binding, return/home plan, API-specific result and provider connection |
+| Linux direct syscall | Explicit architecture and syscall ABI, syscall identity, argument/result interpretation | Actual syscall transition, user/kernel memory boundary, clobbers, error and interruption behavior; no DLL or Win64 home space |
+| Linux library call | Actual library/symbol and selected function ABI | Function-call evidence and a separate connection from wrapper behavior to kernel behavior; do not treat a libc call as the direct syscall |
+| WASI core-module interface | Explicit WASI version and module/function identity, core signature and memory convention | Actual Wasm import invocation, bounds/representation checks and version-specific result behavior; no x86 CALL receipt |
+| WASI component interface | Explicit package/interface version, world/function and resource types | Component binding, canonical ABI adaptation, resource ownership and selected interface's effect/async rules |
+
+Linux syscall interfaces are architecture-specific; see the kernel's
+[syscall interface guidance](https://www.kernel.org/doc/html/latest/process/adding-syscalls.html).
+WASI distinguishes its core-module Preview 1 interface from later component
+interfaces. Pin the trial's version rather than treating `wasi` as an unversioned
+ABI; see [WASI Preview 1](https://wasi.dev/releases/wasi-p1) and
+[WASI releases](https://wasi.dev/releases).
+
+Consequently, the common descriptor should select a typed binding family, not
+require `dll`, native registers, return addresses or Win64 loans in every entry.
+The Win32 `ApiRequest` subtype described above is the first adapter, not the
+universal request universe. Likewise, shared logical occurrence/custody laws can
+be reused where their premises apply, but a WASI adapter must not manufacture
+an X86.State or use a CP handoff as substitute evidence of a Wasm invocation.
+
+Retain shared traversal, initialized-byte decoding, exact-state composition,
+occurrence identity and observation laws at the narrowest applicable layer.
+Target adapters supply their actual transition receipts and distinct ABI laws.
+Portable process requirements and terminal observations stay above these
+adapters; target data layouts and transitions stay below them.
+
+Ask Linux and WASI specialists to instantiate an output operation and a terminal
+operation on paper. For each, list the attributes authored once, the checked
+producer invoked, the common proof reused and the new domain proof still owed.
+The test fails if they must restate Windows-only fields, duplicate a general law,
+erase a failure distinction, or weaken the existing portable specification.
+Explicit custom implementations remain available through the same checked
+construction path. Spikes chooses when any target trial becomes implementation.
+
 ## Instruction construction framework
 
 Use distinct execution shapes over the existing semantic receipts: access-free
