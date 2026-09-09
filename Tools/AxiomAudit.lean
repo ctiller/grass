@@ -1,6 +1,7 @@
 import Lean
 import Grass.Assembly.LoadedCodeRoot
 import Grass.Assembly.LoadedFetchObservation
+import Grass.Assembly.SourceFetchPolicy
 import Grass.Disasm.Linear
 import Grass.Disasm.StoreAttempt
 import Grass.Disasm.Spatial
