@@ -21,11 +21,7 @@ def CallHandoff.runtime {image : ImageInput} {inputs : EntryInputs}
     {receipt : Execution.CallNormal before.machine afterFetch afterRead afterStore displacement}
     {request : Request} {agent : ContextId}
     (handoff : CallHandoff loaded before receipt request agent) : WriteFileRuntime where
-  entryRsp := handoff.reached.machine.gpr .rsp
-  continuation := handoff.abi.continuation
-  returnSlot := handoff.abi.returnSlot
-  homeSlot := handoff.abi.homeSlot
-  saved := captureNonvolatile before.machine.gpr
+  toReturnFrame := ReturnFrame.ofPlan handoff.abi.toPlan
   fifthSlot := handoff.abi.entry.overlappedSlot
   accepted := 0
 
@@ -101,7 +97,11 @@ def CallHandoff.rawAfter {image : ImageInput} {inputs : EntryInputs}
     {receipt : Execution.CallNormal before.machine afterFetch afterRead afterStore displacement}
     {request : Request} {agent : ContextId}
     (handoff : CallHandoff loaded before receipt request agent) :
-    handoff.runtime.saved = captureNonvolatile before.machine.gpr := rfl
+    handoff.runtime.saved = captureNonvolatile before.machine.gpr := by
+  funext register
+  change handoff.reached.machine.gpr register.val = before.machine.gpr register.val
+  rw [(reachedCall?_fields handoff.reachedExact).1]
+  exact receipt.gpr_frame register.val register.property.2
 
 /-- The saved callee-entry RSP restores exactly the pre-CALL RSP.  The retained
 natural stack bound witnesses that the subtraction did not wrap. -/

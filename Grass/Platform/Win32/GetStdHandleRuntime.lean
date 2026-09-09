@@ -1,5 +1,6 @@
 import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.WriteFileCall
+import Grass.Platform.Win32.ReturnHome
 
 /-!
 # Checked GetStdHandle entry and runtime initialization
@@ -26,29 +27,10 @@ def selector (state : Execution.State) : BitVec 32 :=
 saved return address followed by writable Win64 home space. -/
 def stackRequests (returnSlot homeSlot : WriteFile.Argument) :
     List CallProtocol.LoanRequest :=
-  [⟨.loan, returnSlot.provenance, returnSlot.range, .readOnly⟩,
-   ⟨.loan, homeSlot.provenance, homeSlot.range, .readWrite⟩]
+  ReturnHome.stackRequests returnSlot homeSlot
 
 /-- Resolved callee-entry stack coordinates used by the fixed handoff. -/
-structure StackPlan (state : Execution.State) where
-  continuation : BitVec 64
-  returnSlot : WriteFile.Argument
-  returnResolved : WriteFile.Resolved state.machine.memory returnSlot
-  returnCPU : returnSlot.provenance.space = .cpuVirtual
-  returnStack : returnResolved.allocation.source = .stack
-  returnSize : returnSlot.range.size = WriteFile.Abi.returnAddressBytes
-  returnAddress :
-    (addressOf returnResolved.base returnSlot.range.start).toNat = (state.gpr .rsp).toNat
-  returnObserved : WriteFile.Abi.InitializedReturnQword returnResolved continuation
-  homeSlot : WriteFile.Argument
-  homeResolved : WriteFile.Resolved state.machine.memory homeSlot
-  homeCPU : homeSlot.provenance.space = .cpuVirtual
-  homeRoot : homeSlot.provenance.root = returnSlot.provenance.root
-  homeSize : homeSlot.range.size = Win64.shadowSpaceBytes
-  homeAddress :
-    (addressOf homeResolved.base homeSlot.range.start).toNat =
-      (state.gpr .rsp).toNat + WriteFile.Abi.returnAddressBytes
-  homeReturnSeparated : homeResolved.physical.Disjoint returnResolved.physical
+abbrev StackPlan := ReturnHome.Plan
 
 def StackPlan.requests {state : Execution.State} (plan : StackPlan state) :
     List CallProtocol.LoanRequest :=
@@ -154,12 +136,8 @@ variable {image : ImageInput} {inputs : EntryInputs} {loaded : LoadedImage image
   {agent : ContextId}
 
 /-- Runtime data is projected only from the actual reached CALL and its ABI plan. -/
-def frame (handoff : CallHandoff loaded before receipt agent) : ReturnFrame where
-  entryRsp := handoff.reached.machine.gpr .rsp
-  continuation := handoff.abi.continuation
-  returnSlot := handoff.abi.returnSlot
-  homeSlot := handoff.abi.homeSlot
-  saved := captureNonvolatile handoff.reached.machine.gpr
+def frame (handoff : CallHandoff loaded before receipt agent) : ReturnFrame :=
+  ReturnFrame.ofPlan handoff.abi
 
 /-- Attach the fresh runtime entry while retaining every existing CallId. -/
 def afterRaw (handoff : CallHandoff loaded before receipt agent)

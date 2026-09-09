@@ -17,8 +17,8 @@ variable {image : ImageInput} {inputs : EntryInputs}
   {loaded : LoadedImage image inputs} {realization : WriteFile.Realization}
   {call : CallProtocol.CallId}
 
-/-- Every edge in an explicitly service-classified suffix preserves the entire
-pending table, not just the selected call's entry. -/
+/-- `service_suffix_metadata` proves that every edge in an explicitly
+service-classified suffix preserves the entire protocol metadata. -/
 theorem service_suffix_metadata
     (raw : Nat → RawState) (graph : Nat → Graph)
     (agent : Nat → ContextId) (action : Nat → WriteFile.Action) (event : Nat → Event)

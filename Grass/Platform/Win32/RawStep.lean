@@ -183,8 +183,8 @@ theorem agreement (step : RawStep loaded realization graph before choice event a
     EdgeAgreement graph before event after nextGraph := by
   cases step <;> assumption
 
-/-- Every installed CPU edge is an actual fixed-policy evaluator result and
-retains all original non-CPU raw data, even if the reached metadata cannot pack. -/
+/-- `cpu_checked` proves that every installed CPU edge is an actual fixed-policy
+evaluator result retaining the original non-CPU data, even if metadata cannot pack. -/
 theorem cpu_checked {cpuChoice : Grass.ISA.X86.Execution.CheckedChoice}
     (step : RawStep loaded realization graph before (.cpu cpuChoice) event after nextGraph) :
     ∃ (policy : Grass.ISA.X86.Execution.CpuAccessPolicy)
@@ -204,7 +204,8 @@ theorem cpu_checked {cpuChoice : Grass.ISA.X86.Execution.CheckedChoice}
   | cpuUncovered control selected nonNormal evaluated agreement kind =>
       exact ⟨_, _, control, selected, evaluated, rfl⟩
 
-/-- Invalid arithmetic choices cannot acquire a raw CPU edge. -/
+/-- `cpu_rejected` proves that choices rejected by the checked evaluator cannot
+acquire a raw CPU edge. -/
 theorem cpu_rejected {cpuChoice : Grass.ISA.X86.Execution.CheckedChoice}
     {policy : Grass.ISA.X86.Execution.CpuAccessPolicy}
     (selected : Cpu.policy? loaded before.machine = some policy)

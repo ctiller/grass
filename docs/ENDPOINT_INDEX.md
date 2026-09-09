@@ -3,7 +3,12 @@
 Navigation snapshot inspected at `f3b69bfa`, 2026-09-09, informed by interviews
 with `architecture` and `spikes`. This page routes readers to code and its owning
 documents; it does not change their contracts or certify a milestone. Status
-describes this revision unless explicitly marked as an interview report.
+describes this revision unless a later inspected delivery or interview report is
+explicitly named below.
+
+Latest inspected raw-execution delivery: [checked CPU execution and CALL
+provenance](#checked-cpu-execution-and-call-provenance), `0159cb87`. Earlier
+delivery sections explain the retained carrier, service and dispatch boundaries.
 
 ## Start from the authored output
 
@@ -49,7 +54,7 @@ For ownership details and recorded reviews, use
 use [HELLO_UNWIND_BOUNDARY.md](HELLO_UNWIND_BOUNDARY.md). These documents retain
 their own status labels; a reviewed direction is not an implemented declaration.
 
-## Work reported beyond this snapshot
+## Deliveries beyond the initial snapshot
 
 Spikes reported a loaded-Hello prologue fixture on main `87fa3e5b`, explicitly
 short of full Hello, and relative certificate/loop work on
@@ -83,13 +88,13 @@ pending-call domains and request kinds, not original-call or ABI validity.
 
 `Raw.StepSignature` is
 `Graph → RawState → Choice → Event → RawState → Graph → Prop`.
-It is a type, not an installed or exhaustive transition relation.
+It is a type; the partial implementation delivered later is indexed below.
 `Event.Appends` relates edge suffixes to the existing logs; the graph stores
 causal edges rather than a duplicate history. `EdgeAgreement` gives necessary
 log/graph conditions, not sufficient evidence that an instruction or API ran.
 
-At this delivery, architecture owns the still-pending fixed `RawStep.lean`
-union; x86 owns CPU cases; Windows owns WriteFile entry, service/initialization
+Architecture owns the fixed raw-step composition; x86 owns CPU cases;
+Windows owns WriteFile entry, service/initialization
 and modeled return; the certificate-root effort owns the reusable provider
 resume connection and delegated GetStdHandle/ExitProcess endpoints;
 process owns caller normalization; lowering owns loop induction; spikes owns
@@ -99,6 +104,102 @@ superseded by this inspected carrier amendment. It is not a completed endpoint.
 Provider resume connects the Windows opaque-provider contract to an actual
 return-slot read. It does not model a physical RET through provider bytes:
 unchanged Hello has no authored RET, and native correspondence remains open.
+
+### Partial raw-step implementation
+
+Inspected architecture delivery `dd4c85d1` on
+`codex/architecture-raw-composition` supplies
+[RawStep.lean](../Grass/Platform/Win32/RawStep.lean), with a
+[direct consumer fixture](../Tests/Platform/Win32RawStep.lean).
+`Raw.RawStep` fixes one loaded image and one `WriteFile.Realization` across a
+derivation. Its four constructors are three combined actual-CALL/API-entry
+cases (`writeFileEntry`, `getStdHandleEntry`, `exitProcessEntry`) and `service`.
+This supersedes the signature-only implementation status, not the remaining
+whole-execution obligations.
+
+Each entry starts from the exact pre-CALL checked state and prior runtime table,
+retains its actual CALL/handoff receipt, and computes the corresponding raw
+result. `RawStep.agreement` exposes the event-log suffix and graph obligations
+of every installed case. Entry graph constraints are only `EdgeAgreement` at
+this delivery; they do not establish the stronger provider causal realization.
+
+The service case retains the committed receipt, actual output, resulting runtime
+and exact event kind: empty output is internal; nonempty output is publication
+for that call. `Graph.Realizes` equates the selected provider causal order with
+the raw graph's transitive closure at the before and after protocol states.
+`RawStep.service_receipt` inverts the service choice to recover its record,
+action-indexed receipt, output, exact after-state, event kind and both causal
+closure facts. The fixture constructs a five-loan quiet service edge and rejects
+a wrong observation; it is model evidence, not native reachability or adequacy.
+
+The relation is a partial union, not a public `BehaviorModel`, realization
+profile, or exhaustive Windows execution model. At `dd4c85d1`, dispatch
+strengthening and CPU/refusal/return/terminal cases were still outstanding;
+the later dispatch delivery is described below. In particular,
+`exitProcessEntry` is an entry case, not proof of
+terminal observation. The supplied realization remains fixed across the
+derivation; graph agreement does not discharge native correspondence.
+
+### Computed entry dispatch binding
+
+Inspected architecture delivery `d83bdca1` strengthens all three entry
+constructors in `Grass/Platform/Win32/RawStep.lean`. Each now requires successful
+`ApiDispatch.select?` at the **same actual CALL** effective address
+(`fallthroughRip + displacement`) and target value read by its `CallNormal`
+receipt. The selected binding's `MatchesRequest` must match the API constructor
+in that entry choice; request payload correctness remains with the endpoint
+model. An independently supplied API label is no longer sufficient.
+
+`RawStep.entry_binding` inverts an entry choice to expose an address, target and
+binding, its successful computed selection, and matching request. The precise
+ties to the CALL receipt reside in the entry constructors; the inversion's
+existential conclusion does not separately return that receipt. Existing
+service cases and `service_receipt` inversion are unchanged by this delta.
+
+Use `git show d83bdca1:Grass/Platform/Win32/RawStep.lean` and
+`git show d83bdca1:Grass/Platform/Win32/ApiDispatch.lean` for the exact inspected
+implementation. This is logical dispatch from the loaded import layout, not
+native DLL/export adequacy. At that delivery, CPU, refusal, provider-resume and
+terminal cases, plus exhaustive public-profile coverage, remained outstanding;
+the later CPU delivery is described below. Entry `EdgeAgreement` has not gained the service case's
+stronger causal-realization premises.
+
+### Checked CPU execution and CALL provenance
+
+Inspected architecture delivery `0159cb87` adds `EvaluatedCall` to all three
+API-entry constructors. It retains the selected `Cpu.policy?`, an actual
+`CheckedExecution.normal` result of `some (.ok (.call success))`, and `HEq`
+between that success's receipt and the same handoff receipt. A standalone CALL
+receipt no longer suffices without this evaluator provenance.
+
+Three new CPU constructors retain actual checked evaluation:
+
+| Case | Required result and retained evidence |
+|---|---|
+| `cpuCompleted` | Normal evaluation succeeds with the exact `.completed` outcome; CALL is excluded from this case and enters through the API-entry constructors |
+| `cpuFailure` | Normal evaluation returns a full typed `CheckedExecution.Failure`, whose mapped outcome supplies the reached state; the event retains `.checked failure`, not only its projected reason |
+| `cpuUncovered` | An explicitly non-normal choice evaluates to the exact outside-profile reached state and reason |
+
+All three CPU cases require caller control at the selected policy's context and
+retain `EdgeAgreement`. Their result uses `RawState.withMachine`, preserving
+the original metadata, control and runtime table even if the reached metadata
+cannot pack into the checked protocol view. A refusal diagnostic does not
+become a successful physical execution by being retained.
+
+`RawStep.cpu_checked` exposes the selected policy, caller context, checked
+evaluator outcome and exact `withMachine` after-state. `RawStep.cpu_rejected`
+excludes a CPU edge when evaluation under the selected policy returns `none`;
+it does not classify a failure to select a policy. The direct fixture proves
+that CALL is not plain completion and constructs an uncovered CPU edge retaining
+a failed protocol view and the original runtime table.
+
+Inspect `git show 0159cb87:Grass/Platform/Win32/RawStep.lean`,
+`git show 0159cb87:Grass/Platform/Win32/RawStepSignature.lean`, and
+`git show 0159cb87:Tests/Platform/Win32RawStep.lean` for this delivery.
+Service and its inversion are unchanged. This remains a partial relation,
+not a public profile or physical-adequacy theorem: policy-selection failure,
+provider refusal, provider-resume/return, terminal observation and exhaustive
+coverage are still outstanding at this revision.
 
 ## Find a symbol without another inventory
 

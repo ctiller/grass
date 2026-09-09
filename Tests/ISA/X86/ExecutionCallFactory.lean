@@ -74,4 +74,32 @@ private def underflowRetainsRead : Bool := match underflowResult with
   | _ => false
 example : underflowRetainsRead = true := by decide
 
+/-- This fault name is deliberately absent from the fixture vocabulary. -/
+private def rejectedStoreFault : FaultClassId := ⟨⟨"call.factory.rejectedStore"⟩⟩
+
+/-- Fetch and target reads retain their admitted page-fault declaration; only
+the return-address store names the absent fault class. -/
+private def storeRejectedCpu : CpuAccessPolicy :=
+  { cpu with faults := fun purpose =>
+      if purpose = .stackWrite then [rejectedStoreFault] else cpu.faults purpose }
+
+/-- The inadmissible store is rejected before it can run.  The completed fetch
+and indirect-target read remain the exact visible prefix, while CALL's CPU
+register state remains the original one. -/
+private def storeRejectionRetainsReadAndCpu : Bool :=
+  match CallFactory.call storeRejectedCpu before with
+  | .error (.store reached descriptor
+      (.rejected (.accessNotAdmitted (.faultClassNotRecognized fault)))) =>
+      fault == rejectedStoreFault &&
+      reached.machine.events.length == 2 &&
+      reached.rip == before.rip &&
+      Gpr.all.all (fun register => decide (reached.gpr register = before.gpr register)) &&
+      reached.rflags == before.rflags &&
+      descriptor.provenance == chainedProv &&
+      descriptor.range == (⟨56, 8⟩ : ByteRange) &&
+      reached.machine.violations.records? == []
+  | _ => false
+
+example : storeRejectionRetainsReadAndCpu = true := by decide
+
 end Grass.Tests.ExecutionCallFactory

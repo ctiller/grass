@@ -72,6 +72,20 @@ def Event.Appends (event : Event) (before after : RawState) : Prop :=
   after.machine.machine.events = before.machine.machine.events ++ event.memory ∧
     after.metadata.boundaries = before.metadata.boundaries ++ event.boundaries
 
+/-- Compute suffix data from the canonical logs. This does not assert that the
+earlier logs are prefixes; `between_appends` requires that separate evidence. -/
+def Event.between (before after : RawState) (kind : EventKind) : Event :=
+  ⟨after.machine.machine.events.drop before.machine.machine.events.length,
+   after.metadata.boundaries.drop before.metadata.boundaries.length, kind⟩
+
+/-- Exact append evidence makes the computed suffix the edge's actual logs. -/
+theorem Event.between_appends {before after : RawState} {kind : EventKind}
+    {memory : List ValidMemoryEvent} {boundaries : List CallProtocol.Boundary}
+    (memoryExact : after.machine.machine.events = before.machine.machine.events ++ memory)
+    (boundariesExact : after.metadata.boundaries = before.metadata.boundaries ++ boundaries) :
+    (Event.between before after kind).Appends before after := by
+  simp [Event.between, Event.Appends, memoryExact, boundariesExact]
+
 /-- A graph node is represented only by an actual memory event or protocol
 boundary in this raw state, even when its metadata does not currently pack. -/
 def Represented (state : RawState) : WriteFile.CausalNode → Prop

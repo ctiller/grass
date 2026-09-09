@@ -1,5 +1,5 @@
 import Grass.Platform.Win32.WriteFileAbi
-import Grass.Grammar.Endian
+import Grass.Platform.Win32.ReturnHome
 
 /-!
 # Bounded `WriteFile` call custody and entry-stack observations
@@ -47,53 +47,34 @@ def LoanPlan.WriteAt (plan : LoanPlan) (request : Request) (root : AllocId)
   ∃ loan ∈ plan.additional,
     loan.provenance.root = root ∧ loan.rights.write = true ∧ loan.range.Covers offset
 
+instance (plan : LoanPlan) (request : Request) (root : AllocId) (offset : Nat) :
+    Decidable (plan.WriteAt request root offset) := by
+  unfold LoanPlan.WriteAt
+  infer_instance
+
 namespace Abi
 
-/-- Resolved, initialized bytes occupying a callee-entry return-address slot. -/
-structure InitializedReturnQword {memory : MemoryState} {slot : Argument}
-    (resolved : Resolved memory slot) (continuation : BitVec 64) where
-  bytes : Grass.Grammar.SizedByteArray 8
-  initialized : ∀ i : Fin 8,
-    resolved.toResolvedAccess.cellAt? (slot.range.start + i.val) =
-      some (bytes.1[i.val], true)
-  continuationMatches : Grass.Grammar.littleEndianToBitVec bytes = continuation
+/-- The common return-address observation is owned by the shared return/home
+plan and reused by all Windows call sites. -/
+abbrev InitializedReturnQword {memory : MemoryState} {slot : Argument}
+    (resolved : Resolved memory slot) (continuation : BitVec 64) :=
+  ReturnHome.InitializedReturnQword resolved continuation
 
 /-- The fixed ABI loans for the return-address, writable home, and nullable
 fifth-argument stack slots, in callee-entry order. -/
 def stackRequests (returnSlot homeSlot overlappedSlot : Argument) :
     List CallProtocol.LoanRequest :=
-  [⟨.loan, returnSlot.provenance, returnSlot.range, .readOnly⟩,
-   ⟨.loan, homeSlot.provenance, homeSlot.range, .readWrite⟩,
-   ⟨.loan, overlappedSlot.provenance, overlappedSlot.range, .readOnly⟩]
+  ReturnHome.stackRequests returnSlot homeSlot ++
+    [⟨.loan, overlappedSlot.provenance, overlappedSlot.range, .readOnly⟩]
 
-/-- Concrete Win64 callee-entry stack observations for `WriteFile`.
-
-The fields describe memory which has already been resolved against `state`; they
-do not state that a call instruction ran, that a continuation was fetched, or
-that the loans below have been issued. -/
-structure StackPlan (state : Execution.State) (request : Request) where
+/-- `WriteFile`'s fifth argument and semantic custody extension over the
+canonical return/home plan. -/
+structure StackPlan (state : Execution.State) (request : Request)
+    extends ReturnHome.Plan state where
   entry : Entry state request
-  continuation : BitVec 64
-  returnSlot : Argument
-  returnResolved : Resolved state.machine.memory returnSlot
-  returnCPU : returnSlot.provenance.space = .cpuVirtual
-  returnStack : returnResolved.allocation.source = .stack
-  returnSize : returnSlot.range.size = returnAddressBytes
-  returnAddress :
-    (addressOf returnResolved.base returnSlot.range.start).toNat = (state.gpr .rsp).toNat
-  returnObserved : InitializedReturnQword returnResolved continuation
-  homeSlot : Argument
-  homeResolved : Resolved state.machine.memory homeSlot
-  homeCPU : homeSlot.provenance.space = .cpuVirtual
-  homeRoot : homeSlot.provenance.root = returnSlot.provenance.root
-  homeSize : homeSlot.range.size = homeSpaceBytes
-  homeAddress :
-    (addressOf homeResolved.base homeSlot.range.start).toNat =
-      (state.gpr .rsp).toNat + returnAddressBytes
   fifthRoot : entry.overlappedSlot.provenance.root = returnSlot.provenance.root
   homeBufferSeparated : homeResolved.physical.Disjoint entry.prepared.buffer.physical
   homeCountSeparated : homeResolved.physical.Disjoint entry.prepared.countSlot.physical
-  homeReturnSeparated : homeResolved.physical.Disjoint returnResolved.physical
   homeFifthSeparated : homeResolved.physical.Disjoint entry.overlappedResolved.physical
   countReturnSeparated : entry.prepared.countSlot.physical.Disjoint returnResolved.physical
   countFifthSeparated : entry.prepared.countSlot.physical.Disjoint
@@ -105,13 +86,13 @@ structure StackPlan (state : Execution.State) (request : Request) where
     ¬ (LoanPlan.mk (stackRequests returnSlot homeSlot entry.overlappedSlot)).WriteAt request
       entry.overlappedSlot.provenance.root (entry.overlappedSlot.range.start + i.val)
 
-/-- The ABI-specific loans in the exact callee-entry stack order. -/
+/-- The ABI-specific loans remain in callee-entry order: return, writable home,
+then fifth argument. -/
 def StackPlan.requests {state : Execution.State} {request : Request}
     (plan : StackPlan state request) : List CallProtocol.LoanRequest :=
   stackRequests plan.returnSlot plan.homeSlot plan.entry.overlappedSlot
 
-/-- The full custody plan for this ABI binding: semantic permissions followed by
-the fixed-order return, home, and fifth-argument stack permissions. -/
+/-- Semantic request custody precedes the fixed ABI extension. -/
 def StackPlan.loanPlan {state : Execution.State} {request : Request}
     (plan : StackPlan state request) : LoanPlan :=
   { additional := plan.requests }
