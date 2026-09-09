@@ -200,6 +200,14 @@ def machine : MachineCertificate provider where
   stage := noDerivedDemands
   requirements := noDemandCertificates
 
+private theorem empty_ne_selected_artifact_bytes :
+    ByteArray.empty ≠ ⟨#[1, 1]⟩ := by
+  intro exact
+  have sizes := congrArg ByteArray.size exact
+  simp at sizes
+  change 0 = 2 at sizes
+  omega
+
 def artifactFormat : ArtifactFormat spec where
   Artifact := Bool
   write artifact := if artifact then ⟨#[1, 1]⟩ else ByteArray.empty
@@ -207,9 +215,19 @@ def artifactFormat : ArtifactFormat spec where
     bytes = if artifact then ⟨#[1, 1]⟩ else ByteArray.empty
   writeParses := fun _ => rfl
   parseExact := fun parsed => parsed
-  artifactBehavior := fun _ => behavior
-  loadedBehavior := fun _ => behavior
-  loadExact := fun _ => rfl
+  artifactBehavior := fun artifact =>
+    if artifact then behavior else rejectedBehavior
+  loadedBehavior := fun bytes =>
+    if bytes = ⟨#[1, 1]⟩ then behavior else rejectedBehavior
+  loadExact := by
+    intro bytes artifact parsed
+    cases artifact with
+    | false =>
+        subst bytes
+        simp [empty_ne_selected_artifact_bytes]
+    | true =>
+        subst bytes
+        simp
 
 def artifact : ArtifactCertificate machine where
   format := artifactFormat
@@ -299,12 +317,36 @@ theorem profile_mutation_semantics_uninhabited :
   simpa [MachineCertificate.instructions, machine, machineCode] using
     rejectedBehavior_not_adequate
 
-/-- A one-byte mutation cannot be identified with verified emission. -/
+/-- A one-byte mutation is outside the image of this artifact writer, so no
+artifact value can supply exact representation evidence for it. -/
 theorem byte_mutation_rejected :
-    emitProgram verified ≠ ⟨#[1, 0]⟩ := by
+    ¬ ∃ stale : artifactFormat.Artifact,
+      artifactFormat.write stale = ⟨#[1, 0]⟩ := by
+  rintro ⟨stale, exact⟩
+  cases stale with
+  | false =>
+      have sizes := congrArg ByteArray.size exact
+      simp [artifactFormat] at sizes
+      change 0 = 2 at sizes
+      omega
+  | true =>
+      have data := congrArg ByteArray.data exact
+      simp [artifactFormat] at data
+
+/-- The stale artifact's bytes load to the rejected behavior, so it cannot
+supply `loadedBehaviorExact` independently of `representationExact`. -/
+theorem stale_artifact_loaded_behavior_rejected :
+    ¬ artifactFormat.loadedBehavior (artifactFormat.write false) =
+      machine.behavior := by
   intro exact
-  have data := congrArg ByteArray.data exact
-  simp [emitProgram, verified, artifact, artifactFormat] at data
+  have loaded :
+      artifactFormat.loadedBehavior (artifactFormat.write false) =
+        rejectedBehavior := by
+    simp [artifactFormat, empty_ne_selected_artifact_bytes]
+  rw [loaded] at exact
+  apply rejectedBehavior_not_adequate
+  rw [exact]
+  exact machine.adequate
 
 /-- The stale artifact choice cannot supply `ArtifactCertificate.representationExact`
 for the selected machine certificate. -/
@@ -367,20 +409,22 @@ theorem profile_mutation_rejects_stale_artifact :
 end ExactArtifactFixture
 
 example : spec.accepts true
-    ((artifactFormat.loadedBehavior ByteArray.empty).observe (initialExecution true)) :=
+    ((artifactFormat.loadedBehavior (emitProgram verified)).observe
+      (initialExecution true)) :=
   verified.sound (initialExecution true) trivial trivial
 
 example : (artifactFormat.loadedBehavior (emitProgram verified)).Adequate :=
   verified.loadedAdequate
 
 example : Nonempty { execution :
-    (artifactFormat.loadedBehavior ByteArray.empty).system.ExecutionPrefix //
-    (artifactFormat.loadedBehavior ByteArray.empty).HasInput true execution } :=
+    (artifactFormat.loadedBehavior (emitProgram verified)).system.ExecutionPrefix //
+    (artifactFormat.loadedBehavior (emitProgram verified)).HasInput true execution } :=
   verified.execution_nonempty true trivial
 
-example : Nonempty ((artifactFormat.loadedBehavior ByteArray.empty).system.Completion
-    (initialExecution true).state (initialExecution true).graph
-      (initialExecution true).events) :=
+example : Nonempty
+    ((artifactFormat.loadedBehavior (emitProgram verified)).system.Completion
+      (initialExecution true).state (initialExecution true).graph
+        (initialExecution true).events) :=
   verified.execution_completes (initialExecution true)
 
 example : Nonempty (VerifiedProgram.CompletionRefinement verified

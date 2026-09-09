@@ -453,7 +453,9 @@ structure ProviderCertificate {spec : SpecProcess}
   requirements : DemandCertificateFamily stage.demands
 
 /-- The exact authored-source, expanded-instruction, selected-profile, semantic,
-and encoding functions for one machine family.
+and encoding functions for one machine family. `encode` denotes the complete
+machine image for the selected profile and expanded instruction list;
+instruction-level relocation is outside this foundation tier.
 `MachineCertificate.instructions` applies `MachineCodeFormat.elaborate`
 directly to the reviewed source selected by its certificate. -/
 structure MachineCodeFormat (spec : SpecProcess) where
@@ -474,6 +476,23 @@ structure MachineEncodingCertificate {spec : SpecProcess}
   bytes : ByteArray
   encoded : bytes = code.encode profile instructions
   decoded : code.decode profile bytes = some instructions
+
+namespace MachineEncodingCertificate
+
+/-- For a fixed machine format and profile, certified identical bytes determine
+the same instruction list. Consumers need not assume a separate decoder
+canonicity law: it follows from the two exact decoding certificates. -/
+theorem instructions_eq_of_bytes_eq {spec : SpecProcess}
+    {code : MachineCodeFormat spec} {profile : code.EncodingProfile}
+    {leftInstructions rightInstructions : List code.Instruction}
+    (left : MachineEncodingCertificate code profile leftInstructions)
+    (right : MachineEncodingCertificate code profile rightInstructions)
+    (bytesEqual : left.bytes = right.bytes) :
+    leftInstructions = rightInstructions := by
+  apply Option.some.inj
+  rw [← left.decoded, ← right.decoded, bytesEqual]
+
+end MachineEncodingCertificate
 
 /-- A machine realization indexed by its exact authored source and selected
 encoding profile, with refinement from the semantics of its exact expansion. -/
@@ -553,7 +572,11 @@ structure ArtifactFormat (spec : SpecProcess) where
   loadExact : forall {bytes artifact}, Parses bytes artifact ->
       loadedBehavior bytes = artifactBehavior artifact
 
-/-- Exact artifact, loaded behavior, and refinement to the machine tier. -/
+/-- Exact artifact, loaded behavior, and refinement to the machine tier.
+`representationExact` binds the artifact writer's complete output to the
+machine format's complete encoded image. Instruction-level relocation is not
+modeled by this foundation certificate and requires a later artifact-domain
+interface rather than hidden bytes outside either side of this equality. -/
 structure ArtifactCertificate {spec : SpecProcess}
     {portable : PortableProgramCertificate spec}
     {driver : ProjectedDriverCertificate portable}
