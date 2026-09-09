@@ -366,7 +366,8 @@ acquiring a citation.
 -- Thirteen custody predicates and checked adapters add no external behavior.
 -- Runtime, import and checked-evaluator adapters retain actual evidence.
 -- Certificate encoding and original-history transport add two structural adapters.
-def notBehaviourBaseline : Nat := 361
+-- One projection exposes the provenance of the retained memory-MOV data access.
+def notBehaviourBaseline : Nat := 362
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -748,6 +749,7 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.MemoryMoveSelection.displacement?,
     `Grass.ISA.X86.Execution.MemoryMoveSelection.select,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.Success.result,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.Success.provenance,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.reached,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.fromSite,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.fromFetched,

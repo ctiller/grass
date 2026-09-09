@@ -67,6 +67,9 @@ private def load32Result : BitVec 64 := match loaded32.execution with
   | .store _ _ _ => 0
 example : load32Result = 0x89ABCDEF := by decide
 example : BitVec.extractLsb' 32 32 load32Result = 0 := by decide
+
+example : loaded32.execution.provenance = cpu.stack :=
+  MemoryMoveFactory.memoryMove_stack (by rfl)
 example : loaded32.execution.result.machine.events.length = 2 := by decide
 
 private def unplacedRecord : AllocationRecord :=
