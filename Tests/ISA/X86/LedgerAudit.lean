@@ -10,6 +10,7 @@ import Grass.ISA.X86.Execution.State
 import Grass.ISA.X86.Execution.DecodedSite
 import Grass.ISA.X86.Execution.AccessRun
 import Grass.ISA.X86.Execution.Fetch
+import Grass.ISA.X86.Execution.FetchedEncoding
 import Grass.ISA.X86.Execution.SubRspNormal
 import Grass.ISA.X86.Execution.PushNormal
 import Grass.ISA.X86.Execution.AccessFree
@@ -24,6 +25,7 @@ import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Signatures
 import Grass.Platform.Win32.WriteFile
 import Grass.Platform.Win32.WriteFileNonresponse
+import Grass.Platform.Win32.WriteFileStabilization
 import Grass.Platform.Win32.WriteFileReturn
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
@@ -126,6 +128,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.EndianBridge,
    `Grass.ISA.X86.Execution.State, `Grass.ISA.X86.Execution.DecodedSite,
    `Grass.ISA.X86.Execution.AccessRun, `Grass.ISA.X86.Execution.Fetch,
+   `Grass.ISA.X86.Execution.FetchedEncoding,
    `Grass.ISA.X86.Execution.SubRspNormal,
    `Grass.ISA.X86.Execution.PushNormal,
    `Grass.ISA.X86.Execution.AccessFree, `Grass.ISA.X86.Execution.MoveNormal,
@@ -135,6 +138,7 @@ def auditedModules : List Name :=
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
    `Grass.Platform.Win32.Signatures, `Grass.Platform.Win32.WriteFile,
    `Grass.Platform.Win32.WriteFileNonresponse,
+   `Grass.Platform.Win32.WriteFileStabilization,
    `Grass.Platform.Win32.WriteFileResult, `Grass.Platform.Win32.WriteFileReturn,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
@@ -234,7 +238,8 @@ acquiring a citation.
 -- Reviewed AccessFree receipt adds one representation helper.
 -- Three completed-object helpers transport proven memory equality or compose
 -- existing spatial checks; they do not assert a loader or source interpretation.
-def notBehaviourBaseline : Nat := 185
+-- Main adds a reviewed reindexing helper for continuation suffixes.
+def notBehaviourBaseline : Nat := 186
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -402,6 +407,7 @@ def notBehaviour : List Name :=
     -- Derived accumulated histories and the type of an externally supplied
     -- observation relation, not new Windows behavior facts.
     `Grass.Platform.Win32.WriteFile.InfiniteContinuation.historyAt,
+    `Grass.Platform.Win32.WriteFile.InfiniteContinuation.shift,
     `Grass.Platform.Win32.WriteFile.StalledPredicate,
     `Grass.Platform.Win32.WriteFile.History.providerEvents,
     `Grass.Platform.Win32.WriteFile.ReturnInterpretation,
