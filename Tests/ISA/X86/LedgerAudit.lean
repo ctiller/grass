@@ -4,6 +4,7 @@ import Grass.ISA.X86.BasicInstructions
 import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.ImmediateArithmetic
 import Grass.ISA.X86.RegisterDecode
+import Grass.ISA.X86.RegisterLaws
 import Grass.ISA.X86.Decode
 import Grass.ISA.X86.Profile
 import Grass.ABI.Win64.UnwindBytes
@@ -96,6 +97,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Rel32,
    `Grass.ISA.X86.ImmediateArithmetic,
    `Grass.ISA.X86.RegisterSemantics, `Grass.ISA.X86.RegisterDecode,
+   `Grass.ISA.X86.RegisterLaws,
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
