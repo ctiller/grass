@@ -101,4 +101,3 @@ example {selected : ReturnInterpretation} {result : ReturnResult}
   trivial
 
 end Grass.Tests.Console.WriteFileObserved
-
