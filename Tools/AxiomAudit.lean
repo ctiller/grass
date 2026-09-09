@@ -21,6 +21,7 @@ import Grass.Platform.Win32.WriteFileNonresponse
 import Grass.Refinement.Console.WriteFileHistory
 import Grass.Refinement.Console.WriteFileNonresponse
 import Grass.Platform.Win32.WriteFileReturn
+import Grass.Refinement.Console.WriteFilePolicy
 import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
 import Grass.Assembly.X86ControlFlow
