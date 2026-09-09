@@ -29,6 +29,7 @@ import Grass.Platform.Win32.WriteFileStabilization
 import Grass.Platform.Win32.WriteFileReturn
 import Grass.Platform.Win32.LoaderEntry
 import Grass.Artifact.PE.ImageRoundTrip
+import Grass.Artifact.PE.Encoding
 import Grass.Artifact.PE.LayoutBinding
 import Grass.Artifact.PE.ExceptionBinding
 
@@ -144,6 +145,7 @@ def auditedModules : List Name :=
    `Grass.Artifact.PE.PrefixReader, `Grass.Artifact.PE.OptionalReader,
    `Grass.Artifact.PE.SectionReader, `Grass.Artifact.PE.ImageWriter,
    `Grass.Artifact.PE.ImageReader, `Grass.Artifact.PE.ImageRoundTrip,
+   `Grass.Artifact.PE.Encoding,
    `Grass.Artifact.PE.LayoutInvariance, `Grass.Artifact.PE.LayoutBinding]
 
 /--
@@ -219,7 +221,7 @@ acquiring a citation.
 -- Fourteen loader helpers install/compare supplied memory records, scan identity
 -- references, project checked header data, and transform finite byte sequences.
 -- One access-free receipt projects the already completed memory state.
-def notBehaviourBaseline : Nat := 176
+def notBehaviourBaseline : Nat := 177
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -360,6 +362,9 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Packages the existing checked PE writer, reader and roundtrip theorem;
+    -- it defines no alternate serialization, loader rule or format fact.
+    `Grass.Artifact.PE.encoding,
     `Grass.Platform.Win32.InitializedRegion.allocationRecord,
     `Grass.Platform.Win32.InitializedRegion.backingRecord,
     `Grass.Platform.Win32.MemoryFresh,
