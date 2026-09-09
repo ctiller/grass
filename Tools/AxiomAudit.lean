@@ -115,6 +115,8 @@ import Grass.Memory.Ordering
 import Grass.Memory.Profile
 import Grass.Memory.Provenance
 import Grass.Memory.Range
+import Grass.Memory.SpatialRange
+import Grass.Memory.SpatialAccess
 import Grass.Memory.Rights
 import Grass.Memory.Shape
 import Grass.Memory.State
