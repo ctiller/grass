@@ -29,6 +29,53 @@ def handoff := CallProtocol.handoff? state₀ mainThread apiAgent request loans
 
 theorem the_two_loan_handoff_succeeds : handoff.isSome := by decide
 
+/-- Extracting and reattaching metadata to the same nonempty handoff machine
+recovers the complete checked protocol state, including both supplies, pending
+occurrence, and boundary history. -/
+theorem metadata_round_trips_the_nonempty_handoff :
+    ∀ call pending, handoff = some (call, pending) →
+      pending.metadata.pack? pending.machine = some pending := by
+  intro call pending success
+  cases success
+  exact State.metadata_pack? _
+
+/-- Metadata is independent of the machine's context map: after adding the
+agent context, packing succeeds and retains that changed machine together with
+all extracted bookkeeping. -/
+theorem metadata_preserves_a_changed_machine :
+    ∀ call pending, handoff = some (call, pending) →
+      let changed := pending.machine.noteContext apiAgent .externalAgent
+      (pending.metadata.pack? changed).isSome ∧
+        ∀ packed, pending.metadata.pack? changed = some packed →
+          packed.machine = changed ∧ packed.metadata = pending.metadata := by
+  intro call pending success
+  cases success
+  exact ⟨by decide, fun _ packed => Metadata.pack?_fields packed⟩
+
+/-- Resetting either supply loses an identity already represented by this
+nonempty handoff, so neither candidate metadata record can be packed. -/
+theorem metadata_rejects_reset_call_and_grant_supplies :
+    ∀ call pending, handoff = some (call, pending) →
+      ({ pending.metadata with callSupply := FreshSupply.initial }).pack? pending.machine = none ∧
+      ({ pending.metadata with grantSupply := FreshSupply.initial }).pack? pending.machine = none := by
+  intro call pending success
+  cases success
+  decide
+
+/-- Pending metadata cannot be reattached to the machine after its exact return:
+the return removes the loans that `Pending.Valid` requires the pending record to
+match. -/
+theorem metadata_rejects_pending_after_its_loans_return :
+    ∀ call pending record returned,
+      handoff = some (call, pending) →
+      CallProtocol.return? pending call mainThread apiAgent
+        (Option.getD ((pending.pending.lookup call).map Pending.ids) []) = some (record, returned) →
+      pending.metadata.pack? returned.machine = none := by
+  intro call pending record returned handoffSuccess returnSuccess
+  cases handoffSuccess
+  cases returnSuccess
+  decide
+
 theorem an_empty_handoff_succeeds :
     (CallProtocol.handoff? state₀ mainThread apiAgent request []).isSome := by decide
 
