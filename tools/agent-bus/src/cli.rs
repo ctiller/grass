@@ -632,6 +632,7 @@ fn register(args: RegisterArgs) -> AbResult<()> {
             "registry_epoch": new_epoch.id.as_str(),
             "published_events": drained.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
             "outbox_rejected": drained.rejected.iter().map(|r| serde_json::json!({"kind": r.kind, "reason": r.reason})).collect::<Vec<_>>(),
+            "outbox_held": drained.held.iter().map(|h| serde_json::json!({"outbox_path": h.path, "reason": h.reason})).collect::<Vec<_>>(),
             "published": receipt.published,
             "rejected": receipt.rejected,
         }),
@@ -690,6 +691,7 @@ fn coordinate(args: CoordinateArgs) -> AbResult<()> {
         serde_json::json!({
             "published_events": drained.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
             "outbox_rejected": drained.rejected.iter().map(|r| serde_json::json!({"kind": r.kind, "reason": r.reason})).collect::<Vec<_>>(),
+            "outbox_held": drained.held.iter().map(|h| serde_json::json!({"outbox_path": h.path, "reason": h.reason})).collect::<Vec<_>>(),
             "published": receipt.published,
             "rejected": receipt.rejected,
             "not_attempted": receipt.not_attempted,
@@ -849,6 +851,7 @@ fn succeed(args: SucceedArgs) -> AbResult<()> {
             "registry_not_attempted": registry_receipt.not_attempted,
             "resumed_events": resumed.published.iter().map(|e| e.as_str().to_string()).collect::<Vec<_>>(),
             "resumed_rejected": resumed.rejected.iter().map(|r| serde_json::json!({"kind": r.kind, "reason": r.reason})).collect::<Vec<_>>(),
+            "resumed_held": resumed.held.iter().map(|h| serde_json::json!({"outbox_path": h.path, "reason": h.reason})).collect::<Vec<_>>(),
             "stream_published": stream_receipt.published,
             "stream_rejected": stream_receipt.rejected,
             "stream_not_attempted": stream_receipt.not_attempted,
@@ -879,8 +882,22 @@ fn outbox(args: OutboxArgs) -> AbResult<()> {
     let paths = resolve_paths()?;
     let agent = parse_agent(&args.agent)?;
 
-    let pending = crate::outbox::list_pending(&paths.common_dir, &agent)?;
-    let pending_json: Vec<serde_json::Value> = pending
+    let listing = crate::outbox::list_pending(&paths.common_dir, &agent)?;
+    // Reported rather than fatal: one unreadable file used to make this
+    // command -- the operator's only view of what is queued -- fail outright,
+    // which is exactly when it is most needed.
+    let unreadable_json: Vec<serde_json::Value> = listing
+        .unreadable
+        .iter()
+        .map(|u| {
+            serde_json::json!({
+                "outbox_path": u.path.display().to_string(),
+                "reason": u.reason,
+            })
+        })
+        .collect();
+    let pending_json: Vec<serde_json::Value> = listing
+        .pending
         .into_iter()
         .map(|(path, candidate)| {
             serde_json::json!({
@@ -930,6 +947,7 @@ fn outbox(args: OutboxArgs) -> AbResult<()> {
         serde_json::json!({
             "agent": agent.as_str(),
             "pending": pending_json,
+            "unreadable": unreadable_json,
             "rejected": rejected_json,
         }),
         envelope,
@@ -984,13 +1002,12 @@ fn prepare_merge(args: PrepareMergeArgs) -> AbResult<()> {
         reviewed_commit.as_str(),
     )?;
 
-    // Immediately before the one call that runs the merge engine, and no
-    // earlier -- see `require_pinned_merge_engine`'s own doc for why
-    // placement is the whole question here. Everything above is
-    // engine-independent, so checking the pin first told a reviewer whose
-    // *authorship* was wrong that their git was wrong instead.
-    crate::bootstrap::require_pinned_merge_engine(&state)?;
-
+    // `prepare-merge` is the one command that runs the merge engine, and it
+    // runs it with whatever `git` this reviewer's host has (g-design:249).
+    // Nothing downstream re-derives this tree: the candidate is published as
+    // an immutable tag and every validator binds to that object
+    // (`merge_candidate::verify_candidate_object`), so there is no version
+    // any host has to agree with.
     let candidate = crate::merge_candidate::reconstruct_candidate(
         &paths.repo,
         &previous_main,

@@ -17,6 +17,72 @@ def noDemands : DemandFamily where
 theorem noDemandCertificates : DemandCertificateFamily noDemands where
   discharge := fun key => nomatch key
 
+namespace DemandIdentityFixture
+
+def prior : RequirementKey := ⟨⟨"foundation-fixture", "prior"⟩⟩
+
+def identity : Bool → RequirementKey
+  | false => ⟨⟨"foundation-fixture", "false"⟩⟩
+  | true => ⟨⟨"foundation-fixture", "true"⟩⟩
+
+def demands : DemandFamily where
+  Key := Bool
+  keys := [false, true]
+  complete := by intro key; cases key <;> simp
+  unique := by simp
+  identity := identity
+  identityInjective := by
+    intro left right equal
+    cases left <;> cases right <;> simp_all [identity]
+  kind := fun _ => .functional
+  statement := fun _ => True
+
+def stage : DerivedDemandFamily [prior] where
+  demands := demands
+  origin := fun _ => .external ⟨"foundation-fixture", "authority"⟩
+  fresh := by intro key; cases key <;> simp [demands, identity, prior]
+
+example (key : demands.Key) : demands.identity key ∈ demands.identities := by simp
+
+example : demands.identities.Nodup := demands.identities_nodup
+
+example : prior ∈ stage.allKeys := stage.prior_mem_allKeys (by simp)
+
+example (key : stage.demands.Key) :
+    stage.demands.identity key ∈ stage.allKeys := by simp
+
+example : stage.allKeys.Nodup := stage.allKeys_nodup (by simp)
+
+inductive FinalDemand
+  | only
+
+def finalIdentity : FinalDemand → RequirementKey
+  | .only => ⟨⟨"foundation-fixture", "final"⟩⟩
+
+def finalDemands : DemandFamily where
+  Key := FinalDemand
+  keys := [.only]
+  complete := by intro key; cases key; simp
+  unique := by simp
+  identity := finalIdentity
+  identityInjective := by intro left right _; cases left; cases right; rfl
+  kind := fun _ => .artifact
+  statement := fun _ => True
+
+def finalStage : DerivedDemandFamily stage.allKeys where
+  demands := finalDemands
+  origin := fun _ => .external ⟨"foundation-fixture", "final-authority"⟩
+  fresh := by
+    intro key
+    cases key
+    simp [stage, demands, identity, prior, finalDemands, finalIdentity,
+      DerivedDemandFamily.allKeys, DemandFamily.identities]
+
+example : finalStage.allKeys.Nodup :=
+  finalStage.allKeys_nodup (stage.allKeys_nodup (by simp))
+
+end DemandIdentityFixture
+
 def noDerivedDemands : DerivedDemandFamily noDemands.identities where
   demands := noDemands
   origin := fun key => nomatch key
@@ -199,6 +265,163 @@ example (completion : VerifiedProgram.CompletionRefinement verified
       (initialExecution true) completion.loaded :=
   completion.exact
 
+example : verified.requirementKeys.Nodup := verified.requirementKeys_nodup
+
+namespace VerifiedRequirementFixture
+
+/-- One nonempty keyed demand, parameterized by its certificate tier. -/
+def keyed (tier : String) : DemandFamily where
+  Key := Unit
+  keys := [()]
+  complete := by intro key; cases key; simp
+  unique := by simp
+  identity := fun _ => ⟨⟨"verified-ledger", tier⟩⟩
+  identityInjective := by intro left right _; cases left; cases right; rfl
+  kind := fun _ => .functional
+  statement := fun _ => True
+
+theorem certificates (tier : String) : DemandCertificateFamily (keyed tier) where
+  discharge := fun _ => trivial
+
+def stage (prior : List RequirementKey) (tier : String)
+    (fresh : ⟨⟨"verified-ledger", tier⟩⟩ ∉ prior) :
+    DerivedDemandFamily prior where
+  demands := keyed tier
+  origin := fun _ => .external ⟨"verified-ledger", tier ++ "-authority"⟩
+  fresh := by intro key; cases key; exact fresh
+
+def spec : SpecProcess where
+  Input := Bool
+  AuditEvent := Bool
+  Observation := Bool
+  admits := fun _ => True
+  observationProjection := .identity Bool
+  accepts := fun _ _ => True
+  requirements := keyed "portable"
+
+def system : RelationalSystem spec.AuditEvent where
+  State := Bool
+  Choice := Unit
+  Graph := Nat
+  Initial := fun _ graph => graph = 0
+  Step := fun _ _ _ _ _ _ => False
+  Terminal := fun _ _ => True
+  InfiniteConsistent := fun _ _ _ _ _ => True
+  Extends := Nat.le
+  extendsRefl := Nat.le_refl
+  extendsTrans := Nat.le_trans
+  stepExtends := fun transition => False.elim transition
+
+def behavior : ProgramBehavior spec where
+  system := system
+  inputOf := id
+
+def initialExecution (input : Bool) : system.ExecutionPrefix :=
+  @RelationalSystem.ExecutionPrefix.initial spec.AuditEvent system input (0 : Nat)
+    rfl
+
+theorem adequate : behavior.Adequate where
+  execution input _ := ⟨initialExecution input, rfl⟩
+  completion _ := ⟨.finite .refl trivial⟩
+
+def portable : PortableProgramCertificate spec where
+  behavior := behavior
+  requirements := certificates "portable"
+  adequate := adequate
+  sound := fun _ _ _ => trivial
+
+def driverStage : DerivedDemandFamily spec.requirements.identities :=
+  stage spec.requirements.identities "driver" (by
+    simp [spec, keyed, DemandFamily.identities])
+
+def driver : ProjectedDriverCertificate portable where
+  behavior := behavior
+  refinement := .refl behavior
+  adequate := adequate
+  stage := driverStage
+  requirements := certificates "driver"
+
+def providerStage : DerivedDemandFamily driver.stage.allKeys :=
+  stage driver.stage.allKeys "provider" (by
+    simp [driver, driverStage, stage, spec, keyed,
+      DemandFamily.identities, DerivedDemandFamily.allKeys])
+
+def provider : ProviderCertificate driver where
+  behavior := behavior
+  refinement := .refl behavior
+  adequate := adequate
+  stage := providerStage
+  requirements := certificates "provider"
+
+def machineStage : DerivedDemandFamily provider.stage.allKeys :=
+  stage provider.stage.allKeys "machine" (by
+    simp [provider, providerStage, driver, driverStage, stage, spec, keyed,
+      DemandFamily.identities, DerivedDemandFamily.allKeys])
+
+def machine : MachineCertificate provider where
+  behavior := behavior
+  refinement := .refl behavior
+  adequate := adequate
+  stage := machineStage
+  requirements := certificates "machine"
+
+def artifactFormat : ArtifactFormat spec where
+  Artifact := Unit
+  write := fun _ => ByteArray.empty
+  Parses := fun bytes _ => bytes = ByteArray.empty
+  writeParses := fun _ => rfl
+  parseExact := fun parsed => parsed
+  artifactBehavior := fun _ => behavior
+  loadedBehavior := fun _ => behavior
+  loadExact := fun _ => rfl
+
+def artifactStage : DerivedDemandFamily machine.stage.allKeys :=
+  stage machine.stage.allKeys "artifact" (by
+    simp [machine, machineStage, provider, providerStage, driver, driverStage,
+      stage, spec, keyed, DemandFamily.identities,
+      DerivedDemandFamily.allKeys])
+
+def artifact : ArtifactCertificate machine where
+  format := artifactFormat
+  artifact := ()
+  refinement := .refl behavior
+  adequate := adequate
+  stage := artifactStage
+  requirements := certificates "artifact"
+
+def verified : VerifiedProgram spec where
+  portable := portable
+  driver := driver
+  provider := provider
+  machine := machine
+  artifact := artifact
+
+example : verified.requirementKeys = [
+    ⟨⟨"verified-ledger", "portable"⟩⟩,
+    ⟨⟨"verified-ledger", "driver"⟩⟩,
+    ⟨⟨"verified-ledger", "provider"⟩⟩,
+    ⟨⟨"verified-ledger", "machine"⟩⟩,
+    ⟨⟨"verified-ledger", "artifact"⟩⟩] := rfl
+
+example : spec.requirements.identity () ∈ verified.requirementKeys :=
+  verified.portable_identity_mem_requirementKeys ()
+
+example : driver.stage.demands.identity () ∈ verified.requirementKeys :=
+  verified.driver_identity_mem_requirementKeys ()
+
+example : provider.stage.demands.identity () ∈ verified.requirementKeys :=
+  verified.provider_identity_mem_requirementKeys ()
+
+example : machine.stage.demands.identity () ∈ verified.requirementKeys :=
+  verified.machine_identity_mem_requirementKeys ()
+
+example : artifact.stage.demands.identity () ∈ verified.requirementKeys :=
+  verified.artifact_identity_mem_requirementKeys ()
+
+example : verified.requirementKeys.Nodup := verified.requirementKeys_nodup
+
+end VerifiedRequirementFixture
+
 namespace InfinitePrefixFixture
 
 /-- A nontrivial fixture whose infinite limit condition inspects both the event
@@ -357,6 +580,18 @@ def continuation : system.InfiniteContinuation samplePrefix.state samplePrefix.g
   graphZero := rfl
   step := fun _ => trivial
   consistent := ⟨rfl, rfl⟩
+
+example : (toAbstract.mapInfinite continuation).prefixEvents 2 =
+    continuation.prefixEvents 2 :=
+  toAbstract.mapInfinite_prefixEvents continuation 2
+
+example : abstractSystem.Steps
+    (toAbstract.mapState samplePrefix.state)
+    (toAbstract.mapGraph samplePrefix.graph)
+    (continuation.prefixEvents 2)
+    (toAbstract.mapState (continuation.stateAt 2))
+    (toAbstract.mapGraph (continuation.graphAt 2)) :=
+  toAbstract.mapInfinite_prefixSteps continuation 2
 
 /-- A non-vacuous indexed continuation: state and graph both advance at every
 step, while its observable events alternate. -/
