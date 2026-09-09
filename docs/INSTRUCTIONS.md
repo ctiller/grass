@@ -106,8 +106,9 @@ instructions. Assembly authors retain control of registers, stack offsets,
 instruction selection, ordering, and any nonstandard frame or obligation policy.
 Unmodified nonvolatile registers and disjoint stable resources are automatically
 framed across straight-line regions and loop headers when every call and back
-edge preserves them. Loops retain an explicit invariant for changing state and
-an explicit measure/frontier law.
+edge preserves them. Loops retain an explicit invariant for changing state.
+A measure/frontier law is required when proving a demanded progress property
+or using a helper whose abstraction requires finite internal work.
 
 A bare literal `call` never silently inserts stack adjustment, spills, status
 loads, probes, or cleanup: doing so would make the emitted source differ from the
@@ -120,12 +121,15 @@ rewriting while providing an economical explicit macro route.
 
 The measure may be discharged automatically by linear arithmetic or a named
 loop combinator, and routine source need not contain a handwritten proof term.
-Grass nevertheless keeps the measure/frontier declaration at a loop boundary:
+When that progress proof is required, Grass keeps the measure/frontier
+declaration at the loop boundary:
 termination/productivity is semantic, an optimization can invalidate it while
 preserving every straight-line postcondition, and heuristic measure discovery
 would make proof behavior and invalidation unpredictable. Transparent verified
 loop macros may supply the declaration and proof together; novel loops state the
-ranking or external frontier they genuinely use.
+ranking or external frontier they genuinely use. A safe divergent loop remains
+admissible when the specification permits it; its divergence must be represented
+in the refinement rather than hidden by a terminating loop abstraction.
 
 An author may declare a `FrameLayout` with symbolic named slots, field shapes,
 alignment, outgoing shadow/argument area, and optional saved-register regions.

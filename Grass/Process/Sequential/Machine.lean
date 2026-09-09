@@ -4,6 +4,12 @@ import Grass.Specification.Boundary
 /-!
 # The sequential authoring surface
 
+This helper requires finite internal work between its decisions' effect or
+terminal frontiers. Its local rank justifies that particular abstraction;
+decision 136 does not make use of this helper or its rank a universal
+`VerifiedProgram` prerequisite. A realization allowing internal divergence
+must retain that behavior in a suitable process model.
+
 `docs/PROCESS.md` §4:
 
 > The ordinary authoring interface is a typed sequential effect machine.

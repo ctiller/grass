@@ -19,6 +19,12 @@ The public goal is deliberately simple:
 emitProgram : VerifiedProgram spec → ByteArray
 ```
 
+The intended contract is safe emitted code matching `spec`. Termination,
+responsiveness, productivity, and latency are required when the specification
+demands them, not as universal conditions for compilation. Verification must
+still account for divergence and waiting, and connect its proofs to the exact
+emitted bytes.
+
 `emitProgram v` produces an executable artifact for `v`'s selected platform.
 The current minimal `VerifiedProgram` certificate composes exact adjacent
 behavior refinements, terminal-trace acceptance, a terminal-or-infinite

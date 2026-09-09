@@ -4,6 +4,13 @@ import Grass.Process.Run
 /-!
 # The application proof package
 
+This existing package bundles progress as well as functional process facts.
+Decision 136 does not make it a universal `VerifiedProgram` prerequisite.
+Before root integration, its progress component must be separated or indexed
+by the specification's selected demands. Existing consumers of this stronger
+helper retain their proofs; this module does not yet provide the general
+package without unconditional progress.
+
 `docs/PROCESS.md` §4. This is the record an application author fills in, and its
 size is the whole point: everything else in the process layer exists so that
 this record stays small.

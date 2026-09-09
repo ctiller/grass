@@ -17,8 +17,10 @@ to imitate compiler-selected storage or CFG structure.
    means the conforming member of the modeled-execution partition.
 4. Safety is universal over finite prefixes; progress, productivity, conditional
    termination, and unconditional termination are separate demands.
-5. Reactive CFG cycles must decrease or universally cross a law-bearing frontier
-   that transfers agency or has an independent specification-productivity proof.
+5. For a specification demanding the corresponding reactive progress property,
+   CFG cycles must decrease or universally cross a law-bearing frontier that
+   transfers agency or has an independent specification-productivity proof.
+   Decision 136 removes this as a blanket requirement on all verified programs.
 6. Requirements are separate theorem demands and remain separated when possible.
 7. Ghost-bearing operations lower through proved erasure to an unsafe raw layer.
 8. Operations and obligations use existential packaging for open extensibility.
@@ -361,7 +363,9 @@ to imitate compiler-selected storage or CFG structure.
     coinduction, divergence reflection, explicit environment frontiers, and a
     concrete-to-abstract fairness projection establish maximal infinite
     behavior. An inductive OS-settlement premise alone would silently assume the
-    liveness fact being proved.
+    liveness fact being proved. Per decision 136, this machinery justifies
+    selected abstractions and demanded progress properties; it does not impose
+    productivity or absence of internal divergence on every verified program.
 80. The multi-file spike corpus is an audit fixture, not a mandatory per-program
     authoring ceremony. Public closing syntax may co-locate resource selection,
     projection, plan, assembly, and emission and generate closure/artifact
@@ -811,6 +815,31 @@ to imitate compiler-selected storage or CFG structure.
     workflow in decisions 107–115, not substantive proof, safety, source identity,
     or spike acceptance requirements. Internal implementation interfaces remain
     revisable without silently weakening those requirements.
+
+136. `VerifiedProgram spec` means safe emitted code matching `spec`.
+    Termination, responsiveness, productivity, and latency are required when
+    demanded by the specification, not as universal prerequisites for emission.
+    This scopes decision 5 and supersedes blanket internal-cycle and network-progress requirements
+    in SEMANTICS.md section 5 and PROCESS.md section 7. Applicable safety,
+    adequacy/non-vacuity, faithful finite/infinite refinement, and the exact
+    proof-to-bytes connection remain mandatory. Divergence and indefinite
+    waiting cannot be omitted to satisfy a stronger specification. They are
+    admissible when the specification permits them and safety holds throughout.
+    Selected authoring helpers and finite-stuttering abstractions may retain
+    local rank requirements without making those helpers the sole compilation
+    route. Progress proofs remain independently keyed, with their own semantic
+    dependencies and diagnostics; a missing proof is an error only when that
+    progress property is demanded. The existing Hello liveness demand remains
+    authored intent and is not removed by this decision. Implementation migration
+    keeps the current certificate adequacy fields and local helper proofs.
+    The current `ProcessCorrect` package unconditionally bundles process
+    progress and must be split or indexed by selected demands before it can
+    serve as a universal root prerequisite; it is not yet wired to that root.
+    The progress-certified CFG loop helper has the same restricted scope;
+    future root/certificate work must not promote those helper preconditions
+    into universal progress obligations. This adds no new proof burden or
+    dependency and avoids requiring termination machinery for specifications
+    without progress demands.
 
 ## Explicitly rejected shortcuts
 

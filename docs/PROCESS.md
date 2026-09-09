@@ -1520,7 +1520,7 @@ structure ProcessCorrect (p : ProcessSpec) where
   observationsAccept : ∀ run,
     ProcessRun p run -> TraceAccepts p run.observations
   demandsWellFormed : ∀ step, StepOf p step -> DemandsWellFormed step.demands
-  progress : MeetsProcessProgress p
+  progress : EveryDeclaredProcessProgressDemandIsMet p
 
 theorem ProcessRun.observationCausality
     (run : ProcessRun p request) :
@@ -1538,7 +1538,6 @@ structure ProcessNetworkAdequate {R : Type u} [ResourceModel R]
   transitionCoverage : EveryEnabledNetworkTransitionRepresented plan
   childChoiceComplete : EveryReachableChildResultAndLifecycleRepresented plan
   maximalExecutions : EveryInitialNetworkHasMaximalExecution plan
-  networkProgress : MaximalNetworkExecutionsMeetProgressOrFrontier spec plan
 
 structure ProcessNetworkSimulation {R : Type u} [ResourceModel R]
     {resources : R} (spec : SpecProcess resources)
@@ -1608,7 +1607,7 @@ remain in the audit trace and retain the same origin relation.
 Libraries provide induction/coinduction principles, irrelevant-event stuttering,
 result correlation, cancellation, invariant framing, and deterministic
 `update` simplification. A functional update proof normally reduces to initial
-invariant, invariant preservation, view correctness, and process progress.
+invariant, invariant preservation, view correctness, and any demanded process progress.
 
 Safety of memory, ABI, platform resources, concurrency, and raw instructions is
 not smuggled into `Invariant`; those remain independent lower-layer demands.
@@ -2606,25 +2605,37 @@ behaviors. Universal prefix safety quantifies over that model.
 
 Conditional responsiveness is separate. Its coherent strategy may constrain
 only named timing/scheduling dimensions and remains complete for every allowed
-result value, as required by [SEMANTICS.md](SEMANTICS.md). A process cycle must:
+result value, as required by [SEMANTICS.md](SEMANTICS.md). These are selected
+specification demands, not universal compilation prerequisites. When the
+specification requires progress between frontiers, a process cycle must:
 
 - decrease a well-founded internal measure;
 - reach a law-bearing external/demand-result frontier in finite internal
   work; or
 - produce an independently specified observation.
 
-Long-lived processes need not terminate. They prove productivity/reactivity and
-conditional quiescence or user-requested shutdown. A terminal CLI process proves
-conditional or unconditional termination according to its declared frontiers.
+Long-lived processes may demand productivity/reactivity, conditional quiescence,
+or user-requested shutdown. A CLI process may demand conditional or unconditional
+termination. Those properties are proved when demanded; neither process shape
+adds them implicitly. A safe diverging process is admissible if its specification
+permits that behavior.
 
-Local progress is necessary but insufficient. `ProcessNetworkAdequate` proves
-the corresponding theorem over every maximal network execution. An infinite
-network run must produce a specification-demanded observation or remain at a
+When progress is demanded, local progress is necessary but insufficient: the
+selected network progress theorem covers every maximal network execution.
+Under that demand, an infinite network run must produce a specification-demanded
+observation or remain at a
 declared external frontier; otherwise a global well-founded rank decreases
 across process steps, spawn, retry, cancellation, death, join, and restart.
-Supervision therefore carries a restart bound/rank or a separately demanded
-productivity law. Fresh-child restart loops cannot evade the global theorem,
+Supervision under that demand therefore carries a restart bound/rank or a
+separately demanded productivity law. Fresh-child restart loops cannot evade the global theorem,
 and scheduler fairness is used only when named by the specification.
+
+`ProcessNetworkAdequate` remains responsible for a non-vacuous execution model,
+including permitted divergence and pending behavior. It does not itself impose
+the selected network progress theorem. Local ranks used by sequential helpers
+and finite-stuttering call simulations justify those abstractions; a realization
+that permits divergence must expose it through a suitable model instead of
+pretending a potentially diverging call always completes as one finite step.
 
 ## 8. Composition and weaving
 

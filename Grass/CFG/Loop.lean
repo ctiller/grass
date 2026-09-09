@@ -11,6 +11,11 @@ representative is not silently promoted into a semantic loop header.
 each exact discovered identity. It is only structural selection: preservation,
 rank decrease, and frontier advancement remain obligations for the later block
 checker.
+
+This is the progress-certified loop selection helper. Under decision 136 its
+progress description is not a universal `VerifiedProgram` prerequisite: safe
+divergent loops require a faithful realization when their specification permits
+them, rather than this helper's measure/frontier abstraction.
 -/
 
 namespace Grass.CFG

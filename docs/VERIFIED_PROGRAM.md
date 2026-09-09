@@ -4,6 +4,12 @@ This document owns the certificate accepted by `emitProgram`. Exact Lean fields
 may evolve, but no implementation may merge independent demands in a way that
 makes a weaker theorem appear to discharge a stronger one.
 
+`VerifiedProgram spec` means safe emitted code matching `spec` (decision 136).
+Termination, responsiveness, productivity, and latency are certified when
+demanded by `spec`; they are not additional universal compilation conditions.
+Applicable safety, non-vacuous execution semantics, faithful treatment of
+divergence and waiting, and the exact emitted-byte connection remain mandatory.
+
 There is exactly one precious semantic index: the root `SpecProcess`. Other
 specification DSLs and semantic subprocesses have already been composed and
 captured into that value; implementation process graphs merely realize it.
@@ -42,18 +48,8 @@ structure VerifiedProgram {R : Type u} [ResourceModel R]
   requirementClosure    : AllRequirementsDischarged ghostProgram realization
   stepApplicability     : AllReachableStepsApplicable ghostProgram realization
   prefixSafety          : EveryPermittedPrefixSafe ghostProgram realization
-  progress              : MeetsProgressContract ghostProgram spec.progress
-  concreteLivenessInhabited : Nonempty (ConcreteResponsiveStrategy realization)
-  livenessProjection    : ConcreteResponsiveStrategy realization ->
-                             AbstractEnvironmentStrategy spec
-  livenessCoupling      : ∀ s, StrategyRefines realization spec s.strategy
-                             (livenessProjection s)
-  livenessAdequacy      : ∀ s, StrategyAdequate (livenessProjection s)
-  livenessScheduleComplete : ∀ s,
-                             SchedulingComplete spec (livenessProjection s)
-  livenessResultComplete : ∀ s, FrontierComplete spec (livenessProjection s)
-  livenessResponsive    : ∀ s, EnvironmentResponsive spec
-                             (livenessProjection s)
+  progressCertificates  : CertificatesForDeclaredProgressDemands spec ghostProgram
+  livenessCertificates  : CertificatesForDeclaredLivenessDemands spec realization
   functionalRefinement  : Refines ghostProgram spec
   abiCorrectness        : EveryBoundarySatisfiesABI ghostProgram realization
   obligationCorrectness : ObligationsMatchSpecification ghostProgram spec realization
@@ -79,7 +75,9 @@ structure VerifiedProgram {R : Type u} [ResourceModel R]
 ```
 
 The listing above is the **audit inventory of independent demands**, not a
-mandate for one 44-field elaboration telescope. The implementation groups it
+mandate for one flat elaboration telescope. `livenessCertificates` denotes only
+the selected keyed demands; it requires no liveness theorem when there are
+none. The implementation groups the inventory
 behind stratified exported certificates:
 
 `requirementClosure` is not a handwritten theorem checklist. Each specification
@@ -194,6 +192,8 @@ permit an extensionally similar source to replace the authored one.
 memory, concurrency, progress, termination, resource, obligation,
 applicability, diagnostic, and artifact theorems. Grouping them by dependency
 tier does not conflate their statements or make one theorem discharge another.
+Progress and termination entries occur when demanded by the specification;
+enumerating their kinds does not mandate an entry of every kind.
 
 `VerifiedProgram` remains indexed only by the precious `spec`. `portable.model.origin`
 records whether the plan was synthesized from a sequential relational program
@@ -247,6 +247,10 @@ and starting the exact bytes returned by `write linkedArtifact` is matched by a
 permitted ghost-program execution and therefore satisfies the independently
 proved mandatory demands.
 
+For a specification selecting the standard `environmentResponsive` contract,
+its selected liveness certificate contains the following witnesses. These are
+not unconditional fields of `VerifiedProgram`.
+
 `concreteLivenessInhabited` proves the selected providers' assumptions are
 jointly satisfiable. `livenessProjection` names the abstract branching strategy
 of that same concrete strategy, `livenessCoupling` relates their complete
@@ -258,38 +262,18 @@ those satisfying the named timing/fairness premise,
 value or dependent response branch, and
 `livenessResponsive` proves responsiveness of every compatible maximal
 continuation. A constant unrelated abstract strategy cannot discharge the
-coupling. Abstract inhabitance is a derived theorem, not an independent field:
-
-```lean
-theorem VerifiedProgram.abstractLivenessInhabited (v : VerifiedProgram spec) :
-    Nonempty (ResponsiveStrategyWitness spec) := by
-  rcases v.concreteLivenessInhabited with ⟨s⟩
-  exact ⟨{ strategy := v.livenessProjection s
-           adequate := v.livenessAdequacy s
-           scheduleComplete := v.livenessScheduleComplete s
-           resultComplete := v.livenessResultComplete s
-           responsive := v.livenessResponsive s }⟩
-```
+coupling. Abstract inhabitance is derived from that selected certificate's
+concrete witness and projection laws. It is not a theorem available from an
+arbitrary `VerifiedProgram spec` without the corresponding demand.
 
 The fields remain separate theorem demands, but ordinary sequential providers
 use one library constructor which produces them from “every external call
 settles” plus the program's between-frontier measure. The public application
-theorem is explicit and execution-indexed:
-
-```lean
-theorem VerifiedProgram.liveness_for_every_compatible_execution
-    (v : VerifiedProgram spec)
-    (strategy : ConcreteResponsiveStrategy v.realization)
-    (execution : CompatibleExecution v strategy) :
-    SatisfiesLiveness spec execution :=
-  apply_responsive_strategy
-    (v.livenessCoupling strategy)
-    (v.livenessAdequacy strategy)
-    (v.livenessScheduleComplete strategy)
-    (v.livenessResultComplete strategy)
-    (v.livenessResponsive strategy)
-    execution
-```
+theorem consumes the selected demand's certificate, its concrete strategy, and
+each compatible execution. It establishes the liveness property named by that
+demand for every such execution. Other authored liveness properties use their
+own statements and proofs; this standard strategy construction is not imposed
+on them merely because they concern progress.
 
 Strategy construction lives below this theorem and cannot consume
 `SatisfiesLiveness`. Timing/scheduling permissions and dependent result choices

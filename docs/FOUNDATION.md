@@ -2,6 +2,17 @@
 
 ## 1. Mission
 
+`VerifiedProgram spec` means that the emitted code is safe and matches `spec`.
+Termination, responsiveness, productivity, and latency are required only when
+the specification demands them. They are not universal prerequisites of
+verified emission. Applicable platform, memory, ABI, and obligation safety
+remain mandatory, including during divergence or indefinite waiting.
+
+Adequacy, faithful treatment of finite and infinite behavior, and the exact
+proof-to-bytes connection establish that this claim is true. They must prevent
+proofs from omitting executions or hiding divergence; they do not impose an
+additional progress policy on programs whose specifications permit it.
+
 The scale and proof-economy priorities of this mission are fixed by
 [VISION.md](VISION.md). Grass targets large, long-lived systems such as games,
 databases, operating systems, compilers, and graphics/storage engines. Small
@@ -18,7 +29,7 @@ artifact:
 - respects memory provenance, initialization, permissions, and race rules;
 - satisfies ABI and CFG entry contracts;
 - preserves, transfers, or closes every linear obligation lawfully;
-- meets its declared progress and liveness contract; and
+- meets any progress and liveness contract demanded by its specification; and
 - is the same program connected to the serialized executable bytes.
 
 Proof by running one execution is prohibited. Theorems over inputs, API results,

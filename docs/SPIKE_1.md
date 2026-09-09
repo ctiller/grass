@@ -110,8 +110,9 @@ them different physical realizations. A target with no observable status
 channel can still project the abstract outcome only if its profile supplies an
 adequate observation. The portable pair does not
 mention handles, Win32, x86, PE, calls, or write fragmentation.
-Safety, ABI, obligation, and progress demands remain independent mandatory
-fields; the functional projection cannot hide them.
+Applicable safety, ABI, and obligation demands, together with this spike's
+authored progress demand, remain independent certificate fields; the functional
+projection cannot hide them.
 
 The author explicitly chooses conditional liveness intent. A full pipe may leave
 a safe execution pending forever. `environmentResponsive` has a fixed portable

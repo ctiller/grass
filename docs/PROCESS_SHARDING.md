@@ -212,7 +212,8 @@ verified machine objects.
 
 For an acyclic graph, composition follows the dependency DAG. Mutually
 recursive process groups are condensed into a strongly connected component.
-The SCC owns one local coinductive invariant/progress certificate and exports
+The SCC owns one local coinductive invariant/refinement certificate, plus
+progress proofs when demanded by its contract, and exports
 one summary; callers do not depend on its internal cycle. Changing a member
 rechecks the SCC, not unrelated SCCs.
 

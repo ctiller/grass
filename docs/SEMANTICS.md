@@ -291,7 +291,7 @@ structure TraceSpec (resources : R) where
   State InputEvent OutputEvent : Type
   initial : State -> Prop
   step : State -> InputEvent -> State -> List OutputEvent -> Prop
-  progress : TraceProgressContract step
+  progress : Option (TraceProgressContract step)
 
 structure ProtocolSpec (resources : R) where
   SessionSchema : Type
@@ -318,6 +318,12 @@ structure TargetProjection
   faithful : ProjectionPreservesConfiguredClaims
     resources spec project outcome capabilities
 ```
+
+`AbstractProgressContract` records the selected progress demands and admits an
+empty family; the `SpecProcess.progress` accessor does not add a default
+termination or productivity requirement. `TraceSpec.progress = none` similarly
+adds no progress demand. A present contract is captured into the independently
+keyed theorem family and must be discharged like other authored properties.
 
 There is one captured resource-semantics value. Axis keys are derived from the
 dependent map's finite key type, and selected semantics are obtained only by
@@ -471,8 +477,17 @@ a first event in a finite prefix.
 
 ## 5. Progress and liveness
 
-Safety does not imply progress. Each reachable nonterminal state and every
-permitted continuation must establish one explicit `ProgressCase`:
+Safety does not imply progress, and verified emission does not require a
+universal progress policy. `VerifiedProgram spec` requires safe code matching
+the selected specification (decision 136). Termination, responsiveness,
+productivity, and latency are authored demands. A specification may permit
+internal divergence or indefinite waiting; refinement must retain those
+behaviors rather than silently discard them. Applicable safety obligations
+hold throughout them.
+
+When a specification demands finite internal work between meaningful
+frontiers, each reachable nonterminal state and every permitted continuation
+must establish an explicit `ProgressCase` for that demand:
 
 - it reaches a terminal state in finitely many internal steps;
 - it reaches a law-bearing environmental frontier in finitely many internal
@@ -481,8 +496,8 @@ permitted continuation must establish one explicit `ProgressCase`:
 - it transfers control to a separately verified component with an equivalent
   progress demand.
 
-Every reachable cyclic CFG strongly connected component must either have a
-well-founded decreasing rank or necessarily cross a declared frontier. Nested
+Under that demand, every reachable cyclic CFG strongly connected component must
+either have a well-founded decreasing rank or necessarily cross a declared frontier. Nested
 reactive loops satisfy the rule recursively. Merely having an exit condition is
 insufficient if execution can spin internally before observing it.
 
@@ -493,7 +508,7 @@ control cannot certify a cycle unless a separate productivity theorem connects
 it to a specification observation. The rule is universal: one good branch does
 not excuse another permitted branch that spins.
 
-A reactive contract proves:
+A standard reactive contract may demand:
 
 - safety for all finite and infinite input histories;
 - productivity under stated platform/fairness assumptions;
@@ -501,7 +516,11 @@ A reactive contract proves:
 - conditional termination, for example `EventuallyQuit input -> Terminates`.
 
 Unconditional termination is required for programs whose specification demands
-it. Interactive programs may instead use the reviewed reactive contract.
+it. Interactive programs may select the reviewed reactive contract, author a
+different progress property, or make no liveness demand. Lack of a liveness
+demand is not a compilation error. A selected sequential authoring helper or
+finite-stuttering simulation may still require a rank to justify its particular
+abstraction; that is not a prerequisite for all `VerifiedProgram` values.
 
 Fairness and responsiveness are never global axioms. A liveness theorem names
 the precise scheduler, API, device, or user-response assumptions it consumes.
@@ -509,6 +528,11 @@ Safety must not depend on them. If an environment never answers a permitted
 blocking request, a program may remain at that frontier without violating local
 progress; it cannot claim conditional termination unless its assumption requires
 that response.
+
+The following strategy machinery belongs to the standard
+`environmentResponsive` conditional-liveness contract when selected. It is not
+an implicit requirement of every specification or every authored liveness
+theorem.
 
 `AbstractEnvironmentStrategy spec` is a coherent branching strategy: it
 constrains choices but denotes the complete set of abstract histories compatible
@@ -566,7 +590,8 @@ the universal safety model must retain that behavior. Requiring the same
 responsive strategy both to include an infinite pending maximal branch and to
 settle every maximal branch would make the witness contradictory.
 
-Conditional liveness also carries `Nonempty (ResponsiveStrategyWitness spec)`:
+This standard conditional-liveness contract also carries
+`Nonempty (ResponsiveStrategyWitness spec)`:
 an explicit adequate coherent branching strategy witnessing that the predicate can hold
 universally across all reachable frontier kinds and compatible maximal
 continuations. This is distinct from per-request response adequacy, which need
@@ -603,6 +628,13 @@ structure only if it preserves the selected functional observation and every
 independent mandatory demand.
 
 ## 7. Adequacy and non-vacuity
+
+Adequacy is a universal verification obligation, distinct from an authored
+progress demand. It prevents an empty or truncated execution model from
+proving safety or conformance vacuously. A modeled infinite execution need not
+be productive unless the specification requires productivity. Similarly,
+terminal-trace acceptance alone cannot establish a specification that requires
+termination: the refinement must account for divergent and pending executions.
 
 Every execution profile supplies an adequacy package:
 
