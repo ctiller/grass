@@ -35,4 +35,36 @@ example : mismatched.metadata.pending.lookup stdCall = some stdRecord := rfl
 example : ¬ mismatched.ProtocolValid :=
   (mismatched.checked?_eq_none).mp (by decide)
 
+/-- Runtime data is retained explicitly through the checked view. A protocol
+check alone intentionally does not establish endpoint-runtime validity. -/
+private def withRuntime := checked.raw
+  ((Grass.Std.Logical.FiniteMap.empty.insert stdCall CallRuntime.exitProcess).insert
+    writeCall CallRuntime.exitProcess)
+
+example : withRuntime.checked? = some checked := checked.raw_checked? _
+
+example : checked.raw withRuntime.calls = withRuntime :=
+  RawState.checked?_raw (raw := withRuntime) (by exact checked.raw_checked? _)
+
+example : (withRuntime.eraseCall writeCall).calls.lookup stdCall = some .exitProcess := by
+  rw [RawState.eraseCall_other withRuntime mixed_pending_entries_retained_and_calls_distinct.2.2]
+  rfl
+
+example : (withRuntime.eraseCall writeCall).calls.lookup writeCall = none :=
+  withRuntime.eraseCall_lookup writeCall
+
+/-- An ExitProcess runtime tag cannot stand in for a pending GetStdHandle,
+even though the unchanged protocol metadata itself still checks. -/
+example : ¬ withRuntime.RuntimeLinked := by
+  intro linked
+  have present : (stdCall, CallRuntime.exitProcess) ∈ withRuntime.calls.entries :=
+    Grass.Std.Logical.FiniteMap.mem_of_lookup
+      (show withRuntime.calls.lookup stdCall = some CallRuntime.exitProcess from rfl)
+  obtain ⟨pending, lookup, kind⟩ := linked.1 _ present
+  have expected : withRuntime.metadata.pending.lookup stdCall = some stdRecord := rfl
+  have same := Option.some.inj (lookup.symm.trans expected)
+  subst pending
+  change False at kind
+  exact kind
+
 end Grass.Tests.Win32RawState
