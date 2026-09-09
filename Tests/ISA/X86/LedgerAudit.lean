@@ -68,6 +68,7 @@ import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.ProviderResume
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.RawStep
+import Grass.Platform.Win32.RawEntryEvent
 import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.GetStdHandleRuntime
 import Grass.Platform.Win32.WriteFileAbi
@@ -225,6 +226,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.ProviderResume,
    `Grass.Platform.Win32.RawStepSignature,
    `Grass.Platform.Win32.RawStep,
+   `Grass.Platform.Win32.RawEntryEvent,
    `Grass.Platform.Win32.ExitProcessRuntime,
    `Grass.Platform.Win32.GetStdHandleRuntime,
    `Grass.Platform.Win32.WriteFileArguments,
@@ -361,7 +363,8 @@ acquiring a citation.
 -- Thirteen custody predicates and checked adapters add no external behavior.
 -- Runtime, graph, continuation and logical import adapters retain checked evidence.
 -- Thirteen checked-evaluator routing, diagnostic and graph helpers.
-def notBehaviourBaseline : Nat := 359
+-- One canonical log suffix projection asserts no transition by itself.
+def notBehaviourBaseline : Nat := 360
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -542,6 +545,7 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.ProviderResume.returnSlotReached,
     `Grass.Platform.Win32.ProviderResume.Failure.reached,
     `Grass.Platform.Win32.Raw.Event.Appends,
+    `Grass.Platform.Win32.Raw.Event.between,
     `Grass.Platform.Win32.Raw.Represented,
     `Grass.Platform.Win32.Raw.Graph.Endpoints,
     `Grass.Platform.Win32.Raw.Graph.WellFormed,

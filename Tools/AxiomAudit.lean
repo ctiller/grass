@@ -88,6 +88,7 @@ import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.ProviderResume
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.RawStep
+import Grass.Platform.Win32.RawEntryEvent
 import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.GetStdHandleRuntime
 import Grass.Platform.Win32.WriteFileAbi
