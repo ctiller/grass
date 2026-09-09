@@ -5,13 +5,15 @@ import Grass.ISA.X86.Execution.CallFactory
 import Grass.ISA.X86.Execution.MemoryMoveFactory
 
 /-!
-# Actual source-linked Hello prefix through GetStdHandle CALL
+# Actual source-linked Hello prefix through GetStdHandle handoff
 
 This fixture executes the unchanged checked-in source through loading, its
-derived prologue, the source-authored `mov ecx, STD_OUTPUT_HANDLE`, and the
-first indirect CALL. The return-frame slots are then derived from that actual
-CALL result. It stops before provider entry: no registration, custody, provider
-result, or native execution correspondence is fabricated here.
+derived prologue and local initialization, the source-authored
+`mov ecx, STD_OUTPUT_HANDLE`, and the first indirect CALL. The return-frame
+slots are derived from that actual CALL result, then checked handoff uses the
+external agent already registered by the loader environment. Initial protocol
+metadata is retained through the CPU prefix. This stops before a provider
+result or return and makes no native execution correspondence claim.
 -/
 
 namespace Grass.Tests.Win32HelloCall
