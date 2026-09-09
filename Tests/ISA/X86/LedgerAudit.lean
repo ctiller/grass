@@ -33,6 +33,7 @@ import Grass.ISA.X86.Execution.RawOutcome
 import Grass.ISA.X86.Execution.ReadValue64
 import Grass.ISA.X86.Execution.RunFactory
 import Grass.ISA.X86.Execution.FetchFactory
+import Grass.ISA.X86.Execution.BodyComputationFactory
 import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
 import Grass.ISA.X86.Execution.CallNormal
@@ -186,7 +187,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.MoveSelection, `Grass.ISA.X86.Execution.ObservedFetch,
    `Grass.ISA.X86.Execution.PushSavedRead, `Grass.ISA.X86.Execution.RawOutcome,
    `Grass.ISA.X86.Execution.ReadValue64, `Grass.ISA.X86.Execution.RunFactory,
-   `Grass.ISA.X86.Execution.FetchFactory, `Grass.ISA.X86.Execution.ComputationFactory,
+   `Grass.ISA.X86.Execution.FetchFactory, `Grass.ISA.X86.Execution.BodyComputationFactory, `Grass.ISA.X86.Execution.ComputationFactory,
    `Grass.ISA.X86.Execution.PushFactory,
    `Grass.ISA.X86.Execution.CallNormal,
    `Grass.ISA.X86.Execution.CallFactory, `Grass.ISA.X86.Execution.ReturnSlotRead,
@@ -340,7 +341,8 @@ acquiring a citation.
 -- Five raw/checked view operations retain data and assert no target semantics.
 -- One adapter derives the Windows binding from retained actual CALL receipts.
 -- Sixteen runtime operations and raw signature predicates assert no execution.
-def notBehaviourBaseline : Nat := 297
+-- Ten checked body constructors/projections and four fetch-reuse helpers.
+def notBehaviourBaseline : Nat := 311
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -717,6 +719,21 @@ def notBehaviour : List Name :=
     -- Factory packaging and explicit applicability routing over separately
     -- modeled fetch, dispatch, and MOV receipts.
     `Grass.ISA.X86.Execution.ComputationFactory.MoveSuccess.result,
+    -- Checked constructors reuse the separately modeled instruction receipts; no new ISA rule.
+    `Grass.ISA.X86.Execution.BodyComputationFactory.execution,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.ArithmeticSuccess.result,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.arithmeticFromFetched,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.arithmetic,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.BranchSuccess.result,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.branchFromFetched,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.branch,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.LeaSuccess.result,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.leaFromFetched,
+    `Grass.ISA.X86.Execution.BodyComputationFactory.lea,
+    `Grass.ISA.X86.Execution.ComputationFactory.moveFromFetched,
+    `Grass.ISA.X86.Execution.ComputationFactory.subRspFromFetched,
+    `Grass.ISA.X86.Execution.PushFactory.pushFromFetched,
+    `Grass.ISA.X86.Execution.CallFactory.callFromFetched,
     `Grass.ISA.X86.Execution.ComputationFactory.move,
     -- Constructive SUB RSP routing and projection of its already-modeled receipt.
     `Grass.ISA.X86.Execution.ComputationFactory.SubRspSuccess.result,
