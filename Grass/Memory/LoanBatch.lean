@@ -118,6 +118,12 @@ theorem allocations_issue? {state issued : MemoryState} {actor : ContextId}
     issued.allocations = state.allocations :=
   MemoryState.allocations_applyAuthorityEffect? h
 
+/-- Issuing a loan batch changes authority only; backing bytes and capacities remain. -/
+theorem backings_issue? {state issued : MemoryState} {actor : ContextId}
+    {entries : Entries} (h : issue? state actor entries = some issued) :
+    issued.backings = state.backings :=
+  MemoryState.backings_applyAuthorityEffect? h
+
 theorem grantAt?_return?_unrelated {state returned : MemoryState} {actor : ContextId}
     {entries : Entries} (h : return? state actor entries = some returned)
     {other : GrantId} (hunrelated : other ∉ entries.map Prod.fst) :
@@ -178,6 +184,23 @@ theorem allocations_return? {state returned : MemoryState} {actor : ContextId}
       | some mid =>
         simp only [hr, Option.bind_some] at h
         exact (ih h).trans (MemoryState.allocations_returnGrant? hr)
+    · contradiction
+
+/-- Returning an exact loan batch does not mutate backing storage. -/
+theorem backings_return? {state returned : MemoryState} {actor : ContextId}
+    {entries : Entries} (h : return? state actor entries = some returned) :
+    returned.backings = state.backings := by
+  induction entries generalizing state returned with
+  | nil => cases h; rfl
+  | cons entry rest ih =>
+    obtain ⟨id, grant⟩ := entry
+    rw [return?_cons] at h
+    split at h
+    · cases hr : state.returnGrant? actor id with
+      | none => simp [hr] at h
+      | some mid =>
+        simp only [hr, Option.bind_some] at h
+        exact (ih h).trans (MemoryState.backings_returnGrant? hr)
     · contradiction
 
 end Grass.Memory.LoanBatch

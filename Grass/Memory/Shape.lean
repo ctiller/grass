@@ -143,36 +143,57 @@ end Footprint
 namespace MemoryState
 
 /--
-Write one field of an aggregate based at `base` in allocation `id`.
+Write one field of an aggregate based at `base` in `provenance`'s allocation.
 
 The write is confined to the field's own range: `bytes` longer than the field is
 truncated, and `bytes` shorter initializes only what it covered, which is
 `docs/MEMORY_MODEL.md` §4's "a write initializes only the bytes it actually
 completes" applied to a field rather than an access.
 
-`initializes := true`, because a field write is a semantic store. A profile whose
-store does not credit initialization goes through `MemoryState.write` directly;
-this is the typed-shape path, and a typed shape that wrote its field without
-initializing it would be reporting a value it did not stand behind.
+`initializes := true`, because a field write is a semantic store. The exact
+truncated write range is resolved before mutation, so absent, stale, dead, or
+out-of-bounds backing storage is returned as `ResolveFailure` rather than
+silently producing a fallback state.
 -/
-def writeField (state : MemoryState) (id : AllocId) (base : Nat)
-    (field : FieldFootprint) (bytes : ByteSeq) : MemoryState :=
-  state.write id (base + field.range.start) (bytes.take field.range.size) true
+def writeField (state : MemoryState) (provenance : Provenance) (base : Nat)
+    (field : FieldFootprint) (bytes : ByteSeq) : Except ResolveFailure MemoryState :=
+  let written := bytes.take field.range.size
+  let requested := ByteRange.mk (base + field.range.start) written.length
+  match state.resolveAccess? provenance requested with
+  | .error failure => .error failure
+  | .ok access => .ok (state.writeResolved access written true (by
+      change written.length ≤ written.length
+      exact Nat.le_refl _))
 
 /-- Write a list of fields in order. Later writes win where they overlap, which
 for a well-formed footprint is nowhere. -/
-def writeFields (state : MemoryState) (id : AllocId) (base : Nat) :
-    List (FieldFootprint × ByteSeq) → MemoryState
-  | [] => state
-  | (field, bytes) :: rest => (state.writeField id base field bytes).writeFields id base rest
+def writeFields (state : MemoryState) (provenance : Provenance) (base : Nat) :
+    List (FieldFootprint × ByteSeq) → Except ResolveFailure MemoryState
+  | [] => .ok state
+  | (field, bytes) :: rest =>
+      match state.writeField provenance base field bytes with
+      | .error failure => .error failure
+      | .ok next => next.writeFields provenance base rest
 
 /-! ## The laws -/
 
 /-- The byte range a field write actually touches, relative to the allocation. -/
-theorem writeField_range (state : MemoryState) (id : AllocId) (base : Nat)
+theorem writeField_range (state : MemoryState) (provenance : Provenance) (base : Nat)
     (field : FieldFootprint) (bytes : ByteSeq) :
-    state.writeField id base field bytes =
-      state.write id (base + field.range.start) (bytes.take field.range.size) true := rfl
+    state.writeField provenance base field bytes =
+      match state.resolveAccess? provenance
+          ⟨base + field.range.start, (bytes.take field.range.size).length⟩ with
+      | .error failure => .error failure
+      | .ok access => .ok (state.writeResolved access (bytes.take field.range.size) true (by
+          change (bytes.take field.range.size).length ≤ (bytes.take field.range.size).length
+          exact Nat.le_refl _)) := by
+  unfold writeField
+  dsimp
+  split
+  · rename_i failure hresolved
+    rw [hresolved]
+  · rename_i access hresolved
+    rw [hresolved]
 
 /--
 A field write touches no offset outside that field.
@@ -192,13 +213,27 @@ theorem writeField_covers_iff (base : Nat) (field : FieldFootprint) (bytes : Byt
 
 /-- **A field write frames every offset outside that field**, byte and
 initialization together. -/
-theorem cellAt?_writeField_of_not_covers (state : MemoryState) (id : AllocId) (base : Nat)
-    {field : FieldFootprint} {bytes : ByteSeq} {offset : Nat}
+theorem cellAt?_writeField_of_not_covers (state : MemoryState) (provenance : Provenance)
+    (base : Nat) {field : FieldFootprint} {bytes : ByteSeq} {offset : Nat}
+    {next : MemoryState}
+    (hwrite : state.writeField provenance base field bytes = .ok next)
+    (hdedicated : state.DedicatedBackings)
     (h : ¬ field.range.Covers offset) :
-    (state.writeField id base field bytes).cellAt? id (base + offset) =
-      state.cellAt? id (base + offset) :=
-  cellAt?_write_of_not_covers state id
-    (Or.inr fun hin => h (writeField_covers_iff base field bytes offset hin))
+    next.cellAt? provenance.root (base + offset) =
+      state.cellAt? provenance.root (base + offset) := by
+  dsimp [writeField] at hwrite
+  split at hwrite
+  · contradiction
+  · rename_i access hresolved
+    injection hwrite with hnext
+    subst next
+    have hfits : (bytes.take field.range.size).length ≤
+        (ByteRange.mk (base + field.range.start) (bytes.take field.range.size).length).size := by
+      change (bytes.take field.range.size).length ≤ (bytes.take field.range.size).length
+      exact Nat.le_refl _
+    apply cellAt?_writeResolved_of_untouched state access _ true hfits hdedicated
+    intro hcovered
+    exact h (writeField_covers_iff base field bytes offset hcovered.2)
 
 /-- **A field write frames every other field of a well-formed footprint.**
 
@@ -206,23 +241,47 @@ Disjointness is derived from `WellFormed.fieldsDisjoint` rather than taken as a
 hypothesis: a caller holding a well-formed footprint should not have to supply
 again what well-formedness already says. -/
 theorem cellAt?_writeField_of_other_field {f : Footprint} (hwf : f.WellFormed)
-    (state : MemoryState) (id : AllocId) (base : Nat) {written other : FieldFootprint}
-    {bytes : ByteSeq} {offset : Nat} (hw : written ∈ f.fields) (ho : other ∈ f.fields)
-    (hne : written ≠ other) (hcov : other.range.Covers offset) :
-    (state.writeField id base written bytes).cellAt? id (base + offset) =
-      state.cellAt? id (base + offset) := by
+    (state : MemoryState) (provenance : Provenance) (base : Nat)
+    {written other : FieldFootprint} {bytes : ByteSeq} {offset : Nat} {next : MemoryState}
+    (hwrite : state.writeField provenance base written bytes = .ok next)
+    (hdedicated : state.DedicatedBackings) (hw : written ∈ f.fields)
+    (ho : other ∈ f.fields) (hne : written ≠ other) (hcov : other.range.Covers offset) :
+    next.cellAt? provenance.root (base + offset) =
+      state.cellAt? provenance.root (base + offset) := by
   have hd : written.range.Disjoint other.range :=
     Footprint.disjoint_of_pairwise hwf.fieldsDisjoint hw ho hne
-  exact cellAt?_writeField_of_not_covers state id base (fun hin => hd.not_covers hin hcov)
+  exact cellAt?_writeField_of_not_covers state provenance base hwrite hdedicated
+    (fun hin => hd.not_covers hin hcov)
 
 /-- **A field write leaves padding exactly as it was.** The single-write case of
 the theorem below, and the only place the argument does any work. -/
-theorem cellAt?_writeField_of_padding {f : Footprint} (state : MemoryState) (id : AllocId)
-    (base : Nat) {field : FieldFootprint} {bytes : ByteSeq} {offset : Nat}
-    (hmem : field ∈ f.fields) (hpad : f.IsPadding offset) :
-    (state.writeField id base field bytes).cellAt? id (base + offset) =
-      state.cellAt? id (base + offset) :=
-  cellAt?_writeField_of_not_covers state id base (Footprint.not_covers_of_isPadding hpad hmem)
+theorem cellAt?_writeField_of_padding {f : Footprint} (state : MemoryState)
+    (provenance : Provenance) (base : Nat) {field : FieldFootprint} {bytes : ByteSeq}
+    {offset : Nat} {next : MemoryState}
+    (hwrite : state.writeField provenance base field bytes = .ok next)
+    (hdedicated : state.DedicatedBackings) (hmem : field ∈ f.fields)
+    (hpad : f.IsPadding offset) :
+    next.cellAt? provenance.root (base + offset) =
+      state.cellAt? provenance.root (base + offset) :=
+  cellAt?_writeField_of_not_covers state provenance base hwrite hdedicated
+    (Footprint.not_covers_of_isPadding hpad hmem)
+
+/-- A successful checked field write retains the dedicated executable layout. -/
+private theorem DedicatedBackings.writeField_of_ok (state : MemoryState)
+    (provenance : Provenance) (base : Nat) (field : FieldFootprint) (bytes : ByteSeq)
+    (next : MemoryState) (hwrite : state.writeField provenance base field bytes = .ok next)
+    (hdedicated : state.DedicatedBackings) : next.DedicatedBackings := by
+  dsimp [writeField] at hwrite
+  split at hwrite
+  · contradiction
+  · rename_i access hresolved
+    injection hwrite with hnext
+    subst next
+    have hfits : (bytes.take field.range.size).length ≤
+        (ByteRange.mk (base + field.range.start) (bytes.take field.range.size).length).size := by
+      change (bytes.take field.range.size).length ≤ (bytes.take field.range.size).length
+      exact Nat.le_refl _
+    exact hdedicated.writeResolved access _ true hfits
 
 /--
 **Writing any set of an aggregate's fields leaves its padding exactly as it was.**
@@ -231,18 +290,33 @@ theorem cellAt?_writeField_of_padding {f : Footprint} (state : MemoryState) (id 
 data." Proved for any list of the aggregate's fields, in any order, with any
 data, so it is not a fact about one convenient write schedule.
 -/
-theorem cellAt?_writeFields_of_padding {f : Footprint} (id : AllocId) (base : Nat)
-    {offset : Nat} (hpad : f.IsPadding offset) :
-    ∀ (writes : List (FieldFootprint × ByteSeq)) (state : MemoryState),
-      (∀ write ∈ writes, write.1 ∈ f.fields) →
-      (state.writeFields id base writes).cellAt? id (base + offset) =
-        state.cellAt? id (base + offset)
-  | [], _, _ => rfl
-  | (field, bytes) :: rest, state, hall => by
-    rw [MemoryState.writeFields,
-      cellAt?_writeFields_of_padding id base hpad rest _
-        (fun w hw => hall w (List.mem_cons_of_mem _ hw)),
-      cellAt?_writeField_of_padding state id base (hall (field, bytes) List.mem_cons_self) hpad]
+theorem cellAt?_writeFields_of_padding {f : Footprint} (provenance : Provenance)
+    (base : Nat) {offset : Nat} (hpad : f.IsPadding offset) :
+    ∀ (writes : List (FieldFootprint × ByteSeq)) (state next : MemoryState),
+      (∀ write ∈ writes, write.1 ∈ f.fields) → state.DedicatedBackings →
+      state.writeFields provenance base writes = .ok next →
+      next.cellAt? provenance.root (base + offset) =
+        state.cellAt? provenance.root (base + offset)
+  | [], state, next, _, _, hwrite => by
+    simp [writeFields] at hwrite
+    subst next
+    rfl
+  | (field, bytes) :: rest, state, next, hall, hdedicated, hwrite => by
+    unfold writeFields at hwrite
+    split at hwrite
+    · contradiction
+    · rename_i middle hfield
+      have hrest : middle.writeFields provenance base rest = .ok next := hwrite
+      have hmiddle : middle.DedicatedBackings :=
+        DedicatedBackings.writeField_of_ok state provenance base field bytes middle hfield hdedicated
+      calc
+        next.cellAt? provenance.root (base + offset) =
+            middle.cellAt? provenance.root (base + offset) :=
+          cellAt?_writeFields_of_padding provenance base hpad rest middle next
+            (fun write hmem => hall write (List.mem_cons_of_mem _ hmem)) hmiddle hrest
+        _ = state.cellAt? provenance.root (base + offset) :=
+          cellAt?_writeField_of_padding state provenance base hfield hdedicated
+            (hall (field, bytes) List.mem_cons_self) hpad
 
 /--
 **Padding stays uninitialized however many fields are written.**
@@ -252,14 +326,16 @@ never written does not read as initialized just because every field was. Without
 this, a typed shape could launder an `uninitializedRead` that
 `Grass/Memory/Apply.lean`'s `denialOf` would have caught on the raw bytes.
 -/
-theorem padding_uninitialized_after_writing_fields {f : Footprint} (state : MemoryState)
-    (id : AllocId) (base : Nat) {offset : Nat} (hpad : f.IsPadding offset)
+theorem padding_uninitialized_after_writing_fields {f : Footprint} (state next : MemoryState)
+    (provenance : Provenance) (base : Nat) {offset : Nat} (hpad : f.IsPadding offset)
     (writes : List (FieldFootprint × ByteSeq))
     (hall : ∀ write ∈ writes, write.1 ∈ f.fields)
-    (hbefore : ¬ state.InitializedAt id (base + offset)) :
-    ¬ (state.writeFields id base writes).InitializedAt id (base + offset) := by
+    (hdedicated : state.DedicatedBackings)
+    (hwrite : state.writeFields provenance base writes = .ok next)
+    (hbefore : ¬ state.InitializedAt provenance.root (base + offset)) :
+    ¬ next.InitializedAt provenance.root (base + offset) := by
   unfold MemoryState.InitializedAt at hbefore ⊢
-  rw [cellAt?_writeFields_of_padding id base hpad writes state hall]
+  rw [cellAt?_writeFields_of_padding provenance base hpad writes state next hall hdedicated hwrite]
   exact hbefore
 
 /-! ### The other side of the partition
@@ -279,29 +355,54 @@ the memory layer owns. Stated pointwise rather than as a sequence: assembling th
 bytes into a represented value is the layout facility's job, and this is the fact
 it would assemble from.
 -/
-theorem byteAt?_writeField (state : MemoryState) {id : AllocId} (base : Nat)
-    {field : FieldFootprint} {bytes : ByteSeq} {record : AllocationRecord}
-    (hfound : state.allocations.lookup id = some record) {i : Nat}
+theorem byteAt?_writeField (state : MemoryState) (provenance : Provenance) (base : Nat)
+    {field : FieldFootprint} {bytes : ByteSeq} {next : MemoryState}
+    (hwrite : state.writeField provenance base field bytes = .ok next) {i : Nat}
     (hi : i < bytes.length) (hfit : i < field.range.size) :
-    (state.writeField id base field bytes).byteAt? id (base + field.range.start + i) =
-      bytes[i]? := by
-  rw [writeField_range, byteAt?_write_of_covers state hfound
-    (by simp only [ByteRange.covers_def, List.length_take]; omega)]
-  have : base + field.range.start + i - (base + field.range.start) = i := by omega
-  rw [this, List.getElem?_take]
-  simp only [if_pos hfit]
+    next.byteAt? provenance.root (base + field.range.start + i) = bytes[i]? := by
+  dsimp [writeField] at hwrite
+  split at hwrite
+  · contradiction
+  · rename_i access hresolved
+    injection hwrite with hnext
+    subst next
+    have hfits : (bytes.take field.range.size).length ≤
+        (ByteRange.mk (base + field.range.start) (bytes.take field.range.size).length).size := by
+      change (bytes.take field.range.size).length ≤ (bytes.take field.range.size).length
+      exact Nat.le_refl _
+    have hcovered :
+        (ByteRange.mk (base + field.range.start) (bytes.take field.range.size).length).Covers
+          (base + field.range.start + i) := by
+      simp only [ByteRange.covers_def, List.length_take]
+      omega
+    rw [byteAt?_writeResolved_of_covers state access _ true hfits hcovered]
+    change (bytes.take field.range.size)[base + field.range.start + i -
+      (base + field.range.start)]? = bytes[i]?
+    have hsub : base + field.range.start + i - (base + field.range.start) = i := by omega
+    rw [hsub, List.getElem?_take]
+    simp only [if_pos hfit]
 
 /-- **A field write initializes the bytes it wrote**, and only those: compare
 `padding_uninitialized_after_writing_fields`, which is the same write seen from
 the padding. -/
-theorem initializedAt_writeField (state : MemoryState) {id : AllocId} (base : Nat)
-    {field : FieldFootprint} {bytes : ByteSeq} {record : AllocationRecord}
-    (hfound : state.allocations.lookup id = some record) {i : Nat}
+theorem initializedAt_writeField (state : MemoryState) (provenance : Provenance) (base : Nat)
+    {field : FieldFootprint} {bytes : ByteSeq} {next : MemoryState}
+    (hwrite : state.writeField provenance base field bytes = .ok next) {i : Nat}
     (hi : i < bytes.length) (hfit : i < field.range.size) :
-    (state.writeField id base field bytes).InitializedAt id (base + field.range.start + i) := by
-  rw [writeField_range]
-  exact initializedAt_write_of_covers state hfound
-    (by simp only [ByteRange.covers_def, List.length_take]; omega)
+    next.InitializedAt provenance.root (base + field.range.start + i) := by
+  dsimp [writeField] at hwrite
+  split at hwrite
+  · contradiction
+  · rename_i access hresolved
+    injection hwrite with hnext
+    subst next
+    have hfits : (bytes.take field.range.size).length ≤
+        (ByteRange.mk (base + field.range.start) (bytes.take field.range.size).length).size := by
+      change (bytes.take field.range.size).length ≤ (bytes.take field.range.size).length
+      exact Nat.le_refl _
+    apply initializedAt_writeResolved_of_covers state access _ hfits
+    simp only [ByteRange.covers_def, List.length_take]
+    omega
 
 end MemoryState
 

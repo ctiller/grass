@@ -16,7 +16,7 @@ Nine things it has to demonstrate, and does:
 4. fault and obligation facets declared;
 5. the generic transition consuming those facets;
 6. invalid provenance, ranges, and ledger effects rejected;
-7. alias conflicts detected across *distinct* allocations naming the same bytes;
+7. independent backing effects and explicit shared-layout admission boundaries;
 8. partial effects preserved when a compound operation faults;
 9. a second, independently defined family coexisting with the first.
 
@@ -38,8 +38,7 @@ private def allocs₂ := allocs₁.fresh.2
 /-- A data buffer. -/
 def bufferAlloc : AllocId := allocs₀.fresh.1
 
-/-- A second allocation that maps the *same bytes* as `bufferAlloc` — a
-host-visible view of a device buffer, say. Distinct identity, same storage. -/
+/-- A second allocation used to test independent backing access and refused remapping. -/
 def viewAlloc : AllocId := allocs₁.fresh.1
 
 /-- A read-only allocation. -/
@@ -94,7 +93,7 @@ def bufferProv : Provenance :=
   { space := .cpuVirtual, root := bufferAlloc, epoch := epoch₀, source := .virtualAlloc
     rootExtent := ⟨0, 64⟩, path := [] }
 
-/-- Provenance of the aliasing view. Different allocation identity, same bytes. -/
+/-- Provenance of the independently backed mapped-file view. -/
 def viewProv : Provenance := { bufferProv with root := viewAlloc, source := .mappedFile }
 
 /-- Provenance of the read-only allocation. -/
@@ -103,20 +102,18 @@ def constProv : Provenance := { bufferProv with root := constAlloc, source := .i
 /-- Provenance of the stack reservation. -/
 def frameProv : Provenance := { bufferProv with root := stackAlloc, source := .stack }
 
-/-- A third allocation, aliased to `viewAlloc` rather than to `bufferAlloc`, so
-reaching it from the buffer takes two declared hops. -/
+/-- A third independently backed allocation. The historical name is retained for
+operation vocabulary compatibility. -/
 def chainedAlloc : AllocId := allocs₂.fresh.2.fresh.2.fresh.2.fresh.1
 
-/-- Provenance of the far end of the alias chain. -/
+/-- Provenance of the third independent mapped-file allocation. -/
 def chainedProv : Provenance := { bufferProv with root := chainedAlloc, source := .mappedFile }
 
-/-- A host-visible *device* view of the buffer's storage. `docs/MEMORY_MODEL.md` §7.5
-names exactly this pair -- a host-visible device buffer and the allocation behind it --
-among the storage that is shared without being the same allocation. -/
+/-- A host-visible device allocation with its own backing under the executable
+fixture profile. Pure event controls cover shared backing across address spaces. -/
 def deviceViewAlloc : AllocId := allocs₂.fresh.2.fresh.2.fresh.2.fresh.2.fresh.1
 
-/-- Its provenance: a different address space and a different allocator from the
-buffer's, over storage the state declares shared. -/
+/-- Device provenance over independently backed storage. -/
 def deviceProv : Provenance :=
   { bufferProv with
     root := deviceViewAlloc, space := .deviceHostVisible, source := .deviceMemory }
@@ -691,13 +688,11 @@ import it, and is packaged the same way. -/
 inductive Beta where
   /-- A device engine writes the buffer. -/
   | dmaWrite
-  /-- A device engine writes the far end of an alias chain: the same storage as
-  the buffer, two declared hops away. -/
+  /-- A device engine writes an independently backed allocation. -/
   | dmaWriteChained
   /-- A device engine discharges a duty the program thread holds. -/
   | dmaDischargesTheThreadsDuty
-  /-- The engine writes the buffer's storage through a host-visible *device* view:
-  the same declared storage, a different address space. -/
+  /-- The engine writes an independently backed host-visible device allocation. -/
   | dmaWriteDeviceView
   /-- An operation that declares no memory effects at all. -/
   | undeclared
@@ -714,7 +709,7 @@ instance : HasOperationFacets Beta where
   facets
     | .dmaWrite =>
         { memoryEffects := some (.single
-            { acc viewProv ⟨0, 8⟩ 0x1000 .write .readWrite false true
+            { acc bufferProv ⟨0, 8⟩ 0x1000 .write .readWrite false true
                 (context := engine₀) with
               intent := { reads := false, writes := true } })
           faults := some [.pageFault, .deviceFault], restartability := some .notRestartable
@@ -935,56 +930,61 @@ rather than assembled by hand, so the fixture's notion of initialized is the sam
 one `RangeInitialized` reads. -/
 def zeroed64 : ByteStore := ByteStore.empty.write 0 (List.replicate 64 0) true
 
-/-- The buffer, its aliasing view, and a read-only allocation. The alias is
-declared here, in the state, because whether two allocations name the same bytes
-is a fact about the machine and not about provenance. -/
+/-- Mint distinct backing identities for the ordinary operation fixtures. -/
+private def backingSupply : Nat → FreshSupply StorageTag
+  | 0 => .initial
+  | n + 1 => (backingSupply n).fresh.2
+
+private def fixtureBacking (n : Nat) : StorageId := (backingSupply n).fresh.1
+
 def allocations₀ : List (AllocId × AllocationRecord) :=
   [ (bufferAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
                     source := .virtualAlloc, owners := [engine₀, thread₀]
                     permission := .readWrite, live := true
-                    bytes := zeroed64, base := some 0x1000 })
+                    backing := fixtureBacking 0, origin := 0, base := some 0x1000 })
   , (viewAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
                   source := .mappedFile, owners := [engine₀, thread₀]
                   permission := .readWrite, live := true
-                  bytes := zeroed64, base := some 0x1000 })
+                  backing := fixtureBacking 1, origin := 0, base := some 0x1000 })
   , (constAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
                    source := .imageMapping, owners := [thread₀]
                    permission := .readOnly, live := true
-                   bytes := zeroed64, base := some 0x2000 })
+                   backing := fixtureBacking 2, origin := 0, base := some 0x2000 })
   , (stackAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
                    source := .stack, owners := [engine₀, thread₀]
-                   permission := .readWrite, live := true, bytes := zeroed64
+                   permission := .readWrite, live := true, backing := fixtureBacking 3, origin := 0
                    base := some 0x3000 })
   , (borrowedAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
                       source := .virtualAlloc, owners := [engine₀, thread₀]
-                      permission := .readWrite, live := true, bytes := zeroed64
+                      permission := .readWrite, live := true, backing := fixtureBacking 4, origin := 0
                       base := some 0x4000 })
   , (chainedAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀, space := .cpuVirtual
                      source := .mappedFile, owners := [thread₀]
-                     permission := .readWrite, live := true, bytes := zeroed64
+                     permission := .readWrite, live := true, backing := fixtureBacking 5, origin := 0
                      base := some 0x1000 })
   , (deviceViewAlloc, { extent := ⟨0, 64⟩, epoch := epoch₀
                         space := .deviceHostVisible
                         source := .deviceMemory, owners := [engine₀, thread₀]
-                        permission := .readWrite, live := true, bytes := zeroed64
+                        permission := .readWrite, live := true, backing := fixtureBacking 6, origin := 0
                         base := some 0x1000 }) ]
 
-def memory₀ : MemoryState :=
-  (((MemoryState.empty.allocateAll? allocations₀).getD .empty).alias bufferAlloc viewAlloc).alias
-    bufferAlloc deviceViewAlloc
+/-- Every record owns a distinct initialized backing in the selected profile. -/
+def backings₀ : Option MemoryState :=
+  allocations₀.foldlM (fun state entry =>
+    state.installBacking? entry.2.backing
+      ⟨entry.2.extent.stop + entry.2.origin, zeroed64⟩) MemoryState.empty
 
-/-- Every allocation happened, so `getD` did not fall back to the empty state. -/
-theorem the_allocations_succeed :
-    (MemoryState.empty.allocateAll? allocations₀).isSome := by decide
+def memorySetup : Option MemoryState :=
+  backings₀.bind (fun state => state.allocateAll? allocations₀)
 
-/-- The stack reservation the frame provider guards.
+def memory₀ : MemoryState := memorySetup.getD .empty
 
-`viewAlloc` and `chainedAlloc` share `bufferAlloc`'s base, which is the point of
-an alias: distinct allocation identities over the same storage. Placement does not
-decide aliasing — `MemoryState.aliases` does, and `docs/MEMORY_MODEL.md` §2 makes
-provenance rather than address the authority — so the two facts are declared
-separately and agreeing here is the fixture being realistic rather than a rule. -/
-def memory₁ : MemoryState := memory₀.alias viewAlloc chainedAlloc
+/-- Both installation and allocation succeed before the fallback is used. -/
+theorem the_allocations_succeed : memorySetup.isSome := by decide
+
+/-- Ordinary operation controls use the dedicated-backing execution profile.
+Shared-view admission is tested separately as an explicit refusal. -/
+def memory₁ : MemoryState := memory₀
 
 /-- The starting machine state: allocations exist, but no authority is held. -/
 def state₀ : MachineState := .initial memory₁
@@ -1260,7 +1260,7 @@ theorem a_load_before_the_store_observes_the_initial_bytes :
       s.events.getLast?.bind (·.event.valueRead) = some (List.replicate 8 0x00) :=
   ⟨_, rfl, by decide⟩
 
-/-- A store leaves bytes outside its range alone. `MemoryState.write` goes
+/-- A store leaves bytes outside its range alone. `MemoryState.writeResolved` goes
 through `ByteStore.write`, and `ByteStore.cellAt?_write_of_not_covers` is the
 framing law; this is that law observed through a real transition. -/
 theorem a_store_leaves_neighbouring_bytes_alone :
@@ -1270,7 +1270,7 @@ theorem a_store_leaves_neighbouring_bytes_alone :
   ⟨_, rfl, by decide, by decide⟩
 
 /-- A store to the buffer leaves the read-only allocation untouched, which is
-`MemoryState.write_preserves_other_allocation` observed through a transition. -/
+the dedicated-backing framing law observed through a transition. -/
 theorem a_store_leaves_other_allocations_alone :
     ∃ s, (stepAlpha state₀ .store).state? = some s ∧
       s.memory.byteAt? constAlloc 0 = some 0x00 :=
@@ -2466,21 +2466,11 @@ theorem store_has_one_substep :
   cases h
   rfl
 
-/-! ## 7: alias conflicts across distinct allocations -/
+/-! ## 7: conflicts use backing footprints -/
 
-/--
-**The stepper denies it**, not merely a lemma about `Conflicts`.
-
-A thread stores to the buffer; a device engine then stores to the *view*, a
-different allocation naming the same bytes. The second access is refused, nothing
-is committed for it, and a violation is recorded.
-
-`Provenance.SameStorage` would have called these unrelated — the allocation
-identities differ, which is exactly what distinct allocations mean — so the
-conflict is found only because aliasing is recorded in the machine state and the
-transition consults it.
--/
-theorem aliased_cross_context_store_is_denied :
+/-- Different operation families and execution contexts conflict when they write
+the same allocated buffer. The second write records no committed event. -/
+theorem cross_context_store_to_the_same_backing_is_denied :
     ∀ s, (stepAlpha state₀ .store).state? = some s →
       ∀ t, (stepBeta s .dmaWrite).state? = some t →
         t.events.length = 1 ∧ ¬ t.violations.IsEmpty := by
@@ -2488,48 +2478,35 @@ theorem aliased_cross_context_store_is_denied :
   cases hs; cases ht
   exact ⟨by decide, by decide⟩
 
-/--
-**An alias chain is followed, not just one hop.**
-
-`state₀` declares the buffer aliased to the view and the view aliased to
-`chainedAlloc`, so all three name the same bytes. `SharesBytes` compared a single
-hop, so the two ends of the chain were declared non-conflicting and a
-cross-context write to the far end committed with no violation — the same defect
-`SharesBytes` was introduced to fix, one hop further out.
-`docs/MEMORY_MODEL.md` §7.5 makes mapping and sharing typed transitions, and those
-compose.
--/
-theorem chained_alias_store_is_denied :
+/-- Equal local offsets on distinct backings do not manufacture a conflict. -/
+theorem another_backing_store_is_not_denied :
     ∀ s, (stepAlpha state₀ .store).state? = some s →
       ∀ t, (stepBeta s .dmaWriteChained).state? = some t →
-        t.events.length = 1 ∧ ¬ t.violations.IsEmpty := by
+        t.events.length = 2 ∧ t.violations.IsEmpty := by
   intro s hs t ht
   cases hs; cases ht
   exact ⟨by decide, by decide⟩
 
-/-- The chain really is two hops: the buffer and `chainedAlloc` are not directly
-declared aliased, so the theorem above is about transitivity and not about a
-declaration that was there all along. -/
-theorem the_chain_is_two_hops :
-    ¬ (state₀.memory.AliasHop bufferAlloc chainedAlloc) ∧
-    state₀.memory.AliasHop bufferAlloc viewAlloc ∧
-    state₀.memory.AliasHop viewAlloc chainedAlloc ∧
-    state₀.memory.SharesBytes bufferAlloc chainedAlloc := by decide
+/-- The ordinary fixture has distinct backing identities, not a transitive alias
+relation independent of byte storage. -/
+theorem fixture_backings_are_distinct :
+    ¬ state₀.memory.SharesBytes bufferAlloc chainedAlloc ∧
+    ¬ state₀.memory.SharesBytes bufferAlloc viewAlloc ∧
+    ¬ state₀.memory.SharesBytes viewAlloc chainedAlloc := by decide
 
 /-- The same two accesses, one context apart, are *not* denied: program order
 sequences a context against itself, and refusing that would refuse ordinary
 sequential code. -/
 theorem same_context_stores_are_not_denied :
     ∀ s, (stepAlpha state₀ .store).state? = some s →
-      ∀ t, (stepAlpha s .storeThroughView).state? = some t →
+      ∀ t, (stepAlpha s .store).state? = some t →
         t.events.length = 2 ∧ t.violations.IsEmpty := by
   intro s hs t ht
   cases hs; cases ht
   exact ⟨by decide, by decide⟩
 
-/-- The same two stores are *not* related by `SameStorage`, so the conflict is
-found only because the state records the alias. -/
-theorem aliased_stores_are_not_sameStorage :
+/-- Independently backed views have distinct provenance roots. -/
+theorem independent_views_are_not_sameStorage :
     ¬ bufferProv.SameStorage viewProv := by
   refine Provenance.not_sameStorage_of_root_ne ?_
   decide
@@ -3246,35 +3223,21 @@ theorem a_race_is_recorded_as_a_race :
   cases ht
   decide
 
-/-- **And a race across two address spaces is a race.**
-
-`MemoryEvent.Conflicts` carried `a.provenance.space = b.provenance.space` and a theorem
-asserting the narrowing as a law of §7.5. §7.3's sentence has no address-space clause,
-and §7.5's is about offset coincidence, which `SharesBytes` already implements. What
-the conjunct actually did was cancel a *declared* sharing whenever the spaces differed
--- which is two of the three pairs the `SameStorage` repair was made for, a
-host-visible device buffer and the allocation behind it among them.
-
-Review stepped it: the thread wrote the buffer, the engine wrote the same declared
-storage through this view, and the step committed with an empty violation ledger while
-the identical store through a *cpu*-space view was refused. The authority rule had
-already dropped its own space conjunct for this reason and said so, so the two rules
-were answering differently about one pair of allocations. -/
-theorem a_cross_space_race_is_recorded_as_a_race :
-    state₀.memory.SharesBytes bufferAlloc deviceViewAlloc ∧
+/-- Distinct backings remain independent across address-space names as well.
+The event-level shared-backing controls cover cross-space overlap without admitting
+unsupported shared live views into this execution profile. -/
+theorem independent_cross_space_backings_do_not_conflict :
+    ¬ state₀.memory.SharesBytes bufferAlloc deviceViewAlloc ∧
     deviceProv.space ≠ bufferProv.space ∧
-    ¬ state₀.memory.AnyGrantOver deviceProv ⟨0, 8⟩ ∧
     ∀ s, (stepAlpha state₀ .store).state? = some s →
       ∀ t, (stepBeta s .dmaWriteDeviceView).state? = some t →
-        t.violations.records?.any (fun r => r.class_ = .conflictingAccess) := by
-  refine ⟨by decide, by decide, by decide, ?_⟩
+        t.events.length = 2 ∧ t.violations.IsEmpty := by
+  refine ⟨by decide, by decide, ?_⟩
   intro s hs t ht
-  cases hs
-  cases ht
-  decide
+  cases hs; cases ht
+  exact ⟨by decide, by decide⟩
 
-/-- And the same store with nothing written before it commits, so the refusal above is
-the earlier write and not the device view. -/
+/-- The device-view store also commits when executed alone. -/
 theorem the_device_view_store_alone_commits :
     ∀ t, (stepBeta state₀ .dmaWriteDeviceView).state? = some t →
       t.events.length = 1 ∧ t.violations.IsEmpty := by
@@ -3287,7 +3250,7 @@ theorem the_device_view_store_alone_commits :
 `StepPolicy.compatible` is the one field a profile writes that can *remove* a refusal
 rather than add one, and review used it: `compatible := fun _ _ => true` on this very
 profile made every §7.3 conflict vanish, and the cross-context pair
-`aliased_cross_context_store_is_denied` denies committed with an empty ledger.
+`cross_context_store_to_the_same_backing_is_denied` denies committed with an empty ledger.
 
 §7.3's sentence exempts "compatible **atomic** accesses", and the adjective was
 enforced nowhere — `MemoryEvent.Conflicts` never read `ordering.atomicity`.

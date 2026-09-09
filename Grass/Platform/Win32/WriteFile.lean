@@ -8,7 +8,7 @@ Microsoft WriteFile, Parameters and Synchronous Handles, retrieved 2026-09-09:
 https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-writefile
 
 This is a consumer of execution evidence, not an executable Windows provider.
-The initial spatial profile uses placed, nonwrapping, unaliased allocations.
+The initial spatial profile uses placed, nonwrapping allocations with dedicated backing storage.
 Physical action dispatch, ordering and provider-accepted output require external
 realization witnesses. The generic step takes an agent identity, not a call ID:
 its success does not establish which pending occurrence caused that action.
@@ -25,16 +25,8 @@ deriving DecidableEq, Repr
 
 /-- Resolve against the actual live allocation, retaining the lookup and placement.
 This supplies spatial evidence only, never access rights. -/
-structure Resolved (memory : MemoryState) (arg : Argument) where
-  allocation : AllocationRecord
-  lookup : memory.allocations.lookup arg.provenance.root = some allocation
-  live : allocation.live = true
-  epoch : allocation.epoch = arg.provenance.epoch
-  space : allocation.space = arg.provenance.space
-  source : allocation.source = arg.provenance.source
-  extent : allocation.extent = arg.provenance.rootExtent
-  nested : arg.provenance.Nested
-  contained : arg.provenance.extent.Contains arg.range
+structure Resolved (memory : MemoryState) (arg : Argument)
+    extends memory.ResolvedAccess arg.provenance arg.range where
   base : MachineAddress
   placed : allocation.base = some base
   noWrap : FitsAllocation base allocation.extent.stop
@@ -45,13 +37,14 @@ def Resolved.physical {memory : MemoryState} {arg : Argument}
 
 theorem Resolved.root_contains {memory : MemoryState} {arg : Argument}
     (resolved : Resolved memory arg) : resolved.allocation.extent.Contains arg.range := by
-  rw [resolved.extent]
-  exact (Provenance.extent_within_root resolved.nested).trans resolved.contained
+  rw [resolved.extentAgrees]
+  exact (Provenance.extent_within_root resolved.provenanceNested).trans resolved.rangeInProvenance
 
 def Resolved.transport {before after : MemoryState} {arg : Argument}
-    (resolved : Resolved before arg) (same : after.allocations = before.allocations) :
-    Resolved after arg :=
-  { resolved with lookup := by rw [same]; exact resolved.lookup }
+    (resolved : Resolved before arg) (same : after.allocations = before.allocations)
+    (backings : after.backings = before.backings) : Resolved after arg :=
+  { toResolvedAccess := resolved.toResolvedAccess.transport same backings
+    base := resolved.base, placed := resolved.placed, noWrap := resolved.noWrap }
 
 structure Request where
   handle : BitVec 64
@@ -82,7 +75,7 @@ structure Prepared (memory : MemoryState) (request : Request) where
   bufferCPU : request.buffer.provenance.space = .cpuVirtual
   countCPU : request.countSlot.provenance.space = .cpuVirtual
   separated : buffer.physical.Disjoint countSlot.physical
-  unaliased : memory.aliases = []
+  dedicated : memory.DedicatedBackings
   placement : ∀ root allocation, memory.allocations.lookup root = some allocation →
     allocation.live = true → allocation.space = .cpuVirtual →
     ∃ base, allocation.base = some base ∧ FitsAllocation base allocation.extent.stop
@@ -96,21 +89,24 @@ structure Prepared (memory : MemoryState) (request : Request) where
 
 def Prepared.transport {before after : MemoryState} {request : Request}
     (prepared : Prepared before request) (same : after.allocations = before.allocations)
-    (aliases : after.aliases = before.aliases) : Prepared after request where
-  buffer := prepared.buffer.transport same
-  countSlot := prepared.countSlot.transport same
+    (backings : after.backings = before.backings) : Prepared after request where
+  buffer := prepared.buffer.transport same backings
+  countSlot := prepared.countSlot.transport same backings
   bufferSize := prepared.bufferSize
   bytesSize := prepared.bytesSize
   countSize := prepared.countSize
   bufferCPU := prepared.bufferCPU
   countCPU := prepared.countCPU
   separated := prepared.separated
-  unaliased := aliases.trans prepared.unaliased
+  dedicated := by
+    unfold MemoryState.DedicatedBackings MemoryState.backingCapacity?
+    rw [same, backings]
+    exact prepared.dedicated
   placement := by rw [same]; exact prepared.placement
   allocationSeparation := by rw [same]; exact prepared.allocationSeparation
   input := by
     intro i
-    rw [MemoryState.cellAt?_of_allocations_eq same]
+    rw [MemoryState.cellAt?_of_maps_eq same backings]
     exact prepared.input i
 
 /-- Exact pending occurrence; loan identities stay in the record, not recomputed.
@@ -222,7 +218,7 @@ structure CausalEvidence (model : CausalModel) (call : CallProtocol.CallId)
       record.request.countSlot.range.Contains event.event.range)
   conflicts : ∀ old ∈ before.machine.events, ∀ event ∈ added,
     old.event.context.id ≠ event.event.context.id →
-    MemoryEvent.Conflicts before.machine.memory.SharesBytes (fun a b => action.policy.compatible a b = true)
+    MemoryEvent.Conflicts (fun a b => action.policy.compatible a b = true)
       old.event event.event →
     model.precedes after (.event old.event.id) (.event event.event.id)
 

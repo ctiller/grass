@@ -25,13 +25,14 @@ def DwordAt (memory : MemoryState) (arg : Argument) (count : BitVec 32) : Prop :
         rw [h]
         exact i.isLt), true)
 
-/-- `DwordAt.transport` transports observation across allocation equality. -/
+/-- `DwordAt.transport` transports observation across unchanged views and backing bytes. -/
 theorem DwordAt.transport {before after : MemoryState} {arg : Argument}
     {count : BitVec 32} (observed : DwordAt before arg count)
-    (same : after.allocations = before.allocations) : DwordAt after arg count := by
+    (same : after.allocations = before.allocations)
+    (backings : after.backings = before.backings) : DwordAt after arg count := by
   refine ⟨observed.1, ?_⟩
   intro i
-  rw [MemoryState.cellAt?_of_allocations_eq same]
+  rw [MemoryState.cellAt?_of_maps_eq same backings]
   exact observed.2 i
 
 /-- False exposes no trusted count and constrains neither slot nor accepted prefix.
@@ -58,16 +59,17 @@ theorem ReturnResult.Conforms.success {result : ReturnResult} {memory : MemorySt
   rw [if_neg succeeded] at h
   exact h
 
-/-- Exact allocation preservation transports success observations and failures. -/
+/-- Exact allocation and backing preservation transports success observations and failures. -/
 theorem ReturnResult.Conforms.transport {result : ReturnResult} {before after : MemoryState}
     {request : Request} {accepted : Nat} (h : result.Conforms before request accepted)
-    (same : after.allocations = before.allocations) : result.Conforms after request accepted := by
+    (same : after.allocations = before.allocations)
+    (backings : after.backings = before.backings) : result.Conforms after request accepted := by
   unfold ReturnResult.Conforms at *
   split at h
   · simp_all
   · obtain ⟨count, reported, observed, exactCount, bounded⟩ := h
     split
     · contradiction
-    · exact ⟨count, reported, observed.transport same, exactCount, bounded⟩
+    · exact ⟨count, reported, observed.transport same backings, exactCount, bounded⟩
 
 end Grass.Platform.Win32.WriteFile

@@ -2,6 +2,7 @@ import Grass.Core.Context
 import Grass.Core.Name
 import Grass.Core.Uid
 import Grass.Memory.Access
+import Grass.Memory.Coordinates
 import Grass.Std.Logical.Byte
 
 /-!
@@ -109,6 +110,11 @@ structure MemoryEvent where
   provenance : Provenance
   /-- The byte range touched, relative to the provenance's root allocation. -/
   range : ByteRange
+  /-- The backing identity and origin resolved when this event was emitted.
+
+  This is historical event data, rather than a lookup through a later memory state:
+  mappings can change after an event has entered the trace. -/
+  mapping : Coordinates.Mapping
   /-- What the event does at that location. -/
   kind : EventKind
   /-- The bytes observed, if any. -/
@@ -145,6 +151,18 @@ def committedWriteRange (e : MemoryEvent) : ByteRange := e.range.take e.writeCom
 def committedRange (e : MemoryEvent) : ByteRange :=
   e.range.take (max e.readCommitted e.writeCommitted)
 
+/-- The backing bytes this event actually observed, in its captured mapping. -/
+def committedReadSpan (e : MemoryEvent) : Coordinates.BackingSpan :=
+  e.mapping.span e.committedReadRange
+
+/-- The backing bytes this event actually wrote, in its captured mapping. -/
+def committedWriteSpan (e : MemoryEvent) : Coordinates.BackingSpan :=
+  e.mapping.span e.committedWriteRange
+
+/-- The backing bytes this event touched by either effect, in its captured mapping. -/
+def committedSpan (e : MemoryEvent) : Coordinates.BackingSpan :=
+  e.mapping.span e.committedRange
+
 /--
 `e.WellFormed` holds when the event's values agree with what its kind claims.
 
@@ -163,14 +181,13 @@ structure WellFormed (e : MemoryEvent) : Prop where
   writeValueAbsent : e.kind.writes = false → e.valueWritten = Option.none
   /-- A fence or control event has no location, so its range is empty. -/
   noLocationWhenUntouched : e.kind.touchesMemory = false → e.range.IsEmpty
-  /-- Written bytes number exactly what the status says committed. This is what
-  connects `docs/MEMORY_MODEL.md` §4's "a write initializes only the bytes it
-  actually completes" to the event record. -/
-  writtenLength :
-    ∀ bytes, e.valueWritten = some bytes → bytes.length = e.committedWriteRange.size
-  /-- Observed bytes number exactly what the event says it read. -/
-  readLength :
-    ∀ bytes, e.valueRead = some bytes → bytes.length = e.committedReadRange.size
+  /-- The written value's length, or zero when it is absent, is exactly the
+  committed write count. `WellFormed.writtenLength` prevents a read event from carrying a ghost write
+  footprint with no written value. -/
+  writtenLength : (e.valueWritten.map List.length).getD 0 = e.writeCommitted
+  /-- The observed value's length, or zero when it is absent, is exactly the
+  committed read count. -/
+  readLength : (e.valueRead.map List.length).getD 0 = e.readCommitted
   /-- The status does not claim more bytes than the range covers.
 
   **This is also what bounds the event's own counts**, and there were two more clauses
@@ -247,8 +264,8 @@ instance (e : MemoryEvent) : Decidable e.WellFormed :=
       (e.kind.writes = true → e.valueWritten.isSome) ∧
       (e.kind.writes = false → e.valueWritten = Option.none) ∧
       (e.kind.touchesMemory = false → e.range.IsEmpty) ∧
-      (∀ bytes ∈ e.valueWritten, bytes.length = e.committedWriteRange.size) ∧
-      (∀ bytes ∈ e.valueRead, bytes.length = e.committedReadRange.size) ∧
+      (e.valueWritten.map List.length).getD 0 = e.writeCommitted ∧
+      (e.valueRead.map List.length).getD 0 = e.readCommitted ∧
       e.status.WellFormed e.range.size ∧
       e.status.committedReads = e.readCommitted ∧
       e.status.committedWrites = e.writeCommitted ∧
@@ -257,8 +274,8 @@ instance (e : MemoryEvent) : Decidable e.WellFormed :=
       { readValuePresent := h.1, readValueAbsent := h.2.1
         writeValuePresent := h.2.2.1, writeValueAbsent := h.2.2.2.1
         noLocationWhenUntouched := h.2.2.2.2.1
-        writtenLength := fun bytes hb => h.2.2.2.2.2.1 bytes hb
-        readLength := fun bytes hb => h.2.2.2.2.2.2.1 bytes hb
+        writtenLength := h.2.2.2.2.2.1
+        readLength := h.2.2.2.2.2.2.1
         statusWellFormed := h.2.2.2.2.2.2.2.1
         statusAgreesWithReads := h.2.2.2.2.2.2.2.2.1
         statusAgreesWithWrites := h.2.2.2.2.2.2.2.2.2.1
@@ -267,8 +284,7 @@ instance (e : MemoryEvent) : Decidable e.WellFormed :=
     .isFalse fun w =>
       h ⟨w.readValuePresent, w.readValueAbsent, w.writeValuePresent,
         w.writeValueAbsent, w.noLocationWhenUntouched,
-        fun bytes hb => w.writtenLength bytes hb,
-        fun bytes hb => w.readLength bytes hb,
+        w.writtenLength, w.readLength,
         w.statusWellFormed,
         w.statusAgreesWithReads, w.statusAgreesWithWrites,
         w.spaceAgreesWithProvenance⟩
@@ -311,24 +327,20 @@ additionally requires the two events to be unordered by happens-before, which
 needs the consistency graph of M8. Two conflicting events properly ordered by a
 lock are not a race.
 
-`sharesBytes` is the other parameter, and it replaces an earlier
-`Provenance.SameStorage` clause that was wrong in the unsafe direction.
-`SameStorage` demands equal `AllocId`s, so a host-visible device buffer and the
-device allocation behind it, a `MapViewOfFile` view and the file it maps, and a
-physical/virtual pair were all declared non-conflicting — while
-`docs/MEMORY_MODEL.md` §7.5 explicitly contemplates mapping and sharing. Whether
-two allocations name the same bytes is a fact about the machine state, not about
-provenance, so `MemoryState.SharesBytes` supplies it.
-
-Overlap is checked on the *committed* ranges, since bytes an event did not commit
-are bytes it did not touch.
+Overlap is checked on the *committed backing spans captured in each event*, since
+bytes an event did not commit are bytes it did not touch. This does not consult a
+later memory state: the backing identity and origin are historical event data.
 -/
-def Conflicts (sharesBytes : AllocId → AllocId → Prop)
-    (compatible : MemoryEvent → MemoryEvent → Prop) (a b : MemoryEvent) : Prop :=
+def FootprintsConflict (a b : MemoryEvent) : Prop :=
+  a.committedWriteSpan.Overlaps b.committedReadSpan ∨
+  a.committedReadSpan.Overlaps b.committedWriteSpan ∨
+  a.committedWriteSpan.Overlaps b.committedWriteSpan
+
+/-- Two events conflict exactly when their captured committed effects overlap and
+the profile does not exempt them as compatible atomic accesses. -/
+def Conflicts (compatible : MemoryEvent → MemoryEvent → Prop) (a b : MemoryEvent) : Prop :=
   a.kind.touchesMemory = true ∧ b.kind.touchesMemory = true ∧
-  sharesBytes a.provenance.root b.provenance.root ∧
-  a.committedRange.Overlaps b.committedRange ∧
-  (a.kind.writes = true ∨ b.kind.writes = true) ∧
+  a.FootprintsConflict b ∧
   ¬ compatible a b
 
 /--
@@ -343,50 +355,45 @@ def atomicsAreNever (_a _b : MemoryEvent) : Prop := False
 
 instance (a b : MemoryEvent) : Decidable (atomicsAreNever a b) := .isFalse (fun h => h)
 
-instance {sharesBytes : AllocId → AllocId → Prop}
-    [∀ x y, Decidable (sharesBytes x y)]
-    {compatible : MemoryEvent → MemoryEvent → Prop}
+instance (a b : MemoryEvent) : Decidable (FootprintsConflict a b) :=
+  inferInstanceAs (Decidable (_ ∨ _ ∨ _))
+
+instance {compatible : MemoryEvent → MemoryEvent → Prop}
     [∀ x y, Decidable (compatible x y)] (a b : MemoryEvent) :
-    Decidable (Conflicts sharesBytes compatible a b) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+    Decidable (Conflicts compatible a b) :=
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
 
-theorem Conflicts.symm {sharesBytes : AllocId → AllocId → Prop}
-    {compatible : MemoryEvent → MemoryEvent → Prop}
-    (shareSymm : ∀ x y, sharesBytes x y → sharesBytes y x)
+theorem FootprintsConflict.symm {a b : MemoryEvent}
+    (h : FootprintsConflict a b) : FootprintsConflict b a := by
+  rcases h with h | h | h
+  · rcases h with ⟨backing, offset, ha, hb⟩
+    exact Or.inr (Or.inl ⟨backing.symm, offset, hb, ha⟩)
+  · rcases h with ⟨backing, offset, ha, hb⟩
+    exact Or.inl ⟨backing.symm, offset, hb, ha⟩
+  · rcases h with ⟨backing, offset, ha, hb⟩
+    exact Or.inr (Or.inr ⟨backing.symm, offset, hb, ha⟩)
+
+theorem Conflicts.symm {compatible : MemoryEvent → MemoryEvent → Prop}
     (symmetric : ∀ x y, compatible x y → compatible y x) {a b : MemoryEvent}
-    (h : Conflicts sharesBytes compatible a b) :
-    Conflicts sharesBytes compatible b a := by
-  obtain ⟨ha, hb, hshare, ho, hw, hat⟩ := h
-  refine ⟨hb, ha, shareSymm _ _ hshare, ?_, hw.symm,
-    fun hc => hat (symmetric b a hc)⟩
-  obtain ⟨offset, h₁, h₂⟩ := ho
-  exact ⟨offset, h₂, h₁⟩
+    (h : Conflicts compatible a b) :
+    Conflicts compatible b a := by
+  obtain ⟨ha, hb, hfootprints, hat⟩ := h
+  exact ⟨hb, ha, hfootprints.symm, fun hc => hat (symmetric b a hc)⟩
 
-/-- Two reads never conflict, whatever their ordering. -/
-theorem not_conflicts_of_both_read {sharesBytes : AllocId → AllocId → Prop}
-    {compatible : MemoryEvent → MemoryEvent → Prop}
-    {a b : MemoryEvent} (ha : a.kind = .read) (hb : b.kind = .read) :
-    ¬ Conflicts sharesBytes compatible a b := by
-  rintro ⟨_, _, _, _, hw, _⟩
-  rw [ha, hb] at hw
-  simp [EventKind.writes] at hw
-
-/-- **Events whose committed ranges do not overlap never conflict.** §7.3's first
+/-- **Events whose actual committed spans do not overlap never conflict.** §7.3's first
 condition, as a refusal.
 
-`Conflicts` has six conjuncts and four had a negative theorem; this and
-`not_conflicts_of_compatible` below are the two §7.3 is actually *about*, and review
-found both replaceable by `True` with the tree green. Without this one every pair of
-accesses to shared storage with a writer is a race, however far apart they are --
+`Conflicts` has four conjuncts. This and `not_conflicts_of_compatible` are the two
+§7.3 conditions actually exercised by the negative laws, and review found both
+replaceable by `True` with the tree green. Without this one every pair of accesses to
+one backing with a writer is a race, however far apart they are --
 which is the over-refusing direction, and therefore silent.
 
-Stated over the *committed* ranges, because bytes an event did not commit are bytes it
-did not touch. -/
-theorem not_conflicts_of_disjoint {sharesBytes : AllocId → AllocId → Prop}
-    {compatible : MemoryEvent → MemoryEvent → Prop} {a b : MemoryEvent}
-    (h : ¬ a.committedRange.Overlaps b.committedRange) :
-    ¬ Conflicts sharesBytes compatible a b :=
-  fun hc => h hc.2.2.2.1
+Stated over the actual committed backing spans, because bytes an event did not commit
+are bytes it did not touch. -/
+theorem not_conflicts_of_disjoint {compatible : MemoryEvent → MemoryEvent → Prop}
+    {a b : MemoryEvent} (h : ¬ a.FootprintsConflict b) :
+    ¬ Conflicts compatible a b := fun hc => h hc.2.2.1
 
 /-- **And a compatible pair never conflicts**, which is §7.3's own exemption: "not both
 compatible atomic accesses under one profile". Without it `atomicShared` stops meaning
@@ -396,42 +403,14 @@ The adjective is load-bearing and is enforced one layer up:
 `Grass/Op/Step.lean`'s `StepPolicy.compatibleIsAtomic` is a proof field, so a policy
 that cannot show both accesses atomic cannot be constructed at all. This theorem is
 about the clause; that field is about what a profile may put in it. -/
-theorem not_conflicts_of_compatible {sharesBytes : AllocId → AllocId → Prop}
-    {compatible : MemoryEvent → MemoryEvent → Prop} {a b : MemoryEvent}
-    (h : compatible a b) : ¬ Conflicts sharesBytes compatible a b :=
-  fun hc => hc.2.2.2.2.2 h
-
-/-- Events in different storage never conflict, however their offsets compare.
-This is `docs/MEMORY_MODEL.md` §7.5 at the event layer. -/
-theorem not_conflicts_of_unshared {sharesBytes : AllocId → AllocId → Prop}
-    {compatible : MemoryEvent → MemoryEvent → Prop} {a b : MemoryEvent}
-    (h : ¬ sharesBytes a.provenance.root b.provenance.root) :
-    ¬ Conflicts sharesBytes compatible a b :=
-  fun hc => h hc.2.2.1
+theorem not_conflicts_of_compatible {compatible : MemoryEvent → MemoryEvent → Prop}
+    {a b : MemoryEvent} (h : compatible a b) : ¬ Conflicts compatible a b :=
+  fun hc => hc.2.2.2 h
 
 /-!
-**There is no theorem here saying different spaces never conflict, and there was.**
-
-`Conflicts` carried `a.provenance.space = b.provenance.space` and that theorem
-asserted the narrowing as a law of §7.5. §7.3's sentence has no address-space clause,
-and §7.5's is about offset coincidence -- "not interchangeable *merely because their
-offsets match*" -- which `sharesBytes` already implements: unrelated allocations do
-not share bytes whatever their spaces, and related ones share them only where the
-state says so.
-
-The conjunct did not narrow the rule to offset coincidence. It cancelled a
-*declared* sharing whenever the two provenances named different spaces, which is
-exactly the configuration the `SameStorage` repair above was made for: two of the
-three pairs that repair names -- a host-visible device buffer and the device
-allocation behind it, a physical/virtual pair -- live in different spaces. Review
-stepped it: with the buffer aliased to a host-visible device view, the program thread
-wrote the buffer and the device engine then wrote the same declared storage through
-the view, and the step committed with an empty violation ledger. The same store
-through a *cpu*-space view of the same storage was refused as `conflictingAccess`.
-
-`MemoryState.AuthorizedAt` had dropped its own space conjunct for the same reason and
-said so, so the authority rule and the race rule were answering differently about one
-pair of allocations.
+**There is no theorem here saying different spaces never conflict.** Captured backing
+spans decide whether two historical effects overlap; an address-space name and a raw
+allocation identity are neither alternate authorities nor conflict criteria.
 -/
 
 /-- **An event that touches no bytes conflicts with nothing.**
@@ -453,10 +432,9 @@ The theorem is kept, because it is a true statement about `Conflicts` over arbit
 became constructible. What it is not is coverage of anything the transition can
 produce, and this docstring says so now. The same applies to
 `WellFormed.noLocationWhenUntouched`. -/
-theorem not_conflicts_of_untouched {sharesBytes : AllocId → AllocId → Prop}
-    {compatible : MemoryEvent → MemoryEvent → Prop}
+theorem not_conflicts_of_untouched {compatible : MemoryEvent → MemoryEvent → Prop}
     {a b : MemoryEvent} (h : a.kind.touchesMemory ≠ true) :
-    ¬ Conflicts sharesBytes compatible a b := fun hc => h hc.1
+    ¬ Conflicts compatible a b := fun hc => h hc.1
 
 end MemoryEvent
 
@@ -748,7 +726,8 @@ which is what `statusAgreesWithReads` and `statusAgreesWithWrites` fixed. The
 fields remain the thing to keep honest.
 -/
 def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
-    (space : AddressSpace) (d : AccessDescriptor) (outcome : AccessOutcome d) :
+    (space : AddressSpace) (d : AccessDescriptor) (outcome : AccessOutcome d)
+    (mapping : Coordinates.Mapping) :
     Option ValidMemoryEvent :=
   if hspace : space.id ≠ d.provenance.space then Option.none else
   match houtcome : outcome.committed? with
@@ -765,6 +744,7 @@ def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
                   space := space
                   provenance := d.provenance
                   range := d.range
+                  mapping := mapping
                   kind := kind
                   valueRead := c.observed
                   valueWritten := c.written
@@ -784,22 +764,8 @@ def ofOutcome (id : EventId) (contextKind : ContextKind) (cause : EventCause)
                     c.writtenAbsent (by rw [← writes_kindOf hkind]; exact h)
                   noLocationWhenUntouched := fun hu =>
                     absurd (touchesMemory_kindOf hkind) (by rw [hu]; simp)
-                  writtenLength := fun bytes hb => by
-                    have hb' : c.written = some bytes := hb
-                    have hcount : c.writeCount = bytes.length := by
-                      simp [Committed.writeCount, hb']
-                    have hfit := c.writtenFits bytes hb'
-                    show bytes.length = (d.range.take c.writeCount).size
-                    rw [ByteRange.take_size, hcount]
-                    omega
-                  readLength := fun bytes hb => by
-                    have hb' : c.observed = some bytes := hb
-                    have hcount : c.readCount = bytes.length := by
-                      simp [Committed.readCount, hb']
-                    have hfit := c.observedFits bytes hb'
-                    show bytes.length = (d.range.take c.readCount).size
-                    rw [ByteRange.take_size, hcount]
-                    omega
+                  writtenLength := by rfl
+                  readLength := by rfl
                   statusWellFormed := outcome.status_wellFormed
                   statusAgreesWithReads := by
                     cases houtcome' : outcome with
@@ -846,8 +812,8 @@ is the right place for the breakage to appear.
 -/
 theorem touchesMemory_ofOutcome {id : EventId} {contextKind : ContextKind}
     {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
-    {outcome : AccessOutcome d} {valid : ValidMemoryEvent}
-    (h : ofOutcome id contextKind cause space d outcome = some valid) :
+    {outcome : AccessOutcome d} {mapping : Coordinates.Mapping} {valid : ValidMemoryEvent}
+    (h : ofOutcome id contextKind cause space d outcome mapping = some valid) :
     valid.event.kind.touchesMemory = true := by
   unfold ofOutcome at h
   split at h
@@ -865,9 +831,26 @@ theorem touchesMemory_ofOutcome {id : EventId} {contextKind : ContextKind}
 /-- The event an access produces records exactly the access's own range. -/
 @[simp] theorem range_of_ofOutcome {id : EventId} {contextKind : ContextKind}
     {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
-    {outcome : AccessOutcome d} {valid : ValidMemoryEvent}
-    (h : ofOutcome id contextKind cause space d outcome = some valid) :
+    {outcome : AccessOutcome d} {mapping : Coordinates.Mapping} {valid : ValidMemoryEvent}
+    (h : ofOutcome id contextKind cause space d outcome mapping = some valid) :
     valid.event.range = d.range := by
+  unfold ofOutcome at h
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  cases h
+  rfl
+
+/-- The event records the mapping supplied at emission, rather than consulting a
+later memory state. -/
+@[simp] theorem mapping_of_ofOutcome {id : EventId} {contextKind : ContextKind}
+    {cause : EventCause} {space : AddressSpace} {d : AccessDescriptor}
+    {outcome : AccessOutcome d} {mapping : Coordinates.Mapping} {valid : ValidMemoryEvent}
+    (h : ofOutcome id contextKind cause space d outcome mapping = some valid) :
+    valid.event.mapping = mapping := by
   unfold ofOutcome at h
   split at h
   · exact absurd h (by simp)
@@ -882,8 +865,8 @@ theorem touchesMemory_ofOutcome {id : EventId} {contextKind : ContextKind}
 recorded in the trace; the violation ledger is where a denial appears. -/
 @[simp] theorem ofOutcome_denied (id : EventId) (contextKind : ContextKind)
     (cause : EventCause) (space : AddressSpace) (d : AccessDescriptor)
-    (violation : AuditViolation) :
-    ofOutcome id contextKind cause space d (.denied violation) = Option.none := by
+    (violation : AuditViolation) (mapping : Coordinates.Mapping) :
+    ofOutcome id contextKind cause space d (.denied violation) mapping = Option.none := by
   unfold ofOutcome
   simp
 

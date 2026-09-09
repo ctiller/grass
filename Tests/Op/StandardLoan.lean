@@ -130,57 +130,44 @@ theorem a_store_to_lent_bytes_is_refused :
   cases hs
   exact ⟨by decide, by decide, by decide⟩
 
-/--
-**A loan cannot be bypassed through an aliasing allocation.**
+/-- Attempt to bind an existing view to another allocation's backing through
+its checked allocation door. No candidate state is manufactured on failure. -/
+private def rebindTo? (memory : MemoryState) (target source : AllocId) : Option MemoryState := do
+  let targetRecord ← memory.allocations.lookup target
+  let sourceRecord ← memory.allocations.lookup source
+  memory.allocate? target
+    { targetRecord with backing := sourceRecord.backing, origin := sourceRecord.origin }
 
-The regression for the worst defect local review found in this module. `loansOver`
-decided "the relevant map" with `Provenance.SameStorage`, which is not the
-same-bytes relation — this layer had already learned that once, which is why
-`MemoryState.SharesBytes` exists and why `ConflictsWithHistory` consults it. So a
-loan over `bufferAlloc` left `viewAlloc` looking exclusive, and a thread's store
-through the mapped view committed with no violation while the engine held the
-bytes. That is the §7.5 mapped-file and host-visible-device-buffer shape exactly.
--/
-theorem a_loan_cannot_be_bypassed_through_an_alias :
-    ¬ lentToEngine.memory.Exclusive viewProv ⟨0, 8⟩ ∧
+/-- Live mappings remain immutable with or without a loan. The lent case also
+retains its exact outstanding loan identity after refusal. -/
+theorem a_live_view_cannot_be_retargeted_onto_lent_storage :
+    rebindTo? state₀.memory viewAlloc bufferAlloc = none ∧
+    rebindTo? lentToEngine.memory viewAlloc bufferAlloc = none ∧
+    (lentToEngine.memory.grantAt? bufferLoan).isSome := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- The ordinary fixture now uses distinct backings. A loan of the buffer does
+not freeze the independent view's bytes. -/
+theorem an_independent_backing_is_not_frozen_by_the_buffer_loan :
+    lentToEngine.memory.Exclusive viewProv ⟨0, 8⟩ ∧
     ∀ s, (step lentToEngine .storeThroughView).state? = some s →
-      s.events = [] ∧ s.violations.recordCount = 1 := by
+      s.events.length = 1 ∧ s.violations.IsEmpty := by
   refine ⟨by decide, ?_⟩
   intro s hs
   cases hs
   exact ⟨by decide, by decide⟩
 
-/-- **And what "the same bytes" does not yet mean.**
-
-`MemoryState.SharesBytes` is what the whole authority layer keys on — `grantsOver`,
-`AuthorizedAt`, `MemoryEvent.Conflicts` — and `MemoryState.write` writes the bytes of
-the *named* allocation only. So a store through the view leaves the buffer's bytes
-unchanged, and a read of the buffer afterwards sees the old value. "Same storage" is
-an authority-level fiction with no byte-level counterpart, which means the theorem
-above guards a relation the memory semantics does not implement.
-
-Stated here rather than only in `docs/MEMORY_IMPLEMENTATION_PLAN.md` §4.2, because a
-reader meeting the theorem above should meet this in the same file. Closing it is
-either write-propagation across the alias set, which needs the offset mapping
-`MemoryState.aliases` does not record, or allocations sharing one byte store by
-identity — the second removes `SharesAfter` and `AliasHop` entirely and is the
-better shape, and both change `MemoryState`. -/
-theorem the_alias_is_not_yet_a_byte_level_fact :
+/-- Distinct backings remain independent at the byte level. Shared runtime views
+are excluded by the current applicability gate, rather than represented by an
+alias relation disconnected from the byte store. -/
+theorem distinct_backings_do_not_share_byte_writes :
     ∀ s, (step state₀ .storeThroughView).state? = some s →
       s.memory.byteAt? viewAlloc 0 = some 0xab ∧
       s.memory.byteAt? bufferAlloc 0 = some 0x00 ∧
-      state₀.memory.SharesBytes viewAlloc bufferAlloc := by
+      ¬ state₀.memory.SharesBytes viewAlloc bufferAlloc := by
   intro s hs
   cases hs
   exact ⟨by decide, by decide, by decide⟩
-
-/-- The alias really is one: the two provenances name different storage by
-`SameStorage` and the same bytes by `SharesBytes`, which is what made the bypass
-possible and what closes it. -/
-theorem the_view_aliases_the_buffer :
-    ¬ bufferProv.SameStorage viewProv ∧
-    state₀.memory.SharesBytes bufferAlloc viewAlloc := by
-  exact ⟨by decide, by decide⟩
 
 /-- Returning the loan restores the thread's access, so the refusal tracks the
 loan rather than being permanent. -/
@@ -297,52 +284,14 @@ def separatelyLent : MemoryState :=
       { kind := .loan, holder := engine₀, lender := thread₀, provenance := borrowedProv
         range := ⟨0, 8⟩, rights := .readWrite }).getD lentToThread
 
-/-- Then the profile declares the mapping. `docs/MEMORY_MODEL.md` §7.5 makes that a
-real transition, and nothing re-examines the grants already issued. -/
-def aliasedAfterIssue : MachineState :=
-  { state₀ with memory := separatelyLent.alias bufferAlloc borrowedAlloc }
-
-/-- Both lends succeeded, and they became conflicting only once the alias was
-declared: issued in the other order, `issue?` refuses the second. -/
-theorem the_conflict_appears_after_issue :
+/-- Both disjoint loans exist, and their live mappings cannot subsequently be
+merged. The refusal happens at the mapping mutation door, before an invalid
+shared state can be executed with any choice of authority providers. -/
+theorem live_loan_mappings_cannot_be_merged_after_issue :
     (separatelyLent.grantAt? bufferLoan).isSome ∧
     (separatelyLent.grantAt? secondBufferLoan).isSome ∧
-    ((state₀.memory.alias bufferAlloc borrowedAlloc).issue? bufferLoan
-        { kind := .loan, holder := thread₀, lender := engine₀, provenance := bufferProv
-          range := ⟨0, 8⟩, rights := .readWrite }).isSome := by
+    rebindTo? separatelyLent bufferAlloc borrowedAlloc = none := by
   exact ⟨by decide, by decide, by decide⟩
-
-/-- **And the thread's store is refused**, though it holds a covering write loan
-and `issue?` was never given the chance to refuse anything. This is the case no
-issue-time check can catch. -/
-theorem an_alias_declared_after_issue_is_refused :
-    aliasedAfterIssue.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ = AuthorityState.frozen ∧
-    ∀ s, (step aliasedAfterIssue .store).state? = some s →
-      s.events = [] ∧ s.violations.recordCount = 1 := by
-  refine ⟨by decide, ?_⟩
-  intro s hs
-  cases hs
-  exact ⟨by decide, by decide⟩
-
-/-- **And it is refused with no provider listed**, which is the case the holder
-clause alone does not cover.
-
-Each of the two grants covers its own holder, so `Granted` is *true* for the thread
-and the transition's "is anything held here that you are not authorized for" clause
-passes. What sees the other holder is `authorityOf`, which reports `frozen`. A probe
-written while closing the previous finding stepped exactly this state under a policy
-with no providers and watched the write commit; both halves of §3's rule are in
-`refusalOf` now, and this is that state with the second half in place. -/
-theorem an_alias_declared_after_issue_is_refused_without_a_provider :
-    aliasedAfterIssue.memory.Granted thread₀ bufferProv ⟨0, 8⟩ AccessIntent.write ∧
-    aliasedAfterIssue.memory.authorityOf thread₀ bufferProv ⟨0, 8⟩ =
-      AuthorityState.frozen ∧
-    ∀ s, (nakedStep aliasedAfterIssue .store).state? = some s →
-      s.events = [] ∧ s.violations.recordCount = 1 := by
-  refine ⟨by decide, by decide, ?_⟩
-  intro s hs
-  cases hs
-  exact ⟨by decide, by decide⟩
 
 /-- The engine holds a *read* loan over the head. -/
 def readLentToEngine : MachineState :=

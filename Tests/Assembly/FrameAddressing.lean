@@ -11,6 +11,7 @@ namespace Grass.Tests.Assembly.FrameAddressing
 open Grass.Assembly Grass.Core Grass.Memory Grass.Std.Logical
 
 private def alloc : AllocId := (FreshSupply.initial (Tag := AllocTag)).fresh.1
+private def backing : StorageId := (FreshSupply.initial (Tag := StorageTag)).fresh.1
 private def epoch : EpochId := (FreshSupply.initial (Tag := EpochTag)).fresh.1
 private def owner : ContextId := (FreshSupply.initial (Tag := ContextTag)).fresh.1
 
@@ -26,10 +27,15 @@ def frame : Provenance :=
 def record : AllocationRecord :=
   { extent := frame.rootExtent, epoch := epoch, space := .cpuVirtual
     source := .stack, owners := [owner], permission := .readWrite, live := true
-    bytes := .empty, base := some base }
+    backing := backing, origin := 0, base := some base }
 
 def state : MemoryState :=
-  (MemoryState.empty.allocate? alloc record).getD .empty
+  ((MemoryState.empty.installBacking? backing ⟨4096, .empty⟩).bind
+    (fun withBacking => withBacking.allocate? alloc record)).getD .empty
+
+/-- Both checked setup doors succeed; subsequent address proofs cannot rely on
+the fallback empty state. -/
+example : state.allocations.lookup alloc = some record := by decide +kernel
 
 /-- The generic local resolver is inhabited for this real frame geometry. -/
 example :

@@ -24,6 +24,16 @@ private def grants : FreshSupply GrantTag := .initial
 /-- The lent storage. -/
 def buffer : AllocId := allocs.fresh.1
 
+private def stores : FreshSupply StorageTag := .initial
+private def bufferBacking : StorageId := stores.fresh.1
+private def scratchBacking : StorageId := stores.fresh.2.fresh.1
+private def backingState : MemoryState :=
+  ((MemoryState.empty.installBacking? bufferBacking ⟨64, .empty⟩).bind
+    (fun s => s.installBacking? scratchBacking ⟨16, .empty⟩)).getD .empty
+
+example : (backingState.backings.lookup bufferBacking).isSome ∧
+    (backingState.backings.lookup scratchBacking).isSome := by decide +kernel
+
 /-- Its owner. -/
 def owner : ContextId := contexts.fresh.1
 
@@ -60,18 +70,18 @@ def frameGrant : AuthorityGrant :=
 
 /-- A state owning the buffer and lending nothing. -/
 def unlent : MemoryState :=
-  (MemoryState.empty.allocate? buffer
+  (backingState.allocate? buffer
     { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
       source := .virtualAlloc, owners := [owner]
-      permission := .readWrite, live := true, bytes := .empty
+      permission := .readWrite, live := true, backing := bufferBacking, origin := 0
       base := some 0x1000 }).getD .empty
 
 /-- The allocation happened, so `getD` did not fall back to the empty state. -/
 theorem the_allocation_succeeds :
-    (MemoryState.empty.allocate? buffer
+    (backingState.allocate? buffer
       { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
         source := .virtualAlloc, owners := [owner]
-        permission := .readWrite, live := true, bytes := .empty
+        permission := .readWrite, live := true, backing := bufferBacking, origin := 0
         base := some 0x1000 }).isSome := by decide
 
 /-- A write loan of the first eight bytes to the borrower. -/
@@ -358,11 +368,16 @@ whatever provenance is presented. -/
 
 /-- The same buffer, freed. -/
 def freed : MemoryState :=
-  (MemoryState.empty.allocate? buffer
+  (backingState.allocate? buffer
     { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
       source := .virtualAlloc, owners := [owner]
-      permission := .readWrite, live := false, bytes := .empty
+      permission := .readWrite, live := false, backing := bufferBacking, origin := 0
       base := some 0x1000 }).getD .empty
+
+/-- Dead-state setup retains an allocated record; failure cannot masquerade as teardown. -/
+theorem freed_setup_retains_a_dead_record :
+    (freed.allocations.lookup buffer).isSome ∧
+    ((freed.allocations.lookup buffer).map AllocationRecord.live) = some false := by decide
 
 /-- **A freed allocation is exclusive and unwritable.** Both halves matter: the
 loan map really is empty, and that really is not authority. -/
@@ -479,7 +494,7 @@ changed. The guard is the whole record now. -/
 def bufferRecord : AllocationRecord :=
   { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
     source := .virtualAlloc, owners := [owner]
-    permission := .readWrite, live := true, bytes := .empty
+    permission := .readWrite, live := true, backing := bufferBacking, origin := 0
     base := some 0x1000 }
 
 /-- The starting state really does hold that record, so the refusals below are about
@@ -497,21 +512,18 @@ theorem an_owner_list_may_not_be_rewritten_under_a_grant :
     lentHead.allocate? buffer { bufferRecord with owners := [owner, stranger] } =
       Option.none := by decide
 
-/-- **Nor may its bytes be rewritten.** §1's chokepoint sentence names raw memory
-before permissions or provenance, and this was a second door onto it. -/
+/-- Backing installation cannot overwrite bytes under an outstanding grant. -/
 theorem bytes_may_not_be_rewritten_under_a_grant :
-    lentHead.allocate? buffer
-      { bufferRecord with bytes := ByteStore.empty.write 0 [0xde] true } =
-      Option.none := by decide
+    lentHead.installBacking? bufferBacking
+      ⟨64, ByteStore.empty.write 0 [0xde] true⟩ = none := by decide
 
-/-- And with nothing outstanding both are accepted, so the refusals are the grant and
-not the fields. This is the half that keeps `allocate?` usable: a profile that has lent
-nothing out may re-record whatever it likes. -/
-theorem both_are_accepted_with_nothing_outstanding :
+/-- Metadata updates remain possible without grants. Backing installation remains
+insert-only even then; ordinary writes are the byte mutation door. -/
+theorem metadata_update_without_grants_and_backing_identity_is_immutable :
     (unlent.allocate? buffer
       { bufferRecord with owners := [owner, stranger] }).isSome ∧
-    (unlent.allocate? buffer
-      { bufferRecord with bytes := ByteStore.empty.write 0 [0xde] true }).isSome ∧
+    unlent.installBacking? bufferBacking
+      ⟨64, ByteStore.empty.write 0 [0xde] true⟩ = none ∧
     ¬ unlent.AnyGrantOver bufferProv ⟨0, 8⟩ ∧
     lentHead.AnyGrantOver bufferProv ⟨0, 8⟩ := by
   exact ⟨by decide, by decide, by decide, by decide⟩
@@ -681,33 +693,26 @@ theorem a_grant_at_its_tail_field_is_accepted :
 def freedRecord : AllocationRecord :=
   { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
     source := .virtualAlloc, owners := [owner]
-    permission := .readWrite, live := false, bytes := .empty, base := some 0x1000 }
+    permission := .readWrite, live := false, backing := bufferBacking, origin := 0, base := some 0x1000 }
 
-/-- A second allocation over the same storage, declared an alias of the buffer. -/
+/-- A second allocation identity used for shared-backing admission refusal controls. -/
 def view : AllocId := allocs.fresh.2.fresh.1
 
 /-- Provenance of the view. -/
 def viewProv : Provenance := { bufferProv with root := view }
 
-/-- A state holding both, aliased. -/
-def aliasedPair : MemoryState :=
-  ((unlent.allocate? view
-      { extent := ⟨0, 64⟩, epoch := epoch, space := .cpuVirtual
-        source := .virtualAlloc, owners := [owner]
-        permission := .readWrite, live := true, bytes := .empty
-        base := some 0x1000 }).getD unlent).alias buffer view
-
-/-- A loan over the *view*, not over the buffer. -/
-def viewLoan : AuthorityGrant := { loanOfHead with provenance := viewProv }
-
 /-- The buffer, freed and re-allocated at the same identity in a new epoch. -/
 def reusedRecord : AllocationRecord :=
   { extent := ⟨0, 64⟩, epoch := laterEpoch, space := .cpuVirtual
     source := .virtualAlloc, owners := [owner]
-    permission := .readWrite, live := true, bytes := .empty, base := some 0x1000 }
+    permission := .readWrite, live := true, backing := bufferBacking, origin := 0, base := some 0x1000 }
 
 /-- A state holding it. `bufferProv` names the *old* epoch. -/
-def reused : MemoryState := (MemoryState.empty.allocate? buffer reusedRecord).getD .empty
+def reused : MemoryState := (backingState.allocate? buffer reusedRecord).getD .empty
+
+/-- The reuse fixture contains the actual new-epoch record. -/
+theorem reused_setup_has_the_new_epoch :
+    reused.allocations.lookup buffer = some reusedRecord := by decide
 
 /-- **A stale pointer into re-used storage holds no authority.**
 `docs/MEMORY_MODEL.md` §2: address reuse never revives old pointers. Before `Live`
@@ -753,14 +758,12 @@ theorem freeing_under_a_loan_is_refused :
     (returned.allocate? buffer freedRecord).isSome := by
   exact ⟨by decide, by decide⟩
 
-/-- **And a grant held over an aliased view blocks it.** The scan matched
-`provenance.root = id`, so a loan over a mapped view did not block a reallocation of
-the file it maps, though `SharesBytes` says they are the same bytes — the asymmetry
-this layer has now fixed in three places. -/
-theorem an_aliased_grant_blocks_the_reallocation :
-    ((aliasedPair.issue? firstLoan viewLoan).getD aliasedPair).allocate? buffer
-      reusedRecord = Option.none ∧
-    (aliasedPair.issue? firstLoan viewLoan).isSome := by
+/-- The selected dedicated-backing profile refuses a second live view, both
+before and after a loan is issued. Shared runtime mappings require a broader
+applicability proof; they are not fabricated through a fallback state. -/
+theorem shared_view_admission_is_refused_with_and_without_a_loan :
+    unlent.allocate? view bufferRecord = none ∧
+    lentHead.allocate? view bufferRecord = none := by
   exact ⟨by decide, by decide⟩
 
 /-- **A grant of another kind freezes too.** §7.3's conflict is about authority,
@@ -1022,7 +1025,7 @@ def arena : MemoryState :=
   (unlent.allocate? scratch
     { extent := ⟨0, 16⟩, epoch := epoch, space := .cpuVirtual
       source := .bumpAllocator, owners := [owner]
-      permission := .readWrite, live := true, bytes := .empty
+      permission := .readWrite, live := true, backing := scratchBacking, origin := 0
       base := some 0x2000 }).getD unlent
 
 /-- The same arena with the buffer's head lent out. -/
@@ -1083,15 +1086,10 @@ finds a record `allocate?` already holds. -/
 theorem a_repeated_name_is_harmless :
     (arena.tearDown? [buffer, buffer]).isSome := by decide
 
-/-! ## The negatives, composed, over a state nobody built
+/-! ## Authority laws over arbitrary states
 
-Every fixture above is concrete, and `decide` settles a concrete state. Review's point
-was that the `not_authorizedAt_of_*` family and `granted_of_covering` had *only* that
-use: the negatives refute one grant at one byte and `Granted` is existential over the
-entry list, so nothing turned them into a `¬ Granted`; and `granted_of_covering`'s
-`entry ∈ grantEntries` hypothesis was dischargeable by `decide` and by nothing else.
-The two theorems below take an arbitrary `state` — no fixture, no `decide` — which is
-the use those lemmas were written for and had never had. -/
+The negative checks the resolved query without assuming a fixture. The positive
+uses an installed grant whose backing span covers the entire resolved request. -/
 
 /-- **A context that holds no grant is granted nothing**, in any state, over any
 storage, for any intent. -/
@@ -1099,21 +1097,50 @@ theorem a_non_holder_is_granted_nothing (state : MemoryState) (context : Context
     (provenance : Provenance) (range : ByteRange) (intent : AccessIntent)
     (hne : ¬ range.IsEmpty)
     (h : ∀ entry ∈ state.grantEntries, entry.2.holder ≠ context) :
-    ¬ state.Granted context provenance range intent :=
-  MemoryState.not_granted_of_no_authorizing_entry hne fun entry hmem _ =>
-    MemoryState.not_authorizedAt_of_other_holder (h entry hmem)
+    ¬ state.Granted context provenance range intent := by
+  cases hr : state.resolveAccess? provenance range with
+  | error failure => simp [MemoryState.Granted, hr]
+  | ok access =>
+      intro granted
+      have resolved : state.GrantedResolved context access intent := by
+        simpa [MemoryState.Granted, hr] using granted
+      have hpositive : 0 < range.size := by
+        unfold ByteRange.IsEmpty at hne
+        omega
+      obtain ⟨entry, hmem, authorized⟩ := resolved 0 hpositive
+      exact h entry hmem authorized.1
 
 /-- **And a grant identity is enough to establish authority**, without knowing what
 else the state holds. -/
 theorem an_identity_suffices (state : MemoryState) (context : ContextId)
     (provenance : Provenance) (range : ByteRange) (intent : AccessIntent)
+    (access : state.ResolvedAccess provenance range)
+    (hresolve : state.resolveAccess? provenance range = .ok access)
     (id : GrantId) (grant : AuthorityGrant) (hat : state.grantAt? id = some grant)
-    (hcover : grant.range.Contains range) (hholder : grant.holder = context)
-    (hshares : state.SharesBytes grant.provenance.root provenance.root)
+    (grantSpan : Coordinates.BackingSpan) (hspan : state.grantSpan? grant = .ok grantSpan)
+    (hcover : grantSpan.Contains access.span) (hholder : grant.holder = context)
     (hgrant : state.CurrentEpoch grant.provenance)
-    (haccess : state.Live provenance)
     (hrights : grant.rights.Permits intent) :
     state.Granted context provenance range intent :=
-  MemoryState.granted_of_grantAt hat hcover hholder hshares hgrant haccess hrights
+  MemoryState.granted_of_grantAt hresolve hat hspan hcover hholder hgrant hrights
+
+/-- Authority queries validate the same full provenance as accesses, even when
+the installed loan and the queried local byte range otherwise match. -/
+theorem malformed_query_cannot_use_a_valid_loan :
+    ¬ lentHead.Granted borrower { bufferProv with source := .bumpAllocator }
+      ⟨0, 8⟩ AccessIntent.read ∧
+    ¬ lentHead.Granted borrower fatProv ⟨0, 8⟩ AccessIntent.read ∧
+    lentHead.authorityOf borrower { bufferProv with source := .bumpAllocator }
+      ⟨0, 8⟩ = AuthorityState.unavailable := by
+  exact ⟨by decide, by decide, by decide⟩
+
+/-- An empty query outside the allocation is still spatially invalid. Pointwise
+grant checks alone would accept it vacuously. The valid loan remains usable. -/
+theorem empty_outside_query_is_not_vacuously_granted :
+    ¬ lentHead.Granted borrower bufferProv (ByteRange.empty 65) AccessIntent.read ∧
+    lentHead.authorityOf borrower bufferProv (ByteRange.empty 65) =
+      AuthorityState.unavailable ∧
+    lentHead.Granted borrower bufferProv ⟨0, 8⟩ AccessIntent.read := by
+  exact ⟨by decide, by decide, by decide⟩
 
 end Tests.Memory.Loans
