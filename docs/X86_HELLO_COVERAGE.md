@@ -54,6 +54,11 @@ physical return behavior are separate from ISA decoding and register transfer.
 
 ## Independent boundary campaign
 
+The current implementation priority is the unchanged Hello proof and checked
+instruction factory. Additional native runners and campaigns are deferred
+unless they resolve a concrete model or proof defect. Existing campaign evidence
+remains useful, but does not replace constructive execution receipts.
+
 The auditor owns the bounded NASM/NDISASM campaign over the same generated
 population. Keep raw and parsed output, tool versions, executable/input/output
 digests and exact replay instructions. Force production-selected immediate,

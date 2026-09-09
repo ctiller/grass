@@ -19,6 +19,19 @@ import Grass.ISA.X86.Execution.SubRspNormal
 import Grass.ISA.X86.Execution.PushNormal
 import Grass.ISA.X86.Execution.AccessFree
 import Grass.ISA.X86.Execution.MoveNormal
+import Grass.ISA.X86.Execution.AccessPolicy
+import Grass.ISA.X86.Execution.ArithmeticNormal
+import Grass.ISA.X86.Execution.BranchNormal
+import Grass.ISA.X86.Execution.Dispatch
+import Grass.ISA.X86.Execution.FetchAttempt
+import Grass.ISA.X86.Execution.Instruction
+import Grass.ISA.X86.Execution.LeaNormal
+import Grass.ISA.X86.Execution.MoveSelection
+import Grass.ISA.X86.Execution.ObservedFetch
+import Grass.ISA.X86.Execution.PushSavedRead
+import Grass.ISA.X86.Execution.RawOutcome
+import Grass.ISA.X86.Execution.ReadValue64
+import Grass.ISA.X86.Execution.RunFactory
 import Grass.ISA.X86.Execution.StackInstruction
 import Grass.ISA.X86.Execution.CompletionFlags
 import Grass.ISA.X86.Decode
@@ -140,6 +153,13 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.SubRspNormal,
    `Grass.ISA.X86.Execution.PushNormal,
    `Grass.ISA.X86.Execution.AccessFree, `Grass.ISA.X86.Execution.MoveNormal,
+   `Grass.ISA.X86.Execution.AccessPolicy,
+   `Grass.ISA.X86.Execution.ArithmeticNormal, `Grass.ISA.X86.Execution.BranchNormal,
+   `Grass.ISA.X86.Execution.Dispatch, `Grass.ISA.X86.Execution.FetchAttempt,
+   `Grass.ISA.X86.Execution.Instruction, `Grass.ISA.X86.Execution.LeaNormal,
+   `Grass.ISA.X86.Execution.MoveSelection, `Grass.ISA.X86.Execution.ObservedFetch,
+   `Grass.ISA.X86.Execution.PushSavedRead, `Grass.ISA.X86.Execution.RawOutcome,
+   `Grass.ISA.X86.Execution.ReadValue64, `Grass.ISA.X86.Execution.RunFactory,
    `Grass.ISA.X86.Execution.StackInstruction, `Grass.ISA.X86.Execution.CompletionFlags,
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
@@ -211,7 +231,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- The completed-store carrier pins a bounded instruction access contract.
 -- Memory MOV completion adds eight architectural value, operand, width, payload,
 -- encoding, address, and result obligations. No existing debt is reclassified.
-def owedBaseline : Nat := 279
+-- Arithmetic, branch, LEA and fixed access dispatch add twenty reviewed obligations.
+def owedBaseline : Nat := 299
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -263,7 +284,8 @@ acquiring a citation.
 -- Main adds a reviewed reindexing helper for continuation suffixes.
 -- Four memory-completion helpers project or package already selected evidence.
 -- This addition moves no existing declaration from owed or cited coverage.
-def notBehaviourBaseline : Nat := 204
+-- Fixed dispatch and access factories add thirty checked structural helpers.
+def notBehaviourBaseline : Nat := 234
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -549,6 +571,40 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.ReadValue32.bytes,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.displacement,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.LoadNormal.read,
+    -- Checked packaging, projections and selectors over independently modeled
+    -- encoders, decoders, fetches and machine transitions.
+    `Grass.ISA.X86.Execution.ArithmeticInstruction.ofRegisterSelection,
+    `Grass.ISA.X86.Execution.ArithmeticInstruction.select,
+    `Grass.ISA.X86.Execution.ArithmeticInstruction.selectImmediate,
+    `Grass.ISA.X86.Execution.BranchInstruction.select,
+    `Grass.ISA.X86.Execution.BranchInstruction.tryInstruction,
+    `Grass.ISA.X86.Execution.CpuOutcome.state,
+    `Grass.ISA.X86.Execution.FetchedSite.toObservedFetch,
+    `Grass.ISA.X86.Execution.Instruction.accept,
+    `Grass.ISA.X86.Execution.Instruction.encoding?,
+    `Grass.ISA.X86.Execution.Instruction.select,
+    `Grass.ISA.X86.Execution.Instruction.selectControl,
+    `Grass.ISA.X86.Execution.LeaInstruction.accept,
+    `Grass.ISA.X86.Execution.LeaInstruction.select,
+    `Grass.ISA.X86.Execution.MoveInstruction.select,
+    `Grass.ISA.X86.Execution.MoveInstruction.selectImmediate,
+    `Grass.ISA.X86.Execution.ObservedFetch.bytes,
+    `Grass.ISA.X86.Execution.ObservedFetch.decoded,
+    `Grass.ISA.X86.Execution.ObservedFetch.dispatch,
+    `Grass.ISA.X86.Execution.ObservedFetch.failureOutcome,
+    `Grass.ISA.X86.Execution.ObservedFetch.reachedState,
+    `Grass.ISA.X86.Execution.ObservedFetch.toFetchAttempt,
+    `Grass.ISA.X86.Execution.ReadValue64.bytes,
+    `Grass.ISA.X86.Execution.ReadValue64.observed,
+    -- Generic constructors for already selected singleton/access-free generic
+    -- operation runs; they add no instruction or target behavior.
+    `Grass.ISA.X86.Execution.RunFactory.access,
+    `Grass.ISA.X86.Execution.RunFactory.accessFree,
+    `Grass.ISA.X86.Execution.RunFactory.accessFreeOperation,
+    `Grass.ISA.X86.Execution.RunFactory.instHasOperationFacetsFixedAccessFreeOperation,
+    `Grass.ISA.X86.Execution.RunFactory.instHasOperationFacetsSingletonAccessOperation,
+    `Grass.ISA.X86.Execution.RunFactory.noFaultPlan,
+    `Grass.ISA.X86.Execution.RunFactory.singletonOperation,
     -- Decoder-table lookup and packaging of independently checked encoding laws.
     `Grass.ISA.X86.ImmediateArithmetic.operandSpec,
     `Grass.ISA.X86.ImmediateArithmetic.template,
@@ -824,6 +880,29 @@ def owed : List Name :=
     `Grass.ISA.X86.Execution.MoveInstruction.encoding,
     `Grass.ISA.X86.Execution.MoveInstruction.effect,
     `Grass.ISA.X86.Execution.MoveNormal.result,
+    -- Newly modeled address, arithmetic, branch and LEA behavior. Selector
+    -- plumbing is reviewed separately above; these declarations carry the
+    -- architectural operation, address, encoding or result content.
+    `Grass.ISA.X86.Execution.AddressPlan.descriptor,
+    `Grass.ISA.X86.Execution.AddressPlan.offset,
+    `Grass.ISA.X86.Execution.planAddress,
+    `Grass.ISA.X86.Execution.ArithmeticInstruction.destination,
+    `Grass.ISA.X86.Execution.ArithmeticInstruction.effect,
+    `Grass.ISA.X86.Execution.ArithmeticInstruction.encoding,
+    `Grass.ISA.X86.Execution.ArithmeticNormal.result,
+    `Grass.ISA.X86.Execution.BranchInstruction.displacement,
+    `Grass.ISA.X86.Execution.BranchInstruction.encoding,
+    `Grass.ISA.X86.Execution.BranchInstruction.kind,
+    `Grass.ISA.X86.Execution.BranchInstruction.taken,
+    `Grass.ISA.X86.Execution.BranchNormal.result,
+    `Grass.ISA.X86.Execution.BranchNormal.target,
+    `Grass.ISA.X86.Execution.completedBranchRflags,
+    `Grass.ISA.X86.Execution.LeaInstruction.baseValue,
+    `Grass.ISA.X86.Execution.LeaInstruction.effectiveAddress,
+    `Grass.ISA.X86.Execution.LeaInstruction.encoding?,
+    `Grass.ISA.X86.Execution.LeaInstruction.operand,
+    `Grass.ISA.X86.Execution.LeaNormal.result,
+    `Grass.ISA.X86.Execution.ReadValue64.value,
     `Grass.ISA.X86.Execution.StackInstruction.encoding,
     `Grass.ISA.X86.Execution.statusMask,
     `Grass.ISA.X86.Execution.resumeMask,
