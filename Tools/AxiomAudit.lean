@@ -95,6 +95,8 @@ import Grass.Platform.Win32.WriteFileCall
 import Grass.Platform.Win32.WriteFileCallPreservation
 import Grass.Platform.Win32.WriteFileRuntime
 import Grass.Platform.Win32.WriteFileService
+import Grass.Platform.Win32.WriteFileRuntimeLinked
+import Grass.Platform.Win32.ApiDispatch
 import Grass.Refinement.Console.WriteFilePolicy
 import Grass.Artifact.PE.ExceptionBinding
 import Grass.ISA.X86.EndianBridge
