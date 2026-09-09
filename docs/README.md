@@ -64,6 +64,12 @@ comments are historical provenance available in Git, not active instructions.
   theorem and invariant family to authored, library, generated, or authority
   work instead of treating a short identifier as evidence of a short proof.
 - [HELLO_WORLD.md](HELLO_WORLD.md) defines the first acceptance milestone.
+- [HELLO_UNWIND_BOUNDARY.md](HELLO_UNWIND_BOUNDARY.md) records the reviewed
+  Hello unwind/PE binding interpretation of the existing ABI, artifact and
+  milestone requirements; those normative owners retain authority.
+- [SPIKE1_BOUNDARY_REVIEW.md](SPIKE1_BOUNDARY_REVIEW.md) records the console
+  interface review, ownership and remaining proof obligations; it is a review
+  snapshot, not a replacement normative contract.
 - [SPIKE_1.md](SPIKE_1.md) is its annotated proof from portable specification to
   emitted Win32 PE bytes.
 - [SORT.md](SORT.md) defines the second acceptance milestone.
