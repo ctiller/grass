@@ -135,6 +135,15 @@ for merge. The event references relevant issues, dependencies, handoffs, and
 latest progress. It does not name a head commit: rapid authoring on the branch
 is intentional.
 
+Every `required_checks` entry is the exact command the reviewer must execute and
+repeat in the authorization's check result. For a portable `.ps1` check, the
+author selects the spelling available on the named reviewer's host when
+nominating: for example, either `pwsh ./audit-trust.ps1` or
+`powershell.exe -NoProfile -File .\audit-trust.ps1`. Do not nominate both unless
+both executions are required. A differently spelled invocation is not evidence
+that the nominated command ran, and a reviewer whose host lacks the named
+interpreter must decline rather than mark that command as passed.
+
 The nominee emits `review.nomination_accepted` or
 `review.nomination_declined`. Acceptance means responsibility for reviewing and,
 if satisfied, merging; it is not approval returned to the author.

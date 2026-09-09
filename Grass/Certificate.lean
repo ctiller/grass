@@ -521,4 +521,50 @@ structure ArtifactCertificate {spec : SpecProcess}
   stage : DerivedDemandFamily machine.stage.allKeys
   requirements : DemandCertificateFamily stage.demands
 
+namespace ProjectedDriverCertificate
+
+/-- `ProjectedDriverCertificate.allKeys_nodup` proves that the driver tier
+preserves global uniqueness of stable requirement keys. -/
+theorem allKeys_nodup {portable : PortableProgramCertificate spec}
+    (driver : ProjectedDriverCertificate portable) : driver.stage.allKeys.Nodup :=
+  driver.stage.allKeys_nodup spec.requirements.identities_nodup
+
+end ProjectedDriverCertificate
+
+namespace ProviderCertificate
+
+/-- `ProviderCertificate.allKeys_nodup` proves that the provider tier preserves
+global uniqueness of stable requirement keys. -/
+theorem allKeys_nodup {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    (provider : ProviderCertificate driver) : provider.stage.allKeys.Nodup :=
+  provider.stage.allKeys_nodup driver.allKeys_nodup
+
+end ProviderCertificate
+
+namespace MachineCertificate
+
+/-- `MachineCertificate.allKeys_nodup` proves that the machine tier preserves
+global uniqueness of stable requirement keys. -/
+theorem allKeys_nodup {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    {provider : ProviderCertificate driver}
+    (machine : MachineCertificate provider) : machine.stage.allKeys.Nodup :=
+  machine.stage.allKeys_nodup provider.allKeys_nodup
+
+end MachineCertificate
+
+namespace ArtifactCertificate
+
+/-- `ArtifactCertificate.allKeys_nodup` proves that the artifact tier preserves
+global uniqueness of stable requirement keys. -/
+theorem allKeys_nodup {portable : PortableProgramCertificate spec}
+    {driver : ProjectedDriverCertificate portable}
+    {provider : ProviderCertificate driver}
+    {machine : MachineCertificate provider}
+    (artifact : ArtifactCertificate machine) : artifact.stage.allKeys.Nodup :=
+  artifact.stage.allKeys_nodup machine.allKeys_nodup
+
+end ArtifactCertificate
+
 end Grass

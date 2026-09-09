@@ -26,6 +26,57 @@ def emitProgram (verified : VerifiedProgram spec) : ByteArray :=
 
 namespace VerifiedProgram
 
+/-- Stable identities of every keyed demand declared by the five certificate
+tiers from the portable specification through the artifact stage. -/
+def requirementKeys (verified : VerifiedProgram spec) : List RequirementKey :=
+  verified.artifact.stage.allKeys
+
+/-- `VerifiedProgram.requirementKeys_nodup` proves that no two certificate
+tiers discharge the same stable requirement identity. -/
+theorem requirementKeys_nodup (verified : VerifiedProgram spec) :
+    verified.requirementKeys.Nodup :=
+  verified.artifact.allKeys_nodup
+
+/-- Every portable demand identity occurs in the exported requirement keys. -/
+theorem portable_identity_mem_requirementKeys (verified : VerifiedProgram spec)
+    (key : spec.requirements.Key) :
+    spec.requirements.identity key ∈ verified.requirementKeys :=
+  verified.artifact.stage.prior_mem_allKeys
+    (verified.machine.stage.prior_mem_allKeys
+      (verified.provider.stage.prior_mem_allKeys
+        (verified.driver.stage.prior_mem_allKeys
+          (spec.requirements.identity_mem_identities key))))
+
+/-- Every driver demand identity occurs in the exported requirement keys. -/
+theorem driver_identity_mem_requirementKeys (verified : VerifiedProgram spec)
+    (key : verified.driver.stage.demands.Key) :
+    verified.driver.stage.demands.identity key ∈ verified.requirementKeys :=
+  verified.artifact.stage.prior_mem_allKeys
+    (verified.machine.stage.prior_mem_allKeys
+      (verified.provider.stage.prior_mem_allKeys
+        (verified.driver.stage.identity_mem_allKeys key)))
+
+/-- Every provider demand identity occurs in the exported requirement keys. -/
+theorem provider_identity_mem_requirementKeys (verified : VerifiedProgram spec)
+    (key : verified.provider.stage.demands.Key) :
+    verified.provider.stage.demands.identity key ∈ verified.requirementKeys :=
+  verified.artifact.stage.prior_mem_allKeys
+    (verified.machine.stage.prior_mem_allKeys
+      (verified.provider.stage.identity_mem_allKeys key))
+
+/-- Every machine demand identity occurs in the exported requirement keys. -/
+theorem machine_identity_mem_requirementKeys (verified : VerifiedProgram spec)
+    (key : verified.machine.stage.demands.Key) :
+    verified.machine.stage.demands.identity key ∈ verified.requirementKeys :=
+  verified.artifact.stage.prior_mem_allKeys
+    (verified.machine.stage.identity_mem_allKeys key)
+
+/-- Every artifact demand identity occurs in the exported requirement keys. -/
+theorem artifact_identity_mem_requirementKeys (verified : VerifiedProgram spec)
+    (key : verified.artifact.stage.demands.Key) :
+    verified.artifact.stage.demands.identity key ∈ verified.requirementKeys :=
+  verified.artifact.stage.identity_mem_allKeys key
+
 /-- Parsing the emitted bytes selects the exact certified artifact behavior. -/
 theorem loadedBehavior_exact (verified : VerifiedProgram spec) :
     verified.artifact.format.loadedBehavior (emitProgram verified) =
