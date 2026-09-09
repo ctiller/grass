@@ -1,4 +1,4 @@
-import Grass.Assembly.StaticObjects
+import Grass.Assembly.StaticSectionPacking
 import Grass.Artifact.PE.Validation
 
 /-! Deterministic packing of logical static declarations into
@@ -6,51 +6,6 @@ one caller-selected PE section. It does not choose the section's PE placement. -
 namespace Grass.Assembly.StaticSection
 
 open Grass.Artifact.PE Grass.Assembly.StaticObjects Grass.Std.Logical
-
-structure Object where
-  declaration : Declaration
-  offset : Nat
-deriving DecidableEq, Repr
-
-def Object.endOffset (object : Object) : Nat :=
-  object.offset + object.declaration.bytes.length
-
-def packFrom (cursor : Nat) : List Declaration → List Object × Grass.Std.Logical.ByteArray
-  | [] => ([], Vec.empty)
-  | declaration :: tail =>
-      let offset := alignUp cursor declaration.alignment
-      let object := { declaration, offset }
-      let packedTail := packFrom object.endOffset tail
-      (object :: packedTail.1,
-        Vec.replicate (offset - cursor) 0 ++ declaration.bytes ++ packedTail.2)
-
-def ordered? : List Object → Bool
-  | [] => true
-  | object :: tail =>
-      tail.all (fun later => decide (object.endOffset ≤ later.offset)) && ordered? tail
-
-theorem packFrom_declarations (cursor : Nat) (declarations : List Declaration) :
-    (packFrom cursor declarations).1.map Object.declaration = declarations := by
-  induction declarations generalizing cursor with
-  | nil => rfl
-  | cons declaration tail ih =>
-      simp only [packFrom, List.map_cons, List.cons.injEq, true_and]
-      exact ih _
-
-theorem packFrom_offsetsAligned (cursor : Nat) (declarations : List Declaration)
-    (valid : ∀ declaration ∈ declarations, Nat.isPowerOfTwo declaration.alignment) :
-    ∀ object ∈ (packFrom cursor declarations).1,
-      object.offset % object.declaration.alignment = 0 := by
-  induction declarations generalizing cursor with
-  | nil => simp [packFrom]
-  | cons declaration tail ih =>
-      intro object member
-      simp only [packFrom, List.mem_cons] at member
-      rcases member with rfl | member
-      · exact alignUp_mod_eq_zero _ (Nat.pos_of_isPowerOfTwo (valid _ List.mem_cons_self))
-      · apply ih (alignUp cursor declaration.alignment + declaration.bytes.length)
-          (fun later laterMember => valid later (List.mem_cons_of_mem declaration laterMember))
-          object member
 
 structure Layout (table : Table) where
   private mk ::
@@ -72,21 +27,13 @@ def layout? (table : Table) (name : SectionName) (characteristics : BitVec 32) :
     Option (Layout table) :=
   let packed := packFrom 0 table.declarations
   let rawSection : RawSection := { name, contents := packed.2, characteristics }
-  if aligned : packed.1.all (fun object => decide
-      (object.offset % object.declaration.alignment = 0)) = true then
-    if ordered : ordered? packed.1 = true then
-      if exact : packed.1.all (fun object => decide
-          ((rawSection.contents.drop object.offset).take object.declaration.bytes.length =
-            object.declaration.bytes)) = true then
-        if contained : packed.1.all (fun object => decide
-            (object.endOffset ≤ rawSection.contents.length)) = true then
-          some ⟨packed.1, rawSection, rfl, packFrom_declarations 0 table.declarations,
-            rfl, aligned, ordered, exact, contained⟩
-        else none
-      else none
-    else none
-  else none
+  some ⟨packed.1, rawSection, rfl, packFrom_declarations 0 table.declarations,
+    rfl, Table.packFrom_offsetsAligned_all table, packFrom_ordered 0 table.declarations,
+    packFrom_zero_payloads_all table.declarations,
+    packFrom_zero_contained_all table.declarations⟩
 
+theorem layout?_isSome (table : Table) (name : SectionName)
+    (characteristics : BitVec 32) : (layout? table name characteristics).isSome = true := rfl
 def Layout.lookup? {table : Table} (layout : Layout table) (name : String) : Option Object :=
   layout.objects.find? fun object => object.declaration.name = name
 
@@ -112,28 +59,10 @@ theorem Layout.namesUnique {table : Table} (layout : Layout table) :
   rw [functionEq] at unique
   exact unique
 
-private theorem find_object_of_mem {objects : List Object}
-    (unique : (objects.map (fun object => object.declaration.name)).Nodup)
-    {object : Object} (member : object ∈ objects) :
-    objects.find? (fun candidate => candidate.declaration.name = object.declaration.name) =
-      some object := by
-  induction objects with
-  | nil => simp at member
-  | cons head tail ih =>
-      simp only [List.map_cons, List.nodup_cons] at unique
-      simp only [List.mem_cons] at member
-      rcases member with rfl | member
-      · simp
-      · have different : head.declaration.name ≠ object.declaration.name := by
-          intro same
-          exact unique.1 (List.mem_map.mpr ⟨object, member, same.symm⟩)
-        rw [List.find?_cons_of_neg (by simpa using different)]
-        exact ih unique.2 member
-
 theorem Layout.lookup?_complete {table : Table} (layout : Layout table)
     {object : Object} (member : object ∈ layout.objects) :
     layout.lookup? object.declaration.name = some object :=
-  find_object_of_mem layout.namesUnique member
+  Grass.Std.Logical.find?_key_of_mem layout.namesUnique member
 
 theorem Layout.objectContained {table : Table} (layout : Layout table)
     {object : Object} (member : object ∈ layout.objects) :
@@ -148,10 +77,6 @@ theorem layout?_rawSection {table : Table} {name : SectionName}
       layout.rawSection.characteristics = characteristics ∧
       layout.rawSection.contents = (packFrom 0 table.declarations).2 := by
   simp only [layout?] at success
-  split at success <;> try contradiction
-  split at success <;> try contradiction
-  split at success <;> try contradiction
-  split at success <;> try contradiction
   cases success
   exact ⟨rfl, rfl, rfl⟩
 
