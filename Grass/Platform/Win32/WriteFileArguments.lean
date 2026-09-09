@@ -1,37 +1,29 @@
 import Grass.Op.CallProtocol
 import Grass.Std.Logical.Vec
+import Grass.Platform.Win32.CallMemory
 
 namespace Grass.Platform.Win32.WriteFile
 
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical
 
-structure Argument where
-  provenance : Provenance
-  range : ByteRange
-deriving DecidableEq, Repr
+abbrev Argument := Grass.Platform.Win32.CallMemory.Argument
 
 /-- Resolve against the actual live allocation, retaining the lookup and placement.
 This supplies spatial evidence only, never access rights. -/
-structure Resolved (memory : MemoryState) (arg : Argument)
-    extends memory.ResolvedAccess arg.provenance arg.range where
-  base : MachineAddress
-  placed : allocation.base = some base
-  noWrap : FitsAllocation base allocation.extent.stop
+abbrev Resolved := Grass.Platform.Win32.CallMemory.Resolved
 
-def Resolved.physical {memory : MemoryState} {arg : Argument}
-    (resolved : Resolved memory arg) : ByteRange :=
-  arg.range.shift resolved.base.toNat
+abbrev Resolved.physical {memory : MemoryState} {arg : Argument}
+    (resolved : Resolved memory arg) :=
+  Grass.Platform.Win32.CallMemory.Resolved.physical resolved
 
 theorem Resolved.root_contains {memory : MemoryState} {arg : Argument}
-    (resolved : Resolved memory arg) : resolved.allocation.extent.Contains arg.range := by
-  rw [resolved.extentAgrees]
-  exact (Provenance.extent_within_root resolved.provenanceNested).trans resolved.rangeInProvenance
+    (resolved : Resolved memory arg) : resolved.allocation.extent.Contains arg.range :=
+  Grass.Platform.Win32.CallMemory.Resolved.root_contains resolved
 
 def Resolved.transport {before after : MemoryState} {arg : Argument}
     (resolved : Resolved before arg) (same : after.allocations = before.allocations)
     (backings : after.backings = before.backings) : Resolved after arg :=
-  { toResolvedAccess := resolved.toResolvedAccess.transport same backings
-    base := resolved.base, placed := resolved.placed, noWrap := resolved.noWrap }
+  Grass.Platform.Win32.CallMemory.Resolved.transport resolved same backings
 
 structure Request where
   handle : BitVec 64
