@@ -45,6 +45,12 @@ import Grass.Platform.Win32.WriteFileNonresponse
 import Grass.Platform.Win32.WriteFileStabilization
 import Grass.Platform.Win32.WriteFileReturn
 import Grass.Platform.Win32.LoaderEntry
+import Grass.Platform.Win32.LoadedAccess
+import Grass.Platform.Win32.LoadedDataAccess
+import Grass.Platform.Win32.CpuVocabulary
+import Grass.Platform.Win32.CpuPolicy
+import Grass.Platform.Win32.ExecutionState
+import Grass.Platform.Win32.WriteFileAbi
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
 import Grass.Artifact.PE.ExceptionBinding
@@ -170,6 +176,10 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileResult, `Grass.Platform.Win32.WriteFileReturn,
    `Grass.Platform.Win32.LoaderImage, `Grass.Platform.Win32.LoaderRegion,
    `Grass.Platform.Win32.LoaderEntry,
+   `Grass.Platform.Win32.LoadedAccess, `Grass.Platform.Win32.CpuVocabulary,
+   `Grass.Platform.Win32.LoadedDataAccess,
+   `Grass.Platform.Win32.CpuPolicy,
+   `Grass.Platform.Win32.ExecutionState, `Grass.Platform.Win32.WriteFileAbi,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
@@ -232,7 +242,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Memory MOV completion adds eight architectural value, operand, width, payload,
 -- encoding, address, and result obligations. No existing debt is reclassified.
 -- Arithmetic, branch, LEA and fixed access dispatch add twenty reviewed obligations.
-def owedBaseline : Nat := 299
+-- Twelve fixed CPU/ABI obligations, including executable/readable region selection.
+def owedBaseline : Nat := 311
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -285,7 +296,8 @@ acquiring a citation.
 -- Four memory-completion helpers project or package already selected evidence.
 -- This addition moves no existing declaration from owed or cited coverage.
 -- Fixed dispatch and access factories add thirty checked structural helpers.
-def notBehaviourBaseline : Nat := 234
+-- Eleven checked carrier projections, loaded-record searches and internal labels.
+def notBehaviourBaseline : Nat := 245
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -426,6 +438,19 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Checked protocol projections and loader-table searches contain no new
+    -- physical behavior claim. Their underlying profile/ABI facts remain owed.
+    `Grass.Platform.Win32.ExecutionState.State.callProtocol?,
+    `Grass.Platform.Win32.ExecutionState.State.ControlConsistent,
+    `Grass.Platform.Win32.ExecutionState.State.ofCallProtocol,
+    `Grass.Platform.Win32.Loader.allocationProvenance,
+    `Grass.Platform.Win32.Loader.LoadedImage.codeRoot?,
+    `Grass.Platform.Win32.Loader.CodeRoot.provenance,
+    `Grass.Platform.Win32.Loader.LoadedImage.stackProvenance?,
+    `Grass.Platform.Win32.Loader.LoadedImage.dataRoot?,
+    `Grass.Platform.Win32.Loader.DataRoot.provenance,
+    `Grass.Platform.Win32.Cpu.dataProvenance?,
+    `Grass.Platform.Win32.Cpu.instructionCause,
     `Grass.Platform.Win32.InitializedRegion.allocationRecord,
     `Grass.Platform.Win32.InitializedRegion.backingRecord,
     `Grass.Platform.Win32.MemoryFresh,
@@ -712,6 +737,20 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    -- Fixed operational choices and ABI widths require declaration-level
+    -- authority; vendor prose links alone do not close the citation ledger.
+    `Grass.Platform.Win32.Cpu.accessFaults,
+    `Grass.Platform.Win32.Cpu.vocabulary,
+    `Grass.Platform.Win32.Cpu.operationalProfile,
+    `Grass.Platform.Win32.Cpu.operationPolicy,
+    `Grass.Platform.Win32.Cpu.policy?,
+    `Grass.Platform.Win32.Loader.ContainsCodeAddress,
+    `Grass.Platform.Win32.Loader.ContainsDataSpan,
+    `Grass.Platform.Win32.WriteFile.Abi.returnAddressBytes,
+    `Grass.Platform.Win32.WriteFile.Abi.homeSpaceBytes,
+    `Grass.Platform.Win32.WriteFile.Abi.overlappedSlotOffset,
+    `Grass.Platform.Win32.WriteFile.Abi.InitializedNullQword,
+    `Grass.Platform.Win32.WriteFile.Abi.Entry,
     `Grass.Platform.Win32.Loader.EntryMapped,
     `Grass.Platform.Win32.Loader.EnvironmentValid,
     `Grass.Platform.Win32.Loader.ImportPatch.byteAt?,
@@ -1041,6 +1080,7 @@ def modeledDeclarations : MetaM (Array Name) := do
     if n == ``Grass.ISA.X86.Execution.StoreCompletion ||
         n == ``Grass.Disasm.Entry.Entry ||
         n == ``Grass.ISA.X86.Execution.StoreCandidate.Evidence ||
+        n == ``Grass.Platform.Win32.WriteFile.Abi.Entry ||
         n == ``Grass.Platform.Win32.WriteFile.Prepared ||
         n == ``Grass.Platform.Win32.WriteFile.ReturnResult ||
         n == ``Grass.Artifact.PE.SectionName ||
