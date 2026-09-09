@@ -289,7 +289,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Arithmetic, branch, LEA and fixed access dispatch add twenty reviewed obligations.
 -- Twelve fixed CPU/ABI obligations, including executable/readable region selection.
 -- Six fixed request/stack contracts are newly enrolled; no existing debt moves.
-def owedBaseline : Nat := 328
+-- ExitProcess's argument and four GetStdHandle ABI declarations retain debt.
+def owedBaseline : Nat := 329
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
