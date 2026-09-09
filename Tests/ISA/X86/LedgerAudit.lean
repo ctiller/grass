@@ -1,5 +1,6 @@
 import Lean.Elab.Command
 import Grass.ISA.X86.Bytes
+import Grass.ISA.X86.BasicInstructions
 import Grass.ISA.X86.Decode
 import Grass.ISA.X86.Profile
 import Grass.ABI.Win64.UnwindBytes
@@ -87,7 +88,8 @@ The citation machinery itself is not modeled behaviour and is not audited: a
 `Citation` record makes no claim about a processor. -/
 def auditedModules : List Name :=
   [`Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
-   `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.Decode,
+   `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.BasicInstructions,
+   `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console]
 
@@ -103,7 +105,9 @@ ledger's own rules prescribe, and it went quiet.
 
 Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
-def owedBaseline : Nat := 100
+-- Eleven new constructor/operand bindings in BasicInstructions use existing
+-- opcode rows. Their decoder roundtrips do not discharge vendor validation.
+def owedBaseline : Nat := 111
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -438,6 +442,17 @@ def owed : List Name :=
     `Grass.ISA.X86.encodeMemInsn, `Grass.ISA.X86.movRegImm64, `Grass.ISA.X86.movRegImm32,
     `Grass.ISA.X86.leaR64, `Grass.ISA.X86.callMem64,
     `Grass.ISA.X86.movMem32Imm32, `Grass.ISA.X86.movMem64Imm32,
+    `Grass.ISA.X86.BasicInstructions.Width.rexW,
+    `Grass.ISA.X86.BasicInstructions.regReg,
+    `Grass.ISA.X86.BasicInstructions.push,
+    `Grass.ISA.X86.BasicInstructions.movRegReg,
+    `Grass.ISA.X86.BasicInstructions.movReg32Mem,
+    `Grass.ISA.X86.BasicInstructions.testRegReg,
+    `Grass.ISA.X86.BasicInstructions.cmpRegReg,
+    `Grass.ISA.X86.BasicInstructions.addRegReg,
+    `Grass.ISA.X86.BasicInstructions.subRegReg,
+    `Grass.ISA.X86.BasicInstructions.xorRegReg,
+    `Grass.ISA.X86.BasicInstructions.ud2,
     -- The opcode table is the largest single block of uncited vendor fact in
     -- the tree: every row asserts what follows an opcode in the byte stream.
     `Grass.ISA.X86.opcodeTable, `Grass.ISA.X86.decodeInsn,

@@ -15,6 +15,7 @@ structure Body where
   headerText : String
   headerChars : List Char
   text : String
+  bodyChars : List Char
   lines : List SourceLine
 deriving Repr, DecidableEq
 inductive Error where | missing | ambiguous (count : Nat) | malformed
@@ -162,7 +163,7 @@ private def wordChar (c : Char) : Bool := c.isAlphanum || c = '_' || c = '«' ||
       let header := String.ofList ((source.drop hs).take (bs-hs))
       let bodyChars := (source.drop (bs+1)).take (finish-bs-1)
       let text := String.ofList bodyChars
-      .ok ⟨header, (source.drop hs).take (bs-hs), text, sourceLines bodyChars⟩
+      .ok ⟨header, (source.drop hs).take (bs-hs), text, bodyChars, sourceLines bodyChars⟩
     | many => .error (.ambiguous many.length)
 
 @[reducible] def extractHelloSource (source : String) : Except Error Body :=

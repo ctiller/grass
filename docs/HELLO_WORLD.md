@@ -71,8 +71,24 @@ violations. A separate adversarial fixture demonstrates that the previous free
 callback can safely commit a different value. The generic answer and truncation
 laws establish exact bytes and fault prefixes; the single-store transition is
 currently checked in the fixture's machine and address environment.
-Other instructions, frame inputs beyond the local declarations, unwind positions,
-and the complete source-to-artifact proof remain open.
+`Grass/Assembly/X86Source.lean` parses all 50 statements in the unchanged body,
+retaining source locations and annotations. Unsupported syntax, malformed
+annotations, and mixed-width register arithmetic are rejected. Annotation
+parsing does not establish their semantic claims.
+`Grass/Assembly/X86ControlFlow.lean` derives instruction positions and successors
+from those statements. Its checked result proves that targets are in the derived
+code and that successors follow the instruction classifier. Duplicate labels,
+unresolved branches, and fallthrough beyond the code are rejected. External-call
+continuations describe structural edges; they do not prove that a provider returns.
+
+`Grass/Assembly/X86ClosedEncoding.lean` computes encodings for the 20 instructions
+whose operands are already closed, with a generic decoder roundtrip theorem.
+Out-of-range immediates are refused rather than truncated. The remaining
+instructions require symbol, frame, or relocation resolution. Decoder agreement
+is not an instruction-semantics refinement proof, and the ISA ledger still records
+the underlying encodings' outstanding architecture citation obligations.
+Frame inputs beyond the local declarations, unwind positions, and the complete
+source-to-artifact proof remain open.
 
 ## Specification
 
