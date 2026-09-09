@@ -66,8 +66,8 @@ becomes mandatory. It contains `_bus/BUS.json`, `.gitattributes`, and sequence
 zero registration logs for the initially authorized coordinators. `BUS.json`
 names schema version 1, the repository object format, those coordinator
 identities, and the last product `main` commit exempt from the newly activated
-review protocol. It also pins the initial V1 merge engine, exact version, and
-bootstrap epoch event.
+review protocol. Its merge-engine fields record the V1 bootstrap implementation
+but impose no Git-version requirement under the successor review protocol.
 `.gitattributes` contains `*.jsonl -text` so Git never rewrites
 line endings. Bootstrap registrations alone have `observed: null`. Both bootstrap
 files are immutable afterward; changing either requires a new reviewed protocol
@@ -91,7 +91,7 @@ from the orphan branch.
 
 Prepared merge candidates are published as immutable lightweight tags at
 `refs/tags/agent-candidate/<reviewer>/<candidate-object-id>` before authorization.
-They are never moved, force-pushed, or deleted. This makes losing CAS candidates
+They are never moved, force-pushed, or deleted. This makes losing race candidates
 available to bus validation and audit without merging them into any branch.
 
 ## 3. Agent identity, roles, and single writers
@@ -269,12 +269,10 @@ identity's scope. It exists for disappeared agents that cannot emit their own
 `abandoned` status; it is not a coordinator power to interrupt active work
 without user direction.
 
-`merge_engine.activated` upgrades candidate construction without changing the
-event schema. A bootstrap-authorized coordinator names the exact preceding
-engine epoch plus reviewed design/helper commits, engine, and version. Candidate
-preparation stops on concurrent activations until their lifecycle conflict is
-resolved. Every authorization names the one epoch used to build it, so historical
-candidates remain reproducible after fleet upgrades.
+`merge_engine.activated` is retained only to read V2 history. New writers do not
+emit it. Historical engine/version values are diagnostics; candidate authority
+comes from the exact fetched object the reviewer checked, not reproducing it on
+another host.
 
 ### 6.2 Scope
 
@@ -381,15 +379,23 @@ silence never change authority implicitly. Every prior open finding is inherited
 as open. Only the accepting replacement reviewer may later clear it or supersede
 it with rationale. A returning superseded reviewer has no new authority. If the
 old reviewer had already published `review.merge_authorized`, reassignment does
-not revoke that immutable authorization; the old and replacement candidates
-race through ordinary `main` compare-and-swap, so at most one candidate based on
-the same previous main can land.
+not revoke that immutable authorization; the old and replacement candidates use
+ordinary non-force pushes, so at most one candidate based on the same previous
+main can land.
 
-`review.merge_authorized` is the positive review verdict and the pre-merge
-authority. The accepting reviewer publishes it after checks, pinning the
-nomination chain, observed bus state, previous `main`, reviewed product commit,
-exact conflict-free merge candidate, check results, finding dispositions, and
-review scope. Once published it authorizes only that reviewer and candidate.
+The next activated schema splits the current combined authorization as follows.
+Until activation, version two retains its exact-base combined
+`review.merge_authorized` and full-rerun behavior.
+
+`review.approved` is the positive review verdict. The accepting reviewer pins
+one immutable reviewed product commit, authors, scope, review-check results,
+finding dispositions, and limitations. It is deliberately independent of a
+`main` head and remains valid when unrelated product commits land.
+
+`review.merge_authorized` is the pre-merge authority. It references one
+`review.approved`, pins current `main`, the exact conflict-free merge candidate,
+and its landing-check results. Once published it authorizes only that reviewer
+and candidate.
 The matching immutable candidate tag must already be fetchable. Later branch
 commits are excluded. Later bus events cannot retroactively revoke
 the pinned authorization; they govern later candidates and may require an
@@ -408,9 +414,10 @@ previous `main`. Reconciliation cannot authorize or perform a merge.
 
 These events implement [AGENT_REVIEW.md](AGENT_REVIEW.md). Only an eligible
 non-author reviewer may merge. The selected snapshot must merge without
-conflict into current `main`, and required checks run against that exact
-candidate. Later branch commits remain available for a later reviewer-owned
-merge and do not retroactively enter the completed one.
+conflict into current `main`. Review checks bind to the approved authored
+snapshot; only the bounded landing profile reruns against each exact candidate.
+Later branch commits remain available for a later reviewer-owned merge and do
+not retroactively enter the completed one.
 
 ## 7. State reduction
 
@@ -433,7 +440,9 @@ coordinator, on user direction, emits `lifecycle.conflict_resolved` naming the
 complete competing set and selected successor. Review findings are open from
 `review.changes_requested` until the accepting reviewer emits a causally linked
 `review.findings_cleared`; clearing findings does not close the nomination.
-`review.merge_authorized` freezes one candidate but does not close the branch
+`review.approved` freezes one reviewed source judgment but does not close the
+branch or approve future commits. `review.merge_authorized` freezes one
+candidate but does not close the branch
 workstream; matching `review.merged` or `review.merge_reconciled` closes that
 nomination chain for the recorded candidate. Reassignment creates a successor
 chain while preserving inherited findings. Invalid authority or malformed
@@ -541,7 +550,7 @@ after `product_review_from` in immutable `BUS.json`.
 
 Linked validation fetches exact product commits and candidate tags referenced by
 new events from the canonical product remote, then checks reachability, commit
-trailers, roles, candidate parents/tree/message, merge-engine reconstruction,
+trailers, roles, candidate parents/tree/message and exact candidate tag,
 review eligibility, and product-history facts. A present object that mismatches
 its claim is `invalid`. A remote outage, unavailable remote, or absent object is
 `unverifiable`, not structural corruption: read-only reduction and unrelated
@@ -629,11 +638,11 @@ coordinator naming the version and design/helper commits. Only then
 may writers emit the new version. Removing reader support while old events
 remain is forbidden.
 
-Changing only the pinned merge implementation uses `merge_engine.activated`,
-not a schema-version increase. Its reviewed helper must support linked validation
-of every engine epoch still referenced by retained authorizations. The current
-helper distribution owns any bundled/side-by-side historical engine support;
-individual agents are not required to curate old system Git installations.
+`merge_engine.activated` is retained only for reading V2 history. The successor
+review protocol removes the pin from authority: agents need ordinary Git fetch/pull and
+non-force push, and reviewers authorize the exact candidate they actually
+checked. No host must install an historical Git version or reconstruct that
+candidate.
 
 The initial protocol performs no compaction. If storage becomes material,
 closed segments may be archived only under a separately reviewed, exactly
@@ -675,8 +684,9 @@ Before use, the helper must pass fixtures for:
 15. 65,536-byte event acceptance and 65,537-byte rejection;
 16. concurrent lifecycle choices remaining valid, conflict reduction, and
     explicit coordinator selection;
-17. deterministic candidate construction/tag validation for renames, file
-    modes, attributes, symlinks, submodules, and content conflicts;
+17. exact candidate/tag and host-independent tree-relation validation for
+    renames, file modes, attributes, symlinks, submodules, both-sides-changed
+    path disclosure, and rejection of undisclosed candidate-tree edits;
 18. both publication orders of a reassignment racing an offline final finding,
     with no orphaned finding;
 19. candidate-tag fetch count proportional to newly encountered
@@ -698,11 +708,19 @@ in. Measurements record events, bytes, cold/incremental query time, and peak
 memory. No number is promised before measurement; ordinary status and inbox
 queries must remain comfortably interactive.
 
-Review-throughput fixtures also record merge latency and exact-candidate check
-reruns under at least 16 concurrent nominations. If reviewers repeatedly lose
-the `main` compare-and-swap race, a coordinator may announce advisory merge
-slots through ordinary plan/progress events. Slots improve throughput but never
-grant authority or replace review authorization.
+Review-throughput fixtures also record merge latency, review-check executions,
+and landing-check reruns under at least 16 concurrent nominations. Landing one
+candidate may require bounded landing work for the others, but must not repeat
+their substantive review suites. A coordinator may prioritize authorization or
+announce advisory merge slots; it never rebases or merges product content.
+
+A dedicated CI-monitoring identity uses the existing `auditor` role. Under the
+successor schema it emits a non-authoritative `ci.run_observed` for each exact
+landed `main` commit/check pair and opens ordinary targeted issues for red,
+cancelled, timed-out, incomplete, or unavailable runs. `audit.reported` remains
+a verdict-free broad audit summary. The host
+coordinator checks coverage and routes escalation or reassignment; it does not
+decide that CI passed. See [AGENT_REVIEW.md](AGENT_REVIEW.md) section 8.1.
 
 Scope should follow [PROCESS_SHARDING.md](PROCESS_SHARDING.md): implementors
 normally claim a component's implementation/certificate shards, keep signature

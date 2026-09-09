@@ -37,6 +37,25 @@ pub struct RejectedCandidate {
 pub struct DrainResult {
     pub published: Vec<EventId>,
     pub rejected: Vec<RejectedCandidate>,
+    /// Candidates this drain neither published nor rejected, and left in the
+    /// outbox exactly as it found them.
+    ///
+    /// A rejection is a claim this host is entitled to make: the candidate
+    /// was understood and found wanting, and the receipt says so durably. A
+    /// hold is the opposite -- this host could not understand the candidate
+    /// well enough to judge it, or could not write down its judgement, so it
+    /// declines to be the one that destroys it. Both are reported; neither
+    /// stops the rest of the queue.
+    pub held: Vec<HeldCandidate>,
+}
+
+/// One candidate left in the outbox untouched, and why. Held candidates are
+/// offered again on the next drain, so a newer binary -- or the same one on
+/// a filesystem that will accept a write -- can still publish them.
+#[derive(Debug, Clone)]
+pub struct HeldCandidate {
+    pub path: String,
+    pub reason: String,
 }
 
 /// Drains every pending candidate in `agent`'s local outbox, in submission
@@ -102,9 +121,23 @@ pub fn drain_outbox(
     let epoch = crate::registry::read_epoch(repo, &registry_tip)?;
     crate::registry::authorize_stream_write(&epoch, agent, host, coordinator_custody_epoch)?;
 
-    let pending = crate::outbox::list_pending(git_common_dir, agent)?;
+    let listing = crate::outbox::list_pending(git_common_dir, agent)?;
+    // Entries this host could not read at all are reported and left where
+    // they are; they must not stop the readable ones from being drained.
+    let mut held: Vec<HeldCandidate> = listing
+        .unreadable
+        .iter()
+        .map(|u| HeldCandidate {
+            path: u.path.display().to_string(),
+            reason: u.reason.clone(),
+        })
+        .collect();
+    let pending = listing.pending;
     if pending.is_empty() {
-        return Ok(DrainResult::default());
+        return Ok(DrainResult {
+            held,
+            ..DrainResult::default()
+        });
     }
 
     // Fetch first, before reading anything else, when the batch needs it --
@@ -169,7 +202,56 @@ pub fn drain_outbox(
     let mut envelopes = Vec::with_capacity(pending.len());
     let mut rejected = Vec::new();
     for (path, candidate) in &pending {
-        let data = candidate.typed_data()?;
+        // A candidate whose payload will not parse is rejected with a durable
+        // receipt, exactly like every other bad candidate in this loop --
+        // never propagated with `?`.
+        //
+        // It used to abort the whole drain. `g-design` submitted an
+        // `issue.opened` whose `evidence` array held a prose sentence where
+        // an event id belongs; that one typo held **77** urgent candidates
+        // behind it, none of which had anything wrong with them, and no
+        // receipt was written for any of them -- so from the author's side
+        // `submit` had returned success 77 times and the queue simply stopped
+        // moving with nothing to say why.
+        //
+        // The whole point of per-candidate receipts is that one bad event
+        // costs its author a retry rather than costing the fleet its queue.
+        // Parsing is the first thing this loop does, so the one failure that
+        // was not isolated was the one guaranteed to hit first.
+        //
+        // A kind this binary has never heard of is held, not rejected. That
+        // is the one parse failure that says nothing about the candidate:
+        // the author may be running a newer binary that knows the kind
+        // perfectly well, and rejecting it here would delete a valid event
+        // and hand its author a receipt blaming them for a typo they did not
+        // make. Holding costs a line of output per drain and keeps the event
+        // publishable by whichever coordinator can understand it.
+        if !crate::events::EventData::all_kinds().contains(&candidate.kind.as_str()) {
+            held.push(HeldCandidate {
+                path: path.display().to_string(),
+                reason: format!(
+                    "kind {:?} is unknown to this binary, so it is held for a coordinator                      that knows it rather than rejected as malformed",
+                    candidate.kind
+                ),
+            });
+            continue;
+        }
+        let data = match candidate.typed_data() {
+            Ok(d) => d,
+            Err(e) => {
+                let reason = format!("candidate payload does not parse: {e}");
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
+                    reason,
+                    &mut rejected,
+                    &mut held,
+                );
+                continue;
+            }
+        };
         // Gate 17: fail closed rather than validate a currency-sensitive
         // candidate against a stale cached cut just because the fresh probe
         // above failed -- reject it outright, with the fetch's own error,
@@ -181,11 +263,15 @@ pub fn drain_outbox(
                     "requires a current-as-of-remote-probe view (gate 17) but the fetch failed: \
                      {fetch_err}"
                 );
-                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
                     reason,
-                });
+                    &mut rejected,
+                    &mut held,
+                );
                 continue;
             }
         }
@@ -204,11 +290,15 @@ pub fn drain_outbox(
         if let crate::events::EventData::ReviewMergeAuthorized(d) = &data {
             if let Err(e) = verify_review_merge_authorized(repo, remote, &state, agent, d) {
                 let reason = e.to_string();
-                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
                     reason,
-                });
+                    &mut rejected,
+                    &mut held,
+                );
                 continue;
             }
         }
@@ -226,11 +316,15 @@ pub fn drain_outbox(
         if let crate::events::EventData::ReviewMergeReconciled(d) = &data {
             if let Err(e) = verify_review_merge_reconciled(repo, remote, &state, d) {
                 let reason = e.to_string();
-                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
                     reason,
-                });
+                    &mut rejected,
+                    &mut held,
+                );
                 continue;
             }
         }
@@ -307,20 +401,49 @@ pub fn drain_outbox(
         // from exactly this view moments ago.
         if let Err(e) = verify_review_reassignment_inherits_open_findings(&state, &data) {
             let reason = e.to_string();
-            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-            rejected.push(RejectedCandidate {
-                kind: candidate.kind.clone(),
+            record_rejection(
+                git_common_dir,
+                agent,
+                path,
+                candidate,
                 reason,
-            });
+                &mut rejected,
+                &mut held,
+            );
+            continue;
+        }
+        // AGENT_BUS_SCHEMA.md section 8's "a finding is disposed once".
+        // `apply` deliberately does not refuse a second disposal -- see
+        // `apply_finding_disposition` -- because two reviewers can each be
+        // the legitimate reviewer of a link they name and neither event
+        // references the other, so an `Err` there is decided by replay order
+        // and takes the whole bus down. Here `state` is this host's
+        // freshly-fetched, fully-reduced view, and "can I already see this
+        // finding disposed?" has exactly one answer.
+        if let Err(e) = verify_finding_is_still_open(&state, &data) {
+            let reason = e.to_string();
+            record_rejection(
+                git_common_dir,
+                agent,
+                path,
+                candidate,
+                reason,
+                &mut rejected,
+                &mut held,
+            );
             continue;
         }
         if let Err(e) = verify_object_ids_resolve(repo, &data) {
             let reason = e.to_string();
-            reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-            rejected.push(RejectedCandidate {
-                kind: candidate.kind.clone(),
+            record_rejection(
+                git_common_dir,
+                agent,
+                path,
+                candidate,
                 reason,
-            });
+                &mut rejected,
+                &mut held,
+            );
             continue;
         }
         // A frontier this host cannot build rejects *this* candidate, with a
@@ -341,11 +464,15 @@ pub fn drain_outbox(
             Ok(observed) => observed,
             Err(e) => {
                 let reason = e.to_string();
-                reject_candidate(git_common_dir, agent, path, candidate, &reason)?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
                     reason,
-                });
+                    &mut rejected,
+                    &mut held,
+                );
                 continue;
             }
         };
@@ -363,11 +490,25 @@ pub fn drain_outbox(
                 next_seq += 1;
             }
             Err(e) => {
-                reject_candidate(git_common_dir, agent, path, candidate, &e.to_string())?;
-                rejected.push(RejectedCandidate {
-                    kind: candidate.kind.clone(),
-                    reason: e.to_string(),
-                });
+                // This arm is the last one, and it was the one left behind.
+                //
+                // The other eight rejection paths were routed through
+                // `record_rejection`, but `dry_run`'s -- the final semantic
+                // rejection, and the one every well-formed-but-invalid
+                // candidate actually reaches -- still propagated a receipt
+                // write failure with `?`, aborting the whole drain and
+                // leaving every later valid candidate unpublished. Exactly
+                // the outage the rest of the change exists to remove, still
+                // reachable through the busiest door.
+                record_rejection(
+                    git_common_dir,
+                    agent,
+                    path,
+                    candidate,
+                    e.to_string(),
+                    &mut rejected,
+                    &mut held,
+                );
             }
         }
     }
@@ -409,6 +550,7 @@ pub fn drain_outbox(
     Ok(DrainResult {
         published,
         rejected,
+        held,
     })
 }
 
@@ -416,6 +558,43 @@ pub fn drain_outbox(
 /// alongside the reason, to a `rejected/` receipt in the same outbox
 /// directory -- durable local evidence the author (or a human) can inspect,
 /// without it blocking any later candidate's contiguous sequence.
+/// Rejects `candidate` and records the outcome, without ever failing the
+/// drain.
+///
+/// `reject_candidate` writes to the filesystem, and every call site used to
+/// propagate that write's failure with `?`. That made the whole
+/// per-candidate rejection design conditional on a write succeeding: a
+/// read-only outbox directory, a full disk, or a lock on the receipt path
+/// turned *every* rejection arm back into the whole-drain abort this loop
+/// exists to avoid.
+///
+/// When the receipt cannot be written the candidate is held rather than
+/// removed. Removing it is only safe because the receipt preserves it; with
+/// no receipt, removal would be the silent discard the module contract
+/// forbids.
+fn record_rejection(
+    git_common_dir: &Path,
+    agent: &Agent,
+    path: &Path,
+    candidate: &crate::outbox::Candidate,
+    reason: String,
+    rejected: &mut Vec<RejectedCandidate>,
+    held: &mut Vec<HeldCandidate>,
+) {
+    match reject_candidate(git_common_dir, agent, path, candidate, &reason) {
+        Ok(()) => rejected.push(RejectedCandidate {
+            kind: candidate.kind.clone(),
+            reason,
+        }),
+        Err(e) => held.push(HeldCandidate {
+            path: path.display().to_string(),
+            reason: format!(
+                "would be rejected ({reason}), but the receipt could not be written, so the candidate is held rather than discarded: {e}"
+            ),
+        }),
+    }
+}
+
 fn reject_candidate(
     git_common_dir: &Path,
     agent: &Agent,
@@ -594,11 +773,13 @@ fn build_frontier(
 /// The git-linked half of `review.merge_authorized` validation
 /// (AGENT_REVIEW.md section 7) that `apply.rs` deliberately leaves out of
 /// its pure, git-repo-free reduction. Re-runs `merge_candidate::verify_
-/// authorship`/`reconstruct_candidate` against the *submitted* payload
-/// (`d`) -- not merely trusting that `cli::prepare_merge` was ever run, or
-/// run honestly -- and confirms the candidate tag `prepare-merge` would
-/// have published is independently fetchable from `remote`
-/// (`gitrepo::remote_tag_matches`, a real `ls-remote`). Deliberately does
+/// authorship` against the *submitted* payload (`d`) -- not merely trusting
+/// that `cli::prepare_merge` was ever run, or run honestly -- confirms the
+/// candidate tag `prepare-merge` would have published is independently
+/// fetchable from `remote` (`gitrepo::remote_tag_matches`, a real
+/// `ls-remote`), and validates the object that tag names against the
+/// payload (`merge_candidate::verify_candidate_object`/`verify_candidate_
+/// scope`) rather than rebuilding the merge locally. Deliberately does
 /// *not* additionally require the tag to already exist in this checkout's
 /// own local clone: `drain_outbox` may run from any checkout, not just the
 /// one that ran `prepare-merge`, and a tag genuinely pushed from elsewhere
@@ -649,6 +830,41 @@ fn verify_review_merge_authorized(
             d.nomination
         )));
     }
+    // Deliberately no local-only `tag_exists_at` precondition here: `drain_outbox`
+    // may run from any checkout, not just the one `prepare-merge` ran from, and a
+    // tag `prepare-merge` pushed from a *different* checkout is genuinely valid
+    // even though this checkout has never fetched it. `remote_tag_matches` (a real
+    // `ls-remote`) is the checkout-independent, authoritative check for "other
+    // agents could verify this merge" -- see its own doc comment -- so it alone is
+    // both necessary and sufficient for *publication* of the tag.
+    let tag = crate::merge_candidate::candidate_tag_name(reviewer, d.candidate.as_str());
+    if !crate::gitrepo::remote_tag_matches(repo, remote, &tag, d.candidate.as_str())? {
+        return Err(invalid(format!(
+            "candidate tag refs/tags/{tag} is not fetchable from {remote}; other agents could \
+             not verify this merge"
+        )));
+    }
+    // This gate used to rebuild the merge here with this host's own `git
+    // merge-tree --write-tree` and require the result to equal `d.candidate`,
+    // which is what made an installed git version protocol authority: a
+    // coordinator on a different build rejected a perfectly honest
+    // reviewer's authorization, and the only remedy on offer was to make
+    // every host in the fleet compile one particular git. The repository
+    // owner rejected that design (g-design:249).
+    //
+    // So validate the object the tag actually names instead. The tag is
+    // immutable and was just confirmed on `remote`, so fetching it here is
+    // reading the same bytes every other agent will read -- not a local
+    // re-derivation of what they *should* have been.
+    crate::merge_candidate::fetch_candidate_tag(repo, remote, reviewer, d.candidate.as_str())?;
+    // Deliberately after that fetch. This gate may run from any checkout,
+    // including one that has only ever seen `main` and the bus -- the
+    // reviewed commits themselves reach it through the candidate's own
+    // history, since the candidate has `reviewed_commit` as a parent. Asking
+    // about authorship first made a coordinator on a second clone fail with
+    // "does not name an object" for a perfectly valid authorization; the
+    // reconstruction that used to sit here hid it, because the only hosts
+    // that got this far had already built the merge locally.
     let expected_authors: std::collections::BTreeSet<Agent> =
         chain.current_request.authors.iter().cloned().collect();
     crate::merge_candidate::verify_authorship(
@@ -658,46 +874,31 @@ fn verify_review_merge_authorized(
         d.previous_main.as_str(),
         d.reviewed_commit.as_str(),
     )?;
-    // The verifying host must also be on the pinned engine: reconstructing
-    // the candidate below with a different ORT version would disagree with a
-    // perfectly honest reviewer and reject a valid authorization.
-    //
-    // Deliberately here rather than at the top of this gate. Nothing above is
-    // engine-dependent -- `blocking_issue_for_chain` reads reduced state and
-    // `verify_authorship` reads commit trailers through libgit2 -- so an
-    // authorization that is wrong about its *authors* must say so, not blame
-    // this host's git. Same reasoning as the `merge_engine_epoch` check at the
-    // end of this function, and see `require_pinned_merge_engine`'s own doc.
-    crate::bootstrap::require_pinned_merge_engine(state)?;
-    let reconstructed = crate::merge_candidate::reconstruct_candidate(
+    crate::merge_candidate::verify_candidate_object(
         repo,
+        reviewer,
         d.previous_main.as_str(),
         d.reviewed_commit.as_str(),
-        reviewer,
+        d.candidate.as_str(),
     )?;
-    if reconstructed != d.candidate.as_str() {
-        return Err(invalid(format!(
-            "candidate {} does not match the deterministic reconstruction {reconstructed} from \
-             previous_main/reviewed_commit/reviewer",
-            d.candidate
-        )));
-    }
-    // Deliberately no local-only `tag_exists_at` precondition here: `drain_outbox`
-    // may run from any checkout, not just the one `prepare-merge` ran from, and a
-    // tag `prepare-merge` pushed from a *different* checkout is genuinely valid
-    // even though this checkout has never fetched it. `remote_tag_matches` (a real
-    // `ls-remote`) is the checkout-independent, authoritative check for "other
-    // agents could verify this merge" -- see its own doc comment -- so it alone is
-    // both necessary and sufficient here.
-    let tag = crate::merge_candidate::candidate_tag_name(reviewer, d.candidate.as_str());
-    if !crate::gitrepo::remote_tag_matches(repo, remote, &tag, d.candidate.as_str())? {
-        return Err(invalid(format!(
-            "candidate tag refs/tags/{tag} is not fetchable from {remote}; other agents could \
-             not verify this merge"
-        )));
-    }
-    // Checked last, after this gate's own reconstruction work, so a
-    // candidate that is wrong in a more specific way still says so.
+    // The content bound: a candidate nobody rebuilds is still not allowed to
+    // touch anything outside the scope this nomination was reviewed against.
+    // Checked here as well as in `merge_ready` because this is the
+    // publication boundary -- a hand-crafted `submit --kind
+    // review.merge_authorized` never runs `merge-ready` at all.
+    crate::merge_candidate::verify_candidate_scope(
+        repo,
+        d.previous_main.as_str(),
+        d.candidate.as_str(),
+        d.reviewed_scope.as_slice(),
+    )?;
+    // The `checks` half of the binding is already enforced, and enforced
+    // somewhere that cannot drift: `apply_review_merge_authorized` requires
+    // every one of the nomination's `required_checks` to appear in
+    // `d.checks`, at reduction time, on every host. That check never touched
+    // the merge engine, so nothing here needs to move or be duplicated.
+    // Checked last, after this gate's own candidate work, so a candidate
+    // that is wrong in a more specific way still says so.
     // `apply` checks only that the epoch names a real activation, which is
     // all it can soundly do -- a later `merge_engine.activated` moves
     // `current_merge_engine_epoch` and this authorization neither references
@@ -1102,6 +1303,59 @@ fn verify_review_reassignment_inherits_open_findings(
     Ok(())
 }
 
+/// AGENT_BUS_SCHEMA.md section 8: a finding is disposed once.
+///
+/// Asked here rather than in `apply` for the reason this whole class shares.
+/// After a `review.reassigned`, the outgoing reviewer and the incoming one
+/// are each -- at the moment each publishes -- the legitimate reviewer of a
+/// nomination link they name, so each can honestly dispose of the same
+/// finding. Neither event references the other, so `apply::topological_order`
+/// (which builds edges from `refs` and each stream's own predecessor, never
+/// from `observed`) gives them no edge at all and ties break on agent name.
+/// Refusing the second during replay therefore answered a well-formed event
+/// with `Err`, on whichever hosts happened to walk it second, and `reduce`
+/// propagates that with no per-event isolation: the whole bus unreadable,
+/// permanently, since the log is append-only and force-push is prohibited.
+///
+/// Reduction now records both and takes the smallest disposing `EventId`, a
+/// pure function of the recorded set. The policy lives here instead, where
+/// `state` is the publishing host's own freshly-fetched, fully-reduced view
+/// and the question has one answer.
+///
+/// `Ok(())` when the chain or the finding does not resolve at all: those are
+/// ordinary validation failures `apply::dry_run` reports moments later with
+/// clearer, more specific messages, so they are not duplicated here.
+fn verify_finding_is_still_open(
+    state: &crate::state::BusState,
+    data: &crate::events::EventData,
+) -> AbResult<()> {
+    let (nomination, changes_event, finding_id) = match data {
+        crate::events::EventData::ReviewFindingsCleared(d) => {
+            (&d.nomination, &d.changes_event, &d.finding_id)
+        }
+        crate::events::EventData::ReviewFindingsSuperseded(d) => {
+            (&d.nomination, &d.changes_event, &d.finding_id)
+        }
+        _ => return Ok(()),
+    };
+    let Some(chain) = state.review_chain(nomination) else {
+        return Ok(());
+    };
+    let key = (changes_event.clone(), finding_id.as_str().to_string());
+    let Some(finding) = chain.findings.get(&key) else {
+        return Ok(());
+    };
+    let already = match &finding.disposition {
+        crate::state::FindingDisposition::Open => return Ok(()),
+        crate::state::FindingDisposition::Cleared { by_event } => by_event,
+        crate::state::FindingDisposition::Superseded { by_event, .. } => by_event,
+    };
+    Err(invalid(format!(
+        "finding {changes_event}/{finding_id} was already disposed by {already}; a finding is \
+         disposed once, and this host can already see that it has been"
+    )))
+}
+
 fn verify_object_ids_resolve(repo: &Path, data: &crate::events::EventData) -> AbResult<()> {
     let candidates: Vec<(&str, &crate::scalars::ObjectId)> = match data {
         crate::events::EventData::AgentRegistered(d) => {
@@ -1212,7 +1466,7 @@ fn requires_complete_frontier(data: &crate::events::EventData) -> bool {
 /// existing assignment can accept a reassignment that is actually already
 /// stale -- the identical failure mode a fresh cut is meant to close, just
 /// on a different validation path.
-fn requires_synced_snapshot(data: &crate::events::EventData) -> bool {
+pub(crate) fn requires_synced_snapshot(data: &crate::events::EventData) -> bool {
     use crate::events::EventData;
     // A broadcast whose audience resolves against `subscribed_topics` or
     // `scope` is currency-sensitive whatever its acknowledgement setting.
@@ -1275,6 +1529,14 @@ mod tests {
     use crate::outbox::Candidate;
     use crate::scalars::{Agent, ObjectId, Text};
 
+    /// Every fixture here records an engine version no host runs and no
+    /// build of this crate ever pinned, so the whole module stands as an
+    /// assertion that publication never consults it. Spelling a crate
+    /// constant instead would make the fixtures agree with the code under
+    /// test by construction, which is how the version pin stayed invisible
+    /// to this suite while wedging hosts in the field.
+    const FOREIGN_ENGINE_VERSION: &str = "1.2.3-no-build-ever-pinned-this";
+
     fn a(name: &str) -> Agent {
         Agent::parse(name.to_string()).unwrap()
     }
@@ -1336,6 +1598,112 @@ mod tests {
 
     fn text(s: &str) -> Text {
         Text::parse(s.to_string()).unwrap()
+    }
+
+    /// "A finding is disposed once", pinned where it is now enforced.
+    ///
+    /// `apply` used to ask it, and answered a second disposal with `Err`.
+    /// Two reviewers can each be the legitimate reviewer of a nomination
+    /// link they name -- ordinary after a `review.reassigned` -- and neither
+    /// event references the other, so the refusal fired on whichever hosts
+    /// happened to replay them in the unlucky order and made the bus
+    /// unreadable there, permanently. It is asked here instead, against the
+    /// publishing host's own fully-reduced view, where the answer cannot
+    /// move afterwards.
+    #[test]
+    fn verify_finding_is_still_open_refuses_a_second_disposal() {
+        use crate::common::Priority;
+        use crate::events::{ReviewFindingsCleared, ReviewRequest};
+        use crate::state::{FindingDisposition, FindingState, ItemStatus, ReviewChain};
+
+        let nomination = EventId::new(&a("alice"), 1);
+        let changes = EventId::new(&a("bob"), 2);
+        let cleared_by = EventId::new(&a("bob"), 3);
+        let key = (changes.clone(), "f1".to_string());
+
+        let request = ReviewRequest {
+            authors: crate::scalars::StringSet::from_iter([a("alice")]),
+            product_branch: crate::scalars::Branch::parse(
+                "refs/heads/agent/alice/work".to_string(),
+            )
+            .unwrap(),
+            reviewer: a("bob"),
+            required_checks: vec![],
+            review_scope: crate::scalars::StringSet::default(),
+            summary: text("review"),
+            target_branch: crate::scalars::Branch::parse("refs/heads/main".to_string()).unwrap(),
+            evidence: crate::scalars::StringSet::default(),
+        };
+        let finding = |disposition| FindingState {
+            changes_event: changes.clone(),
+            finding_id: short("f1"),
+            priority: Priority::Normal,
+            locations: vec![],
+            rationale: text("because"),
+            closure_conditions: text("fix it"),
+            disposition,
+        };
+        let state_with = |disposition| {
+            let mut state = crate::state::BusState::new(minimal_config());
+            state.reviews.insert(
+                nomination.clone(),
+                ReviewChain {
+                    root: nomination.clone(),
+                    nomination_events: vec![nomination.clone()],
+                    current_nomination: nomination.clone(),
+                    current_request: request.clone(),
+                    nomination_reviewer: [(nomination.clone(), a("bob"))].into(),
+                    accepted_nominations: [nomination.clone()].into(),
+                    decline_or_withdraw_or_reassign_status: ItemStatus::Open,
+                    findings: [(key.clone(), finding(disposition))].into(),
+                    authorizations: Default::default(),
+                    merged: Default::default(),
+                    reconciled: Default::default(),
+                },
+            );
+            state
+                .review_chain_by_nomination
+                .insert(nomination.clone(), nomination.clone());
+            state
+        };
+
+        let dispose = crate::events::EventData::ReviewFindingsCleared(ReviewFindingsCleared {
+            nomination: nomination.clone(),
+            changes_event: changes.clone(),
+            finding_id: short("f1"),
+            resolved_commit: ObjectId::parse("1".repeat(40)).unwrap(),
+            summary: text("fixed"),
+        });
+
+        verify_finding_is_still_open(&state_with(FindingDisposition::Open), &dispose)
+            .expect("an open finding may be disposed of");
+
+        let err = verify_finding_is_still_open(
+            &state_with(FindingDisposition::Cleared {
+                by_event: cleared_by.clone(),
+            }),
+            &dispose,
+        )
+        .expect_err("a finding this host can already see disposed must not be disposed again");
+        assert!(
+            err.to_string().contains("already disposed by"),
+            "the refusal must name the disposal it lost to: {err}"
+        );
+
+        // And nothing else is touched: the gate is per-kind, not a general
+        // review-chain check.
+        verify_finding_is_still_open(
+            &state_with(FindingDisposition::Cleared {
+                by_event: cleared_by,
+            }),
+            &crate::events::EventData::AgentStatus(AgentStatusEvent {
+                status: crate::events::LifecycleStatus::Active,
+                note: text("unrelated"),
+                product_branch: None,
+                product_commit: None,
+            }),
+        )
+        .expect("an unrelated kind passes untouched");
     }
 
     fn init_repo() -> tempfile::TempDir {
@@ -1424,6 +1792,7 @@ mod tests {
         assert!(
             crate::outbox::list_pending(repo.path(), &coord1)
                 .unwrap()
+                .pending
                 .is_empty(),
             "fixture must have an empty outbox, or it tests the wrong path"
         );
@@ -1549,6 +1918,7 @@ mod tests {
             .is_some());
         assert!(crate::outbox::list_pending(repo.path(), &alice)
             .unwrap()
+            .pending
             .is_empty());
     }
 
@@ -1594,6 +1964,494 @@ mod tests {
 
         let (_header, log) = crate::stream::read_stream(repo.path(), &coord1).unwrap();
         assert_eq!(log.len(), 3); // genesis registration + the two status events
+    }
+
+    /// A candidate whose payload does not parse is rejected on its own and
+    /// does not take the rest of the outbox down with it.
+    ///
+    /// This is the live g-design outage. An `issue.opened` was submitted with
+    /// a prose sentence sitting in `evidence`, where an event id belongs.
+    /// `typed_data()` was called with `?` before any per-candidate rejection
+    /// path could run, so the parse error propagated out of `drain_outbox`
+    /// and aborted the whole drain. **77** urgent candidates queued behind
+    /// that one typo stopped moving, none of them defective, and because the
+    /// abort happened before any receipt was written, the author's `submit`
+    /// had returned success for every one of them and nothing said why the
+    /// queue had stalled.
+    ///
+    /// The malformed candidate is built field-by-field rather than through
+    /// `Candidate::new`, because `Candidate::new` takes an already-parsed
+    /// `EventData` and so cannot express the thing being tested: a payload
+    /// that got as far as the outbox and only fails when the coordinator
+    /// reads it back. That is exactly how the real one arrived.
+    ///
+    /// The ordinary candidates are submitted on either side of the bad one so
+    /// the assertion is about isolation and not merely about surviving a
+    /// trailing failure -- `after` is the one that used to be lost.
+    #[test]
+    fn drain_outbox_rejects_an_unparseable_candidate_without_dropping_the_rest() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        crate::outbox::submit(
+            repo.path(),
+            "client-1",
+            &status_candidate(&coord1, "before"),
+        )
+        .unwrap();
+
+        let malformed = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.opened".to_string(),
+            data: serde_json::json!({
+                "target": "coord1",
+                "issue_kind": "correctness",
+                "severity": "critical",
+                "summary": "an issue whose evidence is prose",
+                "locations": [],
+                "reproduction": [],
+                "blocks": [],
+                "evidence": ["Lean probe compiled successfully against exact branch tip"],
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-2", &malformed).unwrap();
+
+        crate::outbox::submit(repo.path(), "client-3", &status_candidate(&coord1, "after"))
+            .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+
+        // Both well-formed candidates published, including the one queued
+        // behind the failure.
+        assert_eq!(
+            drained.published,
+            vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]
+        );
+
+        // The bad one is accounted for, by kind and with a reason that names
+        // what the author has to fix. A silent drop would be its own outage:
+        // the author would again be told nothing.
+        assert_eq!(drained.rejected.len(), 1);
+        assert_eq!(drained.rejected[0].kind, "issue.opened");
+        assert!(
+            drained.rejected[0].reason.contains("does not parse")
+                && drained.rejected[0].reason.contains("malformed event id"),
+            "rejection reason should name the parse failure and the bad field, got: {}",
+            drained.rejected[0].reason
+        );
+
+        // The outbox is drained: nothing is left stuck behind the failure.
+        assert!(crate::outbox::list_pending(repo.path(), &coord1)
+            .unwrap()
+            .pending
+            .is_empty());
+
+        let (_header, log) = crate::stream::read_stream(repo.path(), &coord1).unwrap();
+        assert_eq!(log.len(), 3); // genesis registration + the two good events
+    }
+
+    /// The receipt is the whole point of a rejection, so the test reads it
+    /// off disk.
+    ///
+    /// Asserting only on the returned `rejected` vector was not enough: an
+    /// implementation that deleted the candidate and wrote no receipt at all
+    /// passed the earlier version of this test, which is precisely the silent
+    /// discard the module contract forbids. Removing a candidate is only safe
+    /// *because* the receipt preserves it, so the receipt -- and the fact that
+    /// it round-trips the original payload -- is what has to be pinned.
+    #[test]
+    fn a_rejected_candidate_leaves_a_receipt_that_round_trips_its_payload() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        let malformed = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.opened".to_string(),
+            data: serde_json::json!({
+                "target": "coord1",
+                "issue_kind": "correctness",
+                "severity": "critical",
+                "summary": "an issue whose evidence is prose",
+                "locations": [],
+                "reproduction": [],
+                "blocks": [],
+                "evidence": ["Lean probe compiled successfully against exact branch tip"],
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-1", &malformed).unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+        assert_eq!(drained.rejected.len(), 1);
+
+        let rejected_dir = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
+        let receipts: Vec<_> = std::fs::read_dir(&rejected_dir)
+            .expect("a rejection must create the receipt directory")
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert_eq!(
+            receipts.len(),
+            1,
+            "exactly one receipt, for the one rejection"
+        );
+
+        let receipt: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&receipts[0]).unwrap()).unwrap();
+        assert!(receipt["reason"]
+            .as_str()
+            .unwrap()
+            .contains("does not parse"));
+        // The payload survives verbatim. Without this the receipt would record
+        // that something was thrown away without recording what, and the
+        // author could not reconstruct the event to resubmit it.
+        let recorded: Candidate = serde_json::from_value(receipt["candidate"].clone())
+            .expect("the receipt must hold a candidate");
+        assert_eq!(recorded, malformed);
+    }
+
+    /// An outbox file that is not a candidate at all does not stop the
+    /// candidates beside it, and is held rather than destroyed.
+    ///
+    /// The payload-parse fix alone did not achieve this: `list_pending` runs
+    /// before the drain loop, so a file that failed to deserialize as a
+    /// `Candidate` aborted the drain without ever reaching the per-candidate
+    /// rejection. Same outage, one layer earlier, and reached first.
+    #[test]
+    fn drain_outbox_holds_an_unreadable_file_without_dropping_the_rest() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        crate::outbox::submit(
+            repo.path(),
+            "client-1",
+            &status_candidate(&coord1, "before"),
+        )
+        .unwrap();
+        let junk = crate::outbox::outbox_dir(repo.path(), &coord1).join("client-2.json");
+        std::fs::write(&junk, br#"{"not": "a candidate"}"#).unwrap();
+        crate::outbox::submit(repo.path(), "client-3", &status_candidate(&coord1, "after"))
+            .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+
+        assert_eq!(
+            drained.published,
+            vec![EventId::new(&coord1, 1), EventId::new(&coord1, 2)]
+        );
+        assert_eq!(drained.held.len(), 1);
+        assert!(drained.held[0]
+            .reason
+            .contains("is not a readable candidate"));
+        // Held means held: this host could not tell a broken writer from a
+        // newer binary's envelope, so it must not be the one to delete it.
+        assert!(junk.exists(), "a held file stays on disk");
+    }
+
+    /// A candidate whose *kind* this binary does not know is held, not
+    /// rejected.
+    ///
+    /// This is the one case where treating every parse failure as an author
+    /// defect is worse than the abort it replaced. Every agent on a host
+    /// shares one `git_common_dir`, and the fleet demonstrably runs more than
+    /// one build at a time, so an unknown kind is far more likely to mean
+    /// "the author is ahead of this coordinator" than "the author made a
+    /// typo". Rejecting it would delete a valid event and hand its author a
+    /// receipt blaming them for it.
+    #[test]
+    fn drain_outbox_holds_a_kind_this_binary_does_not_know() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        let from_the_future = Candidate {
+            agent: coord1.clone(),
+            kind: "review.merge_superseded".to_string(),
+            data: serde_json::json!({ "whatever": "a later schema knows this" }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-1", &from_the_future).unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "client-2",
+            &status_candidate(&coord1, "ordinary"),
+        )
+        .unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .unwrap();
+
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1)]);
+        assert!(
+            drained.rejected.is_empty(),
+            "an unknown kind is not the author's fault: {:?}",
+            drained.rejected
+        );
+        assert_eq!(drained.held.len(), 1);
+        assert!(drained.held[0].reason.contains("unknown to this binary"));
+
+        // Still pending, so a coordinator that knows the kind can publish it.
+        let still = crate::outbox::list_pending(repo.path(), &coord1).unwrap();
+        assert_eq!(still.pending.len(), 1);
+        assert_eq!(still.pending[0].1.kind, "review.merge_superseded");
+        assert!(
+            std::fs::read_dir(crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected"))
+                .map(|d| d.count())
+                .unwrap_or(0)
+                == 0,
+            "a held candidate must not get a rejection receipt"
+        );
+    }
+
+    /// The semantic rejection path -- `apply::dry_run`'s -- also holds
+    /// instead of aborting when its receipt cannot be written.
+    ///
+    /// The sibling test covers the *parse* arm, and covering only that is
+    /// what let this survive: the parse arm is reached by a payload that
+    /// will not deserialize at all, while `dry_run`'s arm is reached by
+    /// every candidate that is well-formed but invalid, which is the common
+    /// case by a wide margin. It was the last of the nine rejection paths
+    /// still propagating a receipt-write failure with `?`, so a read-only or
+    /// blocked `rejected/` directory still aborted the whole drain through
+    /// the busiest door in the loop.
+    ///
+    /// The candidate here parses cleanly and is refused on its content -- an
+    /// `issue.acknowledged` naming an issue that does not exist -- so it
+    /// reaches `dry_run` rather than the parse arm, which is the whole point.
+    #[test]
+    fn an_unwritable_receipt_on_the_semantic_path_holds_and_still_publishes_the_rest() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        // Parses fine; refused by `dry_run` because the issue it names was
+        // never opened.
+        let semantically_invalid = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.acknowledged".to_string(),
+            data: serde_json::json!({
+                "issue": "coord1:9000",
+                "assignment": "coord1:9001",
+                "note": "acknowledging an issue that does not exist",
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-1", &semantically_invalid).unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "client-2",
+            &status_candidate(&coord1, "queued behind the unwritable rejection"),
+        )
+        .unwrap();
+
+        // A *file* where the receipt directory must go, so `create_dir_all`
+        // can never succeed. `list_pending` only considers `.json` files, so
+        // the blocker is invisible to the listing.
+        let blocker = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .expect("an unwritable receipt must not fail the drain");
+
+        // The later valid candidate published.
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1)]);
+        assert!(drained.rejected.is_empty());
+        assert_eq!(drained.held.len(), 1);
+        assert!(
+            drained.held[0]
+                .reason
+                .contains("receipt could not be written"),
+            "the hold must say why it could not reject: {}",
+            drained.held[0].reason
+        );
+
+        // Held on disk, not destroyed: the receipt is what makes removal
+        // safe, and there is no receipt.
+        let still = crate::outbox::list_pending(repo.path(), &coord1).unwrap();
+        assert_eq!(still.pending.len(), 1);
+        assert_eq!(still.pending[0].1.kind, "issue.acknowledged");
+    }
+
+    /// A receipt that cannot be written holds the candidate instead of
+    /// aborting the drain -- and does not destroy it.
+    ///
+    /// Every rejection arm in the loop called `reject_candidate(...)?`, so
+    /// the entire per-candidate rejection design was conditional on a
+    /// filesystem write succeeding. If it failed, all eight arms turned back
+    /// into the whole-drain abort the loop exists to prevent, including the
+    /// two arms added for earlier outages.
+    ///
+    /// A plain file where the `rejected/` directory needs to be reproduces it
+    /// portably: `list_pending` only considers `.json` files, so the blocker
+    /// is invisible to the listing, and `create_dir_all` can never succeed.
+    /// The candidate must survive, because with no receipt there is nothing
+    /// else recording it.
+    #[test]
+    fn a_receipt_that_cannot_be_written_holds_the_candidate_and_spares_the_drain() {
+        let repo = init_repo();
+        let coord1 = a("coord1");
+        let review_from = crate::gitrepo::rev_parse(repo.path(), "HEAD").unwrap();
+        crate::bootstrap::genesis(
+            repo.path(),
+            &coord1,
+            short("Coordinator One"),
+            text("bootstraps"),
+            "sha1".to_string(),
+            ObjectId::parse(review_from).unwrap(),
+            short("host1"),
+        )
+        .unwrap();
+
+        let malformed = Candidate {
+            agent: coord1.clone(),
+            kind: "issue.opened".to_string(),
+            data: serde_json::json!({
+                "target": "coord1",
+                "issue_kind": "correctness",
+                "severity": "critical",
+                "summary": "prose where an event id belongs",
+                "locations": [],
+                "reproduction": [],
+                "blocks": [],
+                "evidence": ["not an event id"],
+            }),
+            extra_refs: vec![],
+            urgent: false,
+        };
+        crate::outbox::submit(repo.path(), "client-1", &malformed).unwrap();
+        crate::outbox::submit(
+            repo.path(),
+            "client-2",
+            &status_candidate(&coord1, "behind the unwritable rejection"),
+        )
+        .unwrap();
+
+        // A *file* named `rejected`, so the receipt directory cannot be made.
+        let blocker = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+
+        let drained = drain_outbox(
+            repo.path(),
+            repo.path(),
+            &coord1,
+            &short("host1"),
+            0,
+            "origin",
+        )
+        .expect("an unwritable receipt must not fail the drain");
+
+        // The candidate behind it still published.
+        assert_eq!(drained.published, vec![EventId::new(&coord1, 1)]);
+        assert!(drained.rejected.is_empty());
+        assert_eq!(drained.held.len(), 1);
+        assert!(
+            drained.held[0]
+                .reason
+                .contains("receipt could not be written"),
+            "the hold must say why it could not reject: {}",
+            drained.held[0].reason
+        );
+
+        // Not destroyed: the receipt is what makes removal safe, and there is
+        // no receipt.
+        let still = crate::outbox::list_pending(repo.path(), &coord1).unwrap();
+        assert_eq!(still.pending.len(), 1);
+        assert_eq!(still.pending[0].1.kind, "issue.opened");
     }
 
     /// Gate 18, end to end through the real coordinator path: an urgent
@@ -1725,6 +2583,7 @@ mod tests {
         // entry is gone (not stuck retrying forever) but durably recorded.
         assert!(crate::outbox::list_pending(repo.path(), &coord1)
             .unwrap()
+            .pending
             .is_empty());
         let rejected_dir = crate::outbox::outbox_dir(repo.path(), &coord1).join("rejected");
         let entries: Vec<_> = std::fs::read_dir(&rejected_dir).unwrap().collect();
@@ -3381,6 +4240,11 @@ mod tests {
             &f.reviewer,
         )
         .unwrap();
+        // Published like any real candidate: authorship is checked *after*
+        // the candidate tag is confirmed and fetched, so that a coordinator
+        // draining from a checkout which has only ever seen `main` and the
+        // bus still has the reviewed commits to read trailers from.
+        publish_candidate_tag(&f, &candidate);
         crate::outbox::submit(
             f.repo.path(),
             "auth",
@@ -3410,6 +4274,7 @@ mod tests {
             &f.reviewer,
         )
         .unwrap();
+        publish_candidate_tag(&f, &candidate);
         crate::outbox::submit(
             f.repo.path(),
             "auth",
@@ -3440,6 +4305,7 @@ mod tests {
             &f.reviewer,
         )
         .unwrap();
+        publish_candidate_tag(&f, &candidate);
         crate::outbox::submit(
             f.repo.path(),
             "auth",
@@ -3459,25 +4325,75 @@ mod tests {
         );
     }
 
+    /// Tags `commit` as `reviewer`'s candidate and pushes the tag, exactly
+    /// as `prepare-merge` would -- so the gate under test sees a candidate
+    /// that is published and fetchable, and can only reject it for what the
+    /// *object* says.
+    fn publish_candidate_tag(f: &ReviewFixture, commit: &str) {
+        let tag = crate::merge_candidate::candidate_tag_name(&f.reviewer, commit);
+        crate::gitrepo::tag_lightweight(f.repo.path(), &tag, commit).unwrap();
+        let push = crate::gitrepo::run(
+            f.repo.path(),
+            &["push", &f.remote, &format!("refs/tags/{tag}")],
+        )
+        .unwrap();
+        assert!(push.success, "{push:?}");
+    }
+
+    /// A commit with the given parents, message and tree, built directly --
+    /// not through `merge_candidate::reconstruct_candidate`. This is how a
+    /// tampered or hand-crafted candidate gets into the fixture: the gate
+    /// no longer rebuilds the merge, so what it rejects has to be a real
+    /// object that is wrong in a specific, nameable way.
+    fn forged_candidate(
+        f: &ReviewFixture,
+        parents: &[&str],
+        message: &str,
+        tree_of: &str,
+    ) -> String {
+        use crate::gitobjects::{HistoryReader, ObjectWriter};
+        let g = crate::gitobjects::Libgit2Reader::open(f.repo.path()).unwrap();
+        let tree = g
+            .resolve_rev(&format!("{tree_of}^{{tree}}"))
+            .unwrap()
+            .expect("tree must resolve");
+        let resolved: Vec<ObjectId> = parents
+            .iter()
+            .map(|p| g.resolve_rev(p).unwrap().expect("parent must resolve"))
+            .collect();
+        let refs: Vec<&ObjectId> = resolved.iter().collect();
+        g.create_commit(&tree, &refs, message)
+            .unwrap()
+            .into_string()
+    }
+
+    /// The publication gate used to rebuild the merge with this host's own
+    /// `git merge-tree --write-tree` and compare object ids, which is what
+    /// made an installed git version protocol authority (g-design:249). It
+    /// now validates the object the candidate tag actually names -- so a
+    /// forged candidate has to be rejected by a property of *that object*,
+    /// not by a hash it fails to match.
+    ///
+    /// Parents first: a commit that merges the right two commits in the
+    /// wrong order is a different merge.
     #[test]
-    fn drain_outbox_rejects_review_merge_authorized_with_a_candidate_that_does_not_reconstruct() {
-        // Drives the real `drain_outbox`, so the bus it reduces is pinned by
-        // `genesis` to this build's engine version and there is no seam to
-        // hand it a differently-pinned state -- see
-        // `bootstrap::requires_the_pinned_engine`.
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_rejects_review_merge_authorized_with_a_candidate_that_does_not_reconstruct",
-        ) {
-            return;
-        }
+    fn drain_outbox_rejects_review_merge_authorized_whose_candidate_has_the_wrong_parents() {
         let f = build_review_fixture(Some("zoe"));
-        // A syntactically valid but *wrong* candidate id -- never actually
-        // built by `merge_candidate::reconstruct_candidate`.
-        let bogus_candidate = "f".repeat(40);
+        let forged = forged_candidate(
+            &f,
+            // Reversed: `reviewed_commit` first, `previous_main` second.
+            &[&f.feature_commit, &f.previous_main],
+            &format!(
+                "agent-bus candidate\n\nAgent-Bus-Reviewer: {}\n",
+                f.reviewer
+            ),
+            &f.feature_commit,
+        );
+        publish_candidate_tag(&f, &forged);
         crate::outbox::submit(
             f.repo.path(),
             "auth",
-            &merge_authorized_candidate(&f, &bogus_candidate),
+            &merge_authorized_candidate(&f, &forged),
         )
         .unwrap();
 
@@ -3487,7 +4403,133 @@ mod tests {
         assert!(
             drained.rejected[0]
                 .reason
-                .contains("does not match the deterministic reconstruction"),
+                .contains("candidate parents do not match"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    /// A candidate whose parents are right but which carries somebody
+    /// else's reviewer trailer. Nobody rebuilds the tree any more, so this
+    /// trailer is the accountability binding: it says which reviewer stands
+    /// behind the content.
+    #[test]
+    fn drain_outbox_rejects_review_merge_authorized_whose_candidate_names_another_reviewer() {
+        let f = build_review_fixture(Some("zoe"));
+        let forged = forged_candidate(
+            &f,
+            &[&f.previous_main, &f.feature_commit],
+            "agent-bus candidate\n\nAgent-Bus-Reviewer: someone-else\n",
+            &f.feature_commit,
+        );
+        publish_candidate_tag(&f, &forged);
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &forged),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("exactly one matching Agent-Bus-Reviewer trailer"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    /// Right parents, right reviewer trailer, but extra content in the
+    /// message. The exact-message check is what stops a candidate from
+    /// smuggling further trailers past a validator that only reads back the
+    /// one it expects.
+    #[test]
+    fn drain_outbox_rejects_review_merge_authorized_whose_candidate_message_carries_more_than_the_trailer(
+    ) {
+        let f = build_review_fixture(Some("zoe"));
+        let forged = forged_candidate(
+            &f,
+            &[&f.previous_main, &f.feature_commit],
+            &format!(
+                "agent-bus candidate\n\nAgent-Bus-Reviewer: {}\nAgent-Bus-Agent: {}\n",
+                f.reviewer, f.reviewer
+            ),
+            &f.feature_commit,
+        );
+        publish_candidate_tag(&f, &forged);
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &forged),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("does not carry the exact candidate message"),
+            "{}",
+            drained.rejected[0].reason
+        );
+    }
+
+    /// The content bound, and the check that most directly replaces the
+    /// deleted reconstruction: a candidate whose parents, message and
+    /// trailer are all correct, but whose *tree* carries a file the
+    /// nomination never covered.
+    ///
+    /// Under the old design this was caught only incidentally -- the tree
+    /// differed from the local rebuild, so the object ids differed. There
+    /// is no rebuild now, so scope is what bounds the tree, and this test
+    /// fails outright if `verify_candidate_scope` is not called here.
+    #[test]
+    fn drain_outbox_rejects_review_merge_authorized_whose_candidate_touches_an_unreviewed_path() {
+        let f = build_review_fixture(Some("zoe"));
+        // A commit on top of the feature branch touching a path outside the
+        // reviewed scope (`feature.txt`), used only for its tree.
+        git(
+            f.repo.path(),
+            &["checkout", "--quiet", "--detach", &f.feature_commit],
+        );
+        std::fs::write(f.repo.path().join("smuggled.txt"), "not reviewed\n").unwrap();
+        git(f.repo.path(), &["add", "."]);
+        git(
+            f.repo.path(),
+            &["commit", "-q", "-m", "smuggled\n\nAgent-Bus-Agent: zoe"],
+        );
+        let smuggled = crate::gitrepo::rev_parse(f.repo.path(), "HEAD").unwrap();
+        git(f.repo.path(), &["checkout", "--quiet", "main"]);
+
+        let forged = forged_candidate(
+            &f,
+            &[&f.previous_main, &f.feature_commit],
+            &format!(
+                "agent-bus candidate\n\nAgent-Bus-Reviewer: {}\n",
+                f.reviewer
+            ),
+            &smuggled,
+        );
+        publish_candidate_tag(&f, &forged);
+        crate::outbox::submit(
+            f.repo.path(),
+            "auth",
+            &merge_authorized_candidate(&f, &forged),
+        )
+        .unwrap();
+
+        let drained = drain_reviewer(&f);
+        assert!(drained.published.is_empty());
+        assert_eq!(drained.rejected.len(), 1);
+        assert!(
+            drained.rejected[0]
+                .reason
+                .contains("outside reviewed_scope"),
             "{}",
             drained.rejected[0].reason
         );
@@ -3495,11 +4537,6 @@ mod tests {
 
     #[test]
     fn drain_outbox_rejects_review_merge_authorized_with_no_candidate_tag_at_all() {
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_rejects_review_merge_authorized_with_no_candidate_tag_at_all",
-        ) {
-            return;
-        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -3533,11 +4570,6 @@ mod tests {
     #[test]
     fn drain_outbox_rejects_review_merge_authorized_with_a_candidate_tag_that_never_reached_origin()
     {
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_rejects_review_merge_authorized_with_a_candidate_tag_that_never_reached_origin",
-        ) {
-            return;
-        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -3614,28 +4646,27 @@ mod tests {
             other => panic!("fixture built the wrong event: {other:?}"),
         };
 
-        // The epoch the authorization names is real and this host runs its
-        // engine, so nothing else in the gate objects to it -- but the bus
-        // has since selected a different one.
-        //
-        // "This host runs its engine" has to be spelled `host_engine_version`
-        // rather than the compile-time `SUPPORTED_MERGE_ENGINE_VERSION`: the
-        // two are equal only on a host provisioned with the pinned git, and
-        // anywhere else this fixture claimed an engine the host does not have,
-        // so the gate refused for that reason and never reached the stale
-        // -epoch refusal under test. See `bootstrap::host_engine_version`.
+        // The epoch the authorization names is real, so nothing else in the
+        // gate objects to it -- but the bus has since selected a different
+        // one. Both epochs record an engine version no host anywhere runs,
+        // which is now simply ignored: if any comparison against the
+        // installed git ever comes back, this test stops reaching the
+        // stale-epoch refusal it is about and fails.
         let newer = EventId::new(&f.coord1, 4242);
-        let host_engine = short(&crate::bootstrap::host_engine_version());
+        let engine_version = short(FOREIGN_ENGINE_VERSION);
         state.merge_engine_info.insert(
             d.merge_engine_epoch.clone(),
             (
                 short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                host_engine.clone(),
+                engine_version.clone(),
             ),
         );
         state.merge_engine_info.insert(
             newer.clone(),
-            (short(crate::bootstrap::SUPPORTED_MERGE_ENGINE), host_engine),
+            (
+                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
+                engine_version,
+            ),
         );
         state.current_merge_engine_epoch = Some(newer.clone());
 
@@ -3646,55 +4677,6 @@ mod tests {
             msg.contains("is not the currently selected merge engine epoch")
                 && msg.contains(&newer.to_string()),
             "the message must name the epoch that is current now: {msg}"
-        );
-    }
-
-    /// The pinned-engine gate's *call site*, not the predicate.
-    ///
-    /// `bootstrap::pinned_engine_tests` proves what
-    /// `require_pinned_merge_engine` decides; it cannot see whether this
-    /// function calls it. Mutation testing showed that gap was real --
-    /// deleting the call from here left every suite green, because the test
-    /// host happens to run the pinned version, so the check was invisible
-    /// either way. Pinning a version nobody runs makes the call observable.
-    #[test]
-    fn the_authorization_gate_refuses_a_host_that_is_not_on_the_selected_engine() {
-        let f = build_review_fixture(Some("zoe"));
-        let candidate = crate::merge_candidate::reconstruct_candidate(
-            f.repo.path(),
-            &f.previous_main,
-            &f.feature_commit,
-            &f.reviewer,
-        )
-        .unwrap();
-
-        // A reduced state for this fixture, with the bus's selected engine
-        // moved to a version this host does not have.
-        let snapshot =
-            crate::sync::cached_snapshot(f.repo.path(), f.repo.path()).expect("reduce fixture");
-        let mut state = snapshot.state;
-        let epoch = EventId::new(&f.coord1, 987);
-        state.merge_engine_info.insert(
-            epoch.clone(),
-            (
-                short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-                short("0.0.0-not-a-real-git"),
-            ),
-        );
-        state.current_merge_engine_epoch = Some(epoch);
-
-        let d = match merge_authorized_candidate(&f, &candidate)
-            .typed_data()
-            .unwrap()
-        {
-            EventData::ReviewMergeAuthorized(d) => d,
-            other => panic!("fixture built the wrong event: {other:?}"),
-        };
-        let err = verify_review_merge_authorized(f.repo.path(), &f.remote, &state, &f.reviewer, &d)
-            .expect_err("a host off the selected engine must not verify a candidate");
-        assert!(
-            err.to_string().contains("0.0.0-not-a-real-git"),
-            "expected the selected-engine refusal, got: {err}"
         );
     }
 
@@ -3715,11 +4697,6 @@ mod tests {
     /// absent from the exclusion list below.
     #[test]
     fn drain_outbox_review_merge_authorized_gate_passes_a_genuinely_valid_candidate() {
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_review_merge_authorized_gate_passes_a_genuinely_valid_candidate",
-        ) {
-            return;
-        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -3755,7 +4732,10 @@ mod tests {
             "has no Agent-Bus-Agent trailer",
             "ineligible to merge",
             "do not match nomination authors",
-            "does not match the deterministic reconstruction",
+            "candidate parents do not match",
+            "exactly one matching Agent-Bus-Reviewer trailer",
+            "does not carry the exact candidate message",
+            "outside reviewed_scope",
             "candidate tag is not fetchable",
             "is not fetchable from",
         ] {
@@ -3781,11 +4761,6 @@ mod tests {
     /// ran `prepare-merge` could never validly drain the authorization.
     #[test]
     fn drain_outbox_review_merge_authorized_gate_accepts_a_tag_never_fetched_into_this_checkout() {
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_review_merge_authorized_gate_accepts_a_tag_never_fetched_into_this_checkout",
-        ) {
-            return;
-        }
         let f = build_review_fixture(Some("zoe"));
         let candidate = crate::merge_candidate::reconstruct_candidate(
             f.repo.path(),
@@ -3829,7 +4804,10 @@ mod tests {
             "has no Agent-Bus-Agent trailer",
             "ineligible to merge",
             "do not match nomination authors",
-            "does not match the deterministic reconstruction",
+            "candidate parents do not match",
+            "exactly one matching Agent-Bus-Reviewer trailer",
+            "does not carry the exact candidate message",
+            "outside reviewed_scope",
             "candidate tag is not fetchable",
             "is not fetchable from",
         ] {
@@ -3976,7 +4954,7 @@ mod tests {
             object_format: "sha1".to_string(),
             product_review_from: ObjectId::parse("0".repeat(40)).unwrap(),
             merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: FOREIGN_ENGINE_VERSION.to_string(),
         }
     }
 
@@ -4507,7 +5485,7 @@ mod tests {
         let data = MergeEngineActivated {
             previous_epoch: EventId::new(&f.coord1, 0),
             merge_engine: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE),
-            merge_engine_version: short(crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION),
+            merge_engine_version: short(FOREIGN_ENGINE_VERSION),
             design_commit: ObjectId::parse("0".repeat(40)).unwrap(),
             helper_commit: ObjectId::parse("0".repeat(40)).unwrap(),
         };
@@ -4608,14 +5586,6 @@ mod tests {
 
     #[test]
     fn drain_outbox_rejects_review_merge_reconciled_when_main_was_never_advanced() {
-        // The reconciliation gate itself is engine-independent, but its
-        // fixture is not: `authorized_and_published` has to get a real
-        // `review.merge_authorized` through the publication gate first.
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_rejects_review_merge_reconciled_when_main_was_never_advanced",
-        ) {
-            return;
-        }
         let f = build_review_fixture(Some("zoe"));
         let (candidate, authorization_id) = authorized_and_published(&f);
         // `main` deliberately left at `previous_main` -- the candidate was
@@ -4665,13 +5635,6 @@ mod tests {
     /// reconciliation.
     #[test]
     fn drain_outbox_accepts_review_merge_reconciled_when_main_was_genuinely_advanced() {
-        // See the sibling rejection test: the fixture needs a genuinely
-        // published authorization, which needs the pinned engine.
-        if crate::bootstrap::requires_the_pinned_engine(
-            "drain_outbox_accepts_review_merge_reconciled_when_main_was_genuinely_advanced",
-        ) {
-            return;
-        }
         let f = build_review_fixture(Some("zoe"));
         let (candidate, authorization_id) = authorized_and_published(&f);
         git(
@@ -4732,7 +5695,7 @@ mod tests {
             object_format: "sha1".to_string(),
             product_review_from: ObjectId::parse("1".repeat(40)).unwrap(),
             merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: FOREIGN_ENGINE_VERSION.to_string(),
         });
         state.known_epochs.insert(epoch.id.clone(), epoch.clone());
         state.roster_epoch = Some(epoch.clone());
@@ -4871,7 +5834,7 @@ mod tests {
             object_format: "sha1".to_string(),
             product_review_from: ObjectId::parse("1".repeat(40)).unwrap(),
             merge_engine: crate::bootstrap::SUPPORTED_MERGE_ENGINE.to_string(),
-            merge_engine_version: crate::bootstrap::SUPPORTED_MERGE_ENGINE_VERSION.to_string(),
+            merge_engine_version: FOREIGN_ENGINE_VERSION.to_string(),
         });
         state
             .exclusive

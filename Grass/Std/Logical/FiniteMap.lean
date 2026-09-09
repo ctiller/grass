@@ -16,11 +16,22 @@ agree at every key. Representations are deliberately not normalized, so
 propositional equality of the underlying entry list is finer than `Equiv` and is
 never the right relation to use.
 
-**Custody note.** `Grass.Std.Logical` is not owned by the memory agent. This
-module is temporary custody under `docs/MEMORY_IMPLEMENTATION_PLAN.md` §2. It
-contains only what milestones M1 through M3 consume and is expected to transfer
-to the `Std.Logical` owner by rename and re-export. In particular the disjoint
-union and its split/join laws are deliberately absent until M3 needs them.
+**Custody, settled.** This module was written under `c-mem`'s temporary custody
+per `docs/MEMORY_IMPLEMENTATION_PLAN.md` §2. That custody ended on 2026-09-07:
+offered as `c-mem:47`, accepted as `c-stdlib:19`, and `Grass/Std/Logical/**` is
+the `Std.Logical` owner's exclusive claim from `c-stdlib:21`. `coord1:32` asked
+that the marker be replaced on acceptance rather than stripped before the offer,
+and this is that replacement, late.
+
+The note also predicted the wrong mechanism: it expected the transfer to happen
+"by rename and re-export", and no rename was needed, because the module was
+already sited where its owner wanted it. What did come with the handoff is
+recorded in `c-mem:47` — the framing lemmas on `agent/c-mem/provider-cleanup`
+reach this module through that branch's own review rather than through the
+transfer.
+
+Unchanged by any of that: the disjoint union and its split/join laws are
+deliberately absent until a consumer needs them.
 -/
 
 namespace Grass.Std.Logical
@@ -177,14 +188,14 @@ theorem lookup_erase_ne (m : FiniteMap K V) {key other : K} (h : other ≠ key) 
   simp [lookup, erase, findValue_eraseKey_ne h]
 
 /-- The combined framing law, in the shape memory proofs actually apply it. -/
-theorem lookup_insert (m : FiniteMap K V) (key other : K) (value : V) :
+@[simp] theorem lookup_insert (m : FiniteMap K V) (key other : K) (value : V) :
     (m.insert key value).lookup other =
       if other = key then some value else m.lookup other := by
   by_cases h : other = key
   · subst h; simp
   · simp [lookup_insert_ne m h, h]
 
-theorem lookup_erase (m : FiniteMap K V) (key other : K) :
+@[simp] theorem lookup_erase (m : FiniteMap K V) (key other : K) :
     (m.erase key).lookup other = if other = key then none else m.lookup other := by
   by_cases h : other = key
   · subst h; simp

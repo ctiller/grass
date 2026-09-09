@@ -294,4 +294,103 @@ theorem pos_rejects_unstable : ¬ StableSortedByPos input unstableOutput := by
   have hlt := hstable 0 2 (by decide) (by decide) (by decide) (by decide)
   omega
 
+/-! ## What a divide-and-conquer sort would ask for, and does not get
+
+Everything above works with concrete two- and three-element vectors, and that is
+why `docs/STDLIB_IMPLEMENTATION_PLAN.md` §3.13 measures every one of
+`Grass/Std/Logical/Order.lean`'s six `@[simp]` laws as load-bearing for nothing:
+`decide` and `rfl` reduce a literal without ever reaching a law. §3.13 offers
+that as the explanation and calls it mechanical. It is, and it is not the whole
+story.
+
+The goals below are the other half of the check. They are written over *general*
+vectors, in the shape a merge sort states its own correctness — the shape
+`Spikes/2_Sort` would reach for — and `simp` closes some of them and not others.
+What fails is not scattered: `Order.lean` has `empty` and `push` laws, and every
+divide-and-conquer algorithm is built from `append`, `singleton`, `take` and
+`drop`.
+
+**None of this is a defect and none of it is a request.** By decision 6 the
+operations are determined: every `Vec` is reached from `empty` by `push`, so
+`Vec.count_empty` with `Vec.count_push` pins `Vec.count` and `Vec.pairwise_empty`
+with `Vec.Pairwise.push` pins `Vec.Pairwise`. What is missing is convenience for
+one algorithm shape, which is band 3 under §1 until a consumer that compiles asks
+for it. This section exists so that the asking is cheap: the goals are written
+down, the failures are pinned, and whoever needs them can point here instead of
+describing them.
+-/
+
+section ConsumerShaped
+
+variable {α : Type} [BEq α]
+
+/-! ### What already works -/
+
+/-- The empty case reaches its law through the notation a consumer writes. -/
+example (R : α → α → Prop) : Vec.Pairwise R (∅ : Vec α) := by simp
+
+example (a : α) : Vec.count (∅ : Vec α) a = 0 := by simp
+
+example (p : α → Bool) : Vec.findIdx? p (∅ : Vec α) = none := by simp
+
+/-- Multiplicity under rearrangement, which is what `Vec.count` exists for. -/
+example (u v : Vec α) (h : u.Permutation v) (a : α) : Vec.count u a = Vec.count v a := by
+  simp [Vec.Permutation.count_eq h]
+
+/-! ### What does not
+
+Each is pinned rather than described, so a law that closes one of these later
+turns the pin red and this section gets rewritten instead of quietly rotting.
+
+**The pins were falsified rather than assumed to bite.** Adding
+
+```lean
+@[simp] theorem count_append [BEq α] (u v : Vec α) (a : α) :
+    count (u ++ v) a = count u a + count v a := by
+  simp [count, Vec.toList_append, List.count_append]
+```
+
+to `Grass/Std/Logical/Order.lean` and rebuilding turns the first pin below red —
+`#guard_msgs` reports the docstring no longer matching — and leaves the other
+three alone, the split one included, because `simp` rewrites a concatenation into
+a sum and not the reverse. The law was then removed again. Without that check
+these would be four `example`s that pass for whatever reason `simp` happens to
+have today.
+-/
+
+/-! Multiplicity across a concatenation: the merge step. There is no
+`Vec.count_append`. -/
+/-- error: `simp` made no progress -/
+#guard_msgs in
+example (u v : Vec α) (a : α) : Vec.count (u ++ v) a = Vec.count u a + Vec.count v a := by
+  simp
+
+/-! Multiplicity of a one-element vector: the base case. `Vec.singleton` is
+`⟨[a]⟩` rather than `Vec.push Vec.empty a`, so `Vec.count_push` does not reach
+it, and there is no `Vec.count_singleton`. -/
+/-- error: `simp` made no progress -/
+#guard_msgs in
+example (a b : α) : Vec.count (Vec.singleton b) a = (if b == a then 1 else 0) := by
+  simp
+
+/-! Multiplicity across the split, which follows from the two above plus
+`Vec.append_splitAt` and from nothing that exists now. -/
+/-- error: `simp` made no progress -/
+#guard_msgs in
+example (v : Vec α) (n : Nat) (a : α) :
+    Vec.count (v.take n) a + Vec.count (v.drop n) a = Vec.count v a := by
+  simp
+
+/-! Sortedness of a concatenation given the cross bound: the merge's
+postcondition. `Vec.Pairwise.take` and `Vec.Pairwise.drop` go one way and
+nothing comes back. -/
+/-- error: simp_all made no progress -/
+#guard_msgs in
+example (R : α → α → Prop) (u v : Vec α)
+    (hu : Vec.Pairwise R u) (hv : Vec.Pairwise R v)
+    (hcross : ∀ x ∈ u, ∀ y ∈ v, R x y) : Vec.Pairwise R (u ++ v) := by
+  simp_all
+
+end ConsumerShaped
+
 end Grass.Tests.Std.StableSort

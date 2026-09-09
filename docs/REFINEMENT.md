@@ -155,14 +155,21 @@ presentation of the precious specification. No role projection is fabricated
 from an arbitrary behavior contract:
 
 ```lean
+abbrev AdmittedProtocolInput
+    {R : Type u} [ResourceModel R] {resources : R}
+    (protocol : SpecProcess resources) :=
+  { input : protocol.Input // protocol.admits input }
+
 abbrev ProcessPresentationNetwork
     {R : Type u} [ResourceModel R] (resources : R) :=
-  StructuralProcessNetwork (SpecProcess resources)
+  StructuralProcessNetwork (SpecProcess resources) AdmittedProtocolInput
 
 structure SelectedProcessTrace
     (network : ProcessPresentationNetwork resources) where
+  semantics : AbstractNetworkTraceSemantics network
   contract : BehaviorContract resources
-  realizesComposition : AbstractNetworkTraceRealizes network contract
+  realizesComposition :
+    AbstractNetworkTraceRealizes network semantics contract
 
 structure ProcessPresentation (spec : SpecProcess resources) where
   network : ProcessPresentationNetwork resources
@@ -249,9 +256,16 @@ structure SubsystemRealization
     (shaped.network.protocol schema).boundary
   boundaryExact : implementation.ExportsExactly
     (shaped.network.protocol schema).boundary
+  abstractBehavior : forall instance : shaped.network.Instance schema,
+    BehaviorContract resources
+  abstractBehaviorExact : forall instance,
+    ExactProtocolInstanceBehavior
+      (shaped.network.protocol schema)
+      (shaped.network.instanceOf schema instance)
+      (abstractBehavior instance)
   refines : forall instance : shaped.network.Instance schema,
     implementation.instantiate instance
-      |>.Refines (shaped.network.instances schema instance)
+      |>.Refines (abstractBehavior instance)
   internalFrontiersClosed : forall instance frontier,
     ReachableInternalFrontier (implementation.instantiate instance) frontier ->
     FrontierRealized frontier
@@ -301,6 +315,69 @@ def PartialProcessRealization.close
     ClosedBlend partial complete coherent
 ```
 
+`AdmittedProtocolInput` is the `InstanceOf` parameter of the Process-owned
+structural network. An instance therefore selects one exact input accepted by
+its role protocol. It is not a process identifier, mutable process state, or a
+second protocol implementation; those belong to the later `ProcessPlan`. A
+protocol with no admitted input consequently cannot acquire a structural
+instance. This is the only admission ceremony carried by an ordinary role;
+standard constructors infer the subtype witness from the protocol builder.
+
+Despite its retained public name, `SelectedProcessTrace` does **not** select one
+execution trace. It selects one complete trace *semantics* for the structural
+network. `AbstractNetworkTraceSemantics network` contains the actual
+composition data: the root-input/configuration relation, the coherent
+relational transition system, the network audit-event and completion
+vocabulary, the projection to the root contract, and stable origins for
+transported process demands. It is indexed by the exact `network`; an
+extensionally similar network cannot donate it.
+
+`AbstractNetworkTraceRealizes network semantics contract` is a proof-bearing
+structure indexed by those exact values, not a freely chosen proposition or an
+opaque oracle. Its checked laws establish all of the following:
+
+- every admitted root input has a composition configuration and every selected
+  role instance retains its exact admitted protocol input;
+- every finite network prefix maps to a contract prefix with exactly the
+  projected audit history, including faults, cancellation, interruption,
+  environment violation, pending work, and terminal outcomes;
+- every maximal finite or infinite network execution maps to an allowed
+  contract execution, preserving divergence and progress/frontier
+  classification rather than treating fuel exhaustion as a result;
+- reflection in the other direction: every execution allowed by the selected
+  contract has a network execution in the semantics. Thus a presentation is
+  exact denotation, not merely implementation refinement and not selection of a
+  favorable schedule or response;
+- every network step and audit event has a role/instance/transition origin, and
+  every transported demand has one exact originating protocol demand. The
+  origin map is total, does not merge distinct occurrences, and cannot
+  fabricate, drop, or duplicate a requirement; and
+- the configuration and step relations have explicit inhabitation and coverage
+  witnesses. Universal implications over an empty execution relation do not
+  satisfy the interface.
+
+The composition semantics and its proof are caller-owned replaceable data.
+They do not become fields of `StructuralProcessNetwork` or of the precious
+`SpecProcess`. `BehaviorContract` may remain a reusable lower-level record, but
+the presentation does not accept an unrelated instance as product authority:
+`SpecProcess.contract` is the captured suite's projection, and
+`denotationExact` connects the composition-derived contract back to that exact
+value. `requirementsExact` is deliberately separate so behavioral equality
+cannot erase an outstanding provider, resource, safety, or other keyed demand.
+
+The first implementation must include falsification fixtures for an empty
+execution relation, a one-favorable-trace relation, a projection which drops a
+fault or terminal outcome, a finite-only relation presented as complete, a
+demand without an origin, and a finite-prefix-only carrier exported under the
+public `AbstractNetworkTraceSemantics` or `AbstractNetworkTraceRealizes` name.
+The last fixture must fail to elaborate: privacy and an honestly intermediate
+name are part of the checked boundary, not a review convention. A one-role
+identity presentation and a two-role composition with a real internal event
+provide the positive boundary fixtures. If the current foundation can express
+only finite list acceptance, its carrier must be named as a finite-prefix
+intermediate and kept private; it may not freeze either complete public name
+while infinite and maximal behavior is absent.
+
 `RoleSchema` is finite static syntax; its `Instance` family may be infinite.
 Thus one connection-session schema has a proof polymorphic in
 `ConnectionId`—closure never enumerates runtime identities. A realized node is
@@ -327,6 +404,15 @@ silently trusted. `VerifiedProgram` accepts `closed.realization` only together
 with its indexed `ClosedBlend`; it never accepts a partial blend or closure
 evidence belonging to another graph. The realization's `.blended` origin
 retains that same dependent provenance after ordinary process APIs hide staging.
+
+`StructuralProcessNetwork` carries an `Instance` identity and one `instanceOf`
+value for each identity; in this presentation that value is precisely the
+admitted protocol input. It deliberately has no per-instance behavior field.
+`SubsystemRealization.abstractBehavior` is the separate Semantics-side carrier:
+`abstractBehaviorExact` indexes each selected contract by both the role protocol
+and that exact `instanceOf` input, and `refines` consumes that contract. Thus a
+realization cannot refine an input value, borrow another instance's behavior, or
+require a nonexistent structural-network projection.
 
 This Act-2 blend is portable. It may introduce a Vulkan, IOCP, or other provider
 requirement and prove refinement to that provider's abstract API model, but it
