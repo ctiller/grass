@@ -184,6 +184,13 @@ consumed by later layers rather than choices made by this module.
 
 ### C2 — Logical placement and static layouts
 
+`Grass.Construct.Layout.Core` separates an explicit profile's admissible
+alignments from selected object representations and ordinary struct placement.
+`StructLayout.WellFormed` exposes proposition-level field validity and pairwise
+separation, while lookup theorems recover concrete placements from nominal field
+membership. Empty, packed, overlay, bitfield, and flexible-tail representations
+remain separate constructors rather than exceptions to the ordinary checker.
+
 Build layout and placement values under `Grass/Construct/`:
 
 ```text
