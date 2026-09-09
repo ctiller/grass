@@ -2,8 +2,10 @@
 
 These files are the expected Lean source authored by agents for the programs in
 `docs/SPIKE_1.md` through `docs/SPIKE_5.md`. They are design fixtures, not a compiled Grass
-implementation: the imported `Grass.*` libraries do not exist yet by deliberate
-project scope.
+implementation: supporting libraries are incomplete and these files are not yet
+in the build. Complete them in spike order under
+[CONTRIBUTING.md](../CONTRIBUTING.md), preserving their authored surface except
+for demonstrated defects or an unreasonable realization.
 
 The normative two-view and expansion rules are in
 [`docs/SPIKE_AUTHORING.md`](../docs/SPIKE_AUTHORING.md). In particular, a review

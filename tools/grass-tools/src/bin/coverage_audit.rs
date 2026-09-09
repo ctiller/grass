@@ -1,6 +1,6 @@
 //! Check that every `Vec`-returning operation states what its result observes.
 //!
-//! `docs/STDLIB_IMPLEMENTATION_PLAN.md` decision 6 requires that every operation
+//! `docs/STDLIB.md` observation coverage requires that every operation
 //! returning a `Vec` state a law computing the result's `length` **and** a law
 //! computing the result's `get?`, in terms of its arguments'. This tool checks it.
 //!
@@ -627,7 +627,7 @@ impl Outcome {
     /// The Lean original's `throwError`, reproduced likewise.
     fn failure_message(&self) -> String {
         let mut message = String::from(
-            "observation-coverage audit failed; docs/STDLIB_IMPLEMENTATION_PLAN.md decision 6 \
+            "observation-coverage audit failed; docs/STDLIB.md observation coverage \
              requires a length law and a get? law for every Vec-returning operation:",
         );
         for (name, why) in &self.missing {
@@ -1911,7 +1911,7 @@ mod tests {
         );
         assert_eq!(
             outcome.failure_message(),
-            "observation-coverage audit failed; docs/STDLIB_IMPLEMENTATION_PLAN.md decision 6 \
+            "observation-coverage audit failed; docs/STDLIB.md observation coverage \
              requires a length law and a get? law for every Vec-returning operation:\n  \
              Grass.Std.Logical.Vec.probe: no length law and no get? law"
         );

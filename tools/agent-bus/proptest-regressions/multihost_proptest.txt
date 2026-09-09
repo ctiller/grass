@@ -1,8 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 0fcc750c42781d3b0e7ea7650e57ca13984cddd87a80802aa1f89511d5f64b05 # shrinks to world = World { genesis_name: Sel(0), joins: [Sel(0)], steps: [Register { host: Sel(0), name: Sel(0), coordinator: false }, OpenIssue { opener: Sel(123), target: Sel(255) }, ReassignIssue { issue: Sel(229), new_target: Sel(184) }] }
-cc 05c8a497cb238050bacd1062896d5264d2f08528927d0d9b60ea9e2acb5131c3 # shrinks to world = World { genesis_name: Sel(0), joins: [Sel(0)], steps: [Register { host: Sel(2), name: Sel(0), coordinator: true }, OpenIssue { opener: Sel(145), target: Sel(149) }, ReassignIssue { issue: Sel(168), new_target: Sel(94) }] }

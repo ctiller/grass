@@ -1,6 +1,7 @@
 # Grass specification corpus
 
-Status: pre-implementation normative design, ready for adversarial review.
+Status: target design with a partial foundation implementation. The five spike
+sources remain acceptance fixtures until they compile and close the required proofs.
 
 This corpus defines the interfaces and proof demands that implementation must
 meet. A later implementation may reveal that an interface is inconvenient; it
@@ -14,7 +15,7 @@ When documents conflict, authority is:
 1. [FOUNDATION.md](FOUNDATION.md) for scope, trust, and non-negotiable laws.
 2. The narrowly owning normative document listed below.
 3. [DECISIONS.md](DECISIONS.md) for ratified interpretations not yet folded in.
-4. Plans, examples, and implementation notes.
+4. Examples and implementation notes.
 
 No document may override a narrower owner by restating it differently.
 
@@ -34,9 +35,6 @@ No document may override a narrower owner by restating it differently.
 | [VERIFIED_OBJECTS.md](VERIFIED_OBJECTS.md) | stable subsystem signatures, relocatable verified objects, modular linking |
 | [OLEAN_SHARDING.md](OLEAN_SHARDING.md) | Lean module boundaries, `.olean` reuse, certificate DAGs, and rebuild cones |
 | [IMPLEMENTATION_RATCHET.md](IMPLEMENTATION_RATCHET.md) | future spike commands, evidence schemas, mutations, and implementation sign-off |
-| [AGENT_BUS.md](AGENT_BUS.md) | orphan-branch, segmented JSONL coordination protocol for implementation agents |
-| [AGENT_BUS_SCHEMA.md](AGENT_BUS_SCHEMA.md) | exact version-one event fields, bounds, authority, and lifecycle laws |
-| [AGENT_REVIEW.md](AGENT_REVIEW.md) | mandatory distinct-author/reviewer nomination, review, and reviewer-owned merge protocol |
 | [MEMORY_MODEL.md](MEMORY_MODEL.md) | memory, provenance, borrowing, concurrency, faults |
 | [OBLIGATIONS.md](OBLIGATIONS.md) | linear obligations, transfer, exit dispositions |
 | [REFINEMENT.md](REFINEMENT.md) | refinement proof concerns, weaving, provider realization, generated/authored machine routes |
@@ -48,13 +46,10 @@ No document may override a narrower owner by restating it differently.
 | [STDLIB.md](STDLIB.md) | fundamental data structures and reusable proof laws |
 | [PROTOCOL_STDLIB.md](PROTOCOL_STDLIB.md) | candidate protocol-package shape, staged obligations, and HTTP/2/gRPC composition |
 
-Coordination protocol evolution is drafted separately in
-[AGENT_COORDINATION_EVOLUTION.md](AGENT_COORDINATION_EVOLUTION.md). It is a
-review candidate, not an amendment to the active version-one bus.
-[AGENT_WORKSTREAM_TRANSITION.md](AGENT_WORKSTREAM_TRANSITION.md) separates
-durable provider-neutral responsibilities from model-backed agent identities
-and specifies safe provider exhaustion, replacement, and return. It is likewise
-a review candidate until its protocol support is implemented and activated.
+Development follows the spike-first rebuild workflow in
+[CONTRIBUTING.md](../CONTRIBUTING.md). Former coordination documents and
+implementation plans are retired; references to their sections in older code
+comments are historical provenance available in Git, not active instructions.
 
 ## Review and delivery
 

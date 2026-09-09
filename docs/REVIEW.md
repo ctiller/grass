@@ -408,3 +408,104 @@ Nonblocking findings:
 Required ratchet gates:
 Residual trust accepted:
 ```
+
+## Implementation peer review
+
+Review the actual diff and surrounding implementation at each checkpoint.
+Use fresh review contexts at major boundaries.
+
+### 1 Intent and architecture
+
+- The implementation matches its normative requirement.
+- Behavior, proof demand, trust assumptions, and public interfaces are not
+  silently weakened.
+- The change respects module direction, sharding, and invalidation boundaries.
+- Novel policy is explicit rather than invented by automation.
+
+### 2 Lean and proof integrity
+
+- The theorem is strong, non-vacuous, and connected to its consumer and root.
+- No axiom, `sorry`, unchecked certificate, test, execution, or digest replaces
+  proof.
+- Automation consumes declared invariants and exposes residual goals.
+- Existentials, opaque certificates, source closure, parser/writer laws, and
+  emitted artifacts retain their authority connections.
+- Stable names do not hide changed semantic dependencies.
+
+For every material Lean theorem added, changed, or newly relied upon, review is
+about the proposition and its use—not whether a declaration happens to compile.
+The reviewer records a proportionate proof assessment covering the following
+questions. Closely related routine lemmas may be assessed as one family.
+
+1. **Role and adequacy.** What claim does the theorem establish, which root or
+   exported contract consumes it, and why is that claim the right strength for
+   the normative demand? The report also states what the theorem does *not*
+   establish when a plausible stronger reading would be unsafe. A green build,
+   impressive theorem name, or large declaration count is not adequacy evidence.
+2. **Quantification and coverage.** Inputs, API results, schedules, faults,
+   allocation choices, and other admitted entropy are universally quantified at
+   the correct boundary. Concrete evaluations, fuzz cases, examples, and
+   execution traces are fixtures only. They may refute a theorem or validate a
+   model boundary; they never prove domain coverage. `bv_decide` is acceptable
+   when it produces a kernel-checked proof of the universally quantified finite
+   proposition. `native_decide` is not proof authority, and a closed point proof
+   is acceptable only for a genuinely closed point claim.
+3. **Method and trust.** The proof method matches the structure of the claim:
+   induction covers every constructor or recursive descent; extensional proofs
+   compare every observable component; decidability procedures close the stated
+   proposition rather than a sampled surrogate; and imported lemmas have the
+   required hypotheses. The transitive axiom/unsafe audit must satisfy
+   [FOUNDATION.md](FOUNDATION.md). Automation must be a checked certificate
+   producer or consumer with a documented residual-goal boundary, never hidden
+   invariant discovery or admission.
+4. **Non-vacuity and adversarial resistance.** Premises are jointly inhabitable,
+   conclusions discriminate good from bad behavior, and representation or
+   refinement relations actually connect the two intended objects. For each
+   material theorem family the reviewer attempts a proportionate refutation:
+   construct a negative instance, weaken a hypothesis, remove a guard, mutate a
+   relation, or otherwise try to preserve acceptance while violating the claimed
+   property. The report states the attempted refutation and what rejected it, or
+   explains concretely why a meaningful refutation was impractical. Such attacks
+   challenge the statement and connection; they do not replace universal proof.
+5. **Proof economy and generality.** Prefer a small reusable lemma over repeated
+   case splits, and a structural theorem over pointwise enumeration. Concision
+   means that domain structure and reusable library laws carry the argument; it
+   is not raw line minimization, proof-term opacity, or a one-line tactic that
+   conceals unbounded search and brittle residual obligations. Bespoke proof is
+   justified when the implementation is genuinely novel or the theorem is
+   intrinsically local.
+
+The review record for a Lean-bearing change summarizes why the
+important theorem families are adequate, how universal coverage was checked,
+which refutations were attempted and survived, which proof/trust audits ran,
+and any meaningful insufficiency that remains.
+It need not reproduce proofs line by line, but it must be specific enough that a
+later reviewer can distinguish a proved contract from a fixture, convention, or
+aspirational comment.
+
+### 3 Implementation and assembly
+
+- Relevant failure, partial I/O, nondeterminism, faults, cancellation, cleanup,
+  and incoming entropy are handled.
+- Memory, provenance, ownership, races, obligations, ABI, CFG, and block
+  contracts are respected.
+- Generated instruction fragments remain inspectable and replaceable by raw
+  same-contract assembly.
+- Serialization retains its round-trip, accepted-input, and format laws.
+
+### 4 Tests and external validation
+
+- Positive tests exercise intended paths without masquerading as proof.
+- Negative and mutation fixtures reject relevant weakenings.
+- API, ISA, and protocol claims retain citations and boundary probes.
+- The reviewer independently runs risk-proportionate checks and records them.
+- Claimed build and `.olean` locality has the required evidence.
+
+Every test, audit, probe, mutation, or negative fixture offered as assurance must
+be shown to discriminate the defect class it claims to exclude. Normally this
+means running a negative control: reintroduce the defect, remove the intended
+guard, or supply a known-invalid specimen and observe the check fail for the
+claimed reason. If a safe negative control is impractical, the review records
+why and what weaker evidence was obtained. A guard that cannot be made to fail
+is not evidence for that exclusion claim, even when it remains a useful positive
+regression test.

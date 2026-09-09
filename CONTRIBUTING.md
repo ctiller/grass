@@ -48,13 +48,6 @@ powershell.exe -NoProfile -File .\check-spike-sources.ps1
 powershell.exe -NoProfile -File .\check-doc-links.ps1
 ```
 
-Review nominations must put the exact command the selected reviewer will run in
-`required_checks`. Choose either the `pwsh` or `powershell.exe` spelling for
-that reviewer's host; do not list both unless both executions are required. A
-reviewer must execute and report that exact command. Running the other spelling
-does not satisfy an already nominated command, because the bus compares the
-recorded command text exactly.
-
 The Lake commands compile the Lean libraries, and the trust command audits
 project declarations and named public roots for rejected transitive axioms, then
 rejects unverified `implemented_by` and `extern` replacements in the verified
@@ -67,17 +60,44 @@ commands is an end-to-end proof of the eventual assembler or executable.
 
 ## Review
 
-Every product change requires a distinct author and reviewer. Agent-authored
-work follows [the agent review protocol](docs/AGENT_REVIEW.md): the author
-nominates a reviewer on the coordination bus, and the reviewer merges a named
-branch only after it merges cleanly and the review is satisfied. Force-pushes
-are prohibited by that protocol.
+Every product change receives independent peer review of the actual diff and
+relevant surrounding code. The author may commit and push a reviewed checkpoint;
+there is no bus registration, nomination, role assignment, or reviewer-owned
+merge requirement. Review findings and checks are recorded with the checkpoint
+or pull request. Unresolved findings block acceptance. Reviewers run risk-proportionate checks
+on the reviewed candidate and report exact commands and results. A reviewer who
+authors material fixes needs another independent reviewer for those fixes. Use
+fresh reviewer contexts at major boundaries so inherited assumptions receive
+another independent look. Never force-push shared branches.
 
-Public contribution hosting may add pull requests as an intake mechanism, but
-a pull request does not replace substantive review. Reviewers should challenge
+Reviewers apply [the substantive review standard](docs/REVIEW.md), challenging
 specification adequacy, proof feasibility, proof economics, assembly freedom,
-change blast radius, source authority, and whether the proposed program is one
-we would actually ship.
+change blast radius, source authority, and fitness for the implementation brief.
+
+## Spike-first rebuild workflow
+
+Complete Hello World, sort, gzip, HTTP/2 server, then spinning cube, in order.
+Hold each existing spike's behavior and authored source steady except for a
+demonstrated defect or an implementation approach that proves unreasonable.
+Record the reason for such changes and retain the annotated/source mirror.
+Internal library interfaces may change to meet that acceptance surface.
+
+Work through the active spike's complete specification-to-artifact chain. Add or
+refine library code when that chain needs it; do not build independent layers
+merely to satisfy a speculative roadmap. A compiling fixture or runnable binary
+alone does not finish a spike: its acceptance document and implementation ratchet
+require the connected proofs, exact bytes, failure cases, and rebuild evidence.
+
+Preserve existing agent branches as spare parts. Mine selected code from them and
+from predecessor projects, checking its theorem strength, dependencies, and exact
+source connections before reuse. No bulk merge is implied by a useful fragment.
+Historical plan section numbers and bus event IDs in implementation comments are
+provenance available in Git history, not current authority or work assignments.
+New guidance belongs with its narrow owning design document.
+
+Publish reviewed, validated checkpoints to GitHub during development. Keep the
+current spike's remaining obligations concrete and small; do not recreate the
+retired coordination system or per-layer implementation plans.
 
 Do not include confidential vulnerability details in an ordinary issue or
 review. Follow [SECURITY.md](SECURITY.md) instead.

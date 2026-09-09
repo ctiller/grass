@@ -166,7 +166,8 @@ For material theorem families, the reviewer distinguishes universal proofs from
 point fixtures, checks non-vacuity and connection to their consumers, records
 why the proved statement is sufficient and where it is deliberately weaker,
 and assesses proof economy by reusable abstraction rather than raw line count.
-[AGENT_REVIEW.md](AGENT_REVIEW.md) owns the operational review standard.
+[REVIEW.md](REVIEW.md) owns substantive peer review;
+[CONTRIBUTING.md](../CONTRIBUTING.md) owns the development workflow.
 Any new mandatory prerequisite of `VerifiedProgram`, `emitProgram`, or their
 transitive closure changes the public verification contract and requires an
 explicit normative design decision with feasibility, burden, sharding,

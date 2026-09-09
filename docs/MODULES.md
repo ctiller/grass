@@ -138,8 +138,8 @@ remain explicit profile values selected through this API; neither belongs in
 the module path. In particular, the spike spelling `Grass.Platform.Win10.X64`
 must be replaced by `Grass.Platform.Win32`, not retained as an alias that
 conflates an API family, deployment floor, architecture, and ABI. The spike-side
-replacement, including the Vulkan profile spelling, is tracked by agent-bus
-dependency `g-design:86` rather than claimed complete here.
+replacement, including the Vulkan profile spelling, remains an integration
+obligation to check against the fixed authored surface when that spike is built.
 
 `Grass.Emit` is the safe verified-emission facade. It exposes `VerifiedProgram`
 and the checked `emitProgram` entry point, plus only the result vocabulary

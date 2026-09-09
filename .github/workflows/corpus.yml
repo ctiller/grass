@@ -38,7 +38,7 @@ jobs:
       # c-x86 (c-agent:78). The pattern below is the only place their old paths
       # are written, because this comment is in the gate's own scope. A leftover
       # reference to any of them is worse than a broken link, which is why it
-      # gets a gate rather than a note: docs/STDLIB_IMPLEMENTATION_PLAN.md
+      # gets a gate rather than a note: the retired stdlib plan
       # listed a run of one old path as an exit criterion, so a stale path is a
       # criterion nobody can run, and a docstring resting its claim on a deleted
       # script is evidence nobody can chase. Both read as verification and
@@ -66,83 +66,3 @@ jobs:
             echo "::error::The lines above name a path under Tools/ that no longer exists. Five of these entry points are now binaries in tools/grass-tools; the four x86 ones were deleted with no replacement yet. Name the binary the sentence depends on, or write the sentence as history without the dead path -- and if the sentence claimed a check that no longer runs, say so rather than naming a script nobody can run."
             exit 1
           fi
-
-  agent-bus:
-    runs-on: ubuntu-latest
-    # This job builds two things from source before it can assert anything:
-    # libgit2 (vendored by `libgit2-sys`, since the crate reads and writes the
-    # object database in-process) and `cargo-llvm-cov` for the coverage gate.
-    #
-    # It used to build a third: one exact `git` release, because agent-bus
-    # treated that version as protocol authority and refused to run against
-    # any other. The repository owner rejected that design (g-design:249) --
-    # agents need only ordinary `git pull`/`fetch` and non-force push -- so
-    # this job now runs against whatever `git` the runner image ships, which
-    # is the point. Do not reintroduce a git build step here: it would make
-    # the suite agree with a pin nothing in the crate enforces any more, and
-    # hide the very portability this job is supposed to prove.
-    timeout-minutes: 35
-    defaults:
-      run:
-        working-directory: tools/agent-bus
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Configure git identity for test fixtures
-        run: |
-          git config --global user.email "agent-bus-ci@invalid"
-          git config --global user.name "agent-bus-ci"
-
-      - name: Format check
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        run: cargo clippy --locked --all-targets -- -D warnings
-
-      - name: Build
-        run: cargo build --locked --verbose
-
-      - name: Test
-        run: cargo test --locked --verbose
-
-      - name: Install cargo-llvm-cov
-        run: |
-          rustup component add llvm-tools-preview
-          cargo install cargo-llvm-cov --locked
-
-      # Enforces this crate's nominated ≥95% coverage claim (AGENT_REVIEW.md
-      # `required_checks`) so a later change can't silently regress it.
-      #
-      # `src/multihost_proptest.rs` is excluded from the measured percentage.
-      # It is still compiled and still run -- by the `Test` step above, and
-      # again here, since this step runs the whole suite to collect the
-      # profile. Only its own lines' contribution to the total is dropped.
-      #
-      # It is a `#[cfg(test)]`-only module (see `main.rs`), so it is test
-      # code rather than product code and its own coverage was never part of
-      # the ≥95% claim. It is also the only file in the crate whose coverage
-      # is not a property of the code at all: it is the crate's sole user of
-      # randomness, and it draws a fresh proptest seed every run on purpose
-      # -- see the `config()` doc comment in that file, which explains that
-      # it leans on being run repeatedly rather than on breadth within any
-      # one run. At four generated cases a run reaches only whichever `Op`
-      # arms that seed produced, leaving the remaining arms of both the
-      # executor and its oracle unexecuted, and its `trace` block sits behind
-      # `AGENT_BUS_PROPTEST_TRACE`, which no ordinary run sets.
-      #
-      # That is enough to decide this gate by itself. Four runs of one
-      # unchanged commit measured this file at 84.70%, 85.36%, 85.46% and
-      # 90.38% of its own lines -- and the run on this runner that first
-      # surfaced the problem measured it at 79.78%. The crate totals for
-      # those four were 94.84%, 94.87%, 94.88% and 95.16%, so the same
-      # source both failed and passed the 95% line gate depending on
-      # nothing but the seed it drew. Everything else is
-      # deterministic -- all four runs missed exactly the same 687 lines
-      # outside this file -- so excluding it makes the gate measure the
-      # product code and return the same answer every time (95.45% lines,
-      # 95.97% regions on all four).
-      - name: Coverage threshold
-        run: cargo llvm-cov --locked --all-targets --ignore-filename-regex 'multihost_proptest\.rs' --fail-under-lines 95 --fail-under-regions 95

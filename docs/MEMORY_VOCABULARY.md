@@ -1,33 +1,22 @@
-# Memory vocabulary: what is frozen and what is provisional
+# Historical memory vocabulary assessment
 
-`MEMORY_IMPLEMENTATION_PLAN.md` §3 makes this note an M1 exit criterion:
+This is a retained implementation assessment from before the spike-first reset.
+Its tables preserve concrete compatibility concerns and proof debts for review
+when the active spike reaches them. They are not a current freeze, work assignment,
+or certification that every description still matches the tree. Internal
+interfaces may be rebuilt to meet the reviewed spike, with explicit treatment of
+consumers and proof dependencies.
 
-> A published `MEMORY_VOCABULARY.md` note lists, declaration by declaration, which
-> shapes are frozen under the §7 anti-churn policy and which are explicitly
-> provisional.
+The former memory implementation plan and its numbered sections are available in
+Git history. References below to its milestones or review rounds are historical.
+The named Python audits below are not available current checks; use the actual
+commands in CONTRIBUTING.md and inspect the relevant declarations. Status claims
+must be revalidated against code before using them as evidence.
 
-This is that note. It is tier 4 like the plan: it records status and cannot override
-`FOUNDATION.md`, `MEMORY_MODEL.md`, or `DECISIONS.md`.
+This note cannot override FOUNDATION.md, MEMORY_MODEL.md, or DECISIONS.md.
 
-**Read "frozen" narrowly.** A frozen declaration is one whose *shape* — its fields or
-constructors — a consumer may depend on without expecting a churn cost. It is not a
-claim that the declaration is correct, complete, or sufficient. Several frozen
-entries below have open obligations recorded against them in §4.2 and §4.4.1 of the
-plan, and a frozen shape with a gap behind it is exactly the thing the anti-churn
-policy is for: the gap is closed by adding mechanism, not by moving fields.
+## Previously assessed stable shapes
 
-**Read "provisional" as a warning to consumers**, not as a plan to change. A
-provisional entry is one where a named future milestone or another owner is expected
-to add to it, so a consumer that pattern-matches exhaustively on it will break.
-
-The five audits in `Tools/` are what stop this note drifting from the tree:
-`ReachabilityAudit.py` reports a constructor nothing builds, `ConsultedAudit.py` a
-field nothing reads, `CitationAudit.py` a name in prose that does not exist. A
-declaration listed here that no longer exists fails the citation audit.
-
----
-
-## Frozen
 
 ### Identity and naming
 
@@ -71,7 +60,7 @@ declaration listed here that no longer exists fails the citation audit.
 |---|---|---|
 | `AllocationRecord` | `extent`, `epoch`, `space`, `source`, `owners`, `permission`, `live`, `bytes`, `base` | `initialized` was removed as a second source of truth. `base` is an `Option` because a logical address space has unplaced allocations. This row omitted `source` and `owners`, both load-bearing: `source` feeds `provenanceSourceMismatch` and `owners` feeds `refusalOf`'s owner exemption. |
 | `AllocationRecord.Metadata` | the seven fields a decision reads | Kept in step with what `denialOf` reads; `base` joined it when the address check landed. |
-| `MemoryState` | `allocations`, `aliases`, private `grants` | The constructor and the grant field are private. Five doors change the grant map -- `issue?`, `returnGrant?`, `splitGrant?`, `joinGrants?`, `transferGrant?` -- and `Tools/DoorAudit.py` is what says nothing else does. |
+| `MemoryState` | `allocations`, `aliases`, private `grants` | The constructor and the grant field are private. Five doors change the grant map -- `issue?`, `returnGrant?`, `splitGrant?`, `joinGrants?`, `transferGrant?` -- and the historical door audit was intended to check that no other path did. |
 | `MachineState` | as declared | |
 | `AuditViolation`, `AuditViolationLedger` | as declared | The ledger's records are private; `records?` is the read view. |
 
@@ -116,7 +105,7 @@ declaration listed here that no longer exists fails the citation audit.
 | `AddressSpace` | Gains fields as device and GPU profiles arrive. | M9 |
 | `AdmittedVocabulary` | Gains a registry whenever a new open nominal identity is introduced, and has five times already: ordering modes, ordering scopes, and three justification registries. A profile constructing one positionally will break. | this layer, ongoing |
 | `AuthorityGrant` | Gains `lifetime` and `conditions`, which §3's map carries and this does not. Deliberately deferred: a field nothing consults is the defect this layer has removed three times, and a bounded lifetime has something to mean once frames exist. | M4 |
-| `AuthorityState` | May gain a constructor if §3's open list grows, and `authorityOf` must build it — `ReachabilityAudit.py` is the gate. | this layer |
+| `AuthorityState` | May gain a constructor if §3's open list grows, and `authorityOf` must build it — the historical reachability audit was intended to check this. | this layer |
 | `FaultVisibility.profileSpecific` | The registry holds a *name* and `visibleEffects?` still refuses to guess, so registering a rule unblocks only the non-faulting path. The registry must eventually map a name to a survivor rule. | this layer, recorded in §4.2 |
 | `InitializationDemand` | Per access, where §4 asks for granularity "required to justify every read". A struct copy with padding must currently turn the check off for the whole range. | this layer, recorded in §4.2 |
 | `OperationFacets.ordering` (in `Grass/Op/`) | Single-valued, so an operation whose substeps differ in ordering cannot say so. | this layer, recorded in §4.2 |

@@ -12,7 +12,7 @@
 //! `decodeInsn_toBytes` came to be described as evidence about x86 -- and the
 //! check is cheap. This comment describes what the code does.
 //!
-//! docs/MEMORY_IMPLEMENTATION_PLAN.md section 3.10:
+//! docs/VALIDATION.md implementation-comment evidence:
 //!
 //! > Any implementation comment using "ensures", "prevents", "cannot", "only", or
 //! > "preserves" must name the enforcing type or theorem. If it cannot name one, it
@@ -186,8 +186,8 @@ const HEDGES: &[&str] = &[
 /// but the letters in an operand size, which in an x86 tree was only going to
 /// get worse.
 ///
-/// The milestone labels stay. They refer to the milestones of
-/// `docs/MEMORY_IMPLEMENTATION_PLAN.md`, so a sentence naming one is describing
+/// The milestone labels stay. They refer to the retired memory implementation
+/// plan preserved in Git history, so a sentence naming one is describing
 /// work that is not built yet -- which is a hedge in exactly the sense this list
 /// means. The reviewer read them as review scratch and the Python briefly agreed;
 /// both were wrong, and removing them would have suppressed a legitimate
@@ -1028,7 +1028,7 @@ mod tests {
         let known = known_set(&["f"]);
         assert!(check(
             "Grass/X.lean",
-            "/-- docs/MEMORY_IMPLEMENTATION_PLAN.md says \"the type ensures it\". -/",
+            "/-- docs/VALIDATION.md says \"the type ensures it\". -/",
             &known
         )
         .is_empty());

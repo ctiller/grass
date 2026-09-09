@@ -125,3 +125,12 @@ engine's reuse claims and cache-key sufficiency.
 
 Published-corpus lint also rejects audience/workstation idioms used as evidence,
 including “worked on my machine,” in addition to literal private topology.
+
+## Implementation-comment evidence
+
+Strong implementation-comment claims (including "ensures", "prevents", "cannot",
+"only", "preserves", and "append-only") must name the enforcing type, theorem,
+or transition invariant. If no mechanism enforces the claim, state it as an
+intended invariant or open obligation. This includes theorem docstrings: the
+statement may be weaker than the prose. The `docstring-audit` tool checks named
+enforcement shallowly; substantive peer review checks that it proves the claim.

@@ -1,6 +1,0 @@
----
-source: tests/cli_flow.rs
-assertion_line: 2535
-expression: out
----
-[]

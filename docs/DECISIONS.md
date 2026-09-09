@@ -553,69 +553,24 @@ to imitate compiler-selected storage or CFG structure.
     ground precious vocabulary. Spike 4 names its endpoint and client response
     theorem; Spike 5 names geometry, colors, angular velocity, and conditional
     productivity, and observations do not carry proofs of their own acceptance.
-107. Cross-provider implementation coordination uses the orphan
-    `refs/heads/agent-bus` branch. Each registered agent exclusively appends to
-    segmented `<agent>/<six-digit-segment>.jsonl` logs with 1,000 events per
-    segment. Events are immutable and causal; current scope, plan, progress,
-    issue, dependency, handoff, and review state is derived by replay rather
-    than stored in shared mutable files.
-108. Every product change reaching `main` has at least one author agent and one
-    distinct eligible reviewer agent. An author nominates the reviewer for a
-    named product branch, which may continue advancing during review. The
-    reviewer takes the nomination and either requests changes, declines, or
-    personally merges a reviewed snapshot cleanly into current `main`. The
-    receipt records the snapshot actually incorporated. There is no separate
-    approval token returned to the author, and authors do not merge their own
-    changes. Force pushes are forbidden on all protocol branches.
-109. Every agent-bus identity has one immutable primary role: `implementor`,
-    `reviewer`, `coordinator`, or `observer`. Product authoring and review/merge
-    authority are deliberately separated between implementor and reviewer
-    identities. Changing workload requires a new agent name rather than a role
-    mutation, so dedicated review remains visible and mechanically checkable.
-110. Reviewer silence, quota exhaustion, or provider loss never transfers
-    authority implicitly. An author or bootstrap-authorized coordinator may emit
-    `review.reassigned`, preserving the request and its open findings and
-    requiring a different reviewer to accept. Only that reviewer may clear or
-    explicitly supersede inherited findings. A published merge
-    authorization remains an immutable candidate-specific verdict and can only
-    win or lose its ordinary non-force push. If a reviewer disappears
-    after winning but before its receipt, a bootstrap-authorized coordinator may
-    reconcile only the already-demonstrable product-history fact.
-111. Product merge review is two-phase. Active version two uses a combined
-    `review.merge_authorized` that pins the bus state, previous `main`, reviewed
-    commit, exact merge candidate, passed checks, and reviewer before a
-    non-force push; `review.merged` is the post-push audit receipt. The successor
-    schema splits immutable source approval from bounded candidate landing so
-    unrelated `main` advancement preserves substantive review. Every candidate
-    is still an exact two-parent reviewer-trailed object. Its tree is checked by
-    a host-independent parent-entry relation with exhaustive overlap disclosure,
-    not by cross-host reconstruction. Reviewers never edit candidate trees.
-    Losing a normal push reruns only landing checks; broader post-merge failures
-    receive a forward repair or reviewed revert. Protected landing checks are
-    selected only from the reviewed registry in `previous_main`. A dedicated
-    auditor records each post-merge run in a separate non-authoritative,
-    machine-readable observation; this cannot grant review or merge authority.
-    Active version two retains its combined full-rerun behavior until the
-    successor events and fixtures are reviewed and activated.
-112. Agent-bus V1 has complete bounded schemas in `AGENT_BUS_SCHEMA.md`, a
-    65,536-byte event-line limit, causal same-agent offline references, explicit
-    work reassignment, deterministic scope-race defaults, validation CI, and
-    malformed-log quarantine limited to unrelated diagnostic publication. The
-    helper audits product history but, in the cooperative shared-credential
-    model, does not claim it can prevent a direct push performed outside itself.
-113. Bus-tree structural validity and product-object linked verification are
-    distinct. Missing/unreachable remote objects make linked claims
-    `unverifiable`, not malformed; authority-bearing operations still fail
-    closed until fetch and verification succeed. Present mismatches are invalid.
-114. Exact Git-version pinning and cross-host candidate reconstruction are
-    rejected. Historical version-two engine epochs remain readable diagnostics,
-    but successor authority binds the exact fetched candidate plus the
-    host-independent tree relation in Decision 111. A host needs ordinary Git
-    fetch/pull and non-force push; Git version cannot block bus reduction,
-    coordination, custody transfer, review, or landing.
-115. `agent.resumed` may transfer exclusive custody from the identity's latest
-    own lifecycle event of any status or a coordinator retirement targeting it,
-    so silent death while `active` does not strand the identity or its role.
+107. Retired by decision 135: agent-bus coordination and merge machinery.
+    The former text remains in Git history; it imposes no current workflow.
+108. Retired by decision 135: agent-bus coordination and merge machinery.
+    The former text remains in Git history; it imposes no current workflow.
+109. Retired by decision 135: agent-bus coordination and merge machinery.
+    The former text remains in Git history; it imposes no current workflow.
+110. Retired by decision 135: agent-bus coordination and merge machinery.
+    The former text remains in Git history; it imposes no current workflow.
+111. Retired by decision 135: agent-bus coordination and merge machinery.
+    The former text remains in Git history; it imposes no current workflow.
+112. Retired by decision 135: agent-bus coordination and merge machinery.
+    The former text remains in Git history; it imposes no current workflow.
+113. Retired by decision 135: agent-bus coordination and merge machinery.
+    The former text remains in Git history; it imposes no current workflow.
+114. Retired by decision 135: agent-bus coordination and merge machinery.
+    The former text remains in Git history; it imposes no current workflow.
+115. Retired by decision 135: agent-bus coordination and merge machinery.
+    The former text remains in Git history; it imposes no current workflow.
 116. The specification/process boundary forms an acyclic diamond. A neutral
     `Specification` layer owns `DriverBoundary`, demand/result vocabulary,
     requirement keys, and other typed junctions imported by both sides.
@@ -677,12 +632,10 @@ to imitate compiler-selected storage or CFG structure.
     automatically. The unqualified `ProcessTopology` name may not denote a
     weaker value while prose assumes absent lifecycle authority. This resolves
     `c-process:10` under acknowledgement `g-design:5`.
-123. Normative ratifications are durable product content, not bus-only state.
-    `DECISIONS.md` records each accepted decision using stable numbering and
-    cites the originating and ruling agent-bus event identifiers when applicable.
-    Bus events retain routing, custody, and timing; this file owns the rule that
-    implementations and normative documents must follow. This resolves
-    `coord1:14` under acknowledgement `g-design:6`.
+123. Normative product decisions are published in this file using stable
+    numbering and folded into the narrowly owning documents. Agent messages,
+    historical bus events, and review discussions are provenance, not an
+    independent source of current product requirements.
 124. An open nominal metadata axis may use a closed carrier with an exact
     extension key such as `(owner, kind)` only when the value selects an
     identity and carries no fallback semantics. Consumers that need laws for an
@@ -847,6 +800,18 @@ to imitate compiler-selected storage or CFG structure.
     of every `Grass/Process/**` module. This resolves the three-way
     spike/foundation/module mismatch raised by `c-spike` while retaining the
     process layer's no-import-all invariant.
+135. Development is spike-first and rebuild-oriented. The Lean correctness
+    specification and prose implementation brief are maintained intent; generated
+    or authored implementation is replaceable output constrained by both. Retire
+    the agent-bus helper, coordination protocol, and per-layer implementation
+    plans while retaining all existing branches as spare parts. Independent peer
+    review remains required; CONTRIBUTING.md owns the simplified workflow.
+    Complete the existing spikes in order, changing their authored surface only
+    for demonstrated defects or an unreasonable realization. This retires the
+    workflow in decisions 107–115, not substantive proof, safety, source identity,
+    or spike acceptance requirements. Internal implementation interfaces remain
+    revisable without silently weakening those requirements.
+
 ## Explicitly rejected shortcuts
 
 - bolting memory safety on after an instruction library exists;
