@@ -18,11 +18,11 @@ open Grass.Platform.Win32.WriteFile
 variable {R Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
   {spec : SpecProcess resources}
   {projection : CapturedTargetProjection spec Status}
-  {realization : Realization} {initial before after : CallProtocol.State Request}
+  {plan : LoanPlan} {realization : Realization} {initial before after : ProtocolState}
   {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-  {frontier : Prefix before call record}
-  {history : History realization initial call record frontier}
-  {relation : HandoffRelation projection}
+  {frontier : Prefix plan before call record}
+  {history : History plan realization initial call record frontier}
+  {relation : HandoffRelation (plan := plan) projection}
 
 /-- The concrete observed view is computed from the already captured request. -/
 abbrev observedModel (projection : CapturedTargetProjection spec Status) :=
@@ -83,7 +83,7 @@ theorem observed_output_exact (aligned : Aligned relation history) :
 
 /-- A zero publication leaves the entire reached observed history unchanged. -/
 theorem observed_extend_zero (aligned : Aligned relation history)
-    {nextState : CallProtocol.State Request} {post : Prefix nextState call record}
+    {nextState : ProtocolState} {post : Prefix plan nextState call record}
     (action : Action) (output : Vec Byte)
     (step : CommittedStep realization frontier post action output)
     (same : post.accepted = frontier.accepted) :
@@ -94,7 +94,7 @@ theorem observed_extend_zero (aligned : Aligned relation history)
 
 /-- The exact observed suffix corresponding to a positive provider publication. -/
 noncomputable def observedPublicationPath (aligned : Aligned relation history)
-    {nextState : CallProtocol.State Request} {post : Prefix nextState call record}
+    {nextState : ProtocolState} {post : Prefix plan nextState call record}
     (action : Action) (output : Vec Byte)
     (step : CommittedStep realization frontier post action output)
     (positive : frontier.accepted < post.accepted) :
@@ -109,7 +109,7 @@ noncomputable def observedPublicationPath (aligned : Aligned relation history)
 
 /-- Positive publication appends to the exact previously reached observed history. -/
 theorem observed_extend_positive (aligned : Aligned relation history)
-    {nextState : CallProtocol.State Request} {post : Prefix nextState call record}
+    {nextState : ProtocolState} {post : Prefix plan nextState call record}
     (action : Action) (output : Vec Byte)
     (step : CommittedStep realization frontier post action output)
     (positive : frontier.accepted < post.accepted) :

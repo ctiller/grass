@@ -219,11 +219,11 @@ The caller must supply the real DWORD-load connection into RAX; no load or
 resume is manufactured from the logical return. The observed prefix is retained. -/
 theorem retry_observed {R Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
     {spec : SpecProcess resources} {projection : CapturedTargetProjection spec Status}
-    {realization : Realization} {initial pending after : CallProtocol.State Request}
+    {plan : LoanPlan} {realization : Realization} {initial pending after : ProtocolState}
     {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-    {frontier : Prefix pending call record}
-    {history : History realization initial call record frontier}
-    {relation : HandoffRelation projection} {aligned : Aligned relation history}
+    {frontier : Prefix plan pending call record}
+    {history : History plan realization initial call record frontier}
+    {relation : HandoffRelation (plan := plan) projection} {aligned : Aligned relation history}
     {selected : ReturnInterpretation} {result : ReturnResult}
     (returned : Returned aligned selected result after)
     (success : result.rawBool ≠ 0) (positive : 0 < frontier.accepted)
