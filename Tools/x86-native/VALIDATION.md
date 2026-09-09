@@ -1,5 +1,43 @@
 # Initial campaign and open finding
 
+## Scratch-stack follow-up
+
+The success-only extension described in [STACK.md](STACK.md) was validated on
+the same virtualized Intel Windows host, based on integrated `ed8db295`.
+
+```bash
+bash Tools/x86-native/build.sh target/x86-native/stack-parent-v2
+python -O Tools/x86-native/run_stack.py --worker target/x86-native/stack-parent-v2/windows.exe --output target/x86-native/stack-campaign-2
+python -O Tools/x86-native/run.py --worker target/x86-native/stack-parent-v2/windows.exe --output target/x86-native/stack-register-regression-3
+```
+
+Results: 21 stack cases, zero mismatches, seven execution/comparator controls
+and a footprint-identity negative control; the original 870 cases and nine
+controls also pass. The stack cases cover all sixteen PUSH GPRs, resolved
+allocations 112 and 128 (signed imm8 versus imm32), and three generated public
+prologues with total decreases 72, 72 and 120. Every scratch byte is compared;
+arithmetic flags, failed instruction memory and intermediate/out-of-region
+effects remain outside this evidence.
+
+Repository checks also passed: `lake build`, `lake build Tests`,
+`bash audit-trust.sh` (75 declarations, eight executable modules),
+`bash check-source-input.sh` (13 source embeddings),
+`bash check-spike-sources.sh`, `bash check-doc-links.sh` (53 documents), and
+`git diff --cached --check`.
+
+The memory-model owner and independent harness reviewer approved the final
+success-only boundary. Review fixed footprint identity, post-start unexpected
+exception handling, and self-validation of a mutable restore slot. The reviewer
+independently rebuilt the final worker, ran the controls, and verified a
+stack-mode UD2 failure produces unjudged memory. The restore source is now on a
+read-only page and completion uses an independent original-RSP value. The
+initial concurrent register campaign lost its worker executable while the same
+default build path was also used by the reviewer; it was retained as an incomplete run, then replaced
+by the successful isolated `stack-register-regression-3` above. Use distinct
+worker output directories for concurrent reviews and campaigns.
+
+## Original register campaign
+
 2026-09-09, integration base `28e5767b`. Windows 11 build 26200, x86-64,
 CPUID vendor `GenuineIntel`, leaf 1 EAX `722594` (`0x000b06a2`). The hypervisor
 bit is set. Microcode is unknown. This is virtualized host execution evidence,

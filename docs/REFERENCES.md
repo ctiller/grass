@@ -25,6 +25,11 @@ sufficient declaration-level anchors.
 - Microsoft, *Vectored Exception Handling* (native validation harness; retrieved
   2026-09-09, handler ordering before stack unwinding):
   https://learn.microsoft.com/en-us/windows/win32/debug/vectored-exception-handling
+- Microsoft, `VirtualAlloc`, `VirtualProtect`, and `GetCurrentThreadStackLimits`
+  (scratch-stack validation harness; retrieved 2026-09-09):
+  https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualalloc
+  https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualprotect
+  https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentthreadstacklimits
 
 - Microsoft, *x64 calling convention*:
   https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention
