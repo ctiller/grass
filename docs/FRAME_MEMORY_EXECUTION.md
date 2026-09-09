@@ -22,6 +22,12 @@ they do not define another architectural transfer. The actual fetch and data
 run share one policy, context, and cause, and the data descriptor uses ordinary
 ordering with no authority or obligation transfers.
 
+Both generic normal receipts require a present data-allocation base. A
+successful access preparation alone is insufficient: an unplaced allocation
+can pass preparation without checking its numeric address. The placement
+witness connects the actual resolved allocation and range to the instruction's
+effective address.
+
 `StoreNormal.written_exact` derives the payload from the actual memory-oracle
 answer. `memory_written` and `stored_cell` derive the initialized backing
 mutation from that checked transition. `LoadNormal.read` extracts the actual
@@ -37,3 +43,14 @@ total CPU step dispatcher. A future checked classifier can select the shared
 x86 interpretation; source correspondence remains in Assembly. Ordinary
 integer bytes do not create pointer provenance or prove an API argument's
 authority merely because its source declaration names a pointer parameter.
+
+[ExecutionFrameRoundTrip](../Tests/ISA/X86/ExecutionFrameRoundTrip.lean) checks
+a source-derived DWORD store followed by a DWORD load through four actual
+fetch/data steps. The frame starts uninitialized; the load observes the bytes
+committed by the store, and DWORD write-back clears the upper register half.
+[ExecutionFramePrefix](../Tests/ISA/X86/ExecutionFramePrefix.lean) checks the
+inserted DWORD initializer followed by the adjacent QWORD argument store,
+including the actual initialized zero cells committed by both writes. These
+fixtures begin with an allocated frame at the selected instruction.
+[ExecutionMemoryMoveUnplaced](../Tests/ISA/X86/ExecutionMemoryMoveUnplaced.lean)
+checks that an unplaced resolution cannot construct either normal receipt.
