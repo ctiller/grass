@@ -80,11 +80,11 @@ extension unless spikes explicitly assigns it otherwise.
 * `Prologue.codes_stackDelta` in `Grass/ABI/Win64/Unwind.lean` equates total
   stack-depth arithmetic. Its comment explicitly leaves register restoration
   and ordering separate. It is not a full semantic unwind theorem.
-* The inspected Windows PE `OptionalHeader.writeDataDirectories` populates
-  imports and leaves other directories absent. Adding metadata as raw sections
-  without changing this directory path would not complete the connection.
-  The independent reader currently retains the later directory bytes opaquely;
-  its expected records and exact roundtrip proofs must track the extension.
+* Windows PE `OptionalHeader.writeDataDirectories` now populates the exception
+  directory from the checked layout. `exceptionTableValid` checks the actual
+  table and unwind slices, and `ImagePlan.exceptionTable_binding` connects the
+  directory to the independent runtime-table reader. These are container facts;
+  they do not establish source-prologue reversal or loaded execution.
 
 The current regression fixture encodes three two-byte pushes of `r12`, `r13`,
 `r14`, followed by four-byte allocation of 48 bytes. It expects instruction-end
@@ -95,9 +95,10 @@ its encoding or frame changes.
 
 ## Acceptance obligations that remain
 
-1. Extend the PE writer and independent reader/roundtrip to carry the exact
-   exception-directory entry, table bytes and unwind bytes. Check malformed
-   range, alignment and target cases as well as the successful fixture.
+1. Consume the checked PE exception-directory/table extension in the source
+   image composition. The writer, independent reader and malformed range,
+   alignment, payload and target controls are implemented; the same final plan
+   must carry the actual source-derived metadata.
 2. Bind the prologue result to the final code prefix and table range after
    source resolution. Code offsets are relative to the function start, not the
    image base or end of the generated prefix.
