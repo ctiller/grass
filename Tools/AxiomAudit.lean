@@ -45,6 +45,8 @@ import Grass.Assembly.SourceSplice
 import Grass.Assembly.SourceSpliceDecode
 import Grass.Assembly.SourceResolve
 import Grass.Assembly.SourceBytes
+import Grass.Assembly.SourceImage
+import Grass.Assembly.StaticSection
 import Grass.Assembly.SourceStore
 import Grass.Assembly.Store32
 import Grass.Assembly.Store32Execution
