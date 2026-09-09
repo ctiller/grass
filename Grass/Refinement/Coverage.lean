@@ -12,8 +12,9 @@ Finite `ExecutionPrefix` values do not retain their sequence of choices;
 `Completion.infinite` does retain its choice stream. Surjectivity of these maps
 does not supply a missing branching-strategy model, a permanent-wait execution
 constructor, or a stuttering simulation. The certificate gate requires this
-backward coverage beside every adjacent refinement, so verified emission
-preserves all histories represented by the current vocabulary. Decision 137's
+backward coverage beside every adjacent refinement;
+`VerifiedProgram.histories_surjective` exposes coverage of histories represented
+by the current vocabulary. Decision 137's
 full-equivalence gate remains incomplete until the missing history forms are
 represented and covered.
 
