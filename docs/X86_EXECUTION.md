@@ -1,8 +1,9 @@
 # Bounded x86 execution work
 
 The current implementation supplies the carrier, canonical stack-instruction
-selection, actual fetched-memory receipts and a conditional normal SUB RSP
-completion constructor. PUSH execution and unwind reversal remain unfinished.
+selection, actual fetched-memory receipts and conditional normal SUB RSP,
+register PUSH and register MOV completion constructors. Checked saved-value reads and unwind
+reversal remain unfinished.
 [The agreed execution boundary](HELLO_UNWIND_BOUNDARY.md) defines the remaining
 composition with the actual memory checker and final source.
 
@@ -34,8 +35,25 @@ memory machine, production arithmetic, full-RFLAGS normal rule and fetched
 fallthrough RIP. `machine_frame`, `fetched_event`, `events_exact` and
 `state_frame` retain the continuous run and observations.
 
-This is a conditional normal branch, not total instruction execution. Failure to
-construct its receipt says nothing about whether another outcome is possible.
+`PushNormal` joins its actual fetch to an actual prepared eight-byte store under
+the same policy except for the instruction payload oracle. The execution
+context, cause and descriptor contexts are tied together. The descriptor is a
+plain write with neutral obligation and authority effects. A non-wrapping RSP
+decrement and a successfully prepared placed stack span bound this normal branch.
+The payload comes from the pre-instruction source register, including PUSH RSP.
+`written_exact`, `memory_written` and `saved_cell` derive the actual initialized
+backing bytes, rather than accepting an asserted post-state or event payload.
+`events_exact` retains the ordered instruction fetch and saved-value store.
+
+`AccessFree` packages the common continuous fetch-to-access-free-operation run.
+`MoveNormal` selects production register MOV at 32 or 64 bits or register
+immediate MOV at 32 bits. Its result uses the existing register semantics,
+clears RF on ordinary completion, and retains the full memory/obligation frame.
+The 32-bit forms derive upper-half zero extension; the actual fetch event fixes
+the selected encoding. This receipt supplies no emitted-source membership claim.
+
+These are conditional normal branches, not total instruction execution. Failure
+to construct a receipt says nothing about whether another outcome is possible.
 Faults, traps, interruptions and their delivered contexts remain obligations of
 the later total correspondence. Physical input admissibility and the source
 basis remain separate from these model-level constructor laws.
@@ -103,7 +121,14 @@ the actual fetched normal branch and checks RSP, RIP, RFLAGS and another GPR;
 a mismatched immediate has a different encoding. Neither fixture is hardware
 correspondence evidence or an all-execution proof.
 
-Remaining work binds final emitted source to these fetched bytes, adds the PUSH
-store and checked saved-read branches, and carries actual prefix receipts into
+`Op.WriteCompletion` derives the write payload from the actual memory oracle
+answer, and derives the committed memory state from the actual clean prepared
+transition with neutral ghost effects. It does not bypass the ordinary
+preparation, profile admission or authority checks.
+
+Remaining work binds final emitted source to these fetched bytes, adds checked
+saved-read branches, and carries actual prefix receipts into
 unwind reversal. Rejected, denied and permitted fault outcomes remain separate.
 No total x86 execution or partial-unwind proof is claimed by these files.
+The [exact Hello coverage plan](X86_HELLO_COVERAGE.md) assigns the other emitted
+forms without replacing the production source with a second instruction list.

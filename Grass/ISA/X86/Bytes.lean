@@ -59,9 +59,9 @@ def le32 (v : BitVec 32) : ByteSeq :=
 
 /-- A 64-bit value as eight little-endian bytes.
 
-Only `mov r64, imm64` needs this: it is the one form in this profile whose
-immediate is eight bytes, and `Grass.ISA.X86.OpcodeSpec.immSizeFor` is what
-selects it, from the opcode's promotion flag and the prefix's `W` bit. See `Grass.ISA.X86.OpcodeSpec.immSizeFor`. -/
+The helper encodes the immediate for `mov r64, imm64` and the saved register
+payload for `Execution.PushNormal`. `Grass.ISA.X86.OpcodeSpec.immSizeFor`
+selects the eight-byte immediate from the opcode's promotion flag and REX.W. -/
 def le64 (v : BitVec 64) : ByteSeq :=
   [BitVec.extractLsb' 0 8 v, BitVec.extractLsb' 8 8 v,
    BitVec.extractLsb' 16 8 v, BitVec.extractLsb' 24 8 v,
