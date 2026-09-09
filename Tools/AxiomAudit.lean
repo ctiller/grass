@@ -1,4 +1,6 @@
 import Lean
+import Grass.Grammar.Canonical
+import Grass.Artifact.Binary.EndianLaws
 import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
 import Grass.Assembly.X86ControlFlow
