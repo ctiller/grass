@@ -27,6 +27,11 @@ both the annotated document and its comment-free authored source.
    proofs. Tests and fuzzers validate models; they do not prove them.
 6. Keep caches, local worktrees, credentials, generated binaries, and editor
    state out of commits.
+7. During review, ask whether each artifact can be produced deterministically
+   by an algorithm. If it can, compute it; do not make an agent maintain a
+   handwritten copy. Where intelligence is needed to choose an implementation
+   or devise a proof, require an explicit deterministic check of that candidate
+   against the specification. Identify any part that the check does not cover.
 
 Run the repository's current consistency check from its root:
 
@@ -34,16 +39,18 @@ Run the repository's current consistency check from its root:
 lake build
 lake build Tests
 pwsh ./audit-trust.ps1
+pwsh ./check-source-input.ps1
 pwsh ./check-spike-sources.ps1
 pwsh ./check-doc-links.ps1
 ```
 
-The three `.ps1` checks support PowerShell 7 on every supported platform and
+The four `.ps1` checks support PowerShell 7 on every supported platform and
 Windows PowerShell 5.1 on Windows. If `pwsh` is unavailable, invoke them with
 the in-box Windows host instead:
 
 ```powershell
 powershell.exe -NoProfile -File .\audit-trust.ps1
+powershell.exe -NoProfile -File .\check-source-input.ps1
 powershell.exe -NoProfile -File .\check-spike-sources.ps1
 powershell.exe -NoProfile -File .\check-doc-links.ps1
 ```

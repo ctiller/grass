@@ -94,6 +94,10 @@ jobs:
       - name: Build the library
         run: lake build
 
+      - name: Recheck authored source inputs
+        shell: pwsh
+        run: ./check-source-input.ps1
+
       # Built once here so the audit step runs a compiled binary, and so a tool
       # that fails to compile fails the job before any audit has had a chance to
       # report a misleading pass.

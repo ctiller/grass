@@ -33,8 +33,9 @@ the call allocation and saved-register positions from explicit fixture inputs.
 `Grass/ABI/Win64/FrameRanges.lean` exports relative regions and their general
 containment and disjointness laws; the Spike 1 memory fixtures consume those
 laws through a common placement operation. The unwind fixture agrees with the
-computed allocation. Typed-source extraction and instruction-derived unwind
-positions remain unconnected, as does the external call/return ordering proof.
+computed allocation. Source-derived frame inputs beyond local declarations and
+instruction-derived unwind positions remain unconnected, as does the external
+call/return ordering proof.
 
 `Grass/Op/CallProtocol.lean` supplies a checked synchronous loan protocol over
 the existing machine state. Handoff mints identities, records the exact request
@@ -46,6 +47,32 @@ wrapper; its preservation theorem retains the complete resulting machine state.
 including a transient split/join cycle that a final-loan-table check alone would
 miss. These are bookkeeping and operation-composition proofs: they do not yet
 certify a physical ABI return or establish happens-before for the API agent.
+
+`Grass/Assembly/SourceInput.lean` reads the existing `helloSource` assembly body
+and retains its unhandled lines. `Grass/Assembly/SourceStore.lean` resolves a
+selected immediate store using the parsed UInt32 stack declarations: declaration
+order determines local offsets, and the supplied frame must agree with the
+derived local byte count. `Grass/Assembly/Store32.lean` derives the RSP-relative
+operand, encoded instruction, shifted range, and little-endian write bytes from
+that resolution. The actual-source fixtures are re-elaborated by
+`./check-source-input.ps1`, including when Lake would otherwise reuse a cached
+test. Its elaborator embeds the actual file as literal characters; it supplies
+data, while the Lean kernel checks the parsing and resolution result. No copied
+assembly listing supplies the store occurrence.
+
+This is a source-to-construction-data connection for one instruction form.
+The shifted frame base is still an allocation-relative placement parameter,
+without a register-state relation. `Grass/Assembly/Store32Execution.lean` binds
+the resolved bytes to an instruction-scoped answer for exactly one write
+descriptor. The existing `Op.step` performs the safety checks, fault handling,
+commit, and event creation. `Tests/Assembly/SourceStore.lean` checks that the
+actual parsed store reaches the expected memory cells and event without
+violations. A separate adversarial fixture demonstrates that the previous free
+callback can safely commit a different value. The generic answer and truncation
+laws establish exact bytes and fault prefixes; the single-store transition is
+currently checked in the fixture's machine and address environment.
+Other instructions, frame inputs beyond the local declarations, unwind positions,
+and the complete source-to-artifact proof remain open.
 
 ## Specification
 

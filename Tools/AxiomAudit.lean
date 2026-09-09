@@ -1,4 +1,8 @@
 import Lean
+import Grass.Assembly.SourceInput
+import Grass.Assembly.SourceStore
+import Grass.Assembly.Store32
+import Grass.Assembly.Store32Execution
 import Grass.ABI.Win64.Convention
 import Grass.ABI.Win64.FrameRanges
 import Grass.ABI.Win64.Unwind
