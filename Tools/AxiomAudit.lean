@@ -1,4 +1,9 @@
 import Lean
+import Grass.Artifact.Encoding
+import Grass.Artifact.PE.Encoding
+import Grass.Refinement.BehaviorCorrespondence
+import Grass.Refinement.BehaviorCorrespondenceLaws
+import Grass.Refinement.Realization
 import Grass.Semantics.BehaviorModel
 import Grass.Semantics.BehaviorContract
 import Grass.Semantics.Environment
