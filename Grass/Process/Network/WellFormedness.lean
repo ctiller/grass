@@ -1046,7 +1046,7 @@ either.**
 The eighth clause, and `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.115's owed
 invariant. Three constructors can put an entry into a ledger and each carries its
 own freshness field: `SendsEscrow.identityIsFresh`,
-`ResolvesEscrow.createdIdentityIsFresh` (vacuous at every resolution but
+`Coalesces.createdIdentityIsFresh` (vacuous at every resolution but
 `.coalesced`) and `Reroutes.arrivalIdentityIsFresh` at the destination. Every
 other constructor either creates nothing or does not scope the fragment at all.
 

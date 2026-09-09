@@ -152,7 +152,8 @@ structure ProcessPlan (registry : ProtocolRegistry.{u, w, v})
 
   So the policy belongs to the channel. `sources` is the family this step
   consumes and `carrier` is what replaces it;
-  `ResolvesEscrow.carrierIsPermitted` requires the family to be non-empty, to be
+  `Coalesces.sourcesNonempty`, `Coalesces.consumesExactly` and
+  `Coalesces.permitted` require the family to be non-empty, to be
   *exactly* those the step resolved into that carrier, and to satisfy this.
 
   `exactDedup` below is the one-line policy for a channel that only collapses

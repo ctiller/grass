@@ -452,8 +452,8 @@ The attack a reviewer built: `ResolvesEscrow`'s scope is the escrow ledger alone
 so `the_sender_death` below cannot move the session status, and
 `ChannelContract.sendOnOpenSession` asks only that the *session* be open. The
 world it reaches has the sender present and dead and the wire still `.open`, and
-an ordinary second send of this plan was constructible from it — three steps of
-the family, though not of any run: `Tests/Process/PreservationFixtures.lean`'s
+an ordinary second send of this plan was constructible from it, though of no
+run: `Tests/Process/PreservationFixtures.lean`'s
 `no_run_reaches_sentWithDeadSender` says no execution is ever in that world.
 
 `SendsEscrow.senderIsLive` refuses it, and `agent-bus` ruling `g-design:83` is

@@ -450,9 +450,10 @@ version added that nothing can put a detached incarnation in the listener slot a
 `serverPlan`, which has no theorem behind it and is false of the family --
 `Detaches` has three fields and no well-formedness requirement, so a `detach` is
 constructible from a hand-built world whose listener slot holds an attached
-incarnation. It may be true along every run; that is the further step, and this
-section's rule is that such a sentence should become the Lean rather than sit in
-a docstring.
+incarnation. It may be true along every run; that is the further step. A reviewer built the
+`Detaches` in question to check this sentence, so by §10.134's own rule it should
+be a fixture rather than a docstring, and it is not one yet -- recorded here as
+owed rather than left for the next round to find.
 
 `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.132. The invariant is
 stated over an execution rather than over one step because a step-local fact

@@ -428,7 +428,7 @@ theorem a_coalesce_may_not_import_a_carrier
 **And a reroute into a closed session is refused.**
 
 `Reroutes.destinationWasOpen`. A reroute puts a live payload into a session,
-which is what a send does, and `SendsEscrow.sendOnOpenSession` has guarded a send
+which is what a send does, and `ChannelContract.sendOnOpenSession` has guarded a send
 since the channel contract acquired the law — `Reroutes` had no such guard, and a
 reviewer compiled a complete reroute delivering into a `.closed` session, after
 which no close or death of it is possible either. §10.101.

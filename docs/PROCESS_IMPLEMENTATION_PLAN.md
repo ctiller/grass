@@ -5295,12 +5295,21 @@ claim-word filter -- that sentence carries none, and `check` skips such sentence
 before resolving any name at all. Nor is every wrong prefix invisible: in a
 claim-word sentence whose backticked names all fail, the gate reports them.
 
-The two real gaps are narrower and worth stating exactly. A sentence passes as
-soon as *any one* of its backticked names resolves, so a wrong prefix beside a
-right name is never seen -- which is what would have saved this sentence had it
-carried a claim word, since `ProcessPlan.execution_holds_an_unkilled_root` sits
-in it and does resolve. And a dotted name can never be reported as *invented*,
-because the pattern for "looks like a Lean declaration" admits no dot.
+The real gap is narrower still, and stating it took two attempts. The gate
+reports an unresolved name unconditionally when it *looks like a Lean
+declaration* -- lowercase-initial with an underscore -- and that check runs
+before, and independently of, whether anything else in the sentence resolved.
+The tool's own test asserts it: a resolvable name must not mask an invented one.
+
+What that pattern does not admit is a dot. So a *dotted* name can never be
+reported as
+invented, and falls through to the weaker rule that fires only when nothing in
+the sentence resolves at all. A wrong prefix beside a right name is therefore
+invisible -- which is what would have saved this sentence had it carried a claim
+word, since `ProcessPlan.execution_holds_an_unkilled_root` sits in it and does
+resolve. An earlier version of this paragraph gave the first half as a standalone
+fact about the mechanism, which is false of the tool and false of the behaviour
+the tool was changed to remove.
 
 It is now followed by Lean. Generating one `#check @Name` per distinct dotted
 citation on the branch's added lines and elaborating the file is authoritative in
@@ -5327,9 +5336,11 @@ the slot. The theorem says a restart is the only way it stops holding a
 lines later.
 
 *"no field of `Restarts` refuses one at a parentless slot"* was inferred from one
-of ten fields. `wasEnded` does constrain the old incarnation, so the conclusion
-holds only once the root has ended -- which the preceding sentence assumes and
-this one did not carry.
+of ten fields, and `wasEnded` does constrain the old incarnation. Round
+seventeen's fix said the conclusion "holds only once the root has ended", which
+round eighteen then refuted outright: it does not hold then either, because
+`restartsAChild` and `authorized` refuse the restart jointly. The correction that
+survives is the one below, not this one.
 
 *"the five ending branches that carry one"* -- six carry one. The sixth is
 `childDied`, whose ending is literally `.died reason` and which closes through
@@ -5350,7 +5361,7 @@ two of them. `restartsAChild` forces the new incarnation to record a parent and
 `authorized` then demands `maySpawn` permit that parent for the kind, so where no
 kind may spawn the root's role the relation is uninhabited -- which
 `Tests/Process/PreservationFixtures.lean`'s `no_restart_at_the_root_slot` proves
-at `serverPlan`, eight lines from the sentence denying it. Round seventeen
+at `serverPlan`, twelve lines from the sentence denying it. Round seventeen
 replaced "inferred from one of ten fields" with "inferred from ten fields
 individually" and kept the defect, because reading a structure field by field
 cannot see a refusal two fields make together.
@@ -5361,12 +5372,59 @@ the hypothesis is "not already dead of *that* reason", which an already-dead
 instance can satisfy. Third occurrence of this artefact -- rounds fifteen and
 seventeen each fixed it one declaration over.
 
-And two live wrong-prefix citations of exactly round seventeen's class,
-`WellFormed.SlotsAgree` where the field is `slotsAgree` and the predicate is
-`LogicalProcessNetworkCore.SlotsAgree`. They came from `main` rather than from
-this branch, which is why the `#check` harness did not see them: it runs over
-added lines only. That scope is now stated rather than left for a reader to infer
-from a clean result.
+And live wrong-prefix citations of exactly round seventeen's class, beginning
+with `WellFormed.SlotsAgree` where the field is `slotsAgree` and the predicate is
+`LogicalProcessNetworkCore.SlotsAgree`.
+
+Round eighteen fixed two of them, said there were two, and searched for
+`SlotsAgree` -- so the sweep inherited the blind spot of the name it was written
+from. Round nineteen ran the check over *whole files* rather than added lines and
+found seventeen, over eight names, including `WellFormed.ReroutesLand`, which is
+the same sentence with one noun changed, and
+`ResolvesEscrow.carrierIsPermitted`, which resolves under no prefix at all: the
+three fields it describes are `Coalesces.sourcesNonempty`,
+`Coalesces.consumesExactly` and `Coalesces.permitted`. All seventeen are
+corrected here, and all came from `main` rather than from this branch.
+
+The check is now whole-file. What remains unresolved after it is four names, and
+each is deliberate: `Grass.Process` is a namespace, `ChannelId.sender` describes
+a channel id's structure in prose, and `ProcessNetworkAdequate.initial` and
+`WeaveInvariantMixin.initial` cite `docs/PROCESS.md` field names rather than Lean
+declarations.
+
+**Round nineteen, and the corrected account of the gate was wrong too.** The
+previous entry replaced one wrong description of `docstring_audit.rs` with
+another: it said a sentence passes as soon as any one of its backticked names
+resolves. The tool reports an unresolved *declaration-shaped* name
+unconditionally, before and independently of that check, and its own unit test
+asserts precisely that a resolvable name must not mask an invented one. The real
+gap is that the shape admits no dot, so a dotted name falls through to the weaker
+rule. Corrected above, from the source, at the second attempt.
+
+Two wrong descriptions of the same tool in consecutive rounds is worth naming as
+a pattern rather than as two mistakes. Both were written while fixing something
+else, both were plausible from the tool's *behaviour* on one example, and neither
+cost anything to check -- the source is in this repository and the test suite
+runs in seconds. The rule that comes out is narrower than "read the tool": a
+sentence explaining *why* a check passed or failed is a claim about a mechanism,
+and the mechanism is the thing to read, not the outcome to explain.
+
+Three more, all in the previous round's fix. A sentence in
+`Grass/Process/Network/Transition.lean` credited a "mechanical sweep over every
+backticked name in the files this branch touches", which is the coverage
+seventeen surviving citations refute -- the same shape as round eighteen's own
+headline, a tool's scope asserted rather than measured. "Eight lines from the
+sentence denying it" is twelve. And the round-seventeen bullet in this section
+still says the `Restarts` conclusion "holds only once the root has ended", which
+round eighteen refuted: it does not hold then either.
+
+One strengthening declined rather than taken.
+`dying_was_supervised_or_untouched`'s left disjunct could carry
+`transition.scope`, making the two disjuncts mutually exclusive, and it derives
+from the existing theorem in twelve lines. No consumer wants it, and §10.137's
+sibling branch spent a round on a declaration that existed only to be an
+instantiation. A free strengthening with no consumer is a declaration nobody
+reads; recorded here so the next round finds an answer rather than a gap.
 
 ### 10.135 A role that may write no region owes nothing
 

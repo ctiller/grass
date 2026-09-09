@@ -557,7 +557,7 @@ theorem carrier_ne_escrowed : carrier ≠ escrowed := by
 
 /--
 **And the carrier's identity is new**, which is the stronger claim
-`ResolvesEscrow.createdIdentityIsFresh` asks for and which
+`Coalesces.createdIdentityIsFresh` asks for and which
 `carrier_ne_escrowed` does not give.
 
 Two entries can be distinct pairs and share a nominal — that is exactly the alias

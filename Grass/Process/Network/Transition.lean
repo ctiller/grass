@@ -179,7 +179,7 @@ structure ResolvesEscrow (before after : plan.LogicalProcessNetwork)
   -/
   resolvesNothingElse : ResolvesNothingElse
     (before.inFlight edge session) (after.inFlight edge session) occurrence
-  /-- **And it requests no cancellation**; see `EscrowLedger.RequestsNothing`. -/
+  /-- **And it requests no cancellation**; see `RequestsNothing`. -/
   requestsNothing : RequestsNothing
     (before.inFlight edge session) (after.inFlight edge session)
   /--
@@ -314,7 +314,7 @@ structure Delivers (before after : plan.LogicalProcessNetwork)
   The narrow form, and here it is the right one: `cursorAdvances` says the
   receiver consumed *exactly one* message, so a delivery that also recorded a
   second occurrence `.received` would be recording a delivery that did not
-  happen. See `ResolvesEscrow.resolvesOnlyAs` for why the siblings need the wider form.
+  happen. See `ResolvesOnlyAs` for why the siblings need the wider form.
   -/
   resolvesNothingElse : ResolvesNothingElse
     (before.inFlight edge session) (after.inFlight edge session) occurrence
@@ -396,7 +396,7 @@ structure ClosesSession (before after : plan.LogicalProcessNetwork)
   closesEverything : ∀ other, other.2.1 = session →
     (before.inFlight edge session).Outstanding other →
     (after.inFlight edge session).resolution other = some .channelClosed
-  /-- **And every occurrence it ends, it ends as a closure**; see `ResolvesEscrow.resolvesOnlyAs`. -/
+  /-- **And every occurrence it ends, it ends as a closure**; see `ResolvesOnlyAs`. -/
   resolvesOnlyAs : ResolvesOnlyAs
     (before.inFlight edge session) (after.inFlight edge session) .channelClosed
   /-- **And it escrows nothing new**: a close ends, it does not send. -/
@@ -536,7 +536,7 @@ structure Coalesces (before after : plan.LogicalProcessNetwork)
   /-- Whose identity is new to this ledger — §10.115. -/
   createdIdentityIsFresh : ∀ other, other ∈ (before.inFlight edge session).created →
     other.2.2.id ≠ carrier.2.2.id
-  /-- **And it requests no cancellation**; see `EscrowLedger.RequestsNothing`. -/
+  /-- **And it requests no cancellation**; see `RequestsNothing`. -/
   requestsNothing : RequestsNothing
     (before.inFlight edge session) (after.inFlight edge session)
   /-- And nothing outside this session's escrow changed. -/
@@ -620,13 +620,13 @@ structure SendsEscrow (before after : plan.LogicalProcessNetwork)
   ledgerExtends :
     LedgerExtends (before.inFlight edge occurrence.1) (after.inFlight edge occurrence.1)
   /-- **And it resolves nothing at all**; a send escrows, it does not end
-  anything. See `ResolvesEscrow.resolvesOnlyAs`. -/
+  anything. See `ResolvesOnlyAs`. -/
   resolvesNothing : ResolvesNothing
     (before.inFlight edge occurrence.1) (after.inFlight edge occurrence.1)
   /--
   **And it escrows nothing but the message it is sending.**
 
-  The one constructor that may create, bounded to what it names. See `ResolvesEscrow.createsOnlyTheCarrier` and `CreatesNothing`.
+  The one constructor that may create, bounded to what it names. See `Coalesces.createsOnlyTheCarrier` and `CreatesNothing`.
   -/
   createsOnlyTheMessage : ∀ other, other ∈ (after.inFlight edge occurrence.1).created →
     other ∉ (before.inFlight edge occurrence.1).created → other = ⟨message, occurrence⟩
@@ -1021,8 +1021,8 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
 
 Cited by `StepsLocally.sharedWritesAdmitted`'s own docstring and by
 `Grass/Process/Network/Plan.lean`'s note on `sharedUpdate`, and declared by
-neither until now — a dangling citation of mine, found by a mechanical sweep over
-every backticked name in the files this branch touches rather than by the
+neither until now — a dangling citation of mine, found by elaborating a `#check`
+per backticked dotted name rather than by the
 docstring gate, which checks identifiers only inside sentences carrying a
 strong-claim word. `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.135.
 
@@ -1324,7 +1324,7 @@ An occurrence is rerouted to another session, and arrives there.
 
 `ResolvesEscrow`'s scope is the *source* session's escrow alone, so a `reroute`
 built on it could write `rerouted destination` into one ledger and was forbidden
-from touching the destination's. `WellFormed.ReroutesLand` then degenerated: it
+from touching the destination's. `LogicalProcessNetworkCore.ReroutesLand` then degenerated: it
 could only hold at a destination that was already non-empty before the step, and
 the reroute itself could never make one so. A reroute was a drop with a
 forwarding address.
@@ -1396,7 +1396,7 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
   `arrives` says the destination gained exactly one entry and pins its message and
   its session; it says nothing about the nominal. So a reroute could land a
   payload under an identity the destination is already holding — the same alias
-  `ResolvesEscrow.createdIdentityIsFresh` and `SendsEscrow.identityIsFresh` close
+  `Coalesces.createdIdentityIsFresh` and `SendsEscrow.identityIsFresh` close
   at the other two ways into a ledger.
   `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.115.
   -/
@@ -1409,7 +1409,7 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
   destinationExtends :
     LedgerExtends (before.inFlight edge destination) (after.inFlight edge destination)
   /-- **And it resolves nothing at the destination**: the arrival lands in
-  flight, not already ended. See `ResolvesEscrow.resolvesOnlyAs`. -/
+  flight, not already ended. See `ResolvesOnlyAs`. -/
   destinationResolvesNothing : ResolvesNothing
     (before.inFlight edge destination) (after.inFlight edge destination)
   /-- **And it requests no cancellation here.** -/
@@ -1422,7 +1422,7 @@ structure Reroutes (before after : plan.LogicalProcessNetwork)
   **And the destination is open.**
 
   A reroute puts a live payload into a session, which is what a send does, and
-  `SendsEscrow.sendOnOpenSession` has guarded a send since `ChannelContract`
+  `ChannelContract.sendOnOpenSession` has guarded a send since `ChannelContract`
   acquired the law. `Reroutes` had no such guard: its scope names two escrow
   fragments and no field of it mentioned `sessions` at all, so a reviewer
   compiled a complete reroute delivering into a session already `.closed` — after
@@ -1550,7 +1550,7 @@ structure KillsSession (before after : plan.LogicalProcessNetwork)
   killsEverything : ∀ other, other.2.1 = session →
     (before.inFlight edge session).Outstanding other →
     (after.inFlight edge session).resolution other = some .channelDied
-  /-- **And every occurrence it ends, it ends as a death**; see `ResolvesEscrow.resolvesOnlyAs`. -/
+  /-- **And every occurrence it ends, it ends as a death**; see `ResolvesOnlyAs`. -/
   resolvesOnlyAs : ResolvesOnlyAs
     (before.inFlight edge session) (after.inFlight edge session) .channelDied
   /-- **And it escrows nothing new**: a death ends, it does not send. -/
@@ -1620,7 +1620,7 @@ structure RequestsCancel (before after : plan.LogicalProcessNetwork)
   -/
   ledgerExtends : LedgerExtends (before.inFlight edge session) (after.inFlight edge session)
   /-- **And it resolves nothing at all**: a request records, it does not end.
-  See `ResolvesEscrow.resolvesOnlyAs`. -/
+  See `ResolvesOnlyAs`. -/
   resolvesNothing : ResolvesNothing
     (before.inFlight edge session) (after.inFlight edge session)
   /-- **And it escrows nothing new**: a request records, it does not send. -/
@@ -1712,7 +1712,7 @@ plain field of `LogicalProcessNetworkCore`, so a commit is still a legal step of
 non-empty `pending` is something a process produced. A second reviewer proved
 both, generically. That is a much smaller residual than the old one — the old
 `Commits` was enabled at every network, full stop, which made
-`NetworkProgressMeasure.AtFrontier` empty — but it is a residual, and
+`ProcessPlan.AtFrontier` empty — but it is a residual, and
 `docs/PROCESS_IMPLEMENTATION_PLAN.md` §10.66 is what would close it: an invariant
 that `observations ++ pending` is what the run's steps emitted, which is a
 statement about executions and not about a world.
