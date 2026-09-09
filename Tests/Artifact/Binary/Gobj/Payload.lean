@@ -35,6 +35,15 @@ example : (writeGobj payload).length = 61 := by
 example : readGobj (writeGobj payload ++ suffix) = .done payload suffix := by
   exact readGobj_write_append payload suffix
 
+example : Derives gobjPayloadFormat (writeGobj payload ++ suffix)
+    payload suffix := by
+  exact derives_gobjPayload_iff.mpr rfl
+
+example (input rest : Std.Logical.ByteArray) (value : GobjPayload) :
+    readGobj input = .done value rest ↔
+      Derives gobjPayloadFormat input value rest := by
+  exact readGobj_done_iff input value rest
+
 example : readGobj (Vec.fromList [0x42, 0x4f, 0x42, 0x4a]) =
     .invalid (.malformed "invalid .gobj magic") := by rfl
 

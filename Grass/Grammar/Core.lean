@@ -340,6 +340,23 @@ theorem Derives.lift_inner {α β : Type} {inner : Format α}
   cases derivation with
   | lift innerDerivation => exact innerDerivation
 
+/-- Eliminate a filtering derivation back to the underlying format. -/
+theorem Derives.refine_inner {α : Type} {inner : Format α}
+    {accepts : α → Prop} {input rest : Std.Logical.ByteArray} {value : α}
+    (derivation : Derives (.refine inner accepts) input value rest) :
+    Derives inner input value rest := by
+  cases derivation with
+  | refine innerDerivation _ => exact innerDerivation
+
+/-- A filtering derivation carries evidence that its returned value satisfies
+the declared predicate. -/
+theorem Derives.refine_accepted {α : Type} {inner : Format α}
+    {accepts : α → Prop} {input rest : Std.Logical.ByteArray} {value : α}
+    (derivation : Derives (.refine inner accepts) input value rest) :
+    accepts value := by
+  cases derivation with
+  | refine _ accepted => exact accepted
+
 /-- Eliminate an isomorphism derivation back to its underlying value. -/
 theorem Derives.iso_inner {α β : Type} {inner : Format α}
     {isomorphism : Isomorphism α β} {input rest : Std.Logical.ByteArray}
