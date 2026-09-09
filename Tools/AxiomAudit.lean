@@ -10,6 +10,8 @@ import Grass.Assembly.SourceFrameHeader
 import Grass.Assembly.SavedPrefix
 import Grass.Assembly.SourceFrame
 import Grass.Assembly.FrameStore
+import Grass.Assembly.LocalAddress
+import Grass.Assembly.FrameLoad
 import Grass.Assembly.FrameAllocation
 import Grass.Assembly.SourcePrologue
 import Grass.Assembly.SourceStore
@@ -40,6 +42,7 @@ import Grass.Core.Uid
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.BasicInstructions
+import Grass.ISA.X86.EncodingTemplate
 import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.ImmediateArithmetic
 import Grass.ISA.X86.Citation

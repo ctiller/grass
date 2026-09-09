@@ -1,4 +1,4 @@
-import Grass.ABI.Win64.FrameRanges
+import Grass.Assembly.LocalAddress
 import Grass.ISA.X86.Decode
 import Grass.Std.Logical.FiniteMap
 
@@ -38,45 +38,26 @@ def Resolved.writeBytes (r : Resolved) : ByteSeq := le32 r.input.value
 
 def resolve? (layout : CallFrameLayout) (rspRootOffset : Nat) (env : SlotEnv)
     (input : Input) : Option Resolved :=
-  match env.lookup input.slot with
+  match _ha : LocalAddress.resolve? layout rspRootOffset env input.slot 4 with
   | none => none
-  | some offset =>
-      if ¬ SlotFits layout offset then none else
-      if ¬ D32Fits layout offset then none else
-      (movMem32Imm32 (.base .rsp (BitVec.ofNat 32 (layout.localOffset + offset)))
-        input.value).map fun encoding => ⟨input, layout, rspRootOffset, offset, encoding⟩
+  | some address =>
+    match _he : movMem32Imm32 address.operand input.value with
+    | none => none
+    | some encoding => some ⟨input, layout, rspRootOffset, address.offset, encoding⟩
 
 private theorem resolve?_eq {layout : CallFrameLayout} {rspRootOffset : Nat} {env : SlotEnv}
     {input : Input} {resolved : Resolved}
     (h : resolve? layout rspRootOffset env input = some resolved) :
-    ∃ offset encoding, env.lookup input.slot = some offset ∧ SlotFits layout offset ∧
-      D32Fits layout offset ∧
-      movMem32Imm32 (.base .rsp (BitVec.ofNat 32 (layout.localOffset + offset)))
-        input.value = some encoding ∧
-      resolved = ⟨input, layout, rspRootOffset, offset, encoding⟩ := by
+    ∃ address encoding, LocalAddress.resolve? layout rspRootOffset env input.slot 4 = some address ∧
+      movMem32Imm32 address.operand input.value = some encoding ∧
+      resolved = ⟨input, layout, rspRootOffset, address.offset, encoding⟩ := by
   unfold resolve? at h
-  cases hl : env.lookup input.slot with
-  | none => simp [hl] at h
-  | some offset =>
-    rw [hl] at h
-    change (if ¬ SlotFits layout offset then none else
-      if ¬ D32Fits layout offset then none else
-      (movMem32Imm32 (.base .rsp (BitVec.ofNat 32 (layout.localOffset + offset)))
-        input.value).map fun encoding =>
-          ⟨input, layout, rspRootOffset, offset, encoding⟩) = some resolved at h
-    split at h
-    · simp at h
-    · next hf =>
-      split at h
-      · simp at h
-      · next hd =>
-        cases he : movMem32Imm32
-            (.base .rsp (BitVec.ofNat 32 (layout.localOffset + offset))) input.value with
-        | none => simp [he] at h
-        | some encoding =>
-          simp [he] at h
-          cases h
-          exact ⟨offset, encoding, rfl, by simpa using hf, by simpa using hd, he, rfl⟩
+  split at h <;> try contradiction
+  rename_i address ha
+  split at h <;> try contradiction
+  rename_i encoding he
+  cases h
+  exact ⟨address, encoding, ha, he, rfl⟩
 
 theorem range_eq_rspRootOffset_add_displacement (r : Resolved) :
     r.range = ⟨r.rspRootOffset + r.displacement, 4⟩ := rfl
@@ -87,13 +68,15 @@ theorem encoding_equation_of_resolve? {layout : CallFrameLayout} {rspRootOffset 
     {env : SlotEnv} {input : Input} {r : Resolved}
     (h : resolve? layout rspRootOffset env input = some r) :
     movMem32Imm32 r.operand input.value = some r.encoding := by
-  obtain ⟨o, e, _, _, _, he, rfl⟩ := resolve?_eq h
-  exact he
+  obtain ⟨address, e, ha, he, rfl⟩ := resolve?_eq h
+  obtain ⟨hl, _, _, _, _⟩ := LocalAddress.resolve?_exact ha
+  simpa [Resolved.operand, Resolved.displacement, LocalAddress.Result.operand,
+    LocalAddress.Result.displacement, hl] using he
 
 theorem writeBytes_of_resolve? {layout : CallFrameLayout} {rspRootOffset : Nat} {env : SlotEnv}
     {input : Input} {r : Resolved} (h : resolve? layout rspRootOffset env input = some r) :
     r.writeBytes = le32 input.value := by
-  obtain ⟨o, e, _, _, _, _, rfl⟩ := resolve?_eq h; rfl
+  obtain ⟨address, e, _, _, rfl⟩ := resolve?_eq h; rfl
 
 theorem writeBytes_length_of_resolve? {layout : CallFrameLayout} {rspRootOffset : Nat}
     {env : SlotEnv} {input : Input} {r : Resolved}
@@ -103,23 +86,31 @@ theorem writeBytes_length_of_resolve? {layout : CallFrameLayout} {rspRootOffset 
 theorem displacement_positive_of_resolve? {layout : CallFrameLayout} {rspRootOffset : Nat}
     {env : SlotEnv} {input : Input} {r : Resolved}
     (h : resolve? layout rspRootOffset env input = some r) : 0 < r.displacement := by
-  obtain ⟨o, e, _, _, _, _, rfl⟩ := resolve?_eq h
+  obtain ⟨address, e, ha, _, rfl⟩ := resolve?_eq h
+  obtain ⟨hl, _, _, _, _⟩ := LocalAddress.resolve?_exact ha
   have before := layout.stackArguments_end_before_local
   have shadowPositive : 0 < shadowSpaceBytes := by decide
+  have displacement := address.fitsDisplacement
   simp only [Resolved.displacement] at *
+  rw [hl] at displacement
   omega
 
 theorem displacement_bounded_of_resolve? {layout : CallFrameLayout} {rspRootOffset : Nat}
     {env : SlotEnv} {input : Input} {r : Resolved}
     (h : resolve? layout rspRootOffset env input = some r) : r.displacement < 2 ^ 31 := by
-  obtain ⟨o, e, _, _, hd, _, rfl⟩ := resolve?_eq h
-  exact hd
+  obtain ⟨address, e, ha, _, rfl⟩ := resolve?_eq h
+  obtain ⟨hl, _, _, _, _⟩ := LocalAddress.resolve?_exact ha
+  simpa [Resolved.displacement, LocalAddress.Result.displacement, hl] using
+    address.fitsDisplacement
 
 theorem displacement_roundtrip_of_resolve? {layout : CallFrameLayout} {rspRootOffset : Nat}
     {env : SlotEnv} {input : Input} {r : Resolved}
     (h : resolve? layout rspRootOffset env input = some r) :
     (BitVec.ofNat 32 r.displacement).toNat = r.displacement := by
-  obtain ⟨o, e, _, _, hd, _, rfl⟩ := resolve?_eq h
+  obtain ⟨address, e, ha, _, rfl⟩ := resolve?_eq h
+  obtain ⟨hl, _, _, _, _⟩ := LocalAddress.resolve?_exact ha
+  have hd : layout.localOffset + address.offset < 2 ^ 31 := by
+    simpa [hl] using address.fitsDisplacement
   simp only [Resolved.displacement, BitVec.toNat_ofNat]
   exact Nat.mod_eq_of_lt (Nat.lt_trans hd (by decide : 2 ^ 31 < 2 ^ 32))
 
@@ -127,21 +118,17 @@ theorem range_in_frame_of_resolve? {layout : CallFrameLayout} {rspRootOffset : N
     {env : SlotEnv} {input : Input} {r : Resolved}
     (h : resolve? layout rspRootOffset env input = some r) :
     (layout.frameRange.shift rspRootOffset).Contains r.range := by
-  obtain ⟨o, e, _, hf, _, _, rfl⟩ := resolve?_eq h
-  change (layout.frameRange.shift rspRootOffset).Contains
-    ((ByteRange.mk (layout.localOffset + o) 4).shift rspRootOffset)
-  rw [ByteRange.shift_contains_iff]
-  have hlocal : layout.localRange.Contains ⟨layout.localOffset + o, 4⟩ := by
-    unfold SlotFits at hf
-    simp only [ByteRange.contains_def, CallFrameLayout.localRange]
-    constructor <;> omega
-  exact layout.frame_contains_local.trans hlocal
+  obtain ⟨address, e, ha, _, rfl⟩ := resolve?_eq h
+  obtain ⟨hl, hr, _, hw, _⟩ := LocalAddress.resolve?_exact ha
+  have contained := address.range_in_frame
+  simpa [Resolved.range, Resolved.displacement, LocalAddress.Result.range,
+    LocalAddress.Result.displacement, hl, hr, hw] using contained
 
 theorem encoding_decodes_of_resolve? {layout : CallFrameLayout} {rspRootOffset : Nat}
     {env : SlotEnv} {input : Input} {r : Resolved}
     (h : resolve? layout rspRootOffset env input = some r) (rest : ByteSeq) :
     decodeInsn (r.encoding.toBytes ++ rest) = .ok (r.encoding, rest) := by
-  obtain ⟨o, e, _, _, _, he, rfl⟩ := resolve?_eq h
+  obtain ⟨address, e, ha, he, rfl⟩ := resolve?_eq h
   exact movMem32Imm32_decodes he rest
 
 end Grass.Assembly.Store32

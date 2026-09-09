@@ -124,6 +124,26 @@ x86 and other noncanonical instruction encodings, the important theorem may be
 that emitted bytes decode to the selected instruction semantics rather than
 that decoding and re-encoding reproduces the same bytes.
 
+The grammar authoring language should derive canonical round-trip laws from
+its combinators whenever a writer policy is selected. For a whole-input parser,
+define normalization on accepted input by parsing its value and writing that
+value with the selected writer. `parse_write` then gives preservation of the
+parsed value and idempotence of normalization; authors should not repeat those
+proofs for each format. Prefix formats additionally require the compositional
+law `parse (write value ++ suffix) = done value suffix`; the whole-input
+`parse_write` theorem alone does not establish suffix preservation. Equality
+with an independently specified canonicalization
+policy remains an obligation: defining normalization as parse-then-write does
+not prove that the selected policy meets the author's intent.
+
+Primitive codecs and semantic conversions supply the laws needed by the
+combinators. Lexical restrictions belong in the value domain or an explicit
+refinement, so a string containing punctuation cannot masquerade as an
+identifier with a universal printing law. Token-level round trips do not by
+themselves establish character-level round trips. Automatic canonicalization
+also does not replace parser completeness, exact incomplete/invalid outcomes,
+or the format's consumption rule.
+
 ## 5. Syntax versus contextual legality
 
 Grammar derivation answers whether bytes have a syntactic form and value.

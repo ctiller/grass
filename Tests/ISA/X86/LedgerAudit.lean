@@ -140,7 +140,8 @@ Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
 -- Nine new representation conversions, derived queries, and internal names.
-def notBehaviourBaseline : Nat := 79
+-- Four lookup-derived opcode selections and checked encoding-template wrappers.
+def notBehaviourBaseline : Nat := 83
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -186,7 +187,8 @@ real instruction in it.
 def notModelling : List Name :=
   [`Grass.ISA.X86.Citation, `Grass.ISA.X86.DualCitation,
    `Grass.ISA.X86.Sources, `Grass.ISA.X86.Ledger,
-   `Grass.ISA.X86.Profile, `Grass.ISA.X86.Performance]
+   `Grass.ISA.X86.Profile, `Grass.ISA.X86.Performance,
+   `Grass.ISA.X86.EncodingTemplate]
 
 /--
 Every Lean module found under `root` on disk, as a module name.
@@ -280,6 +282,11 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Decoder-table lookup and packaging of independently checked encoding laws.
+    `Grass.ISA.X86.ImmediateArithmetic.operandSpec,
+    `Grass.ISA.X86.ImmediateArithmetic.template,
+    `Grass.ISA.X86.Rel32.operandSpec,
+    `Grass.ISA.X86.Rel32.template,
     -- Representation conversion and queries over the existing immediate type.
     `Grass.ISA.X86.ImmediateArithmetic.Immediate.isa,
     `Grass.ISA.X86.ImmediateArithmetic.Immediate.size,
