@@ -74,7 +74,8 @@ def reachedCall? (before : ExecutionState.State ApiRequest)
         protocolValid := valid }
   else none
 
-/-- Successful repacking preserves metadata and control and uses the exact CALL result. -/
+/-- `reachedCall?_fields` proves that successful repacking preserves metadata
+and control and uses the exact CALL result. -/
 theorem reachedCall?_fields {before after : ExecutionState.State ApiRequest}
     {afterFetch afterRead afterStore : MachineState} {displacement : BitVec 32}
     {receipt : Execution.CallNormal before.machine afterFetch afterRead afterStore displacement}

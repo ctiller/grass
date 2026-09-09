@@ -18,8 +18,8 @@ variable {image : ImageInput} {inputs : EntryInputs}
   {graph nextGraph : Graph} {before after : RawState} {event : Event}
   {call : CallProtocol.CallId} {agent : ContextId} {action : WriteFile.Action}
 
-/-- An actual classified provider service step preserves the complete raw
-protocol metadata. -/
+/-- `service_metadata` proves that an actual classified provider service step
+preserves the complete raw protocol metadata. -/
 theorem service_metadata
     (step : RawStep loaded realization graph before (.providerService call agent action)
       event after nextGraph) :
