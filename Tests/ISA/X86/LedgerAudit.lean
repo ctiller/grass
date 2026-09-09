@@ -32,6 +32,9 @@ import Grass.ISA.X86.Execution.PushSavedRead
 import Grass.ISA.X86.Execution.RawOutcome
 import Grass.ISA.X86.Execution.ReadValue64
 import Grass.ISA.X86.Execution.RunFactory
+import Grass.ISA.X86.Execution.FetchFactory
+import Grass.ISA.X86.Execution.ComputationFactory
+import Grass.ISA.X86.Execution.PushFactory
 import Grass.ISA.X86.Execution.StackInstruction
 import Grass.ISA.X86.Execution.CompletionFlags
 import Grass.ISA.X86.Decode
@@ -167,6 +170,8 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.MoveSelection, `Grass.ISA.X86.Execution.ObservedFetch,
    `Grass.ISA.X86.Execution.PushSavedRead, `Grass.ISA.X86.Execution.RawOutcome,
    `Grass.ISA.X86.Execution.ReadValue64, `Grass.ISA.X86.Execution.RunFactory,
+   `Grass.ISA.X86.Execution.FetchFactory, `Grass.ISA.X86.Execution.ComputationFactory,
+   `Grass.ISA.X86.Execution.PushFactory,
    `Grass.ISA.X86.Execution.StackInstruction, `Grass.ISA.X86.Execution.CompletionFlags,
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
@@ -244,7 +249,7 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- encoding, address, and result obligations. No existing debt is reclassified.
 -- Arithmetic, branch, LEA and fixed access dispatch add twenty reviewed obligations.
 -- Twelve fixed CPU/ABI obligations, including executable/readable region selection.
-def owedBaseline : Nat := 311
+def owedBaseline : Nat := 314
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -298,7 +303,7 @@ acquiring a citation.
 -- This addition moves no existing declaration from owed or cited coverage.
 -- Fixed dispatch and access factories add thirty checked structural helpers.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
-def notBehaviourBaseline : Nat := 246
+def notBehaviourBaseline : Nat := 252
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -634,6 +639,16 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.RunFactory.instHasOperationFacetsSingletonAccessOperation,
     `Grass.ISA.X86.Execution.RunFactory.noFaultPlan,
     `Grass.ISA.X86.Execution.RunFactory.singletonOperation,
+    -- Factory packaging and explicit applicability routing over separately
+    -- modeled fetch, dispatch, and MOV receipts.
+    `Grass.ISA.X86.Execution.ComputationFactory.MoveSuccess.result,
+    `Grass.ISA.X86.Execution.ComputationFactory.move,
+    -- Fixed PUSH routing constructs the separately modeled PushNormal receipt;
+    -- its failure projection retains the actual already-reached machine.
+    `Grass.ISA.X86.Execution.PushFactory.push,
+    `Grass.ISA.X86.Execution.PushFactory.reachedAfterAccess,
+    `Grass.ISA.X86.Execution.FetchFactory.accessReached,
+    `Grass.ISA.X86.Execution.FetchFactory.fetchPolicy,
     -- Decoder-table lookup and packaging of independently checked encoding laws.
     `Grass.ISA.X86.ImmediateArithmetic.operandSpec,
     `Grass.ISA.X86.ImmediateArithmetic.template,
@@ -946,6 +961,11 @@ def owed : List Name :=
     `Grass.ISA.X86.Execution.LeaInstruction.operand,
     `Grass.ISA.X86.Execution.LeaNormal.result,
     `Grass.ISA.X86.Execution.ReadValue64.value,
+    -- The normal fetch factory's lookahead and footprint determine the actual
+    -- execute-read extent; the resulting fetch therefore remains architecture debt.
+    `Grass.ISA.X86.Execution.FetchFactory.lookahead,
+    `Grass.ISA.X86.Execution.FetchFactory.footprint,
+    `Grass.ISA.X86.Execution.FetchFactory.fetch,
     `Grass.ISA.X86.Execution.StackInstruction.encoding,
     `Grass.ISA.X86.Execution.statusMask,
     `Grass.ISA.X86.Execution.resumeMask,

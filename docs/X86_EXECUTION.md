@@ -146,6 +146,28 @@ normal receipt types still provide evidence, and their union is not exhaustive
 raw execution. Fault vocabularies alone establish no architectural fault
 conditions, priority or delivery behavior.
 
+`FetchFactory.fetch` takes only the fixed policy and current CPU state. It plans
+the execute range from actual code placement, then runs the computed access and
+classifies its actual observation. Bounded lookahead chooses the access width;
+it is not evidence of a completed read. Successful dispatch retains the raw
+descriptor and run metadata through `ObservedFetch.dispatch_metadata`.
+
+`ComputationFactory.move` constructs a normal register MOV result from those
+same two inputs, including the actual access-free operation step. Other selected
+families remain explicit unsupported prefixes. This first constructive path
+does not yet execute the full Hello program or settle fault applicability.
+
+`PushFactory.push` uses the same fixed fetch path, checks stack underflow, and
+computes the eight-byte stack descriptor from the current placed allocation.
+Its actual store writes the selected register's pre-instruction value and
+constructs `PushNormal`; callers supply no receipt or store payload. This adds
+the first Hello instruction family to the constructive path.
+
+The shared x86 canonical linear-address predicate is still absent. The memory
+space's 64-bit representation check is weaker than architectural address
+validity. Physical adequacy must cover effective addresses and control-transfer
+targets under the admitted address mode; the normal receipts alone do not.
+
 Remaining work composes final emitted source, fixed factory results, CALL target
 reads and return-address writes, and actual prefix receipts for unwind reversal.
 Rejected, denied and permitted fault outcomes remain separate.

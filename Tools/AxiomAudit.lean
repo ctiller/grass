@@ -22,6 +22,8 @@ import Grass.Op.PreparedPlacement
 import Grass.ISA.X86.Execution.AccessRun
 import Grass.ISA.X86.Execution.Fetch
 import Grass.ISA.X86.Execution.FetchedEncoding
+import Grass.Assembly.LoadedCodeRoot
+import Grass.Assembly.LoadedFetchObservation
 import Grass.Disasm.Linear
 import Grass.Disasm.StoreAttempt
 import Grass.Disasm.Spatial
@@ -51,6 +53,9 @@ import Grass.ISA.X86.Execution.PushSavedRead
 import Grass.ISA.X86.Execution.RawOutcome
 import Grass.ISA.X86.Execution.ReadValue64
 import Grass.ISA.X86.Execution.RunFactory
+import Grass.ISA.X86.Execution.FetchFactory
+import Grass.ISA.X86.Execution.ComputationFactory
+import Grass.ISA.X86.Execution.PushFactory
 import Grass.Semantics.OutputCut
 import Grass.Specification.TextLine
 import Grass.Console.Behavior
