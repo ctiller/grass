@@ -29,6 +29,7 @@ import Grass.ISA.X86.Execution.ReadValue64
 import Grass.ISA.X86.Execution.RunFactory
 import Grass.ISA.X86.Execution.FetchFactory
 import Grass.ISA.X86.Execution.ComputationFactory
+import Grass.ISA.X86.Execution.PushFactory
 import Grass.ISA.X86.Execution.StackInstruction
 import Grass.ISA.X86.Execution.CompletionFlags
 import Grass.ISA.X86.Decode
@@ -143,6 +144,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.PushSavedRead, `Grass.ISA.X86.Execution.RawOutcome,
    `Grass.ISA.X86.Execution.ReadValue64, `Grass.ISA.X86.Execution.RunFactory,
    `Grass.ISA.X86.Execution.FetchFactory, `Grass.ISA.X86.Execution.ComputationFactory,
+   `Grass.ISA.X86.Execution.PushFactory,
    `Grass.ISA.X86.Execution.StackInstruction, `Grass.ISA.X86.Execution.CompletionFlags,
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
@@ -227,7 +229,7 @@ acquiring a citation.
 -- Three new generic definitions derive history events or name selected evidence.
 -- Ten exception helpers traverse, project or compare already selected values.
 -- One helper replaces the memory-machine field after a checked fetch.
-def notBehaviourBaseline : Nat := 195
+def notBehaviourBaseline : Nat := 197
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -503,6 +505,10 @@ def notBehaviour : List Name :=
     -- modeled fetch, dispatch, and MOV receipts.
     `Grass.ISA.X86.Execution.ComputationFactory.MoveSuccess.result,
     `Grass.ISA.X86.Execution.ComputationFactory.move,
+    -- Fixed PUSH routing constructs the separately modeled PushNormal receipt;
+    -- its failure projection retains the actual already-reached machine.
+    `Grass.ISA.X86.Execution.PushFactory.push,
+    `Grass.ISA.X86.Execution.PushFactory.reachedAfterAccess,
     `Grass.ISA.X86.Execution.FetchFactory.accessReached,
     `Grass.ISA.X86.Execution.FetchFactory.fetchPolicy,
     -- Decoder-table lookup and packaging of independently checked encoding laws.
