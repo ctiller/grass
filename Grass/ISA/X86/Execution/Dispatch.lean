@@ -58,6 +58,25 @@ def dispatch {before : State} {after : Grass.Memory.MachineState}
       | none => .error (.instruction site.site.encoding)
       | some selection => .ok ⟨site, selection, selected⟩
 
+/-- `dispatch_metadata` retains the exact raw fetch operation metadata after successful dispatch. -/
+theorem dispatch_metadata {before : State} {after : Grass.Memory.MachineState}
+    (fetch : ObservedFetch before after) (selected : Dispatched before after)
+    (success : fetch.dispatch = .ok selected) :
+    selected.fetch.run.policy = fetch.run.policy ∧
+      selected.fetch.run.context = fetch.run.context ∧
+      selected.fetch.run.contextKind = fetch.run.contextKind ∧
+      selected.fetch.run.cause = fetch.run.cause ∧
+      selected.fetch.descriptor = fetch.descriptor := by
+  cases checked : DecodedSite.check before.rip fetch.bytes with
+  | error reason => simp [dispatch, decoded, checked] at success
+  | ok site =>
+      by_cases trailing : site.rest = []
+      · simp only [dispatch, decoded, checked, dif_pos trailing] at success
+        split at success <;> simp_all
+        subst selected
+        exact ⟨rfl, rfl, rfl, rfl, rfl⟩
+      · simp [dispatch, decoded, checked, trailing] at success
+
 /-- `failureOutcome` represents a demonstrated classification failure with the actual reached state. -/
 def failureOutcome {before : State} {after : Grass.Memory.MachineState}
     (fetch : ObservedFetch before after) (reason : ApplicabilityFailure)
