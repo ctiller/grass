@@ -871,6 +871,23 @@ to imitate compiler-selected storage or CFG structure.
     separates `ProcessCorrect` from existing standalone progress proofs now;
     captured-root and full-equivalence work must preserve this separation.
 
+138. Hello's status-bearing console contract distinguishes logical result
+    selection from committed whole-program terminal observation. Its base
+    denotation has writing, reporting the fixed selection, and observed phases;
+    only observed is whole-program terminal. Reporting retains the exact reached
+    prefix, byte cut, diagnostic cause and public outcome computed from the
+    captured policy, permits permanent waiting, and cannot reopen output or
+    outcome choices. `withLiveness` appends author demands without introducing
+    this phase or filtering unrestricted behavior. Existing component terminal
+    histories embed into reporting rather than being relabeled as observed
+    completion. The neutral request contains no target API; platform terminal
+    fidelity and the standard responsive-strategy bridge remain actual proof
+    obligations. This interprets the existing Hello terminal-status requirement,
+    not a universal status-channel or termination prerequisite for every Grass
+    program. [HELLO_FACADE_BOUNDARY.md](HELLO_FACADE_BOUNDARY.md) records the
+    reviewed owner split, exact component/root migration and remaining gates;
+    SEMANTICS.md and the narrower platform laws retain normative authority.
+
 ## Explicitly rejected shortcuts
 
 - bolting memory safety on after an instruction library exists;
