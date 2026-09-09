@@ -90,6 +90,30 @@ the underlying encodings' outstanding architecture citation obligations.
 Frame inputs beyond the local declarations, unwind positions, and the complete
 source-to-artifact proof remain open.
 
+`Grass/Assembly/ByteLayout.lean` connects prefix sums of instruction sizes to
+emitted byte lengths. Its prefix-insertion law and
+`Grass/Assembly/SignedRel32.lean`'s translation law describe changes in byte-layout
+coordinates without requiring new proofs about concrete offsets. The signed
+resolver refuses values outside signed 32-bit range and proves that the target
+equals the next instruction position plus the recovered signed immediate.
+`Grass/ISA/X86/Rel32.lean` supplies fixed-width jump/equal/above encodings and
+decoder roundtrips; branch sizes are computed from those constructors.
+These arithmetic laws do not establish machine-address non-wrapping or loader
+placement. The `withStack`/`withCallFrame` wrapper expansion, including the
+computed allocation before the first call, still needs an implementation.
+
+`Grass/Assembly/X86BranchLayout.lean` connects these laws to checked source
+programs containing closed operands and local branches. It derives every
+instruction's size, computes label byte positions, and checks correspondence
+between the input source, ordered output instructions, and branch occurrences.
+The result exposes exact prefix positions, signed branch-target equations,
+targets strictly inside the emitted bytes, total byte length, and decoder
+roundtrips. A source-only rebuild fixture changes an earlier instruction's size
+and checks the newly computed branch positions. The actual Hello World fixture
+is still refused by this layer because it also needs symbolic constants, stack
+slots, static addresses, external calls, and wrapper expansion. No instruction
+is silently omitted to obtain an accepted layout.
+
 ## Specification
 
 The high-level Lean specification requests one fixed byte string on the standard

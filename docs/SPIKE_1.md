@@ -531,12 +531,16 @@ and the initial obligation ledger. It does not borrow an ordinary caller's
 return-address premise. A dedicated loader theorem connects every loaded entry
 state to this contract.
 
-The authored assembly chooses nonvolatile registers for loop state. Its prologue
-pushes `r12`, `r13`, and `r14`, then reserves 48 bytes. This produces 16-byte
-call-site alignment and the following verifier-derived interpretation. In the
-first-class assembly route the author controls literal prologue instructions and
-offsets; the frame verifier checks their geometry and derives unwind operations.
-Generated-code and macro routes may instead request symbolic slots.
+The authored assembly chooses nonvolatile registers for loop state and pushes
+`r12`, `r13`, and `r14`. Its `withStack` and `withCallFrame WriteFile` wrappers
+request symbolic local and call storage. Their lowering must insert the computed
+allocation after that saved-register prefix and before the first call. For these
+inputs the allocation is 48 bytes, producing 16-byte call-site alignment and the
+following derived review table. The table's offsets are observations, not inputs
+to instruction generation or consumer proofs. Explicit assembly prologues remain
+legal; the frame verifier checks their geometry and derives unwind operations.
+The wrapper route used here must supply the allocation instruction: the three
+pushes alone establish alignment but reserve no shadow, argument, or local area.
 
 | Offset | Size | Meaning |
 |---:|---:|---|

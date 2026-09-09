@@ -1,6 +1,7 @@
 import Lean.Elab.Command
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.BasicInstructions
+import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.Decode
 import Grass.ISA.X86.Profile
 import Grass.ABI.Win64.UnwindBytes
@@ -89,6 +90,7 @@ The citation machinery itself is not modeled behaviour and is not audited: a
 def auditedModules : List Name :=
   [`Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.BasicInstructions,
+   `Grass.ISA.X86.Rel32,
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console]
@@ -107,7 +109,9 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -/
 -- Eleven new constructor/operand bindings in BasicInstructions use existing
 -- opcode rows. Their decoder roundtrips do not discharge vendor validation.
-def owedBaseline : Nat := 111
+-- Rel32 adds a branch constructor and its computed size over existing rows;
+-- decoder agreement still does not discharge the architecture citation debt.
+def owedBaseline : Nat := 113
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -453,6 +457,8 @@ def owed : List Name :=
     `Grass.ISA.X86.BasicInstructions.subRegReg,
     `Grass.ISA.X86.BasicInstructions.xorRegReg,
     `Grass.ISA.X86.BasicInstructions.ud2,
+    `Grass.ISA.X86.Rel32.encode,
+    `Grass.ISA.X86.Rel32.encodedSize,
     -- The opcode table is the largest single block of uncited vendor fact in
     -- the tree: every row asserts what follows an opcode in the byte stream.
     `Grass.ISA.X86.opcodeTable, `Grass.ISA.X86.decodeInsn,

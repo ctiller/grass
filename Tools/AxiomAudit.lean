@@ -3,6 +3,9 @@ import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
 import Grass.Assembly.X86ControlFlow
 import Grass.Assembly.X86ClosedEncoding
+import Grass.Assembly.ByteLayout
+import Grass.Assembly.SignedRel32
+import Grass.Assembly.X86BranchLayout
 import Grass.Assembly.SourceStore
 import Grass.Assembly.Store32
 import Grass.Assembly.Store32Execution
@@ -31,6 +34,7 @@ import Grass.Core.Uid
 import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.BasicInstructions
+import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.Citation
 import Grass.ISA.X86.Decode
 import Grass.ISA.X86.DualCitation
