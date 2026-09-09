@@ -2,6 +2,7 @@ import Grass.Platform.Win32.ReturnHome
 import Grass.ISA.X86.EndianBridge
 import Grass.ISA.X86.Execution.CallNormal
 import Grass.ISA.X86.Execution.AccessPolicy
+import Grass.Platform.Win32.CallEntry
 
 /-!
 # Deterministic returning-call stack-plan construction
@@ -126,14 +127,24 @@ def derive? {callBefore : State} {afterFetch afterRead afterStore : MachineState
   else .error .wrongAddressSpace
   else .error .wrongStackProvenance
 
+theorem exact_fields {callBefore : State} {afterFetch afterRead afterStore : MachineState}
+    {displacement : BitVec 32} {policy : CpuAccessPolicy}
+    {call : CallNormal callBefore afterFetch afterRead afterStore displacement}
+    {plan : ReturnHome.Plan call.result}
+    (success : derive? policy call = .ok plan) :
+    plan.continuation = call.fetch.site.fallthroughRip ∧
+      plan.returnSlot.provenance = call.storeDescriptor.provenance ∧
+      plan.returnSlot.range = call.storeDescriptor.range := by
+  unfold derive? at success
+  grind
+
 theorem continuation_exact {callBefore : State} {afterFetch afterRead afterStore : MachineState}
     {displacement : BitVec 32} {policy : CpuAccessPolicy}
     {call : CallNormal callBefore afterFetch afterRead afterStore displacement}
     {plan : ReturnHome.Plan call.result}
     (success : derive? policy call = .ok plan) :
-    plan.continuation = call.fetch.site.fallthroughRip := by
-  unfold derive? at success
-  grind
+    plan.continuation = call.fetch.site.fallthroughRip :=
+  (exact_fields success).1
 
 theorem return_provenance_exact {callBefore : State}
     {afterFetch afterRead afterStore : MachineState} {displacement : BitVec 32}
@@ -141,9 +152,8 @@ theorem return_provenance_exact {callBefore : State}
     {call : CallNormal callBefore afterFetch afterRead afterStore displacement}
     {plan : ReturnHome.Plan call.result}
     (success : derive? policy call = .ok plan) :
-    plan.returnSlot.provenance = call.storeDescriptor.provenance := by
-  unfold derive? at success
-  grind
+    plan.returnSlot.provenance = call.storeDescriptor.provenance :=
+  (exact_fields success).2.1
 
 theorem return_range_exact {callBefore : State}
     {afterFetch afterRead afterStore : MachineState} {displacement : BitVec 32}
@@ -151,9 +161,24 @@ theorem return_range_exact {callBefore : State}
     {call : CallNormal callBefore afterFetch afterRead afterStore displacement}
     {plan : ReturnHome.Plan call.result}
     (success : derive? policy call = .ok plan) :
-    plan.returnSlot.range = call.storeDescriptor.range := by
-  unfold derive? at success
-  grind
+    plan.returnSlot.range = call.storeDescriptor.range :=
+  (exact_fields success).2.2
+
+def deriveLoaded? {image : Loader.ImageInput} {inputs : Loader.EntryInputs}
+    {loaded : Loader.LoadedImage image inputs} {callBefore : State}
+    {afterFetch afterRead afterStore : MachineState} {displacement : BitVec 32}
+    {call : CallNormal callBefore afterFetch afterRead afterStore displacement}
+    (binding : CallEntry.CallPolicy loaded call) :
+    Except Failure (ReturnHome.Plan call.result) :=
+  derive? binding.policy call
+
+theorem loaded_continuation_exact {image : Loader.ImageInput} {inputs : Loader.EntryInputs}
+    {loaded : Loader.LoadedImage image inputs} {callBefore : State}
+    {afterFetch afterRead afterStore : MachineState} {displacement : BitVec 32}
+    {call : CallNormal callBefore afterFetch afterRead afterStore displacement}
+    {binding : CallEntry.CallPolicy loaded call} {plan : ReturnHome.Plan call.result}
+    (success : deriveLoaded? binding = .ok plan) :
+    plan.continuation = call.fetch.site.fallthroughRip :=
+  continuation_exact success
 
 end Grass.Platform.Win32.ReturnHome.StackPlanFactory
-
