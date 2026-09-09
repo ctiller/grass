@@ -1,5 +1,9 @@
-import Grass.Op.CallProtocol
+import Grass.Platform.Win32.ApiRequest
+import Grass.Platform.Win32.WriteFileCallPlan
+import Grass.Op.CallProtocolCustody
 import Grass.Std.Logical.Vec
+
+variable {plan : Grass.Platform.Win32.WriteFile.LoanPlan}
 
 /-!
 # Evidence for a synchronous WriteFile provider prefix
@@ -18,105 +22,13 @@ namespace Grass.Platform.Win32.WriteFile
 
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical
 
-structure Argument where
-  provenance : Provenance
-  range : ByteRange
-deriving DecidableEq, Repr
-
-/-- Resolve against the actual live allocation, retaining the lookup and placement.
-This supplies spatial evidence only, never access rights. -/
-structure Resolved (memory : MemoryState) (arg : Argument)
-    extends memory.ResolvedAccess arg.provenance arg.range where
-  base : MachineAddress
-  placed : allocation.base = some base
-  noWrap : FitsAllocation base allocation.extent.stop
-
-def Resolved.physical {memory : MemoryState} {arg : Argument}
-    (resolved : Resolved memory arg) : ByteRange :=
-  arg.range.shift resolved.base.toNat
-
-theorem Resolved.root_contains {memory : MemoryState} {arg : Argument}
-    (resolved : Resolved memory arg) : resolved.allocation.extent.Contains arg.range := by
-  rw [resolved.extentAgrees]
-  exact (Provenance.extent_within_root resolved.provenanceNested).trans resolved.rangeInProvenance
-
-def Resolved.transport {before after : MemoryState} {arg : Argument}
-    (resolved : Resolved before arg) (same : after.allocations = before.allocations)
-    (backings : after.backings = before.backings) : Resolved after arg :=
-  { toResolvedAccess := resolved.toResolvedAccess.transport same backings
-    base := resolved.base, placed := resolved.placed, noWrap := resolved.noWrap }
-
-structure Request where
-  handle : BitVec 64
-  requested : BitVec 32
-  buffer : Argument
-  countSlot : Argument
-  bytes : Vec Byte
-
-def Request.loans (request : Request) : List CallProtocol.LoanRequest :=
-  [⟨.loan, request.buffer.provenance, request.buffer.range, .readOnly⟩,
-   ⟨.loan, request.countSlot.provenance, request.countSlot.range, { write := true }⟩]
-
-/-- Snapshot correspondence includes initialization, not merely byte equality. -/
-def InputMatches (memory : MemoryState) (request : Request) : Prop :=
-  ∀ i : Fin request.bytes.length,
-    memory.cellAt? request.buffer.provenance.root (request.buffer.range.start + i.val) =
-      some (request.bytes.toList[i.val]'i.isLt, true)
-
-instance (memory : MemoryState) (request : Request) : Decidable (InputMatches memory request) :=
-  by unfold InputMatches; infer_instance
-
-structure Prepared (memory : MemoryState) (request : Request) where
-  buffer : Resolved memory request.buffer
-  countSlot : Resolved memory request.countSlot
-  bufferSize : request.buffer.range.size = request.requested.toNat
-  bytesSize : request.bytes.length = request.requested.toNat
-  countSize : request.countSlot.range.size = 4
-  bufferCPU : request.buffer.provenance.space = .cpuVirtual
-  countCPU : request.countSlot.provenance.space = .cpuVirtual
-  separated : buffer.physical.Disjoint countSlot.physical
-  dedicated : memory.DedicatedBackings
-  placement : ∀ root allocation, memory.allocations.lookup root = some allocation →
-    allocation.live = true → allocation.space = .cpuVirtual →
-    ∃ base, allocation.base = some base ∧ FitsAllocation base allocation.extent.stop
-  allocationSeparation : ∀ left right a b leftBase rightBase,
-    memory.allocations.lookup left = some a → memory.allocations.lookup right = some b →
-    left ≠ right → a.live = true → b.live = true →
-    a.space = .cpuVirtual → b.space = .cpuVirtual →
-    a.base = some leftBase → b.base = some rightBase →
-    (a.extent.shift leftBase.toNat).Disjoint (b.extent.shift rightBase.toNat)
-  input : InputMatches memory request
-
-def Prepared.transport {before after : MemoryState} {request : Request}
-    (prepared : Prepared before request) (same : after.allocations = before.allocations)
-    (backings : after.backings = before.backings) : Prepared after request where
-  buffer := prepared.buffer.transport same backings
-  countSlot := prepared.countSlot.transport same backings
-  bufferSize := prepared.bufferSize
-  bytesSize := prepared.bytesSize
-  countSize := prepared.countSize
-  bufferCPU := prepared.bufferCPU
-  countCPU := prepared.countCPU
-  separated := prepared.separated
-  dedicated := by
-    unfold MemoryState.DedicatedBackings MemoryState.backingCapacity?
-    rw [same, backings]
-    exact prepared.dedicated
-  placement := by rw [same]; exact prepared.placement
-  allocationSeparation := by rw [same]; exact prepared.allocationSeparation
-  input := by
-    intro i
-    rw [MemoryState.cellAt?_of_maps_eq same backings]
-    exact prepared.input i
-
 /-- Exact pending occurrence; loan identities stay in the record, not recomputed.
 Applicability of the synchronous handle and its ABI arguments remains separate. -/
-structure PendingAt (state : CallProtocol.State Request) (call : CallProtocol.CallId)
+structure PendingAt (plan : LoanPlan) (state : ProtocolState) (call : CallProtocol.CallId)
     (record : CallProtocol.Pending Request) : Prop where
-  lookup : state.pending.lookup call = some record
+  lookup : state.pending.lookup call = some (embedPending record)
   custody : record.Valid state.machine.memory
-  loans : record.loans.map Prod.snd =
-    record.request.loans.map (fun loan => loan.grant record.caller record.agent)
+  loans : record.LoanPartition record.request.loans plan.additional
 
 /-- Incremental accepted output, distinct from a reported DWORD or device durability. -/
 structure Publication (bytes : Vec Byte) (before after : Nat) (output : Vec Byte) : Prop where
@@ -137,16 +49,16 @@ theorem Publication.output_unique {bytes left right : Vec Byte} {before after : 
     (a : Publication bytes before after left) (b : Publication bytes before after right) :
     left = right := a.suffix.trans b.suffix.symm
 
-structure Prefix (state : CallProtocol.State Request) (call : CallProtocol.CallId)
+structure Prefix (plan : LoanPlan) (state : ProtocolState) (call : CallProtocol.CallId)
     (record : CallProtocol.Pending Request) where
-  pending : PendingAt state call record
+  pending : PendingAt plan state call record
   prepared : Prepared state.machine.memory record.request
   clean : state.machine.violations.IsEmpty
   accepted : Nat
   bounded : accepted ≤ record.request.bytes.length
 
-def Prefix.output {state : CallProtocol.State Request} {call : CallProtocol.CallId}
-    {record : CallProtocol.Pending Request} (frontier : Prefix state call record) : Vec Byte :=
+def Prefix.output {state : ProtocolState} {call : CallProtocol.CallId}
+    {record : CallProtocol.Pending Request} (frontier : Prefix plan state call record) : Vec Byte :=
   record.request.bytes.take frontier.accepted
 
 /-- A concrete provider memory action. Its identity and fault plan are retained. -/
@@ -158,7 +70,7 @@ structure Action where
   faultAt : (sequence : SubstepSequence) → FaultPlan sequence
 
 def Action.Runs (action : Action) (record : CallProtocol.Pending Request)
-    (before after : CallProtocol.State Request) : Prop :=
+    (before after : ProtocolState) : Prop :=
   CallProtocol.step? before action.policy action.operation record.agent action.kind
     action.cause action.faultAt = some after
 
@@ -168,7 +80,7 @@ inductive CausalNode where
   | event (id : EventId)
 deriving DecidableEq
 
-def Represented (state : CallProtocol.State Request) : CausalNode → Prop
+def Represented (state : ProtocolState) : CausalNode → Prop
   | .entry call => ∃ caller agent loans,
       CallProtocol.Boundary.handoff call caller agent loans ∈ state.boundaries
   | .returned call => ∃ caller agent loans,
@@ -177,16 +89,16 @@ def Represented (state : CallProtocol.State Request) : CausalNode → Prop
 
 /-- Select once outside a whole prefix derivation. No default relation is supplied. -/
 structure CausalModel where
-  precedes : CallProtocol.State Request → CausalNode → CausalNode → Prop
+  precedes : ProtocolState → CausalNode → CausalNode → Prop
 
-structure CausalModel.Valid (model : CausalModel) (state : CallProtocol.State Request) : Prop where
+structure CausalModel.Valid (model : CausalModel) (state : ProtocolState) : Prop where
   endpoints : ∀ a b, model.precedes state a b → Represented state a ∧ Represented state b
   irreflexive : ∀ node, ¬ model.precedes state node node
   transitive : ∀ a b c, model.precedes state a b → model.precedes state b c →
     model.precedes state a c
 
 structure HandoffCausality (model : CausalModel) (call : CallProtocol.CallId)
-    (record : CallProtocol.Pending Request) (before after : CallProtocol.State Request) : Prop where
+    (record : CallProtocol.Pending Request) (before after : ProtocolState) : Prop where
   beforeValid : model.Valid before
   afterValid : model.Valid after
   historyExtends : ∀ a b, model.precedes before a b → model.precedes after a b
@@ -197,9 +109,9 @@ structure HandoffCausality (model : CausalModel) (call : CallProtocol.CallId)
 /-- Fixed graph obligations, including actual matched entry and exact new events.
 Pending-prefix steps do not themselves establish a return edge.
 Integrating these premises with `Grass.Op.step` is an open obligation. -/
-structure CausalEvidence (model : CausalModel) (call : CallProtocol.CallId)
+structure CausalEvidence (plan : LoanPlan) (model : CausalModel) (call : CallProtocol.CallId)
     (record : CallProtocol.Pending Request) (action : Action)
-    (before after : CallProtocol.State Request) (added : List ValidMemoryEvent) : Prop where
+    (before after : ProtocolState) (added : List ValidMemoryEvent) : Prop where
   entry : CallProtocol.Boundary.handoff call record.caller record.agent record.ids ∈
     before.boundaries
   events : after.machine.events = before.machine.events ++ added
@@ -212,10 +124,10 @@ structure CausalEvidence (model : CausalModel) (call : CallProtocol.CallId)
   entryEffects : ∀ event ∈ added, event.event.context.id = record.agent ∧
     model.precedes after (.entry call) (.event event.event.id)
   footprint : ∀ event ∈ added,
-    (event.event.kind.reads = true → event.event.provenance = record.request.buffer.provenance ∧
-      record.request.buffer.range.Contains event.event.range) ∧
-    (event.event.kind.writes = true → event.event.provenance = record.request.countSlot.provenance ∧
-      record.request.countSlot.range.Contains event.event.range)
+    (event.event.kind.reads = true →
+      plan.ReadFootprint record.request event.event.provenance event.event.range) ∧
+    (event.event.kind.writes = true →
+      plan.WriteFootprint record.request event.event.provenance event.event.range)
   conflicts : ∀ old ∈ before.machine.events, ∀ event ∈ added,
     old.event.context.id ≠ event.event.context.id →
     MemoryEvent.Conflicts (fun a b => action.policy.compatible a b = true)
@@ -229,20 +141,21 @@ structure Realization where
   /-- `Realization.executesFor` is an open physical-dispatch obligation,
   including when an agent serves multiple calls. -/
   executesFor : CallProtocol.CallId → CallProtocol.Pending Request → Action →
-    CallProtocol.State Request → CallProtocol.State Request → Prop
+    ProtocolState → ProtocolState → Prop
   publishes : CallProtocol.CallId → CallProtocol.Pending Request → Action →
-    CallProtocol.State Request → CallProtocol.State Request → Nat → Nat → Vec Byte → Prop
+    ProtocolState → ProtocolState → Nat → Nat → Vec Byte → Prop
 
-/-- Only count-slot bytes may change in this bounded provider slice. -/
-def Confined (request : Request) (before after : MemoryState) : Prop :=
+/-- Only count-slot bytes and the fixed plan's writable additional footprint
+may change in this bounded provider slice. -/
+def Confined (plan : LoanPlan) (request : Request) (before after : MemoryState) : Prop :=
   ∀ root offset,
-    (root ≠ request.countSlot.provenance.root ∨ ¬ request.countSlot.range.Covers offset) →
+    ¬ plan.WriteAt request root offset →
     after.cellAt? root offset = before.cellAt? root offset
 
 structure CommittedStep (realization : Realization)
-    {before after : CallProtocol.State Request} {call : CallProtocol.CallId}
+    {before after : ProtocolState} {call : CallProtocol.CallId}
     {record : CallProtocol.Pending Request}
-    (pre : Prefix before call record) (post : Prefix after call record)
+    (pre : Prefix plan before call record) (post : Prefix plan after call record)
     (action : Action) (output : Vec Byte) : Prop where
   ran : action.Runs record before after
   dispatch : realization.executesFor call record action before after
@@ -252,50 +165,50 @@ structure CommittedStep (realization : Realization)
   obligations : after.machine.obligations = before.machine.obligations
   metadata : ∀ root, (after.machine.memory.allocations.lookup root).map AllocationRecord.metadata =
     (before.machine.memory.allocations.lookup root).map AllocationRecord.metadata
-  confined : Confined record.request before.machine.memory after.machine.memory
-  causal : ∃ added, CausalEvidence realization.causal call record action before after added
+  confined : Confined plan record.request before.machine.memory after.machine.memory
+  causal : ∃ added, CausalEvidence plan realization.causal call record action before after added
 
 theorem CommittedStep.output_extends {realization : Realization}
-    {before after : CallProtocol.State Request} {call : CallProtocol.CallId}
+    {before after : ProtocolState} {call : CallProtocol.CallId}
     {record : CallProtocol.Pending Request}
-    {pre : Prefix before call record} {post : Prefix after call record}
+    {pre : Prefix plan before call record} {post : Prefix plan after call record}
     {action : Action} {output : Vec Byte}
     (step : CommittedStep realization pre post action output) :
     pre.output ++ output = post.output := step.publication.append_prefix
 
-theorem Prefix.no_denial {state : CallProtocol.State Request} {call : CallProtocol.CallId}
-    {record : CallProtocol.Pending Request} (frontier : Prefix state call record) :
+theorem Prefix.no_denial {state : ProtocolState} {call : CallProtocol.CallId}
+    {record : CallProtocol.Pending Request} (frontier : Prefix plan state call record) :
     state.machine.violations.records? = [] :=
   (AuditViolationLedger.isEmpty_iff_records?_nil _).mp frontier.clean
 
-theorem PendingAt.same_record {state : CallProtocol.State Request} {call : CallProtocol.CallId}
+theorem PendingAt.same_record {state : ProtocolState} {call : CallProtocol.CallId}
     {left right : CallProtocol.Pending Request}
-    (a : PendingAt state call left) (b : PendingAt state call right) : left = right := by
-  exact Option.some.inj (a.lookup.symm.trans b.lookup)
+    (a : PendingAt plan state call left) (b : PendingAt plan state call right) : left = right := by
+  exact embedPending_injective (Option.some.inj (a.lookup.symm.trans b.lookup))
 
 /-- Reachable evidence starts at the actual handoff with zero accepted bytes.
 The outer realization is fixed across the entire derivation. An arbitrary
 `Prefix` alone must never be advertised as a reachable provider history. -/
-inductive History (realization : Realization) (initial : CallProtocol.State Request)
+inductive History (plan : LoanPlan) (realization : Realization) (initial : ProtocolState)
     (call : CallProtocol.CallId) (record : CallProtocol.Pending Request) :
-    {state : CallProtocol.State Request} → Prefix state call record → Type 1 where
-  | handoff {state : CallProtocol.State Request} (frontier : Prefix state call record)
-      (ran : CallProtocol.handoff? initial record.caller record.agent record.request
-        record.request.loans = some (call, state))
+    {state : ProtocolState} → Prefix plan state call record → Type 1 where
+  | handoff {state : ProtocolState} (frontier : Prefix plan state call record)
+      (ran : CallProtocol.handoff? initial record.caller record.agent (.writeFile record.request)
+        (plan.requests record.request) = some (call, state))
       (input : Prepared initial.machine.memory record.request)
       (causal : HandoffCausality realization.causal call record initial state)
-      (zero : frontier.accepted = 0) : History realization initial call record frontier
-  | step {before after : CallProtocol.State Request}
-      {pre : Prefix before call record} {post : Prefix after call record}
-      (history : History realization initial call record pre)
+      (zero : frontier.accepted = 0) : History plan realization initial call record frontier
+  | step {before after : ProtocolState}
+      {pre : Prefix plan before call record} {post : Prefix plan after call record}
+      (history : History plan realization initial call record pre)
       (action : Action) (output : Vec Byte)
       (committed : CommittedStep realization pre post action output) :
-      History realization initial call record post
+      History plan realization initial call record post
 
-def History.published {realization : Realization} {initial : CallProtocol.State Request}
+def History.published {realization : Realization} {initial : ProtocolState}
     {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
-    {state : CallProtocol.State Request} {frontier : Prefix state call record}
-    (history : History realization initial call record frontier) : Vec Byte :=
+    {state : ProtocolState} {frontier : Prefix plan state call record}
+    (history : History plan realization initial call record frontier) : Vec Byte :=
   match history with
   | .handoff .. => .fromList []
   | .step previous _ output _ => previous.published ++ output
@@ -303,10 +216,10 @@ def History.published {realization : Realization} {initial : CallProtocol.State 
 /-- Every finite derived history publishes exactly its cumulative request prefix,
 not merely some bounded collection of bytes. -/
 theorem History.published_eq_output {realization : Realization}
-    {initial : CallProtocol.State Request} {call : CallProtocol.CallId}
-    {record : CallProtocol.Pending Request} {state : CallProtocol.State Request}
-    {frontier : Prefix state call record}
-    (history : History realization initial call record frontier) :
+    {initial : ProtocolState} {call : CallProtocol.CallId}
+    {record : CallProtocol.Pending Request} {state : ProtocolState}
+    {frontier : Prefix plan state call record}
+    (history : History plan realization initial call record frontier) :
     history.published = frontier.output := by
   induction history with
   | handoff frontier _ _ _ zero => simp [History.published, Prefix.output, zero, Vec.empty]
@@ -316,10 +229,10 @@ theorem History.published_eq_output {realization : Realization}
     exact committed.output_extends
 
 theorem History.causal_valid {realization : Realization}
-    {initial : CallProtocol.State Request} {call : CallProtocol.CallId}
-    {record : CallProtocol.Pending Request} {state : CallProtocol.State Request}
-    {frontier : Prefix state call record}
-    (history : History realization initial call record frontier) : realization.causal.Valid state := by
+    {initial : ProtocolState} {call : CallProtocol.CallId}
+    {record : CallProtocol.Pending Request} {state : ProtocolState}
+    {frontier : Prefix plan state call record}
+    (history : History plan realization initial call record frontier) : realization.causal.Valid state := by
   cases history with
   | handoff _ _ _ causal _ => exact causal.afterValid
   | step _ _ _ committed => obtain ⟨_, causal⟩ := committed.causal; exact causal.afterValid

@@ -56,6 +56,13 @@ import Grass.Platform.Win32.CpuVocabulary
 import Grass.Platform.Win32.CpuPolicy
 import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.WriteFileAbi
+import Grass.Platform.Win32.WriteFileArguments
+import Grass.Platform.Win32.ApiRequest
+import Grass.Platform.Win32.WriteFileCallPlan
+import Grass.Platform.Win32.WriteFileHandoff
+import Grass.Platform.Win32.WriteFilePreservation
+import Grass.Platform.Win32.WriteFileCall
+import Grass.Platform.Win32.WriteFileCallPreservation
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.Encoding
 import Grass.Artifact.PE.LayoutBinding
@@ -190,6 +197,13 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.LoadedDataAccess,
    `Grass.Platform.Win32.CpuPolicy,
    `Grass.Platform.Win32.ExecutionState, `Grass.Platform.Win32.WriteFileAbi,
+   `Grass.Platform.Win32.WriteFileArguments,
+   `Grass.Platform.Win32.ApiRequest,
+   `Grass.Platform.Win32.WriteFileCallPlan,
+   `Grass.Platform.Win32.WriteFileHandoff,
+   `Grass.Platform.Win32.WriteFilePreservation,
+   `Grass.Platform.Win32.WriteFileCall,
+   `Grass.Platform.Win32.WriteFileCallPreservation,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
@@ -253,7 +267,10 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- encoding, address, and result obligations. No existing debt is reclassified.
 -- Arithmetic, branch, LEA and fixed access dispatch add twenty reviewed obligations.
 -- Twelve fixed CPU/ABI obligations, including executable/readable region selection.
-def owedBaseline : Nat := 318
+-- Twelve fixed CPU/ABI obligations, including executable/readable region
+-- selection and explicit Entry structure enrollment.
+-- Six fixed request/stack contracts are newly enrolled; no existing debt moves.
+def owedBaseline : Nat := 324
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -307,7 +324,8 @@ acquiring a citation.
 -- This addition moves no existing declaration from owed or cited coverage.
 -- Fixed dispatch and access factories add thirty checked structural helpers.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
-def notBehaviourBaseline : Nat := 252
+-- Thirteen custody predicates and checked adapters add no external behavior.
+def notBehaviourBaseline : Nat := 265
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -451,6 +469,21 @@ def notBehaviour : List Name :=
     -- Packages the existing checked PE writer, reader and roundtrip theorem.
     -- It introduces no alternate serialization, loader rule or format fact.
     `Grass.Artifact.PE.encoding,
+    -- Exact table views, fixed-plan predicates and checked bookkeeping adapters;
+    -- they assert no native provider or CPU adequacy beyond their premises.
+    `Grass.Platform.Win32.WriteFile.EntryHandoff.after,
+    `Grass.Platform.Win32.WriteFile.EntryHandoff.history,
+    `Grass.Platform.Win32.WriteFile.EntryHandoff.initialPrefix,
+    `Grass.Platform.Win32.WriteFile.EntryHandoff.record,
+    `Grass.Platform.Win32.WriteFile.LoanPlan.ReadFootprint,
+    `Grass.Platform.Win32.WriteFile.LoanPlan.WriteAt,
+    `Grass.Platform.Win32.WriteFile.LoanPlan.WriteFootprint,
+    `Grass.Platform.Win32.WriteFile.LoanPlan.requests,
+    `Grass.Platform.Win32.WriteFile.ProtocolState,
+    `Grass.Platform.Win32.WriteFile.embedPending,
+    `Grass.Platform.Win32.WriteFile.entryHandoff?,
+    `Grass.Platform.Win32.WriteFile.reachedCall?,
+    `Grass.Platform.Win32.WriteFile.selectPending,
     -- Checked protocol projections and loader-table searches contain no new
     -- physical behavior claim. Their underlying profile/ABI facts remain owed.
     `Grass.Platform.Win32.ExecutionState.State.callProtocol?,
@@ -760,6 +793,13 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    -- Fixed request widths and callee stack custody retain external ABI debt.
+    `Grass.Platform.Win32.ApiRequest,
+    `Grass.Platform.Win32.WriteFile.Abi.InitializedReturnQword,
+    `Grass.Platform.Win32.WriteFile.Abi.StackPlan,
+    `Grass.Platform.Win32.WriteFile.Abi.StackPlan.loanPlan,
+    `Grass.Platform.Win32.WriteFile.Abi.StackPlan.requests,
+    `Grass.Platform.Win32.WriteFile.Abi.stackRequests,
     -- Fixed operational choices and ABI widths require declaration-level
     -- authority; vendor prose links alone do not close the citation ledger.
     `Grass.Platform.Win32.Cpu.accessFaults,
@@ -1114,6 +1154,9 @@ def modeledDeclarations : MetaM (Array Name) := do
     if n == ``Grass.ISA.X86.Execution.StoreCompletion ||
         n == ``Grass.Disasm.Entry.Entry ||
         n == ``Grass.ISA.X86.Execution.StoreCandidate.Evidence ||
+        n == ``Grass.Platform.Win32.WriteFile.Abi.StackPlan ||
+        n == ``Grass.Platform.Win32.WriteFile.Abi.InitializedReturnQword ||
+        n == ``Grass.Platform.Win32.ApiRequest ||
         n == ``Grass.Platform.Win32.WriteFile.Abi.Entry ||
         n == ``Grass.Platform.Win32.WriteFile.Prepared ||
         n == ``Grass.Platform.Win32.WriteFile.ReturnResult ||
