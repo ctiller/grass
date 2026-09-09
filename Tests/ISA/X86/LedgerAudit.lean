@@ -79,6 +79,7 @@ import Grass.Platform.Win32.WriteFileCall
 import Grass.Platform.Win32.WriteFileCallPreservation
 import Grass.Platform.Win32.WriteFileRuntime
 import Grass.Platform.Win32.WriteFileService
+import Grass.Platform.Win32.WriteFileServiceContinuation
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.Encoding
 import Grass.Artifact.PE.LayoutBinding
@@ -233,6 +234,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileCallPreservation,
    `Grass.Platform.Win32.WriteFileRuntime,
    `Grass.Platform.Win32.WriteFileService,
+   `Grass.Platform.Win32.WriteFileServiceContinuation,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
@@ -354,7 +356,8 @@ acquiring a citation.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
 -- Runtime and execution adapters retain checked receipts and graph agreement.
-def notBehaviourBaseline : Nat := 338
+-- Two continuation adapters transport supplied evidence.
+def notBehaviourBaseline : Nat := 340
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -508,6 +511,8 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.WriteFile.CallHandoff.rawAfter,
     `Grass.Platform.Win32.WriteFile.ServiceReceipt.nextRuntime,
     `Grass.Platform.Win32.WriteFile.ServiceReceipt.after,
+    `Grass.Platform.Win32.WriteFile.ServiceReceipt.castPrefixPlan,
+    `Grass.Platform.Win32.WriteFile.ServiceReceipt.extractInfiniteContinuation,
     `Grass.Platform.Win32.WriteFile.ServiceEdge,
     `Grass.Platform.Win32.NonvolatileSnapshot,
     `Grass.Platform.Win32.captureNonvolatile,
