@@ -111,6 +111,7 @@ import Grass.Std.Logical.Order
 import Grass.Std.Logical.Text
 import Grass.Std.Logical.Vec
 import Grass.Trust.Audit
+import Grass.Unsafe.Construct
 import Grass.Verify.VerifiedProgram
 
 /-!

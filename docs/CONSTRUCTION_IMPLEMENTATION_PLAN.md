@@ -293,6 +293,13 @@ cast or proof-erasing convenience. Imported indirect control flow is rejected
 until annotations, relocation/symbol evidence, or analysis proves every target
 belongs to the typed CFG.
 
+`Grass.Unsafe.Construct` wraps a closed `RawKind` family of existing raw
+representations in `Raw`, with a nonempty `Taint` account naming the first
+missing check and any additional missing obligations. `Raw.map` and
+`Construct.x86Bytes` preserve that account exactly; the closed payload family
+cannot contain a certificate type, and the unsafe namespace exposes no
+taint-removal or certificate constructor.
+
 Exit criteria include round trips for supported raw instructions, structured
 errors for unknown/ambiguous bytes and targets, exact stepping agreement with
 `Grass.Op.step`, and exact byte/list input passed to the artifact writer.
