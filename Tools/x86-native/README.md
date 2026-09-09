@@ -1,5 +1,8 @@
 # x86 native differential validation
 
+The bounded [scratch-stack campaign](STACK.md) extends this register campaign
+with successful PUSH/allocation effects and complete declared scratch snapshots.
+
 This is the verification side lane following `spikes`, initially against main
 `28e5767b`. It exercises public encoders and register write-back on the host CPU.
 It does not certify instruction semantics or close citation/proof obligations.

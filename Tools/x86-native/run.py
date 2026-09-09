@@ -21,10 +21,11 @@ def require(condition, detail):
         raise ValueError(detail)
 
 
-def observe(worker, code, before, flags, timeout=5):
+def observe(worker, code, before, flags, timeout=5, stack=False):
     try:
         result = subprocess.run([str(worker), code, *[f'{0 if x is None else x:x}' for x in before],
-                                 f'{flags:x}'], capture_output=True, text=True, timeout=timeout)
+                                 f'{flags:x}', *(['--stack'] if stack else [])],
+                                capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return {'status': 'timeout'}
     if result.returncode:
@@ -42,19 +43,19 @@ def observe(worker, code, before, flags, timeout=5):
         return {'status': 'protocol-error', 'stdout': result.stdout, 'stderr': result.stderr}
 
 
-def differences(actual, code, expected, flags):
+def differences(actual, code, expected, flags, rsp_decrease=0, terminal_extra=0):
     if actual['status'] != 'completed':
         return [actual['status']]
     errors = []
     if actual['exception'] != 0x80000003:
         errors.append('completion-exception')
-    if actual['pc_offset'] != len(bytes.fromhex(code)):
+    if actual['pc_offset'] != len(bytes.fromhex(code)) + terminal_extra:
         errors.append('completion-address')
     # Windows CONTEXT reports the breakpoint instruction, not its successor.
-    if actual['rip_offset'] != len(bytes.fromhex(code)):
+    if actual['rip_offset'] != len(bytes.fromhex(code)) + terminal_extra:
         errors.append('completion-rip')
     for i, name in enumerate(REGS):
-        want = actual['entry_rsp'] if i == 4 else expected[i]
+        want = actual['entry_rsp'] - rsp_decrease if i == 4 else expected[i]
         if actual['registers'][i] != want:
             errors.append(name)
     if flags is not None and (actual['flags'] ^ flags) & FLAGS_MASK:
