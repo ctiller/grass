@@ -90,11 +90,15 @@ log/graph conditions, not sufficient evidence that an instruction or API ran.
 
 At this delivery, architecture owns the still-pending fixed `RawStep.lean`
 union; x86 owns CPU cases; Windows owns WriteFile entry, service/initialization
-and modeled return; the certificate-root effort owns physical resume
-correspondence and delegated GetStdHandle/ExitProcess endpoints;
+and modeled return; the certificate-root effort owns the reusable provider
+resume connection and delegated GetStdHandle/ExitProcess endpoints;
 process owns caller normalization; lowering owns loop induction; spikes owns
 integration and acceptance. The earlier three-field raw-state proposal is
 superseded by this inspected carrier amendment. It is not a completed endpoint.
+
+Provider resume connects the Windows opaque-provider contract to an actual
+return-slot read. It does not model a physical RET through provider bytes:
+unchanged Hello has no authored RET, and native correspondence remains open.
 
 ## Find a symbol without another inventory
 
