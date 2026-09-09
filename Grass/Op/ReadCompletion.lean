@@ -3,10 +3,9 @@ import Grass.Op.Step
 /-!
 # Read-only completion facts
 
-These lemmas expose two consequences of the generic checked transition.  A
-read-only prepared access cannot change the allocation or backing tables, and
-the memory-backed oracle reports the bytes observed through the exact resolved
-access it was given.
+`performPreparedAccess_readOnly_storage` frames the two storage tables.
+`Oracle.ofMemory_observed_of_answerResolved` connects the answer to the exact
+resolved access supplied to the oracle.
 -/
 
 namespace Grass.Op
@@ -85,7 +84,7 @@ private theorem outcome_written_none_of_readOnly {d : AccessDescriptor}
       exact committed.writtenAbsent readOnly
   | denied violation => rfl
 
-/-- A read-only prepared access preserves both storage tables on every branch,
+/-- `performPreparedAccess_readOnly_storage` frames both storage tables on every branch,
 including refusal branches. -/
 theorem performPreparedAccess_readOnly_storage
     (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor)
@@ -107,7 +106,7 @@ theorem performPreparedAccess_readOnly_storage
        exact ⟨MemoryState.allocations_applyAuthorityEffect? authorityApplied,
          MemoryState.backings_applyAuthorityEffect? authorityApplied⟩)
 
-/-- A read-only prepared access preserves the complete allocation table on
+/-- `performPreparedAccess_readOnly_allocations` frames the allocation table on
 every branch, including refusal branches. -/
 theorem performPreparedAccess_readOnly_allocations
     (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor)
@@ -120,7 +119,7 @@ theorem performPreparedAccess_readOnly_allocations
   (performPreparedAccess_readOnly_storage policy state d resolved prepared outcome
     contextKind cause readOnly).1
 
-/-- A read-only prepared access preserves the complete backing table on every
+/-- `performPreparedAccess_readOnly_backings` frames the backing table on every
 branch, including refusal branches. -/
 theorem performPreparedAccess_readOnly_backings
     (policy : StepPolicy) (state : MachineState) (d : AccessDescriptor)

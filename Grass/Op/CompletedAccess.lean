@@ -64,7 +64,7 @@ theorem completedEvent_fields {id : EventId} {contextKind : ContextKind}
   cases Option.some.inj event
   exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
-/-- A clean actual prepared completion appends exactly the event produced by
+/-- `clean_prepared_completion_event` derives the exact event produced by
 the checked constructor, advances its supply, and preserves fault history. -/
 theorem clean_prepared_completion_event (policy : StepPolicy) (before after : MachineState)
     (d : AccessDescriptor) (resolved : before.memory.ResolvedAccess d.provenance d.range)
