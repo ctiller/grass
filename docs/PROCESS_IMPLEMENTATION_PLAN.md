@@ -556,7 +556,8 @@ fragment, so a caller could supply equality, discharge every `framed` by `subst`
 at any footprint whatsoever, and reduce every framing obligation in the weave to
 "the worlds are identical". Nothing was unsound; everything was useless, and no
 theorem in the module noticed. The fix is `agreesGlue`: any two worlds can be
-mixed along any set of fragments, which the equality agreement fails. It does not
+mixed along any set of fragments, which the equality agreement fails at any world with two distinct inhabitants
+(`subsingleton_of_forced_equality` carries the remaining case). It does not
 say the fragments cover the world — §10.137 records the refutation.
 
 Two further defects came from the same review: the frame rule
@@ -5293,7 +5294,8 @@ witness for one of the two. `MirrorWorld` readmits the shape `OrderedWorld`'s
 docstring rejects, legitimately but without saying so. One event was dated by two
 incompatible round numberings for the second round running -- the fixture's
 ordinals are now driven from this entry rather than counted separately. And
-§10.13's own paragraph at the top of this file still gave the reason this entry
+the unnumbered "Decided --" paragraph near the top of this file, the one
+recording that the segmentation is carried as an index, still gave the reason this entry
 demotes.
 
 **One of my own, and the worst kind.** `Grass/Process/Function/Serial.lean` said
@@ -5304,6 +5306,45 @@ uninhabited `Post` and `footprintAgrees := fun _ _ => False` satisfies it at
 holding somewhere, which is what `agent-bus` `g-design:152` actually found and
 what my restatement dropped. That is a claim that no witness can be built, made
 in the same commit whose ledger entry says not to make them.
+
+**And the theorem was stated as a biconditional it is not.** Sixth consecutive
+round in which the replacement claim was refuted by construction, and the first
+in which what was refuted was a theorem's *advertised strength* rather than a
+sentence with no theorem behind it.
+
+`determining_glue_forces_rectangle` and `rectangle_gives_glue` do not compose
+into "exactly when". The forward direction quantifies over any agreement
+determining two components at two distinct fragments. The converse quantifies
+over one clause shape, and its `elsewhere` hypothesis -- the agreement says
+nothing at any other fragment -- is load-bearing: `rectAgrees` meets both clause
+conditions over the full rectangle `Nat x Nat`, pins both components at a third
+fragment, and does not glue. Worth knowing when reading the converse:
+`elsewhere` excludes every agreement this project actually uses, including
+`logicalWorldAgreement`, which has content at all eight fragments.
+
+The other hypothesis was load-bearing too, and the prose had dropped it. "A world
+whose invariant genuinely constrains the pair cannot admit a determining
+agreement at all" needs *at two distinct fragments*: `orderedSingleFragment`
+determines both components of `OrderedWorld` -- which is not a rectangle -- at a
+single fragment, and glues, because its mixture only ever copies one argument
+whole. So the consequence that `boundedAgreement`'s redundant field is *forced*
+holds only within that qualifier, and "genuinely constrains" is now the defined
+property: the pair's realised values are not a product.
+
+The pattern across six rounds is stable enough to state. Each round's claim was
+weaker than the last and each was still too strong, and every refutation came
+from somebody building the object rather than from anybody reading. What finally
+made the sentences true was not a better adjective and not withdrawing the claim:
+it was writing down both quantifiers -- over agreements, and over the fragments
+they act at -- and putting a fixture on each hypothesis that could be dropped.
+
+Smaller, and again in the previous round's fix: the subsingleton correction left
+two differently-worded twins standing, in `Grass/Process/Network/World.lean` and
+in a paragraph of this file the branch had edited; a cross-reference said the
+theorem section is above the four cases when it is below; two docstring claims
+had no witness in the file whose subject is claims without witnesses; and a
+section citation inside this entry's own findings list named §10.13, which is
+about `detach`.
 
 **On the script, which an earlier version of this entry overclaimed.** It said
 the sweep "has to be a script ... the script is what the next round is

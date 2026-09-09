@@ -78,23 +78,35 @@ each refuted by somebody compiling a witness. The attempts went: a world carryin
 a cross-fragment invariant has no componentwise agreement; no *separating* one;
 no *determining* one. All false.
 
-The criterion is not about invariants. For an agreement whose clauses determine
-two components at two fragments, gluing holds exactly when those components range
-over a **rectangle** — when every combination of one world's first and another's
-second is realised by some world.
-`Tests/Process/AssertionFixtures.lean`'s `determining_glue_forces_rectangle` is
-the forward direction and `rectangle_gives_glue` the converse, so this reduces to
-a property of the world alone, which the previous version of this paragraph said
-it did not.
+The criterion is not about invariants, and it is one-directional. Call the two
+components a **rectangle** when every combination of one world's first and
+another's second is realised by some world.
 
-Two consequences worth stating, because five rounds of prose here missed them.
-A cross-fragment field costs nothing when it is *implied* by per-component
-bounds, since the world is then still a rectangle — and by the forward direction
-that is the only kind such a field can be, so `boundedAgreement`'s existence is
-forced rather than lucky. And an agreement that merely *looks* at two components
-is not thereby safe: `mirrorLooks` determines neither and still has no glue, so
-the criterion says nothing about non-determining agreements, of which the file
-holds one on each side. §10.137.
+*Necessary, and fully general.* Any agreement determining two components at two
+*distinct* fragments, and gluing, forces those components to be a rectangle —
+`Tests/Process/AssertionFixtures.lean`'s `determining_glue_forces_rectangle`.
+
+*Sufficient, for one clause shape only.* A rectangle gives gluing back for the
+agreement that reads each of those two components exactly at its own fragment and
+says nothing anywhere else — `rectangle_gives_glue`. That silence is load-bearing
+and excludes every agreement this project actually uses, `logicalWorldAgreement`
+included: `rectAgrees` meets both clause conditions over a full rectangle, pins
+both components at a third fragment, and does not glue.
+
+An earlier version of this paragraph called the pair a biconditional and said
+gluing reduces to a property of the world alone. It does not, and two fixtures
+say so. `orderedSingleFragment` is the other: it determines both components of a
+world that is *not* a rectangle, at a single fragment, and glues — so the
+necessary direction's two-fragment hypothesis is load-bearing too.
+
+What survives is a real consequence, stated with that hypothesis: a world whose
+components are not a rectangle admits no agreement determining them at two
+distinct fragments. So where a cross-fragment field takes the pair out of product
+shape, no such agreement exists over that world, and a field redundant given the
+per-component bounds is the only kind the gluing case can hold. The fixture's
+`boundedAgreement` carries exactly such a field, and `mirrorLooks` is the
+reminder that an agreement which merely *looks* at two components is not thereby
+safe -- it determines neither and has no glue either. §10.137.
 
 ## The world is abstract on purpose
 

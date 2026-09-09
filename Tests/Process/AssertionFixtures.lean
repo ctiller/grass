@@ -520,7 +520,11 @@ theorem orderedComponentwise_is_not_equality :
   simp at projected
 
 /-- An agreement that *reads* `low` at one fragment and `high` at another
-without determining either: it sees `low`'s parity and `high`'s half. -/
+without determining either -- it sees `low`'s parity and `high`'s half.
+
+`orderedSplit_does_not_determine_low` and `..._high` below are the witnesses;
+this docstring asserted it in prose until a reviewer pointed out that the file's
+whole subject is prose asserted without witnesses. -/
 def orderedSplitAgrees :
     NetworkFragment serverTopology → OrderedWorld → OrderedWorld → Prop
   | .obligations, a, b => a.low % 2 = b.low % 2
@@ -611,11 +615,13 @@ varies is:
 All four combinations are inhabited -- `orderedComponentwise`, `boundedAgreement`,
 `mirrorLooks`, `orderedSplitAgreement` -- so neither property implies the other.
 
-For the *determining* row that is not the end of it, and the section above this
-one has the theorem: gluing holds exactly when the two determined components
-range over a rectangle. So the first two cases are one criterion rather than an
-unexplained pair, and the invariant an author writes matters only insofar as it
-takes the world out of that shape. §10.137. -/
+For the *determining* row that is not the end of it, and the section below --
+"What determining agreements cost" -- has the theorem: an agreement determining
+two components at two distinct fragments can glue only if those components are a
+rectangle. So the first two cases are one criterion rather than an unexplained
+pair, and the invariant an author writes matters only insofar as it takes the
+world out of that shape. The converse is narrower than the necessary direction
+and the section says where. §10.137. -/
 
 /-- **Corner one: an invariant, a determining agreement, and no glue.**
 
@@ -808,12 +814,14 @@ theorem ordered_is_not_a_rectangle :
 /-- **`BoundedTiedWorld` is one**, and by `determining_glue_forces_rectangle` it
 had to be for `boundedAgreement` to exist.
 
-This is the sharp version of what that fixture shows. It is not that a
-cross-fragment invariant *happens* to cost nothing here; it is that a world
-carrying an invariant which genuinely constrains the pair cannot admit a
-determining agreement at all. `tie : low < high` follows from the two
-per-component bounds, so it constrains nothing the components do not already,
-and that is the only kind of cross-fragment field this case can hold. -/
+This is the sharper version of what that fixture shows, with the hypothesis an
+earlier version of this docstring dropped. A world whose components are not a
+rectangle admits no agreement determining them *at two distinct fragments* --
+`orderedSingleFragment` below determines both at one and glues over
+`OrderedWorld`, so the qualifier is not decoration. Within that hypothesis the
+consequence holds: `tie : low < high` follows from the two per-component bounds,
+so the pair is still a product, and a field that took it out of product shape
+would leave this case empty. -/
 theorem bounded_is_a_rectangle :
     ∀ a b : BoundedTiedWorld, ∃ mixed : BoundedTiedWorld,
       mixed.low = a.low ∧ mixed.high = b.high := by
@@ -822,6 +830,22 @@ theorem bounded_is_a_rectangle :
     have small := a.lowSmall
     have big := b.highBig
     omega⟩, rfl, rfl⟩
+
+/-- It reads `low`'s parity without determining `low`. -/
+theorem orderedSplit_does_not_determine_low :
+    orderedSplitAgrees .obligations ⟨0, 0, Nat.le_refl 0⟩ ⟨2, 2, Nat.le_refl 2⟩ ∧
+      (⟨0, 0, Nat.le_refl 0⟩ : OrderedWorld).low
+        ≠ (⟨2, 2, Nat.le_refl 2⟩ : OrderedWorld).low := by
+  refine ⟨rfl, ?_⟩
+  simp
+
+/-- And `high`'s half without determining `high`. -/
+theorem orderedSplit_does_not_determine_high :
+    orderedSplitAgrees .observations ⟨0, 0, Nat.le_refl 0⟩ ⟨1, 1, Nat.le_refl 1⟩ ∧
+      (⟨0, 0, Nat.le_refl 0⟩ : OrderedWorld).high
+        ≠ (⟨1, 1, Nat.le_refl 1⟩ : OrderedWorld).high := by
+  refine ⟨rfl, ?_⟩
+  simp
 
 /-- **Corner three: an invariant, an agreement that only looks, and no glue.**
 
@@ -890,7 +914,7 @@ open Classical in
 /-- Parity at both fragments, over the world with the weaker tie. -/
 theorem orderedParity_glues :
     ∀ (inside : NetworkFragment serverTopology → Prop) (left right : OrderedWorld),
-      ∃ mixed, (∀ fragment, inside fragment → orderedParity fragment mixed left) /\
+      ∃ mixed, (∀ fragment, inside fragment → orderedParity fragment mixed left) ∧
         (∀ fragment, ¬ inside fragment → orderedParity fragment mixed right) := by
   intro inside left right
   refine ⟨⟨(if inside .obligations then left else right).low % 2,
@@ -913,7 +937,7 @@ open Classical in
 difference between corners three and four. -/
 theorem mirrorHalf_glues :
     ∀ (inside : NetworkFragment serverTopology → Prop) (left right : MirrorWorld),
-      ∃ mixed, (∀ fragment, inside fragment → mirrorHalf fragment mixed left) /\
+      ∃ mixed, (∀ fragment, inside fragment → mirrorHalf fragment mixed left) ∧
         (∀ fragment, ¬ inside fragment → mirrorHalf fragment mixed right) := by
   intro inside left right
   refine ⟨⟨2 * ((if inside .observations then left else right).high / 2)
@@ -930,10 +954,110 @@ theorem mirrorHalf_glues :
 Corner three's docstring says it determines neither component, and only the
 `low` half had a witness. -/
 theorem mirror_does_not_determine_high :
-    mirrorLooks .observations ⟨0, 0, rfl⟩ ⟨2, 2, rfl⟩ /\
+    mirrorLooks .observations ⟨0, 0, rfl⟩ ⟨2, 2, rfl⟩ ∧
       (⟨0, 0, rfl⟩ : MirrorWorld).high ≠ (⟨2, 2, rfl⟩ : MirrorWorld).high := by
   refine ⟨rfl, ?_⟩
   simp
+
+/-! ### What the two directions do not add up to
+
+They are not a biconditional, and an earlier version of the prose above said they
+were. The forward direction quantifies over *any* agreement determining two
+components at two fragments. The converse quantifies over one clause shape: each
+of those two fragments reading its own component exactly, and every other
+fragment saying nothing. That `elsewhere` hypothesis is load-bearing, and the two
+fixtures here are what a reviewer built to show it. §10.137. -/
+
+/-- A relation over the full rectangle `Nat × Nat` whose two named fragments read
+one component each -- and which pins both at a *third* fragment. -/
+def rectAgrees : NetworkFragment serverTopology → Nat × Nat → Nat × Nat → Prop
+  | .obligations, a, b => a.1 = b.1
+  | .observations, a, b => a.2 = b.2
+  | .pending, a, b => a.1 = b.1 ∧ a.2 = b.2
+  | _, _, _ => True
+
+/-- It determines the first component at `.obligations`. -/
+theorem rectAgrees_determines_fst (a b : Nat × Nat)
+    (agreed : rectAgrees .obligations a b) : a.1 = b.1 := agreed
+
+/-- And the second at `.observations`. -/
+theorem rectAgrees_determines_snd (a b : Nat × Nat)
+    (agreed : rectAgrees .observations a b) : a.2 = b.2 := agreed
+
+/-- `Nat × Nat` is a rectangle -- every pair of components is realised. -/
+theorem prod_is_a_rectangle :
+    ∀ a b : Nat × Nat, ∃ mixed : Nat × Nat, mixed.1 = a.1 ∧ mixed.2 = b.2 :=
+  fun a b => ⟨(a.1, b.2), rfl, rfl⟩
+
+/--
+**And it does not glue.**
+
+So a rectangle is not sufficient. Gluing at `{.obligations}` needs a world
+agreeing with `left` there and with `right` at every other fragment, `.pending`
+included -- and `.pending` pins both components to `right` while `.obligations`
+pins the first to `left`.
+
+This is why `rectangle_gives_glue` carries `elsewhere` and why the criterion is
+one-directional in general. Worth knowing when reading it: `elsewhere` excludes
+every agreement actually used in this project, `logicalWorldAgreement` included,
+since those have content at all eight fragments. §10.137. -/
+theorem rectangle_is_not_sufficient :
+    ¬ (∀ (inside : NetworkFragment serverTopology → Prop) (left right : Nat × Nat),
+        ∃ mixed, (∀ fragment, inside fragment → rectAgrees fragment mixed left) ∧
+          (∀ fragment, ¬ inside fragment → rectAgrees fragment mixed right)) := by
+  intro glue
+  obtain ⟨mixed, inside, outside⟩ :=
+    glue (fun fragment => fragment = .obligations) (1, 0) (0, 0)
+  have fromLeft : mixed.1 = 1 := inside .obligations rfl
+  have fromRight := outside .pending (by intro same; cases same)
+  exact absurd (fromLeft.symm.trans fromRight.1) (by decide)
+
+/--
+**And determining at *one* fragment escapes the forward direction entirely.**
+
+`determining_glue_forces_rectangle` needs the two components determined at two
+*distinct* fragments; nothing stops an agreement pinning both at the same one.
+This does, over `OrderedWorld`, which is not a rectangle -- and it glues, because
+the mixture only ever has to copy one argument whole.
+
+So "a world whose invariant constrains the pair admits no determining agreement"
+is false as stated, and an earlier version of the prose above stated it. What is
+true is the two-fragment form. §10.137. -/
+def orderedSingleFragment : WorldAgreement serverTopology OrderedWorld where
+  Agrees
+    | .obligations, a, b => a.low = b.low ∧ a.high = b.high
+    | _, _, _ => True
+  agreesRefl := by intro fragment _; cases fragment <;> simp
+  agreesSymm := by
+    intro fragment left right agreed
+    cases fragment <;> simp_all
+  agreesTrans := by
+    intro fragment a b c first second
+    cases fragment <;> simp_all
+  agreesGlue := by
+    classical
+    intro inside left right
+    by_cases obligationsInside : inside .obligations
+    · refine ⟨left, ?_, ?_⟩
+      · intro fragment _; cases fragment <;> simp
+      · intro fragment isOutside
+        cases fragment <;> simp_all
+    · refine ⟨right, ?_, ?_⟩
+      · intro fragment isInside
+        cases fragment <;> simp_all
+      · intro fragment _; cases fragment <;> simp
+
+/-- It determines both components, so it is not blind. -/
+theorem orderedSingleFragment_determines (left right : OrderedWorld)
+    (agreed : orderedSingleFragment.Agrees .obligations left right) :
+    left.low = right.low ∧ left.high = right.high := agreed
+
+/-- And it is not the blind agreement: two worlds disagree at `.obligations`. -/
+theorem orderedSingleFragment_is_not_blind :
+    ¬ orderedSingleFragment.Agrees .obligations ⟨0, 0, Nat.le_refl 0⟩
+        ⟨1, 1, Nat.le_refl 1⟩ := by
+  intro agreed
+  exact absurd agreed.1 (by decide)
 
 /-- **Corner four: an invariant, an agreement that only looks, and glue.**
 

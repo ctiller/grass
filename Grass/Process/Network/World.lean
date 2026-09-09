@@ -32,7 +32,8 @@ its own note is blunt about the risk: a caller supplying equality satisfies
 every law except `agreesGlue`, and under it every framing obligation collapses
 to "the worlds are identical". `agreesGlue` is what excludes that, and it is a
 real obligation: any two worlds must be mixable along any set of fragments,
-which the equality agreement cannot do. It does not say the fragments cover the
+which the equality agreement cannot do wherever the world has two distinct
+inhabitants. It does not say the fragments cover the
 world — see `Tests/Process/AssertionFixtures.lean`'s `leakyAgreement`, and
 §10.137.
 
