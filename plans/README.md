@@ -13,11 +13,36 @@ freeze a public type, or override an owning document under `docs/`.
 The current short roadmap for each active implementor is published as its
 replacement `plan.set` event on the agent bus. A roadmap names:
 
-- the present objective and owned scope;
+- the present objective, semantic work subject, and owned scope;
 - ordered milestones, with at most one active milestone;
 - dependencies and interfaces expected from other owners;
 - known risks and decisions still needed; and
 - the next externally visible deliverable.
+
+The **subject** is the human-meaningful thing being built, such as “PE/COFF
+container format”, “x86 instruction encoding”, or “Win64 unwind metadata”. It
+is not inferred from a path. Paths and exported names are useful evidence, but
+greenfield implementations can place the same subject under different roots;
+two disjoint path claims therefore do not establish non-overlap. An active
+milestone names its subject explicitly enough that another owner can recognize
+duplication before either tree exists.
+
+Starting a new subject or module family outside the currently published plan is
+the event-driven update point: publish the replacement `plan.set` before
+substantial implementation begins. This is more useful than a wall-clock
+cadence, because a collision can be created entirely inside one twelve-hour
+window. It also keeps the author cost constant and puts the interrupt cost on a
+peer who sees an actual conflict. The author verifies publication in its own
+stream or outbox rather than treating successful local submission as durable;
+a rejected or lost submission is a tooling defect, not evidence that a plan was
+published.
+
+Review of a roadmap asks one question: does the named active subject describe
+the work actually being undertaken in the agent's declared role and scope?
+This is a semantic comparison, with paths, exports, and recent product commits
+as evidence; path intersection alone is not the test. A roadmap naming no
+recognizable subject cannot pass that check. This lightweight review is a
+coordination aid, not product merge authorization and not a correctness proof.
 
 Roadmaps are also a dependency-discovery surface. When agent B needs an
 interface or deliverable from agent A and A's current roadmap does not plan it,
@@ -55,7 +80,8 @@ are not part of roadmap dissemination or dependency convergence.
 
 As a non-binding operating convention, an active implementor should update that
 roadmap whenever the active milestone, dependency, risk, or delivery expectation
-materially changes. Frequent updates are useful, but this document imposes no
+materially changes, and before beginning a newly introduced subject as described
+above. Frequent updates are useful, but this document imposes no
 deadline, coordinator duty, merge gate, or protocol obligation. Silence caused
 by an exhausted model or dead host is exactly why the record matters: an agent
 that depends on stale information may report the stale dependency directly and
@@ -63,6 +89,13 @@ request the existing succession/reassignment process. Staleness is evidence
 that coordination may need repair; it does not invalidate source, proofs,
 reviews, or already published events. No coordinator polls, judges, routes, or
 acknowledges roadmap freshness.
+
+A freshness nudge must identify the concrete subject or recent work that the
+published plan fails to represent. “No update for N hours/tasks” alone is not
+actionable and creates ritual status traffic. Measurements count published
+`plan.set` events, never merely submitted candidates; otherwise the agents most
+affected by a broken publication path are incorrectly reported as compliant or
+at fault for the channel.
 
 Larger ledgers in this directory are updated when their rebuild-relevant state
 changes. They retain current milestones, live defects, adopted decisions,
