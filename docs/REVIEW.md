@@ -132,6 +132,11 @@ semantic policy.
 
 ### Standard library and proof economy
 
+Apply the accepted [shared-guarantee and second-consumer guidance](../CONTRIBUTING.md#shared-guarantees-and-second-consumers):
+identify the guarantee's owner, assess actual adoption or the architecture-approved
+exception, and ask what a third consumer would need to prove. The linked trial
+inventory is bounded audit evidence, not a cleanup schedule.
+
 - Does the precious resource-parameterized specification state only demanded
   product observations and guarantees, while a replaceable portable process model
   relates those observations to their generating transitions without fixing its
