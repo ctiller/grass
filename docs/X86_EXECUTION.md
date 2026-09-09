@@ -57,9 +57,25 @@ register/width SUB and unrelated opcodes. Representation checks retain full
 flags; completed-flag checks catch accidental RF preservation. Universal laws
 tie selected instructions to the shared decoder and production constructors.
 
-The pending memory migration supplies prepared backing accesses and the exact
-reached-state oracle API. The instruction receipt must use the actual selected
-sequence and `noteContext` state, no-fault plan, checked answer and real step
-result; event suffixes and byte/read-length laws follow from that receipt.
-Rejected, denied and permitted fault outcomes remain separate. No completed
-execution or partial-unwind proof is claimed by the current foundation files.
+The integrated memory migration supplies prepared backing accesses and the exact
+reached-state oracle API. `Op.Completion` derives the selected no-fault run from
+the actual step result, then exposes a singleton prepared access at that same
+`noteContext` state. Its access-free law frames the memory machine; it does not
+execute the arithmetic of a compute substep.
+
+`Op.CompletedAccess` derives event existence from a well-formed descriptor and
+a complete answer. A clean actual prepared result then supplies the exact fresh
+event suffix and preserved fault/violation histories. Event fields are derived
+from the checked constructor. An arbitrary complete oracle answer constrains
+presence and length; it does not by itself prove equality to backing bytes.
+`Op.ReadCompletion` supplies that equality for the exact `Oracle.ofMemory`
+answer and frames allocation/backing tables for every read-only prepared
+transition, including refused ones. A successful preparation demanding initialized
+bytes establishes initialization of the resolved span; those observations are
+independent of the indeterminate-byte provider. Fixtures retain a missing-cell
+counterexample where changing that provider changes the observed bytes.
+
+These are generic transition laws. The instruction receipt still must bind the
+actual selected sequence, fetched source bytes and instruction-specific register
+and memory effects. Rejected, denied and permitted fault outcomes remain separate.
+No completed x86 execution or partial-unwind proof is claimed by these files.
