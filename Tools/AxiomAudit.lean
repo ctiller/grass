@@ -1,5 +1,4 @@
 import Lean
-import Grass.ISA.X86.RegisterDecode
 import Grass.Semantics.OutputCut
 import Grass.Specification.TextLine
 import Grass.Console.Behavior
