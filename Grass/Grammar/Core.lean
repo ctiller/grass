@@ -206,6 +206,32 @@ theorem repeatConsumedLengthShape {α : Type} {format : Format α}
   | lift => trivial
   | iso => trivial
 
+/-- Expose the head and tail of a repeated-format derivation while preserving
+the result-type index. This is the value-level companion to
+`repeatConsumedLengthShape`. -/
+theorem repeatOuterShape {α : Type} {format : Format α}
+    {input : Std.Logical.ByteArray} {value : α} {rest : Std.Logical.ByteArray}
+    (derivation : Derives format input value rest) :
+    match format with
+    | .repeat 0 item => value = Vec.empty ∧ input = rest
+    | .repeat (Nat.succ count) item =>
+        ∃ middle head tail,
+          value = Vec.singleton head ++ tail ∧
+          Derives item input head middle ∧
+          Derives (.repeat count item) middle tail rest
+    | _ => True := by
+  induction derivation with
+  | pure => trivial
+  | byte => trivial
+  | seq => trivial
+  | choiceLeft => trivial
+  | choiceRight => trivial
+  | repeatZero => exact ⟨rfl, rfl⟩
+  | repeatSucc head tail => exact ⟨_, _, _, rfl, head, tail⟩
+  | refine => trivial
+  | lift => trivial
+  | iso => trivial
+
 /-- Prefix-format derivations are stable under an arbitrary appended suffix.
 The parsed value is unchanged and the exact residual bytes gain that suffix.
 This is the semantic transport law that lets concrete writers compose without

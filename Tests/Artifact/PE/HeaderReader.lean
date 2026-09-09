@@ -9,8 +9,19 @@ private def suffix : Std.Logical.ByteArray := Vec.fromList [0xaa, 0xbb]
 example : takeHeaderPrefix (writeHeaderPrefix 3 ++ suffix) = .done 3 suffix := by
   simp
 
+example : Derives headerPrefixFormat (writeHeaderPrefix 3 ++ suffix) 3 suffix := by
+  exact derives_headerPrefix_iff.mpr rfl
+
 example : takeHeaderPrefix (writeHeaderPrefix 4 |>.take 80) = .needMore (some 8) := by
   rfl
+
+example : ∃ completion sectionCount,
+    completion.length = 8 ∧
+    takeHeaderPrefix ((writeHeaderPrefix 4).take 80 ++ completion) =
+      .done sectionCount Vec.empty := by
+  simpa [headerPrefixSize, canonicalPeOffset, peSignatureSize, coffHeaderSize] using
+    takeHeaderPrefix_needMore_has_exact_completion
+      ((writeHeaderPrefix 4).take 80) (some 8) (by rfl)
 
 example : takeHeaderPrefix (Vec.fromList [0]) =
     .invalid (.malformed "impossible PE header prefix") := by

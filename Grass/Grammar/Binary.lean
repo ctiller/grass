@@ -74,6 +74,33 @@ theorem anyBytes_derives (value rest : Std.Logical.ByteArray) :
           (Derives.byte (fun _ => True) byte (tail ++ rest) trivial)
           tailDerivation
 
+/-- Repetition of the unconstrained byte format consumes exactly the returned
+byte sequence and no other prefix. This is the inversion counterpart of
+`anyBytes_derives`, used by concrete fixed-width container formats. -/
+theorem derives_repeatedBytes_iff {count : Nat}
+    {input value rest : Std.Logical.ByteArray} :
+    Derives (repeatedBytesFormat count) input value rest ↔
+      input = value ++ rest ∧ value.length = count := by
+  constructor
+  · intro derivation
+    induction count generalizing input value with
+    | zero =>
+        have shape := derivation.repeatOuterShape
+        rcases shape with ⟨rfl, rfl⟩
+        simp
+    | succ count inductionHypothesis =>
+        have shape := derivation.repeatOuterShape
+        rcases shape with ⟨middle, head, tail, rfl, headDerivation, tailDerivation⟩
+        have headInput := headDerivation.byteInput
+        have tailParts := inductionHypothesis tailDerivation
+        constructor
+        · rw [headInput, tailParts.1]
+          simp [Vec.append_assoc]
+        · simp [tailParts.2]
+          omega
+  · rintro ⟨rfl, rfl⟩
+    exact anyBytes_derives value rest
+
 /-- Exact fixed-width parsing selects the leading `count` bytes, classifies
 short buffers by their exact deficit, and has no irrecoverably invalid prefix. -/
 def fixedBytesSemantics (count : Nat) : FormatSemantics (fixedBytesFormat count) where
