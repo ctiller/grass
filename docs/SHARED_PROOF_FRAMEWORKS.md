@@ -455,6 +455,61 @@ Do not replace the public certificate with a generic user-supplied profile or
 selected successful execution to make construction easier. Proof reuse must
 preserve the original theorem, including refusal and complete behavior scope.
 
+### Concrete library interfaces and remaining migration evidence
+
+Follow-up source audit at main `900df7d4` found independent failure-state helpers
+still in MemoryMoveFactory (`reached`), ReturnSlotFactory (`accessReached`) and
+FetchFactory (`accessReached`). Push/Call adoption is therefore partial DUP-06
+closure. The remaining migration should call RunFactory.AccessFailure.reached
+with each factory's exact stage input and remove those three private matches.
+Do not change the surrounding family-specific Failure constructors.
+
+The same audit confirms that SourceInitialization.resolveEntries? and
+SourceImportRequests.resolveNames? each recursively traverse Option results and
+reprove projected source order. Replace their recursion with existing List.mapM
+and a shared success-correspondence theorem. Proposed theorem shape, not a new
+implementation or a claim about an existing theorem name:
+
+```text
+mapM f inputs = some outputs
+  iff List.Forall₂ (fun input output => f input = some output) inputs outputs
+```
+
+Derive output length and indexed/member provenance from this correspondence.
+For order projection, a consumer supplies only its one-element law
+`f input = some output -> project output = input`; shared composition proves
+`outputs.map project = inputs`. Initialization still owns Store32.resolve?
+correctness; import requests still own resolveName?_source. Neither should
+induct over lists again. Preserve the existing first-occurrence deduplication
+before import resolution; the all-or-none traversal does not replace it.
+
+ImageReader.readSectionHeaders and ExceptionReader.readRuntimeFunctions also
+still implement the same counted-reader recursion and writer-append induction.
+Proposed ReaderCore interface: `readCount readOne count input`, with zero count
+returning the unchanged suffix and positive count using existing continueRead.
+Its general round-trip theorem consumes only the single-record law:
+
+```text
+readOne (writeOne item ++ suffix) = .done (view item) suffix
+  => readCount readOne items.length (writeMany writeOne items ++ suffix)
+       = .done (items.map view) suffix
+```
+
+The single-record law is universally quantified over item and suffix. Either
+make the existing table writers use the shared concatenation or prove their
+definitional bridge once. Section-header and runtime-function consumers retain
+their distinct field decoding and semantic bounds; the general theorem does
+not establish loader acceptance or unwind validity. Counted-reader reuse also
+retains the exact needMore/invalid result from the failing element through
+continueRead. A zero-count case, two differently sized record types, a nonempty
+suffix, and an incomplete second record distinguish the required behavior.
+
+These source findings make DUP-03/04 concrete law-library migrations. They do
+not justify another DSL or a framework with caller-selected parser semantics.
+Library owns the shared law surface, grammar/artifact and source owners review
+their adapters, and spikes schedules the work. DUP-02 and DUP-05 remain the
+separate read-observation and receipt-construction migrations described above.
+
 ## Acceptance and sequencing
 
 Spikes schedules bounded migrations beside the demanded implementation. Finish
