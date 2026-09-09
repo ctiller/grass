@@ -320,6 +320,18 @@ the abstract-behavior equivalence required by decision 137; backward behavior
 and choice coverage remain a separate necessary part of that correspondence.
 The current Lean foundation implements forward inclusion only.
 
+`Grass/Refinement/Coverage.lean` separately proves composition and generic
+property transport when that existing refinement's prefix and completion maps
+are surjective. It covers represented finite prefixes and their finite/infinite
+completions, including dependent prefix/completion pairs. The counterexample in
+`Tests/Refinement/ForwardInclusion.lean` exhibits an adequate implementation
+which forward-refines an adequate abstraction while deleting one observable
+alternative; it fails this coverage condition. This is a reusable partial step,
+not an extra author-theorem certificate or a completed `VerifiedProgram`
+equivalence gate. Finite packaged prefixes erase intermediate choice witnesses,
+and the current completion type still lacks permanent waiting without steps;
+weak/stuttering correspondence also remains outside these lockstep maps.
+
 ```lean
 theorem emitted_sound
     (v : VerifiedProgram spec)

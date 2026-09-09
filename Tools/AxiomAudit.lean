@@ -100,6 +100,7 @@ import Grass.Process.Weave.Blend
 import Grass.Process.Weave.Lens
 import Grass.Process.Weave.Mixin
 import Grass.Refinement.Console.WriteHistory
+import Grass.Refinement.Coverage
 import Grass.Resource.Algebra
 import Grass.Resource.Axis
 import Grass.Semantics.Execution
