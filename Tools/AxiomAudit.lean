@@ -1,4 +1,9 @@
 import Lean
+import Grass.Semantics.OutputCut
+import Grass.Specification.TextLine
+import Grass.Console.Behavior
+import Grass.Console.Accounting
+import Grass.Console.LineBehavior
 import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
 import Grass.Assembly.X86ControlFlow
