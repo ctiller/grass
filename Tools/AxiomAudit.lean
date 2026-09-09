@@ -6,6 +6,7 @@ import Grass.Build.Cache.Key
 import Grass.CFG.Contract
 import Grass.CFG.Graph
 import Grass.CFG.Join
+import Grass.CFG.Loop
 import Grass.Certificate
 import Grass.Core.Context
 import Grass.Core.Demand
