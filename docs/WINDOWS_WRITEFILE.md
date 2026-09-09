@@ -47,8 +47,10 @@ zero/partial/full successes, failure after zero/partial/full output, and rejecte
 excess counts, count/output disagreement and wrong bytes using the existing Lean
 relations. They are not emitted programs. A thin host launcher may supply inherited
 stdout fixtures and collect output; it must not replace the API test body or its
-model predictions. The unavailable production emitter remains the blocking
-dependency; no parallel PE writer is introduced for validation.
+model predictions. The [checked PE container path](WINDOWS_PE.md) now has a
+complete reader and exact decoded-record round trip. Binding authored Grass code,
+static data and imports through that layout remains the dependency before native
+Grass probe execution; validation uses that same production writer.
 
 The [auxiliary native campaign](../probes/windows/README.md) builds an MSVC executable
 and checks real pipe API outcomes against an independently written comparator.
