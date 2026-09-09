@@ -10,8 +10,8 @@ open Grass.Console Grass.Semantics Grass.Std.Logical Grass.Op
 open Grass.Platform.Win32.WriteFile
 open Grass.Refinement.Console.WriteFileHistory
 
-variable {R Outcome Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
-  {spec : CapturedSpecification resources Outcome}
+variable {R Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
+  {spec : SpecProcess resources}
   {projection : CapturedTargetProjection spec Status}
   {realization : Realization} {initial state : CallProtocol.State Request}
   {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
@@ -30,7 +30,7 @@ example (aligned : Aligned relation history)
     ((aligned.extend first silent zero).extend second bytes positive).upper.path.events =
       aligned.upper.path.events ++ [.emitted bytes] :=
   ((aligned.extend first silent zero).extend_positive_events second bytes positive more).trans
-    (congrArg (fun upper : projection.system.History => upper.path.events ++ [.emitted bytes])
+    (congrArg (fun upper : projection.componentSystem.History => upper.path.events ++ [.emitted bytes])
       (aligned.extend_zero first silent zero same))
 
 /-- Full output plus an external stalled observation maps to the full-cut wait. -/
@@ -58,7 +58,7 @@ example (aligned : Aligned relation history) (response : FixedNonresponse aligne
 /-- Equal cut counts never authorize replacing the reached upper history. -/
 example (aligned : Aligned relation history) (response : FixedNonresponse aligned) (n : Nat) :
     (response.alignedAt n).upper.path.choices = aligned.upper.path.choices :=
-  congrArg (fun upper : projection.system.History => upper.path.choices) (response.upper_at n)
+  congrArg (fun upper : projection.componentSystem.History => upper.path.choices) (response.upper_at n)
 
 /-- Distinct provider contexts are explicit arguments of the selected relation. -/
 example (_aligned : Aligned relation history) (_otherRealization : Realization)

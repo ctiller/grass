@@ -6,8 +6,8 @@ open Grass.Console Grass.Semantics Grass.Std.Logical Grass.Std.Console Grass.Op
 open Grass.Platform.Win32.WriteFile
 open Grass.Refinement.Console.WriteFileHistory
 
-variable {R Outcome Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
-  {spec : CapturedSpecification resources Outcome}
+variable {R Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
+  {spec : SpecProcess resources}
   {projection : CapturedTargetProjection spec Status}
   {realization : Realization} {initial before after : CallProtocol.State Request}
   {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
