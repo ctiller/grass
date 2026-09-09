@@ -2045,6 +2045,12 @@ theorem allocations_applyAuthorityEffect? {state next : MemoryState} {actor : Co
 @[simp] theorem grantEntries_eq (state : MemoryState) :
     state.grantEntries = state.grants.entries := rfl
 
+/-- Equal grant-entry views give equal lookup observations. -/
+theorem grantAt?_eq_of_grantEntries_eq {before after : MemoryState}
+    (same : after.grantEntries = before.grantEntries) (id : GrantId) :
+    after.grantAt? id = before.grantAt? id :=
+  congrArg (fun entries => Grass.Std.Logical.findValue entries id) same
+
 /-- A successful issue records the grant under the identity it names. -/
 theorem grantAt?_issue?_self {state issued : MemoryState} {id : GrantId}
     {grant : AuthorityGrant} (h : state.issue? id grant = some issued) :
@@ -2071,6 +2077,33 @@ theorem grantAt?_issue?_self {state issued : MemoryState} {id : GrantId}
   injection h with h
   subst h
   exact FiniteMap.lookup_insert_self _ _ _
+
+/-- Issuing one grant leaves every other identity alone. -/
+theorem grantAt?_issue?_ne {state issued : MemoryState} {id other : GrantId}
+    {grant : AuthorityGrant} (h : state.issue? id grant = some issued)
+    (hne : other ≠ id) : issued.grantAt? other = state.grantAt? other := by
+  unfold issue? at h
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  split at h
+  · exact absurd h (by simp)
+  injection h with h
+  subst h
+  exact FiniteMap.lookup_insert_ne _ hne _
 
 /-- **A reissued identity is refused**, which is §3's "a return consumes that exact
 identity" read from the other side: an identity is consumed by a return and by

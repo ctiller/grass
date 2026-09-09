@@ -36,6 +36,17 @@ laws through a common placement operation. The unwind fixture agrees with the
 computed allocation. Typed-source extraction and instruction-derived unwind
 positions remain unconnected, as does the external call/return ordering proof.
 
+`Grass/Op/CallProtocol.lean` supplies a checked synchronous loan protocol over
+the existing machine state. Handoff mints identities, records the exact request
+and loans, and suspends the caller. Return checks that occurrence and its exact
+ordered loan identities before releasing them. Ordinary operations use the
+existing `Op.step` semantics, with authority effects excluded by this bounded
+wrapper; its preservation theorem retains the complete resulting machine state.
+`Tests/Memory/CallProtocol.lean` exercises successful and malformed boundaries,
+including a transient split/join cycle that a final-loan-table check alone would
+miss. These are bookkeeping and operation-composition proofs: they do not yet
+certify a physical ABI return or establish happens-before for the API agent.
+
 ## Specification
 
 The high-level Lean specification requests one fixed byte string on the standard

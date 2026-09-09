@@ -169,6 +169,23 @@ def Equiv (m n : FiniteMap K V) : Prop := ∀ key, m.lookup key = n.lookup key
 
 @[simp] theorem lookup_empty (key : K) : (empty : FiniteMap K V).lookup key = none := rfl
 
+/-- A successful lookup identifies an entry in the map's finite presentation. -/
+theorem mem_of_lookup {m : FiniteMap K V} {key : K} {value : V}
+    (found : m.lookup key = some value) : (key, value) ∈ m.entries := by
+  cases m with
+  | mk entries =>
+    induction entries with
+    | nil => simp [lookup, findValue] at found
+    | cons entry rest ih =>
+      rcases entry with ⟨headKey, headValue⟩
+      change (if headKey = key then some headValue else findValue rest key) = some value at found
+      split at found
+      · next same =>
+        cases found
+        subst headKey
+        exact List.mem_cons_self
+      · exact List.mem_cons_of_mem _ (ih found)
+
 @[simp] theorem lookup_insert_self (m : FiniteMap K V) (key : K) (value : V) :
     (m.insert key value).lookup key = some value := by
   simp [lookup, insert]

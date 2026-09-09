@@ -2181,6 +2181,29 @@ theorem step_frames_untouched (policy : StepPolicy) (state : MachineState)
         rw [runStep_frames_untouched policy _ sequence context contextKind cause _ hacc,
           MachineState.noteContext_memory]
 
+/-- `step_preserves_authority_of_no_effects` lifts the grant-map framing law to
+the actual operation entry point, including arbitrary fault plans. -/
+theorem step_preserves_authority_of_no_effects (policy : StepPolicy)
+    (state : MachineState) (operation : SomeOperation) (context : ContextId)
+    (contextKind : ContextKind) (cause : EventCause)
+    (faultAt : (sequence : SubstepSequence) → FaultPlan sequence) (final : MachineState)
+    (ran : step policy state operation context contextKind cause faultAt = .ran final)
+    (effects : ∀ sequence, operation.facets.substeps? = some sequence →
+      ∀ access ∈ sequence.accesses, access.authorityEffect = []) :
+    final.memory.grantEntries = state.memory.grantEntries := by
+  unfold step at ran
+  split at ran
+  · exact absurd ran (by simp)
+  · split at ran
+    · exact absurd ran (by simp)
+    · rename_i sequence hseq
+      have noEffects := effects sequence hseq
+      repeat' split at ran
+      all_goals cases ran
+      all_goals
+        rw [runStep_preserves_authority_of_no_effects policy _ sequence context
+          contextKind cause _ noEffects, MachineState.noteContext_memory]
+
 /-- Performing an access does not touch the fault record: a fault is raised by a
 substep, and `performAccess` runs one access. -/
 theorem performAccess_preserves_faults (policy : StepPolicy) (state : MachineState)
