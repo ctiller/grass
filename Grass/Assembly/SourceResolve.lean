@@ -25,6 +25,12 @@ structure Symbols where
   staticNamesUnique : (statics.map StaticSymbol.name).Nodup
   importNamesUnique : (imports.map ImportSymbol.name).Nodup
 
+/-- Build an environment from populations whose name uniqueness is already proved. -/
+def Symbols.checked (statics : List StaticSymbol) (imports : List ImportSymbol)
+    (staticNamesUnique : (statics.map StaticSymbol.name).Nodup)
+    (importNamesUnique : (imports.map ImportSymbol.name).Nodup) : Symbols :=
+  ⟨statics, imports, staticNamesUnique, importNamesUnique⟩
+
 def Symbols.mk? (statics : List StaticSymbol) (imports : List ImportSymbol) : Option Symbols :=
   if hs : (statics.map StaticSymbol.name).Nodup then
     if hi : (imports.map ImportSymbol.name).Nodup then some ⟨statics, imports, hs, hi⟩ else none
@@ -180,6 +186,19 @@ def resolve? {frame rootOffset} (splice : SourceSplice.Result frame rootOffset)
         else none
       else none
     else none
+
+/-- Successful resolution retains the exact splice, symbol environment and RVA base. -/
+theorem resolve?_inputs {frame rootOffset} {splice : SourceSplice.Result frame rootOffset}
+    {symbols : Symbols} {codeBase : Nat} {result : Result frame rootOffset}
+    (success : resolve? splice symbols codeBase = some result) :
+    result.splice = splice ∧ result.symbols = symbols ∧ result.codeBase = codeBase := by
+  unfold resolve? at success
+  split at success <;> try contradiction
+  split at success <;> try contradiction
+  split at success <;> try contradiction
+  split at success <;> try contradiction
+  cases success
+  exact ⟨rfl, rfl, rfl⟩
 
 def Result.encodings {frame rootOffset} (r : Result frame rootOffset) := r.outputs.map Output.encoding
 

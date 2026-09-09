@@ -12,6 +12,8 @@ import Grass.ABI.Win64.FrameRanges
 import Grass.Platform.Win32.Console
 import Grass.Platform.Win32.Signatures
 import Grass.Platform.Win32.WriteFile
+import Grass.Platform.Win32.WriteFileNonresponse
+import Grass.Platform.Win32.WriteFileReturn
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
 
@@ -105,6 +107,8 @@ def auditedModules : List Name :=
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
    `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
    `Grass.Platform.Win32.Signatures, `Grass.Platform.Win32.WriteFile,
+   `Grass.Platform.Win32.WriteFileNonresponse,
+   `Grass.Platform.Win32.WriteFileResult, `Grass.Platform.Win32.WriteFileReturn,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.HeaderPrefix, `Grass.Artifact.PE.OptionalHeader,
@@ -139,7 +143,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- No existing debt is reclassified by this addition.
 -- PE/COFF adds 71 format-schema, profile, serializer, and reader obligations.
 -- No PE declaration is treated as cited merely because a Lean roundtrip holds.
-def owedBaseline : Nat := 204
+-- Matched-return adds raw BOOL width, DWORD observation and result conformance.
+def owedBaseline : Nat := 207
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -168,7 +173,10 @@ acquiring a citation.
 -- Fourteen new structural helpers over explicit semantic and decoder results.
 -- Twenty-nine PE coordinate, projection, and supplied-data transformations are
 -- implementation plumbing over the separately owed format schema/profile.
-def notBehaviourBaseline : Nat := 136
+-- Two nonresponse consumers derive finite histories or accept a selected
+-- external relation; neither asserts Windows adequacy or physical nonresponse.
+-- Three new generic definitions derive history events or name selected evidence.
+def notBehaviourBaseline : Nat := 141
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -309,6 +317,13 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Derived accumulated histories and the type of an externally supplied
+    -- observation relation, not new Windows behavior facts.
+    `Grass.Platform.Win32.WriteFile.InfiniteContinuation.historyAt,
+    `Grass.Platform.Win32.WriteFile.StalledPredicate,
+    `Grass.Platform.Win32.WriteFile.History.providerEvents,
+    `Grass.Platform.Win32.WriteFile.ReturnInterpretation,
+    `Grass.Platform.Win32.WriteFile.CallerInterpretation,
     -- These project supplied spans and payload lengths. Invariance theorems
     -- transport coordinates without adding a format/loader applicability claim.
     `Grass.Artifact.PE.placementSpans,
@@ -572,6 +587,9 @@ def owed : List Name :=
     -- no-wrap and disjointness as a selected profile, whose applicability is
     -- still external. No loan or probe result discharges those obligations.
     `Grass.Platform.Win32.WriteFile.Request.loans,
+    `Grass.Platform.Win32.WriteFile.DwordAt,
+    `Grass.Platform.Win32.WriteFile.ReturnResult,
+    `Grass.Platform.Win32.WriteFile.ReturnResult.Conforms,
     `Grass.Platform.Win32.WriteFile.Prepared,
     `Grass.ISA.X86.RegisterSemantics.Flags.bits,
     `Grass.ISA.X86.RegisterSemantics.Flags.fromBits,
@@ -706,6 +724,7 @@ def modeledDeclarations : MetaM (Array Name) := do
     -- rather than letting the generic structure filter hide the obligation.
     -- This exception adds coverage; it exempts no future declaration.
     if n == ``Grass.Platform.Win32.WriteFile.Prepared ||
+        n == ``Grass.Platform.Win32.WriteFile.ReturnResult ||
         n == ``Grass.Artifact.PE.SectionName ||
         n == ``Grass.Artifact.PE.ParsedHeaderPrefix ||
         n == ``Grass.Artifact.PE.ParsedOptionalHeader ||

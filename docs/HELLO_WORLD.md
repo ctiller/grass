@@ -109,8 +109,21 @@ equals the next instruction position plus the recovered signed immediate.
 `Grass/ISA/X86/Rel32.lean` supplies fixed-width jump/equal/above encodings and
 decoder roundtrips; branch sizes are computed from those constructors.
 These arithmetic laws do not establish machine-address non-wrapping or loader
-placement. The source-derived prologue now realizes the wrapper's computed
-allocation, but it is not yet spliced and relinked with the complete body.
+applicability. `Grass/Assembly/SourceSplice.lean` inserts the source-derived
+allocation and local initialization into the complete body.
+`Grass/Assembly/SourceResolve.lean` resolves its branches, frame references,
+static addresses, sizes and external calls; the actual authored assembly fixture
+resolves all 44 outputs. `Grass/Assembly/SourceBytes.lean` proves decoding at
+every computed instruction position, including the exact remaining byte stream.
+
+`Grass/Assembly/SourceLinkedImage.lean` now composes code, static objects and
+source-derived imports through provisional placement and a checked final PE
+plan. Its final result retains exact code bytes and recomputed static/import
+symbol bindings. The integration fixture supplies explicit static bytes and
+also grows them across a section-alignment interval without new offset inputs.
+This does not yet elaborate the authored specification or complete the required
+unwind attachment, loaded-image applicability, machine-execution refinement,
+or final `VerifiedProgram`/`emitProgram` acceptance path.
 
 `Grass/Assembly/X86BranchLayout.lean` connects these laws to checked source
 programs containing closed operands and local branches. It derives every
@@ -120,9 +133,10 @@ The result exposes exact prefix positions, signed branch-target equations,
 targets strictly inside the emitted bytes, total byte length, and decoder
 roundtrips. A source-only rebuild fixture changes an earlier instruction's size
 and checks the newly computed branch positions. The actual Hello World fixture
-is still refused by this layer because it also needs symbolic constants, stack
+is refused by this restricted layer because it also needs symbolic constants, stack
 slots, static addresses, external calls, and integration of the generated
-prologue. No instruction is silently omitted to obtain an accepted layout.
+prologue. Those operands are handled by the full `SourceSplice`/`SourceResolve`
+path above; no instruction is silently omitted to obtain an accepted layout.
 
 ## Specification
 
@@ -178,6 +192,12 @@ that each conforming response refines a portable console outcome.
 - Sections: standard least-privilege permissions.
 - Layout: abstract RIP/section-relative proof followed by relocation.
 - Unwind: generated `.pdata`/`.xdata` consistent with the realized prologue.
+
+The reviewed [Hello unwind and PE binding interpretation](HELLO_UNWIND_BOUNDARY.md)
+records the exact code/metadata placement, exception-directory connection,
+ownership and remaining semantic reversal obligations for this requirement.
+It applies this milestone and the normative ABI/artifact requirements; it does
+not replace their authority or waive unwind because the normal path exits.
 
 Frame allocation, local and argument offsets, and alignment padding are
 computed from the realized calls, local storage requirements, saved registers,
