@@ -2,11 +2,13 @@ import Lean.Elab.Command
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.BasicInstructions
 import Grass.ISA.X86.Rel32
+import Grass.ISA.X86.ImmediateArithmetic
 import Grass.ISA.X86.Decode
 import Grass.ISA.X86.Profile
 import Grass.ABI.Win64.UnwindBytes
 import Grass.ABI.Win64.FrameRanges
 import Grass.Platform.Win32.Console
+import Grass.Platform.Win32.Signatures
 
 /-!
 # Ledger coverage gate
@@ -91,9 +93,11 @@ def auditedModules : List Name :=
   [`Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.BasicInstructions,
    `Grass.ISA.X86.Rel32,
+   `Grass.ISA.X86.ImmediateArithmetic,
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
-   `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console]
+   `Grass.ABI.Win64.UnwindBytes, `Grass.Platform.Win32.Console,
+   `Grass.Platform.Win32.Signatures]
 
 /--
 The number of entries `owed` was last reviewed at.
@@ -111,7 +115,9 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- opcode rows. Their decoder roundtrips do not discharge vendor validation.
 -- Rel32 adds a branch constructor and its computed size over existing rows;
 -- decoder agreement still does not discharge the architecture citation debt.
-def owedBaseline : Nat := 113
+-- Reviewed additions: three immediate-arithmetic encoding facts and two
+-- Win32 signature tables. No existing citation debt is reclassified.
+def owedBaseline : Nat := 118
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -133,7 +139,8 @@ than `owed` does, not less.
 Both lists are now capped separately. A declaration can leave either only by
 acquiring a citation.
 -/
-def notBehaviourBaseline : Nat := 70
+-- Nine new representation conversions, derived queries, and internal names.
+def notBehaviourBaseline : Nat := 79
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -273,6 +280,18 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Representation conversion and queries over the existing immediate type.
+    `Grass.ISA.X86.ImmediateArithmetic.Immediate.isa,
+    `Grass.ISA.X86.ImmediateArithmetic.Immediate.size,
+    `Grass.ISA.X86.ImmediateArithmetic.Immediate.toInt,
+    -- Selected inventory, derived table queries, and Grass's internal IAT alias.
+    -- The native names and ordered parameter facts themselves remain owed.
+    `Grass.Platform.Win32.Signatures.apis,
+    `Grass.Platform.Win32.Signatures.argumentCount,
+    `Grass.Platform.Win32.Signatures.argumentIndex?,
+    `Grass.Platform.Win32.Signatures.importName,
+    `Grass.Platform.Win32.Signatures.resolveImport?,
+    `Grass.Platform.Win32.Signatures.resolveName?,
     -- Win64 and Win32: Grass's own constructions over the ABI types. The
     -- external content they are built from is in `owed` below.
     `Grass.ABI.Win64.Ascends, `Grass.ABI.Win64.ascends,
@@ -363,6 +382,11 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    `Grass.ISA.X86.ImmediateArithmetic.Immediate.opcode,
+    `Grass.ISA.X86.ImmediateArithmetic.Kind.extension,
+    `Grass.ISA.X86.ImmediateArithmetic.encode,
+    `Grass.Platform.Win32.Signatures.apiName,
+    `Grass.Platform.Win32.Signatures.parameters,
     -- Architectural facts that were in `notBehaviour` and should not have been.
     -- A reviewer pointed at the sharpest case: `ByteReg.Encodable` is one of the
     -- six cited declarations and is *defined from* `highCapable` and

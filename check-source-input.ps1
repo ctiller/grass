@@ -5,11 +5,13 @@ $ErrorActionPreference = 'Stop'
 # Run Lean directly on each source-backed fixture after building its imports.
 Push-Location $PSScriptRoot
 try {
-    & lake build Grass.Assembly.SourceStore Grass.Assembly.X86ControlFlow Grass.Assembly.X86ClosedEncoding Grass.Assembly.X86BranchLayout Tests.Assembly.SourceLiteral
+    & lake build Grass.Assembly.SourceFrameHeader Grass.Assembly.SavedPrefix Grass.Assembly.SourceFrame Grass.Assembly.SourcePrologue Grass.Assembly.FrameStore Grass.Assembly.SourceStore Grass.Assembly.X86ControlFlow Grass.Assembly.X86ClosedEncoding Grass.Assembly.X86BranchLayout Tests.Assembly.SourceLiteral
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     foreach ($fixture in @('Tests/Assembly/SourceInput.lean', 'Tests/Assembly/SourceStore.lean',
         'Tests/Assembly/X86Source.lean', 'Tests/Assembly/X86ControlFlow.lean',
-        'Tests/Assembly/X86ClosedEncoding.lean', 'Tests/Assembly/X86BranchLayout.lean')) {
+        'Tests/Assembly/X86ClosedEncoding.lean', 'Tests/Assembly/X86BranchLayout.lean',
+        'Tests/Assembly/SourceFrameHeader.lean', 'Tests/Assembly/SavedPrefix.lean',
+        'Tests/Assembly/SourceFrame.lean', 'Tests/Assembly/SourcePrologue.lean')) {
         & lake env lean $fixture
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }

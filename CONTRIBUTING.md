@@ -89,6 +89,13 @@ demonstrated defect or an implementation approach that proves unreasonable.
 Record the reason for such changes and retain the annotated/source mirror.
 Internal library interfaces may change to meet that acceptance surface.
 
+As completed spike work reveals better abstractions, assign bounded rewrite
+agents to rebuild earlier implementation around them. Keep the main effort
+advancing the spikes. Each rewrite names its consumers, preserves the authored
+specification and required public laws, and passes deterministic checks and
+independent review before integration. For repeated populations, prefer a shared
+Lean description with general proofs over separately maintained instances.
+
 Work through the active spike's complete specification-to-artifact chain. Add or
 refine library code when that chain needs it; do not build independent layers
 merely to satisfy a speculative roadmap. A compiling fixture or runnable binary

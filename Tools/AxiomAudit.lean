@@ -6,6 +6,12 @@ import Grass.Assembly.X86ClosedEncoding
 import Grass.Assembly.ByteLayout
 import Grass.Assembly.SignedRel32
 import Grass.Assembly.X86BranchLayout
+import Grass.Assembly.SourceFrameHeader
+import Grass.Assembly.SavedPrefix
+import Grass.Assembly.SourceFrame
+import Grass.Assembly.FrameStore
+import Grass.Assembly.FrameAllocation
+import Grass.Assembly.SourcePrologue
 import Grass.Assembly.SourceStore
 import Grass.Assembly.Store32
 import Grass.Assembly.Store32Execution
@@ -35,6 +41,7 @@ import Grass.ISA.X86.Addressing
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.BasicInstructions
 import Grass.ISA.X86.Rel32
+import Grass.ISA.X86.ImmediateArithmetic
 import Grass.ISA.X86.Citation
 import Grass.ISA.X86.Decode
 import Grass.ISA.X86.DualCitation
@@ -67,6 +74,7 @@ import Grass.Op.Facets
 import Grass.Op.Step
 import Grass.Op.CallProtocol
 import Grass.Platform.Win32.Console
+import Grass.Platform.Win32.Signatures
 import Grass.Process
 import Grass.Process.Acceptance
 import Grass.Process.Bag
