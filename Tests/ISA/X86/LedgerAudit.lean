@@ -30,6 +30,8 @@ import Grass.ISA.X86.Execution.RunFactory
 import Grass.ISA.X86.Execution.FetchFactory
 import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
+import Grass.ISA.X86.Execution.CallNormal
+import Grass.ISA.X86.LinearAddress
 import Grass.ISA.X86.Execution.StackInstruction
 import Grass.ISA.X86.Execution.CompletionFlags
 import Grass.ISA.X86.Decode
@@ -145,6 +147,8 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.ReadValue64, `Grass.ISA.X86.Execution.RunFactory,
    `Grass.ISA.X86.Execution.FetchFactory, `Grass.ISA.X86.Execution.ComputationFactory,
    `Grass.ISA.X86.Execution.PushFactory,
+   `Grass.ISA.X86.Execution.CallNormal,
+   `Grass.ISA.X86.LinearAddress,
    `Grass.ISA.X86.Execution.StackInstruction, `Grass.ISA.X86.Execution.CompletionFlags,
    `Grass.ISA.X86.Decode,
    `Grass.ABI.Win64.Convention, `Grass.ABI.Win64.FrameRanges, `Grass.ABI.Win64.Unwind,
@@ -195,7 +199,7 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- The fetched normal SUB RSP constructor adds one instruction-transfer obligation.
 -- The fetched normal register PUSH adds one instruction-transfer obligation.
 -- Normal MOV adds its encoding, effect, flags and architectural result obligations.
-def owedBaseline : Nat := 261
+def owedBaseline : Nat := 265
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -781,6 +785,12 @@ def owed : List Name :=
     `Grass.ISA.X86.Execution.FetchFactory.lookahead,
     `Grass.ISA.X86.Execution.FetchFactory.footprint,
     `Grass.ISA.X86.Execution.FetchFactory.fetch,
+    -- Conditional indirect CALL register transfer and actual target interpretation.
+    `Grass.ISA.X86.Execution.CallNormal.result,
+    -- Unmasked linear-address width, canonical ranges and nonwrapping spans.
+    `Grass.ISA.X86.LinearAddressMode.width,
+    `Grass.ISA.X86.Canonical,
+    `Grass.ISA.X86.CanonicalSpan,
     `Grass.ISA.X86.Execution.StackInstruction.encoding,
     `Grass.ISA.X86.Execution.statusMask,
     `Grass.ISA.X86.Execution.resumeMask,

@@ -163,10 +163,23 @@ Its actual store writes the selected register's pre-instruction value and
 constructs `PushNormal`; callers supply no receipt or store payload. This adds
 the first Hello instruction family to the constructive path.
 
-The shared x86 canonical linear-address predicate is still absent. The memory
-space's 64-bit representation check is weaker than architectural address
-validity. Physical adequacy must cover effective addresses and control-transfer
-targets under the admitted address mode; the normal receipts alone do not.
+`LinearAddress` supplies shared canonicality predicates for unmasked linear
+addresses in 48-bit and 57-bit modes, with a sign-extension equivalence and
+nonwrapping byte spans. Addresses below 2^47 satisfy both modes; no active mode
+is inferred from executable bitness. See the
+[Intel paging reference](https://cdrdv2-public.intel.com/671442/5-level-paging-white-paper.pdf).
+The memory space's 64-bit representation check remains weaker than architectural
+address validity. This additive leaf does not change receipt admission: physical
+adequacy still must cover effective addresses and control-transfer targets under
+the admitted environment, including any pointer-masking applicability.
+
+`CallNormal` now connects a fetched RIP-relative indirect CALL to an actual
+initialized eight-byte target read and an actual return-address store. The
+result RIP comes from the observed target value; the stack store contains the
+fetched fallthrough address. Its three events and exact memory mutation follow
+from those continuous accesses. Windows still owns the exact IAT/API identity,
+provider handoff and actual return-slot read; this receipt supplies no provider
+return or terminality theorem.
 
 Remaining work composes final emitted source, fixed factory results, CALL target
 reads and return-address writes, and actual prefix receipts for unwind reversal.
