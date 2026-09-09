@@ -86,6 +86,7 @@ import Grass.Assembly.FrameAllocationExecution
 import Grass.Assembly.SourceFetched
 import Grass.Assembly.SourceLoadedImage
 import Grass.Assembly.PrologueExecution
+import Grass.Assembly.FrameMemoryExecution
 import Grass.Assembly.SourceUnwind
 import Grass.Assembly.SourceUnwindPrefix
 import Grass.Assembly.SourceStore
