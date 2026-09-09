@@ -383,6 +383,15 @@ def ImageLayout.importAddressRva? (layout : ImageLayout)
   let _symbol ← library.library.symbols.get? symbolIndex
   some (iatSlotRva baseRva library symbolIndex)
 
+/-- Exception-directory coordinates from the requested table and this placement.
+The production plan separately requires complete exception-table validation. -/
+def ImageLayout.exceptionDirectory (layout : ImageLayout) : Nat × Nat :=
+  match layout.requested.exceptionTable with
+  | none => (0, 0)
+  | some description =>
+      ((resolveSectionLocation? layout.placed description.table.location).getD 0,
+        description.table.size)
+
 /-- `ImageLayout.ImportsResolved` states that materialized import bytes use the
 `.idata` RVA from this exact final placement, rather than a provisional RVA. -/
 def ImageLayout.ImportsResolved (layout : ImageLayout) : Prop :=

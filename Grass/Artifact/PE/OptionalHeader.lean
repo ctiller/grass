@@ -5,8 +5,8 @@ import Grass.Artifact.PE.Validation
 # Canonical PE32+ optional header
 
 This module synthesizes the fixed PE32+ fields from the typed image description
-and its checked placements. Import-directory entries use the measured `.idata`
-directory supplied by the import-table builder, or zero when no imports exist.
+and its checked placements. Import and exception directories use the same
+layout's measured table locations.
 
 Format authority: Microsoft, [PE Format](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format),
 sections "Optional Header Standard Fields (Image Only)", "Optional Header
@@ -19,10 +19,10 @@ namespace Grass.Artifact.PE
 open Grass.Std.Logical Grass.Artifact.Binary
 
 /-- `IMAGE_SCN_CNT_CODE`. -/
-def containsCode : BitVec 32 := 0x00000020
+def containsCode : BitVec 32 := sectionContainsCode
 
 /-- `IMAGE_SCN_CNT_INITIALIZED_DATA`. -/
-def containsInitializedData : BitVec 32 := 0x00000040
+def containsInitializedData : BitVec 32 := sectionInitializedData
 
 /-- Sum padded raw extents carrying a selected section characteristic. -/
 def sumRawSizeWith (flag : BitVec 32) : List PlacedSection → Nat
@@ -44,15 +44,16 @@ def writeDataDirectory (rva size : Nat) : Std.Logical.ByteArray :=
   writeLittleEndian (count := 4) (BitVec.ofNat 32 rva) ++
     writeLittleEndian (count := 4) (BitVec.ofNat 32 size)
 
-/-- Sixteen data-directory entries. The import entry is populated exactly when
-imports were materialized; all other directories remain absent. -/
+/-- Sixteen directory entries, including the checked import and exception tables. -/
 def writeDataDirectories (layout : ImageLayout) : Std.Logical.ByteArray :=
   let importRva := layout.importSectionRva.getD 0
   let importSize :=
     if layout.requested.imports.length = 0 then 0
     else importDescriptorTableSize layout.requested.imports.length
   writeDataDirectory 0 0 ++ writeDataDirectory importRva importSize ++
-    Vec.replicate (14 * 8) 0
+    writeDataDirectory 0 0 ++
+    writeDataDirectory layout.exceptionDirectory.1 layout.exceptionDirectory.2 ++
+    Vec.replicate (12 * 8) 0
 
 /-- Serialize the 240-byte PE32+ optional header for placements already derived
 from `description`. -/

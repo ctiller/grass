@@ -93,11 +93,22 @@ theorem short_header_extent_rejected : shortHeaderExtentRejected = true := by de
 
 /-- Opaque directory bytes are retained, not silently validated as absent. -/
 def noncanonicalDirectoryRetained : Bool :=
-  match readImage (image.set 216 42) with
+  match readImage (image.set 232 42) with
   | .done decoded rest =>
       decide (decoded.optional.remainingDirectories.get? 0 = some 42 ∧ rest.length = 0)
   | _ => false
 
 theorem noncanonical_directory_retained : noncanonicalDirectoryRetained = true := by decide
+
+/-- Resource and exception fields are decoded even for noncanonical inputs;
+the container reader does not pretend to validate their pointed-to contents. -/
+def explicitDirectoriesRetained : Bool :=
+  match readImage ((image.set 216 42).set 224 43) with
+  | .done decoded rest =>
+      decide (decoded.optional.resourceRva = 42 ∧ decoded.optional.exceptionRva = 43 ∧
+        rest.length = 0)
+  | _ => false
+
+example : explicitDirectoriesRetained = true := by decide
 
 end Tests.Artifact.PE.Reader

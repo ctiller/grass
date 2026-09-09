@@ -45,6 +45,10 @@ structure ParsedOptionalHeader where
   exportSize : BitVec 32
   importRva : BitVec 32
   importSize : BitVec 32
+  resourceRva : BitVec 32
+  resourceSize : BitVec 32
+  exceptionRva : BitVec 32
+  exceptionSize : BitVec 32
   remainingDirectories : Std.Logical.ByteArray
 deriving DecidableEq, Repr
 
@@ -82,8 +86,12 @@ def readOptionalHeader (input : Std.Logical.ByteArray) : ParseResult ParsedOptio
   continueRead (takeLittleEndian 4 input) fun exportSize input =>
   continueRead (takeLittleEndian 4 input) fun importRva input =>
   continueRead (takeLittleEndian 4 input) fun importSize input =>
-  continueRead (takeExact 112 input) fun remainingDirectories input =>
-  .done { magic, linkerVersion, sizeOfCode, sizeOfInitializedData, sizeOfUninitializedData, entryPointRva, baseOfCode, imageBase, sectionAlignment, fileAlignment, majorOSVersion, minorOSVersion, majorImageVersion, minorImageVersion, majorSubsystemVersion, minorSubsystemVersion, win32Version, sizeOfImage, sizeOfHeaders, checksum, subsystem, dllCharacteristics, stackReserve, stackCommit, heapReserve, heapCommit, loaderFlags, directoryCount, exportRva, exportSize, importRva, importSize, remainingDirectories } input
+  continueRead (takeLittleEndian 4 input) fun resourceRva input =>
+  continueRead (takeLittleEndian 4 input) fun resourceSize input =>
+  continueRead (takeLittleEndian 4 input) fun exceptionRva input =>
+  continueRead (takeLittleEndian 4 input) fun exceptionSize input =>
+  continueRead (takeExact 96 input) fun remainingDirectories input =>
+  .done { magic, linkerVersion, sizeOfCode, sizeOfInitializedData, sizeOfUninitializedData, entryPointRva, baseOfCode, imageBase, sectionAlignment, fileAlignment, majorOSVersion, minorOSVersion, majorImageVersion, minorImageVersion, majorSubsystemVersion, minorSubsystemVersion, win32Version, sizeOfImage, sizeOfHeaders, checksum, subsystem, dllCharacteristics, stackReserve, stackCommit, heapReserve, heapCommit, loaderFlags, directoryCount, exportRva, exportSize, importRva, importSize, resourceRva, resourceSize, exceptionRva, exceptionSize, remainingDirectories } input
 
 /-- The field values synthesized from the single image layout. -/
 def expectedOptionalHeader (layout : ImageLayout) : ParsedOptionalHeader where
@@ -119,7 +127,11 @@ def expectedOptionalHeader (layout : ImageLayout) : ParsedOptionalHeader where
   exportSize := 0
   importRva := BitVec.ofNat 32 (layout.importSectionRva.getD 0)
   importSize := BitVec.ofNat 32 (if layout.requested.imports.length = 0 then 0 else importDescriptorTableSize layout.requested.imports.length)
-  remainingDirectories := Vec.replicate (14 * 8) 0
+  resourceRva := 0
+  resourceSize := 0
+  exceptionRva := BitVec.ofNat 32 layout.exceptionDirectory.1
+  exceptionSize := BitVec.ofNat 32 layout.exceptionDirectory.2
+  remainingDirectories := Vec.replicate (12 * 8) 0
 
 /-- `readOptionalHeader_write_append` proves full field recovery with an arbitrary suffix. -/
 theorem readOptionalHeader_write_append (layout : ImageLayout)
@@ -131,7 +143,7 @@ theorem readOptionalHeader_write_append (layout : ImageLayout)
     continueRead]
   rw [takeExact_append (by simp : (Vec.fromList [14, 0] : Std.Logical.ByteArray).length = 2)]
   simp only [takeLittleEndian_writeLittleEndian_append]
-  rw [takeExact_append (by simp : (Vec.replicate (14 * 8) (0 : Byte)).length = 112)]
+  rw [takeExact_append (by simp : (Vec.replicate (12 * 8) (0 : Byte)).length = 96)]
   rfl
 
 end Grass.Artifact.PE
