@@ -67,7 +67,7 @@ private def producesClosedVerifiedProgram (type : Expr) : MetaM Bool :=
       unless parameters.isEmpty do
         return false
       let reduced ← whnf result
-      return reduced.getAppFn.constName? == some ``Grass.VerifiedProgram
+      return reduced.getAppFn.constName? == some ``Grass.VerifiedProgramRoot
 
 private def isProjectModule (moduleName : Name) : Bool :=
   (`Grass).isPrefixOf moduleName || (`Tests).isPrefixOf moduleName
@@ -93,7 +93,7 @@ private def sensitiveDeclarations
     (environment : Environment)
     (declarations : Array (Name × ConstantInfo)) : Std.HashSet Name :=
   Id.run do
-    let verifiedModuleIndex := environment.getModuleIdxFor? ``Grass.VerifiedProgram
+    let verifiedModuleIndex := environment.getModuleIdxFor? ``Grass.VerifiedProgramRoot
     -- Imported modules are indexed in dependency order. A declaration from a
     -- strictly earlier module cannot mention VerifiedProgram; current-module
     -- declarations have no index yet and must always be included.
@@ -108,7 +108,7 @@ private def sensitiveDeclarations
       Std.HashMap.emptyWithCapacity (capacity := candidates.size)
     for (name, info) in candidates do
       if name == ``Grass.emitProgram ||
-          info.type.getUsedConstantsAsSet.contains ``Grass.VerifiedProgram then
+          info.type.getUsedConstantsAsSet.contains ``Grass.VerifiedProgramRoot then
         seeds := seeds.insert name
       for dependency in info.getUsedConstantsAsSet do
         let dependents := reverseDependencies.get? dependency |>.getD #[]

@@ -9,11 +9,13 @@ plus the platform environment and a phase: running, awaiting a platform
 response, or halted. Steps are
 
 - an internal ISA step, event `silent`;
-- an ISA native call the platform decodes to a request, event `call r`,
-  moving to `awaiting`;
+- an ISA native call the platform decodes to a non-terminal request, event
+  `call r`, moving to `awaiting`;
+- an ISA native call the platform decodes to a terminal request (an exit),
+  event `call r`, moving to `halted`: no response is ever delivered;
 - the environment answering a pending request, event `reply r ρ`, chosen by
   the environment under `Platform.Responds`, resuming the ISA with the encoded
-  return, or halting if the request is terminal;
+  return;
 - an ISA halt, event `silent`.
 
 A fault, an undecodable native call, and a request with no allowed response
@@ -68,22 +70,22 @@ inductive Step : State isa D platform → Choice D → Event D → State isa D p
   | call {state : isa.State} {call : isa.NativeCall} {resume : isa.NativeReturn → isa.State}
       {request : D.Request} {env0 env : platform.Environment}
       (step : isa.step state = .external call resume)
-      (decoded : platform.decode call = some request) :
+      (decoded : platform.decode call = some request)
+      (continues : ¬ D.Terminal request) :
       Step ⟨env0, env, .running state⟩ .machine (.call request)
         ⟨env0, env, .awaiting call request resume⟩
+  | exit {state : isa.State} {call : isa.NativeCall} {resume : isa.NativeReturn → isa.State}
+      {request : D.Request} {env0 env : platform.Environment}
+      (step : isa.step state = .external call resume)
+      (decoded : platform.decode call = some request)
+      (ends : D.Terminal request) :
+      Step ⟨env0, env, .running state⟩ .machine (.call request) ⟨env0, env, .halted⟩
   | reply {call : isa.NativeCall} {request : D.Request} {resume : isa.NativeReturn → isa.State}
       {response : D.Response request} {env0 env env' : platform.Environment}
-      (allowed : platform.Responds env request response env')
-      (continues : ¬ D.Terminal request) :
+      (allowed : platform.Responds env request response env') :
       Step ⟨env0, env, .awaiting call request resume⟩ (.respond request response)
         (.reply request response)
         ⟨env0, env', .running (resume (platform.encodeReturn call request response))⟩
-  | terminal {call : isa.NativeCall} {request : D.Request} {resume : isa.NativeReturn → isa.State}
-      {response : D.Response request} {env0 env env' : platform.Environment}
-      (allowed : platform.Responds env request response env')
-      (ends : D.Terminal request) :
-      Step ⟨env0, env, .awaiting call request resume⟩ (.respond request response)
-        (.reply request response) ⟨env0, env', .halted⟩
 
 /-- The generic machine as a relational system. Graphs are trivial: the
 machine has no causal structure beyond its trace. -/
@@ -116,7 +118,8 @@ theorem stuck_of_fault {state : isa.State} {env0 env : platform.Environment}
   cases step with
   | internal step' => rw [faulted] at step'; cases step'
   | halt step' => rw [faulted] at step'; cases step'
-  | call step' _ => rw [faulted] at step'; cases step'
+  | call step' _ _ => rw [faulted] at step'; cases step'
+  | exit step' _ _ => rw [faulted] at step'; cases step'
 
 /-- A running state whose native call the platform does not realize is stuck. -/
 theorem stuck_of_undecoded {state : isa.State} {env0 env : platform.Environment}
@@ -129,15 +132,30 @@ theorem stuck_of_undecoded {state : isa.State} {env0 env : platform.Environment}
   cases step with
   | internal step' => rw [external] at step'; cases step'
   | halt step' => rw [external] at step'; cases step'
-  | call step' decoded =>
+  | call step' decoded _ =>
+      rw [external] at step'
+      cases step'
+      rw [undecoded] at decoded
+      cases decoded
+  | exit step' decoded _ =>
       rw [external] at step'
       cases step'
       rw [undecoded] at decoded
       cases decoded
 
+/-- An awaiting state whose request the environment never answers is stuck. -/
+theorem stuck_of_unanswered {call : isa.NativeCall} {request : D.Request}
+    {resume : isa.NativeReturn → isa.State} {env0 env : platform.Environment}
+    (unanswered : ∀ response env', ¬ platform.Responds env request response env') :
+    Stuck platform ⟨env0, env, .awaiting call request resume⟩ := by
+  refine ⟨by simp, ?_⟩
+  intro choice event next step
+  cases step with
+  | reply allowed => exact unanswered _ _ allowed
+
 /-- The behavior of a loaded program for a specification whose audit events
 are a relabeling of the service events. -/
-def behavior (raw : isa.Raw) (spec : SpecProcess)
+def behavior (raw : isa.Raw) (spec : SpecRoot)
     (eventOf : Event D → spec.AuditEvent)
     (inputOf : platform.Environment → spec.Input) : ProgramBehavior spec where
   system :=

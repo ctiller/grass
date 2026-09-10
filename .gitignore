@@ -21,8 +21,8 @@ Thumbs.db
 Desktop.ini
 
 # Native helper build products
-target/
-!Grass/Target/
+/Tools/agent-bus/target/
+/Tools/grass-tools/target/
 
 # Python bytecode from the tools under Tools/
 __pycache__/

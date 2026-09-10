@@ -88,7 +88,7 @@ def noDerivedDemands : DerivedDemandFamily noDemands.identities where
   origin := fun key => nomatch key
   fresh := fun derived => nomatch derived
 
-def spec : SpecProcess where
+def spec : SpecRoot where
   Input := Bool
   AuditEvent := Bool
   Observation := Bool
@@ -229,14 +229,14 @@ def artifact : ArtifactCertificate machine where
   stage := noDerivedDemands
   requirements := noDemandCertificates
 
-def verified : VerifiedProgram spec where
+def verified : VerifiedProgramRoot spec where
   portable := portable
   driver := driver
   provider := provider
   machine := machine
   artifact := artifact
 
-abbrev Certified := VerifiedProgram spec
+abbrev Certified := VerifiedProgramRoot spec
 
 def aliasedVerified : Certified := verified
 
@@ -259,14 +259,14 @@ example : Nonempty ((artifactFormat.loadedBehavior ByteArray.empty).system.Compl
       (initialExecution true).events) :=
   verified.execution_completes (initialExecution true)
 
-example : Nonempty (VerifiedProgram.CompletionRefinement verified
+example : Nonempty (VerifiedProgramRoot.CompletionRefinement verified
     (initialExecution true)) :=
   verified.completion_refinement_nonempty (initialExecution true)
 
 example : Function.Surjective verified.refinement.mapHistory :=
   verified.histories_surjective
 
-example (completion : VerifiedProgram.CompletionRefinement verified
+example (completion : VerifiedProgramRoot.CompletionRefinement verified
     (initialExecution true)) :
     completion.portable = verified.refinement.mapCompletionAtPrefix
       (initialExecution true) completion.loaded :=
@@ -297,7 +297,7 @@ def stage (prior : List RequirementKey) (tier : String)
   origin := fun _ => .external ⟨"verified-ledger", tier ++ "-authority"⟩
   fresh := by intro key; cases key; exact fresh
 
-def spec : SpecProcess where
+def spec : SpecRoot where
   Input := Bool
   AuditEvent := Bool
   Observation := Bool
@@ -400,7 +400,7 @@ def artifact : ArtifactCertificate machine where
   stage := artifactStage
   requirements := certificates "artifact"
 
-def verified : VerifiedProgram spec where
+def verified : VerifiedProgramRoot spec where
   portable := portable
   driver := driver
   provider := provider

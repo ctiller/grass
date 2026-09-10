@@ -20,13 +20,13 @@ namespace Grass
 universe u
 
 /-- Relational semantics and the specification-selected observation view. -/
-structure ProgramBehavior (spec : SpecProcess) where
+structure ProgramBehavior (spec : SpecRoot) where
   system : RelationalSystem spec.AuditEvent
   inputOf : system.State -> spec.Input
 
 namespace ProgramBehavior
 
-variable {spec : SpecProcess}
+variable {spec : SpecRoot}
 
 /-- The specification's whole-trace view of one finite execution prefix.
 
@@ -61,7 +61,7 @@ theorem Adequate.cast {behavior replacement : ProgramBehavior spec}
 
 end ProgramBehavior
 
-variable {spec : SpecProcess}
+variable {spec : SpecRoot}
 variable {lower middle upper concrete abstract : ProgramBehavior spec}
 
 /-- Behavioral inclusion from a concrete layer into its immediate abstraction. -/
@@ -475,7 +475,7 @@ theorem preservesAcceptance (refinement : BehaviorRefinement concrete abstract)
 end BehaviorRefinement
 
 /-- Portable process/model correctness, independent of target realization. -/
-structure PortableProgramCertificate (spec : SpecProcess) where
+structure PortableProgramCertificate (spec : SpecRoot) where
   behavior : ProgramBehavior spec
   requirements : DemandCertificateFamily spec.requirements
   adequate : behavior.Adequate
@@ -485,7 +485,7 @@ structure PortableProgramCertificate (spec : SpecProcess) where
     spec.accepts (behavior.inputOf execution.initialState) (behavior.observe execution)
 
 /-- A projected driver and its exact refinement to the portable behavior. -/
-structure ProjectedDriverCertificate {spec : SpecProcess}
+structure ProjectedDriverCertificate {spec : SpecRoot}
     (portable : PortableProgramCertificate spec) where
   behavior : ProgramBehavior spec
   refinement : BehaviorRefinement behavior portable.behavior
@@ -495,7 +495,7 @@ structure ProjectedDriverCertificate {spec : SpecProcess}
   requirements : DemandCertificateFamily stage.demands
 
 /-- A machine realization and its exact refinement to its selected driver. -/
-structure ProviderCertificate {spec : SpecProcess}
+structure ProviderCertificate {spec : SpecRoot}
     {portable : PortableProgramCertificate spec}
     (driver : ProjectedDriverCertificate portable) where
   behavior : ProgramBehavior spec
@@ -506,7 +506,7 @@ structure ProviderCertificate {spec : SpecProcess}
   requirements : DemandCertificateFamily stage.demands
 
 /-- A machine realization and its exact refinement to selected providers. -/
-structure MachineCertificate {spec : SpecProcess}
+structure MachineCertificate {spec : SpecRoot}
     {portable : PortableProgramCertificate spec}
     {driver : ProjectedDriverCertificate portable}
     (provider : ProviderCertificate driver) where
@@ -518,7 +518,7 @@ structure MachineCertificate {spec : SpecProcess}
   requirements : DemandCertificateFamily stage.demands
 
 /-- Selected artifact syntax, canonical writer/parser, and loaded semantics. -/
-structure ArtifactFormat (spec : SpecProcess) where
+structure ArtifactFormat (spec : SpecRoot) where
   Artifact : Type u
   write : Artifact -> ByteArray
   Parses : ByteArray -> Artifact -> Prop
@@ -530,7 +530,7 @@ structure ArtifactFormat (spec : SpecProcess) where
       loadedBehavior bytes = artifactBehavior artifact
 
 /-- Exact artifact, loaded behavior, and refinement to the machine tier. -/
-structure ArtifactCertificate {spec : SpecProcess}
+structure ArtifactCertificate {spec : SpecRoot}
     {portable : PortableProgramCertificate spec}
     {driver : ProjectedDriverCertificate portable}
     {provider : ProviderCertificate driver}

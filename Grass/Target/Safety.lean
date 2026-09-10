@@ -88,7 +88,7 @@ theorem successor_nonempty (inv : Invariant platform raw)
 
 /-- Every frontier of the relabeled behavior completes, given an invariant
 that excludes stuck states. -/
-theorem completion_of_invariant (inv : Invariant platform raw) (spec : SpecProcess)
+theorem completion_of_invariant (inv : Invariant platform raw) (spec : SpecRoot)
     (eventOf : Event D → spec.AuditEvent) (inputOf : platform.Environment → spec.Input)
     (run : (behavior platform raw spec eventOf inputOf).system.ExecutionPrefix) :
     Nonempty ((behavior platform raw spec eventOf inputOf).system.Completion
@@ -142,7 +142,7 @@ theorem completion_of_invariant (inv : Invariant platform raw) (spec : SpecProce
 
 /-- Every admitted input starts an execution, given that the platform admits
 an environment presenting it. -/
-theorem execution_of_covers (spec : SpecProcess)
+theorem execution_of_covers (spec : SpecRoot)
     (eventOf : Event D → spec.AuditEvent) (inputOf : platform.Environment → spec.Input)
     (covers : ∀ input, spec.admits input →
       ∃ env, platform.Admits env ∧ inputOf env = input)
@@ -158,7 +158,7 @@ theorem execution_of_covers (spec : SpecProcess)
 
 /-- Adequacy of the generic machine from an invariant and input coverage. This
 is the whole machine-tier safety obligation for every ISA and platform. -/
-theorem adequate_of_invariant (inv : Invariant platform raw) (spec : SpecProcess)
+theorem adequate_of_invariant (inv : Invariant platform raw) (spec : SpecRoot)
     (eventOf : Event D → spec.AuditEvent) (inputOf : platform.Environment → spec.Input)
     (covers : ∀ input, spec.admits input →
       ∃ env, platform.Admits env ∧ inputOf env = input) :

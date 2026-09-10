@@ -13,7 +13,7 @@ Finite `ExecutionPrefix` values do not retain their sequence of choices;
 does not supply a missing branching-strategy model, a permanent-wait execution
 constructor, or a stuttering simulation. The certificate gate requires this
 backward coverage beside every adjacent refinement;
-`VerifiedProgram.histories_surjective` exposes coverage of histories represented
+`VerifiedProgramRoot.histories_surjective` exposes coverage of histories represented
 by the current vocabulary. Decision 137's
 full-equivalence gate remains incomplete until the missing history forms are
 represented and covered.
@@ -25,7 +25,7 @@ author's theorem family.
 
 namespace Grass
 
-variable {spec : SpecProcess}
+variable {spec : SpecRoot}
 
 /-- Package an existing finite prefix with one of its represented completions;
 this adds no transition or completion case. -/
@@ -35,7 +35,7 @@ abbrev ProgramBehavior.CompletedHistory (behavior : ProgramBehavior spec) :=
 
 namespace BehaviorRefinement
 
-variable {spec : SpecProcess}
+variable {spec : SpecRoot}
   {lower middle upper concrete abstract : ProgramBehavior spec}
 
 /-- Map both parts of a represented history with the existing coherent maps. -/

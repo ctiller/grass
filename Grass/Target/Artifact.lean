@@ -50,7 +50,7 @@ def listOfBytes (bytes : ByteArray) : List UInt8 := bytes.data.toList
 
 /-- The behavior of bytes no reader accepts: no initial state. It has no
 executions, so it can never be certified. -/
-def unloadable (spec : SpecProcess) : ProgramBehavior spec where
+def unloadable (spec : SpecRoot) : ProgramBehavior spec where
   system :=
     { State := spec.Input
       Choice := Unit
@@ -70,7 +70,7 @@ variable {isa : ISA} {D : Domain}
 /-- The certificate's artifact format for a container format, an ISA, and a
 platform: loaded behavior is the generic machine on the carried program. -/
 def toArtifactFormat (format : Format isa.Raw) (platform : Platform isa D)
-    (spec : SpecProcess) (eventOf : Event D → spec.AuditEvent)
+    (spec : SpecRoot) (eventOf : Event D → spec.AuditEvent)
     (inputOf : platform.Environment → spec.Input) : ArtifactFormat spec where
   Artifact := format.Artifact
   write artifact := bytesOfList (format.write artifact)
