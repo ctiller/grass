@@ -13,7 +13,7 @@ and either WriteFile entry or the stdout-unavailable ExitProcess completion.
 The existing ExecutionPrefix retains every raw edge.
 Provider registers are an observation and the graph is explicitly empty;
 native execution, causal correspondence, and properties of all runs remain open.
-The finite view's unused completion fields supply no completion semantics. -/
+The canonical raw system supplies terminal semantics; this fixture establishes only these selected executions. -/
 namespace Grass.Tests.Frontend.WriteFilePrefix
 
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical Grass.Artifact
