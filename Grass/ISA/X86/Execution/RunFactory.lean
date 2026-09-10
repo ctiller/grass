@@ -1,4 +1,5 @@
 import Grass.ISA.X86.Execution.AccessFree
+import Grass.Op.AccessFactory
 
 /-!
 # Checked operation-run factories
@@ -12,28 +13,21 @@ namespace Grass.ISA.X86.Execution.RunFactory
 
 open Grass.Core Grass.Memory Grass.Op
 
-private inductive SingletonAccessOperation (descriptor : AccessDescriptor) where
-  | run
+/-- Compatibility aliases for the generic singleton-access factory. `access`
+retains the generic execution implementation; this x86 layer keeps only
+state-shaped failure views and access-free execution below. -/
+abbrev singletonOperation := Grass.Op.AccessFactory.singletonOperation
+abbrev noFaultPlan := Grass.Op.AccessFactory.noFaultPlan
+abbrev AccessFailure := Grass.Op.AccessFactory.AccessFailure
+abbrev AccessSuccess := Grass.Op.AccessFactory.AccessSuccess
+abbrev access := Grass.Op.AccessFactory.access
 
-private instance (descriptor : AccessDescriptor) :
-    HasOperationFacets (SingletonAccessOperation descriptor) where
-  facets
-    | .run =>
-      { memoryEffects := some (.single descriptor)
-        faults := some descriptor.admittedFaults
-        restartability := some descriptor.restartability
-        ordering := some descriptor.ordering }
+namespace AccessFailure
 
-def singletonOperation (descriptor : AccessDescriptor) : SomeOperation :=
-  SomeOperation.of (SingletonAccessOperation.run (descriptor := descriptor))
+export Grass.Op.AccessFactory.AccessFailure
+  (rejected violations preparationUnavailable answerUnavailable)
 
-def noFaultPlan : (sequence : SubstepSequence) → FaultPlan sequence := fun _ => .none
-
-inductive AccessFailure (descriptor : AccessDescriptor) where
-  | rejected (reason : StepRejection)
-  | violations (after : MachineState)
-  | preparationUnavailable (after : MachineState) (reason : AuditViolationClass)
-  | answerUnavailable (after : MachineState)
+end AccessFailure
 
 /-- Recover the CPU prefix at an access failure. `AccessFailure.reached_rejected` retains the
 supplied state; the other constructor equations retain its CPU fields and use
@@ -62,64 +56,6 @@ def AccessFailure.reached (before : State) {descriptor : AccessDescriptor} :
     (descriptor : AccessDescriptor) (after : MachineState) :
     reached before (AccessFailure.answerUnavailable (descriptor := descriptor) after) =
       { before with machine := after } := rfl
-
-structure AccessSuccess (policy : StepPolicy) (before : MachineState)
-    (descriptor : AccessDescriptor) (context : ContextId) (contextKind : ContextKind)
-    (cause : EventCause) where
-  after : MachineState
-  run : AccessRun before after descriptor
-  policy_exact : run.policy = policy
-  context_exact : run.context = context
-  contextKind_exact : run.contextKind = contextKind
-  cause_exact : run.cause = cause
-  operation_exact : run.operation = singletonOperation descriptor
-  faultAt_exact : run.faultAt = noFaultPlan
-
-/-- Execute the fixed singleton operation and, only for a clean completed run,
-return the actual post-state together with its `AccessRun` proof. -/
-def access (policy : StepPolicy) (before : MachineState) (descriptor : AccessDescriptor)
-    (context : ContextId) (contextKind : ContextKind) (cause : EventCause) :
-    Except (AccessFailure descriptor)
-      (AccessSuccess policy before descriptor context contextKind cause) :=
-  let operation := singletonOperation descriptor
-  let sequence := SubstepSequence.single descriptor
-  match ran : step policy before operation context contextKind cause noFaultPlan with
-  | .rejected reason => .error (.rejected reason)
-  | .ran after =>
-      if clean : after.violations.IsEmpty then
-        match prepared : prepareAccess (before.noteContext context contextKind).memory descriptor with
-        | .error reason => .error (.preparationUnavailable after reason)
-        | .ok resolved =>
-            match answered : policy.oracle.answerResolved
-                (before.noteContext context contextKind) descriptor resolved with
-            | none => .error (.answerUnavailable after)
-            | some complete =>
-                .ok
-                  { after := after
-                    run :=
-                      { policy := policy
-                        operation := operation
-                        context := context
-                        contextKind := contextKind
-                        cause := cause
-                        faultAt := noFaultPlan
-                        sequence := sequence
-                        selected := rfl
-                        substeps_exact := rfl
-                        noFault := rfl
-                        ran := ran
-                        resolved := resolved
-                        prepared := prepared
-                        complete := complete
-                        answerResolved := answered
-                        clean := clean }
-                    policy_exact := rfl
-                    context_exact := rfl
-                    contextKind_exact := rfl
-                    cause_exact := rfl
-                    operation_exact := rfl
-                    faultAt_exact := rfl }
-      else .error (.violations after)
 
 private inductive FixedAccessFreeOperation where | run
 

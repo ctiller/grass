@@ -1,0 +1,82 @@
+import Grass.Op.CompletedAccess
+
+/-!
+# Exact singleton-access execution receipts
+
+`AccessRun` packages evidence already checked by the generic operation stepper.
+It does not describe instruction decoding, register transfer, or any
+architecture-specific address computation. An ISA or platform adapter supplies
+the descriptor and this receipt; the generic completion theorem derives the
+completed event from the actual run.
+-/
+
+namespace Grass.Op.AccessFactory
+
+open Grass.Core Grass.Memory
+
+/-- Evidence that one exactly selected singleton access actually ran to a clean
+completion under a concrete operation policy. -/
+structure AccessRun (before after : MachineState) (descriptor : AccessDescriptor) where
+  policy : StepPolicy
+  operation : SomeOperation
+  context : ContextId
+  contextKind : ContextKind
+  cause : EventCause
+  faultAt : (sequence : SubstepSequence) → FaultPlan sequence
+  sequence : SubstepSequence
+  selected : operation.facets.substeps? = some sequence
+  /-- The selected sequence contains this access substep and no other substep. -/
+  substeps_exact : sequence.substeps = [.access descriptor]
+  noFault : faultAt sequence = .none
+  ran : step policy before operation context contextKind cause faultAt = .ran after
+  resolved : (before.noteContext context contextKind).memory.ResolvedAccess
+    descriptor.provenance descriptor.range
+  prepared : prepareAccess (before.noteContext context contextKind).memory descriptor = .ok resolved
+  complete : CompleteCommitted descriptor
+  answerResolved : policy.oracle.answerResolved (before.noteContext context contextKind)
+    descriptor resolved = some complete
+  clean : after.violations.IsEmpty
+
+namespace AccessRun
+
+/-- The exact substep singleton projects to the singleton access list required
+by the generic completion theorem. -/
+theorem accesses_exact {before after : MachineState} {descriptor : AccessDescriptor}
+    (run : AccessRun before after descriptor) : run.sequence.accesses = [descriptor] := by
+  simp [SubstepSequence.accesses, run.substeps_exact]
+
+/-- `wellFormed` extracts descriptor admission from the actual selected step. -/
+theorem wellFormed {before after : MachineState} {descriptor : AccessDescriptor}
+    (run : AccessRun before after descriptor) :
+    ∃ space, run.policy.profile.vocabulary.addressSpaces.find? descriptor.space = some space ∧
+      descriptor.WellFormedIn space :=
+  ran_selected_access_wellFormed run.policy before run.operation run.context run.contextKind
+    run.cause run.faultAt run.sequence after descriptor run.selected run.ran
+    (by simp [run.accesses_exact])
+
+/-- `prepared_result` reduces the actual singleton run to its prepared access. -/
+theorem prepared_result {before after : MachineState} {descriptor : AccessDescriptor}
+    (run : AccessRun before after descriptor) :
+    after = performPreparedAccess run.policy (before.noteContext run.context run.contextKind)
+      descriptor run.resolved run.prepared (.completed run.complete) run.contextKind run.cause :=
+  ran_singleton_prepared_eq_performPreparedAccess run.policy before run.operation run.context
+    run.contextKind run.cause run.faultAt run.sequence descriptor after run.selected
+    run.accesses_exact run.noFault run.ran run.resolved run.prepared run.complete run.answerResolved
+
+/-- The fresh completed event is derived from the actual selected run and clean
+ledger, not supplied by the caller as an output assertion. -/
+theorem completed_event {before after : MachineState} {descriptor : AccessDescriptor}
+    (run : AccessRun before after descriptor) :
+    ∃ space valid,
+      run.policy.profile.vocabulary.addressSpaces.find? descriptor.space = some space ∧
+      MemoryEvent.ofOutcome before.eventSupply.fresh.1 run.contextKind run.cause space descriptor
+        (.completed run.complete) run.resolved.allocation.mapping = some valid ∧
+      after.events = before.events ++ [valid] ∧
+      after.eventSupply = before.eventSupply.fresh.2 ∧
+      after.faults = before.faults ∧ after.violations = before.violations := by
+  exact ran_clean_singleton_event run.policy before run.operation run.context run.contextKind
+    run.cause run.faultAt run.sequence descriptor after run.selected run.accesses_exact run.noFault
+    run.ran run.resolved run.prepared run.complete run.answerResolved run.clean
+
+end AccessRun
+end Grass.Op.AccessFactory
