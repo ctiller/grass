@@ -76,6 +76,7 @@ import Grass.Platform.Win32.RawPhasePreservation
 import Grass.Platform.Win32.RawPrefix
 import Grass.Platform.Win32.RawServiceMetadata
 import Grass.Platform.Win32.RawServiceContinuation
+import Grass.Platform.Win32.RawServicePrefix
 import Grass.Platform.Win32.RawEntryEvent
 import Grass.Platform.Win32.RawServicePreservation
 import Grass.Platform.Win32.ExitProcessRuntime
@@ -260,6 +261,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawPrefix,
    `Grass.Platform.Win32.RawServiceMetadata,
    `Grass.Platform.Win32.RawServiceContinuation,
+   `Grass.Platform.Win32.RawServicePrefix,
    `Grass.Platform.Win32.RawEntryEvent,
    `Grass.Platform.Win32.RawServicePreservation,
    `Grass.Platform.Win32.ExitProcessRuntime,
@@ -428,7 +430,7 @@ acquiring a citation.
 -- The actual checked completion projects its canonical raw event suffix.
 -- Shared observation staging installs supplied register data without native authority.
 -- Checked WriteFile resume construction and computed final carrier.
-def notBehaviourBaseline : Nat := 395
+def notBehaviourBaseline : Nat := 398
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -613,6 +615,9 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.WriteFile.ServiceReceipt.castPrefixPlan,
     `Grass.Platform.Win32.WriteFile.ServiceReceipt.extractInfiniteContinuation,
     `Grass.Platform.Win32.WriteFile.ServiceReceipt.extractInfiniteContinuationFrom,
+    `Grass.Platform.Win32.WriteFile.ServiceReceipt.extendHistory,
+    `Grass.Platform.Win32.Raw.RawStep.foldServicePrefix,
+    `Grass.Platform.Win32.WriteFile.CallHandoff.serviceHistory,
     `Grass.Platform.Win32.WriteFile.ServiceEdge,
     `Grass.Platform.Win32.NonvolatileSnapshot,
     `Grass.Platform.Win32.captureNonvolatile,
