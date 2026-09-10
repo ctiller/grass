@@ -49,6 +49,12 @@ def pl011FR_TXFF : UInt8 := 0x20
 has no delivered byte. ARM DDI 0183 §3.3.6, Table 3-8. -/
 def pl011FR_RXFE : UInt8 := 0x10
 
+/-- The physical address span a platform declares as the PL011's device
+window at `pl011Base`: 4 KiB, matching QEMU's `virt` machine memory map
+(`hw/arm/virt.c`, the `VIRT_UART` entry) and large enough to cover every
+register offset ARM DDI 0183 §3.3 defines. -/
+def pl011Size : Nat := 0x1000
+
 /-! ## 16550 UART, COM1, x86 port I/O -/
 
 /-- The 16550's COM1 I/O-port base on the PC platform. Unlike the PL011 this

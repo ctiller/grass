@@ -26,8 +26,8 @@ call site to `decode`.
 `uartDomain` is this round's answer to the part of that problem that is
 ISA-independent: fix the vocabulary of device requests a UART accepts and
 the environment relation that answers them, in a form any ISA's MMIO-as-
-`external` extension (proposed below and in this module's report) can
-`decode` into. `toConsole` then shows that vocabulary is not a new console
+`external` extension (see below) can `decode` into. `toConsole` then shows
+that vocabulary is not a new console
 protocol invented for bare metal — every one of its requests already
 corresponds to a `Console` request, so a program written against the
 portable console domain and compiled for a hosted platform continues to
@@ -35,42 +35,16 @@ mean the same thing when it is instead compiled for bare metal and its
 console calls are realized through `uartDomain`. That correspondence is
 approximate in one place; see `toConsole`'s docstring.
 
-## The proposed ISA-seam extension (not made here)
+## The ISA-seam extension this vocabulary decodes
 
-`docs/TARGET_SEAMS.md` forbids editing `Grass.Target.ISA`; this is a written
-proposal for the change an ISA would need, for review before it is made.
-
-An `ISA` would gain one field, `deviceRange : InitialContext → ByteRange`
-(or a `List` of them, one per MMIO window, if a target has more than one
-device), naming the address range treated as device registers rather than
-ordinary memory for a given entry context. `step` would then be required to
-report a store whose address falls in `deviceRange ctx` as
-`.external (mmioWrite addr value) resume`, not as an internal memory write —
-symmetrically, a load from that range would report
-`.external (mmioRead addr) resume`. `NativeCall` would need a constructor
-(or a sum case) carrying `addr : MachineAddress` and, for a write,
-`value : Byte` (or a width tag, if a target exposes wider MMIO accesses);
-`resume` would build the post-load state from the platform's answer instead
-of always resuming with the same state the way a plain load does today.
-
-For x86, the mechanism is different but the shape is the same: `out dx, al`
-and `in al, dx` already decode as ordinary instructions with no memory
-effect, so the natural encoding is for `step` to report them directly as
-`.external (portOut port value) resume` / `.external (portIn port) resume`
-without any `deviceRange` at all — port space is already disjoint from
-address space, so there is nothing to range-check. A shared `NativeCall`
-sum type (`mmio addr value | portIo port value`, or two ISA-specific
-`NativeCall` shapes unified only by what `Platform.decode` produces) lets
-`Platform.decode` for bare metal pattern-match either encoding down to the
-same `uartDomain.Request` — a store to `pl011Base + pl011DR` and an `out` to
-`com1Data` both decode to `.txWrite value`.
-
-This keeps the rule the ISA seam states — "the ISA never knows what a call
-means" — intact: the ISA reports *that* an address was a device access (or,
-for x86, that a port instruction ran) and hands over the raw address/port
-and value; deciding that this particular address is a UART data register
-and this particular write means `txWrite` is entirely the platform's job,
-exactly like decoding a `syscall` number today.
+`Grass.ISA.AArch64.InitialContext.devices` names the platform's MMIO
+windows; a load or store inside one steps to `.external` carrying
+`CallTarget.mmioLoad`/`mmioStore` instead of touching memory
+(`Grass.ISA.AArch64.Target.Step.execLoadStoreUImm`). `Grass.Platform.
+BareMetal.Target.AArch64.decode` pattern-matches that address/size pair down
+to a `UartRequest` exactly as this module anticipated: the ISA reports only
+*that* an address was a device access, deciding it names the UART's data or
+flag register is the platform's job.
 -/
 
 namespace Grass.Platform.BareMetal
