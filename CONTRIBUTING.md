@@ -67,19 +67,22 @@ commands is an end-to-end proof of the eventual assembler or executable.
 
 ## Review
 
-Every product change receives independent peer review of the actual diff and
-relevant surrounding code. The author may commit and push a reviewed checkpoint;
-there is no bus registration, nomination, role assignment, or reviewer-owned
-merge requirement. Review findings and checks are recorded with the checkpoint
-or pull request. Unresolved findings block acceptance. Reviewers run risk-proportionate checks
-on the reviewed candidate and report exact commands and results. A reviewer who
-authors material fixes needs another independent reviewer for those fixes. Use
-fresh reviewer contexts at major boundaries so inherited assumptions receive
-another independent look. Never force-push shared branches.
+Independent semantic review covers new or changed contracts, assumptions,
+definitions, trust and implementation/consumer connections, once per cohesive
+slice. Once those boundaries are established, routine proof bodies, plumbing and
+packaging use Lean typechecking, automated trust audits and targeted checks;
+they do not require another independent review merely because a commit or agent
+produced them. Changes to semantic dependencies can reopen review even when the
+theorem's displayed type is unchanged. See the
+[implementation review standard](docs/REVIEW.md#implementation-peer-review).
 
-Reviewers apply [the substantive review standard](docs/REVIEW.md), challenging
-specification adequacy, proof feasibility, proof economics, assembly freedom,
-change blast radius, source authority, and fitness for the implementation brief.
+Keep the semantic conclusion, remaining findings and actual check results with
+the slice's checkpoint or pull request; no per-commit review form is required.
+Unresolved semantic findings block acceptance of the affected claim. Fresh
+contexts are useful for major new boundaries, not mandatory for routine fixes.
+Authors may commit, push and directly merge within the authorized scope; this
+standard adds no human confirmation, role registration or reviewer-owned merge
+gate. Never force-push shared branches.
 
 ## Shared guarantees and second consumers
 
@@ -112,6 +115,10 @@ claiming shared reuse has been completed.
 This is not a mandate for speculative abstraction or an automatic cleanup
 campaign. Spikes sequences work, and the unchanged authored
 `Program → helloVerified → emitProgram` chain remains the priority.
+Major milestones trigger the existing [cleanup audits](docs/SPIKE1_BOUNDARY_REVIEW.md#responsibility):
+architecture coordinates the required audit, and spikes schedules its
+actions or records deferral with a rationale and revisit point. The audit does
+not require every cleanup to finish before implementation continues.
 
 ### Proposed evaluation: instruction and API declarations
 
@@ -139,9 +146,19 @@ change. Publishing a common type is insufficient; one consumer now and a second
 independent producer pending later cleanup do not satisfy it. Supplier
 implementation is still pending. The API-specific obligations remain separate.
 
-Architecture's next raw-entry work uses or factors shared checked-handoff and
-log laws rather than adding per-API copies. This is bounded work within spikes'
-sequence, not a blanket rewrite of existing implementations.
+Architecture's raw-entry work uses or factors shared checked-handoff and log
+laws rather than adding per-API copies. Inspected delivery `3887deed` is a
+concrete example: `Grass/Platform/Win32/RawEntryEvent.lean` supplies one
+`call_handoff_appends` theorem consumed by all three WriteFile, GetStdHandle and
+ExitProcess `CallHandoff.rawStep` adapters. Each uses computed `Event.between`
+and derives append evidence from the actual CALL and checked handoff, avoiding
+three separately authored entry-log proofs. Inspect it with
+`git show 3887deed:Grass/Platform/Win32/RawEntryEvent.lean`.
+
+Graph-ordering premises remain explicit; this shared construction proves no
+native adequacy or complete profile. It does not close the broader DUP-01
+family, the seven-family audit below, or the pending ReturnHome migration. This is bounded work within
+spikes' sequence, not a blanket rewrite of existing implementations.
 
 The auditor's *Cross-consumer duplication sweep*, pinned to `2370d929`, reports
 seven **additional evidenced families**, excluding that ReturnHome trial. This
@@ -160,8 +177,10 @@ the pinned revision (use `git show 2370d929:<path>` for that source).
 | DUP-06 | Access-failure mapping that retains the actual reached state | [PushFactory](Grass/ISA/X86/Execution/PushFactory.lean), [CallFactory](Grass/ISA/X86/Execution/CallFactory.lean), [MemoryMoveFactory](Grass/ISA/X86/Execution/MemoryMoveFactory.lean), [ReturnSlotFactory](Grass/ISA/X86/Execution/ReturnSlotFactory.lean), [FetchFactory](Grass/ISA/X86/Execution/FetchFactory.lean) |
 | DUP-07 | Placement recovery indexed by the same successful access run and address plan | [PushFactory](Grass/ISA/X86/Execution/PushFactory.lean), [CallFactory](Grass/ISA/X86/Execution/CallFactory.lean), [MemoryMoveFactory](Grass/ISA/X86/Execution/MemoryMoveFactory.lean), [ReturnSlotFactory](Grass/ISA/X86/Execution/ReturnSlotFactory.lean) |
 
-Library read-only triage has been requested; implementation of these seven
-candidates awaits spikes' sequencing. Four are substantial proof/construction
+Architecture reports library read-only triage complete: DUP-06 followed by
+DUP-05 are recommended to spikes, with DUP-02 the next substantive family.
+These are recommendations; implementation awaits spikes' sequencing. Four of
+the seven are substantial proof/construction
 families and three are smaller helpers. The report's speculative FrameLoad/
 FrameLea and StaticSectionPacking candidates are excluded from the count, as are
 already-shared runtime table updates and superficially similar domain laws.
@@ -177,9 +196,10 @@ Internal library interfaces may change to meet that acceptance surface.
 As completed spike work reveals better abstractions, assign bounded rewrite
 agents to rebuild earlier implementation around them. Keep the main effort
 advancing the spikes. Each rewrite names its consumers, preserves the authored
-specification and required public laws, and passes deterministic checks and
-independent review before integration. For repeated populations, prefer a shared
-Lean description with general proofs over separately maintained instances.
+specification and required public laws, and passes deterministic checks with
+semantic review where the boundary changes under the standard above. For repeated
+populations, prefer a shared Lean description with general proofs over separately
+maintained instances.
 
 Work through the active spike's complete specification-to-artifact chain. Add or
 refine library code when that chain needs it; do not build independent layers

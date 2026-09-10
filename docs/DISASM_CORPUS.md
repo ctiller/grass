@@ -161,7 +161,7 @@ and aid diagnosis; they do not substitute for any of these proofs.
 
 Specialists own the underlying ISA/platform/memory tests. `disasm` owns the
 connected corpus and reports. Integration remains with the disasm/spikes
-drivers under normal independent review; consult architecture for changes to
+drivers under the [semantic review standard](REVIEW.md#implementation-peer-review); consult architecture for changes to
 shared boundaries.
 No new CLI names are fixed here: extend the existing Grass command/report
 family when the first implementation establishes its concrete interface.

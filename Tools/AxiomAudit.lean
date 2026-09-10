@@ -7,6 +7,9 @@ import Grass.Platform.Win32
 import Grass.Artifact.Encoding
 import Grass.Artifact.PE.Encoding
 import Grass.Refinement.BehaviorCorrespondence
+import Grass.Refinement.BehaviorMatching
+import Grass.Refinement.HistorySimulation
+import Grass.Refinement.ImplementationConformance
 import Grass.Refinement.BehaviorCorrespondenceLaws
 import Grass.Refinement.Realization
 import Grass.Semantics.BehaviorModel
@@ -14,6 +17,7 @@ import Grass.Semantics.BehaviorContract
 import Grass.Semantics.Environment
 import Grass.Semantics.SpecificationDemands
 import Grass.Console.ObservedBehavior
+import Grass.Console.ObservedFrontier
 import Grass.Console.ObservedEmbedding
 import Grass.Console.ObservedEmbeddingSteps
 import Grass.Console.Contract
@@ -97,6 +101,8 @@ import Grass.Platform.Win32.WriteFileServiceContinuation
 import Grass.Refinement.Console.WriteFileHistory
 import Grass.Refinement.Console.WriteFileStaticArgument
 import Grass.Refinement.Console.WriteFileStaticEntry
+import Grass.Refinement.Console.WriteFileConsoleHistory
+import Grass.Platform.Win32.WriteFileConsolePublication
 import Grass.Refinement.Console.WriteFileNonresponse
 import Grass.Refinement.Console.WriteFileEventualNonresponse
 import Grass.Platform.Win32.WriteFileReturn
@@ -120,7 +126,13 @@ import Grass.Platform.Win32.RawServiceContinuation
 import Grass.Platform.Win32.RawEntryEvent
 import Grass.Platform.Win32.RawServicePreservation
 import Grass.Platform.Win32.ExitProcessRuntime
+import Grass.Platform.Win32.ConsoleEnvironment
+import Grass.Platform.Win32.GetStdHandleReturn
+import Grass.Platform.Win32.GetStdHandleRawReturn
+import Grass.Platform.Win32.EvaluatedCall
+import Grass.Platform.Win32.GetStdHandleResult
 import Grass.Platform.Win32.GetStdHandleRuntime
+import Grass.Platform.Win32.ProtocolEntry
 import Grass.Platform.Win32.GetStdHandleStackPlan
 import Grass.Platform.Win32.ReturnHome
 import Grass.Platform.Win32.ReturnHomeStackPlan
@@ -304,6 +316,7 @@ import Grass.Process.Network.Instance
 import Grass.Process.Network.Mailbox
 import Grass.Process.Network.Plan
 import Grass.Process.Network.Progress
+import Grass.Process.Network.Receive
 import Grass.Process.Network.Structural
 import Grass.Process.Network.Topology
 import Grass.Process.Network.Transition

@@ -621,13 +621,31 @@ discharges the demand.
 
 For a deterministic specification, every conforming execution must produce its
 specified projected observation for the same environmental choices. For a
-permissive specification, absence of extra implementation behavior is only one
-direction of the required correspondence. Decision 137 requires equivalence of
-the selected abstract behavior after projection so that author theorems about
-that behavior transfer without separate lowering obligations. Relevant choice,
-scheduling, divergence, pending, and complete-history structure must be retained;
-equality of terminating outputs alone is insufficient. The current foundation's
-forward `BehaviorRefinement` does not yet establish this equivalence.
+permissive specification, implementation conformance is directed: every actual
+finite history, terminal result, infinite execution, wait and reply must satisfy
+the selected abstract contract after projection. A conditional “on error” clause
+can be satisfied by an infallible implementation; permitting an abstract error
+does not require an implementation to produce it. This user-approved correction
+supersedes the earlier requirement here for symmetric implementation equivalence.
+It introduces no optional-outcome machinery.
+
+Exact presentation/denotation equivalence remains a separate relation for
+representations of the same behavior. Directed inclusion alone does not transfer
+arbitrary author theorems: explicitly authored availability and progress demands
+retain their own obligations. Relevant choice, scheduling, divergence, pending
+and complete-history structure must be covered; equality of terminating outputs
+alone is insufficient. An API implementing a concept is a recorded external
+correspondence claim, not a proof of Windows internals; actual diagnostic causes
+must remain visible. The generic relation and relative certificate gate now have
+reviewed delivery checkpoints; the public verified-emission root remains pending.
+The subsequent user-approved baseline also requires internal deadlock freedom:
+no closed, stuck internal subset, even when unrelated work continues. Permitted
+external waiting and intended idle remain valid. This is distinct from termination,
+starvation freedom and environment responsiveness. The composition theorem and
+lowering preservation for introduced locks, channels and callbacks remain owed;
+the existing gate and `Complete` classification do not yet establish this
+requirement. See the
+[current migration status](ENDPOINT_INDEX.md#approved-semantic-correction-and-relative-gate).
 
 Optimization may change instruction traces, layout, timing, or internal API
 structure only if it preserves the selected functional observation and every

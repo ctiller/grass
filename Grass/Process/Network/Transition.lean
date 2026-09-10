@@ -288,7 +288,8 @@ transition could deliver an occurrence the plan's own relation forbids,
 including one whose `ReceiverPre` is false. Local adversarial review found it by
 grepping for the one place `plan.steps` was used and noticing there was only one.
 -/
-structure Delivers (before after : plan.LogicalProcessNetwork)
+/-/ The ledger and session effects shared by every delivery form. -/
+structure DeliveryEffects (before after : plan.LogicalProcessNetwork)
     (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
     (occurrence : EdgeOccurrence plan.topology plan.message edge) : Prop where
   /-- The edge's own receive relation admits this step. -/
@@ -329,11 +330,16 @@ structure Delivers (before after : plan.LogicalProcessNetwork)
     (before.sessions edge session).delivered + 1
   /-- And the session is not closed by being read from. -/
   statusUnchanged : (after.sessions edge session).status = (before.sessions edge session).status
+/-/ A ledger-and-cursor delivery with no receiver-local transition. -/
+structure EscrowDelivery (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (occurrence : EdgeOccurrence plan.topology plan.message edge) :
+    Prop extends DeliveryEffects plan before after edge session occurrence where
   /-- This session's escrow and this session's cursor, and nothing else. -/
   scope : plan.TouchesOnly before after
     (fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session)
 
-namespace Delivers
+namespace DeliveryEffects
 
 variable {plan}
 
@@ -347,14 +353,27 @@ that field, `ChannelContract.receive` was a law about a relation no transition
 invoked.
 -/
 theorem establishes_receiverPost {before after edge session occurrence}
-    (delivered : plan.Delivers before after edge session occurrence)
+    (delivered : plan.DeliveryEffects before after edge session occurrence)
     (receiverPre : ((plan.channel edge).ReceiverPre occurrence.1 occurrence.2).holds before)
     (escrowed : ((plan.channel edge).Escrow occurrence.1 occurrence.2).holds before) :
     ((plan.channel edge).ReceiverPost occurrence.1 occurrence.2).holds after :=
   (plan.channel edge).receive occurrence.1 occurrence.2 before after
     delivered.contractual receiverPre escrowed
 
-end Delivers
+end DeliveryEffects
+
+namespace EscrowDelivery
+
+variable {plan}
+
+theorem establishes_receiverPost {before after edge session occurrence}
+    (delivered : plan.EscrowDelivery before after edge session occurrence)
+    (receiverPre : ((plan.channel edge).ReceiverPre occurrence.1 occurrence.2).holds before)
+    (escrowed : ((plan.channel edge).Escrow occurrence.1 occurrence.2).holds before) :
+    ((plan.channel edge).ReceiverPost occurrence.1 occurrence.2).holds after :=
+  DeliveryEffects.establishes_receiverPost delivered.toDeliveryEffects receiverPre escrowed
+
+end EscrowDelivery
 
 /--
 A channel is closed in the ordinary way.
@@ -882,7 +901,12 @@ step in the program, vacuously and wrongly.
 regions its own role may write, so `ProcessGraph.sharedAccess` still decides who
 touches what.
 -/
-structure StepsLocally (before after : plan.LogicalProcessNetwork)
+/-
+The effects common to a local protocol transition and a channel-delivered local
+transition. Scope remains specific to the transition family that consumes these
+effects.
+-/
+structure LocalStepEffects (before after : plan.LogicalProcessNetwork)
     (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
     (event : (plan.topology.protocol kind).Event)
     (emitted : Trace boundary.Observation)
@@ -994,6 +1018,16 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
       plan.sharedUpdate kind event (fromKind ▸ fromInstance.localState)
         (toKind ▸ toInstance.localState) issued localEmitted region
         (before.shared region) (after.shared region)
+
+/-- One instance takes a local protocol step. The common operational effects
+are kept in `LocalStepEffects`; this structure supplies the local-step scope. -/
+structure StepsLocally (before after : plan.LogicalProcessNetwork)
+    (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+    (event : (plan.topology.protocol kind).Event)
+    (emitted : Trace boundary.Observation)
+    (issued : Bag (plan.topology.protocol kind).Demand)
+    (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation) :
+    Prop extends LocalStepEffects plan before after kind slot event emitted issued localEmitted where
   /--
   Its slot, the regions it wrote, the observation trace **if it actually
   emitted**, and nothing else.
@@ -1015,6 +1049,48 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
     (fun fragment => fragment = .instanceState kind slot ∨
       (emitted ≠ [] ∧ fragment = .pending) ∨
       ∃ region, before.shared region ≠ after.shared region ∧ fragment = .region region)
+
+def DeliveryScope (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge) :
+    NetworkFragment plan.topology → Prop :=
+  fun fragment => fragment = .escrow edge session ∨
+    fragment = .session edge session ∨
+    fragment = .instanceState (plan.topology.endpoints edge).2 session.receiver.instanceId ∨
+    (before.pending ≠ after.pending ∧ fragment = .pending) ∨
+    ∃ region, before.shared region ≠ after.shared region ∧ fragment = .region region
+
+/-- A channel delivery resolves its exact escrow occurrence and performs the
+receiver's declared local event in the same network step. -/
+structure Delivers (before after : plan.LogicalProcessNetwork)
+    (edge : plan.topology.ChannelKind) (session : plan.topology.ChannelId edge)
+    (occurrence : EdgeOccurrence plan.topology plan.message edge)
+    (emitted : Trace boundary.Observation)
+    (issued : Bag (plan.topology.protocol (plan.topology.endpoints edge).2).Demand)
+    (localEmitted : ObservationSegment
+      (plan.topology.protocol (plan.topology.endpoints edge).2).Observation) :
+    Prop extends DeliveryEffects plan before after edge session occurrence where
+  receiverStep : plan.LocalStepEffects before after (plan.topology.endpoints edge).2
+    session.receiver.instanceId ((plan.channel edge).receiverInput.arrives occurrence.1)
+    emitted issued localEmitted
+  receiverRef : ∀ incarnation,
+    before.instances (plan.topology.endpoints edge).2 session.receiver.instanceId = some incarnation →
+      ∃ sameKind : incarnation.kind = (plan.topology.endpoints edge).2,
+        sameKind ▸ incarnation.ref = session.receiver
+  scope : plan.TouchesOnly before after (DeliveryScope plan before after edge session)
+
+namespace Delivers
+
+variable {plan}
+
+theorem establishes_receiverPost {before after edge session occurrence}
+    {emitted issued localEmitted}
+    (delivered : plan.Delivers before after edge session occurrence emitted issued localEmitted)
+    (receiverPre : ((plan.channel edge).ReceiverPre occurrence.1 occurrence.2).holds before)
+    (escrowed : ((plan.channel edge).Escrow occurrence.1 occurrence.2).holds before) :
+    ((plan.channel edge).ReceiverPost occurrence.1 occurrence.2).holds after :=
+  DeliveryEffects.establishes_receiverPost delivered.toDeliveryEffects receiverPre escrowed
+
+end Delivers
 
 /--
 A new incarnation appears in a slot that was empty.
@@ -1846,8 +1922,8 @@ inductive NetworkTransition (before after : plan.LogicalProcessNetwork) : Type (
       (occurrence : plan.topology.ChannelOccurrence edge message)
       (step : plan.SendsEscrow before after edge message occurrence)
   /-- The receiver consumes it, advancing its cursor. -/
-  | receive (edge session occurrence)
-      (step : plan.Delivers before after edge session occurrence)
+  | receive (edge session occurrence emitted issued localEmitted)
+      (step : plan.Delivers before after edge session occurrence emitted issued localEmitted)
   /-- Observations processes produced are committed. -/
   | commit (emitted : Trace boundary.Observation)
       (step : plan.Commits before after emitted)
@@ -1987,8 +2063,7 @@ def scope : plan.NetworkTransition before after → NetworkFragment plan.topolog
   | .send edge _ occurrence _ => fun fragment => fragment = .escrow edge occurrence.1
   | .commit emitted _ =>
       fun fragment => emitted ≠ [] ∧ (fragment = .observations ∨ fragment = .pending)
-  | .receive edge session _ _ =>
-      fun fragment => fragment = .escrow edge session ∨ fragment = .session edge session
+  | .receive edge session _ _ _ _ _ => DeliveryScope plan before after edge session
   | .requestCancel edge session _ _ => fun fragment => fragment = .escrow edge session
   | .acknowledgeCancel edge session _ _ _ => fun fragment => fragment = .escrow edge session
   | .timeout edge session _ _ => fun fragment => fragment = .escrow edge session
@@ -2100,7 +2175,7 @@ theorem touchesOnly (transition : plan.NetworkTransition before after) :
   | restart _ _ _ _ _ step => exact step.scope
   | send _ _ _ step => exact step.scope
   | commit _ step => exact step.scope
-  | receive _ _ _ step => exact step.scope
+  | receive _ _ _ _ _ _ step => exact step.scope
   | requestCancel _ _ _ step => exact step.scope
   | acknowledgeCancel _ _ _ _ step => exact step.scope
   | timeout _ _ _ step => exact step.scope
@@ -2175,7 +2250,8 @@ theorem moving_the_ledger_ends_an_instance (transition : plan.NetworkTransition 
   | restart _ _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
   | send _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
   | commit _ step => exact absurd (step.scope .obligations (by simp)) moved
-  | receive _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
+  | receive _ _ _ _ _ _ step =>
+    exact absurd (step.scope .obligations (by simp [DeliveryScope])) moved
   | requestCancel _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
   | acknowledgeCancel _ _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
   | timeout _ _ _ step => exact absurd (step.scope .obligations (by simp)) moved
@@ -2204,9 +2280,9 @@ def allocatedNominals :
   | .restart _ _ allocation _ _ _ => allocation
   | _ => Allocation.empty
 
-@[simp] theorem allocatedNominals_receive {edge session occurrence step} :
+@[simp] theorem allocatedNominals_receive {edge session occurrence emitted issued localEmitted step} :
     (NetworkTransition.receive (plan := plan) (before := before) (after := after)
-      edge session occurrence step).allocatedNominals = Allocation.empty := rfl
+      edge session occurrence emitted issued localEmitted step).allocatedNominals = Allocation.empty := rfl
 
 @[simp] theorem allocatedNominals_commit {emitted step} :
     (NetworkTransition.commit (plan := plan) (before := before) (after := after)

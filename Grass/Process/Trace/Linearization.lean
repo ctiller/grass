@@ -128,7 +128,7 @@ theorem publishing_produces {before after : plan.LogicalProcessNetwork}
     (publishes : transition.scope .observations) : transition.Emits := by
   cases transition with
   | commit _ _ => exact ⟨publishes.1, Or.inr rfl⟩
-  | _ => exact absurd publishes (by simp [NetworkTransition.scope])
+  | _ => exact absurd publishes (by simp [NetworkTransition.scope, DeliveryScope])
 
 /--
 A step that did not declare either trace left the committed one exactly.
@@ -167,7 +167,7 @@ theorem observations_extend {before after : plan.LogicalProcessNetwork}
   by_cases publishes : transition.scope (.observations : NetworkFragment plan.topology)
   · cases transition with
     | commit emitted step => exact ⟨emitted, step.appended⟩
-    | _ => exact absurd publishes (by simp [NetworkTransition.scope])
+    | _ => exact absurd publishes (by simp [NetworkTransition.scope, DeliveryScope])
   · refine ⟨[], ?_⟩
     rw [← transition.touchesOnly .observations publishes, List.append_nil]
 
@@ -191,7 +191,7 @@ theorem publishes_iff_the_trace_moved {before after : plan.LogicalProcessNetwork
       have lengths := congrArg List.length step.appended
       rw [← same, List.length_append] at lengths
       exact nonempty (List.eq_nil_of_length_eq_zero (by omega))
-    | _ => exact absurd publishes (by simp [NetworkTransition.scope])
+    | _ => exact absurd publishes (by simp [NetworkTransition.scope, DeliveryScope])
   · intro moved
     exact Classical.byContradiction
       (fun silent => moved (transition.touchesOnly .observations silent))
@@ -222,6 +222,14 @@ theorem emits_iff_the_pending_trace_moved {before after : plan.LogicalProcessNet
         rw [← same, List.length_append] at lengths
         exact nonempty (List.eq_nil_of_length_eq_zero (by omega))
       · exact absurd isRegion (by simp)
+    | receive edge session occurrence _ _ _ step =>
+      rcases emits with isEscrow | isSession | isInstance | moved | isRegion
+      · exact absurd isEscrow (by simp)
+      · exact absurd isSession (by simp)
+      · exact absurd isInstance (by simp)
+      · exact moved.1
+      · rcases isRegion with ⟨region, _, isRegion⟩
+        exact absurd isRegion (by simp)
     | commit emitted step =>
       obtain ⟨nonempty, _⟩ := emits
       intro same
@@ -312,6 +320,11 @@ theorem produced_extends {before after : plan.LogicalProcessNetwork}
       refine ⟨emitted, ?_⟩
       show after.observations ++ after.pending = before.observations ++ before.pending ++ emitted
       rw [step.producesPending, ← step.scope .observations (by simp), List.append_assoc]
+    | receive edge session occurrence emitted issued localEmitted step =>
+      refine ⟨emitted, ?_⟩
+      show after.observations ++ after.pending = before.observations ++ before.pending ++ emitted
+      rw [step.receiverStep.producesPending,
+        ← step.scope .observations (by simp [DeliveryScope]), List.append_assoc]
     | spawn _ _ _ emitted _ step =>
       refine ⟨emitted, ?_⟩
       show after.observations ++ after.pending = before.observations ++ before.pending ++ emitted

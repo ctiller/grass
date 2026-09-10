@@ -18,7 +18,7 @@ def observeRegisters (before : RawState) (gpr : Gpr → BitVec 64)
   { before with machine := { before.machine with gpr := gpr, rflags := rflags } }
 
 /-- Install the exact protocol return's bookkeeping data before reading the
-returned slot. This view preserves actual CPU registers and raw control/runtime;
+returned slot. `afterReturn` preserves actual CPU registers and raw control/runtime;
 it does not itself assert a raw transition or a physical provider return. -/
 def afterReturn (before : RawState) (returned : CallProtocol.State ApiRequest) : RawState :=
   { before with machine := { before.machine with machine := returned.machine }
@@ -66,7 +66,7 @@ theorem resume_caller_registered
   simp only [MachineState.noteContext, resume.slot.context_exact,
     resume.slot.contextKind_exact, context, kind, FiniteMap.lookup_insert_self]
 
-/-- Runtime consumption preserves the actual read state and settled metadata;
+/-- `finalized_fields` proves runtime consumption preserves the actual read state and settled metadata;
 only this call is removed and caller control is selected. -/
 theorem finalized_fields
     (resume : ProviderResume.Success loaded (afterReturn before settled) callId runtime frame call)

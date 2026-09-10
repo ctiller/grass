@@ -77,7 +77,14 @@ import Grass.Platform.Win32.RawServiceContinuation
 import Grass.Platform.Win32.RawEntryEvent
 import Grass.Platform.Win32.RawServicePreservation
 import Grass.Platform.Win32.ExitProcessRuntime
+import Grass.Platform.Win32.ConsoleEnvironment
+import Grass.Platform.Win32.WriteFileConsolePublication
+import Grass.Platform.Win32.GetStdHandleReturn
+import Grass.Platform.Win32.GetStdHandleRawReturn
+import Grass.Platform.Win32.EvaluatedCall
+import Grass.Platform.Win32.GetStdHandleResult
 import Grass.Platform.Win32.GetStdHandleRuntime
+import Grass.Platform.Win32.ProtocolEntry
 import Grass.Platform.Win32.GetStdHandleStackPlan
 import Grass.Platform.Win32.ReturnHome
 import Grass.Platform.Win32.ReturnHomeStackPlan
@@ -250,7 +257,14 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawEntryEvent,
    `Grass.Platform.Win32.RawServicePreservation,
    `Grass.Platform.Win32.ExitProcessRuntime,
+   `Grass.Platform.Win32.ConsoleEnvironment,
+   `Grass.Platform.Win32.WriteFileConsolePublication,
+   `Grass.Platform.Win32.GetStdHandleReturn,
+   `Grass.Platform.Win32.GetStdHandleRawReturn,
+   `Grass.Platform.Win32.EvaluatedCall,
+   `Grass.Platform.Win32.GetStdHandleResult,
    `Grass.Platform.Win32.GetStdHandleRuntime,
+   `Grass.Platform.Win32.ProtocolEntry,
    `Grass.Platform.Win32.GetStdHandleStackPlan,
    `Grass.Platform.Win32.ReturnHome,
    `Grass.Platform.Win32.ReturnHomeStackPlan,
@@ -335,7 +349,11 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Twelve fixed CPU/ABI obligations, including executable/readable region selection.
 -- Six fixed request/stack contracts are newly enrolled; no existing debt moves.
 -- Shared ABI declarations and the two WriteFile extension checks retain debt.
-def owedBaseline : Nat := 342
+-- Two checked WriteFile request/entry producers retain their external ABI debt.
+-- Static selector/route/result policy and observed-register API acceptance.
+-- External process applicability and formal source anchors remain owed.
+-- The bounded live writable/synchronous publication attribution policy.
+def owedBaseline : Nat := 347
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -390,10 +408,18 @@ acquiring a citation.
 -- Fixed dispatch and access factories add thirty checked structural helpers.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
--- Shared runtime and compatibility adapters retain actual evidence.
+-- Runtime, compatibility and shared spatial adapters retain actual evidence.
+-- Shared failure recovery removes one duplicate; memory-MOV provenance adds one projection.
+-- Two endpoint aliases and three shared protocol bookkeeping computations add no model debt.
 -- Certificate encoding adds one reviewed structural adapter beyond main.
+-- Two preparation helpers resolve checked memory and project retained fifth-slot identity.
 -- The shared settled-state view retains data and asserts no transition.
-def notBehaviourBaseline : Nat := 377
+-- Nominal aliases, generational construction, finite comparison and supplied-state projection.
+-- Return composition and final projection reuse checked protocol/resume computations.
+-- Comparison with the snapshot's selected stdout route adds no native authority.
+-- The actual checked completion projects its canonical raw event suffix.
+-- Shared observation staging installs supplied register data without native authority.
+def notBehaviourBaseline : Nat := 392
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -539,6 +565,18 @@ def notBehaviour : List Name :=
     -- Packages the existing checked PE writer, reader and roundtrip theorem.
     -- It introduces no alternate serialization, loader rule or format fact.
     `Grass.Artifact.PE.encoding,
+    -- Nominal data and comparison over the separately owed ABI list. The stage
+    -- installs supplied observations; it asserts no actual provider transition.
+    `Grass.Platform.Win32.ProcessId,
+    `Grass.Platform.Win32.RouteId,
+    `Grass.Platform.Win32.GenerationalBV64,
+    `Grass.Platform.Win32.HandleBinding.identity,
+    `Grass.Platform.Win32.GetStdHandle.ProviderResult.nonvolatileSame,
+    `Grass.Platform.Win32.GetStdHandle.ProviderResult.stage,
+    `Grass.Platform.Win32.GetStdHandle.Return.complete?,
+    `Grass.Platform.Win32.GetStdHandle.Return.Completion.final,
+    `Grass.Platform.Win32.GetStdHandle.Return.Completion.event,
+    `Grass.Platform.Win32.WriteFile.ConsolePublication.onStdout,
     -- Bind the fixed policy to an existing successful CALL factory receipt.
     `Grass.Platform.Win32.CallEntry.CallPolicy.ofFactory,
     `Grass.Platform.Win32.WriteFile.CallPolicy,
@@ -608,6 +646,11 @@ def notBehaviour : List Name :=
     -- Checked GetStdHandle bookkeeping and projections add no provider or CPU
     -- claim beyond the actual CALL, ABI and protocol receipts they retain.
     `Grass.Platform.Win32.GetStdHandle.EntryHandoff.after,
+    `Grass.Platform.Win32.GetStdHandle.EntryHandoff,
+    `Grass.Platform.Win32.WriteFile.EntryHandoff,
+    `Grass.Platform.Win32.ProtocolEntry.issue?,
+    `Grass.Platform.Win32.ProtocolEntry.Entry.after,
+    `Grass.Platform.Win32.ProtocolEntry.Entry.pendingRecord,
     `Grass.Platform.Win32.WriteFile.EntryFactory.resolve?,
     `Grass.Platform.Win32.WriteFile.EntryFactory.prepare?,
     `Grass.Platform.Win32.GetStdHandle.EntryHandoff.record,
@@ -990,6 +1033,12 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    -- Fixed console table/sentinel policy and observed API/ABI acceptance.
+    `Grass.Platform.Win32.ConsoleEnvironment.standardHandle?,
+    `Grass.Platform.Win32.ConsoleEnvironment.routeOf?,
+    `Grass.Platform.Win32.ConsoleEnvironment.getStdAllowed,
+    `Grass.Platform.Win32.GetStdHandle.ProviderResult.observe?,
+    `Grass.Platform.Win32.WriteFile.ConsolePublication.matches?,
     `Grass.Platform.Win32.ExitProcess.status,
     -- Fixed request widths and callee stack custody retain external ABI debt.
     `Grass.Platform.Win32.ApiRequest,

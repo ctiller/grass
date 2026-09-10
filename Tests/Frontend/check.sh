@@ -6,6 +6,7 @@ lake() { "$lake_exe" "$@"; }
 
 # This is the current construction gate, not a completed VerifiedProgram gate.
 lake build Grass.Assembly.X86 Grass.Platform.Win32 Grass.Spec.Console Grass.Spec.Resource Tests.Frontend.Source
+lake build Grass.Refinement.Console.WriteFileStaticEntry Tests.Platform.Win32LoaderEntry Tests.Console.WriteFileCountEntry
 mkdir -p .lake/build/lib/lean/Spikes/1_Hello_World
 lake env lean Spikes/1_Hello_World/Spec.lean -o .lake/build/lib/lean/Spikes/1_Hello_World/Spec.olean
 
@@ -13,7 +14,8 @@ fixture=$(mktemp .lake/frontend-hello-XXXXXX.lean)
 rejected=$(mktemp .lake/frontend-rejected-XXXXXX.lean)
 diagnostic=$(mktemp .lake/frontend-rejected-XXXXXX.log)
 audit=$(mktemp .lake/frontend-audit-XXXXXX.lean)
-trap 'rm -f -- "$fixture" "$rejected" "$diagnostic" "$audit"' EXIT
+entry=$(mktemp .lake/frontend-writefile-XXXXXX.lean)
+trap 'rm -f -- "$fixture" "$rejected" "$diagnostic" "$audit" "$entry"' EXIT
 
 # Preserve all authored declarations through helloSource verbatim. Only the
 # unavailable emission import and certificate suffix are outside this gate.
@@ -28,6 +30,22 @@ perl -0777 -e '
   print "end Grass.Spikes.HelloWorld\n";
 ' Spikes/1_Hello_World/Program.lean > "$fixture"
 lake env lean "$fixture"
+
+# The entry fixture sees these freshly elaborated authored declarations, not a
+# copied test specification or an independently rebuilt payload/source/image.
+perl -0777 -e '
+  my ($templatePath, $prefixPath) = @ARGV;
+  open my $templateFile, "<", $templatePath or die $!;
+  open my $prefixFile, "<", $prefixPath or die $!;
+  local $/;
+  my $template = <$templateFile>;
+  my $prefix = <$prefixFile>;
+  my $markers = () = $template =~ /^-- INCLUDE_AUTHORED_HELLO\r?$/mg;
+  die "expected one authored source marker\n" unless $markers == 1;
+  $template =~ s/^-- INCLUDE_AUTHORED_HELLO\r?$/$prefix/m;
+  print $template;
+' Tests/Frontend/WriteFileEntry.lean.in "$fixture" > "$entry"
+lake env lean "$entry"
 
 # A source mutation must fail checked construction; parsing an assembly-shaped
 # declaration alone must never produce a MachineSource.
@@ -65,4 +83,4 @@ perl -0777 -e '
 ' Tools/AxiomAudit.lean > "$audit"
 printf "Focused frontend import-closure declaration audit only; NOT a full repository census or audit-trust adversarial probes. Counts below are computed for this run.\n"
 lake env lean "$audit"
-printf "Unchanged Hello specification/source construction and focused import-closure audit pass; unsupported source rejected. Certificate suffix and full repository trust gates remain outside this check.\n"
+printf "Unchanged Hello frontend and same-source WriteFile CALL/entry fixture pass; unsupported source rejected. CALL-prefix reachability, deadlock freedom, certificate suffix and full repository trust gates remain outside this check.\n"

@@ -6,9 +6,9 @@ documents; it does not change their contracts or certify a milestone. Status
 describes this revision unless a later inspected delivery or interview report is
 explicitly named below.
 
-Latest inspected raw-execution delivery: [checked CPU execution and CALL
-provenance](#checked-cpu-execution-and-call-provenance), `0159cb87`. Earlier
-delivery sections explain the retained carrier, service and dispatch boundaries.
+Latest mechanical connection update: [issued-call resume status](#issued-call-resume-status),
+covering `98b9147e`, `ba7b01ec`, `5be3f92e` and `4141cb7f`. Earlier delivery sections explain
+the retained carrier, service, dispatch and checked-CPU boundaries.
 
 ## Start from the authored output
 
@@ -53,6 +53,168 @@ For ownership details and recorded reviews, use
 [SPIKE1_BOUNDARY_REVIEW.md](SPIKE1_BOUNDARY_REVIEW.md). For unwind requirements,
 use [HELLO_UNWIND_BOUNDARY.md](HELLO_UNWIND_BOUNDARY.md). These documents retain
 their own status labels; a reviewed direction is not an implemented declaration.
+
+## Issued-call resume status
+
+Inspected source at `31ad186e`, 2026-09-09. The following are bounded mechanical
+connections, not whole-spike completion. Initial linkage and finite service
+history are no longer merely extra premises for consumers rooted in these
+actual handoff witnesses:
+
+| Connection | Implemented evidence | Boundary still to connect |
+|---|---|---|
+| Shared checked protocol entry, `5be3f92e` | [ProtocolEntry.lean](../Grass/Platform/Win32/ProtocolEntry.lean): `Entry`, `issue?` and general projection, pending-record, freshness and storage laws. Both [GetStdHandleRuntime](../Grass/Platform/Win32/GetStdHandleRuntime.lean) and [WriteFileHandoff](../Grass/Platform/Win32/WriteFileHandoff.lean) use it through their actual entry producers; duplicated entry construction was removed | API-specific requests, loans and observations remain distinct; this is not a native provider or endpoint certificate |
+| Original CALL and initial resume inputs, `98b9147e` | [CallResumeBinding.lean](../Grass/Platform/Win32/CallResumeBinding.lean): both APIs' `CallHandoff.resumeInputs` derive `ProviderResume.PolicyBinding` and `Link` from the same actual CALL, reached plan and computed runtime insertion | Initial linkage does not establish a later return or provider transfer |
+| Finite WriteFile service history, `ba7b01ec` | [CallResumeHistory.lean](../Grass/Platform/Win32/CallResumeHistory.lean): `WriteFile.CallHandoff.resumeInputsAfterService` starts at that issued CALL's `rawAfter`, follows the supplied finite same-call `providerService` edges, and derives the original frame link, whole metadata/pending-record agreement, fifth slot and loan plan at the endpoint | It does not include settlement, return-slot read, resumed caller execution, arbitrary non-service edges or infinite-history coverage |
+
+The generic `ProviderResume.Link` remains a data-agreement proposition. These
+new consumers derive its relevant issuance/history connection; equal frame
+coordinates alone still do not establish that connection for an arbitrary
+supplied `Link`.
+
+The separately inspected lowering delivery `4141cb7f` connects **same-issued-CALL
+finite history → matched settlement → computed slot read → raw BOOL guard →
+source body**, conditionally. This historical LEA-specific wrapper is superseded
+by the incoming-state count-entry delivery below. Inspect it with
+`git show 4141cb7f:Grass/Refinement/Console/WriteFileResume.lean`, theorem
+`returned_body`. It transports the original pre-CALL cursor, derives the original
+frame, preserves R12/RSP and settled memory, and connects the source load's exact
+range and provenance. It still consumes `requestSlot` equating the request's
+count slot with `SourceLea.argument`, actual provider BOOL/GPR evidence,
+`resumeRan`, the original pre-CALL cursor, and checked guard/body execution
+witnesses (including successful BOOL and positive count). It does not install a
+raw return edge, restore raw caller control, consume runtime state or establish
+physical transfer. Spikes reports integration as `38536c7e`.
+
+[ProviderResume.lean](../Grass/Platform/Win32/ProviderResume.lean)
+computes the checked slot read and resume candidate under the original CALL's
+policy. Its `resume` still consumes actual reached-state
+`PreservesNonvolatile` evidence, and `WriteFileOutput` relates the actual low
+32 bits of RAX to the raw BOOL. Neither deriving `PolicyBinding` nor preserving
+the frame manufactures those provider observations. The modeled GPR table does
+not cover XMM, MXCSR, x87 control state or direction-flag adequacy. Matched
+return still needs actual `CallProtocol.return?` settlement with the full
+recorded loan IDs; `MatchedReturn.effects` and `consumed` are existing
+conditional laws for that evidence. The composition consumes the checked
+candidate and source execution witnesses; producing those at the actual endpoint,
+including exact-stage slot-read permission and physical provider-transfer
+correspondence, remains an obligation. No fetched native RET is claimed.
+
+The checked request/entry producer is delivered in Windows checkpoint `4f431cee`:
+inspect `git show 4f431cee:Grass/Platform/Win32/WriteFilePrepare.lean`.
+`WriteFile.EntryFactory.requestOf` fixes the request from the actual state,
+canonical provenance-carrying buffer/count arguments and bytes; `prepare?` also
+takes the supplied fifth slot and computes `Abi.Entry` with `Prepared` for that
+same request, or refuses failed spatial, initialization, size or ABI checks.
+It derives the handle from RCX and requested count from low 32-bit R8, checks
+RDX/R9 and the fifth-slot stack address, and never reconstructs count provenance
+from R9 alone. `requestOf_countSlot`, `requestOf_buffer`, `requestOf_bytes`,
+`requestOf_handle`, `requestOf_requested` and `prepare?_fifthSlot` retain the exact
+supplied inputs. The inspected fixture at
+`Tests/Platform/Win32WriteFilePrepare.lean` connects actual CALL → preparation →
+stack plan → protocol entry, retaining the canonical count slot in the pending
+record; Windows reports review and validation passed.
+
+This closes the missing checked preparation step. The source suffix buffer and
+outer source-to-loaded-image correspondence still need their lowering connection.
+Provider BOOL, settlement/resume and physical correspondence retain
+their separate obligations above. Existing
+[WriteFileStackPlan.lean](../Grass/Platform/Win32/WriteFileStackPlan.lean)
+`Abi.StackPlanFactory.deriveLoaded?` consumes an already supplied `Entry` and
+derives the shared ReturnHome plan plus WriteFile extensions, including the later
+fifth-slot separation checks.
+
+Count-entry rewrite `8f213c0c`, integrated on the certificate branch as `a3375cee`,
+uses `Grass/Refinement/Console/WriteFileCountArgument.lean` to compute the static
+source-local count argument from the selected frame and fixed loaded stack.
+`Grass/Refinement/Console/WriteFileCountEntry.lean` provides `prepareCountCall?`
+and `returned_body`, using the existing incoming-state checker without an executed
+LEA or separate `requestSlot` premise. The generic `WriteFileSourceEntry.prepareCall?`
+still composes reached CALL, preparation, stack plan and protocol entry, retaining
+the exact receipt and original metadata. Unused `prepareSourceCall?` and old
+LEA-specific return/body wrappers were deleted; `WriteFileResume.returned_body_bound`
+is the shared descriptor-bound composition. Actual LEA remains an optional producer.
+
+Spikes reports the combined 299-job build passed. The fixture accepts preexisting
+correct R9 with no LEA and rejects wrong-local, shifted-frame, width and space
+mismatches. It combines a separate source selection with an actual-CALL image;
+outer source-to-loaded-image correspondence remains owed, along with the other
+return/body premises. This is not public-gate or main Console migration.
+
+Shared finalization now has **both real production consumers** at certificate
+checkpoint `c6ded4d2`. Main `95675923` delivers
+[GetStdHandleReturn.lean](../Grass/Platform/Win32/GetStdHandleReturn.lean):
+observed-result, same-call `complete?` uses `ProviderResume.finalized_*` for
+fields, other-call preservation, protocol consumption/replay rejection and logs.
+The inspected `Grass/Refinement/Console/WriteFileFinalize.lean` at `c6ded4d2`
+delegates to those same laws in
+[ProviderResumeFinalization.lean](../Grass/Platform/Win32/ProviderResumeFinalization.lean).
+This closes the specific dual-adoption obligation. Spikes reports boundary review
+accepted, root/certificate focused builds (249/296 jobs), root audit (31,112
+declarations/360 modules), certificate ledger and supplier build/trust checks
+passed. These do not establish broader cleanup, native applicability, physical
+return or the public `VerifiedProgram` endpoint.
+
+The [incoming-state contract rule](PLATFORM_ABI.md#incoming-state-contract)
+separates the checked call state from its setup recipe. The count-entry rewrite
+implements that distinction while retaining canonical arguments and actual CALL
+binding; it does not prove the remaining outer execution connection.
+
+The structured Hello fixture at the inspected `31ad186e` had a trust-gate
+setup-extraction defect, so that checkpoint is not acceptance evidence.
+The repair is integrated as `d7c63bab`, with independent review, the 595-job
+root build, and the trust audit of 75 declarations and 8 executable test modules
+passing. Source freshness passed for 22 embedding modules. This fixture does not
+establish whole Hello.
+
+### Approved semantic correction and relative gate
+
+Process and architecture confirm the latest user-approved boundary: “on error”
+is conditional, so an infallible implementation can satisfy that contract.
+Generic implementation conformance covers **every actual history, result,
+completion and wait**; it does not require producing every abstractly permitted
+error. Exact presentation/denotation equivalence remains a separate relation,
+and explicitly authored availability and progress requirements remain obligations.
+An API implementing a concept is a recorded external correspondence claim, not
+a proof of Windows internals. Preserve actual diagnostic causes.
+
+The optional-outcome machinery is stopped; no optional-outcome flags or framework
+follow from this decision. Older symmetric back-coverage counterexamples diagnose
+an overstrong implementation interface, not an obligation to manufacture errors.
+Process's generic relation is delivered as `36ebd13c`, integrated on the
+certificate branch as `04b8e23f`: `Grass/Refinement/ImplementationConformance.lean`
+defines `DirectedWaitTranslation`, `ImplementationConformance` and the exact-to-directed
+adapters `DirectedWaitTranslation.ofExact` and
+`BehaviorCorrespondence.toImplementationConformance`. Architecture's relative
+gate change `ab646796`, integrated as `6b784003`, uses the directed translation
+in `RealizationProfile.waits` and directed conformance in
+`RealizationCertificate.correspondence`. Exact artifact binding and admitted-input
+entry/safety remain. Inspect these deliveries with `git show <commit>:<path>`;
+the gate is in `Grass/Refinement/Realization.lean`.
+
+Spikes reports the combined 245-job focused build and independent Sol review
+passed. Expanded scoped audit checkpoint `a5a495f3` covers 2,009 declarations
+in 26 modules, including `Realization`. These are **relative certificate
+deliveries**, not whole-public-root or trust acceptance: the known legacy
+`Grass.Certificate` migration failure remains. Matching covers actual histories,
+replies and the existing classified terminal/infinite/wait completions; it adds
+no completion-existence field.
+
+The subsequent user-approved direction makes **internal deadlock freedom a
+baseline requirement**, alongside safety and specification matching. A closed,
+stuck internal subset is disallowed even while unrelated work continues.
+Permitted external waiting and intended idle remain valid; termination, starvation
+freedom and environment responsiveness are separate requirements. This supersedes
+the earlier research-only policy status. A composition theorem and lowering
+preservation, including introduced locks, channels and callbacks, are still owed.
+Neither this theorem nor its gate integration is implemented by the checkpoints
+above; the existing `Complete` classification does not establish this requirement.
+
+The decision record is available as
+`git show 2ae59a56:docs/HELLO_ENDPOINT_MODEL.md`. Its earlier fixed-environment
+signatures remain explicitly provisional; do not treat them as an accepted,
+implemented complete-correspondence model. This note records the latest decision
+without claiming the public verified-emission gate or the Hello endpoint has migrated.
 
 ## Deliveries beyond the initial snapshot
 
