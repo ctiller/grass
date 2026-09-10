@@ -1,6 +1,7 @@
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.EvaluatedCall
 import Grass.Platform.Win32.GetStdHandleReturn
+import Grass.Platform.Win32.WriteFileReturnCompletion
 import Grass.Platform.Win32.WriteFileRuntime
 import Grass.Platform.Win32.WriteFileService
 import Grass.Platform.Win32.GetStdHandleRuntime
@@ -11,7 +12,8 @@ import Grass.Platform.Win32.ApiDispatch
 # Concrete raw endpoint case composition
 
 This is the fixed union of the endpoint cases currently implemented, indexed by
-one loaded image, console environment and provider realization for an entire derivation. It is
+one loaded image, console environment, provider realization and return interpretation
+for an entire derivation. It is
 not a complete Windows execution model or a public realization profile. In
 particular, native export adequacy, failed/refused provider actions,
 physical provider transfer and terminal observation are not classified here. No totality,
@@ -25,7 +27,11 @@ the loaded import layout using the actual CALL effective address and target;
 logical selection is not proof of native DLL/export identity.
 The bounded GetStdHandle return case starts at the exact entered pending state
 and consumes the computed checked completion; its register stage is internal.
-Its log/graph agreement is not a full cross-log causal correspondence claim.
+The WriteFile return starts at the exact current provider state and consumes a
+matched return under the fixed interpretation. The supplied provider history is
+indexed to the original handoff; linking it to the same enclosing raw execution
+remains an outer adapter obligation. Return log/graph agreement does not establish
+full cross-log causal correspondence.
 -/
 
 namespace Grass.Platform.Win32.Raw
@@ -40,12 +46,12 @@ def Graph.Realizes (graph : Graph) (model : WriteFile.CausalModel)
   ∀ left right, model.precedes state left right ↔
     Relation.TransGen (fun a b => (a, b) ∈ graph) left right
 
-/-- Implemented endpoint cases only. The indices fix the image, environment and
+/-- Implemented endpoint cases only. The indices fix the image, environment, interpretation and
 realization; none can be chosen anew by a constructor. Missing native adequacy and outcome
 coverage prevent using this relation as a certified public execution model. -/
 inductive RawStep {image : ImageInput} {inputs : EntryInputs}
     (loaded : LoadedImage image inputs) (realization : WriteFile.Realization)
-    (environment : ConsoleEnvironment) :
+    (environment : ConsoleEnvironment) (interpretation : WriteFile.ReturnInterpretation) :
     StepSignature where
   | writeFileEntry {graph nextGraph : Graph} {event : Event}
       {before : State ApiRequest} {calls : CallRuntimeTable}
@@ -64,7 +70,7 @@ inductive RawStep {image : ImageInput} {inputs : EntryInputs}
       (agreement : EdgeAgreement graph (before.raw calls) event
         (entered.rawAfter calls) nextGraph)
       (kind : event.kind = .internal) :
-      RawStep loaded realization environment graph (before.raw calls) (.apiEntry (.writeFile request) agent)
+      RawStep loaded realization environment interpretation graph (before.raw calls) (.apiEntry (.writeFile request) agent)
         event (entered.rawAfter calls) nextGraph
   | getStdHandleEntry {graph nextGraph : Graph} {event : Event}
       {before : State ApiRequest} {calls : CallRuntimeTable}
@@ -83,9 +89,36 @@ inductive RawStep {image : ImageInput} {inputs : EntryInputs}
       (agreement : EdgeAgreement graph (before.raw calls) event
         (entered.afterRaw calls) nextGraph)
       (kind : event.kind = .internal) :
-      RawStep loaded realization environment graph (before.raw calls)
+      RawStep loaded realization environment interpretation graph (before.raw calls)
         (.apiEntry (.getStdHandle (GetStdHandle.selector entered.reached.machine)) agent)
         event (entered.afterRaw calls) nextGraph
+  | writeFileReturn {graph nextGraph : Graph}
+      {before : State ApiRequest} {current : RawState}
+      {afterFetch afterRead afterStore : MachineState} {displacement : BitVec 32}
+      {receipt : Grass.ISA.X86.Execution.CallNormal before.machine
+        afterFetch afterRead afterStore displacement}
+      {request : WriteFile.Request} {agent : ContextId}
+      {entered : WriteFile.CallHandoff loaded before receipt request agent}
+      (evaluated : EvaluatedCall loaded before receipt)
+      {provider settled : WriteFile.ProtocolState}
+      {frontier : WriteFile.Prefix entered.abi.loanPlan provider
+        entered.handoff.call entered.handoff.record}
+      {history : WriteFile.History entered.abi.loanPlan realization entered.handoff.beforeProtocol
+        entered.handoff.call entered.handoff.record frontier}
+      {result : WriteFile.ReturnResult} {gpr : Grass.ISA.X86.Gpr → BitVec 64} {rflags : BitVec 64}
+      (observed : WriteFile.Return.Observation entered frontier current result gpr rflags)
+      (returned : WriteFile.MatchedReturn interpretation history result settled)
+      (completion : WriteFile.Return.Completion observed returned)
+      (completed : WriteFile.Return.complete? observed returned = .ok completion)
+      (caller : environment.caller = entered.handoff.record.caller)
+      (providerContext : environment.provider = entered.handoff.record.agent)
+      (agreement : EdgeAgreement graph current
+        (Event.between current completion.final (.endpoint (.apiReturned entered.handoff.call result)))
+        completion.final nextGraph) :
+      RawStep loaded realization environment interpretation graph current
+        (.providerReturn entered.handoff.call result gpr rflags)
+        (Event.between current completion.final (.endpoint (.apiReturned entered.handoff.call result)))
+        completion.final nextGraph
   | getStdHandleReturn {graph nextGraph : Graph}
       {before : State ApiRequest} {prior : CallRuntimeTable}
       {afterFetch afterRead afterStore : MachineState} {displacement : BitVec 32}
@@ -101,7 +134,7 @@ inductive RawStep {image : ImageInput} {inputs : EntryInputs}
         (Event.between (entered.afterRaw prior) completion.final
           (.endpoint (.stdoutAcquired entered.handoff.call (gpr .rax))))
         completion.final nextGraph) :
-      RawStep loaded realization environment graph (entered.afterRaw prior)
+      RawStep loaded realization environment interpretation graph (entered.afterRaw prior)
         (.stdoutResult entered.handoff.call gpr rflags)
         (Event.between (entered.afterRaw prior) completion.final
           (.endpoint (.stdoutAcquired entered.handoff.call (gpr .rax))))
@@ -123,7 +156,7 @@ inductive RawStep {image : ImageInput} {inputs : EntryInputs}
       (agreement : EdgeAgreement graph (before.raw calls) event
         (entered.handoff.initRaw calls) nextGraph)
       (kind : event.kind = .internal) :
-      RawStep loaded realization environment graph (before.raw calls)
+      RawStep loaded realization environment interpretation graph (before.raw calls)
         (.apiEntry (.exitProcess (ExitProcess.status entered.reached.machine)) agent)
         event (entered.handoff.initRaw calls) nextGraph
   | service {graph nextGraph : Graph} {before : RawState} {event : Event}
@@ -135,7 +168,7 @@ inductive RawStep {image : ImageInput} {inputs : EntryInputs}
         else .endpoint (.published call output))
       (priorCausal : graph.Realizes realization.causal receipt.protocol)
       (nextCausal : nextGraph.Realizes realization.causal receipt.nextProtocol) :
-      RawStep loaded realization environment graph before (.providerService call record.agent action)
+      RawStep loaded realization environment interpretation graph before (.providerService call record.agent action)
         event receipt.after nextGraph
   | cpuCompleted {graph nextGraph : Graph} {before : RawState} {event : Event}
       {policy : Grass.ISA.X86.Execution.CpuAccessPolicy}
@@ -149,7 +182,7 @@ inductive RawStep {image : ImageInput} {inputs : EntryInputs}
       (completed : success.outcome = .progressed result .completed)
       (agreement : EdgeAgreement graph before event (before.withMachine result) nextGraph)
       (kind : event.kind = .cpu .completed) :
-      RawStep loaded realization environment graph before (.cpu (.normal flags)) event
+      RawStep loaded realization environment interpretation graph before (.cpu (.normal flags)) event
         (before.withMachine result) nextGraph
   | cpuFailure {graph nextGraph : Graph} {before : RawState} {event : Event}
       {policy : Grass.ISA.X86.Execution.CpuAccessPolicy}
@@ -164,7 +197,7 @@ inductive RawStep {image : ImageInput} {inputs : EntryInputs}
       (mapped : failure.outcome = some (.outsideProfile reached reason))
       (agreement : EdgeAgreement graph before event (before.withMachine reached) nextGraph)
       (kind : event.kind = .outsideProfile (.checked failure)) :
-      RawStep loaded realization environment graph before (.cpu (.normal flags)) event
+      RawStep loaded realization environment interpretation graph before (.cpu (.normal flags)) event
         (before.withMachine reached) nextGraph
   | cpuUncovered {graph nextGraph : Graph} {before : RawState} {event : Event}
       {policy : Grass.ISA.X86.Execution.CpuAccessPolicy}
@@ -178,18 +211,18 @@ inductive RawStep {image : ImageInput} {inputs : EntryInputs}
         some (.outsideProfile reached reason))
       (agreement : EdgeAgreement graph before event (before.withMachine reached) nextGraph)
       (kind : event.kind = .outsideProfile (.cpu reason)) :
-      RawStep loaded realization environment graph before (.cpu choice) event
+      RawStep loaded realization environment interpretation graph before (.cpu choice) event
         (before.withMachine reached) nextGraph
 
 namespace RawStep
 
 variable {image : ImageInput} {inputs : EntryInputs}
   {loaded : LoadedImage image inputs} {realization : WriteFile.Realization}
-  {environment : ConsoleEnvironment}
+  {environment : ConsoleEnvironment} {interpretation : WriteFile.ReturnInterpretation}
   {graph nextGraph : Graph} {before after : RawState} {choice : Choice} {event : Event}
 
 /-- Every installed case retains both exact log suffixes and graph obligations. -/
-theorem agreement (step : RawStep loaded realization environment graph before choice event after nextGraph) :
+theorem agreement (step : RawStep loaded realization environment interpretation graph before choice event after nextGraph) :
     EdgeAgreement graph before event after nextGraph := by
   cases step <;> assumption
 
@@ -197,7 +230,7 @@ theorem agreement (step : RawStep loaded realization environment graph before ch
 its supplied raw RAX and settles the same runtime occurrence into checked caller control. -/
 theorem stdout_result {call : CallProtocol.CallId}
     {gpr : Grass.ISA.X86.Gpr → BitVec 64} {rflags : BitVec 64}
-    (step : RawStep loaded realization environment graph before (.stdoutResult call gpr rflags)
+    (step : RawStep loaded realization environment interpretation graph before (.stdoutResult call gpr rflags)
       event after nextGraph) :
     after.machine.gpr .rax = gpr .rax ∧ after.machine.rflags = rflags ∧
       event.kind = .endpoint (.stdoutAcquired call (gpr .rax)) ∧
@@ -207,10 +240,24 @@ theorem stdout_result {call : CallProtocol.CallId}
       exact ⟨completion.rax_unchanged, completion.resumed.rflags_exact, rfl,
         completion.fields.2.2.2, completion.control⟩
 
+/-- `provider_result` retains the raw BOOL bits and original observed flags,
+and proves runtime consumption and checked caller control for an installed return. -/
+theorem provider_result {call : CallProtocol.CallId} {result : WriteFile.ReturnResult}
+    {gpr : Grass.ISA.X86.Gpr → BitVec 64} {rflags : BitVec 64}
+    (step : RawStep loaded realization environment interpretation graph before
+      (.providerReturn call result gpr rflags) event after nextGraph) :
+    ProviderResume.WriteFileOutput after result ∧ after.machine.rflags = rflags ∧
+      event.kind = .endpoint (.apiReturned call result) ∧
+      after.calls.lookup call = none ∧ after.ControlConsistent := by
+  cases step with
+  | writeFileReturn evaluated observed returned completion completed caller providerContext agreement =>
+      exact ⟨completion.output, completion.resumed.rflags_exact, rfl,
+        completion.fields.2.2.2.1, completion.control⟩
+
 /-- `cpu_checked` proves that every installed CPU edge is an actual fixed-policy
 evaluator result retaining the original non-CPU data, even if metadata cannot pack. -/
 theorem cpu_checked {cpuChoice : Grass.ISA.X86.Execution.CheckedChoice}
-    (step : RawStep loaded realization environment graph before (.cpu cpuChoice) event after nextGraph) :
+    (step : RawStep loaded realization environment interpretation graph before (.cpu cpuChoice) event after nextGraph) :
     ∃ (policy : Grass.ISA.X86.Execution.CpuAccessPolicy)
       (outcome : Grass.ISA.X86.Execution.CpuOutcome),
       before.control = .caller policy.context ∧
@@ -234,7 +281,7 @@ theorem cpu_rejected {cpuChoice : Grass.ISA.X86.Execution.CheckedChoice}
     {policy : Grass.ISA.X86.Execution.CpuAccessPolicy}
     (selected : Cpu.policy? loaded before.machine = some policy)
     (rejected : Grass.ISA.X86.Execution.CheckedExecution.evaluate policy before.machine cpuChoice = none) :
-    ¬ RawStep loaded realization environment graph before (.cpu cpuChoice) event after nextGraph := by
+    ¬ RawStep loaded realization environment interpretation graph before (.cpu cpuChoice) event after nextGraph := by
   intro step
   obtain ⟨actual, outcome, _, actualSelected, checked, _⟩ := step.cpu_checked
   have same : actual = policy := Option.some.inj (actualSelected.symm.trans selected)
@@ -247,7 +294,7 @@ theorem cpu_rejected {cpuChoice : Grass.ISA.X86.Execution.CheckedChoice}
 /-- Every installed entry uses a successful computed logical import selection
 whose API variant matches the explicit choice. Native identity remains separate. -/
 theorem entry_binding {request : ApiRequest} {agent : ContextId}
-    (step : RawStep loaded realization environment graph before (.apiEntry request agent)
+    (step : RawStep loaded realization environment interpretation graph before (.apiEntry request agent)
       event after nextGraph) :
     ∃ (address target : BitVec 64) (binding : ApiDispatch.Binding loaded address target),
       ApiDispatch.select? loaded address target = some binding ∧
@@ -264,7 +311,7 @@ theorem entry_binding {request : ApiRequest} {agent : ContextId}
 of physical provider activity or all choices admitted by a future profile. -/
 theorem service_receipt {call : CallProtocol.CallId} {agent : ContextId}
     {action : WriteFile.Action}
-    (step : RawStep loaded realization environment graph before (.providerService call agent action)
+    (step : RawStep loaded realization environment interpretation graph before (.providerService call agent action)
       event after nextGraph) :
     ∃ (record : CallProtocol.Pending WriteFile.Request) (output : Vec Byte)
       (receipt : WriteFile.ServiceReceipt realization before call record action output),
