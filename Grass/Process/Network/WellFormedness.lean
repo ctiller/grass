@@ -381,8 +381,24 @@ theorem declared_slot_outcome (transition : plan.NetworkTransition before after)
   | coalesce _ _ _ _ _ => exact absurd declared (by intro equal; cases equal)
   | commit _ _ =>
     rcases declared.2 with h | h <;> exact absurd h (by intro equal; cases equal)
-  | receive _ _ _ _ =>
-    rcases declared with h | h <;> exact absurd h (by intro equal; cases equal)
+  | receive edge session occurrence emitted issued localEmitted step =>
+    rcases declared with h | h | h | h | h
+    · exact absurd h (by intro equal; cases equal)
+    · exact absurd h (by intro equal; cases equal)
+    · obtain ⟨sameKind, sameSlot⟩ := instanceFragment_inj h
+      cases sameKind; cases sameSlot
+      let effects := step.receiverStep
+      obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter, _, _,
+        sameRef, sameParentage, _⟩ := effects.protocolStep
+      obtain ⟨live, foundLive, isLive⟩ := effects.stillLive
+      refine Or.inr (Or.inl ⟨(by simp [NetworkTransition.scope, DeliveryScope]),
+        fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter, sameRef,
+        knownParent_of_transported toKind fromKind sameParentage, fun _ => ?_⟩)
+      exact ProcessInstance.live_witnessed_vacuously
+        (Option.some.inj (foundLive.symm.trans foundAfter) ▸ isLive)
+    · exact absurd h.2 (by intro equal; cases equal)
+    · rcases h with ⟨region, moved, sameFragment⟩
+      exact absurd sameFragment (by intro equal; cases equal)
   | channelClose _ _ _ _ =>
     rcases declared with h | h <;> exact absurd h (by intro equal; cases equal)
   | channelDeath _ _ _ _ =>
@@ -588,6 +604,23 @@ theorem escrowFragment_inj {edge edge' : plan.topology.ChannelKind}
   cases equal
   exact ⟨rfl, rfl⟩
 
+/-- The wider receive scope declares an escrow fragment only at the exact
+delivery session; its receiver-local, pending, and region alternatives cannot
+be an escrow fragment. -/
+theorem escrow_of_deliveryScope {edge edge' : plan.topology.ChannelKind}
+    {session : plan.topology.ChannelId edge} {session' : plan.topology.ChannelId edge'}
+    (declared : DeliveryScope plan before after edge' session'
+      (.escrow edge session)) :
+    (NetworkFragment.escrow edge session : NetworkFragment plan.topology) =
+      .escrow edge' session' := by
+  rcases declared with h | h | h | h | h
+  · exact h
+  · exact absurd h (by intro equal; cases equal)
+  · exact absurd h (by intro equal; cases equal)
+  · exact absurd h.2 (by intro equal; cases equal)
+  · rcases h with ⟨region, moved, equal⟩
+    exact absurd equal (by intro same; cases same)
+
 /-- A session whose escrow a step did not declare holds exactly what it held. -/
 theorem ledger_unchanged (transition : plan.NetworkTransition before after)
     {edge : plan.topology.ChannelKind} {session : plan.topology.ChannelId edge}
@@ -614,11 +647,8 @@ theorem ledgers_extend (transition : plan.NetworkTransition before after)
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
       exact step.ledgerExtends
-    | receive _ _ _ step =>
-      obtain ⟨same, sameSession⟩ := escrowFragment_inj
-        (by rcases declared with h | h
-            · exact h
-            · exact absurd h (by intro equal; cases equal))
+    | receive _ _ _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj (escrow_of_deliveryScope declared)
       cases same; cases sameSession
       exact step.ledgerExtends
     | requestCancel _ _ _ step =>
@@ -734,11 +764,8 @@ theorem rerouting_stood_or_is_this_step (transition : plan.NetworkTransition bef
       obtain ⟨same, sameSession⟩ := escrowFragment_inj declared
       cases same; cases sameSession
       exact Or.inl (step.resolvesNothing occurrence ▸ resolved)
-    | receive _ _ occurrence' step =>
-      obtain ⟨same, sameSession⟩ := escrowFragment_inj
-        (by rcases declared with h | h
-            · exact h
-            · exact absurd h (by intro equal; cases equal))
+    | receive _ _ occurrence' _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj (escrow_of_deliveryScope declared)
       cases same; cases sameSession
       by_cases isIt : occurrence = occurrence'
       · subst isIt
@@ -914,11 +941,8 @@ theorem occurrencesOnTheirSession_preserved (transition : plan.NetworkTransition
       by_cases fresh : occurrence ∈ (before.inFlight edge session).created
       · exact holds edge session occurrence fresh
       · exact absurd (step.createsNothing ▸ held) fresh
-    | receive _ _ _ step =>
-      obtain ⟨same, sameSession⟩ := escrowFragment_inj
-        (by rcases declared with h | h
-            · exact h
-            · exact absurd h (by intro equal; cases equal))
+    | receive _ _ _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj (escrow_of_deliveryScope declared)
       cases same; cases sameSession
       by_cases fresh : occurrence ∈ (before.inFlight edge session).created
       · exact holds edge session occurrence fresh
@@ -1109,11 +1133,8 @@ theorem identitiesDistinct_preserved (transition : plan.NetworkTransition before
       exact creates_nothing_distinct
         (fun other found fresh => absurd (step.createsNothing ▸ found) fresh)
         holds heldFirst heldSecond sameIdentity
-    | receive _ _ _ step =>
-      obtain ⟨same, sameSession⟩ := escrowFragment_inj
-        (by rcases declared with h | h
-            · exact h
-            · exact absurd h (by intro equal; cases equal))
+    | receive _ _ _ _ _ _ step =>
+      obtain ⟨same, sameSession⟩ := escrowFragment_inj (escrow_of_deliveryScope declared)
       cases same; cases sameSession
       exact creates_nothing_distinct
         (fun other found fresh => absurd (step.createsNothing ▸ found) fresh)
@@ -1206,8 +1227,24 @@ theorem sharedInvariantHolds_preserved (transition : plan.NetworkTransition befo
     | spawn _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
     | restart _ _ _ _ _ _ => exact absurd declared (by rintro (h | h | ⟨_, h⟩) <;> cases h)
     | send _ _ _ _ => exact absurd declared (by intro equal; cases equal)
-    | receive _ _ _ _ =>
-      exact absurd declared (by rintro (h | h) <;> cases h)
+    | receive edge session occurrence emitted issued localEmitted step =>
+      rcases declared with h | h | h | h | ⟨region', moved, sameFragment⟩
+      · exact absurd h (by intro equal; cases equal)
+      · exact absurd h (by intro equal; cases equal)
+      · exact absurd h (by intro equal; cases equal)
+      · exact absurd h.2 (by intro equal; cases equal)
+      · injection sameFragment with same
+        subst same
+        let effects := step.receiverStep
+        obtain ⟨fromInstance, toInstance, fromKind, toKind, foundBefore, foundAfter, _⟩ :=
+          effects.protocolStep
+        exact plan.sharedUpdatePreserves (plan.topology.endpoints edge).2
+          ((plan.channel edge).receiverInput.arrives occurrence.1)
+          (fromKind ▸ fromInstance.localState) (toKind ▸ toInstance.localState)
+          issued localEmitted region (before.shared region) (after.shared region)
+          (effects.sharedWritesAdmitted region moved fromInstance toInstance fromKind toKind
+            foundBefore foundAfter)
+          (holds region)
     | commit _ _ =>
       rcases declared.2 with h | h <;> exact absurd h (by intro equal; cases equal)
     | requestCancel _ _ _ _ => exact absurd declared (by intro equal; cases equal)

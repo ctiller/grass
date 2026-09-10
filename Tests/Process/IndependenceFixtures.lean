@@ -71,7 +71,7 @@ only in their observation trace — which `Delivers` does not mention, so every
 field transports unchanged.
 -/
 theorem receiving_after_the_beep :
-    serverPlan.Delivers Grass.Process.Tests.Commit.afterBeep afterBoth () wire escrowed where
+    serverPlan.Delivers Grass.Process.Tests.Commit.afterBeep afterBoth () wire escrowed [] 0 [] where
   contractual := Transition.receiving_resolves_the_escrow.contractual
   onItsSession := rfl
   wasOutstanding := Transition.receiving_resolves_the_escrow.wasOutstanding
@@ -82,6 +82,17 @@ theorem receiving_after_the_beep :
   ledgerExtends := Transition.receiving_resolves_the_escrow.ledgerExtends
   cursorAdvances := Transition.receiving_resolves_the_escrow.cursorAdvances
   statusUnchanged := Transition.receiving_resolves_the_escrow.statusUnchanged
+  receiverStep := by
+    let effects := Transition.receiving_resolves_the_escrow.receiverStep
+    exact {
+      from' := effects.from'
+      stillLive := effects.stillLive
+      protocolStep := effects.protocolStep
+      emittedIsProjected := effects.emittedIsProjected
+      producesPending := rfl
+      writesPermitted := effects.writesPermitted
+      sharedWritesAdmitted := effects.sharedWritesAdmitted }
+  receiverRef := Transition.receiving_resolves_the_escrow.receiverRef
   scope := by
     intro fragment outside
     cases fragment with
@@ -99,7 +110,7 @@ theorem receiving_after_the_beep :
       have notWire : ¬ (session = wire) := by
         intro isWire
         subst isWire
-        exact outside (Or.inr rfl)
+        exact outside (Or.inr (Or.inl rfl))
       show cursorAt false session = cursorAt true session
       rw [cursorAt_off_wire notWire, cursorAt_off_wire notWire]
     | _ => rfl
@@ -107,7 +118,7 @@ theorem receiving_after_the_beep :
 /-- As a transition. -/
 def receiveAfterBeep :
     serverPlan.NetworkTransition Grass.Process.Tests.Commit.afterBeep afterBoth :=
-  .receive () wire escrowed receiving_after_the_beep
+  .receive () wire escrowed [] 0 [] receiving_after_the_beep
 
 /--
 **And the commit, taken after the receive.**
@@ -173,10 +184,12 @@ theorem the_receive_and_the_commit_are_independent :
   intro fragment inReceive inCommit
   obtain ⟨_, isObservations⟩ := inCommit
   rcases (Transition.receive_scope_is_the_session fragment).mp inReceive with
-    isEscrow | isSession
+    isEscrow | isSession | isReceiver
   · rw [isEscrow] at isObservations
     exact absurd isObservations (by simp)
   · rw [isSession] at isObservations
+    exact absurd isObservations (by simp)
+  · rw [isReceiver] at isObservations
     exact absurd isObservations (by simp)
 
 /--
@@ -196,7 +209,12 @@ one is not.
 theorem the_receive_and_the_commit_swap :
     ProcessPlan.SwapsWith receiveAsStep commitAfterReceiveStep :=
   ⟨Grass.Process.Tests.Commit.afterBeep, beepCommitStep, receiveAfterBeepStep,
-    fun _ => Iff.rfl, fun _ => Iff.rfl⟩
+    fun _ => Iff.rfl, fun fragment => by
+      change ProcessPlan.DeliveryScope serverPlan _ _ () wire fragment ↔
+        ProcessPlan.DeliveryScope serverPlan _ _ () wire fragment
+      have pendingSame : beforeReceive.pending = afterReceive.pending := rfl
+      simp [ProcessPlan.DeliveryScope, afterBoth, Grass.Process.Tests.Commit.afterBeep,
+        pendingSame]⟩
 
 /--
 **So an observer outside both scopes sees the same thing either way.**
@@ -209,9 +227,12 @@ theorem the_route_table_agrees_either_way :
     LogicalProcessNetworkCore.Agrees (.region Region.routeTable) beforeReceive afterBoth :=
   ProcessPlan.swapped_execution_agrees_off_both the_receive_and_the_commit_swap
     (by
-      rintro (isEscrow | isSession)
+      intro inScope
+      rcases (Transition.receive_scope_is_the_session _).mp inScope with
+        isEscrow | isSession | isReceiver
       · exact absurd isEscrow (by simp)
-      · exact absurd isSession (by simp))
+      · exact absurd isSession (by simp)
+      · exact absurd isReceiver (by simp))
     (by rintro ⟨_, isObservations⟩; exact absurd isObservations (by simp))
 
 /--
