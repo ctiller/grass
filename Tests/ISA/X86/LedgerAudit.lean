@@ -409,7 +409,7 @@ acquiring a citation.
 -- Nominal aliases, generational construction, finite comparison and supplied-state projection.
 -- Return composition and final projection reuse checked protocol/resume computations.
 -- Comparison with the snapshot's selected stdout route adds no native authority.
-def notBehaviourBaseline : Nat := 387
+def notBehaviourBaseline : Nat := 388
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -597,6 +597,7 @@ def notBehaviour : List Name :=
     -- The provider resume reads the actual retained slot and packages the
     -- reached platform state; it does not claim that an x86 RET was fetched.
     `Grass.Platform.Win32.ProviderResume.afterReturn,
+    `Grass.Platform.Win32.ProviderResume.observeRegisters,
     `Grass.Platform.Win32.ProviderResume.returnFrame?,
     `Grass.Platform.Win32.ProviderResume.PreservesNonvolatile,
     `Grass.Platform.Win32.ProviderResume.WriteFileOutput,
