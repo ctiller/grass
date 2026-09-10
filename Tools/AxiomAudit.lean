@@ -95,6 +95,7 @@ import Grass.Platform.Win32.WriteFileNonresponse
 import Grass.Platform.Win32.WriteFileStabilization
 import Grass.Platform.Win32.WriteFileServiceContinuation
 import Grass.Refinement.Console.WriteFileHistory
+import Grass.Refinement.Console.WriteFileStaticArgument
 import Grass.Refinement.Console.WriteFileNonresponse
 import Grass.Refinement.Console.WriteFileEventualNonresponse
 import Grass.Platform.Win32.WriteFileReturn
@@ -184,6 +185,7 @@ import Grass.Assembly.SourceBytes
 import Grass.Assembly.SourceImage
 import Grass.Assembly.StaticSection
 import Grass.Assembly.SourceStaticBindings
+import Grass.Assembly.LoadedStaticArgument
 import Grass.Assembly.SourceImportBindings
 import Grass.Assembly.SourceImportRequests
 import Grass.Assembly.SourceLinkedImage
