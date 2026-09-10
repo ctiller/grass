@@ -6,7 +6,7 @@ lake() { "$lake_exe" "$@"; }
 
 # This is the current construction gate, not a completed VerifiedProgram gate.
 lake build Grass.Assembly.X86 Grass.Platform.Win32 Grass.Spec.Console Grass.Spec.Resource Tests.Frontend.Source
-lake build Grass.Refinement.Console.WriteFileStaticEntry Tests.Platform.Win32LoaderEntry Tests.Console.WriteFileCountEntry
+lake build Grass.Refinement.Console.WriteFileStaticEntry Tests.Platform.Win32LoaderEntry Tests.Console.WriteFileCountEntry Tests.Platform.Win32GetStdHandleRawReturn
 mkdir -p .lake/build/lib/lean/Spikes/1_Hello_World
 lake env lean Spikes/1_Hello_World/Spec.lean -o .lake/build/lib/lean/Spikes/1_Hello_World/Spec.olean
 
@@ -44,7 +44,7 @@ perl -0777 -e '
   die "expected one authored source marker\n" unless $markers == 1;
   $template =~ s/^-- INCLUDE_AUTHORED_HELLO\r?$/$prefix/m;
   print $template;
-' Tests/Frontend/WriteFileEntry.lean.in "$fixture" > "$entry"
+' Tests/Frontend/WriteFilePrefix.lean.in "$fixture" > "$entry"
 lake env lean "$entry"
 
 # A source mutation must fail checked construction; parsing an assembly-shaped
@@ -83,4 +83,4 @@ perl -0777 -e '
 ' Tools/AxiomAudit.lean > "$audit"
 printf "Focused frontend import-closure declaration audit only; NOT a full repository census or audit-trust adversarial probes. Counts below are computed for this run.\n"
 lake env lean "$audit"
-printf "Unchanged Hello frontend and same-source WriteFile CALL/entry fixture pass; unsupported source rejected. CALL-prefix reachability, deadlock freedom, certificate suffix and full repository trust gates remain outside this check.\n"
+printf "Unchanged Hello frontend and actual-prefix WriteFile entry fixture pass; unsupported source rejected. Initial raw-prefix preservation, deadlock freedom, certificate suffix and full repository trust gates remain outside this check.\n"
