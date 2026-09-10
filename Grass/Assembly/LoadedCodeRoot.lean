@@ -73,7 +73,7 @@ theorem codeRegion_address {frame rootOffset}
   have valid := loaded.placement.2.1
     (selected.region.allocId, selected.region.allocationRecord) entryMember
   have fits : FitsAllocation selected.region.base selected.region.bytes.length := by
-    simpa [CpuPlacementValid, InitializedRegion.allocationRecord] using valid
+    simpa [Grass.Memory.ImageInstall.CpuPlacementValid, InitializedRegion.allocationRecord] using valid
   have offsetBound : offset < selected.region.bytes.length := by
     have sourceBound := (Vec.get?_isSome_iff source.bytes offset).mp (by simp [sourceByte])
     simpa [selected.bytesExact, length_patchContents] using sourceBound

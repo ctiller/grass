@@ -72,15 +72,17 @@ ISA trap receipts, confined provider memory effects and output observation,
 return/terminal transitions, and exact loaded-source execution must be connected
 before any whole-program Linux assurance claim is made.
 
-## AArch64 source adapter
+## AArch64 request interpretation
 
-[`AArch64.lean`](../Grass/Platform/Linux/AArch64.lean) consumes the accepted
-AArch64 source/body checkpoint `f06f2162`. Its `DecodedRequest` is indexed by the
-exact `SourceWord bytes` and the same `Cpu` that indexes the ISA request. The
-checked producer accepts only the selected SVC-zero source form and recognized
-native syscall numbers, deriving all arguments from that CPU. It proves the
-original bytes equal the exact SVC-zero encoding plus the parser's suffix,
-and ties the syscall identity to the low 32 bits of that CPU's X8.
+[`AArch64.lean`](../Grass/Platform/Linux/AArch64.lean) now consumes the existing
+ISA `SupervisorCall.Request word before` directly. `DecodedRequest` adds only
+the selected immediate-zero condition and native ABI interpretation, deriving
+arguments and the low-32-bit syscall number from the same pretransfer CPU.
+The former Linux source-indexed wrapper, second instruction decode and redundant
+source-prefix theorem have been removed by agreement with the AArch64 owner.
+ISA `SourceWord.bytes_exact` owns source reconstruction, and
+`BodyStep.supervisorRequest` projects an existing body receipt without decoding
+again. These canonical producer APIs arrived in reviewed checkpoint `967f5512`.
 
 This is a checked source interpretation. SVC-zero is an emitted-profile
 restriction, not a claim that Linux rejects all other immediates. The decoded
@@ -88,14 +90,14 @@ ISA request supplies no actual instruction fetch, exception admission, Linux
 kernel routing or provider result. Those missing connections are not replaced
 with caller-selected predicates or a fabricated call occurrence.
 
-[Adapter tests](../Tests/Platform/LinuxAArch64.lean) invoke the shared source
-parser and check read/write selection, high number bits and suffix handling,
-then reject a different immediate, unsupported word/number and short source.
-The focused adapter plus AArch64 control tests pass 20 jobs. The source,
-number and argument theorems are conditional on the same checked inputs;
-native AArch64 execution remains unobserved.
+[Request tests](../Tests/Platform/LinuxAArch64.lean) exercise the shared source
+parser and ISA request producer, and directly consume existing body receipts for
+both SVC-zero acceptance and another immediate's refusal. They also check
+read/write selection, high number bits, suffixes, unsupported words/numbers and
+short source. Native AArch64 execution remains unobserved.
 
-Sol independently reviewed this adapter with no blocking semantic findings.
+At the historical pre-backfill checkpoint `7c37cb97`, Sol independently reviewed
+the source adapter with no blocking semantic findings.
 The broader `lake build Grass Tests.Platform.LinuxAArch64
 Tests.ISA.AArch64.Control Tests.Platform.LinuxSyscall` check passed 396 jobs.
 A fresh citation census passed with 760 definitions, including two additional
@@ -109,8 +111,9 @@ The full-suite limitation described below remains inherited from the baseline.
 
 The proposed next bounded consumer is native A64 EL0 userspace issuing the
 selected read, write, exit or exit-group request through SVC-zero, with an
-explicitly selected non-VHE kernel-at-EL1 execution profile. This proposal is
-awaiting the ISA owner's source-backed eligibility and transfer definition;
+explicitly selected non-VHE kernel-at-EL1 execution profile. The ISA owner
+confirmed the bounded regime and supplied an explicit routing checker, while
+complete eligibility and transfer remain open;
 neither the Linux name nor the decoded word establishes that regime.
 
 The connection requires these pieces of evidence:
@@ -126,13 +129,16 @@ The connection requires these pieces of evidence:
   occurrence, using the existing source adapter. Posttransfer state must not
   substitute for the syscall's input state.
 
-The mapped/reached Linux execution producer is currently missing. The shared
+The complete reached Linux execution producer is currently missing. The shared
 `AccessFactory.access` seam (`d95e4817`) accepts an arbitrary actual predecessor
 state; `Op.ReadObservation` (`676c1943`) exposes its completed read bytes and,
 under the selected memory oracle, relates them to the resolved backing bytes.
 Linux/AArch64 must supply the reached predecessor, address-space context and
 virtual-PC descriptor linkage. This consumer introduces no separate Linux
-memory model. Other exception regimes require their own supported profile.
+memory model. The image initialization below supplies initial logical segment
+placement; it does not prove a later PC is reached or that physical translation
+realizes the supplied allocation identities. Other exception regimes require
+their own supported profile.
 
 Architectural entry also does not prove Linux provider dispatch. The inspected
 [arm64 kernel syscall entry implementation](https://raw.githubusercontent.com/torvalds/linux/master/arch/arm64/kernel/syscall.c)
@@ -141,7 +147,50 @@ defer, alter or skip invocation. A future kernel/provider connection must retain
 the applicable path and its effects. The current native userspace probes cannot
 observe the privileged entry state, and supply no evidence for that connection.
 
-## Checked checkpoint evidence
+## General ELF segment initialization
+
+[`ProgramHeader.lean`](../Grass/Artifact/ELF/ProgramHeader.lean) serializes all
+eight ELF64 program-header fields in their specified 56-byte layout. Universal
+suffix round-trip, successful-read reconstruction and exact consumption laws
+reuse the shared endian parser. The [GABI program-loading specification](https://gabi.xinuos.com/elf/07-pheader.html)
+supplies segment layout, alignment, file/zero-fill and permission rules.
+
+[`LoadPlan.lean`](../Grass/Artifact/ELF/LoadPlan.lean) parses the exact input file's
+header and program table, then checks a selected fixed-address ET_EXEC profile.
+Machine, page size, permitted user-address interval and maximum mapped-byte
+count are explicit data. Only PT_LOAD and PT_NULL are supported; interpreter,
+dynamic, TLS and other segment types are refused. Extended program counts are
+also unsupported. The checker validates table bounds before table recursion,
+file/memory extents, nonwrapping virtual placement, alignment, ordered disjoint
+logical segments, exact permission flags, aggregate size and executable entry
+containment. The loader derives each segment's file slice and zero-filled tail
+only after accepting the plan. Public raw byte helpers have conditional laws;
+calling them alone does not confer load admission.
+
+[`Loader.lean`](../Grass/Platform/Linux/Loader.lean) installs those computed
+segments through the shared initialized-region implementation. It checks complete
+fresh identity assignments, represented history, final records, disjoint virtual
+placement and a four-byte aligned AArch64 entry range in an executable segment.
+The supplied context must already be a thread. Output projections retain that
+context, all input general registers/NZCV and non-memory machine fields; the PC
+comes from the same parsed ELF header. General laws connect original file bytes
+and zero-fill bytes to initialized cells of the final authoritative memory.
+
+Windows and Linux now share
+[`InitializedRegion.lean`](../Grass/Memory/InitializedRegion.lean) and
+[`ImageInstall.lean`](../Grass/Memory/ImageInstall.lean). Windows keeps compatible
+names while both consumers use the same installation, freshness, placement and
+record laws. No Windows stack or PE import semantics moved into Linux.
+
+This is logical image initialization, not Linux execve: page tails/page tables,
+physical permissions, initial stack/auxv, relocation/interpreter setup, feature
+configuration, instruction fetch, exception entry and provider execution are
+not established. Configuration is passed separately to the ISA consumer; the
+ELF machine tag cannot establish effective EL or feature state. Terra independently
+reviewed the segment checker, installation connection and final request backfill
+and found no blocking semantic issues in this scope.
+
+## Historical initial checkpoint evidence
 
 Semantic review separated the syscall decoder, ELF parser and native observer.
 Terra reviewed the ELF layout and shared PE sequencing and required successful

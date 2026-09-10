@@ -1,5 +1,6 @@
 import Grass.Platform.Win32.LoaderImage
 import Grass.Platform.Win32.LoaderRegion
+import Grass.Memory.ImageInstall
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.ISA.X86.Execution.State
 
@@ -21,13 +22,10 @@ register values, context identities and existing history/obligation ledgers.
 namespace Grass.Platform.Win32.Loader
 
 open Grass.Core Grass.Memory Grass.Std.Logical Grass.Artifact Grass.ISA.X86
+open Grass.Memory.ImageInstall
 
 /-- Nominal storage identities supplied from the environment's identity domain. -/
-structure RegionIdentity where
-  allocation : AllocId
-  storage : StorageId
-  epoch : EpochId
-deriving DecidableEq, Repr
+abbrev RegionIdentity := Grass.Memory.ImageInstall.RegionIdentity
 
 /-- Actual stack view and the source's required window below entry RSP. -/
 structure StackInput where
@@ -62,55 +60,26 @@ def assignedRegions (image : ImageInput) (inputs : EntryInputs)
       bytes := region.bytes })
 
 /-- Install all image regions using only the public checked memory doors. -/
-def installRegions? (before : MemoryState) : List InitializedRegion → Option MemoryState
-  | [] => some before
-  | region :: tail => do
-      let next ← installInitializedRegion? before region
-      installRegions? next tail
+abbrev installRegions? := Grass.Memory.ImageInstall.installRegions?
 
 /-- An existing allocation lookup survives the complete installation sequence. -/
 theorem installRegions?_allocation_preserved {before after : MemoryState}
     {regions : List InitializedRegion} {id : AllocId} {record : AllocationRecord}
     (installed : installRegions? before regions = some after)
     (present : before.allocations.lookup id = some record) :
-    after.allocations.lookup id = some record := by
-  induction regions generalizing before with
-  | nil => simp [installRegions?] at installed; cases installed; exact present
-  | cons region tail ih =>
-    change (installInitializedRegion? before region).bind (fun next => installRegions? next tail) =
-      some after at installed
-    obtain ⟨next, head, rest⟩ := Option.bind_eq_some_iff.mp installed
-    have different : id ≠ region.allocId := by
-      intro same
-      have absent := (installInitializedRegion?_admitted head).2.1
-      rw [← same, present] at absent
-      contradiction
-    exact ih rest ((installInitializedRegion?_allocation_ne head different).trans present)
+    after.allocations.lookup id = some record :=
+  Grass.Memory.ImageInstall.installRegions?_allocation_preserved installed present
 
 /-- An existing backing lookup survives the complete installation sequence. -/
 theorem installRegions?_backing_preserved {before after : MemoryState}
     {regions : List InitializedRegion} {id : StorageId} {record : BackingRecord}
     (installed : installRegions? before regions = some after)
     (present : before.backings.lookup id = some record) :
-    after.backings.lookup id = some record := by
-  induction regions generalizing before with
-  | nil => simp [installRegions?] at installed; cases installed; exact present
-  | cons region tail ih =>
-    change (installInitializedRegion? before region).bind (fun next => installRegions? next tail) =
-      some after at installed
-    obtain ⟨next, head, rest⟩ := Option.bind_eq_some_iff.mp installed
-    have different : id ≠ region.storageId := by
-      intro same
-      have absent := (installInitializedRegion?_admitted head).2.2.1
-      rw [← same, present] at absent
-      contradiction
-    exact ih rest ((installInitializedRegion?_backing_ne head different).trans present)
+    after.backings.lookup id = some record :=
+  Grass.Memory.ImageInstall.installRegions?_backing_preserved installed present
 
 /-- Final authoritative records contain the exact computed payload and permissions. -/
-def RegionsPresent (memory : MemoryState) (regions : List InitializedRegion) : Prop :=
-  ∀ region ∈ regions,
-    memory.allocations.lookup region.allocId = some region.allocationRecord ∧
-    memory.backings.lookup region.storageId = some region.backingRecord
+abbrev RegionsPresent := Grass.Memory.ImageInstall.RegionsPresent
 
 instance (memory : MemoryState) (regions : List InitializedRegion) :
     Decidable (RegionsPresent memory regions) := by
@@ -119,37 +88,20 @@ instance (memory : MemoryState) (regions : List InitializedRegion) :
 
 /-- All represented live CPU views have present, nonwrapping, mutually disjoint
 placements. This is not a statement that unrepresented physical pages do not exist. -/
-def CpuPlacementValid (record : AllocationRecord) : Prop :=
-  record.live = true → record.space = .cpuVirtual →
-    match record.base with
-    | none => False
-    | some base => FitsAllocation base record.extent.stop
+abbrev CpuPlacementValid := Grass.Memory.ImageInstall.CpuPlacementValid
 
 instance (record : AllocationRecord) : Decidable (CpuPlacementValid record) := by
-  unfold CpuPlacementValid
-  split <;> infer_instance
+  infer_instance
 
 /-- Different represented live CPU allocation identities have disjoint addresses. -/
-def CpuPlacementsDisjoint (a b : AllocId × AllocationRecord) : Prop :=
-    a.1 ≠ b.1 → a.2.live = true → b.2.live = true →
-    a.2.space = .cpuVirtual → b.2.space = .cpuVirtual →
-    match a.2.base, b.2.base with
-    | some baseA, some baseB =>
-        baseA.toNat + a.2.extent.stop ≤ baseB.toNat + b.2.extent.start ∨
-        baseB.toNat + b.2.extent.stop ≤ baseA.toNat + a.2.extent.start
-    | _, _ => True
+abbrev CpuPlacementsDisjoint := Grass.Memory.ImageInstall.CpuPlacementsDisjoint
 
 set_option synthInstance.maxSize 256 in
 instance (a b : AllocId × AllocationRecord) : Decidable (CpuPlacementsDisjoint a b) := by
-  unfold CpuPlacementsDisjoint
-  split <;> infer_instance
+  infer_instance
 
 /-- Dedicated storage plus nonwrapping and mutually disjoint CPU placements. -/
-def PlacementValid (memory : MemoryState) : Prop :=
-  memory.DedicatedBackings ∧
-  (∀ entry ∈ memory.allocations.entries, CpuPlacementValid entry.2) ∧
-  (∀ a ∈ memory.allocations.entries, ∀ b ∈ memory.allocations.entries,
-    CpuPlacementsDisjoint a b)
+abbrev PlacementValid := Grass.Memory.ImageInstall.PlacementValid
 
 instance (memory : MemoryState) : Decidable (PlacementValid memory) := by
   unfold PlacementValid
@@ -219,11 +171,7 @@ instance (image : ImageInput) : Decidable (EntryMapped image) := by
 /-- New image identities do not reuse represented historical provenance or
 captured backing identities. Freshness outside the supplied machine's records
 remains an environment-domain obligation. -/
-def HistoryFresh (machine : MachineState) (regions : List InitializedRegion) : Prop :=
-  ∀ region ∈ regions,
-    (∀ event ∈ machine.events,
-      event.event.provenance.root ≠ region.allocId ∧ event.event.mapping.backing ≠ region.storageId) ∧
-    (∀ violation ∈ machine.violations.records?, violation.provenance.root ≠ region.allocId)
+abbrev HistoryFresh := Grass.Memory.ImageInstall.HistoryFresh
 
 instance (machine : MachineState) (regions : List InitializedRegion) :
     Decidable (HistoryFresh machine regions) := by

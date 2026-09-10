@@ -44,6 +44,11 @@ to the ledger or settle the remaining misplaced-REX claim.
 
 ### ELF64
 
+- Xinuos, *System V generic ABI*, [Program Loading](https://gabi.xinuos.com/elf/07-pheader.html),
+  sections 7.1–7.4, accessed 2026-09-09: ELF64 program-header field order,
+  PT_LOAD file bytes and zero-fill, segment order, alignment and permissions.
+  Linux's selected logical loader uses fixed-address ET_EXEC and exact flags;
+  this does not establish actual Linux page mapping or process entry.
 - Xinuos, *System V generic ABI, ELF Object File Format*,
   [ELF Header](https://gabi.xinuos.com/elf/02-eheader.html), sections 2.1–2.3,
   accessed 2026-09-09: ELF64 field order and widths, identification bytes,

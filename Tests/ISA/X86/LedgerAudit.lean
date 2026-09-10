@@ -120,6 +120,12 @@ import Grass.Platform.Win32.WriteFileRuntimeLinked
 import Grass.Platform.Win32.ApiDispatch
 import Grass.Platform.Linux.Syscall
 import Grass.Platform.Linux.X86
+import Grass.Platform.Linux.Loader
+import Grass.Memory.InitializedRegion
+import Grass.Memory.ImageInstall
+import Grass.Artifact.ELF.Header
+import Grass.Artifact.ELF.ProgramHeader
+import Grass.Artifact.ELF.LoadPlan
 import Grass.Platform.Linux.AArch64
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
@@ -313,6 +319,10 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileRuntimeLinked,
    `Grass.Platform.Win32.ApiDispatch,
    `Grass.Platform.Linux.Syscall, `Grass.Platform.Linux.X86,
+   `Grass.Platform.Linux.Loader,
+   `Grass.Memory.InitializedRegion, `Grass.Memory.ImageInstall,
+   `Grass.Artifact.ELF.Header, `Grass.Artifact.ELF.ProgramHeader,
+   `Grass.Artifact.ELF.LoadPlan,
    `Grass.Platform.Linux.AArch64,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
@@ -389,7 +399,10 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- attachment remains owed, so none is promoted to cited or native proof.
 -- Two additional AArch64 source-bound adapter definitions retain native
 -- register selection and the explicit SVC-zero emitted profile.
-def owedBaseline : Nat := 359
+-- ELF header/program-header serialization and load planning add seventeen
+-- format/profile obligations; Linux image entry and placement add three more.
+-- Source comments and fixture success do not constitute ledger attachment.
+def owedBaseline : Nat := 379
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -455,7 +468,8 @@ acquiring a citation.
 -- The actual checked completion projects its canonical raw event suffix.
 -- Shared observation staging installs supplied register data without native authority.
 -- Checked WriteFile resume construction and computed final carrier.
-def notBehaviourBaseline : Nat := 400
+-- Six retained Win32 loader abbreviations delegate to the shared memory layer.
+def notBehaviourBaseline : Nat := 407
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -728,17 +742,31 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.Loader.DataRoot.provenance,
     `Grass.Platform.Win32.Cpu.dataProvenance?,
     `Grass.Platform.Win32.Cpu.instructionCause,
-    `Grass.Platform.Win32.InitializedRegion.allocationRecord,
-    `Grass.Platform.Win32.InitializedRegion.backingRecord,
-    `Grass.Platform.Win32.MemoryFresh,
-    `Grass.Platform.Win32.installInitializedRegion?,
+    `Grass.Memory.InitializedRegion.allocationRecord,
+    `Grass.Memory.InitializedRegion.backingRecord,
+    `Grass.Memory.MemoryFresh,
+    `Grass.Memory.installInitializedRegion?,
+    `Grass.Memory.ImageInstall.CpuPlacementValid,
+    `Grass.Memory.ImageInstall.CpuPlacementsDisjoint,
+    `Grass.Memory.ImageInstall.HistoryFresh,
+    `Grass.Platform.Win32.Loader.ImportTargets,
+    `Grass.Memory.ImageInstall.PlacementValid,
+    `Grass.Memory.ImageInstall.RegionsPresent,
+    `Grass.Memory.ImageInstall.installRegions?,
+    -- Compatibility identity and checked compositions/projections add no
+    -- loader behavior beyond their explicitly owed profile predicates.
+    `Grass.Platform.Win32.Loader.RegionIdentity,
+    `Grass.Artifact.ELF.PowerOfTwo,
+    `Grass.Platform.Linux.Loader.assignedRegions,
+    `Grass.Platform.Linux.Loader.load?,
+    `Grass.Platform.Linux.Loader.LoadedImage.machine,
+    `Grass.Platform.Linux.Loader.LoadedImage.context,
+    `Grass.Platform.Win32.Loader.installRegions?,
+    `Grass.Platform.Win32.Loader.RegionsPresent,
     `Grass.Platform.Win32.Loader.CpuPlacementValid,
     `Grass.Platform.Win32.Loader.CpuPlacementsDisjoint,
-    `Grass.Platform.Win32.Loader.HistoryFresh,
-    `Grass.Platform.Win32.Loader.ImportTargets,
     `Grass.Platform.Win32.Loader.PlacementValid,
-    `Grass.Platform.Win32.Loader.RegionsPresent,
-    `Grass.Platform.Win32.Loader.installRegions?,
+    `Grass.Platform.Win32.Loader.HistoryFresh,
     `Grass.Platform.Win32.Loader.patchContents,
     `Grass.Platform.Win32.Loader.patchedByte,
     `Grass.Platform.Win32.Loader.preferredBase,
@@ -1451,6 +1479,31 @@ def owed : List Name :=
     `Grass.Platform.Linux.Syscall.X86.decodeResult,
     `Grass.Platform.Linux.Syscall.AArch64.captureRequest,
     `Grass.Platform.Linux.Syscall.AArch64.decode?,
+    -- ELF64 field encodings, canonical profile, load-segment selection,
+    -- permissions, bounds, zero-fill construction and selected load plan.
+    -- Recorded specifications are provenance; formal subjects remain owed.
+    `Grass.Artifact.ELF.Header64.Canonical,
+    `Grass.Artifact.ELF.ImageValid,
+    `Grass.Artifact.ELF.LoadProfile.Valid,
+    `Grass.Artifact.ELF.SegmentValid,
+    `Grass.Artifact.ELF.compatibleHeaderPrefix,
+    `Grass.Artifact.ELF.ident64LE,
+    `Grass.Artifact.ELF.loadSegments,
+    `Grass.Artifact.ELF.parseImage?,
+    `Grass.Artifact.ELF.plan?,
+    `Grass.Artifact.ELF.readHeader64,
+    `Grass.Artifact.ELF.readHeader64Fields,
+    `Grass.Artifact.ELF.readProgramHeader64,
+    `Grass.Artifact.ELF.readProgramHeaders,
+    `Grass.Artifact.ELF.segmentBytes,
+    `Grass.Artifact.ELF.segmentPermission,
+    `Grass.Artifact.ELF.writeHeader64,
+    `Grass.Artifact.ELF.writeProgramHeader64,
+    -- Linux AArch64 image placement and entry selection. Checked composition
+    -- and supplied-state projections are categorized separately above.
+    `Grass.Platform.Linux.Loader.EntryValid,
+    `Grass.Platform.Linux.Loader.regionFor,
+    `Grass.Platform.Linux.Loader.LoadedImage.cpu,
     -- The opcode table is the largest single block of uncited vendor fact in
     -- the tree: every row asserts what follows an opcode in the byte stream.
     `Grass.ISA.X86.opcodeTable, `Grass.ISA.X86.decodeInsn,
