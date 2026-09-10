@@ -12,7 +12,7 @@ open Grass.Platform.Win32
 open Grass.Platform.Win32.Loader Grass.Platform.Win32.ExecutionState
 
 /-- Install the exact protocol return's bookkeeping data before reading the
-returned slot. This view preserves actual CPU registers and raw control/runtime;
+returned slot. `afterReturn` preserves actual CPU registers and raw control/runtime;
 it does not itself assert a raw transition or a physical provider return. -/
 def afterReturn (before : RawState) (returned : CallProtocol.State ApiRequest) : RawState :=
   { before with machine := { before.machine with machine := returned.machine }
@@ -60,7 +60,7 @@ theorem resume_caller_registered
   simp only [MachineState.noteContext, resume.slot.context_exact,
     resume.slot.contextKind_exact, context, kind, FiniteMap.lookup_insert_self]
 
-/-- Runtime consumption preserves the actual read state and settled metadata;
+/-- `finalized_fields` proves runtime consumption preserves the actual read state and settled metadata;
 only this call is removed and caller control is selected. -/
 theorem finalized_fields
     (resume : ProviderResume.Success loaded (afterReturn before settled) callId runtime frame call)
