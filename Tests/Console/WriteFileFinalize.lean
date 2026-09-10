@@ -45,7 +45,7 @@ example
   have machine := resume.machine_afterRead.symm.trans erasedRead
   have lengths := congrArg (fun state : MachineState => state.events.length) machine
   rw [appended, List.length_append] at lengths
-  simp only [afterReturn, List.length_singleton] at lengths
+  simp only [afterReturn, ProviderResume.afterReturn, List.length_singleton] at lengths
   omega
 
 end Grass.Tests.Console.WriteFileFinalize

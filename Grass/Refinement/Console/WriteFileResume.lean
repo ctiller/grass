@@ -1,4 +1,5 @@
 import Grass.Platform.Win32.CallResumeHistory
+import Grass.Platform.Win32.ProviderResumeFinalization
 import Grass.Refinement.Console.WriteAllBody
 import Grass.Refinement.Console.WriteFileCountAddress
 
@@ -17,22 +18,11 @@ open Grass.Platform.Win32 Grass.Platform.Win32.WriteFile
 open Grass.Platform.Win32.Loader Grass.Platform.Win32.ExecutionState
 open WriteAllX86 WriteFileLoad
 
-/-- Install the exact protocol return's bookkeeping data before reading the
-returned slot. This view preserves actual CPU registers and raw control/runtime;
-it does not itself assert a raw transition or a physical provider return. -/
-def afterReturn (before : RawState) (returned : ProtocolState) : RawState :=
-  { before with machine := { before.machine with machine := returned.machine }
-                metadata := returned.metadata }
+/-- Compatibility door for the shared settled-state computation. -/
+abbrev afterReturn := ProviderResume.afterReturn
 
-theorem resume_memory {image : ImageInput} {inputs : EntryInputs}
-    {loaded : LoadedImage image inputs} {callBefore : State}
-    {afterFetch afterTarget afterCall : MachineState} {displacement : BitVec 32}
-    {before : RawState} {callId : CallProtocol.CallId} {runtime : CallRuntime}
-    {frame : ReturnFrame} {call : CallNormal callBefore afterFetch afterTarget afterCall displacement}
-    (resume : ProviderResume.Success loaded before callId runtime frame call) :
-    resume.after.machine.machine.memory = before.machine.machine.memory := by
-  rw [resume.machine_afterRead]
-  exact resume.slot.receipt.state_frame.1
+/-- The shared actual-read memory frame. -/
+abbrev resume_memory := @ProviderResume.resume_memory
 
 theorem resume_nonvolatile {image : ImageInput} {inputs : EntryInputs}
     {loaded : LoadedImage image inputs} {callBefore : ExecutionState.State ApiRequest}
