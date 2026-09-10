@@ -6,7 +6,7 @@
 # dependency is added by a reviewed change, never as a convenience.
 
 name = "grass"
-defaultTargets = ["Grass", "Tests"]
+defaultTargets = ["Grass", "Tests", "Spikes"]
 
 # `warningAsError` is the build gate, not a style preference. Without it a
 # declaration using `sorry` is a warning and `lake build` exits 0, which would
