@@ -10,15 +10,18 @@ issue below. The fixed-initial-environment signatures are provisional and must
 not be implemented as an accepted complete-correspondence solution until that
 issue is resolved. Shared entry/settlement/resume machinery is unaffected.
 
-**Subsequent policy clarification:** Craig told process that narrowing error
-alternatives may be safe, unlike general result-range narrowing. The symmetric
-counterexamples below diagnose the current interface; they do not establish a
-requirement to manufacture every permitted error. Root/process are deciding an
-API-independent distinction between allowed behavior and required capabilities.
-Any revised coverage policy must preserve required success/recovery and progress,
-and must not substitute divergence or permanent wait for those requirements.
-No interface change is authorized by this document alone. Keep actual diagnostic
-causes distinct; optional-error refinement would not justify relabeling them.
+**Latest policy decision:** Craig superseded the optional-outcome proposal.
+There will be no new optional-outcome modality. An API implementing a concept is
+an explicit external correspondence claim. Conditional handling of an error does
+not require an implementation to produce that error; an infallible implementation
+can satisfy that conditional contract. Process is separating exact presentation/
+denotation equivalence from directed implementation conformance over every actual
+result. Explicitly authored availability and progress remain independent
+obligations, never inferred from an error handler or result name. Preserve actual
+diagnostic causes. No silent CompleteMatch edit, phantom API choices, or implicit
+theorem-transfer claim follows from this decision. The symmetric counterexamples
+below diagnose the old implementation requirement; they do not require provider
+completeness. Earlier optional-policy discussion is superseded.
 
 ## Placement and trust
 
