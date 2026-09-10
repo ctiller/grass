@@ -20,7 +20,7 @@ giving the fixture two consecutive actual edges without identifying their raw
 states. -/
 theorem quiet_service₂ {image : ImageInput} {inputs : EntryInputs}
     (loaded : LoadedImage image inputs) :
-    RawStep loaded Grass.Tests.Win32WriteFile.noEffects [] receipt₁.after
+    RawStep loaded Grass.Tests.Win32WriteFile.noEffects Grass.Tests.Win32WriteFileConsolePublication.environment [] receipt₁.after
       (.providerService call record.agent action) quietEvent receipt₂.after [] := by
   apply RawStep.service receipt₂
   · exact ⟨by constructor <;> rfl, empty_graph_valid _, empty_graph_valid _,

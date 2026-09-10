@@ -128,6 +128,8 @@ import Grass.Platform.Win32.RawServicePreservation
 import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.ConsoleEnvironment
 import Grass.Platform.Win32.GetStdHandleReturn
+import Grass.Platform.Win32.GetStdHandleRawReturn
+import Grass.Platform.Win32.EvaluatedCall
 import Grass.Platform.Win32.GetStdHandleResult
 import Grass.Platform.Win32.GetStdHandleRuntime
 import Grass.Platform.Win32.ProtocolEntry

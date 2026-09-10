@@ -27,10 +27,11 @@ theorem resumeInputsAfterService
     {request : Request} {provider : ContextId}
     (entered : CallHandoff loaded before receipt request provider) (prior : CallRuntimeTable)
     {realization : Realization}
+    {environment : ConsoleEnvironment}
     (raw : Nat → RawState) (graph : Nat → Graph)
     (agent : Nat → ContextId) (action : Nat → Action) (event : Nat → Event)
     (length : Nat) (root : raw 0 = entered.rawAfter prior)
-    (steps : ∀ n, n < length → RawStep loaded realization (graph n) (raw n)
+    (steps : ∀ n, n < length → RawStep loaded realization environment (graph n) (raw n)
       (.providerService entered.handoff.call (agent n) (action n))
       (event n) (raw (n + 1)) (graph (n + 1))) :
     ProviderResume.PolicyBinding loaded receipt ∧

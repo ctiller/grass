@@ -15,13 +15,14 @@ open Grass.Platform.Win32.ExecutionState Grass.Platform.Win32.Loader
 
 variable {image : ImageInput} {inputs : EntryInputs}
   {loaded : LoadedImage image inputs} {realization : WriteFile.Realization}
+  {environment : ConsoleEnvironment}
   {graph nextGraph : Graph} {before after : RawState} {event : Event}
   {call : CallProtocol.CallId} {agent : ContextId} {action : WriteFile.Action}
 
 /-- `service_metadata` proves that an actual classified provider service step
 preserves the complete raw protocol metadata. -/
 theorem service_metadata
-    (step : RawStep loaded realization graph before (.providerService call agent action)
+    (step : RawStep loaded realization environment graph before (.providerService call agent action)
       event after nextGraph) :
     after.metadata = before.metadata := by
   obtain ⟨record, output, receipt, _, rfl, _, _, _⟩ := service_receipt step
@@ -31,7 +32,7 @@ theorem service_metadata
 call, inversion recovers a receipt indexed by that same occurrence. -/
 theorem service_receipt_sameRecord
     {record : CallProtocol.Pending WriteFile.Request}
-    (step : RawStep loaded realization graph before (.providerService call agent action)
+    (step : RawStep loaded realization environment graph before (.providerService call agent action)
       event after nextGraph)
     (pending : before.metadata.pending.lookup call =
       some (WriteFile.embedPending record)) :

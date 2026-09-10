@@ -77,11 +77,11 @@ theorem rawStep {image : ImageInput} {inputs : EntryInputs} {loaded : LoadedImag
       (receipt.fetch.site.fallthroughRip + BitVec.ofInt 64 displacement.toInt)
       receipt.read.value = some dispatch)
     (requestMatches : dispatch.MatchesRequest (.writeFile request))
-    {realization : WriteFile.Realization} {graph nextGraph : Graph}
+    {realization : WriteFile.Realization} {environment : ConsoleEnvironment} {graph nextGraph : Graph}
     (prior : graph.WellFormed (before.raw calls))
     (next : nextGraph.WellFormed (entered.rawAfter calls))
     (graphExtends : graph.Extends nextGraph) :
-    RawStep loaded realization graph (before.raw calls) (.apiEntry (.writeFile request) agent)
+    RawStep loaded realization environment graph (before.raw calls) (.apiEntry (.writeFile request) agent)
       (Event.between (before.raw calls) (entered.rawAfter calls) .internal)
       (entered.rawAfter calls) nextGraph :=
   RawStep.writeFileEntry entered evaluated dispatch selected requestMatches
@@ -110,11 +110,11 @@ theorem rawStep {image : ImageInput} {inputs : EntryInputs} {loaded : LoadedImag
       receipt.read.value = some dispatch)
     (requestMatches : dispatch.MatchesRequest
       (.getStdHandle (GetStdHandle.selector entered.reached.machine)))
-    {realization : WriteFile.Realization} {graph nextGraph : Graph}
+    {realization : WriteFile.Realization} {environment : ConsoleEnvironment} {graph nextGraph : Graph}
     (prior : graph.WellFormed (before.raw calls))
     (next : nextGraph.WellFormed (entered.afterRaw calls))
     (graphExtends : graph.Extends nextGraph) :
-    RawStep loaded realization graph (before.raw calls)
+    RawStep loaded realization environment graph (before.raw calls)
       (.apiEntry (.getStdHandle (GetStdHandle.selector entered.reached.machine)) agent)
       (Event.between (before.raw calls) (entered.afterRaw calls) .internal)
       (entered.afterRaw calls) nextGraph :=
@@ -145,11 +145,11 @@ theorem rawStep {image : ImageInput} {inputs : EntryInputs} {loaded : LoadedImag
       receipt.read.value = some dispatch)
     (requestMatches : dispatch.MatchesRequest
       (.exitProcess (ExitProcess.status entered.reached.machine)))
-    {realization : WriteFile.Realization} {graph nextGraph : Graph}
+    {realization : WriteFile.Realization} {environment : ConsoleEnvironment} {graph nextGraph : Graph}
     (prior : graph.WellFormed (before.raw calls))
     (next : nextGraph.WellFormed (entered.handoff.initRaw calls))
     (graphExtends : graph.Extends nextGraph) :
-    RawStep loaded realization graph (before.raw calls)
+    RawStep loaded realization environment graph (before.raw calls)
       (.apiEntry (.exitProcess (ExitProcess.status entered.reached.machine)) agent)
       (Event.between (before.raw calls) (entered.handoff.initRaw calls) .internal)
       (entered.handoff.initRaw calls) nextGraph :=
