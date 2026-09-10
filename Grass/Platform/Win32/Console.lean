@@ -394,18 +394,4 @@ structure ExitRequest where
   status : BitVec 32
 deriving DecidableEq, Repr, Inhabited
 
-/-- The exit status for a successful run, per `docs/HELLO_WORLD.md`: zero. -/
-def successStatus : BitVec 32 := 0
-
-/-- The exit status for every noncontinuable failure: one.
-
-`docs/HELLO_WORLD.md` gives one public `.failure` outcome, so
-"standard-output unavailable, write failure, and zero progress remain distinct
-only in the complete audit trace". They share this status deliberately. -/
-def failureStatus : BitVec 32 := 1
-
-/-- The two statuses are distinguishable, which is what makes the terminal
-protocol's `distinguish` law satisfiable for this program's demanded set. -/
-theorem statuses_distinct : successStatus ≠ failureStatus := by decide
-
 end Grass.Platform.Win32
