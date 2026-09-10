@@ -158,6 +158,14 @@ inductive BodyStep (word : BitVec 32) (before : Cpu) : BodyOutcome → Prop wher
   | svc (immediate : BitVec 16) (decoded : SupervisorCall.decode word = some immediate) :
       BodyStep word before (.supervisor immediate)
 
+/-- Extract the existing SVC decode evidence, without running a second decoder.
+This remains a body request, not exception-entry evidence. -/
+def BodyStep.supervisorRequest {word : BitVec 32} {before : Cpu} {immediate : BitVec 16}
+    (step : BodyStep word before (.supervisor immediate)) : SupervisorCall.Request word before := by
+  refine ⟨immediate, ?_⟩
+  cases step with
+  | svc immediate decoded => exact decoded
+
 /-- Every admitted body outcome retains its actual decode and condition or trap
 request. No selected successful execution or arbitrary postcondition is used. -/
 theorem bodyStep_cases {word : BitVec 32} {before : Cpu} {outcome : BodyOutcome}
