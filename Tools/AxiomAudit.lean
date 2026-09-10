@@ -162,7 +162,6 @@ import Grass.Assembly.FrameLoad
 import Grass.Assembly.FrameAddressing
 import Grass.Assembly.FrameLea
 import Grass.Assembly.FrameArgument
-import Grass.Assembly.Win32Constants
 import Grass.Assembly.RipRelative
 import Grass.Assembly.FrameAllocation
 import Grass.Assembly.SourcePrologue
