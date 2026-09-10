@@ -38,7 +38,7 @@ private instance (event : Raw.Event) (before after : RawState) :
 def Edge {image : ImageInput} {inputs : EntryInputs} (loaded : LoadedImage image inputs)
     (environment : ConsoleEnvironment) (before after : RawState) : Prop :=
   ∃ choice event, Raw.RawStep loaded Grass.Tests.Win32WriteFile.noEffects environment
-    [] before choice event after []
+    Grass.Tests.Win32RawStep.noReturnInterpretation [] before choice event after []
 
 inductive Steps {α : Type} (edge : α → α → Prop) : α → α → Prop where
   | refl {state} : Steps edge state state
