@@ -1,13 +1,17 @@
 import Tests.Platform.Win32GetStdHandleRawReturn
 import Grass.Refinement.Console.WriteFileStaticEntry
 import Tests.Console.WriteFileCountEntry
+import Grass.Platform.Win32.RawPrefix
+import Grass.Platform.Win32.RawEntryEvent
 
 -- INCLUDE_AUTHORED_HELLO
 
-/-! One computed path from the actual authored image's loader initial state,
-through GetStdHandle entry, an allowed observed provider result, checked return,
-and source instructions to WriteFile. Provider registers are an observation;
-this is not native execution or an all-path/raw-history certificate. -/
+/-! One checked finite prefix from the actual authored image's loader/protocol
+root through GetStdHandle entry, an allowed observed provider result, return,
+and WriteFile entry. The existing ExecutionPrefix retains every raw edge.
+Provider registers are an observation and the graph is explicitly empty;
+native execution, causal correspondence, and properties of all runs remain open.
+The finite view's unused completion fields supply no completion semantics. -/
 namespace Grass.Tests.Frontend.WriteFilePrefix
 
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical Grass.Artifact
@@ -18,10 +22,6 @@ open Grass.Platform.Win32.ExecutionState
 
 set_option maxRecDepth 100000
 set_option maxHeartbeats 16000000
-
-private def required {α : Type u} (stage : String) : Option α → Except String α
-  | none => .error stage
-  | some value => .ok value
 
 private instance : DecidableEq ValidMemoryEvent := fun left right =>
   decidable_of_iff (left.event = right.event) (by
@@ -35,31 +35,33 @@ private instance (event : Raw.Event) (before after : RawState) :
     Decidable (event.Appends before after) :=
   inferInstanceAs (Decidable (_ ∧ _))
 
-def Edge {image : ImageInput} {inputs : EntryInputs} (loaded : LoadedImage image inputs)
-    (environment : ConsoleEnvironment) (before after : RawState) : Prop :=
-  ∃ choice event, Raw.RawStep loaded Grass.Tests.Win32WriteFile.noEffects environment
-    Grass.Tests.Win32RawStep.noReturnInterpretation [] before choice event after []
-
-inductive Steps {α : Type} (edge : α → α → Prop) : α → α → Prop where
-  | refl {state} : Steps edge state state
-  | step {before middle after} : edge before middle → Steps edge middle after → Steps edge before after
+abbrev system {image : ImageInput} {inputs : EntryInputs} (loaded : LoadedImage image inputs)
+    (environment : ConsoleEnvironment)
+    (covered : CallProtocol.GrantSupplyCovers loaded.initialState.machine.memory
+      (FreshSupply.initial : FreshSupply GrantTag)) :=
+  Raw.finitePrefixSystem loaded Grass.Tests.Win32WriteFile.noEffects environment
+    Grass.Tests.Win32RawStep.noReturnInterpretation covered
 
 /-- Bounded checked raw CPU edges with an explicitly empty graph. The graph
 does not assert native causal correspondence. Undefined arithmetic flags choose
 an admitted representative, so this validates one path. -/
 def advanceTo {image : ImageInput} {inputs : EntryInputs}
     (loaded : LoadedImage image inputs) (environment : ConsoleEnvironment)
+    (covered : CallProtocol.GrantSupplyCovers loaded.initialState.machine.memory
+      (FreshSupply.initial : FreshSupply GrantTag))
     (target : MachineAddress) :
-    Nat → (before : RawState) →
-      Except String { after : RawState // Steps (Edge loaded environment) before after }
-  | 0, _ => .error "prefix fuel exhausted"
-  | fuel + 1, before => do
-    if before.machine.rip == target then return ⟨before, .refl⟩
+    Nat → (execution : (system loaded environment covered).ExecutionPrefix) →
+      execution.graph.down = [] →
+      Except String { after : (system loaded environment covered).ExecutionPrefix // after.graph.down = [] }
+  | 0, _, _ => .error "execution fuel exhausted"
+  | fuel + 1, execution, empty => do
+    let before := execution.state.down
+    if before.machine.rip == target then return ⟨execution, empty⟩
     match selected : Cpu.policy? loaded before.machine with
-    | none => throw "prefix CPU policy"
+    | none => throw "execution CPU policy"
     | some cpu =>
       if control : before.control = .caller cpu.context then
-        let some fetched := (FetchFactory.fetch cpu before.machine).toOption | throw "prefix fetch"
+        let some fetched := (FetchFactory.fetch cpu before.machine).toOption | throw "execution fetch"
         let flags := match fetched.dispatched.selection.instruction with
           | .arithmetic instruction => (instruction.effect before.machine).flags.map (·.getD false)
           | .stack (.subRsp immediate) => completedSubStatus before.machine immediate
@@ -71,118 +73,195 @@ def advanceTo {image : ImageInput} {inputs : EntryInputs}
             let next := before.withMachine after
             let event := Raw.Event.between before next (.cpu .completed)
             if appends : event.Appends before next then
-              have edge : Edge loaded environment before next :=
-                ⟨.cpu (.normal flags), event,
-                  Raw.RawStep.cpuCompleted control selected evaluated completed
-                    ⟨appends, Grass.Tests.Win32RawStep.empty_graph_valid _,
-                      Grass.Tests.Win32RawStep.empty_graph_valid _, Raw.Graph.extends_refl []⟩ rfl⟩
-              let rest ← advanceTo loaded environment target fuel next
-              return ⟨rest.val, .step edge rest.property⟩
+              have edge : (system loaded environment covered).Step execution.graph execution.state
+                  (.cpu (.normal flags)) ⟨event⟩ ⟨next⟩ ⟨[]⟩ := by
+                change Raw.RawStep _ _ _ _ execution.graph.down before _ event next []
+                rw [empty]
+                exact Raw.RawStep.cpuCompleted control selected evaluated completed
+                  ⟨appends, Grass.Tests.Win32RawStep.empty_graph_valid _,
+                    Grass.Tests.Win32RawStep.empty_graph_valid _, Raw.Graph.extends_refl []⟩ rfl
+              advanceTo loaded environment covered target fuel (execution.step edge) rfl
             else throw "CPU edge log suffix"
-          | _ => throw "unexpected prefix CALL or non-completion"
-        | _ => throw "prefix instruction or flags"
+          | _ => throw "unexpected execution CALL or non-completion"
+        | _ => throw "execution instruction or flags"
       else throw "CPU caller control"
 
+/-- Test result keeps the exact authored image and the existing proof-bearing
+prefix available to downstream consumers; reporting does not replace it. -/
+abbrev Result {requirements : Specification.RequirementSet} {plan : PlatformPlan requirements}
+    (machineSource : MachineSource plan) :=
+  Σ inputs : EntryInputs,
+    Σ loaded : LoadedImage
+      ⟨machineSource.construction.linked.plan,
+        (PE.writeImage machineSource.construction.linked.plan).toHostBytes, rfl⟩ inputs,
+      Σ' covered : CallProtocol.GrantSupplyCovers loaded.initialState.machine.memory
+        (FreshSupply.initial : FreshSupply GrantTag),
+        (system loaded (Grass.Tests.Win32GetStdHandleReturn.environmentFor
+          inputs.thread inputs.independentContext 55) covered).ExecutionPrefix
+
 def inspected {requirements : Specification.RequirementSet} {plan : PlatformPlan requirements}
-    (machineSource : MachineSource plan) (expectedPayload : Grass.ByteArray) : Except String String := do
+    (machineSource : MachineSource plan) (expectedPayload : Grass.ByteArray) :
+    Except String (Result machineSource) := do
   let linked := machineSource.construction.linked
   let image : ImageInput := ⟨linked.plan, (PE.writeImage linked.plan).toHostBytes, rfl⟩
   let inputs := Grass.Tests.Win32LoaderEntry.inputsFor linked.plan
     (.fromList [.fromList [0x7ff01000, 0x7ff02000, 0x7ff03000]])
-  let loaded ← required "exact authored image" (initialize? image inputs)
+  let some loaded := initialize? image inputs | throw "exact authored image"
   let setup : Grass.Tests.Win32HelloCall.ActualSetup :=
     { body := machineSource.body, frame := machineSource.construction.frame
       splice := machineSource.construction.splice, image, inputs, loaded }
-  let some handoff :=
-    (Grass.Tests.Win32HelloCall.actualHandoffFor? setup) | throw "initial state through GetStd CALL"
-  let entered := handoff.entered.entered
-  let evaluated := Grass.Tests.Win32GetStdHandleReturn.evaluatedFor handoff
-  let environment := Grass.Tests.Win32GetStdHandleReturn.environmentFor
-    entered.handoff.caller inputs.independentContext 55
-  let gpr : Gpr → BitVec 64 := fun register =>
-    if register = .rax then 55 else entered.reached.machine.gpr register
-  let some observed :=
-    (GetStdHandle.ProviderResult.observe? loaded environment entered evaluated
-      handoff.preCall.before.calls gpr entered.reached.machine.rflags).toOption | throw "observed GetStd result"
-  match completed : GetStdHandle.Return.complete? observed with
-  | .error _ => throw "GetStd return"
-  | .ok completion => do
-    let returned : { state : RawState //
-        Edge loaded environment (entered.afterRaw handoff.preCall.before.calls) state } :=
-      ⟨completion.final, .intro (.stdoutResult entered.handoff.call gpr entered.reached.machine.rflags)
-        (.intro completion.event (completion.rawStep completed
+  let environment := Grass.Tests.Win32GetStdHandleReturn.environmentFor inputs.thread inputs.independentContext 55
+  let some getStdOutput := (linked.source.outputs.find? fun output =>
+    match output.detail with
+    | .ripImport name _ _ => name == "__imp_GetStdHandle"
+    | _ => false) | throw "source GetStd CALL"
+  let getStdAddress : MachineAddress := BitVec.ofNat 64
+    ((preferredBase image).toNat + SourceResolve.sourceOffset linked.source.codeBase
+      linked.source.splice.finalSizes getStdOutput.index)
+  if covered : CallProtocol.GrantSupplyCovers loaded.initialState.machine.memory
+      (FreshSupply.initial : FreshSupply GrantTag) then
+    let initial : (system loaded environment covered).ExecutionPrefix :=
+      Grass.RelationalSystem.ExecutionPrefix.initial
+        (state := ⟨Raw.initialState loaded covered⟩) (graph := ⟨[]⟩) ⟨rfl, rfl⟩
+    let .ok execution := advanceTo loaded environment covered getStdAddress
+      (linked.source.outputs.length + 1) initial rfl | throw "initial raw CPU execution"
+    let some found := Grass.Tests.Win32HelloCall.handoffFrom? setup execution.val.state.down
+      | throw "reached GetStd entry"
+    let handoff := found.val
+    let entered := handoff.entered.entered
+    let evaluated := Grass.Tests.Win32GetStdHandleReturn.evaluatedFor handoff
+    let gpr : Gpr → BitVec 64 := fun register =>
+      if register = .rax then 55 else entered.reached.machine.gpr register
+    let some observed :=
+      (GetStdHandle.ProviderResult.observe? loaded environment entered evaluated
+        handoff.preCall.before.calls gpr entered.reached.machine.rflags).toOption | throw "observed GetStd result"
+    match completed : GetStdHandle.Return.complete? observed with
+    | .error _ => throw "GetStd return"
+    | .ok completion => do
+      have beforeExact : handoff.entered.checked.raw handoff.preCall.before.calls = execution.val.state.down :=
+        handoff.entered.checked_is_exact_preCall.trans found.property
+      have entryEdge : (system loaded environment covered).Step execution.val.graph execution.val.state
+          (.apiEntry (.getStdHandle (GetStdHandle.selector entered.reached.machine)) inputs.independentContext)
+          ⟨Raw.Event.between execution.val.state.down (entered.afterRaw handoff.preCall.before.calls) .internal⟩
+          ⟨entered.afterRaw handoff.preCall.before.calls⟩ ⟨[]⟩ := by
+        change Raw.RawStep _ _ _ _ execution.val.graph.down execution.val.state.down _ _ _ []
+        rw [execution.property, ← beforeExact]
+        exact entered.rawStep evaluated observed.dispatch observed.selected observed.request
           (Grass.Tests.Win32RawStep.empty_graph_valid _) (Grass.Tests.Win32RawStep.empty_graph_valid _)
-          (Raw.Graph.extends_refl [])))⟩
-    let callOutput ← required "source WriteFile CALL" (linked.source.outputs.find? fun output =>
-      match output.detail with
-      | .ripImport name _ _ => name == "__imp_WriteFile"
-      | _ => false)
-    let callAddress : MachineAddress := BitVec.ofNat 64
-      ((preferredBase image).toNat + SourceResolve.sourceOffset linked.source.codeBase
-        linked.source.splice.finalSizes callOutput.index)
-    let reached ← advanceTo loaded environment callAddress (linked.source.outputs.length + 1) returned.val
-    let before := reached.val.machine
-    let objectBinding ← required "source payload binding"
-      (linked.bindings.staticBindings.bindings.find? (fun binding => binding.name == "payload"))
-    let buffer ← required "reached static payload"
-      (LoadedStaticArgument.prepare? objectBinding loaded before.machine.memory 0)
-    let countLocal ← required "source count local"
-      (Grass.Tests.Console.WriteFileCountEntry.selectLoad? linked.source)
-    unless before.gpr .rcx == 55 && before.gpr .rdx == buffer.address &&
-        before.gpr .r8 == BitVec.ofNat 64 expectedPayload.length && buffer.bytes == expectedPayload do
-      throw "reached WriteFile registers differ from original payload/handle"
-    let stackArgument ← required "source fifth argument"
-      (linked.source.splice.source.outputs.findSome? fun output =>
-        match output with
-        | .argument _ result _ =>
-            if result.api == .writeFile && result.field == "overlapped" then some result else none
-        | _ => none)
-    let raw := reached.val
-    let some checked := raw.checked? | throw "reached checked state"
-    match projected : checked.callProtocol? with
-    | none => throw "reached protocol"
-    | some protocol => do
-      if control : checked.control = .caller inputs.thread then
-        if registered : protocol.machine.contexts.lookup inputs.thread = some .thread then
-          if available : CallProtocol.callerPending protocol inputs.thread = false then
-            have ready : checked.ControlConsistent := by
-              unfold ExecutionState.State.ControlConsistent
-              rw [control]
-              exact ⟨protocol, projected, ⟨.thread, registered⟩, available⟩
-            match selected : Cpu.policy? loaded checked.machine with
-            | none => throw "WriteFile CPU policy"
-            | some cpu =>
-              match evaluated : CheckedExecution.normal cpu checked.machine checked.machine.statusFlags with
-              | some (.ok (.call called)) =>
-                let binding := WriteFile.CallPolicy.ofFactory selected called
-                let actual : Raw.EvaluatedCall loaded checked called.receipt :=
-                  { policy := cpu, selected, flags := checked.machine.statusFlags
-                    success := called, evaluated, receiptExact := HEq.rfl }
-                let frameOrigin := called.receipt.storeDescriptor.range.stop
-                let fifth : WriteFile.Argument :=
-                  ⟨binding.policy.stack,
-                    ⟨frameOrigin + stackArgument.displacement, stackArgument.range.size⟩⟩
-                let entry := WriteFileStaticEntry.prepare? objectBinding checked called.receipt binding
-                  ready actual countLocal (.zero objectBinding.object.declaration.bytes) fifth
-                  inputs.independentContext
-                unless called.receipt.fetch.site.encoding == callOutput.encoding do
-                  throw "WriteFile fetched encoding differs from source"
-                let some accepted := entry | throw "actual reached WriteFile entry refused"
-                let request := accepted.2.val.handoff.record.request
-                unless request.countSlot.range.start == frameOrigin + countLocal.result.address.displacement &&
-                    request.countSlot.range.size == countLocal.result.address.width &&
-                    request.countSlot.provenance == binding.policy.stack &&
-                    request.buffer == accepted.1.argument && request.bytes == expectedPayload do
-                  throw "actual request differs from reached frame and original payload"
-                return "Actual Hello prefix reaches WriteFile entry with the original payload and runtime-placed count local."
-              | _ => throw "checked WriteFile CALL"
-          else throw "caller already pending"
-        else throw "caller registration"
-      else throw "caller control"
+          (Raw.Graph.extends_refl [])
+      let pending := execution.val.step entryEdge
+      let returned := pending.step (completion.rawStep completed
+        (Grass.Tests.Win32RawStep.empty_graph_valid _) (Grass.Tests.Win32RawStep.empty_graph_valid _)
+        (Raw.Graph.extends_refl []))
+      let some callOutput := (linked.source.outputs.find? fun output =>
+        match output.detail with
+        | .ripImport name _ _ => name == "__imp_WriteFile"
+        | _ => false) | throw "source WriteFile CALL"
+      let callAddress : MachineAddress := BitVec.ofNat 64
+        ((preferredBase image).toNat + SourceResolve.sourceOffset linked.source.codeBase
+          linked.source.splice.finalSizes callOutput.index)
+      let .ok reached := advanceTo loaded environment covered callAddress
+        (linked.source.outputs.length + 1) returned rfl | throw "postreturn raw CPU execution"
+      let before := reached.val.state.down.machine
+      let some objectBinding :=
+        (linked.bindings.staticBindings.bindings.find? (fun binding => binding.name == "payload"))
+        | throw "source payload binding"
+      let some buffer := LoadedStaticArgument.prepare? objectBinding loaded before.machine.memory 0
+        | throw "reached static payload"
+      let some countLocal := Grass.Tests.Console.WriteFileCountEntry.selectLoad? linked.source
+        | throw "source count local"
+      unless before.gpr .rcx == 55 && before.gpr .rdx == buffer.address &&
+          before.gpr .r8 == BitVec.ofNat 64 expectedPayload.length && buffer.bytes == expectedPayload do
+        throw "reached WriteFile registers differ from original payload/handle"
+      let some stackArgument :=
+        (linked.source.splice.source.outputs.findSome? fun output =>
+          match output with
+          | .argument _ result _ =>
+              if result.api == .writeFile && result.field == "overlapped" then some result else none
+          | _ => none) | throw "source fifth argument"
+      let raw := reached.val.state.down
+      match checkedExact : raw.checked? with
+      | none => throw "reached checked state"
+      | some checked => do
+        match projected : checked.callProtocol? with
+        | none => throw "reached protocol"
+        | some protocol => do
+          if control : checked.control = .caller inputs.thread then
+            if registered : protocol.machine.contexts.lookup inputs.thread = some .thread then
+              if available : CallProtocol.callerPending protocol inputs.thread = false then
+                have ready : checked.ControlConsistent := by
+                  unfold ExecutionState.State.ControlConsistent
+                  rw [control]
+                  exact ⟨protocol, projected, ⟨.thread, registered⟩, available⟩
+                match selected : Cpu.policy? loaded checked.machine with
+                | none => throw "WriteFile CPU policy"
+                | some cpu =>
+                  match evaluated : CheckedExecution.normal cpu checked.machine checked.machine.statusFlags with
+                  | some (.ok (.call called)) =>
+                    let binding := WriteFile.CallPolicy.ofFactory selected called
+                    let actual : Raw.EvaluatedCall loaded checked called.receipt :=
+                      { policy := cpu, selected, flags := checked.machine.statusFlags
+                        success := called, evaluated, receiptExact := HEq.rfl }
+                    let frameOrigin := called.receipt.storeDescriptor.range.stop
+                    let fifth : WriteFile.Argument :=
+                      ⟨binding.policy.stack,
+                        ⟨frameOrigin + stackArgument.displacement, stackArgument.range.size⟩⟩
+                    let entry := WriteFileStaticEntry.prepare? objectBinding checked called.receipt binding
+                      ready actual countLocal (.zero objectBinding.object.declaration.bytes) fifth
+                      inputs.independentContext
+                    unless called.receipt.fetch.site.encoding == callOutput.encoding do
+                      throw "WriteFile fetched encoding differs from source"
+                    let some accepted := entry | throw "actual reached WriteFile entry refused"
+                    let request := accepted.2.val.handoff.record.request
+                    unless request.countSlot.range.start == frameOrigin + countLocal.result.address.displacement &&
+                        request.countSlot.range.size == countLocal.result.address.width &&
+                        request.countSlot.provenance == binding.policy.stack &&
+                        request.buffer == accepted.1.argument && request.bytes == expectedPayload do
+                      throw "actual request differs from reached frame and original payload"
+                    match dispatchSelected : ApiDispatch.select? loaded
+                        (called.receipt.fetch.site.fallthroughRip + BitVec.ofInt 64 called.displacement.toInt)
+                        called.receipt.read.value with
+                    | none => throw "WriteFile dispatch"
+                    | some dispatch =>
+                      if api : dispatch.api = .writeFile then
+                        have requestMatches : dispatch.MatchesRequest (.writeFile request) := api.symm
+                        have beforeExact : checked.raw raw.calls = raw := RawState.checked?_raw checkedExact
+                        have entryEdge : (system loaded environment covered).Step reached.val.graph reached.val.state
+                            (.apiEntry (.writeFile request) inputs.independentContext)
+                            ⟨Raw.Event.between raw (accepted.2.val.rawAfter raw.calls) .internal⟩
+                            ⟨accepted.2.val.rawAfter raw.calls⟩ ⟨[]⟩ := by
+                          change Raw.RawStep _ _ _ _ reached.val.graph.down raw _ _ _ []
+                          rw [reached.property]
+                          simpa only [beforeExact, request, WriteFile.EntryHandoff.record] using accepted.2.val.rawStep (calls := raw.calls)
+                            (realization := Grass.Tests.Win32WriteFile.noEffects) (environment := environment)
+                            (interpretation := Grass.Tests.Win32RawStep.noReturnInterpretation) actual dispatch dispatchSelected
+                            requestMatches (Grass.Tests.Win32RawStep.empty_graph_valid _)
+                            (Grass.Tests.Win32RawStep.empty_graph_valid _) (Raw.Graph.extends_refl [])
+                        let finished := reached.val.step entryEdge
+                        unless finished.events.length > 0 &&
+                            finished.state.down.control == .pending accepted.2.val.handoff.call
+                              inputs.thread inputs.independentContext do
+                          throw "final prefix did not retain entered WriteFile state"
+                        return ⟨inputs, loaded, covered, finished⟩
+                      else throw "WriteFile request dispatch"
+                  | _ => throw "checked WriteFile CALL"
+              else throw "caller already pending"
+            else throw "caller registration"
+          else throw "caller control"
 
-#eval do
-  match inspected helloSource payload with
+  else throw "initial grant coverage"
+
+def report {requirements : Specification.RequirementSet} {plan : PlatformPlan requirements}
+    {machineSource : MachineSource plan} (result : Result machineSource) : String :=
+  s!"Actual loader-rooted ExecutionPrefix ({result.2.2.2.events.length} edges) reaches WriteFile entry with the original payload and runtime-placed count local."
+
+def run {requirements : Specification.RequirementSet} {plan : PlatformPlan requirements}
+    (machineSource : MachineSource plan) (expectedPayload : Grass.ByteArray) : IO Unit := do
+  match inspected machineSource expectedPayload with
   | .error stage => throw (IO.userError stage)
-  | .ok report => IO.println report
+  | .ok result =>
+    IO.println (report result)
+
+#eval run helloSource payload
 
 end Grass.Tests.Frontend.WriteFilePrefix
