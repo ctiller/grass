@@ -10,6 +10,16 @@ issue below. The fixed-initial-environment signatures are provisional and must
 not be implemented as an accepted complete-correspondence solution until that
 issue is resolved. Shared entry/settlement/resume machinery is unaffected.
 
+**Subsequent policy clarification:** Craig told process that narrowing error
+alternatives may be safe, unlike general result-range narrowing. The symmetric
+counterexamples below diagnose the current interface; they do not establish a
+requirement to manufacture every permitted error. Root/process are deciding an
+API-independent distinction between allowed behavior and required capabilities.
+Any revised coverage policy must preserve required success/recovery and progress,
+and must not substitute divergence or permanent wait for those requirements.
+No interface change is authorized by this document alone. Keep actual diagnostic
+causes distinct; optional-error refinement would not justify relabeling them.
+
 ## Placement and trust
 
 Keep GetStdHandle and ExitProcess allowed behavior in Windows semantic modules
