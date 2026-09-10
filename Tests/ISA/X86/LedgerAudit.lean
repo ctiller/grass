@@ -72,6 +72,8 @@ import Grass.Platform.Win32.CallResumeBinding
 import Grass.Platform.Win32.CallResumeHistory
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.RawStep
+import Grass.Platform.Win32.RawPhasePreservation
+import Grass.Platform.Win32.RawPrefix
 import Grass.Platform.Win32.RawServiceMetadata
 import Grass.Platform.Win32.RawServiceContinuation
 import Grass.Platform.Win32.RawEntryEvent
@@ -253,6 +255,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.CallResumeHistory,
    `Grass.Platform.Win32.RawStepSignature,
    `Grass.Platform.Win32.RawStep,
+   `Grass.Platform.Win32.RawPhasePreservation,
+   `Grass.Platform.Win32.RawPrefix,
    `Grass.Platform.Win32.RawServiceMetadata,
    `Grass.Platform.Win32.RawServiceContinuation,
    `Grass.Platform.Win32.RawEntryEvent,
@@ -422,7 +426,7 @@ acquiring a citation.
 -- The actual checked completion projects its canonical raw event suffix.
 -- Shared observation staging installs supplied register data without native authority.
 -- Checked WriteFile resume construction and computed final carrier.
-def notBehaviourBaseline : Nat := 392
+def notBehaviourBaseline : Nat := 394
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -563,6 +567,9 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Instantiate the existing exact raw relation and loader/protocol root; no new hardware rule.
+    `Grass.Platform.Win32.Raw.initialState,
+    `Grass.Platform.Win32.Raw.finitePrefixSystem,
     -- Nominal data and comparison over the separately owed ABI list. The stage
     -- installs supplied observations; it asserts no actual provider transition.
     `Grass.Platform.Win32.ProcessId,
