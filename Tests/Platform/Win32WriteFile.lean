@@ -65,27 +65,23 @@ theorem lookup_exact (root : AllocId) :
     rw [MemoryState.allocations_installBacking? installed_from_door]
     rfl
 
-def resolved (range : ByteRange) (contained : stackProvenance.extent.Contains range) :
+private theorem resolvedAllocation_eq (range : ByteRange)
+    (success : (memory.resolveAccess? stackProvenance range).toOption.isSome) :
+    ((memory.resolveAccess? stackProvenance range).toOption.get success).allocation = allocation := by
+  have found :=
+    ((memory.resolveAccess? stackProvenance range).toOption.get success).allocationLookup
+  rw [lookup_exact] at found
+  simp at found
+  exact found.2.symm
+
+def resolved (range : ByteRange)
+    (success : (memory.resolveAccess? stackProvenance range).toOption.isSome) :
     Resolved memory ⟨stackProvenance, range⟩ where
-  allocation := allocation
-  backing := fixtureBackingRecord
-  allocationLookup := by change memory.allocations.lookup stackAlloc = some allocation; decide
-  backingLookup := by change memory.backings.lookup fixtureBacking = some fixtureBackingRecord; decide
-  allocationLive := rfl
-  epochAgrees := rfl
-  spaceAgrees := rfl
-  sourceAgrees := rfl
-  extentAgrees := rfl
-  provenanceNested := by change stackProvenance.Nested; decide
-  rangeInProvenance := contained
-  coordinates :=
-    { withinView := by
-        rw [show allocation.extent = stackProvenance.rootExtent by rfl]
-        exact (Provenance.extent_within_root (by decide)).trans contained
-      viewWithinBacking := by decide }
+  toResolvedAccess :=
+    (memory.resolveAccess? stackProvenance range).toOption.get success
   base := stackBaseAddress
-  placed := rfl
-  noWrap := by decide
+  placed := by rw [resolvedAllocation_eq range success]; rfl
+  noWrap := by rw [resolvedAllocation_eq range success]; decide
 
 def prepared : Prepared memory request where
   buffer := resolved ⟨0, 3⟩ (by decide)

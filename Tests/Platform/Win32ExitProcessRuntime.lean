@@ -4,7 +4,7 @@ import Tests.Platform.Win32ApiRequest
 namespace Grass.Tests.Win32ExitProcessRuntime
 
 open Grass.Platform.Win32 Grass.Platform.Win32.ExecutionState
-open Grass.Tests.Win32ApiRequest Grass.Tests.Spike1
+open Grass.Tests.Win32ApiRequest Grass.Tests.Win32WriteFile
 
 private def cpu : Grass.ISA.X86.Execution.State :=
   { machine := afterStd.machine.noteContext apiAgent .externalAgent
