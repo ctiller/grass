@@ -104,7 +104,8 @@ def completedFetchState {cpu : Cpu} (result : Result policy entry cpu) : Option 
   | .fetched fetch _ _ => some fetch.read.after
   | _ => none
 
-/-- The actual execute-read observation cannot be replaced by independent bits. -/
+/-- `fetched_observation` projects the exact execute-read observation equation
+from `AArch64BootFetch.Word` through its read receipt's `observed_exact` proof. -/
 theorem fetched_observation (fetch : AArch64BootFetch.Word policy entry) :
     fetch.read.run.complete.committed.observed = some fetch.read.bytes :=
   fetch.read.observed_exact
