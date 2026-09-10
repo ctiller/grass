@@ -256,8 +256,9 @@ The initial reusable pieces are:
   `RunFactory.accessFree` result and equation. It must not depend on
   `FetchFactory.Success`, which would introduce an import cycle.
 * `ReadValue byteCount run`, indexed by the same actual `AccessRun`, with one
-  observed-byte, backing, initialization and decoding library. Existing 32/64
-  names become aliases at four/eight bytes. Register writes, extension rules,
+  observed-byte, backing, initialization and decoding library. Migrate existing
+  four/eight-byte consumers and delete the duplicate implementations; retain a
+  width-specific name only when it helps express distinct semantics. Register writes, extension rules,
   effective addresses and return-target semantics remain instruction-specific.
 * One access-failure reached-state mapping. A rejected access preserves its
   supplied stage input; a failure after execution retains that actual reached
@@ -295,6 +296,37 @@ reconstruct those indices has erased too much. Do not abstract whole family
 factories into a common success record that loses their typed Normal receipts.
 Repeated proofs of fetch equality, observation length or context-only state
 change fail acceptance.
+
+### Width-indexed read migration
+
+Source inspection at `31814e40` confirms that
+[ReadValue32](../Grass/ISA/X86/Execution/ReadValue32.lean) and
+[ReadValue64](../Grass/ISA/X86/Execution/ReadValue64.lean) still independently
+implement observation extraction, exact observation/width, sized bytes, backing
+correspondence, initialization and little-endian decoding. This is an open
+cleanup item, sequenced by spikes after the current synchronization milestone.
+
+Use one receipt indexed by byte count and the **same actual** `AccessRun`.
+Retain its concrete memory-oracle equation, read-only intent, exact descriptor
+width and initialized-access evidence. Derive the decoded value at `8 * byteCount`
+bits from the completion's observed bytes; do not introduce a supplied value or
+recompute an observation from a different memory state. One general decoding
+round-trip law should replace the repeated endian arguments. Width-specific
+`le32`/`le64` bridges may delegate to that law.
+
+| Actual consumer | Migration boundary |
+|---|---|
+| `LoadNormal.read` in `FrameMemoryExecution` and `MemoryMoveNormal` | Use the four-byte receipt; retain source/frame addressing and register effects in their existing adapters. |
+| `Refinement.Console.WriteFileLoad` | Consume the same four-byte observed count; preserve the actual load and source-count correspondence. |
+| `CallFactory` / `CallNormal` | Use the eight-byte receipt for the actual target read; retain CALL dispatch, stack-store and target semantics. |
+| `ReturnSlotFactory` / `ReturnSlotRead` and `PushSavedRead` | Use the eight-byte receipt for the actual slot read; retain continuation, stack and saved-value obligations. |
+
+Completion requires production adoption on both widths and deletion of both
+old proof bodies, not only a generic receipt exercised by new tests. Check the
+real load, indirect-call and return-slot consumers, including their existing
+rejection cases. New syntax, compatibility aliases and a separate read engine
+are not prerequisites. Synchronization changes must continue through the same
+underlying `AccessRun`; the width abstraction must not bypass its access checks.
 
 ## Other stack-wide proof libraries
 
