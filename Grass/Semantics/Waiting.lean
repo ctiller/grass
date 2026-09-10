@@ -21,25 +21,26 @@ identified, and no fairness or responsiveness assumption is imposed.
 
 namespace Grass
 
-universe u
+universe uSystem uRequest uResponse uOccurrence
 
 /-- The selected external request/response law and its nonresponse permission. -/
-structure WaitProtocol (Request : Type u) where
-  Response : Request → Type u
+structure WaitProtocol (Request : Type uRequest) where
+  Response : Request → Type uResponse
   Allowed : (request : Request) → Response request → Prop
   AllowsPermanentWait : Request → Prop
 
 namespace RelationalSystem
 
-variable {Event Request : Type u} {system : RelationalSystem Event}
+variable {Event : Type uSystem} {Request : Type uRequest}
+  {system : RelationalSystem Event}
 
 /-- Interpret a selected protocol at exact occurrence-bearing histories.
 `Reply` classifies a transition choice; completeness retains every allowed
 dependent result without merging two responses at one occurrence/choice.
 Exclusion of internal work requires a faithful supplied reply classification. -/
 structure WaitBoundary (system : RelationalSystem Event)
-    (protocol : WaitProtocol Request) where
-  Occurrence : Type u
+    (protocol : WaitProtocol.{uRequest, uResponse} Request) where
+  Occurrence : Type uOccurrence
   request : Occurrence → Request
   Pending : system.History → Occurrence → Prop
   Reply : (occurrence : Occurrence) → protocol.Response (request occurrence) →
@@ -61,15 +62,17 @@ structure WaitBoundary (system : RelationalSystem Event)
 
 /-- A permanent wait holds the exact existing occurrence without taking a
 step, delivering a result, changing custody, or creating a replacement. -/
-structure PermanentWait {protocol : WaitProtocol Request}
-    (boundary : system.WaitBoundary protocol) (history : system.History) where
+structure PermanentWait {protocol : WaitProtocol.{uRequest, uResponse} Request}
+    (boundary : system.WaitBoundary.{uSystem, uRequest, uResponse, uOccurrence} protocol)
+    (history : system.History) where
   occurrence : boundary.Occurrence
   pending : boundary.Pending history occurrence
   permitted : protocol.AllowsPermanentWait (boundary.request occurrence)
 
 namespace PermanentWait
 
-variable {protocol : WaitProtocol Request} {boundary : system.WaitBoundary protocol}
+variable {protocol : WaitProtocol.{uRequest, uResponse} Request}
+  {boundary : system.WaitBoundary.{uSystem, uRequest, uResponse, uOccurrence} protocol}
   {history : system.History}
 
 /-- `WaitBoundary.nonterminal` excludes a terminal boundary from permanent waits. -/
@@ -102,8 +105,9 @@ forms distinct. An infinite suffix retains the existing graph consistency law
 and is attached to the exact choice-bearing finite history. That existing law
 sees prior finite events, not prior finite choices; this carrier does not add a
 stronger history-sensitive infinite-admissibility condition. -/
-inductive CompleteHistory {protocol : WaitProtocol Request}
-    (boundary : system.WaitBoundary protocol) : Type u where
+inductive CompleteHistory {protocol : WaitProtocol.{uRequest, uResponse} Request}
+    (boundary : system.WaitBoundary.{uSystem, uRequest, uResponse, uOccurrence} protocol) :
+    Type (max uSystem uRequest uResponse uOccurrence) where
   | terminal (history : system.History)
       (finished : system.Terminal history.state history.graph)
   | infinite (history : system.History)

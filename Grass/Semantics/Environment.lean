@@ -13,10 +13,14 @@ namespace Grass
 
 namespace BehaviorModel
 
-variable {Outcome : Type} (model : BehaviorModel Outcome)
+universe uSystem uRequest uResponse uOccurrence
+
+variable {Outcome : Type}
+  (model : BehaviorModel.{uSystem, uRequest, uResponse, uOccurrence} Outcome)
 
 /-- A maximal continuation beginning at one exact choice-bearing history. -/
-inductive MaximalContinuation (history : model.History) : Type where
+inductive MaximalContinuation (history : model.History) :
+    Type (max uSystem uRequest uResponse uOccurrence) where
   | terminal {state graph}
       (path : model.system.Path history.state history.graph state graph)
       (finished : model.system.Terminal state graph)
@@ -165,7 +169,8 @@ theorem infinite_first_reply {history : model.History}
   rw [continuation.graphZero, continuation.stateZero] at step
   exact model.boundary.step_reply history occurrence pending _ _ _ _ step
 
-private theorem Path.first_of_positive {Event : Type} {system : RelationalSystem Event}
+private theorem Path.first_of_positive {Event : Type uSystem}
+    {system : RelationalSystem Event}
     {start finish : system.State} {startGraph finishGraph : system.Graph}
     (path : system.Path start startGraph finish finishGraph) (positive : 0 < path.length) :
     ∃ choice event next nextGraph,

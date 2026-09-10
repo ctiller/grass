@@ -20,7 +20,7 @@ structure BehaviorLanguage (R : Type) (resourceModel : Resource.ResourceModel R)
   Interpretation : Syntax → Type
   admits : (authored : Syntax) → Input authored → Prop
   denotation : (resources : R) → (authored : Syntax) → Snapshot resources →
-    Interpretation authored → Input authored → BehaviorModel (Outcome authored)
+    Interpretation authored → Input authored → BehaviorModel.{0, 0, 0, 0} (Outcome authored)
   demands : (resources : R) → (authored : Syntax) → Snapshot resources → List AuthoredDemand
 
 /-- Construction captures one authored value and one resource snapshot. -/
@@ -39,7 +39,7 @@ abbrev Interpretation (contract : BehaviorContract resources) :=
 def admits (contract : BehaviorContract resources) : contract.Input → Prop :=
   contract.language.admits contract.authored
 def denotation (contract : BehaviorContract resources) (interpretation : contract.Interpretation)
-    (input : contract.Input) : BehaviorModel contract.Outcome :=
+    (input : contract.Input) : BehaviorModel.{0, 0, 0, 0} contract.Outcome :=
   contract.language.denotation resources contract.authored contract.snapshot interpretation input
 def demands (contract : BehaviorContract resources) : List AuthoredDemand :=
   contract.language.demands resources contract.authored contract.snapshot

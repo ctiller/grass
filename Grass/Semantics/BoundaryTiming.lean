@@ -14,10 +14,12 @@ terminal state alone does not establish that external observation bridge.
 
 namespace Grass.RelationalSystem
 
-universe u
+universe uSystem uRequest uResponse uOccurrence
 
-variable {Event Request : Type u} {system : RelationalSystem Event}
-  {protocol : WaitProtocol Request} {boundary : system.WaitBoundary protocol}
+variable {Event : Type uSystem} {Request : Type uRequest}
+  {system : RelationalSystem Event}
+  {protocol : WaitProtocol.{uRequest, uResponse} Request}
+  {boundary : system.WaitBoundary.{uSystem, uRequest, uResponse, uOccurrence} protocol}
 
 /-- The only selectable timing fact is permanent nonresponse at an exact wait. -/
 structure BoundaryTimingStrategy (boundary : system.WaitBoundary protocol) where
