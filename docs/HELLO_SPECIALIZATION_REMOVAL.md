@@ -6,6 +6,32 @@ Program-specific expansion remains stopped; deletion and general rework are
 authorized. No completed removal is claimed by this census. The original
 five-spike goal remains open.
 
+The rule now applies to every spike: no spike-specific code is permitted in
+`Grass/` or `Tests/`. Remove a discovered recipe, then report the removal and
+missing general capability to its owner. Ordinary small test inputs for general
+contracts remain useful; a renamed program schedule does not qualify.
+
+## Removal checkpoint
+
+On main through `9c7d1ca9`, the program-name source parser, authored assembly
+fixtures, dedicated addressing fixture, production ABI frame/unwind fixtures,
+and structural Hello exporter/runner have been removed. General source capture
+and its assembly consumers passed 176 focused build jobs. The remaining unwind
+corpus contains 51 generic cases, all byte-identical to `ml64`; its row count and
+digest were updated after regenerating and reviewing the actual corpus.
+
+Certificate integration through `48a101bc` additionally removes the fixed
+loop/guard recognizers and dependent lowering recipes, the aggregate source
+witness, and the scripted partial-source execution gate. Its general frontend
+and source checks passed 190 jobs, followed by 63 jobs for remaining assembly
+fixture changes. The legacy public certificate interface is still incomplete;
+these checks are not a full certificate build or a verified spike.
+
+Further confirmed removals are in progress: the seven-file Hello memory schedule
+and dependent API test fixtures, the two-symbol instruction-specific Win32
+constant lowerer, and the stand-in spike API surface test. These findings extend
+the frozen census below. No completed cleanup or completed spike is claimed.
+
 The implementation has accumulated a second, hand-maintained description of
 Hello beneath its authored source. This includes source recognizers, fixed
 register/guard proofs, a scripted execution harness, and fixture-based emission.
