@@ -22,13 +22,11 @@ This is that policy, and the reference cases through `Grass.Op.step`.
 Every reference case that is a program-thread operation steps and records what it
 should. That is the criterion, for the program's own instructions.
 
-**Spike 1's point does not step.** `WriteFile` is a second execution context, and
-`Grass/Op/Step.lean`'s `ConflictsWithHistory` refuses any cross-context access whose
-event conflicts with an earlier one — `StepPolicy.compatible` defaults to refusing
-every pair, which the comment there names as the conservative direction pending M8's
-happens-before. So the agent's write to the slot the program lent it is refused and
-recorded, and `docs/MEMORY_MODEL.md` §8 requires the ledger to be empty for a
-`VerifiedProgram`.
+**This fixture has no synchronous call cut.** `WriteFile` is a second execution
+context, so its conflicting write remains unordered and is refused. The separate
+`Tests/Memory/CallProtocolOrdering.lean` fixture exercises the successful checked
+handoff/return path. General target happens-before remains outside this bounded
+synchronous interpretation.
 
 The conservative direction is right. What was not recorded until review found it is
 that its consequence lands on the *first* acceptance program rather than the fourth:
@@ -409,11 +407,10 @@ def agentOperation : SomeOperation := SomeOperation.of Op.agentWrite
 /--
 **The agent's write is refused, and the ledger is not empty.**
 
-`Grass/Op/Step.lean`'s `ConflictsWithHistory` refuses any cross-context access whose
-event conflicts with an earlier one, and `StepPolicy.compatible` defaults to refusing
-every pair. The program stores to the slot; the agent then writes the same bytes from
-a different `ContextId`; distinct contexts, overlapping committed ranges, one writes,
-and no happens-before exists in this layer. So the write is refused with
+`Grass/Op/Step.lean`'s `ConflictsWithHistory` refuses an unordered cross-context
+conflict. The program stores to the slot; the agent then writes the same bytes from
+a different `ContextId`, without a checked synchronous handoff in this fixture.
+The write is therefore refused with
 `conflictingAccess` and recorded — and `docs/MEMORY_MODEL.md` §8 requires the ledger to
 be empty for a `VerifiedProgram`.
 
@@ -423,9 +420,8 @@ found the sharper problem: the theorem asserted a *count*, which any of the six 
 ahead of the conflict check would have satisfied equally. It names the class now, which
 is what makes it a theorem about `ConflictsWithHistory` rather than about a refusal.
 
-This is the conservative direction working exactly as its comment says, and the
-consequence is that M8 is a prerequisite for **M2's** exit criterion. Recorded in
-§4.2; this is it as a theorem.
+The checked synchronous-call fixture supplies the missing cut; this fixture
+continues to test conservative refusal when that evidence is absent.
 
 The event count is one and not two: the store's event is still there and the agent's
 access minted none, which is what a refusal does.

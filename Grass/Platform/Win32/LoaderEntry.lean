@@ -187,13 +187,15 @@ instance (memory : MemoryState) (inputs : EntryInputs) : Decidable (StackValid m
   unfold StackValid
   infer_instance
 
-/-- Explicit nonempty independent context inventory and the selected ABI's DF
-clear condition. Other full RFLAGS bits and all non-RSP registers remain data. -/
+/-- Explicit nonempty independent context inventory, the selected ABI's DF
+clear condition, and an empty synchronization frontier for this fresh entry.
+Supplied memory/history does not confer inherited call synchronization. -/
 def EnvironmentValid (inputs : EntryInputs) : Prop :=
   inputs.environment.contexts.lookup inputs.thread = some .thread ∧
   inputs.independentContext ≠ inputs.thread ∧
   (inputs.environment.contexts.lookup inputs.independentContext).isSome = true ∧
-  inputs.rflags &&& 0x402 = 2
+  inputs.rflags &&& 0x402 = 2 ∧
+  inputs.environment.synchronization = .empty
 
 instance (inputs : EntryInputs) : Decidable (EnvironmentValid inputs) := by
   unfold EnvironmentValid

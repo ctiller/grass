@@ -147,11 +147,10 @@ is not Spike 1's. Review found it.
 
 The agent's write is a *different context* — `ContextKind.externalAgent` — and that
 is exactly why it appears here and not in a `Grass.Op.step` fixture:
-`ConflictsWithHistory` refuses every cross-context conflict pending M8's
-happens-before, which §4.2 records as making M8 a prerequisite for the first
-acceptance program rather than the fourth. `runBlock` is the `applyAccess`-level
-executor and asks no such question, so this block can say what the program does while
-the transition cannot yet admit it. -/
+`ConflictsWithHistory` refuses its unordered cross-context conflict unless an
+actual synchronous call cut is carried by the machine. `runBlock` is the
+`applyAccess`-level executor and asks no such question. The separate checked
+call-ordering fixture exercises the transition with actual handoff and return. -/
 def agentWrite : AccessDescriptor :=
   { access transferredProvenance transferredRange (stackAddress transferredRange.start)
       .write .readWrite 4 false true with

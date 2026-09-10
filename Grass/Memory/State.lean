@@ -3,6 +3,7 @@ import Grass.Memory.Backing
 import Grass.Memory.Audit
 import Grass.Memory.Authority
 import Grass.Memory.Event
+import Grass.Memory.Synchronization
 import Grass.Std.Logical.FiniteMap
 
 /-!
@@ -4714,6 +4715,10 @@ structure MachineState where
   refuses an identity whose kind disagrees with what is recorded here, and records
   the pairing the first time it sees one. -/
   contexts : FiniteMap ContextId ContextKind
+  /-- Causal frontiers for the selected synchronous call interpretation.
+  Only actual memory commits and matched call boundaries extend this state;
+  an empty frontier grants no cross-context ordering. -/
+  synchronization : Synchronization.State := .empty
 
 namespace MachineState
 
