@@ -28,7 +28,7 @@ def commandOffsets : SourceOffsets :=
   let headerStart := "def renamed".toList.length
   let headerFinish := "def renamed : MachineSource p := withCallFrame Api asm_source (statics := s) ".toList.length
   ⟨headerStart, headerFinish, headerFinish + 1, command.length - 1⟩
-example : (captureSourceChars command commandOffsets).toOption = (extractSourceChars command).toOption := by native_decide
-example : (captureSourceChars command { commandOffsets with headerStart := commandOffsets.headerStart - 1 }).toOption = none := by native_decide
-example : (captureSourceChars command { commandOffsets with bodyFinish := commandOffsets.bodyFinish - 1 }).toOption = none := by native_decide
+example : (captureSourceChars command commandOffsets).toOption = (extractSourceChars command).toOption := by decide +kernel
+example : (captureSourceChars command { commandOffsets with headerStart := commandOffsets.headerStart - 1 }).toOption = none := by decide +kernel
+example : (captureSourceChars command { commandOffsets with bodyFinish := commandOffsets.bodyFinish - 1 }).toOption = none := by decide +kernel
 end Grass.Tests.Assembly.SourceInput
