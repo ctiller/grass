@@ -56,3 +56,10 @@ prefixes nor equal endpoints supply that entry ancestry. Its `pending_segment`
 theorem derives the intermediate controls from the actual entry's pending
 control and the indexed slice's internal/publication events. Return and exit
 observations are excluded by the slice condition, not reclassified as service.
+[RawGetStdHandlePending](../Grass/Platform/Win32/RawGetStdHandlePending.lean)
+classifies outgoing choices using exact pending control and the same call's
+GetStdHandle runtime entry: every actual outgoing edge is a stdout-result edge
+for that call. This excludes CPU work and WriteFile service at that frontier.
+It does not establish reply existence for every allowed provider observation,
+or permission for permanent nonresponse. Those are separate obligations before
+this frontier can supply a full external wait boundary.

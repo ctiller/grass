@@ -3,6 +3,7 @@ import Grass.Platform.Win32.RawPhasePreservation
 import Grass.Platform.Win32.RawPendingService
 import Grass.Platform.Win32.RawPrefixSteps
 import Grass.Platform.Win32.RawTerminal
+import Grass.Platform.Win32.RawGetStdHandlePending
 import Grass.Platform.Win32.RawPrefix
 import Grass.Assembly.PrologueFactory
 import Grass.Assembly.CodeWriteFrame
