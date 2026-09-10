@@ -73,6 +73,10 @@ The actual ExitProcess entry retains the selected request's low DWORD status and
 same CallId. It acquires no returning frame. Define a fixed terminal relation
 between that process/occurrence and the observed completed process exit, with
 observed status equal to the request status and accumulated output preserved.
+Preserving output is itself a fixed profile obligation: any teardown/provider
+output must either be represented in the observation relation or excluded by an
+explicit justified environment restriction. It cannot disappear because it was
+not emitted by the guest WriteFile loop.
 Decode the demanded zero/one statuses through the target projection; prove their
 distinction using the existing status encoding. No caller continuation follows
 the terminal edge.
