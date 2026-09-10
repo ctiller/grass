@@ -8,6 +8,7 @@ not follow merely from directed conformance. -/
 
 namespace Grass
 open RelationalSystem
+universe uObservation
 
 /-- Interpret each actual request and dependent response. Permitted lower waits
 must be permitted above; no abstract response-existence promise is introduced. -/
@@ -40,10 +41,14 @@ abbrev Finite (observe : lower.Observation → upper.Observation) :=
   HistorySimulation lower.system upper.system
     (fun history => (lower.observe history).map observe) upper.observe
 
+variable {PublicObservation : Type uObservation}
+  {observeLower : lower.History → PublicObservation}
+  {observeUpper : upper.History → PublicObservation}
+
 /-- Every actual service-and-reply extension has a matching upper extension of the
 same related frontier, including its dependent reply interpretation. -/
-structure WaitMatch {observe : lower.Observation → upper.Observation}
-    (finite : Finite observe) (waits : DirectedWaitTranslation lower upper)
+structure WaitMatch
+    (finite : HistorySimulation lower.system upper.system observeLower observeUpper) (waits : DirectedWaitTranslation lower upper)
     (left : lower.History) (right : upper.History)
     (leftWait : PermanentWait lower.boundary left)
     (rightWait : PermanentWait upper.boundary right) : Prop where
@@ -62,8 +67,8 @@ its explicit finite cut, the same permitted external occurrence stays pending,
 every actual choice requires external agency, no choice is its completed reply,
 and every reached suffix history matches the same upper waiting history.
 It does not identify the infinite run with a stationary lower wait. -/
-structure ExternalNonresponse {observe : lower.Observation → upper.Observation}
-    (finite : Finite observe) (waits : DirectedWaitTranslation lower upper)
+structure ExternalNonresponse
+    (finite : HistorySimulation lower.system upper.system observeLower observeUpper) (waits : DirectedWaitTranslation lower upper)
     (left : lower.History) (right : upper.History)
     (run : lower.system.InfiniteContinuation left.state left.graph left.path.events)
     (rightWait : PermanentWait upper.boundary right) where
@@ -81,14 +86,14 @@ namespace ExternalNonresponse
 
 /-- `observations` exposes equality at every actual suffix cut from the same
 finite simulation law; silent labels alone cannot hide a later publication. -/
-theorem observations {observe : lower.Observation → upper.Observation}
-    {finite : Finite observe} {waits : DirectedWaitTranslation lower upper}
+theorem observations
+    {finite : HistorySimulation lower.system upper.system observeLower observeUpper} {waits : DirectedWaitTranslation lower upper}
     {left : lower.History} {right : upper.History}
     {run : lower.system.InfiniteContinuation left.state left.graph left.path.events}
     {rightWait : PermanentWait upper.boundary right}
     (evidence : ExternalNonresponse finite waits left right run rightWait) (index : Nat) :
-    (lower.observe (left.append (run.prefixPath (evidence.cut + index)))).map observe =
-      upper.observe right := finite.observations (evidence.related index)
+    observeLower (left.append (run.prefixPath (evidence.cut + index))) =
+      observeUpper right := finite.observations (evidence.related index)
 
 end ExternalNonresponse
 
@@ -96,8 +101,7 @@ end ExternalNonresponse
 proved external-nonresponse case. Exact correspondence keeps its original
 strict matching relation. Program-owned infinite work has no new matching case. -/
 inductive CompleteMatchWith (outcomes : Option LowerOutcome → Option UpperOutcome → Prop)
-    {observe : lower.Observation → upper.Observation}
-    (finite : Finite observe) (waits : DirectedWaitTranslation lower upper) :
+    (finite : HistorySimulation lower.system upper.system observeLower observeUpper) (waits : DirectedWaitTranslation lower upper) :
     lower.Complete → upper.Complete → Prop where
   | strict {left right}
       (matched : BehaviorMatching.CompleteMatchWith outcomes finite.Rel (WaitMatch finite waits) left right) :
@@ -108,8 +112,10 @@ inductive CompleteMatchWith (outcomes : Option LowerOutcome → Option UpperOutc
       (evidence : ExternalNonresponse finite waits left right run rightWait) :
       CompleteMatchWith outcomes finite waits (.infinite left run) (.waiting right rightWait)
 
-abbrev CompleteMatch {Outcome : Type} {lower upper : BehaviorModel Outcome} :=
-  @CompleteMatchWith Outcome Outcome lower upper Eq
+abbrev CompleteMatch {Outcome : Type} {lower upper : BehaviorModel Outcome}
+    {observe : lower.Observation → upper.Observation}
+    (finite : Finite observe) (waits : DirectedWaitTranslation lower upper) :=
+  CompleteMatchWith Eq finite waits
 
 namespace CompleteMatch
 export CompleteMatchWith (strict externalNonresponse)
@@ -119,11 +125,13 @@ end ImplementationConformance
 /-- Directed complete conformance extends the same actual initialized histories.
 Terminal, infinite, and waiting executions use the shared distinct constructors. -/
 structure ImplementationConformanceWith {LowerOutcome UpperOutcome : Type}
+    {PublicObservation : Type uObservation}
     (lower : BehaviorModel LowerOutcome) (upper : BehaviorModel UpperOutcome)
-    (observe : lower.Observation → upper.Observation)
+    (observeLower : lower.History → PublicObservation)
+    (observeUpper : upper.History → PublicObservation)
     (waits : DirectedWaitTranslation lower upper)
     (outcomes : Option LowerOutcome → Option UpperOutcome → Prop) where
-  finite : ImplementationConformance.Finite observe
+  finite : HistorySimulation lower.system upper.system observeLower observeUpper
   completeForth : ∀ {left right}, finite.Rel left right → ∀ complete,
     BehaviorModel.Complete.StartsAfter left complete →
     ∃ other, BehaviorModel.Complete.StartsAfter right other ∧
@@ -134,7 +142,8 @@ directed matcher, not a separate execution or proof path. -/
 abbrev ImplementationConformance {Outcome : Type} (lower upper : BehaviorModel Outcome)
     (observe : lower.Observation → upper.Observation)
     (waits : DirectedWaitTranslation lower upper) :=
-  ImplementationConformanceWith lower upper observe waits Eq
+  ImplementationConformanceWith lower upper
+    (fun history => (lower.observe history).map observe) upper.observe waits Eq
 
 namespace BehaviorCorrespondence
 variable {Outcome : Type} {lower : BehaviorModel Outcome} {upper : BehaviorModel Outcome}
