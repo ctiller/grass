@@ -30,7 +30,7 @@ def prepare? : Option
     (Σ prepared : LoadedStaticArgument.Prepared objectBinding loaded call.result.machine.memory cut.offset,
       { entered : CallHandoff loaded before call
           (WriteFileStaticArgument.requestOf call.result prepared
-            (WriteFileCountArgument.argument binding.policy selectedLocal)) provider //
+            (WriteFileCountArgument.argument binding.policy call selectedLocal)) provider //
         LoadedStaticArgument.prepare? objectBinding loaded call.result.machine.memory cut.offset = some prepared ∧
         WriteFileCountEntry.prepareCountCall? before call binding ready evaluated selectedLocal
           prepared.argument prepared.bytes fifth provider = some entered ∧
@@ -51,7 +51,7 @@ theorem request_remaining
     (prepared : LoadedStaticArgument.Prepared objectBinding loaded call.result.machine.memory cut.offset)
     (entered : CallHandoff loaded before call
       (WriteFileStaticArgument.requestOf call.result prepared
-        (WriteFileCountArgument.argument binding.policy selectedLocal)) provider) :
+        (WriteFileCountArgument.argument binding.policy call selectedLocal)) provider) :
     entered.handoff.record.request.bytes = cut.remaining ∧
       entered.handoff.record.request.buffer = prepared.argument ∧
       InputMatches call.result.machine.memory entered.handoff.record.request :=
