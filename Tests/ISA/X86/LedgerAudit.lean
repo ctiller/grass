@@ -67,6 +67,7 @@ import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.ProviderResume
 import Grass.Platform.Win32.CallResumeBinding
+import Grass.Platform.Win32.CallResumeHistory
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.RawStep
 import Grass.Platform.Win32.RawServiceMetadata
@@ -236,6 +237,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.CallRuntime,
    `Grass.Platform.Win32.ProviderResume,
    `Grass.Platform.Win32.CallResumeBinding,
+   `Grass.Platform.Win32.CallResumeHistory,
    `Grass.Platform.Win32.RawStepSignature,
    `Grass.Platform.Win32.RawStep,
    `Grass.Platform.Win32.RawServiceMetadata,
