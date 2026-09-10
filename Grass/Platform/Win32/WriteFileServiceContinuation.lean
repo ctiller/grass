@@ -61,6 +61,45 @@ private theorem CommittedStep.reindex
   · simpa only [← preAccepted, ← postAccepted] using step.publishes
   · simpa only [← preAccepted, ← postAccepted] using step.publication
 
+/-- Append this actual receipt to the supplied history after checking its
+protocol, plan and accepted frontier. Different `Prepared` witnesses do not
+require replacing the original history. The finite and infinite consumers use
+the same committed-step reindexing law. -/
+def extendHistory {before : RawState} {action : Action} {output : Vec Byte}
+    (receipt : ServiceReceipt realization before call record action output)
+    {plan : LoanPlan} {initial state : ProtocolState}
+    {frontier : Prefix plan state call record}
+    (history : History plan realization initial call record frontier)
+    (planEq : receipt.runtime.loanPlan = plan) (stateEq : receipt.protocol = state)
+    (acceptedEq : receipt.pre.accepted = frontier.accepted) :
+    Σ post : Prefix plan receipt.nextProtocol call record,
+      History plan realization initial call record post :=
+  ⟨castPrefixPlan planEq receipt.post,
+    .step history action output (CommittedStep.reindex receipt.committed planEq stateEq rfl
+      acceptedEq (castPrefixPlan_accepted planEq receipt.post).symm)⟩
+
+theorem extendHistory_accepted {before : RawState} {action : Action} {output : Vec Byte}
+    (receipt : ServiceReceipt realization before call record action output)
+    {plan : LoanPlan} {initial state : ProtocolState}
+    {frontier : Prefix plan state call record}
+    (history : History plan realization initial call record frontier)
+    (planEq : receipt.runtime.loanPlan = plan) (stateEq : receipt.protocol = state)
+    (acceptedEq : receipt.pre.accepted = frontier.accepted) :
+    (receipt.extendHistory history planEq stateEq acceptedEq).1.accepted = receipt.post.accepted :=
+  castPrefixPlan_accepted planEq receipt.post
+
+theorem extendHistory_step {before : RawState} {action : Action} {output : Vec Byte}
+    (receipt : ServiceReceipt realization before call record action output)
+    {plan : LoanPlan} {initial state : ProtocolState}
+    {frontier : Prefix plan state call record}
+    (history : History plan realization initial call record frontier)
+    (planEq : receipt.runtime.loanPlan = plan) (stateEq : receipt.protocol = state)
+    (acceptedEq : receipt.pre.accepted = frontier.accepted) :
+    ∃ committed : CommittedStep realization frontier
+        (receipt.extendHistory history planEq stateEq acceptedEq).1 action output,
+      (receipt.extendHistory history planEq stateEq acceptedEq).2 = .step history action output committed :=
+  ⟨_, rfl⟩
+
 /-- Consecutive receipts over the same supplied raw-state stream have the exact
 protocol endpoint and runtime entry computed by the preceding receipt. -/
 theorem stream_continuity
