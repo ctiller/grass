@@ -1,40 +1,34 @@
 import Grass.Assembly.SourceInput
-import Tests.Assembly.SourceLiteral
 namespace Grass.Tests.Assembly.SourceInput
 open Grass.Assembly.SourceInput
 set_option maxRecDepth 1000000
 set_option maxHeartbeats 4000000
 
-def spike1Program : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
-theorem spike1_source_ingress :
-    (extractHelloSourceChars spike1Program).toOption.map (fun body =>
-      (symbolicStores body |>.filter (fun store => store.1 = "transferred"),
-        uint32StackSlots body)) =
-      some ([("transferred", 0)], some ["transferred"]) := by decide +kernel
+def renamed : String :=
+  "def renamed : MachineSource plan := withStack (x : UInt32 := 0) withStack (y : UInt32 := 7) withCallFrame Api asm_source (statics := s) {\n  mov x, 0\n}"
 
-example : (extractHelloSource "def other := asm_source { mov transferred, 0 }").toOption = none := by decide
-example : (extractHelloSource
-    "def helloSource := asm_source { mov transferred, 0 }\n\
-     def helloSource := asm_source { mov transferred, 0 }").toOption = none := by decide
-example : (extractHelloSource "def helloSource := asm_source { nested { }").toOption = none := by decide
-example : (extractHelloSource
-    "-- def helloSource := asm_source { bogus }\n\
-     def helloSource := asm_source (statics := x) { mov transferred, 0 }").toOption.isSome := by decide
-example : (extractHelloSource
-    "def decoy := \"def helloSource := asm_source { bogus }\"\n\
-     def helloSource := asm_source { mov transferred, 0 }").toOption.isSome := by decide
-example : (extractHelloSource
-    "def helloSource := asm_source { /- } /- nested -/ misleading -/ mov transferred, 0 }").toOption.isSome := by decide
-example : (extractHelloSource "def helloSource := asm_source { /- unterminated").toOption = none := by decide
-example : (extractHelloSource "def helloSource := \"unterminated").toOption = none := by decide
-example : (extractHelloSource
-    "def helloSource := asm_source { /- unterminated\n\
-     def helloSource := asm_source { mov transferred, 0 }").toOption = none := by decide
-example : (extractHelloSource
-    "def helloSource := asm_source { \"ignored\nmov transferred, 7\" }").toOption.map
-      symbolicStores = some [] := by decide
-example : (extractHelloSource
-    "def helloSource := withStack (x : UInt64 := 0) asm_source { mov x, 0 }").toOption.map
-      uint32StackSlots = some none := by decide
+example : (extractSource renamed).toOption.map (fun body =>
+    (body.headerText, body.text, uint32StackSlots body)) =
+    some (" : MachineSource plan := withStack (x : UInt32 := 0) withStack (y : UInt32 := 7) withCallFrame Api asm_source (statics := s) ",
+      "\n  mov x, 0\n", some ["x", "y"]) := by decide
+example : (extractSource "def empty : MachineSource p := withCallFrame Api asm_source (statics := s) { }").toOption.map uint32StackSlots = some (some []) := by decide
+example : (extractSource "def renamed := asm_source { nested { } }").toOption.isSome := by decide
+example : (extractSource "def renamed := asm_source { body }\n\t").toOption.isSome := by decide
+example : (extractSource " \ndef renamed := asm_source { body }").toOption = none := by decide
+example : (extractSource "def renamed := asm_source { body } def other := 1").toOption = none := by decide
+example : (extractSource "def renamed := asm_source { body").toOption = none := by decide
+example : (extractSource "def renamed := asm_source { body } junk").toOption = none := by decide
+example : (extractSource "-- def fake := asm_source { bogus }\ndef renamed := asm_source { ok }").toOption = none := by decide
+example : (extractSource "def renamed := asm_source { /- } /- nested -/ still comment -/ ok }").toOption.isSome := by decide
+example : (extractSource "def renamed := asm_source { /- unterminated").toOption = none := by decide
+example : (extractSource "def renamed := \"asm_source { bogus }\"").toOption = none := by decide
 
+def command : List Char := "def renamed : MachineSource p := withCallFrame Api asm_source (statics := s) { mov x, 0 }".toList
+def commandOffsets : SourceOffsets :=
+  let headerStart := "def renamed".toList.length
+  let headerFinish := "def renamed : MachineSource p := withCallFrame Api asm_source (statics := s) ".toList.length
+  ⟨headerStart, headerFinish, headerFinish + 1, command.length - 1⟩
+example : (captureSourceChars command commandOffsets).toOption = (extractSourceChars command).toOption := by native_decide
+example : (captureSourceChars command { commandOffsets with headerStart := commandOffsets.headerStart - 1 }).toOption = none := by native_decide
+example : (captureSourceChars command { commandOffsets with bodyFinish := commandOffsets.bodyFinish - 1 }).toOption = none := by native_decide
 end Grass.Tests.Assembly.SourceInput
