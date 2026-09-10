@@ -135,6 +135,16 @@ same issue applies to WaitTranslation.responseCoverage/WaitMatch.replyBack at a
 specific occurrence. Native-to-model correspondence does not by itself prove
 model-to-authored back coverage.
 
+Direct inspection of HistoryRelation strengthens this check: extendBack already
+requires every upper finite extension from each related pair, and extendForth
+must relate every lower extension. Deferring only the initial choice is not a
+proof. Audit the post-GetStd and post-provider-choice prefixes too. The upper
+ObservedBehavior.writing phase still permits all replies at its cut; reporting
+fixes a Selection and can only observe it. A relation may advance to reporting
+only when that selection and the observation history are justified, not as a
+way to discard inconvenient alternatives. Include WaitMatch's actual reply-headed
+extension coverage, not only equality of protocol response sets.
+
 Root/process must choose and prove the correct quantification: leave model
 environment choices unresolved until the matched interaction and retain the
 selected bindings thereafter, or justify environment conditions in the actual
