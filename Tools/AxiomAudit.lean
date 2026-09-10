@@ -96,6 +96,9 @@ import Grass.Platform.Win32.RawServiceContinuation
 import Grass.Platform.Win32.RawEntryEvent
 import Grass.Platform.Win32.RawServicePreservation
 import Grass.Platform.Win32.ExitProcessRuntime
+import Grass.Platform.Win32.ConsoleEnvironment
+import Grass.Platform.Win32.GetStdHandleReturn
+import Grass.Platform.Win32.GetStdHandleResult
 import Grass.Platform.Win32.GetStdHandleRuntime
 import Grass.Platform.Win32.ProtocolEntry
 import Grass.Platform.Win32.GetStdHandleStackPlan
