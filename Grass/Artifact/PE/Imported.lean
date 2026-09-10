@@ -16,13 +16,13 @@ structure ImportedPrefix where
 /-- Follow the on-disk NT offset instead of treating the DOS stub as a signature.
 All arithmetic is unbounded Nat; takeExact checks available file bytes. -/
 def readImportedPrefix (input : Std.Logical.ByteArray) : ParseResult ImportedPrefix :=
-  continueRead (takeExact 2 input) fun dosMagic input =>
-  continueRead (takeExact 58 input) fun dosCompatibility input =>
-  continueRead (takeLittleEndian 4 input) fun ntOffset input =>
+  Grass.Artifact.Binary.continueRead (takeExact 2 input) fun dosMagic input =>
+  Grass.Artifact.Binary.continueRead (takeExact 58 input) fun dosCompatibility input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun ntOffset input =>
   if dosMagic = Vec.fromList [0x4d, 0x5a] then
     if 64 ≤ ntOffset.toNat then
-      continueRead (takeExact (ntOffset.toNat - 64) input) fun dosStub input =>
-      continueRead (readSignatureAndCoff dosMagic dosCompatibility ntOffset input)
+      Grass.Artifact.Binary.continueRead (takeExact (ntOffset.toNat - 64) input) fun dosStub input =>
+      Grass.Artifact.Binary.continueRead (readSignatureAndCoff dosMagic dosCompatibility ntOffset input)
         fun header rest => .done ⟨header, dosStub⟩ rest
     else .invalid (.malformed "NT headers overlap the DOS header")
   else .invalid (.unsupported "expected DOS MZ header")
@@ -53,18 +53,18 @@ theorem ImportedImage.section_exact {input : Std.Logical.ByteArray}
 /-- Read the actual external container, retaining unsupported/malformed and
 incomplete cases. No normalization or rewriting of its bytes is performed. -/
 def readImportedImage (input : Std.Logical.ByteArray) : ParseResult (ImportedImage input) :=
-  continueRead (readImportedPrefix input) fun decodedPrefix rest =>
+  Grass.Artifact.Binary.continueRead (readImportedPrefix input) fun decodedPrefix rest =>
   if decodedPrefix.header.signature = Vec.fromList [0x50, 0x45, 0, 0] ∧
       decodedPrefix.header.machine = amd64Machine ∧ decodedPrefix.header.optionalHeaderSize = 240 then
-    continueRead (readOptionalHeader rest) fun optional rest =>
+    Grass.Artifact.Binary.continueRead (readOptionalHeader rest) fun optional rest =>
     if optional.magic = 0x020b ∧ optional.directoryCount = 16 then
-      continueRead (readSectionHeaders decodedPrefix.header.sectionCount.toNat rest) fun headers rest =>
+      Grass.Artifact.Binary.continueRead (readSectionHeaders decodedPrefix.header.sectionCount.toNat rest) fun headers rest =>
       let headersEnd := decodedPrefix.header.ntOffset.toNat + peSignatureSize + coffHeaderSize +
         optionalHeader64Size + sectionHeaderSize * decodedPrefix.header.sectionCount.toNat
       if headersEnd ≤ optional.sizeOfHeaders.toNat then
-        continueRead (takeExact (optional.sizeOfHeaders.toNat - headersEnd) rest)
+        Grass.Artifact.Binary.continueRead (takeExact (optional.sizeOfHeaders.toNat - headersEnd) rest)
           fun headerPadding rest =>
-        continueRead (readSectionContents headers optional.sizeOfHeaders.toNat rest)
+        Grass.Artifact.Binary.continueRead (readSectionContents headers optional.sizeOfHeaders.toNat rest)
           fun sections suffix =>
         if suffix.length = 0 then
           if exactSlices : sectionSlicesMatch input sections = true then

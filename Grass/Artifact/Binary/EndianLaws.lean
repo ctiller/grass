@@ -10,6 +10,15 @@ namespace Grass.Artifact.Binary
 
 open Grass.Std.Logical Grass.Grammar
 
+/-- A successful sized exact read consumes precisely the returned byte sequence. -/
+theorem takeExactSized_done {count : Nat} {input rest : Std.Logical.ByteArray}
+    {value : SizedByteArray count}
+    (success : takeExactSized count input = .done value rest) :
+    input = writeExact value ++ rest := by
+  have selected := (takeExactSized_realizes count).consumes input value rest success
+  change input = value.1 ++ rest at selected
+  simpa [writeExact] using selected
+
 /-- `takeLittleEndian_writeLittleEndian_append` preserves every trailing byte. -/
 @[simp] theorem takeLittleEndian_writeLittleEndian_append {count : Nat}
     (value : BitVec (8 * count)) (rest : Std.Logical.ByteArray) :
@@ -29,6 +38,16 @@ theorem takeLittleEndian_short {count : Nat} {input : Std.Logical.ByteArray}
     (short : input.length < count) :
     takeLittleEndian count input = .needMore (some (count - input.length)) := by
   simp [takeLittleEndian, isoParser, takeExactSized_short short, ParseResult.map]
+
+/-- A successful little-endian read consumes precisely that value's encoding. -/
+theorem takeLittleEndian_done {count : Nat} {input rest : Std.Logical.ByteArray}
+    {value : BitVec (8 * count)}
+    (success : takeLittleEndian count input = .done value rest) :
+    input = writeLittleEndian value ++ rest := by
+  have selected := (takeLittleEndian_realizes count).consumes input value rest success
+  unfold littleEndianSemantics FormatSemantics.iso at selected
+  change input = (bitVecToLittleEndian value).1 ++ rest at selected
+  simpa [writeLittleEndian, isoWriter, writeExact, littleEndianIsomorphism] using selected
 
 /-- `takeBigEndian_short` returns the exact missing byte count. -/
 theorem takeBigEndian_short {count : Nat} {input : Std.Logical.ByteArray}

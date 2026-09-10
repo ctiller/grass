@@ -118,6 +118,8 @@ import Grass.Platform.Win32.WriteFileService
 import Grass.Platform.Win32.WriteFileServiceContinuation
 import Grass.Platform.Win32.WriteFileRuntimeLinked
 import Grass.Platform.Win32.ApiDispatch
+import Grass.Platform.Linux.Syscall
+import Grass.Platform.Linux.X86
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
 import Grass.Artifact.PE.ExceptionBinding
@@ -309,6 +311,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileServiceContinuation,
    `Grass.Platform.Win32.WriteFileRuntimeLinked,
    `Grass.Platform.Win32.ApiDispatch,
+   `Grass.Platform.Linux.Syscall, `Grass.Platform.Linux.X86,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
@@ -378,7 +381,11 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Static selector/route/result policy and observed-register API acceptance.
 -- External process applicability and formal source anchors remain owed.
 -- The bounded live writable/synchronous publication attribution policy.
-def owedBaseline : Nat := 349
+-- Ten Linux native syscall API/ABI definitions carry table-number, physical
+-- register, argument-width, and raw-error semantics. Primary Linux kernel
+-- anchors are reviewed in REFERENCES.md and the Linux modules; formal ledger
+-- attachment remains owed, so none is promoted to cited or native proof.
+def owedBaseline : Nat := 357
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -1040,6 +1047,8 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.MemOperand.indexRegister,
     `Grass.ISA.X86.RmEncoding.needsRex, `Grass.ISA.X86.RmEncoding.modrm,
     `Grass.ISA.X86.RmEncoding.rex,
+    -- Pure projection from the already selected internal request sum.
+    `Grass.Platform.Linux.Syscall.Request.id,
     ]
 
 /--
@@ -1423,6 +1432,19 @@ def owed : List Name :=
     `Grass.ISA.X86.BasicInstructions.ud2,
     `Grass.ISA.X86.Rel32.encode,
     `Grass.ISA.X86.Rel32.encodedSize,
+    -- Linux native syscall table, register selection, argument widths and raw
+    -- error convention. Kernel sources are recorded, but declaration-level
+    -- citation subjects and native entry receipts remain outstanding.
+    `Grass.Platform.Linux.Syscall.number,
+    `Grass.Platform.Linux.Syscall.id?,
+    `Grass.Platform.Linux.Syscall.captureX86,
+    `Grass.Platform.Linux.Syscall.captureAArch64,
+    `Grass.Platform.Linux.Syscall.decode?,
+    `Grass.Platform.Linux.Syscall.errorThreshold,
+    `Grass.Platform.Linux.Syscall.decodeRaw,
+    `Grass.Platform.Linux.Syscall.X86.captureRequest,
+    `Grass.Platform.Linux.Syscall.X86.decodeRequest?,
+    `Grass.Platform.Linux.Syscall.X86.decodeResult,
     -- The opcode table is the largest single block of uncited vendor fact in
     -- the tree: every row asserts what follows an opcode in the byte stream.
     `Grass.ISA.X86.opcodeTable, `Grass.ISA.X86.decodeInsn,

@@ -18,8 +18,8 @@ open Grass.Grammar Grass.Std.Logical Grass.Artifact.Binary
 def readSectionHeaders : Nat → Std.Logical.ByteArray → ParseResult (List ParsedSectionHeader)
   | 0, input => .done [] input
   | n + 1, input =>
-      continueRead (readSectionHeader input) fun header rest =>
-      continueRead (readSectionHeaders n rest) fun tail suffix =>
+      Grass.Artifact.Binary.continueRead (readSectionHeader input) fun header rest =>
+      Grass.Artifact.Binary.continueRead (readSectionHeaders n rest) fun tail suffix =>
       .done (header :: tail) suffix
 
 /-- All section headers are recovered in order with their exact suffix. -/
@@ -31,7 +31,7 @@ theorem readSectionHeaders_write_append (sections : List PlacedSection)
   | nil => simp [readSectionHeaders, writeSectionTableList]
   | cons head tail ih =>
       simp only [List.length_cons, writeSectionTableList, Vec.append_assoc,
-        readSectionHeaders, readSectionHeader_writeSectionHeader_append, continueRead,
+        readSectionHeaders, readSectionHeader_writeSectionHeader_append, Grass.Artifact.Binary.continueRead,
         ih, List.map_cons]
 
 /-- A section's full raw extent, including file-alignment padding. -/
@@ -47,8 +47,8 @@ def readSectionContents : List ParsedSectionHeader → Nat →
   | [], _, input => .done [] input
   | header :: tail, cursor, input =>
       if header.rawOffset.toNat = cursor then
-        continueRead (takeExact header.rawSize.toNat input) fun rawData rest =>
-        continueRead (readSectionContents tail (cursor + header.rawSize.toNat) rest)
+        Grass.Artifact.Binary.continueRead (takeExact header.rawSize.toNat input) fun rawData rest =>
+        Grass.Artifact.Binary.continueRead (readSectionContents tail (cursor + header.rawSize.toNat) rest)
           fun contents suffix => .done (⟨header, rawData⟩ :: contents) suffix
       else .invalid (.malformed "PE raw section offset is not contiguous")
 
@@ -72,16 +72,16 @@ def supportedImageHeader (header : ParsedHeaderPrefix) (optional : ParsedOptiona
 /-- Decode one complete image. Header size and all raw offsets are checked;
 unclaimed trailing bytes are rejected. -/
 def readImage (input : Std.Logical.ByteArray) : ParseResult ParsedImage :=
-  continueRead (readHeaderPrefix input) fun header rest =>
-  continueRead (readOptionalHeader rest) fun optional rest =>
+  Grass.Artifact.Binary.continueRead (readHeaderPrefix input) fun header rest =>
+  Grass.Artifact.Binary.continueRead (readOptionalHeader rest) fun optional rest =>
   if supportedImageHeader header optional then
-    continueRead (readSectionHeaders header.sectionCount.toNat rest) fun headers rest =>
+    Grass.Artifact.Binary.continueRead (readSectionHeaders header.sectionCount.toNat rest) fun headers rest =>
     let headersEnd := canonicalPeOffset + peSignatureSize + coffHeaderSize +
       optionalHeader64Size + sectionHeaderSize * header.sectionCount.toNat
     if headersEnd ≤ optional.sizeOfHeaders.toNat then
-      continueRead (takeExact (optional.sizeOfHeaders.toNat - headersEnd) rest)
+      Grass.Artifact.Binary.continueRead (takeExact (optional.sizeOfHeaders.toNat - headersEnd) rest)
         fun headerPadding rest =>
-      continueRead (readSectionContents headers optional.sizeOfHeaders.toNat rest)
+      Grass.Artifact.Binary.continueRead (readSectionContents headers optional.sizeOfHeaders.toNat rest)
         fun sections suffix =>
       if suffix.length = 0 then
         .done { header, optional, headerPadding, sections } Vec.empty

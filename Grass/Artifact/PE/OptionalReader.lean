@@ -54,43 +54,43 @@ deriving DecidableEq, Repr
 
 /-- Decode the complete 240-byte PE32+ header independently of serialization. -/
 def readOptionalHeader (input : Std.Logical.ByteArray) : ParseResult ParsedOptionalHeader :=
-  continueRead (takeLittleEndian 2 input) fun magic input =>
-  continueRead (takeExact 2 input) fun linkerVersion input =>
-  continueRead (takeLittleEndian 4 input) fun sizeOfCode input =>
-  continueRead (takeLittleEndian 4 input) fun sizeOfInitializedData input =>
-  continueRead (takeLittleEndian 4 input) fun sizeOfUninitializedData input =>
-  continueRead (takeLittleEndian 4 input) fun entryPointRva input =>
-  continueRead (takeLittleEndian 4 input) fun baseOfCode input =>
-  continueRead (takeLittleEndian 8 input) fun imageBase input =>
-  continueRead (takeLittleEndian 4 input) fun sectionAlignment input =>
-  continueRead (takeLittleEndian 4 input) fun fileAlignment input =>
-  continueRead (takeLittleEndian 2 input) fun majorOSVersion input =>
-  continueRead (takeLittleEndian 2 input) fun minorOSVersion input =>
-  continueRead (takeLittleEndian 2 input) fun majorImageVersion input =>
-  continueRead (takeLittleEndian 2 input) fun minorImageVersion input =>
-  continueRead (takeLittleEndian 2 input) fun majorSubsystemVersion input =>
-  continueRead (takeLittleEndian 2 input) fun minorSubsystemVersion input =>
-  continueRead (takeLittleEndian 4 input) fun win32Version input =>
-  continueRead (takeLittleEndian 4 input) fun sizeOfImage input =>
-  continueRead (takeLittleEndian 4 input) fun sizeOfHeaders input =>
-  continueRead (takeLittleEndian 4 input) fun checksum input =>
-  continueRead (takeLittleEndian 2 input) fun subsystem input =>
-  continueRead (takeLittleEndian 2 input) fun dllCharacteristics input =>
-  continueRead (takeLittleEndian 8 input) fun stackReserve input =>
-  continueRead (takeLittleEndian 8 input) fun stackCommit input =>
-  continueRead (takeLittleEndian 8 input) fun heapReserve input =>
-  continueRead (takeLittleEndian 8 input) fun heapCommit input =>
-  continueRead (takeLittleEndian 4 input) fun loaderFlags input =>
-  continueRead (takeLittleEndian 4 input) fun directoryCount input =>
-  continueRead (takeLittleEndian 4 input) fun exportRva input =>
-  continueRead (takeLittleEndian 4 input) fun exportSize input =>
-  continueRead (takeLittleEndian 4 input) fun importRva input =>
-  continueRead (takeLittleEndian 4 input) fun importSize input =>
-  continueRead (takeLittleEndian 4 input) fun resourceRva input =>
-  continueRead (takeLittleEndian 4 input) fun resourceSize input =>
-  continueRead (takeLittleEndian 4 input) fun exceptionRva input =>
-  continueRead (takeLittleEndian 4 input) fun exceptionSize input =>
-  continueRead (takeExact 96 input) fun remainingDirectories input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 2 input) fun magic input =>
+  Grass.Artifact.Binary.continueRead (takeExact 2 input) fun linkerVersion input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun sizeOfCode input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun sizeOfInitializedData input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun sizeOfUninitializedData input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun entryPointRva input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun baseOfCode input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 8 input) fun imageBase input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun sectionAlignment input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun fileAlignment input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 2 input) fun majorOSVersion input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 2 input) fun minorOSVersion input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 2 input) fun majorImageVersion input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 2 input) fun minorImageVersion input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 2 input) fun majorSubsystemVersion input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 2 input) fun minorSubsystemVersion input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun win32Version input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun sizeOfImage input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun sizeOfHeaders input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun checksum input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 2 input) fun subsystem input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 2 input) fun dllCharacteristics input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 8 input) fun stackReserve input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 8 input) fun stackCommit input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 8 input) fun heapReserve input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 8 input) fun heapCommit input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun loaderFlags input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun directoryCount input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun exportRva input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun exportSize input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun importRva input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun importSize input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun resourceRva input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun resourceSize input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun exceptionRva input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun exceptionSize input =>
+  Grass.Artifact.Binary.continueRead (takeExact 96 input) fun remainingDirectories input =>
   .done { magic, linkerVersion, sizeOfCode, sizeOfInitializedData, sizeOfUninitializedData, entryPointRva, baseOfCode, imageBase, sectionAlignment, fileAlignment, majorOSVersion, minorOSVersion, majorImageVersion, minorImageVersion, majorSubsystemVersion, minorSubsystemVersion, win32Version, sizeOfImage, sizeOfHeaders, checksum, subsystem, dllCharacteristics, stackReserve, stackCommit, heapReserve, heapCommit, loaderFlags, directoryCount, exportRva, exportSize, importRva, importSize, resourceRva, resourceSize, exceptionRva, exceptionSize, remainingDirectories } input
 
 /-- The field values synthesized from the single image layout. -/
@@ -140,7 +140,7 @@ theorem readOptionalHeader_write_append (layout : ImageLayout)
       .done (expectedOptionalHeader layout) suffix := by
   simp only [readOptionalHeader, writeOptionalHeader, writeDataDirectories,
     writeDataDirectory, Vec.append_assoc, takeLittleEndian_writeLittleEndian_append,
-    continueRead]
+    Grass.Artifact.Binary.continueRead]
   rw [takeExact_append (by simp : (Vec.fromList [14, 0] : Std.Logical.ByteArray).length = 2)]
   simp only [takeLittleEndian_writeLittleEndian_append]
   rw [takeExact_append (by simp : (Vec.replicate (12 * 8) (0 : Byte)).length = 96)]
