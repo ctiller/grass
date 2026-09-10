@@ -1,4 +1,6 @@
 import Lean
+import Grass.Platform.Win32.RawPhasePreservation
+import Grass.Platform.Win32.RawPrefix
 import Grass.Assembly.PrologueFactory
 import Grass.Assembly.CodeWriteFrame
 import Grass.Assembly.LoadedCodeRoot
