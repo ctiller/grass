@@ -233,7 +233,11 @@ def boundary (request : LineRequest Outcome) (rendering : LineRendering) :
       simp only [History.append] at afterPending
       change State.observed selection = State.reporting selection at afterPending
       cases afterPending
-  reply_path := by
+
+/-- This particular model realizes every allowed reply; generic waiting does not
+require an implementation to realize all permitted alternatives. -/
+theorem repliesAvailable (request : LineRequest Outcome) (rendering : LineRendering) :
+    (boundary request rendering).RepliesAvailable := by
     intro history occurrence pending response allowed
     refine ⟨history.state, history.graph, .nil, by simp [Path.choices], pending, ?_⟩
     cases occurrence with

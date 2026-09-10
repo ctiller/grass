@@ -156,9 +156,11 @@ def infiniteGenerated (strategy : model.EnvironmentStrategy) (history : model.Hi
       history.path.events) : EnvironmentStrategy.Generated model strategy history :=
   ⟨.infinite continuation, trivial⟩
 
-/-- Every allowed dependent response and every concrete realization of it
-extends the exact history; the strategy has no predicate capable of pruning it. -/
+/-- Under the explicit stronger availability law, every allowed dependent
+response has a concrete realization extending the exact history; the strategy
+has no predicate capable of pruning that supplied path. -/
 theorem allowedResponseHistory (_strategy : model.EnvironmentStrategy)
+    (available : model.boundary.RepliesAvailable)
     (history : model.History) (occurrence : model.boundary.Occurrence)
     (pending : model.boundary.Pending history occurrence)
     (response : model.protocol.Response (model.boundary.request occurrence))
@@ -170,7 +172,7 @@ theorem allowedResponseHistory (_strategy : model.EnvironmentStrategy)
       ∃ choice event next nextGraph,
         model.boundary.Reply occurrence response choice ∧
         model.system.Step graph state choice event next nextGraph :=
-  model.boundary.reply_path history occurrence pending response allowed
+  available history occurrence pending response allowed
 
 /-- The first transition of an infinite continuation from a pending frontier
 uses the selected external agency. It need not complete the reply. -/

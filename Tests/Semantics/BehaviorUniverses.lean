@@ -55,12 +55,6 @@ private def highBoundary : highSystem.WaitBoundary.{1, 0, 1, 0} highProtocol whe
     change next.down = occurrence at later
     change next.down = history.state.down + 1 at step
     omega
-  reply_path := by
-    intro history occurrence pending response allowed
-    exact ⟨history.state, history.graph, .nil, by intros; contradiction, pending,
-      .cpu (.interruption 0), .up { memory := [], boundaries := [], kind := .internal },
-      .up (history.state.down + 1), history.graph, trivial, rfl⟩
-
 private def high : BehaviorModel.{1, 0, 1, 0} Empty where
   Event := HighEvent
   Observation := Unit
@@ -125,12 +119,6 @@ private def lowBoundary : lowSystem.WaitBoundary lowProtocol where
     have impossible : occurrence = occurrence + 1 :=
       later.symm.trans (step'.trans (congrArg (· + 1) pending'))
     omega
-  reply_path := by
-    intro history occurrence pending response allowed
-    exact ⟨history.state, history.graph, .nil, by intros; contradiction, pending, (), (),
-      Nat.succ (show Nat from history.state), history.graph, trivial, by
-        simp only [lowSystem]⟩
-
 private def low : BehaviorModel Empty where
   Event := Unit
   Observation := Unit

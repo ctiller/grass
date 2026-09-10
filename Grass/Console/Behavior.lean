@@ -228,7 +228,11 @@ def boundary (payload : Vec Byte) : (system payload).WaitBoundary (protocol payl
         simp only [History.append] at pending
         change State.finished cut cause = State.pending cut at pending
         cases pending
-  reply_path := by
+
+/-- This particular model realizes every allowed reply; generic waiting does not
+require an implementation to realize all permitted alternatives. -/
+theorem repliesAvailable (payload : Vec Byte) :
+    (boundary payload).RepliesAvailable := by
     intro history cut located response allowed
     refine ⟨history.state, history.graph, .nil, ?_, located, ?_⟩
     · simp [Path.choices]

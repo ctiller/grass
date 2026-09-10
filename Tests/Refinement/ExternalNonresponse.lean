@@ -67,11 +67,6 @@ abbrev boundary : system.WaitBoundary protocol where
       subst next
       simp only [History.append] at afterPending
       cases afterPending
-  reply_path := by
-    intro history occurrence pending response allowed
-    refine ⟨history.state, history.graph, .nil, by simp [Path.choices], pending, ?_⟩
-    exact ⟨.reply, (), true, (), rfl, Or.inr ⟨pending, rfl, rfl⟩⟩
-
 abbrev model : BehaviorModel Unit where
   Event := Unit
   Observation := Unit

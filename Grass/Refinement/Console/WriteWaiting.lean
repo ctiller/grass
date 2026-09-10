@@ -102,7 +102,11 @@ def boundary {payload : Vec Byte} (mayWait : Demand payload → Prop) :
     have sameAge : history.state.age = next.age :=
       congrArg (fun point => point.age) (beforePoint.symm.trans afterPoint)
     omega
-  reply_path := by
+
+/-- This particular model realizes every allowed reply; generic waiting does not
+require an implementation to realize all permitted alternatives. -/
+theorem repliesAvailable {payload : Vec Byte} (mayWait : Demand payload → Prop) :
+    (boundary mayWait).RepliesAvailable := by
     intro history occurrence held response _
     refine ⟨history.state, history.graph, .nil, by simp [Path.choices], held, ?_⟩
     refine ⟨.result occurrence response, [],

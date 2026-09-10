@@ -71,18 +71,24 @@ structure WaitBoundary (system : RelationalSystem Event)
     ∀ step : system.Step history.graph history.state choice event next nextGraph,
     Reply occurrence response choice →
       ¬ Pending (history.append (.snoc .nil choice event next nextGraph step)) occurrence
-  reply_path : ∀ history occurrence, Pending history occurrence →
-    ∀ response, protocol.Allowed (request occurrence) response →
-    ∃ state graph, ∃ beforeReply : system.Path history.state history.graph state graph,
-      (∀ choice ∈ beforeReply.choices, ∀ earlier, ¬ Reply occurrence earlier choice) ∧
-      Pending (history.append beforeReply) occurrence ∧
-      ∃ choice event next nextGraph,
-        Reply occurrence response choice ∧
-        system.Step graph state choice event next nextGraph
 namespace WaitBoundary
 
 variable {protocol : WaitProtocol.{uRequest, uResponse} Request}
   (boundary : system.WaitBoundary.{uSystem, uRequest, uResponse, uOccurrence} protocol)
+
+/-- Optional progress law: every allowed response has an actual finite
+service path followed by its reply. The boundary itself classifies agency and
+replies without asserting that any permitted response exists operationally. -/
+def RepliesAvailable : Prop :=
+  ∀ history occurrence, boundary.Pending history occurrence →
+    ∀ response, protocol.Allowed (boundary.request occurrence) response →
+    ∃ state graph, ∃ beforeReply : system.Path history.state history.graph state graph,
+      (∀ choice ∈ beforeReply.choices, ∀ earlier,
+        ¬ boundary.Reply occurrence earlier choice) ∧
+      boundary.Pending (history.append beforeReply) occurrence ∧
+      ∃ choice event next nextGraph,
+        boundary.Reply occurrence response choice ∧
+        system.Step graph state choice event next nextGraph
 
 /-- `path_pending_or_reply` follows the actual path: either this occurrence is
 still pending, or one of its retained choices delivered an allowed reply. -/
@@ -178,9 +184,11 @@ theorem impossible_when_forbidden
   rintro ⟨waiting⟩
   exact forbidden waiting.occurrence waiting.pending waiting.permitted
 
-/-- Every allowed reply has an actual finite service path followed by its
-completed response. Permanent nonresponse itself takes no step. -/
-theorem reply_possible (waiting : PermanentWait boundary history)
+/-- Under the explicit stronger availability law, every allowed reply has an
+actual finite service path followed by its completed response. Protocol
+permission alone does not supply this path. Permanent nonresponse takes no step. -/
+theorem reply_possible (available : boundary.RepliesAvailable)
+    (waiting : PermanentWait boundary history)
     (response : protocol.Response (boundary.request waiting.occurrence))
     (allowed : protocol.Allowed (boundary.request waiting.occurrence) response) :
     ∃ state graph, ∃ beforeReply : system.Path history.state history.graph state graph,
@@ -190,7 +198,7 @@ theorem reply_possible (waiting : PermanentWait boundary history)
       ∃ choice event next nextGraph,
         boundary.Reply waiting.occurrence response choice ∧
         system.Step graph state choice event next nextGraph :=
-  boundary.reply_path history waiting.occurrence waiting.pending response allowed
+  available history waiting.occurrence waiting.pending response allowed
 end PermanentWait
 
 /-- Complete histories keep terminal, infinite-step, and external nonresponse

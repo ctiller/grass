@@ -83,9 +83,11 @@ rather than an automatic claim about arbitrary relational systems. -/
 structure BoundaryTerminalAdequate (boundary : system.WaitBoundary protocol) : Prop where
   complete : ∀ history : system.History, Nonempty (TerminalExtension boundary history)
 
-/-- Every allowed dependent response supplies the exact appended history. All
-finite histories are retained because the timing strategy has no history filter. -/
-theorem allowedReplyHistory (history : system.History) (occurrence : boundary.Occurrence)
+/-- Under the explicit stronger availability law, every allowed dependent
+response supplies the exact appended history. Permission alone does not assert
+that a reply path exists. -/
+theorem allowedReplyHistory (available : boundary.RepliesAvailable)
+    (history : system.History) (occurrence : boundary.Occurrence)
     (pending : boundary.Pending history occurrence)
     (response : protocol.Response (boundary.request occurrence))
     (allowed : protocol.Allowed (boundary.request occurrence) response) :
@@ -96,7 +98,7 @@ theorem allowedReplyHistory (history : system.History) (occurrence : boundary.Oc
       ∃ choice event next nextGraph,
         boundary.Reply occurrence response choice ∧
         system.Step graph state choice event next nextGraph :=
-  boundary.reply_path history occurrence pending response allowed
+  available history occurrence pending response allowed
 
 @[simp] theorem responding_responsive (boundary : system.WaitBoundary protocol) :
     BoundaryResponsive (BoundaryTimingStrategy.responding boundary) := by

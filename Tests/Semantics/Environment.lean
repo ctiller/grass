@@ -47,7 +47,7 @@ private def boundary : spinningSystem.WaitBoundary protocol where
     have impossible : occurrence = occurrence + 1 :=
       later.symm.trans (step'.trans (congrArg (· + 1) pending'))
     omega
-  reply_path := by
+private theorem repliesAvailable : boundary.RepliesAvailable := by
     intro history occurrence pending response allowed
     exact ⟨history.state, history.graph, .nil, by intros; contradiction, pending, response, (),
       Nat.succ (show Nat from history.state), history.graph, rfl, by
@@ -118,6 +118,6 @@ example (strategy : model.EnvironmentStrategy) (history : model.History)
       ∃ choice event next nextGraph,
         model.boundary.Reply history.state response choice ∧
         model.system.Step graph state choice event next nextGraph :=
-  model.allowedResponseHistory strategy history history.state rfl response trivial
+  model.allowedResponseHistory strategy repliesAvailable history history.state rfl response trivial
 
 end Grass.Tests.Semantics.Environment

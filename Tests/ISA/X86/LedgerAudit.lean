@@ -75,6 +75,10 @@ import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.RawStep
 import Grass.Platform.Win32.RawPhasePreservation
 import Grass.Platform.Win32.RawPrefix
+import Grass.Platform.Win32.RawObservation
+import Grass.Platform.Win32.RawSafety
+import Grass.Platform.Win32.RawStateSafety
+import Grass.Platform.Win32.RawWaiting
 import Grass.Platform.Win32.RawPendingService
 import Grass.Platform.Win32.RawPrefixSteps
 import Grass.Platform.Win32.RawTerminal
@@ -268,6 +272,10 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawStep,
    `Grass.Platform.Win32.RawPhasePreservation,
    `Grass.Platform.Win32.RawPrefix,
+   `Grass.Platform.Win32.RawObservation,
+   `Grass.Platform.Win32.RawSafety,
+   `Grass.Platform.Win32.RawStateSafety,
+   `Grass.Platform.Win32.RawWaiting,
    `Grass.Platform.Win32.RawPendingService,
    `Grass.Platform.Win32.RawPrefixSteps,
    `Grass.Platform.Win32.RawTerminal,
@@ -379,7 +387,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Static selector/route/result policy and observed-register API acceptance.
 -- External process applicability and formal source anchors remain owed.
 -- The bounded live writable/synchronous publication attribution policy.
-def owedBaseline : Nat := 349
+-- Selected external agency and nonresponse policy require an external semantic basis.
+def owedBaseline : Nat := 351
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -448,7 +457,8 @@ acquiring a citation.
 -- Checked WriteFile resume construction and computed final carrier.
 -- Three selected provider-response definitions project existing endpoint laws;
 -- they add no native response, wait permission or provider applicability claim.
-def notBehaviourBaseline : Nat := 403
+-- Fourteen raw coverage, safety, observation and boundary compositions reuse existing evidence.
+def notBehaviourBaseline : Nat := 417
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -591,6 +601,22 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Fixed projections and proof obligations; underlying external claims remain owed.
+    `Grass.Platform.Win32.Raw.Coverage,
+    `Grass.Platform.Win32.Raw.EventCovered,
+    `Grass.Platform.Win32.Raw.FaultSuffixRecognized,
+    `Grass.Platform.Win32.Raw.InitialAdmission,
+    `Grass.Platform.Win32.Raw.OutgoingCoverage,
+    `Grass.Platform.Win32.Raw.WaitOccurrence.Reply,
+    `Grass.Platform.Win32.Raw.WaitOccurrence.ReplyFor,
+    `Grass.Platform.Win32.Raw.behaviorModel,
+    `Grass.Platform.Win32.Raw.endpointObservation,
+    `Grass.Platform.Win32.Raw.historyObservation,
+    `Grass.Platform.Win32.Raw.observationProjection,
+    `Grass.Platform.Win32.Raw.observeEvent,
+    `Grass.Platform.Win32.Raw.observeHistory,
+    `Grass.Platform.Win32.Raw.waitBoundary,
+
     -- Packages the existing checked PE writer, reader and roundtrip theorem.
     -- It introduces no alternate serialization, loader rule or format fact.
     `Grass.Artifact.PE.encoding,
@@ -1076,6 +1102,9 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    `Grass.Platform.Win32.Raw.WaitOccurrence.External,
+    `Grass.Platform.Win32.Raw.waitProtocol,
+
     -- Fixed console table/sentinel policy and observed API/ABI acceptance.
     `Grass.Platform.Win32.ConsoleEnvironment.standardHandle?,
     `Grass.Platform.Win32.ConsoleEnvironment.routeOf?,

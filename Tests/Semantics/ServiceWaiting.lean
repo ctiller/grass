@@ -60,22 +60,6 @@ private abbrev boundary : system.WaitBoundary protocol where
   reply_ends := by
     intro history occurrence pending response choice event next nextGraph step reply later
     rcases step with step | step | step <;> simp [History.append] at later <;> simp_all
-  reply_path := by
-    intro history occurrence pending response allowed
-    rcases pending with awaiting | serviced
-    · let service : system.Path history.state () .serviced () :=
-        (Path.nil : system.Path history.state () history.state ()).snoc
-          Choice.service false Phase.serviced () (Or.inl ⟨awaiting, rfl, rfl, rfl⟩)
-      refine ⟨.serviced, (), service, ?_, ?_, .reply, true, .completed, (), rfl,
-        by simp [Step]⟩
-      · intro choice member earlier reply
-        simp [service, Path.choices] at member
-        cases member
-        cases reply
-      · exact Or.inr rfl
-    · exact ⟨history.state, (), .nil, by intros; contradiction, Or.inr serviced,
-        .reply, true, .completed, (), rfl, by simp [Step, serviced]⟩
-
 private abbrev model : BehaviorModel Unit where
   Event := Bool
   Observation := Bool

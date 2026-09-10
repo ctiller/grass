@@ -38,8 +38,6 @@ def boundary : system.WaitBoundary protocol where
   step_pending_or_reply _ occurrence := nomatch occurrence
   reply_allowed _ occurrence := nomatch occurrence
   reply_ends _ occurrence := nomatch occurrence
-  reply_path _ occurrence := nomatch occurrence
-
 def model : BehaviorModel Unit where
   Event := Unit
   Observation := Unit

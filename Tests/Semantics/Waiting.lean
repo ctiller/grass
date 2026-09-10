@@ -25,13 +25,13 @@ private def permitsWait : WaitProtocol Unit where
   AllowsPermanentWait := fun _ => True
 
 /-- Even permission to wait cannot turn ordinary internal deadlock into an
-external frontier: an allowed response must actually be possible. This holds
-for every attempted boundary interpretation, not just one with empty Pending. -/
+external frontier when response availability is explicitly required. Generic
+permission alone does not establish external agency or response availability. -/
 theorem ordinary_deadlock_rejected (boundary : stuck.WaitBoundary permitsWait)
-    (history : stuck.History) : ¬ Nonempty (PermanentWait boundary history) := by
+    (history : stuck.History) (available : boundary.RepliesAvailable) : ¬ Nonempty (PermanentWait boundary history) := by
   rintro ⟨waiting⟩
   obtain ⟨state, graph, path, quiet, pending, choice, event, next, nextGraph, reply, impossible⟩ :=
-    waiting.reply_possible () trivial
+    waiting.reply_possible available () trivial
   exact impossible
 
 /-- Constructor distinctions do not depend on the finite observation view. -/

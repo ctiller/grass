@@ -51,8 +51,6 @@ abbrev noWaitBoundary : terminalSystem.WaitBoundary noRequests where
   step_pending_or_reply := by intro history occurrence; exact nomatch occurrence
   reply_allowed := by intro history occurrence; exact nomatch occurrence
   reply_ends := by intro history occurrence; exact nomatch occurrence
-  reply_path := by intro history occurrence; exact nomatch occurrence
-
 /-- `true` denotes success and `false` denotes error. -/
 abbrev successOnly : BehaviorModel Bool where
   Event := Unit
@@ -262,8 +260,6 @@ abbrev loopingNoWaitBoundary : loopingSystem.WaitBoundary noRequests where
   step_pending_or_reply := by intro history occurrence; exact nomatch occurrence
   reply_allowed := by intro history occurrence; exact nomatch occurrence
   reply_ends := by intro history occurrence; exact nomatch occurrence
-  reply_path := by intro history occurrence; exact nomatch occurrence
-
 abbrev looping : BehaviorModel Bool where
   Event := Unit
   Observation := Unit
@@ -349,8 +345,6 @@ abbrev lowerWaitBoundary : waitingSystem.WaitBoundary waitProtocol where
   step_pending_or_reply := by intros; contradiction
   reply_allowed := by intro history occurrence pending response; exact nomatch response
   reply_ends := by intro history occurrence pending response; exact nomatch response
-  reply_path := by intro history occurrence pending response; exact nomatch response
-
 abbrev upperWaitBoundary : terminalSystem.WaitBoundary waitProtocol where
   Occurrence := Unit
   request := fun _ => ()
@@ -367,8 +361,6 @@ abbrev upperWaitBoundary : terminalSystem.WaitBoundary waitProtocol where
   step_pending_or_reply := by intro history occurrence pending; exact False.elim pending
   reply_allowed := by intro history occurrence pending; exact False.elim pending
   reply_ends := by intro history occurrence pending; exact False.elim pending
-  reply_path := by intro history occurrence pending; exact False.elim pending
-
 abbrev waitingLower : BehaviorModel Bool where
   Event := Unit
   Observation := Unit

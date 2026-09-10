@@ -42,12 +42,6 @@ private def boundary : spinning.WaitBoundary protocol where
     have impossible : occurrence = occurrence + 1 :=
       later.symm.trans (step'.trans (congrArg (· + 1) pending'))
     omega
-  reply_path := by
-    intro history occurrence pending response allowed
-    exact ⟨history.state, history.graph, .nil, by intros; contradiction, pending, (), (),
-      Nat.succ (show Nat from history.state), history.graph, trivial, by
-        simp only [spinning]⟩
-
 private def history : spinning.History :=
   History.initial (state := (0 : Nat)) (graph := ()) trivial
 
