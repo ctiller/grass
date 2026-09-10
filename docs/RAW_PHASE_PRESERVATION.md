@@ -63,3 +63,10 @@ for that call. This excludes CPU work and WriteFile service at that frontier.
 It does not establish reply existence for every allowed provider observation,
 or permission for permanent nonresponse. Those are separate obligations before
 this frontier can supply a full external wait boundary.
+[RawPendingInfinite](../Grass/Platform/Win32/RawPendingInfinite.lean) classifies
+an actual infinite stream starting at pending control. Either caller control
+occurs at some supplied index, or every point retains the exact initial pending
+call, caller and provider. In the latter case every edge exposes its actual
+service receipt, choice, output and causal graph evidence. Terminal control is
+excluded by the next actual edge. This classification retains the infinite
+stream and makes no permanent-wait or eventual-response claim.
