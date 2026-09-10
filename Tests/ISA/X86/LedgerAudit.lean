@@ -78,6 +78,7 @@ import Grass.Platform.Win32.RawPhasePreservation
 import Grass.Platform.Win32.RawPrefix
 import Grass.Platform.Win32.RawPendingService
 import Grass.Platform.Win32.RawPrefixSteps
+import Grass.Platform.Win32.RawTerminal
 import Grass.Platform.Win32.RawServiceMetadata
 import Grass.Platform.Win32.RawServiceContinuation
 import Grass.Platform.Win32.RawServicePrefix
@@ -268,6 +269,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawPrefix,
    `Grass.Platform.Win32.RawPendingService,
    `Grass.Platform.Win32.RawPrefixSteps,
+   `Grass.Platform.Win32.RawTerminal,
    `Grass.Platform.Win32.RawServiceMetadata,
    `Grass.Platform.Win32.RawServiceContinuation,
    `Grass.Platform.Win32.RawServicePrefix,
@@ -588,7 +590,8 @@ def notBehaviour : List Name :=
     `Grass.Artifact.PE.encoding,
     -- Instantiate the existing exact raw relation and loader/protocol root; no new hardware rule.
     `Grass.Platform.Win32.Raw.initialState,
-    `Grass.Platform.Win32.Raw.finitePrefixSystem,
+    `Grass.Platform.Win32.Raw.system,
+    `Grass.Platform.Win32.Raw.result,
     -- Nominal data and comparison over the separately owed ABI list. The stage
     -- installs supplied observations; it asserts no actual provider transition.
     `Grass.Platform.Win32.ProcessId,
