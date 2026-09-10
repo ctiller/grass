@@ -1,5 +1,6 @@
 import Grass.ISA.AArch64.Control
 import Grass.Artifact.Binary.Endian
+import Grass.Artifact.Binary.EndianLaws
 
 /-!
 The shared binary codec connects an exact four-byte source prefix to the A64
@@ -26,6 +27,12 @@ structure SourceWord (bytes : Std.Logical.ByteArray) where
   word : BitVec 32
   rest : Std.Logical.ByteArray
   parsed : takeLittleEndian 4 bytes = .done word rest
+
+/-- General source-prefix law belongs to the ISA source producer, not an ABI
+adapter. The original suffix is retained for every decoded word. -/
+theorem SourceWord.bytes_exact {bytes : Std.Logical.ByteArray} (source : SourceWord bytes) :
+    bytes = emitWord source.word ++ source.rest :=
+  takeLittleEndian_done source.parsed
 
 /-- Checked receipt packing preserves the binary parser's refusal and suffix. -/
 def readSource (bytes : Std.Logical.ByteArray) : ParseResult (SourceWord bytes) :=

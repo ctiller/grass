@@ -63,5 +63,7 @@ example (instruction : CompareZero) (cpu : Cpu) :
 #print axioms Grass.ISA.AArch64.SupervisorCall.Request.source_exact
 #print axioms Grass.ISA.AArch64.readSource_needMore
 #print axioms Grass.ISA.AArch64.citations_checked
+#print axioms Grass.ISA.AArch64.BodyStep.supervisorRequest
+#print axioms Grass.ISA.AArch64.SourceWord.bytes_exact
 
 end Tests.ISA.AArch64

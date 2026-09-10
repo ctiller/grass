@@ -78,13 +78,26 @@ def registerControlCitation : Citation :=
       "and operation entry for the four-byte body successor; no fetch or exception adequacy claim."
     confirmed := some ⟨2026, 9, 9⟩ }
 
+def svcRoutingCitation : Citation :=
+  { document := armA64March2025
+    anchor := { volume := none, section_ := "Shared pseudocode: SVC routing"
+                heading := some "CheckForSVCTrap; CallSupervisor", table := none
+                page := some 5410 }
+    subjects := [⟨"Grass.ISA.AArch64.SupervisorCall.Routing.check"⟩,
+      ⟨"Grass.ISA.AArch64.SupervisorCall.Routing.select"⟩,
+      ⟨"Grass.ISA.AArch64.SupervisorCall.Routing.Route.preferredReturn"⟩]
+    locator := "PDF pp.5403/5413 (printed 5400/5410), EL2Enabled PDF p.5973 " ++
+      "(printed 5970), ELIsInHost PDF p.5975 (printed 5972). Routing-only " ++
+      "non-secure non-VHE A64 EL0 projection; not SSAdvance or TakeException."
+    confirmed := some ⟨2026, 9, 9⟩ }
+
 def citations : List Citation :=
-  [compareZeroCitation, supervisorCallCitation, registerControlCitation]
+  [compareZeroCitation, supervisorCallCitation, registerControlCitation, svcRoutingCitation]
 
 theorem citations_checked : ∀ citation ∈ citations,
     citation.WellFormed ∧ citation.FullyChecked := by
   intro citation member
   simp only [citations, List.mem_cons, List.not_mem_nil, or_false] at member
-  rcases member with rfl | rfl | rfl <;> decide
+  rcases member with rfl | rfl | rfl | rfl <;> decide
 
 end Grass.ISA.AArch64
