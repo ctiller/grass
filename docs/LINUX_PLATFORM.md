@@ -105,6 +105,42 @@ A fresh imported-closure trust audit with the foundation and Linux tests passed
 `propext` and `Quot.sound`.
 The full-suite limitation described below remains inherited from the baseline.
 
+## Next AArch64 entry consumer
+
+The proposed next bounded consumer is native A64 EL0 userspace issuing the
+selected read, write, exit or exit-group request through SVC-zero, with an
+explicitly selected non-VHE kernel-at-EL1 execution profile. This proposal is
+awaiting the ISA owner's source-backed eligibility and transfer definition;
+neither the Linux name nor the decoded word establishes that regime.
+
+The connection requires these pieces of evidence:
+
+- An actual execute-read at the reached user virtual PC, retaining the current
+  address-space context, input/output memory state, bytes and failure outcomes.
+  The existing fresh physical boot fetch does not provide this evidence.
+- Effective execution and control configuration sufficient for the ISA's trap
+  checks and destination selection, followed by the actual exception transition.
+  The ISA owner determines the required configuration and saved-state, syndrome,
+  vector-target and register-framing effects from its architectural sources.
+- A Linux request derived from the retained pretransfer registers of that same
+  occurrence, using the existing source adapter. Posttransfer state must not
+  substitute for the syscall's input state.
+
+The mapped/reached Linux execution producer is currently missing. The shared
+`AccessFactory.access` seam (`d95e4817`) accepts an arbitrary actual predecessor
+state; `Op.ReadObservation` (`676c1943`) exposes its completed read bytes and,
+under the selected memory oracle, relates them to the resolved backing bytes.
+Linux/AArch64 must supply the reached predecessor, address-space context and
+virtual-PC descriptor linkage. This consumer introduces no separate Linux
+memory model. Other exception regimes require their own supported profile.
+
+Architectural entry also does not prove Linux provider dispatch. The inspected
+[arm64 kernel syscall entry implementation](https://raw.githubusercontent.com/torvalds/linux/master/arch/arm64/kernel/syscall.c)
+(accessed 2026-09-09) has asynchronous MTE-fault and syscall-work paths that can
+defer, alter or skip invocation. A future kernel/provider connection must retain
+the applicable path and its effects. The current native userspace probes cannot
+observe the privileged entry state, and supply no evidence for that connection.
+
 ## Checked checkpoint evidence
 
 Semantic review separated the syscall decoder, ELF parser and native observer.
