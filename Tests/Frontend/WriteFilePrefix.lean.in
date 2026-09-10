@@ -13,7 +13,7 @@ and either WriteFile entry or the stdout-unavailable ExitProcess completion.
 The existing ExecutionPrefix retains every raw edge.
 Provider registers are an observation and the graph is explicitly empty;
 native execution, causal correspondence, and properties of all runs remain open.
-The finite view's unused completion fields supply no completion semantics. -/
+The canonical raw system supplies terminal semantics; this fixture establishes only these selected executions. -/
 namespace Grass.Tests.Frontend.WriteFilePrefix
 
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical Grass.Artifact
@@ -41,7 +41,7 @@ abbrev system {image : ImageInput} {inputs : EntryInputs} (loaded : LoadedImage 
     (environment : ConsoleEnvironment)
     (covered : CallProtocol.GrantSupplyCovers loaded.initialState.machine.memory
       (FreshSupply.initial : FreshSupply GrantTag)) :=
-  Raw.finitePrefixSystem loaded Grass.Tests.Win32WriteFile.noEffects environment
+  Raw.system loaded Grass.Tests.Win32WriteFile.noEffects environment
     Grass.Tests.Win32RawStep.noReturnInterpretation covered
 
 /-- Bounded checked raw CPU edges with an explicitly empty graph. The graph
