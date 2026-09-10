@@ -77,6 +77,7 @@ import Grass.Platform.Win32.RawEntryEvent
 import Grass.Platform.Win32.RawServicePreservation
 import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.ConsoleEnvironment
+import Grass.Platform.Win32.WriteFileConsolePublication
 import Grass.Platform.Win32.GetStdHandleReturn
 import Grass.Platform.Win32.GetStdHandleResult
 import Grass.Platform.Win32.GetStdHandleRuntime
@@ -253,6 +254,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawServicePreservation,
    `Grass.Platform.Win32.ExitProcessRuntime,
    `Grass.Platform.Win32.ConsoleEnvironment,
+   `Grass.Platform.Win32.WriteFileConsolePublication,
    `Grass.Platform.Win32.GetStdHandleReturn,
    `Grass.Platform.Win32.GetStdHandleResult,
    `Grass.Platform.Win32.GetStdHandleRuntime,
@@ -344,7 +346,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Two checked WriteFile request/entry producers retain their external ABI debt.
 -- Static selector/route/result policy and observed-register API acceptance.
 -- External process applicability and formal source anchors remain owed.
-def owedBaseline : Nat := 346
+-- The bounded live writable/synchronous publication attribution policy.
+def owedBaseline : Nat := 347
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -407,7 +410,8 @@ acquiring a citation.
 -- The shared settled-state view retains data and asserts no transition.
 -- Nominal aliases, generational construction, finite comparison and supplied-state projection.
 -- Return composition and final projection reuse checked protocol/resume computations.
-def notBehaviourBaseline : Nat := 387
+-- Comparison with the snapshot's selected stdout route adds no native authority.
+def notBehaviourBaseline : Nat := 388
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -563,6 +567,7 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.GetStdHandle.ProviderResult.stage,
     `Grass.Platform.Win32.GetStdHandle.Return.complete?,
     `Grass.Platform.Win32.GetStdHandle.Return.Completion.final,
+    `Grass.Platform.Win32.WriteFile.ConsolePublication.onStdout,
     -- Bind the fixed policy to an existing successful CALL factory receipt.
     `Grass.Platform.Win32.CallEntry.CallPolicy.ofFactory,
     `Grass.Platform.Win32.WriteFile.CallPolicy,
@@ -1021,6 +1026,7 @@ def owed : List Name :=
     `Grass.Platform.Win32.ConsoleEnvironment.routeOf?,
     `Grass.Platform.Win32.ConsoleEnvironment.getStdAllowed,
     `Grass.Platform.Win32.GetStdHandle.ProviderResult.observe?,
+    `Grass.Platform.Win32.WriteFile.ConsolePublication.matches?,
     `Grass.Platform.Win32.ExitProcess.status,
     -- Fixed request widths and callee stack custody retain external ABI debt.
     `Grass.Platform.Win32.ApiRequest,
