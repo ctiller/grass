@@ -14,6 +14,12 @@ both the annotated document and its comment-free authored source.
 
 ## Making a change
 
+Every task must obtain an independent agent review of its concrete final change
+before submission or integration, and address findings before handoff. Building
+may be delegated to Terra (preferred) or Sol agents; coordinate file ownership
+and build resources. Spike-specific implementation or proof recipes are forbidden
+in `Grass/` and `Tests/`: remove discoveries and report them to the owner.
+
 The [endpoint index](docs/ENDPOINT_INDEX.md) helps locate code and its design
 owner; the [validation command map](docs/CHECKS.md) explains check coverage.
 

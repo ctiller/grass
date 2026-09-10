@@ -27,10 +27,14 @@ and source checks passed 190 jobs, followed by 63 jobs for remaining assembly
 fixture changes. The legacy public certificate interface is still incomplete;
 these checks are not a full certificate build or a verified spike.
 
-Further confirmed removals are in progress: the seven-file Hello memory schedule
-and dependent API test fixtures, the two-symbol instruction-specific Win32
-constant lowerer, and the stand-in spike API surface test. These findings extend
-the frozen census below. No completed cleanup or completed spike is claimed.
+The seven-file Hello memory schedule is deleted in `fa722b2a`; independent API
+fixtures replace its consumer dependencies in `5fda39cc` and `23dc34f4`.
+The two-symbol instruction-specific constant lowerer and stand-in spike API
+surface test are deleted in `a79c27c7`; copied sort and server-network fixtures
+are deleted in `c3871d58`. The combined main build passed all 644 jobs, and an
+independent Sol review accepted the API fixture replacement. These findings
+extend the frozen census below. No completed spike or exhaustive clean bill
+for all future supplier imports is claimed.
 
 The implementation has accumulated a second, hand-maintained description of
 Hello beneath its authored source. This includes source recognizers, fixed
