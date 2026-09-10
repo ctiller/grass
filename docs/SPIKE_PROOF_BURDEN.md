@@ -1,7 +1,9 @@
 # Spike proof-burden ledger
 
-Status: normative pre-implementation accounting. Estimates are smell tests,
-not acceptance limits and not claims of measured Lean code.
+Status: pre-implementation estimates, not evidence of implemented proof economy.
+The [Hello specialization census and removal plan](HELLO_SPECIALIZATION_REMOVAL.md)
+supersedes any interpretation below permitting additional hand-maintained Hello
+proof scaffolding. The original authored spike must compile unchanged.
 
 The exact spike sources intentionally name library theorems and local proof
 obligations before those proofs exist. A short identifier is not evidence that
@@ -43,9 +45,11 @@ listed; “the usual invariants” is not accepted.
 | Exact name | Burden and owner | Proof shape |
 |---|---|---|
 | `write_all_loop(payload)` | S, library-instance | Standard partial-write induction over the derived payload suffix; author selects operand and failure policy. |
-| `helloVerified` closing obligations | S, generated-structural plus authored boundary theorem | Source closure, Win32 provider selection, PE construction, and standard certificate composition are derived; exact-message observation is precious. |
+| `helloVerified` closing obligations | Unmeasured implementation work behind `verify_assembly` | Structural closure is computed; lowering proofs are generated/synthesized and kernel checked against the original spec. No additional authored boundary theorem or companion proof file is required. |
 
-No application-specific algorithmic invariant is hidden in Spike 1.
+The source already selects `write_all_loop(payload)`. The implementation census
+found hidden fixed-register/guard/loop recipes beneath it; those are being
+deleted, not counted as reusable automation or moved into the authored spike.
 
 ## 3. Spike 2
 

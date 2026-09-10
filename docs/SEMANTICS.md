@@ -617,6 +617,36 @@ with a strategy satisfying `EnvironmentResponsive`, the implementation
 terminates as specified. Existence of one terminating compatible history never
 discharges the demand.
 
+### Selected agency and directed waiting
+
+Approved direction; implementation is not yet delivered. In the selected Win32
+Hello profile, provider service microsteps, API return observations and completed
+Exit observations are environment-owned; compiled caller CPU steps are
+program-owned. This is an explicit profile choice, not a consequence of an
+`externalAgent` label or a universal rule for composed program-owned providers.
+
+Process owns the `WaitBoundary` rewrite separating agency from actual API reply
+paths on the existing carriers and `Path`. A permitted wait cut must retain the
+exact request occurrence and all intervening observations and prove that no
+program-autonomous outgoing edge exists. Raw steps are not themselves fabricated
+responses; dummy empty wait interfaces do not discharge this obligation.
+
+Directed `ImplementationConformance` may match an actual infinite environment-owned
+nonresponse suffix to an authored external wait. Its concrete witness must retain
+a finite actual cut, the same pending permitted external occurrence at every later
+prefix, environment ownership of every suffix action, no completed reply, the
+existing wait/request match, and exact projected observations at every matched
+suffix cut. Earlier finite publication remains visible; `finite.Rel`'s observation
+law may derive the exported agreement. The raw `InfiniteContinuation`, every edge
+and every graph remain distinct and retained.
+
+Placement is fixed: directed conformance reuses either the existing strict witness
+or this concrete nonresponse witness. `BehaviorMatching.CompleteMatch` and exact
+`BehaviorCorrespondence` remain strict; caller-owned divergence still requires
+infinite matching. This introduces no open extension predicate, copied proof
+stack, raw-infinity/stationary-wait equality, synthetic self-loop, fairness,
+edge filtering, arbitrary classifier authority or change to the authored spec.
+
 ## 6. Refinement
 
 For a deterministic specification, every conforming execution must produce its

@@ -793,8 +793,8 @@ instance (policy : StepPolicy) (state : MachineState) (event : MemoryEvent) :
     state.synchronization.ordered (state.events.map (·.event))
       state.eventSupply.fresh.1 earlier.event event = false))
 
-/-- Every cross-context structural conflict must be ordered individually.
-Ordering one predecessor cannot hide a second unordered predecessor. -/
+/-- `not_conflictsWithHistory_of_ordered` excludes `ConflictsWithHistory` when
+every cross-context structural conflict is individually ordered. -/
 theorem not_conflictsWithHistory_of_ordered {policy : StepPolicy} {state : MachineState}
     {event : MemoryEvent}
     (ordered : ∀ earlier ∈ state.events,

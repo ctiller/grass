@@ -98,32 +98,20 @@ restrictions. Sources checked 2026-09-09:
 [WriteFile](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-writefile),
 [ExitProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-exitprocess).
 
-Process resolved the bounded representation direction. `WriteFile.InfiniteContinuation` can retain
-an actual infinite sequence of committed provider steps. The authored console
-system advances a bounded cut strictly, then reports and observes; there is no
-obvious corresponding infinite transition sequence. Shared `CompleteMatch`
-requires infinite-to-infinite matching. Directedness removes reverse error
-coverage, not this requirement. Do not silently replace internal divergence by
-a permanent wait, drop it in an observation quotient, or add a responsiveness
-assumption. Keep shared conformance strict and place an explicit raw-to-caller
-boundary interpretation before it. Provider-only activity at the same external
-occurrence can represent caller nonresponse only with its actual raw run,
-unchanged occurrence and complete publication history retained. Caller-internal
-divergence remains infinite; positive publication advances the cut; every reply
-and caller-control edge must be accounted for.
+The approved [agency and directed-waiting decision](SEMANTICS.md#selected-agency-and-directed-waiting)
+supersedes the earlier requirement here that every raw infinity match an authored
+infinity. Exact `BehaviorCorrespondence` and shared `BehaviorMatching.CompleteMatch`
+remain strict. Directed `ImplementationConformance` will reuse a strict witness
+or a concrete external-nonresponse witness; this change is not yet delivered.
 
-Process identifies `RawStep.service_suffix_continuation` and the existing
-`Grass.Refinement.Console.WriteFileHistory.Aligned.eventually_fixedNonresponse`
-(in `WriteFileEventualNonresponse.lean`) evidence as
-support for the bounded provider-only, eventually fixed-cut case. They do not
-classify arbitrary mixed raw runs. A raw `WaitBoundary` cannot mark naked
-service steps as replies: its `step_reply` law covers every outgoing step.
-The caller boundary must therefore be explicit, and every admitted raw execution
-category needs a representation argument. Native API meaning can be recorded
-at the external claim boundary; a claimed normalization theorem for Grass's raw
-model still needs its own proof or explicitly recorded assumption. This is the
-remaining implementation obligation, not a new infinite-to-waiting constructor.
-Genuine external nonresponse and internal deadlock remain distinct questions.
+The selected Hello profile treats provider service, API return observations and
+completed Exit observations as environment-owned, and caller CPU steps as
+program-owned. The wait rewrite must preserve the exact occurrence, every actual
+edge/graph and all intervening observations. Caller-owned divergence still needs
+strict infinite matching. Existing service-suffix and eventually-fixed-nonresponse
+lemmas are supporting evidence, not classification of arbitrary mixed runs or a
+completed wait adapter. No fairness, synthetic replies or authored-spec change
+follows from this decision.
 
 Craig's subsequent policy decision makes internal deadlock freedom a baseline
 requirement alongside safety and conformance: exclude a closed internally stuck
