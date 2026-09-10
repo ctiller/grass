@@ -1,7 +1,6 @@
 import Grass.Platform.Win32.CallResumeHistory
 import Grass.Platform.Win32.ProviderResumeFinalization
 import Grass.Refinement.Console.WriteAllBody
-import Grass.Refinement.Console.WriteFileCountAddress
 
 /-! Compose the existing matched-return bookkeeping and checked resume candidate
 with the reached source body. This is not an installed raw return transition:
@@ -85,27 +84,6 @@ theorem guard_success {before : State} (guard : TestZeroRun .rax before)
   rw [guard.zero_flag, output]
   exact beq_eq_false_iff_ne.mpr success
 
-theorem body_argument {image : ImageInput} {inputs : EntryInputs}
-    {loaded : LoadedImage image inputs} {leaPolicy loadPolicy : CpuAccessPolicy}
-    {frame : SourceFrame.Result} {rootOffset : Nat}
-    {source : SourceResolve.Result frame rootOffset} {leaBefore loadBefore : State}
-    (lea : WriteFileCountAddress.SourceLea leaPolicy source leaBefore)
-    (leaSelected : Cpu.policy? loaded leaBefore = some leaPolicy)
-    (body : WriteAllBody.Run loadPolicy source loadBefore)
-    (loadSelected : Cpu.policy? loaded loadBefore = some loadPolicy)
-    (authored : lea.item.instruction =
-      ⟨.lea, [.register ⟨.r9, .w64⟩, .address "transferred"]⟩) :
-    body.load.source.access.descriptor.provenance = lea.argument.provenance ∧
-    body.load.source.access.descriptor.range = lea.argument.range := by
-  have loadSlot := (WriteAllBody.load_operand body.selected body.load.source.selection
-    (body.load.source.selected.symm.trans body.checksSource.loadSelected)).2
-  have sameSlot := (lea.authored_operand authored).2.trans loadSlot.symm
-  constructor
-  · rw [body.load.descriptor_exact]
-    exact lea.load_provenance leaSelected loadSelected body.load.ran
-  · rw [body.load.source.range]
-    exact (lea.load_range_same body.load.source.selection sameSlot).symm
-
 theorem body_gpr_frame {policy : CpuAccessPolicy} {frame : SourceFrame.Result} {rootOffset : Nat}
     {source : SourceResolve.Result frame rootOffset} {before : State}
     (body : WriteAllBody.Run policy source before) (register : Gpr)
@@ -145,12 +123,10 @@ theorem historical_frame {image : ImageInput} {inputs : EntryInputs}
   subst actualRuntime
   exact ⟨pending, Option.some.inj linked.runtimeFrame, fifth, plan⟩
 
-/-- Conditional original-history-to-body composition. The reached pre-CALL
-cursor is transported, never supplied afresh at return. `requestSlot` is the
-remaining exact request-producer obligation; the load's provenance and range
-are derived from it and the checked source/factory evidence. `resumeRan` is
-actual evaluation of the existing candidate, not physical-transfer adequacy. -/
-theorem returned_body
+/-- Common original-history-to-body proof over the actual load descriptor.
+Argument producers discharge its provenance and range equations independently
+of the instruction recipe used to establish the incoming call state. -/
+theorem returned_body_bound
     {R Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
     {spec : Grass.SpecProcess resources}
     {projection : Grass.Console.CapturedTargetProjection spec Status}
@@ -192,13 +168,11 @@ theorem returned_body
     (guardSource : SourceGuard guards.candidate.rawTest.output guards.candidate.failed.output guard)
     {bodyPolicy : CpuAccessPolicy} (body : WriteAllBody.Run bodyPolicy source guard.result)
     (_bodySelected : body.selected = guards.candidate.post)
-    (bodyPolicySelected : Cpu.policy? loaded guard.result = some bodyPolicy)
-    {leaPolicy : CpuAccessPolicy} {leaBefore : State}
-    (lea : WriteFileCountAddress.SourceLea leaPolicy source leaBefore)
-    (leaPolicySelected : Cpu.policy? loaded leaBefore = some leaPolicy)
-    (leaAuthored : lea.item.instruction =
-      ⟨.lea, [.register ⟨.r9, .w64⟩, .address "transferred"]⟩)
-    (requestSlot : entered.handoff.record.request.countSlot = lea.argument)
+    (_bodyPolicySelected : Cpu.policy? loaded guard.result = some bodyPolicy)
+    (provenance : body.load.source.access.descriptor.provenance =
+      entered.handoff.record.request.countSlot.provenance)
+    (range : body.load.source.access.descriptor.range =
+      entered.handoff.record.request.countSlot.range)
     {base : Nat}
     (placed : CursorRegisters projection.target.payload base returned.cursor callBefore.machine) :
     runtime.toReturnFrame = entered.runtime.toReturnFrame ∧
@@ -220,15 +194,6 @@ theorem returned_body
   have atLoad := guard_cursor guard resumed
   have memory : guard.result.machine.memory = after.machine.memory :=
     (guard_frame guard).2.trans (resume_memory resume)
-  have argument := body_argument lea leaPolicySelected body bodyPolicySelected leaAuthored
-  have provenance : body.load.source.access.descriptor.provenance =
-      entered.handoff.record.request.countSlot.provenance := by
-    rw [requestSlot]
-    exact argument.1
-  have range : body.load.source.access.descriptor.range =
-      entered.handoff.record.request.countSlot.range := by
-    rw [requestSlot]
-    exact argument.2
   have closed := WriteAllBody.Run.returned_reenters_head returned body atLoad memory success positive
     provenance range
   have sourceReached := guardSource.tested.rip_exact

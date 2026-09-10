@@ -4,6 +4,7 @@ import Grass.ISA.X86.Execution.BodyComputationFactory
 import Grass.ISA.X86.Execution.MemoryMoveFactory
 import Grass.Platform.Win32.CpuPolicy
 import Grass.Platform.Win32.WriteFileArguments
+import Grass.Refinement.Console.WriteFileCountArgument
 
 /-! Source-local LEA identity for the WriteFile count argument. The argument is
 computed from the selected CPU stack provenance and the source-resolved local
@@ -158,5 +159,21 @@ theorem SourceLea.authored_operand {policy : CpuAccessPolicy} {frame : SourceFra
     X86Source.Operand.register.injEq, X86Source.Register.mk.injEq,
     X86Source.Operand.address.injEq] at instruction
   exact ⟨instruction.2.1.1.symm, instruction.2.2.1.symm⟩
+
+/-- Executing LEA is one way to establish the canonical incoming argument;
+the argument itself depends only on the static local and fixed loaded stack. -/
+theorem SourceLea.canonical_argument {image : Loader.ImageInput} {inputs : Loader.EntryInputs}
+    {loaded : Loader.LoadedImage image inputs} {policy callPolicy : CpuAccessPolicy}
+    {frame : SourceFrame.Result} {rootOffset : Nat} {source : SourceResolve.Result frame rootOffset}
+    {before callBefore : State} (lea : SourceLea policy source before)
+    (leaSelected : Cpu.policy? loaded before = some policy)
+    (callSelected : Cpu.policy? loaded callBefore = some callPolicy)
+    (selectedLocal : SourceResolve.LoadSelection source)
+    (sameSlot : lea.resolved.slot = selectedLocal.result.slot) :
+    lea.argument = WriteFileCountArgument.argument callPolicy selectedLocal := by
+  have stack := WriteFileCountArgument.stack_same leaSelected callSelected
+  have range := lea.load_range_same selectedLocal sameSlot
+  change (⟨policy.stack, lea.argument.range⟩ : Argument) = ⟨callPolicy.stack, _⟩
+  rw [stack, range]
 
 end Grass.Refinement.Console.WriteFileCountAddress
