@@ -62,7 +62,7 @@ def read {callBefore : State} {afterFetch afterTarget afterCall : MachineState}
               policy.context policy.contextKind policy.cause with
           | .error reason => .error (.access (accessReached beforeReturn reason) descriptor reason)
           | .ok result =>
-            let read64 : ReadValue64 result.run :=
+            let read64 : ReadValue 8 result.run :=
               { writeData := fun _ _ => [], indeterminate := fun _ _ _ => 0
                 memoryOracle := by rw [result.policy_exact]; rfl
                 reads := rfl, writes := rfl, width := rfl, initialization := rfl }

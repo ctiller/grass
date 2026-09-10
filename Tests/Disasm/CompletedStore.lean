@@ -3,6 +3,7 @@ import Grass.Disasm.CompletedViolation
 import Grass.Disasm.Spatial
 import Tests.Artifact.PE.Imported
 import Tests.Op.FakeIsa
+import Grass.Op.AccessRun
 
 /-! A closed declared model run, not a Windows loader or a proof that C source
 is defined. The test uses FakeIsa's explicitly unproved memory-profile package.
@@ -93,7 +94,7 @@ def afterWrite := afterWrite?.get write_ran
 def writeReached := afterFetch.noteContext thread₀ .thread
 def writeResolved := (prepareAccess writeReached.memory writeDescriptor).toOption.get (by decide)
 def writeComplete := (writePolicy.oracle.answerResolved writeReached writeDescriptor writeResolved).get (by decide)
-def writeRun : AccessRun afterFetch afterWrite writeDescriptor :=
+def writeRun : Grass.Op.AccessFactory.AccessRun afterFetch afterWrite writeDescriptor :=
   { policy := writePolicy, operation := SomeOperation.of ProbeOp.write
     context := thread₀, contextKind := .thread, cause := cause
     faultAt := fun _ => .none, sequence := .single writeDescriptor

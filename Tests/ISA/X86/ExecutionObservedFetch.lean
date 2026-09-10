@@ -1,5 +1,6 @@
 import Grass.ISA.X86.Execution.ObservedFetch
 import Tests.Op.FakeIsa
+import Grass.Op.AccessRun
 
 namespace Grass.Tests.ISA.X86.ExecutionObservedFetch
 
@@ -41,7 +42,7 @@ example : ∃ (fetch : ObservedFetch before after),
     fetch.bytes = [0x0F, 0x0C] ∧ (DecodedSite.check before.rip fetch.bytes).toOption = none := by
   have ran : stepResult = .ran after := by rfl
   have clean : after.violations.IsEmpty := by decide
-  let run : AccessRun machine after descriptor :=
+  let run : Grass.Op.AccessFactory.AccessRun machine after descriptor :=
     { policy := policy, operation := SomeOperation.of Operation.fetch
       context := thread₀, contextKind := .thread, cause := ⟨⟨"raw-fetch"⟩⟩
       faultAt := fun _ => .none, sequence := .single descriptor

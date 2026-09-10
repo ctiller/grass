@@ -1,5 +1,6 @@
 import Grass.ISA.X86.Execution.Fetch
 import Tests.Op.FakeIsa
+import Grass.Op.AccessRun
 
 namespace Grass.Tests.ISA.X86.ExecutionFetch
 
@@ -105,7 +106,7 @@ example : ∃ (fetch : FetchedSite fetchBefore after),
     (∃ base, addressOf base fetch.descriptor.range.start = fetchBefore.rip) := by
   have ran : fetchStep = .ran after := by rfl
   have clean : after.violations.IsEmpty := by decide
-  let run : AccessRun fetchMachine after fetchDescriptor :=
+  let run : Grass.Op.AccessFactory.AccessRun fetchMachine after fetchDescriptor :=
     { policy := policy, operation := SomeOperation.of FetchOperation.fetch
       context := thread₀, contextKind := .thread, cause := ⟨⟨"fetch"⟩⟩
       faultAt := fun _ => .none, sequence := .single fetchDescriptor

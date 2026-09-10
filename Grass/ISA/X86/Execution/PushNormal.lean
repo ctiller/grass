@@ -2,6 +2,7 @@ import Grass.ISA.X86.Execution.Fetch
 import Grass.ISA.X86.Execution.StackInstruction
 import Grass.ISA.X86.Execution.CompletionFlags
 import Grass.Op.WriteCompletion
+import Grass.Op.AccessRun
 
 /-!
 # The bounded normal register PUSH completion branch
@@ -13,6 +14,8 @@ does not exclude faults, traps or interruptions from other executions.
 -/
 
 namespace Grass.ISA.X86.Execution
+
+open Grass.Op.AccessFactory (AccessRun)
 
 open Grass.Core Grass.Memory Grass.Op
 

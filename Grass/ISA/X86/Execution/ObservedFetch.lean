@@ -1,5 +1,6 @@
 import Grass.ISA.X86.Execution.Fetch
 import Grass.ISA.X86.Execution.FetchAttempt
+import Grass.Op.AccessRun
 
 /-!
 # Actual instruction-byte observations before decoding
@@ -11,6 +12,7 @@ fallthrough claim.
 
 namespace Grass.ISA.X86.Execution
 
+open Grass.Op.AccessFactory (AccessRun)
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical
 
 /-- A source-free actual execute-read observation, before any instruction bytes

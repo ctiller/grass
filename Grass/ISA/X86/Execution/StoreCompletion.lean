@@ -1,6 +1,7 @@
 import Grass.ISA.X86.Execution.Fetch
 import Grass.ISA.X86.Execution.StoreCandidate
 import Grass.Op.WriteCompletion
+import Grass.Op.AccessRun
 
 /-!
 # Completed bounded immediate stores after checked fetch
@@ -15,6 +16,8 @@ branch; this adapter does not pin them as a total model of x86 store faults or
 restart behavior.
 -/
 namespace Grass.ISA.X86.Execution
+
+open Grass.Op.AccessFactory (AccessRun)
 
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical Grass.ISA.X86
 

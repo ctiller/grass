@@ -65,7 +65,7 @@ def callFromFetched {policy : CpuAccessPolicy} (before : State)
                         (RunFactory.AccessFailure.reached { before with machine := fetched.after } reason)
                         readDescriptor reason)
                   | .ok readSuccess =>
-                      let read : ReadValue64 readSuccess.run :=
+                      let read : ReadValue 8 readSuccess.run :=
                         { writeData := fun _ _ => []
                           indeterminate := fun _ _ _ => 0
                           memoryOracle := by rw [readSuccess.policy_exact]

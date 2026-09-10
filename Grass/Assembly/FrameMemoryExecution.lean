@@ -1,7 +1,7 @@
 import Grass.Assembly.SourceFetch
 import Grass.Assembly.FrameMemorySource
 import Grass.ISA.X86.Execution.MemoryWrite
-import Grass.ISA.X86.Execution.ReadValue32
+import Grass.ISA.X86.Execution.ReadValue
 import Grass.Assembly.Store32Addressing
 import Grass.Assembly.FrameArgumentAddressing
 import Grass.ISA.X86.Execution.MemoryMoveNormal
@@ -301,7 +301,7 @@ theorem selected_encoding {frame rootOffset} {source : SourceResolve.Result fram
 /-- `read` constructs the value witness from this exact initialized data run. -/
 def read {frame rootOffset} {source : SourceResolve.Result frame rootOffset}
     {before : State} {afterFetch afterLoad : MachineState}
-    (receipt : LoadNormal source before afterFetch afterLoad) : ReadValue32 receipt.access.run :=
+    (receipt : LoadNormal source before afterFetch afterLoad) : ReadValue 4 receipt.access.run :=
   { writeData := receipt.access.writeData
     indeterminate := receipt.access.indeterminate
     memoryOracle := receipt.access.memoryOracle

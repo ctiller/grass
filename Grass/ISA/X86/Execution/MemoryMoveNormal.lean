@@ -1,6 +1,5 @@
 import Grass.ISA.X86.Execution.MemoryWrite
-import Grass.ISA.X86.Execution.ReadValue32
-import Grass.ISA.X86.Execution.ReadValue64
+import Grass.ISA.X86.Execution.ReadValue
 import Grass.ISA.X86.Execution.MoveNormal
 
 /-!
@@ -271,7 +270,7 @@ theorem unplaced_impossible {instruction : Instruction} {encoded : Instruction.E
 def read {instruction : Instruction} {encoded : Instruction.Encoding instruction}
     {before : State} {afterFetch afterData : MachineState}
     (receipt : LoadNormal instruction encoded before afterFetch afterData) :
-    ReadValue32 receipt.access.run :=
+    ReadValue 4 receipt.access.run :=
   { writeData := receipt.access.writeData
     indeterminate := receipt.access.indeterminate
     memoryOracle := receipt.access.memoryOracle
@@ -380,7 +379,7 @@ namespace Load64Normal
 def read {instruction : Instruction} {encoded : Instruction.Encoding instruction}
     {before : State} {afterFetch afterData : MachineState}
     (receipt : Load64Normal instruction encoded before afterFetch afterData) :
-    ReadValue64 receipt.access.run :=
+    ReadValue 8 receipt.access.run :=
   { writeData := receipt.access.writeData, indeterminate := receipt.access.indeterminate
     memoryOracle := receipt.access.memoryOracle
     reads := by rw [receipt.intent]; rfl

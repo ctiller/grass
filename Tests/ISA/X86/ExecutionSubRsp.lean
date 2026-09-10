@@ -1,6 +1,7 @@
 import Grass.ISA.X86.Execution.SubRspNormal
 import Grass.Assembly.FrameAllocationExecution
 import Tests.Op.FakeIsa
+import Grass.Op.AccessRun
 
 namespace Grass.Tests.ISA.X86.ExecutionSubRsp
 
@@ -74,7 +75,7 @@ private def site : DecodedSite before.rip observed :=
   (DecodedSite.check before.rip observed).toOption.get (by decide)
 
 private def fetch : FetchedSite before afterFetch := by
-  let run : AccessRun fetchMachine afterFetch fetchDescriptor :=
+  let run : Grass.Op.AccessFactory.AccessRun fetchMachine afterFetch fetchDescriptor :=
     { policy := policy
       operation := SomeOperation.of FetchOperation.fetch
       context := thread₀

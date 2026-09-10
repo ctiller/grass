@@ -248,10 +248,13 @@ remain outside this receipt. The generic dispatcher still refuses SYSCALL
 because its policy carries no privileged configuration.
 
 Completed reads share `Grass.Op.AccessFactory.AccessRun` observation laws.
-`ReadValue32` and `ReadValue64` add x86 width and byte-order interpretation;
+One `ReadValue count` interface adds x86 width and byte-order interpretation;
 `FetchedSite` connects the same concrete backing observation to decoding, while
 `ObservedFetch` retains the actual completion bytes before successful decoding.
 The shared laws preserve the exact run and concrete memory-oracle equation.
+The x86 consumers use the canonical `Op` receipt directly. Width-specific read
+records and receipt-forwarding aliases have been removed; production byte
+encoding bridges and CPU register effects remain in x86.
 
 `CheckedExecution.normal` performs one actual fetch and dispatches to these
 constructors. Its typed success retains the normal receipt, including the full

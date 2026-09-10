@@ -1,5 +1,6 @@
 import Grass.ISA.X86.Execution.BranchNormal
 import Tests.Op.FakeIsa
+import Grass.Op.AccessRun
 
 namespace Grass.Tests.ISA.X86.ExecutionBranch
 
@@ -57,7 +58,7 @@ private def observed (c : Case) := observedBytes (resolved c) (indeterminateByte
 private def site (c : Case) : DecodedSite (before c).rip (observed c) :=
   (DecodedSite.check (before c).rip (observed c)).toOption.get (by cases c <;> decide)
 private def fetch (c : Case) : FetchedSite (before c) (afterFetch c) := by
-  let run : AccessRun (machine c) (afterFetch c) (descriptor c) :=
+  let run : Grass.Op.AccessFactory.AccessRun (machine c) (afterFetch c) (descriptor c) :=
     { policy := policy
       operation := SomeOperation.of (FetchOp.fetch c)
       context := thread₀

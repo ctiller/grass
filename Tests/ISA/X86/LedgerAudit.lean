@@ -8,12 +8,11 @@ import Grass.ISA.X86.RegisterLaws
 import Grass.ISA.X86.EndianBridge
 import Grass.ISA.X86.Execution.State
 import Grass.ISA.X86.Execution.DecodedSite
-import Grass.ISA.X86.Execution.AccessRun
 import Grass.ISA.X86.Execution.Fetch
 import Grass.ISA.X86.Execution.FetchedEncoding
 import Grass.ISA.X86.Execution.MemoryAccess
 import Grass.ISA.X86.Execution.MemoryWrite
-import Grass.ISA.X86.Execution.ReadValue32
+import Grass.ISA.X86.Execution.ReadValue
 import Grass.ISA.X86.Execution.MemoryMoveFactory
 import Grass.ISA.X86.Execution.SyscallEntry
 import Grass.ISA.X86.Execution.MemoryMoveSelection
@@ -33,7 +32,6 @@ import Grass.ISA.X86.Execution.MoveSelection
 import Grass.ISA.X86.Execution.ObservedFetch
 import Grass.ISA.X86.Execution.PushSavedRead
 import Grass.ISA.X86.Execution.RawOutcome
-import Grass.ISA.X86.Execution.ReadValue64
 import Grass.ISA.X86.Execution.RunFactory
 import Grass.ISA.X86.Execution.FetchFactory
 import Grass.ISA.X86.Execution.BodyComputationFactory
@@ -220,10 +218,10 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.RegisterLaws,
    `Grass.ISA.X86.EndianBridge,
    `Grass.ISA.X86.Execution.State, `Grass.ISA.X86.Execution.DecodedSite,
-   `Grass.ISA.X86.Execution.AccessRun, `Grass.ISA.X86.Execution.Fetch,
+   `Grass.ISA.X86.Execution.Fetch,
    `Grass.ISA.X86.Execution.FetchedEncoding,
    `Grass.ISA.X86.Execution.MemoryAccess, `Grass.ISA.X86.Execution.MemoryWrite,
-   `Grass.ISA.X86.Execution.ReadValue32,
+   `Grass.ISA.X86.Execution.ReadValue,
    `Grass.ISA.X86.Execution.MemoryMoveFactory, `Grass.ISA.X86.Execution.MemoryMoveSelection,
    `Grass.ISA.X86.Execution.MemoryMoveNormal,
    `Grass.ISA.X86.Execution.SubRspNormal,
@@ -235,7 +233,7 @@ def auditedModules : List Name :=
    `Grass.ISA.X86.Execution.Instruction, `Grass.ISA.X86.Execution.LeaNormal,
    `Grass.ISA.X86.Execution.MoveSelection, `Grass.ISA.X86.Execution.ObservedFetch,
    `Grass.ISA.X86.Execution.PushSavedRead, `Grass.ISA.X86.Execution.RawOutcome,
-   `Grass.ISA.X86.Execution.ReadValue64, `Grass.ISA.X86.Execution.RunFactory,
+   `Grass.ISA.X86.Execution.RunFactory,
    `Grass.ISA.X86.Execution.FetchFactory, `Grass.ISA.X86.Execution.BodyComputationFactory, `Grass.ISA.X86.Execution.ComputationFactory,
    `Grass.ISA.X86.Execution.PushFactory,
    `Grass.ISA.X86.Execution.CallNormal,
@@ -382,7 +380,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- The bounded live writable/synchronous publication attribution policy.
 -- AND, general memory MOV, and the bounded legacy SYSCALL projection add ten
 -- explicit semantic/profile definitions. Source inspection is not enrollment.
-def owedBaseline : Nat := 357
+-- One width-indexed value decoder replaces the two width-specific decoders.
+def owedBaseline : Nat := 356
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -450,7 +449,9 @@ acquiring a citation.
 -- Checked WriteFile resume construction and computed final carrier.
 -- Five projection/receipt-construction helpers reuse separately owed semantics.
 -- Generic Op extraction replaces one local instance with three compatibility aliases.
-def notBehaviourBaseline : Nat := 402
+-- Direct canonical receipt adoption removes the AccessRun alias again.
+-- One pair of observed/sized-byte methods replaces two width-specific pairs.
+def notBehaviourBaseline : Nat := 399
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -865,8 +866,8 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.StackInstruction.decode,
     -- Structural projections and proof-indexed packaging over an already selected
     -- access completion or memory-MOV constructor.
-    `Grass.ISA.X86.Execution.ReadValue32.observed,
-    `Grass.ISA.X86.Execution.ReadValue32.bytes,
+    `Grass.ISA.X86.Execution.ReadValue.observed,
+    `Grass.ISA.X86.Execution.ReadValue.bytes,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.displacement,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.LoadNormal.read,
     -- Whole-production checks and actual fixed-operation construction, not new transfer rules.
@@ -907,8 +908,6 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.ObservedFetch.failureOutcome,
     `Grass.ISA.X86.Execution.ObservedFetch.reachedState,
     `Grass.ISA.X86.Execution.ObservedFetch.toFetchAttempt,
-    `Grass.ISA.X86.Execution.ReadValue64.bytes,
-    `Grass.ISA.X86.Execution.ReadValue64.observed,
     -- Generic constructors for already selected singleton/access-free generic
     -- operation runs; they add no instruction or target behavior.
     `Grass.ISA.X86.Execution.RunFactory.access,
@@ -916,7 +915,6 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.RunFactory.accessFree,
     `Grass.ISA.X86.Execution.RunFactory.accessFreeOperation,
     `Grass.ISA.X86.Execution.RunFactory.instHasOperationFacetsFixedAccessFreeOperation,
-    `Grass.ISA.X86.Execution.AccessRun,
     `Grass.ISA.X86.Execution.RunFactory.AccessFailure,
     `Grass.ISA.X86.Execution.RunFactory.AccessSuccess,
     `Grass.ISA.X86.Execution.RunFactory.noFaultPlan,
@@ -1314,7 +1312,7 @@ def owed : List Name :=
     `Grass.ISA.X86.Execution.LeaInstruction.encoding?,
     `Grass.ISA.X86.Execution.LeaInstruction.operand,
     `Grass.ISA.X86.Execution.LeaNormal.result,
-    `Grass.ISA.X86.Execution.ReadValue64.value,
+    `Grass.ISA.X86.Execution.ReadValue.value,
     -- The normal fetch factory's lookahead and footprint determine the actual
     -- execute-read extent; the resulting fetch therefore remains architecture debt.
     `Grass.ISA.X86.Execution.FetchFactory.lookahead,
@@ -1334,7 +1332,6 @@ def owed : List Name :=
     `Grass.ISA.X86.Execution.completedSubRflags,
     -- Normal memory MOV semantics: value decoding, operand/width/payload/encoder
     -- selection, effective address, and the two architectural result states.
-    `Grass.ISA.X86.Execution.ReadValue32.value,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.operand,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.width,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.payload?,

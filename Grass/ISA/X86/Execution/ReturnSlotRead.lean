@@ -1,5 +1,6 @@
 import Grass.ISA.X86.Execution.CallNormal
-import Grass.ISA.X86.Execution.ReadValue64
+import Grass.ISA.X86.Execution.ReadValue
+import Grass.Op.AccessRun
 
 /-!
 # Current-state read of a CALL return slot
@@ -12,6 +13,7 @@ return transition or provider-continuity proof.
 
 namespace Grass.ISA.X86.Execution
 
+open Grass.Op.AccessFactory (AccessRun)
 open Grass.Core Grass.Memory Grass.Op
 
 /-- Actual initialized read of the return slot previously written by CALL. -/
@@ -20,7 +22,7 @@ structure ReturnSlotRead {callBefore : State} {afterFetch afterTarget afterCall 
     (beforeReturn : State) (afterRead : MachineState) where
   descriptor : AccessDescriptor
   run : AccessRun beforeReturn.machine afterRead descriptor
-  read : ReadValue64 run
+  read : ReadValue 8 run
   slotProvenance : descriptor.provenance = call.storeDescriptor.provenance
   slotRange : descriptor.range = call.storeDescriptor.range
   slotAddress : descriptor.address = call.storeDescriptor.address

@@ -1,4 +1,4 @@
-import Grass.ISA.X86.Execution.AccessRun
+import Grass.Op.AccessRun
 import Grass.ISA.X86.Execution.DecodedSite
 import Grass.ISA.X86.Execution.State
 import Grass.Op.ReadObservation
@@ -14,6 +14,8 @@ This does not bind the bytes to an assembly source or execute their semantics.
 -/
 
 namespace Grass.ISA.X86.Execution
+
+open Grass.Op.AccessFactory (AccessRun)
 
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical
 

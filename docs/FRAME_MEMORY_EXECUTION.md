@@ -26,7 +26,7 @@ ordering with no authority or obligation transfers.
 `StoreNormal.written_exact` derives the payload from the actual memory-oracle
 answer. `memory_written` and `stored_cell` derive the initialized backing
 mutation from that checked transition. `LoadNormal.read` extracts the actual
-completed observation, and the shared `ReadValue32` adapter proves its width,
+completed observation, and the shared `ReadValue 4` adapter proves its width,
 backing origin, and initialization. The load result uses the canonical DWORD
 write-back rule, including clearing the destination's upper half. Both forms
 retain the actual post-access memory machine, advance to the fetched

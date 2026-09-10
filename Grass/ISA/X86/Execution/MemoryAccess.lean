@@ -1,10 +1,12 @@
 import Grass.ISA.X86.Execution.Fetch
+import Grass.Op.AccessRun
 
 /-! Continuous fetched data accesses used by the source-frame adapters.
 `MemoryAccess` supplies conditional clean normal branches, not an exhaustive instruction
 semantics or a claim that faults and rejected accesses cannot occur. -/
 
 namespace Grass.ISA.X86.Execution
+open Grass.Op.AccessFactory (AccessRun)
 open Grass.Core Grass.Memory Grass.Op Grass.ISA.X86 Grass.ISA.X86.Execution
 open Grass.Std.Logical
 

@@ -1,7 +1,8 @@
 import Grass.ISA.X86.Execution.Fetch
-import Grass.ISA.X86.Execution.ReadValue64
+import Grass.ISA.X86.Execution.ReadValue
 import Grass.ISA.X86.Execution.CompletionFlags
 import Grass.Op.WriteCompletion
+import Grass.Op.AccessRun
 
 /-!
 # Conditional normal indirect CALL completion
@@ -14,6 +15,8 @@ to the admitted architectural and platform profile.
 
 namespace Grass.ISA.X86.Execution
 
+open Grass.Op.AccessFactory (AccessRun)
+
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical
 
 /-- Source-free bounded normal RIP-relative indirect CALL. -/
@@ -23,7 +26,7 @@ structure CallNormal (before : State)
   encoding : callMem64 (.ripRelative displacement) = some fetch.site.encoding
   readDescriptor : AccessDescriptor
   readRun : AccessRun afterFetch afterRead readDescriptor
-  read : ReadValue64 readRun
+  read : ReadValue 8 readRun
   readPolicy : readRun.policy = { fetch.run.policy with oracle := readRun.policy.oracle }
   readContext : readRun.context = fetch.run.context
   readContextKind : readRun.contextKind = fetch.run.contextKind

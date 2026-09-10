@@ -1,5 +1,6 @@
 import Grass.ISA.X86.Execution.CallNormal
 import Tests.Op.FakeIsa
+import Grass.Op.AccessRun
 
 namespace Grass.Tests.ExecutionCall
 
@@ -72,7 +73,7 @@ private def observedF := observedBytes resolvedF (fun _ => 0)
 private def site : DecodedSite before.rip observedF :=
   (DecodedSite.check before.rip observedF).toOption.get (by decide)
 private def fetch : FetchedSite before afterF := by
-  let run : AccessRun initial afterF fetchD :=
+  let run : Grass.Op.AccessFactory.AccessRun initial afterF fetchD :=
     { policy := readPolicy, operation := SomeOperation.of Operation.fetch
       context := thread₀, contextKind := .thread, cause := cause, faultAt := fun _ => .none
       sequence := .single fetchD, selected := by rfl, substeps_exact := by rfl
@@ -102,13 +103,13 @@ private def resolvedR : reachedR.memory.ResolvedAccess readD.provenance readD.ra
   (prepareAccess reachedR.memory readD).toOption.get (by decide)
 private def completeR : CompleteCommitted readD :=
   (readPolicy.oracle.answerResolved reachedR readD resolvedR).get (by decide)
-private def runR : AccessRun afterF afterR readD :=
+private def runR : Grass.Op.AccessFactory.AccessRun afterF afterR readD :=
   { policy := readPolicy, operation := SomeOperation.of Operation.read, context := thread₀
     contextKind := .thread, cause := cause, faultAt := fun _ => .none
     sequence := .single readD, selected := by rfl, substeps_exact := by rfl
     noFault := by rfl, ran := by rfl, resolved := resolvedR, prepared := by rfl
     complete := completeR, answerResolved := by simp [completeR, reachedR], clean := by decide }
-private def read : ReadValue64 runR :=
+private def read : ReadValue 8 runR :=
   { writeData := fun _ _ => [], indeterminate := fun _ _ _ => 0
     memoryOracle := by rfl, reads := by rfl, writes := by rfl, width := by rfl
     initialization := by rfl }
@@ -121,7 +122,7 @@ private def resolvedS : reachedS.memory.ResolvedAccess storeD.provenance storeD.
   (prepareAccess reachedS.memory storeD).toOption.get (by decide)
 private def completeS : CompleteCommitted storeD :=
   (storePolicy.oracle.answerResolved reachedS storeD resolvedS).get (by decide)
-private def runS : AccessRun afterR afterS storeD :=
+private def runS : Grass.Op.AccessFactory.AccessRun afterR afterS storeD :=
   { policy := storePolicy, operation := SomeOperation.of Operation.store, context := thread₀
     contextKind := .thread, cause := cause, faultAt := fun _ => .none
     sequence := .single storeD, selected := by rfl, substeps_exact := by rfl

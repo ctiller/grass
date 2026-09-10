@@ -1,6 +1,7 @@
 import Grass.ISA.X86.Execution.PushNormal
-import Grass.ISA.X86.Execution.ReadValue64
+import Grass.ISA.X86.Execution.ReadValue
 import Grass.Op.ReadBytes
+import Grass.Op.AccessRun
 
 /-!
 # Immediate checked reads of values saved by a normal PUSH
@@ -12,6 +13,7 @@ later intervening writes, unwinding, or POP.
 
 namespace Grass.ISA.X86.Execution
 
+open Grass.Op.AccessFactory (AccessRun)
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical
 open Grass.ISA.X86
 
@@ -32,7 +34,7 @@ structure PushSavedRead {before : State} {afterFetch afterStore afterRead : Mach
   ordering : descriptor.ordering = .plain
   ledgerEffect : descriptor.ledgerEffect = []
   authorityEffect : descriptor.authorityEffect = []
-  valueRead : ReadValue64 read
+  valueRead : ReadValue 8 read
 
 namespace PushSavedRead
 

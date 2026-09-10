@@ -1,5 +1,6 @@
 import Grass.ISA.X86.Execution.PushNormal
 import Tests.Op.FakeIsa
+import Grass.Op.AccessRun
 
 namespace Grass.Tests.ISA.X86.ExecutionPush
 
@@ -89,7 +90,7 @@ private def site : DecodedSite before.rip fetchObserved :=
   (DecodedSite.check before.rip fetchObserved).toOption.get (by decide)
 
 private def fetched : FetchedSite before afterFetch := by
-  let run : AccessRun initialMachine afterFetch fetchDescriptor :=
+  let run : Grass.Op.AccessFactory.AccessRun initialMachine afterFetch fetchDescriptor :=
     { policy := pushPolicy, operation := SomeOperation.of FetchOperation.fetch
       context := thread₀, contextKind := .thread, cause := ⟨⟨"push.fetch"⟩⟩
       faultAt := fun _ => .none, sequence := .single fetchDescriptor
