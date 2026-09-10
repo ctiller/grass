@@ -66,6 +66,7 @@ import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.ProviderResume
+import Grass.Platform.Win32.ProviderResumeFinalization
 import Grass.Platform.Win32.CallResumeBinding
 import Grass.Platform.Win32.CallResumeHistory
 import Grass.Platform.Win32.RawStepSignature
@@ -237,6 +238,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawState,
    `Grass.Platform.Win32.CallRuntime,
    `Grass.Platform.Win32.ProviderResume,
+   `Grass.Platform.Win32.ProviderResumeFinalization,
    `Grass.Platform.Win32.CallResumeBinding,
    `Grass.Platform.Win32.CallResumeHistory,
    `Grass.Platform.Win32.RawStepSignature,
@@ -392,7 +394,8 @@ acquiring a citation.
 -- Shared failure recovery removes one duplicate; memory-MOV provenance adds one projection.
 -- Two endpoint aliases and three shared protocol bookkeeping computations add no model debt.
 -- Two preparation helpers resolve checked memory and project retained fifth-slot identity.
-def notBehaviourBaseline : Nat := 377
+-- The shared settled-state view retains data and asserts no transition.
+def notBehaviourBaseline : Nat := 378
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -568,6 +571,7 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.ExecutionState.RawState.eraseCall,
     -- The provider resume reads the actual retained slot and packages the
     -- reached platform state; it does not claim that an x86 RET was fetched.
+    `Grass.Platform.Win32.ProviderResume.afterReturn,
     `Grass.Platform.Win32.ProviderResume.returnFrame?,
     `Grass.Platform.Win32.ProviderResume.PreservesNonvolatile,
     `Grass.Platform.Win32.ProviderResume.WriteFileOutput,

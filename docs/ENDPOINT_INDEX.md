@@ -99,19 +99,41 @@ candidate and source execution witnesses; producing those at the actual endpoint
 including exact-stage slot-read permission and physical provider-transfer
 correspondence, remains an obligation. No fetched native RET is claimed.
 
-Windows reports the request/count-slot producer is newly authorized, not yet
-implemented or named. [WriteFileArguments.lean](../Grass/Platform/Win32/WriteFileArguments.lean)
-(`Request`, `Resolved`, `Prepared`) and
-[WriteFileAbi.lean](../Grass/Platform/Win32/WriteFileAbi.lean) (`Abi.Entry`) currently
-provide evidence types. The proposed producer starts from the reached post-CALL
-state plus canonical provenance-carrying buffer/count arguments, bytes and
-fifth slot. It derives the handle from RCX and requested count from the low 32 bits of R8,
-checks RDX/R9/stack correspondence, and never reconstructs count provenance from
-R9 alone. Existing
+The checked request/entry producer is delivered in Windows checkpoint `4f431cee`:
+inspect `git show 4f431cee:Grass/Platform/Win32/WriteFilePrepare.lean`.
+`WriteFile.EntryFactory.requestOf` fixes the request from the actual state,
+canonical provenance-carrying buffer/count arguments and bytes; `prepare?` also
+takes the supplied fifth slot and computes `Abi.Entry` with `Prepared` for that
+same request, or refuses failed spatial, initialization, size or ABI checks.
+It derives the handle from RCX and requested count from low 32-bit R8, checks
+RDX/R9 and the fifth-slot stack address, and never reconstructs count provenance
+from R9 alone. `requestOf_countSlot`, `requestOf_buffer`, `requestOf_bytes`,
+`requestOf_handle`, `requestOf_requested` and `prepare?_fifthSlot` retain the exact
+supplied inputs. The inspected fixture at
+`Tests/Platform/Win32WriteFilePrepare.lean` connects actual CALL → preparation →
+stack plan → protocol entry, retaining the canonical count slot in the pending
+record; Windows reports review and validation passed.
+
+This closes the missing checked preparation step. The source LEA's argument and
+R9 transport to the CALL, and the source suffix buffer, still need their lowering
+connection. Provider BOOL, settlement/resume and physical correspondence retain
+their separate obligations above. Existing
 [WriteFileStackPlan.lean](../Grass/Platform/Win32/WriteFileStackPlan.lean)
 `Abi.StackPlanFactory.deriveLoaded?` consumes an already supplied `Entry` and
-derives the shared ReturnHome plan plus WriteFile extensions; it does not fill
-that missing request/entry-production step.
+derives the shared ReturnHome plan plus WriteFile extensions, including the later
+fifth-slot separation checks.
+
+Source-entry delivery `4a172bd4`, integrated on the certificate branch as
+`3c572e90`, adds `Grass/Refinement/Console/WriteFileSourceEntry.lean`.
+Its inspected `prepareCall?` composes reached CALL, preparation, stack plan and
+protocol entry with the exact receipt and original metadata. `prepareSourceCall?`
+uses the canonical `SourceLea.argument` with an explicit checked-evaluator witness.
+The specialized `returned_body` requires the successful producer equation and
+removes the generic `requestSlot` premise by construction. It still does not
+construct the source-LEA-to-pre-CALL setup ancestry or whole Hello; the other
+return/body premises remain. Spikes reports independent Sol review and a combined
+304-job focused build passed. Shared finalization extraction remains unpublished
+at this checkpoint; no GetStdHandle production adoption is claimed.
 
 The structured Hello fixture at the inspected `31ad186e` had a trust-gate
 setup-extraction defect, so that checkpoint is not acceptance evidence.
