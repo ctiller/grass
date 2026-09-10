@@ -37,10 +37,9 @@ whose core grammar declares SPIR-V 1.5 revision 4.
   derive an identifier-to-ID mapping or assert that an arbitrary translation
   preserves semantics.
 
-The corresponding [SPIR-V tests](../Tests/ISA/SPIRV/Composite.lean),
-[WGSL tests](../Tests/Shader/WGSL/Composite.lean), and
-[connection trust audit](../Tests/Shader/CompositeConnection.lean) are focused
-checks of this boundary. The authored cube sources are unchanged.
+The corresponding SPIR-V tests, WGSL tests, and connection trust audit (since
+removed from `Tests/` as internal-only coverage) were focused checks of this
+boundary. The authored cube sources are unchanged.
 
 ## Connection boundaries
 

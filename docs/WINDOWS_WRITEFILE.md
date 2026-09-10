@@ -98,9 +98,9 @@ physical permanent-wait interpretation and violation envelopes remain downstream
 work. The modeled return boundary below supplies conditional return evidence;
 it does not close those physical obligations.
 
-[`Win32WriteFile.lean`](../Tests/Platform/Win32WriteFile.lean) exercises initialized
-request preparation, exact handoff, and an actual no-memory provider step. It
-rejects wrong calls/dispatch, missing loans, substituted or uninitialized bytes,
+`Win32WriteFile.lean` (since removed from `Tests/` as internal-only coverage)
+exercised initialized request preparation, exact handoff, and an actual
+no-memory provider step. It rejected wrong calls/dispatch, missing loans, substituted or uninitialized bytes,
 overlap, repeated prefixes, excessive/backward counts and missing causal edges.
 Its actual caller-zero/handoff/provider-zero fixture still receives a denial from
 the current checker; the evidence layer rejects that result even though `step?`
@@ -130,11 +130,12 @@ permission. Reachability at every output cut, physical adequacy, conforming
 return, and eventual stabilization of arbitrary infinite continuations remain
 separate obligations. The fixed-cut result alone proves none of them.
 
-[`Win32WriteFileNonresponse.lean`](../Tests/Platform/Win32WriteFileNonresponse.lean)
-uses an explicitly synthetic identity relation over the existing reached quiet
-history, rejects false and wrong-occurrence relations, and checks endpoint
-construction from supplied evidence without any continuation. It does not
-fabricate an infinite quiet execution from the fixture's single committed edge.
+`Win32WriteFileNonresponse.lean` (since removed from `Tests/` as internal-only
+coverage) used an explicitly synthetic identity relation over the existing
+reached quiet history, rejected false and wrong-occurrence relations, and
+checked endpoint construction from supplied evidence without any
+continuation. It did not fabricate an infinite quiet execution from the
+fixture's single committed edge.
 
 ## Matched return and caller continuation
 
@@ -160,11 +161,11 @@ These equalities are derived from the actual loan-return effects and preserve th
 checked count-slot bytes and their initialization.
 
 Architecture and an independent Terra reviewer approved this conditional
-return boundary. The [result fixtures](../Tests/Platform/Win32WriteFileReturn.lean)
-cover non-one success, wrong counts and uninitialized slots. The
-[matched fixture](../Tests/Platform/Win32MatchedReturn.lean) constructs an actual
-handoff/return with a synthetic interpretation and rejects false interpretation
-and absent return ordering. Neither fixture asserts physical Windows behavior.
+return boundary. The result fixtures and the matched fixture (since removed
+from `Tests/` as internal-only coverage) covered non-one success, wrong
+counts, uninitialized slots, and constructed an actual handoff/return with a
+synthetic interpretation, rejecting false interpretation and absent return
+ordering. Neither fixture asserted physical Windows behavior.
 
 The pending provider-resume connection must combine an actual return-slot read
 with fixed endpoint correspondence for the opaque-provider contract. A frame
@@ -178,19 +179,19 @@ review, not a completed result at this snapshot.
 
 ## Model regressions and external validation
 
-[Win32ApiRequest.lean](../Tests/Platform/Win32ApiRequest.lean) exercises mixed API
-occurrences and full-batch custody. The
-[service fixture](../Tests/Platform/Win32WriteFileService.lean) exercises five
-loans and two consecutive quiet service actions. These are model regressions;
-they do not establish native dispatch, provider progress or full Hello execution.
+`Win32ApiRequest.lean` and the service fixture (both since removed from
+`Tests/` as internal-only coverage) exercised mixed API occurrences and
+full-batch custody, and five loans and two consecutive quiet service actions
+respectively. These were model regressions; they did not establish native
+dispatch, provider progress or full Hello execution.
 Existing contributor checks are in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 Probe programs are to be authored in Grass and emitted through Hello World's
-production PE entry/import/emitter path. The
-[semantic probe cases](../Tests/Platform/Win32ProbeCases.lean) currently check
+production PE entry/import/emitter path. The semantic probe cases (since
+removed from `Tests/` as internal-only coverage) checked
 zero/partial/full successes, failure after zero/partial/full output, and rejected
 excess counts, count/output disagreement and wrong bytes using the existing Lean
-relations. They are not emitted programs. A thin host launcher may supply inherited
+relations. They were not emitted programs. A thin host launcher may supply inherited
 stdout fixtures and collect output; it must not replace the API test body or its
 model predictions. The [checked PE container path](WINDOWS_PE.md) now has a
 complete reader and exact decoded-record round trip. Native Grass probe execution

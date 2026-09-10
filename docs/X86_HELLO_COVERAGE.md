@@ -7,10 +7,10 @@ The inventory is a scheduling aid, not a second executable instruction sequence.
 
 ## Population and source binding
 
-Use the production chain exercised by
-[SourceResolve's fixture](../Tests/Assembly/SourceResolve.lean): embedded authored
+Use the production chain exercised by SourceResolve's fixture (since removed
+from `Tests/` as internal-only coverage): embedded authored
 characters, `SourceInput.extractHelloSourceChars`, `SourceFrame.derive?`,
-`SourceSplice.derive? frame 0`, then `SourceResolve.resolve?`. Its fixture uses
+`SourceSplice.derive? frame 0`, then `SourceResolve.resolve?`. Its fixture used
 code base 1000 **decimal**, payload address 2000 with length 15, and IAT cells
 3000, 3008 and 3016. These fixture addresses are not Windows loader addresses.
 

@@ -52,9 +52,10 @@ ELF is the second consumer of
 [`Binary.ReaderCore`](../Grass/Artifact/Binary/ReaderCore.lean). The existing PE
 readers now use the same sequencing implementation; the historical PE name is
 only an abbreviation. Endian readers and their universal laws are reused
-unchanged. [Header tests](../Tests/Artifact/ELF/Header.lean) check both machine
-values, independent byte offsets, suffix retention, unsupported profiles and
-truncation. These checks do not prove loading or execution.
+unchanged. Header tests (since removed from `Tests/` as internal-only
+coverage) checked both machine values, independent byte offsets, suffix
+retention, unsupported profiles and truncation; those checks did not prove
+loading or execution.
 
 ## Source authority
 

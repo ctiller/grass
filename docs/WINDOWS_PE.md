@@ -123,9 +123,9 @@ parallel serializer. Native API applicability and execution evidence remain
 distinct from container recovery.
 
 The exception-table checkpoint received independent architecture and Terra
-review of the actual format path and tests. The
-[exception fixtures](../Tests/Artifact/PE/Exceptions.lean) build final table bytes
-from provisional resolved coordinates and challenge stale bytes, missing targets,
+review of the actual format path and tests. The exception fixtures (since
+removed from `Tests/` as internal-only coverage) built final table bytes
+from provisional resolved coordinates and challenged stale bytes, missing targets,
 permissions, overlapping functions, alignment and overflow. The existing image
 round-trip theorem and the checked directory/table binding remain distinct from
 the source/ABI and native execution obligations.

@@ -10,9 +10,9 @@ extracts local facts from the actual fixed raw relation:
 - CPU edges preserve metadata, control and runtime data, including across
   explicit outside-profile outcomes. This does not preserve protocol validity
   of an arbitrary reached machine.
-- Bounded actual CPU prefixes retain those same fields. The
-  [composition test](../Tests/Platform/Win32RawPhasePreservation.lean) joins an
-  actual GetStdHandle return to a CPU suffix at the exact same state and graph.
+- Bounded actual CPU prefixes retain those same fields. The composition test
+  (since removed from `Tests/` as internal-only coverage) joined an actual
+  GetStdHandle return to a CPU suffix at the exact same state and graph.
 
 [RawPrefix](../Grass/Platform/Win32/RawPrefix.lean) defines `Raw.system` and reuses
 `RelationalSystem.ExecutionPrefix` for finite histories. Its root is computed

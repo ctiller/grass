@@ -1,5 +1,5 @@
 import Grass.Artifact.PE.Imported
-import Tests.Artifact.PE.Reader
+import Grass.Artifact.PE.ImageReader
 
 /-! Focused fixtures for bounded external PE ingestion.  The byte-exact MSVC
 prefix below comes from `.lake/disasm/c/store_safe.exe` (1,536 bytes): its NT
@@ -11,6 +11,29 @@ namespace Tests.Artifact.PE.Imported
 open Grass.Artifact.PE Grass.Grammar Grass.Std.Logical
 
 set_option maxRecDepth 10000
+
+/-- A minimal canonical writer fixture, supplying the synthetic `image` bytes
+that `externalFixture` below splices a real DOS stub and NT/COFF prefix into.
+Inlined from the deleted `Tests.Artifact.PE.Reader` round-trip fixtures, whose
+own internal writer/reader checks made no external-ground-truth claim. -/
+private def readerTextName : SectionName :=
+  ⟨Vec.fromList [46, 116, 101, 120, 116], by decide⟩
+
+private def readerDescription : ExecutableImageDescription :=
+  { entryPoint := { sectionIndex := 0, offset := 1 }
+    sections := Vec.fromList [
+      { name := readerTextName
+        contents := Vec.fromList [0x90, 0xc3]
+        characteristics := 0x60000020 }]
+    imports := Vec.empty }
+
+private def readerPlan? : Option ImagePlan := (prepareImage readerDescription).toOption
+
+private theorem readerPlan_exists : readerPlan?.isSome := by decide
+
+private def readerPlan : ImagePlan := readerPlan?.get readerPlan_exists
+
+private def readerImage : Grass.Std.Logical.ByteArray := writeImage readerPlan
 
 /-- Bytes 64 through 167 of the checked MSVC sample, retained verbatim. -/
 def msvcDosStub : Grass.Std.Logical.ByteArray := Vec.fromList [
@@ -56,11 +79,11 @@ example : msvcPrefixAccepted = true := by decide
 Moving NT headers from 64 to 168 consumes 104 bytes of otherwise canonical
 header padding, leaving the first raw section at its declared offset 512. -/
 def externalFixture : Grass.Std.Logical.ByteArray :=
-  (Tests.Artifact.PE.Reader.image.take 60 ++ Vec.fromList [0xa8, 0, 0, 0]) ++
+  (readerImage.take 60 ++ Vec.fromList [0xa8, 0, 0, 0]) ++
     msvcDosStub ++
-    (Tests.Artifact.PE.Reader.image.drop 64).take 304 ++
-    (Tests.Artifact.PE.Reader.image.drop 368).take 40 ++
-    Tests.Artifact.PE.Reader.image.drop 512
+    (readerImage.drop 64).take 304 ++
+    (readerImage.drop 368).take 40 ++
+    readerImage.drop 512
 
 def importedFixture? : Option (ImportedImage externalFixture) :=
   match readImportedImage externalFixture with
@@ -83,7 +106,7 @@ example : (match importedFixture.image.sections with
   | _ => false) = true := by decide
 
 /-- The immutable canonical writer output is accepted as the empty-stub case. -/
-example : (match readImportedImage Tests.Artifact.PE.Reader.image with
+example : (match readImportedImage readerImage with
   | .done decoded rest => decide (decoded.dosStub.length = 0 ∧ rest.length = 0)
   | _ => false) = true := by decide
 

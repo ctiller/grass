@@ -67,10 +67,11 @@ not discharge it.
 
 ## Validation
 
-[`Win32LoaderEntry`](../Tests/Platform/Win32LoaderEntry.lean) checks missing and
-extra import data, reused IDs, context/flags/stack failures, physical aliases,
-historical identity reuse and patch framing using source-independent PE data.
-The separate Hello image and prologue construction helpers have been deleted.
+`Win32LoaderEntry` (since removed from `Tests/` as internal-only coverage)
+checked missing and extra import data, reused IDs, context/flags/stack
+failures, physical aliases, historical identity reuse and patch framing using
+source-independent PE data. The separate Hello image and prologue construction
+helpers have been deleted.
 These are executable model tests, separate from universal kernel proofs.
 
 The former source-reading Hello exporter and runner have been deleted under the

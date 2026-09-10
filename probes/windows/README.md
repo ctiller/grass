@@ -7,7 +7,7 @@ authored program through the general verified emission path.
 
 ## Auxiliary API campaign
 
-This C/Python campaign is retained as auxiliary comparison evidence and will not be expanded. [Lean semantic cases](../../Tests/Platform/Win32ProbeCases.lean) exercise accepted and rejected API outcomes; those individual cases do not yet emit runnable Grass programs.
+This C/Python campaign is retained as auxiliary comparison evidence and will not be expanded. Lean semantic cases (since removed from `Tests/` as internal-only coverage, since they did not emit or execute a program) exercised accepted and rejected API outcomes.
 
 This directory contains an external validation harness for the bounded synchronous `WriteFile` model. It compiles `writefile.c` with the installed MSVC x64 tools, runs each case in a separate process with a timeout, and writes `.lake/windows-probes/results.json`.
 

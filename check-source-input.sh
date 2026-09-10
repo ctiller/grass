@@ -30,8 +30,12 @@ while IFS= read -r -d '' fixture; do
   fi
 done < "$inventory"
 if (( ${#fixtures[@]} == 0 )); then
-  echo 'No authored-source embedding fixtures found.' >&2
-  exit 1
+  # `include_source_chars` currently has no author under Tests/; the fixtures
+  # that used it were removed when Tests/ was narrowed to real-world
+  # comparisons (docs/DECISIONS.md). Nothing to re-elaborate is not a failure:
+  # a future embedding fixture makes this loop non-empty again automatically.
+  echo 'No authored-source embedding fixtures found; nothing to re-elaborate.'
+  exit 0
 fi
 for fixture in "${fixtures[@]}"; do
   lake env lean "$fixture"
