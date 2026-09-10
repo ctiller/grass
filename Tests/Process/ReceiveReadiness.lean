@@ -1,12 +1,12 @@
 import Tests.Process.PreservationFixtures
 import Tests.Process.EscrowReceiveUpdate
 
-/-! A test-only receive-readiness experiment.  Readiness is stated from the
-channel's concrete operational guards, then connected to a receive-tagged
-`NetworkStep`; it is not defined as existence of that step.  The equivalence
-below proves neither that a receiver is live nor that a local process handles
-the delivered value.  `Tests/Process/ChannelAgencyGap.lean`'s initialized world
-with no receiver is the concrete counterexample separating those claims. -/
+/-! Test-only readiness for the channel's escrow/cursor mechanism. The explicit
+updated world realizes these guards as `EscrowDelivery`. An actual network
+receive additionally requires the exact live receiver and its declared local
+transition; the mechanism is deliberately no longer a `NetworkStep`.
+`ChannelAgencyGap` checks that the formerly accepted absent-receiver frontier
+cannot perform an actual receive. -/
 
 namespace Grass.Process.Tests.ReceiveReadiness
 
@@ -24,28 +24,26 @@ open Classical
 
 /-- The pre-state guards selected by this concrete channel contract, retaining
 the exact session and occurrence. -/
-def Ready (before : ServerWorld) (session : serverTopology.ChannelId ())
+def LedgerReady (before : ServerWorld) (session : serverTopology.ChannelId ())
     (occurrence : serverTopology.ChannelOccurrence () payload) : Prop :=
   session = wire ∧ occurrence = occurrenceOf ∧
     (before.inFlight () session).Outstanding escrowed ∧
     (before.sessions () session).delivered = 0
 
-/-- A network step whose constructor is specifically the receive of this exact
-session and occurrence. Other enabled transition constructors are irrelevant. -/
-structure ActualReceive (before : ServerWorld)
+/-- The ledger operation for this exact session and occurrence. It supplies no
+network-step witness or claim about receiver readiness. -/
+structure LedgerReceive (before : ServerWorld)
     (session : serverTopology.ChannelId ())
     (occurrence : serverTopology.ChannelOccurrence () payload) : Type 1 where
   after : ServerWorld
-  delivery : serverPlan.Delivers before after () session escrowed
-  step : serverPlan.NetworkStep before after
-  tagged : step.transition = .receive () session escrowed delivery
+  delivery : serverPlan.EscrowDelivery before after () session escrowed
   occurrenceExact : occurrence = occurrenceOf
 
-/-- Every tagged actual receive exposes the channel relation's pre-state guards. -/
-theorem actual_receive_implies_ready {before : ServerWorld}
+/-- Every tagged ledger receive exposes the channel relation's pre-state guards. -/
+theorem ledger_receive_implies_ready {before : ServerWorld}
     {session : serverTopology.ChannelId ()}
     {occurrence : serverTopology.ChannelOccurrence () payload}
-    (actual : ActualReceive before session occurrence) : Ready before session occurrence := by
+    (actual : LedgerReceive before session occurrence) : LedgerReady before session occurrence := by
   have onWire : escrowed.2.1 = wire := actual.delivery.contractual.1
   have onSession : escrowed.2.1 = session := actual.delivery.onItsSession
   have sameSession : session = wire := onSession.symm.trans onWire
@@ -80,13 +78,13 @@ noncomputable def receiveAfter (before : ServerWorld)
           delivered := (before.sessions () wire).delivered + 1 } := by
   simp [receiveAfter]
 
-noncomputable def readyActualReceive {before : ServerWorld}
+noncomputable def readyLedgerReceive {before : ServerWorld}
     {session : serverTopology.ChannelId ()}
     {occurrence : serverTopology.ChannelOccurrence () payload}
-    (ready : Ready before session occurrence) : ActualReceive before session occurrence := by
+    (ready : LedgerReady before session occurrence) : LedgerReceive before session occurrence := by
   rcases ready with ⟨rfl, rfl, outstanding, atZero⟩
   let after := receiveAfter before outstanding
-  have delivery : serverPlan.Delivers before after () wire escrowed := by
+  have delivery : serverPlan.EscrowDelivery before after () wire escrowed := by
     refine
       { contractual := ⟨rfl, outstanding, atZero, ?_⟩
         onItsSession := rfl
@@ -152,27 +150,22 @@ noncomputable def readyActualReceive {before : ServerWorld}
   refine
     { after := after
       delivery := delivery
-      step :=
-        { transition := .receive () wire escrowed delivery
-          admissible := by intro _ absent; cases absent
-          historyExact := rfl }
-      tagged := rfl
       occurrenceExact := rfl }
 
 /-- For this fixture's channel relation, the concrete ledger/cursor guards are
-exactly enough to construct a receive-tagged network step at any world.  This
+exactly enough to construct the escrow/cursor operation at any world. This
 says nothing about a live receiver or subsequent local process handling. -/
-theorem ready_iff_actual_receive {before : ServerWorld}
+theorem ready_iff_ledger_receive {before : ServerWorld}
     {session : serverTopology.ChannelId ()}
     {occurrence : serverTopology.ChannelOccurrence () payload} :
-    Ready before session occurrence ↔ Nonempty (ActualReceive before session occurrence) := by
+    LedgerReady before session occurrence ↔ Nonempty (LedgerReceive before session occurrence) := by
   constructor
-  · exact fun ready => ⟨readyActualReceive ready⟩
+  · exact fun ready => ⟨readyLedgerReceive ready⟩
   · rintro ⟨actual⟩
-    exact actual_receive_implies_ready actual
+    exact ledger_receive_implies_ready actual
 
 /-- The existing send-produced frontier satisfies the concrete guards. -/
-theorem sent_is_ready : Ready sent wire occurrenceOf := by
+theorem sent_is_ready : LedgerReady sent wire occurrenceOf := by
   refine ⟨rfl, rfl, ?_, ?_⟩
   · exact the_receive_after_the_send.wasOutstanding
   · exact the_receive_after_the_send.contractual.2.2.1
@@ -180,15 +173,13 @@ theorem sent_is_ready : Ready sent wire occurrenceOf := by
 /-- An enabled receive at the concrete send-produced frontier. Its resolution,
 cursor and frame obligations come from the existing `Delivers` witness;
 this does not construct a receive from the readiness guards. -/
-noncomputable def sent_actual_receive : ActualReceive sent wire occurrenceOf where
+noncomputable def sent_ledger_receive : LedgerReceive sent wire occurrenceOf where
   after := received
   delivery := the_receive_after_the_send
-  step := Grass.Process.Tests.Preservation.theReceiveStep
-  tagged := rfl
   occurrenceExact := rfl
 
 /-- Once resolved, the same occurrence is no longer receive-ready. -/
-theorem resolved_is_not_ready : ¬ Ready received wire occurrenceOf := by
+theorem resolved_is_not_ready : ¬ LedgerReady received wire occurrenceOf := by
   rintro ⟨_, _, outstanding, _⟩
   rw [received_wire] at outstanding
   rcases outstanding with ⟨_, unresolved⟩
@@ -196,28 +187,28 @@ theorem resolved_is_not_ready : ¬ Ready received wire occurrenceOf := by
   contradiction
 
 /-- Before the send, the missing occurrence is not receive-ready. -/
-theorem missing_is_not_ready : ¬ Ready withRoot wire occurrenceOf := by
+theorem missing_is_not_ready : ¬ LedgerReady withRoot wire occurrenceOf := by
   rintro ⟨_, _, outstanding, _⟩
   change (EscrowLedger.empty).Outstanding escrowed at outstanding
   exact List.not_mem_nil outstanding.1
 
-theorem resolved_has_no_actual_receive :
-    ¬ Nonempty (ActualReceive received wire occurrenceOf) := by
+theorem resolved_has_no_ledger_receive :
+    ¬ Nonempty (LedgerReceive received wire occurrenceOf) := by
   rintro ⟨actual⟩
-  exact resolved_is_not_ready (actual_receive_implies_ready actual)
+  exact resolved_is_not_ready (ledger_receive_implies_ready actual)
 
-theorem missing_has_no_actual_receive :
-    ¬ Nonempty (ActualReceive withRoot wire occurrenceOf) := by
+theorem missing_has_no_ledger_receive :
+    ¬ Nonempty (LedgerReceive withRoot wire occurrenceOf) := by
   rintro ⟨actual⟩
-  exact missing_is_not_ready (actual_receive_implies_ready actual)
+  exact missing_is_not_ready (ledger_receive_implies_ready actual)
 
 /-- Naming the concrete later-epoch session cannot satisfy readiness. -/
-theorem sidewire_is_not_ready : ¬ Ready sent sidewire occurrenceOf := by
+theorem sidewire_is_not_ready : ¬ LedgerReady sent sidewire occurrenceOf := by
   intro ready
   exact sidewire_ne_wire ready.1
 
 theorem wrong_session_is_not_ready {session : serverTopology.ChannelId ()}
-    (wrong : session ≠ wire) : ¬ Ready sent session occurrenceOf := by
+    (wrong : session ≠ wire) : ¬ LedgerReady sent session occurrenceOf := by
   intro ready
   exact wrong ready.1
 
@@ -225,22 +216,22 @@ theorem wrong_session_is_not_ready {session : serverTopology.ChannelId ()}
 independently of other transition constructors. -/
 theorem wrong_session_has_no_delivery {before after : ServerWorld}
     {session : serverTopology.ChannelId ()} (wrong : session ≠ wire) :
-    ¬ serverPlan.Delivers before after () session escrowed := by
+    ¬ serverPlan.EscrowDelivery before after () session escrowed := by
   intro delivery
   have onWire : escrowed.2.1 = wire := delivery.contractual.1
   have onSession : escrowed.2.1 = session := delivery.onItsSession
   exact wrong (onSession.symm.trans onWire)
 
-theorem wrong_session_has_no_actual_receive {before : ServerWorld}
+theorem wrong_session_has_no_ledger_receive {before : ServerWorld}
     {session : serverTopology.ChannelId ()} (wrong : session ≠ wire) :
-    ¬ Nonempty (ActualReceive before session occurrenceOf) := by
+    ¬ Nonempty (LedgerReceive before session occurrenceOf) := by
   rintro ⟨actual⟩
-  exact wrong (actual_receive_implies_ready actual).1
+  exact wrong (ledger_receive_implies_ready actual).1
 
-/-- The later epoch is an inhabited negative control for the tagged step. -/
-theorem sidewire_has_no_actual_receive :
-    ¬ Nonempty (ActualReceive sent sidewire occurrenceOf) :=
-  wrong_session_has_no_actual_receive sidewire_ne_wire
+/-- The later epoch is an inhabited negative control for the ledger operation. -/
+theorem sidewire_has_no_ledger_receive :
+    ¬ Nonempty (LedgerReceive sent sidewire occurrenceOf) :=
+  wrong_session_has_no_ledger_receive sidewire_ne_wire
 
 end
 
