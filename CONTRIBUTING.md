@@ -185,9 +185,14 @@ families and three are smaller helpers. The report's speculative FrameLoad/
 FrameLea and StaticSectionPacking candidates are excluded from the count, as are
 already-shared runtime table updates and superficially similar domain laws.
 
-## Spike-first rebuild workflow
+## Parallel cross-stack implementation
 
-Complete Hello World, sort, gzip, HTTP/2 server, then spinning cube, in order.
+Implement all five spikes in parallel: Hello World, sort, gzip, HTTP/2 server and
+spinning cube. Work concurrently across Windows, Linux, WASI and bare metal, and
+x86, AArch64, Wasm, SPIR-V and WGSL, to expose shared requirements early. This
+supersedes the earlier requirement to wait for Hello or complete spikes in order.
+The [implementation matrix](docs/ENDPOINT_INDEX.md#cross-stack-implementation-matrix)
+distinguishes actual checked evidence from missing work; assignment is not implementation.
 Hold each existing spike's behavior and authored source steady except for a
 demonstrated defect or an implementation approach that proves unreasonable.
 Record the reason for such changes and retain the annotated/source mirror.
@@ -201,9 +206,9 @@ semantic review where the boundary changes under the standard above. For repeate
 populations, prefer a shared Lean description with general proofs over separately
 maintained instances.
 
-Work through the active spike's complete specification-to-artifact chain. Add or
-refine library code when that chain needs it; do not build independent layers
-merely to satisfy a speculative roadmap. A compiling fixture or runnable binary
+Work through each spike's complete specification-to-artifact chain with shared
+checked mechanisms. Preserve the precious specifications; do not replace them
+with bespoke program recipes or mock verification. A compiling fixture or runnable binary
 alone does not finish a spike: its acceptance document and implementation ratchet
 require the connected proofs, exact bytes, failure cases, and rebuild evidence.
 
@@ -215,7 +220,7 @@ provenance available in Git history, not current authority or work assignments.
 New guidance belongs with its narrow owning design document.
 
 Publish reviewed, validated checkpoints to GitHub during development. Keep the
-current spike's remaining obligations concrete and small; do not recreate the
+spikes' remaining obligations concrete and small; do not recreate the
 retired coordination system or per-layer implementation plans.
 
 Do not include confidential vulnerability details in an ordinary issue or

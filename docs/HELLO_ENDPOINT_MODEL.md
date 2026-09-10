@@ -101,8 +101,9 @@ restrictions. Sources checked 2026-09-09:
 The approved [agency and directed-waiting decision](SEMANTICS.md#selected-agency-and-directed-waiting)
 supersedes the earlier requirement here that every raw infinity match an authored
 infinity. Exact `BehaviorCorrespondence` and shared `BehaviorMatching.CompleteMatch`
-remain strict. Directed `ImplementationConformance` will reuse a strict witness
-or a concrete external-nonresponse witness; this change is not yet delivered.
+remain strict. Directed `ImplementationConformance` reuses a strict witness
+or a concrete external-nonresponse witness in certificate delivery `07e176f7`.
+Actual raw wait agency remains missing; the Hello-specific raw profile was removed.
 
 The selected Hello profile treats provider service, API return observations and
 completed Exit observations as environment-owned, and caller CPU steps as
