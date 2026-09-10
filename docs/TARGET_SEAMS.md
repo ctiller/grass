@@ -60,6 +60,23 @@ instead of re-proving its own copy.
   graphics APIs. A shader module is a second artifact embedded in the host
   program's data; the API is a `Service.Domain` family.
 
+## What the generic tier already proves
+
+- `ISA.decodeAll_encodeAll`: whole-code decode of a canonical encoding, from
+  each ISA's single-instruction `decode_encode`.
+- `Machine.stuck_of_fault`, `Machine.stuck_of_undecoded`: the two ways a
+  program gets stuck, so an ISA fault or an unrealized platform call is a
+  visible refusal, never silent progress.
+- `Machine.adequate_of_invariant` (`Grass/Target/Safety.lean`): the
+  certificate's `Adequate` obligation for the machine tier follows from an
+  inductive invariant that holds initially, is preserved by every step, and
+  excludes stuck states, plus platform input coverage. A block-structured
+  assembly verifier produces exactly that invariant: block contracts at
+  labels, preserved between them. This is the theorem that makes per-program
+  proof work target-independent.
+- `toArtifactFormat`: `loadExact` for every container format from its
+  `read_write` law alone.
+
 ## Rules for every contributor (agents included)
 
 1. Do not edit `Grass/Target/*.lean` or `Grass/Service/Domain.lean`. If the
