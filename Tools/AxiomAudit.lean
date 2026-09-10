@@ -291,6 +291,7 @@ import Grass.Process.Network.Mailbox
 import Grass.Process.Network.Plan
 import Grass.Process.Network.Progress
 import Grass.Process.Network.Receive
+import Grass.Process.Network.EscrowReceive
 import Grass.Process.Network.Structural
 import Grass.Process.Network.Topology
 import Grass.Process.Network.Transition
