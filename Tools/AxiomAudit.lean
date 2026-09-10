@@ -1,4 +1,7 @@
 import Lean
+import Grass.Std.Logical.StableSort
+import Grass.Std.Logical.ByteOrder
+import Grass.Std.Sort.Descriptors
 import Grass.Platform.Win32.RawPhasePreservation
 import Grass.Platform.Win32.RawPendingService
 import Grass.Platform.Win32.RawPrefixSteps
