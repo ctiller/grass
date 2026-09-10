@@ -444,7 +444,8 @@ acquiring a citation.
 -- The actual checked completion projects its canonical raw event suffix.
 -- Shared observation staging installs supplied register data without native authority.
 -- Checked WriteFile resume construction and computed final carrier.
-def notBehaviourBaseline : Nat := 400
+-- Shared access extraction replaces one obsolete instance entry with three aliases.
+def notBehaviourBaseline : Nat := 402
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -904,7 +905,10 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.RunFactory.accessFree,
     `Grass.ISA.X86.Execution.RunFactory.accessFreeOperation,
     `Grass.ISA.X86.Execution.RunFactory.instHasOperationFacetsFixedAccessFreeOperation,
-    `Grass.ISA.X86.Execution.RunFactory.instHasOperationFacetsSingletonAccessOperation,
+    -- Transparent aliases retain the shared producer's exact receipt/failure types.
+    `Grass.ISA.X86.Execution.AccessRun,
+    `Grass.ISA.X86.Execution.RunFactory.AccessFailure,
+    `Grass.ISA.X86.Execution.RunFactory.AccessSuccess,
     `Grass.ISA.X86.Execution.RunFactory.noFaultPlan,
     `Grass.ISA.X86.Execution.RunFactory.singletonOperation,
     -- Factory packaging and explicit applicability routing over separately
