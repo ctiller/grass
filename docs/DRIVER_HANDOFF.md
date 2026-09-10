@@ -15,12 +15,20 @@ the matrix. Start with [TARGET_SEAMS.md](TARGET_SEAMS.md).
   `Grass.SpecRoot`; facades `Grass.Spec.{Console,Resource,Grammar,Graphics}`.
   `Spikes/1_Hello_World/Spec.lean` elaborates unchanged.
 - ISAs: `Grass.ISA.Wasm.isa` (104 instructions, full round trip, step),
-  `Grass.ISA.AArch64.isa` (8 families). x86-64: native-call types and an
-  encoder landed in the worktree, record not finished (uncommitted
-  `Grass/ISA/X86/Target/Encode.lean` when this was written).
+  `Grass.ISA.AArch64.isa` (8 families), `Grass.ISA.X86.isa` (33 register-direct
+  and immediate/rel32 families with round trip; no memory-operand addressing
+  yet: `[base+disp32]`, `[rip+disp32]`, `lea`, `call qword ptr [rip+disp32]`
+  were removed because their ModR/M round-trip proofs did not close; the
+  machinery remains in `Grass/ISA/X86/Target/Encode.lean`).
 - Platforms: hosted environment (`Grass/Platform/Hosted`), bare-metal UART
-  device, Linux x86-64 decode, Win32 x86-64 decode, WASI Preview 1 with the
-  first fully wired record `Grass.Platform.WASI.Target.platform`.
+  device, and wired records for WASI/Wasm, Linux x86-64 and AArch64,
+  Win32 x86-64 and bare-metal AArch64. A concurrent session added
+  `Grass/Target/Checkpoint.lean` (`adequate_of_checkpoints`: bounded progress
+  between checkpoint states, the shape a block verifier produces) and deleted
+  the legacy Win32/WriteFile machine tier (20k lines).
+- Devices: `Grass.Shader.SPIRV.language`, `Grass.Shader.WGSL.language`
+  (a canonical prefix token text with a proved round trip, not WGSL concrete
+  syntax a browser accepts), `Grass.Device.Vulkan.api`, `Grass.Device.WebGPU.api`.
 - Formats: Flat boot image and ELF64 (`read_write` proved); PE adapter over
   the existing round-trip writer not yet written; Wasm module format not yet.
 - Models: gasm's fixed-Huffman DEFLATE/gzip (`Grass.Std.Zlib.Fixed32K`,
@@ -46,14 +54,16 @@ the matrix. Start with [TARGET_SEAMS.md](TARGET_SEAMS.md).
 
 ## Next steps
 
-- Finish `Grass.ISA.X86.isa`, wire Win32 and Linux x86 records, then the PE
-  adapter; that closes the first Hello World chain candidate.
+- Add the x86-64 memory-operand families (prove ModR/M round trips through
+  named `ofByte_toByte` lemmas by rewriting, never `cases <;> rfl`), then the
+  PE adapter over the existing round-trip writer and the Wasm module format;
+  that closes the first Hello World chain candidate.
+- Print and parse real WGSL concrete syntax over the WGSL AST.
 - Lower `Grass.Assembly.Syntax.Source` to each ISA's `Instr` with label
   resolution and frame layout, producing `Sectioned`; then the block-contract
   verifier that discharges `Machine.Invariant`.
 - Add authored target variants under `Spikes/` (`ProgramAarch64.lean`,
   `ProgramWasm.lean`, Linux/WASI/bare-metal variants) as approved by Craig.
-- Delete the legacy `Grass/Platform/Win32/*` raw-waiting engine,
-  `Grass/Refinement/Console/*` and program-shaped `Grass/Assembly/Source*`
-  once nothing imports them.
+- Delete the remaining program-shaped `Grass/Assembly/Source*` modules once
+  the lowering from `Grass.Assembly.Syntax` replaces them.
 - Linux execution of emitted ELF images can use the `polonius` host over ssh.
