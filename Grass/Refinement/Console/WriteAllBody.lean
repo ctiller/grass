@@ -23,9 +23,11 @@ def sourceLoad {frame : SourceFrame.Result} {rootOffset : Nat}
     (selection : SourceResolve.LoadSelection source)
     (site : SourceFetch.SourceSite source before afterFetch)
     (sameFetch : site.fetch = receipt.fetch) (selected : site.output = selection.output)
-    (range : receipt.access.descriptor.range = selection.result.address.range)
+    (frameOffset : Nat)
+    (range : receipt.access.descriptor.range =
+      ⟨frameOffset + selection.result.address.displacement, selection.result.address.width⟩)
     (base : MachineAddress) (placed : receipt.access.run.resolved.allocation.base = some base)
-    (rsp : before.gpr .rsp = addressOf base selection.result.address.rootOffset) :
+    (rsp : before.gpr .rsp = addressOf base frameOffset) :
     FrameMemoryExecution.LoadNormal source before afterFetch afterData := by
   rcases site with ⟨output, outputAt, fetch, space, observed, codeBase, codePlaced,
     codeOffset, image, placement, start⟩
@@ -39,6 +41,7 @@ def sourceLoad {frame : SourceFrame.Result} {rootOffset : Nat}
       access := receipt.access
       intent := receipt.intent
       initialization := receipt.initialization
+      frameOffset := frameOffset
       range := range
       base := base
       placed := placed
@@ -52,12 +55,14 @@ theorem sourceLoad_result {frame : SourceFrame.Result} {rootOffset : Nat}
     (selection : SourceResolve.LoadSelection source)
     (site : SourceFetch.SourceSite source before afterFetch)
     (sameFetch : site.fetch = receipt.fetch) (selected : site.output = selection.output)
-    (range : receipt.access.descriptor.range = selection.result.address.range)
+    (frameOffset : Nat)
+    (range : receipt.access.descriptor.range =
+      ⟨frameOffset + selection.result.address.displacement, selection.result.address.width⟩)
     (base : MachineAddress) (placed : receipt.access.run.resolved.allocation.base = some base)
-    (rsp : before.gpr .rsp = addressOf base selection.result.address.rootOffset)
+    (rsp : before.gpr .rsp = addressOf base frameOffset)
     (instructionSelected : instruction = .load32
       (BitVec.ofNat 32 selection.result.address.displacement) selection.result.destination) :
-    (sourceLoad receipt selection site sameFetch selected range base placed rsp).result =
+    (sourceLoad receipt selection site sameFetch selected frameOffset range base placed rsp).result =
       receipt.result := by
   have destination := (MemoryMoveNormal.Instruction.load32.inj
     (receipt.instructionExact.symm.trans instructionSelected)).2
@@ -137,10 +142,12 @@ structure FactoryLoad (policy : CpuAccessPolicy) {frame : SourceFrame.Result}
   site : SourceFetch.SourceSite source before fetched.after
   sameFetch : site.fetch = receipt.fetch
   selected : site.output = selection.output
-  range : receipt.access.descriptor.range = selection.result.address.range
+  frameOffset : Nat
+  range : receipt.access.descriptor.range =
+    ⟨frameOffset + selection.result.address.displacement, selection.result.address.width⟩
   base : MachineAddress
   placed : receipt.access.run.resolved.allocation.base = some base
-  rsp : before.gpr .rsp = addressOf base selection.result.address.rootOffset
+  rsp : before.gpr .rsp = addressOf base frameOffset
   instructionSelected : instruction = .load32
     (BitVec.ofNat 32 selection.result.address.displacement) selection.result.destination
 
@@ -149,14 +156,14 @@ structure FactoryLoad (policy : CpuAccessPolicy) {frame : SourceFrame.Result}
     (load : FactoryLoad policy source before) :
     FrameMemoryExecution.LoadNormal source before load.fetched.after load.afterData :=
   sourceLoad load.receipt load.selection load.site load.sameFetch load.selected
-    load.range load.base load.placed load.rsp
+    load.frameOffset load.range load.base load.placed load.rsp
 
 theorem FactoryLoad.result_exact {policy : CpuAccessPolicy} {frame : SourceFrame.Result}
     {rootOffset : Nat} {source : SourceResolve.Result frame rootOffset} {before : State}
     (load : FactoryLoad policy source before) : load.source.result = load.receipt.result := by
   unfold FactoryLoad.source
   exact sourceLoad_result load.receipt load.selection load.site load.sameFetch load.selected
-    load.range load.base load.placed load.rsp load.instructionSelected
+    load.frameOffset load.range load.base load.placed load.rsp load.instructionSelected
 
 theorem FactoryLoad.actual_result {policy : CpuAccessPolicy} {frame : SourceFrame.Result}
     {rootOffset : Nat} {source : SourceResolve.Result frame rootOffset} {before : State}

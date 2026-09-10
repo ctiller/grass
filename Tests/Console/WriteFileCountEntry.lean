@@ -39,8 +39,7 @@ def selectedLocal := (selectLoad? source.2).get (by decide +kernel)
 open Grass.Tests.Win32WriteFileStackPlan in
 def incoming : State :=
   { initial with gpr := fun register => if register = .r9 then
-      initial.gpr .r9 - BitVec.ofNat 64 request.countSlot.range.start +
-        BitVec.ofNat 64 selectedLocal.result.address.range.start
+      initial.gpr .rsp + BitVec.ofNat 64 selectedLocal.result.address.displacement
     else initial.gpr register }
 
 abbrev loaded := Grass.Tests.Win32WriteFileStackPlan.loaded
@@ -69,7 +68,7 @@ theorem preexisting_r9_accepts : prepared.isSome := by decide +kernel
 
 def handoff := prepared.get (by decide +kernel)
 theorem canonical_count_retained : handoff.handoff.record.request.countSlot =
-    WriteFileCountArgument.argument binding.policy selectedLocal := rfl
+    WriteFileCountArgument.argument binding.policy called.receipt selectedLocal := rfl
 
 /-- The source-specific producer rejects a different named local even when its
 layout gives the same numeric address and width. -/
@@ -98,7 +97,7 @@ theorem changed_frame_address_refuses :
     (WriteFileCountEntry.prepareCountCall? before called.receipt binding ready evaluated
       shiftedLocal request.buffer request.bytes fifthArgument inputs.independentContext).isNone := by decide +kernel
 
-def canonical := WriteFileCountArgument.argument binding.policy selectedLocal
+def canonical := WriteFileCountArgument.argument binding.policy called.receipt selectedLocal
 
 open Grass.Tests.Win32WriteFileStackPlan in
 theorem wrong_count_width_refuses :
