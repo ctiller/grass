@@ -56,7 +56,12 @@ their own status labels; a reviewed direction is not an implemented declaration.
 
 ## Issued-call resume status
 
-Current consolidated snapshot: main `a3b4ed9a` and certificate `2b160c4d`.
+Historical snapshot: main `a3b4ed9a` and certificate `2b160c4d`.
+The Hello prefix template, partial-source gate, and program-specific static/count
+and loop/guard adapters described below have since been deleted. They are not
+current implementation evidence. See the approved
+[removal plan](HELLO_SPECIALIZATION_REMOVAL.md); general full-source verification
+and emission remain incomplete. The following records the retired checkpoint.
 The retained **24-edge loader-rooted Hello prefix reaches the first WriteFile
 entry**. This replaces the earlier missing-initial-prefix status; it is one
 checked finite execution, not whole-Hello or public-emission acceptance.
