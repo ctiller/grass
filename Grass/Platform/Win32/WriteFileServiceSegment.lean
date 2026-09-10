@@ -118,5 +118,3 @@ theorem returnedAfterSegment
   exact returned.on_history folded.2.2.val accepted
 
 end Grass.Platform.Win32.WriteFile.CallHandoff
-
-
