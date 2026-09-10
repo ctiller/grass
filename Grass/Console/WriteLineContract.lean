@@ -1,5 +1,6 @@
 import Grass.Spec.Root
-import Grass.Console.LineBehavior
+import Grass.Specification.TextLine
+import Grass.Console.OutcomePolicy
 
 /-!
 # The portable write-line-and-exit behavior contract
