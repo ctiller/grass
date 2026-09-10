@@ -79,7 +79,7 @@ def prepare? {image : ImageInput} {inputs : EntryInputs}
             binding.span.placedSection.source.contents then
           if regionPermissionExact : region.permission =
               sectionPermission binding.span.placedSection.source.characteristics then
-    if loadedPayloadExact :
+            if loadedPayloadExact :
                 (region.bytes.drop (binding.object.offset + offset)).take
                   (binding.object.declaration.bytes.length - offset) =
                     binding.object.declaration.bytes.drop offset then
