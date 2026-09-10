@@ -38,4 +38,11 @@ example : (captureSourceChars emptyCommand emptyOffsets).toOption.isSome := by d
 -- Equal empty text at a different location does not certify the original range.
 example : (captureSourceChars emptyCommand
     { emptyOffsets with bodyStart := 25, bodyFinish := 25 }).toOption = none := by decide +kernel
+
+def spirvCommand : List Char := "def renamed := spirv_asm { nested { } }".toList
+def spirvOffsets : SourceOffsets := ⟨11, 25, 26, 38⟩
+example : (extractMarkedSourceChars "spirv_asm" spirvCommand).toOption.isSome := by decide +kernel
+example : (captureMarkedSourceChars "spirv_asm" spirvCommand spirvOffsets).toOption =
+    (extractMarkedSourceChars "spirv_asm" spirvCommand).toOption := by decide +kernel
+example : (captureMarkedSourceChars "asm_source" spirvCommand spirvOffsets).toOption = none := by decide +kernel
 end Grass.Tests.Assembly.SourceInput

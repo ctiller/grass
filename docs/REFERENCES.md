@@ -19,6 +19,10 @@ Inspected 2026-09-09 for the bounded vector constructor/component models:
 - Khronos SPIRV-Headers tag `1.5.4`,
   [SPIR-V 1.5 revision 4 core grammar](https://raw.githubusercontent.com/KhronosGroup/SPIRV-Headers/1.5.4/include/spirv/unified1/spirv.core.grammar.json),
   supplies the instruction opcode and operand-layout cross-check.
+- Oracle, [IEEE single-format bit fields and values](https://docs.oracle.com/cd/E19957-01/806-3568/ncg_math.html),
+  inspected 2026-09-09. The bounded decimal literal encoder checks sign and
+  rational magnitude against this binary32 interpretation, including signed
+  zero and subnormals. Decimal inputs requiring rounding are refused.
 - W3C, WebGPU Shading Language, Candidate Recommendation Draft, 31 August 2026,
   [vector types](https://www.w3.org/TR/2026/CRD-WGSL-20260831/#vector-types),
   [vector access](https://www.w3.org/TR/2026/CRD-WGSL-20260831/#vector-access-expression),

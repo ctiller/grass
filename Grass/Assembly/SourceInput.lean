@@ -88,28 +88,31 @@ private def wordChar (c : Char) : Bool := c.isAlphanum || c = '_' || c.toNat ≥
     | .leftBrace => bodyEnd? ts (depth+1)
     | .rightBrace => if depth=1 then some (t, ts) else bodyEnd? ts (depth-1)
     | _ => bodyEnd? ts depth
-@[reducible] private def assemblyStart? : List Token → Option (Token × List Token)
+@[reducible] private def markedStart? (marker : String) : List Token → Option (Token × List Token)
   | [] => none
   | t::ts => match t.kind with
     | .word "def" => none
-    | .word "asm_source" =>
+    | .word value => if value = marker then
       let rec brace : List Token → Option (Token × List Token)
         | [] => none
         | b :: after => match b.kind with
           | .leftBrace => some (b, after)
-          | .word "asm_source" | .word "def" | .rightBrace => none
+          | .word value => if value = marker || value = "def" then none else brace after
+          | .rightBrace => none
           | _ => brace after
       brace ts
-    | _ => assemblyStart? ts
+    else markedStart? marker ts
+    | _ => markedStart? marker ts
 @[reducible] private def whitespace (c : Char) : Bool :=
   c = ' ' || c = '\t' || c = '\r' || c = '\n'
 
-@[reducible] private def sourceRanges? (source : List Char) (ts : List Token) : Option SourceOffsets :=
+@[reducible] private def markedRanges?
+    (marker : String) (source : List Char) (ts : List Token) : Option SourceOffsets :=
   match ts with
   | declaration :: name :: rest => match declaration.kind, name.kind with
     | .word "def", .word _ => do
       if declaration.start != 0 then none
-      let (brace, afterBrace) ← assemblyStart? rest
+      let (brace, afterBrace) ← markedStart? marker rest
       let (close, afterClose) ← bodyEnd? afterBrace 1
       if !afterClose.isEmpty || !(source.drop close.finish).all whitespace then none
       some ⟨name.finish, brace.start, brace.finish, close.start⟩
@@ -169,25 +172,28 @@ private def wordChar (c : Char) : Bool := c.isAlphanum || c = '_' || c.toNat ≥
     some ⟨String.ofList headerChars, headerChars, String.ofList bodyChars, bodyChars,
       sourceLines bodyChars⟩
 
-@[reducible] def extractSourceChars (source : List Char) : Except Error Body :=
+@[reducible] def extractMarkedSourceChars (marker : String) (source : List Char) : Except Error Body :=
   match tokensChars source with
   | none => .error .malformed
-  | some ts => match sourceRanges? source ts with
+  | some ts => match markedRanges? marker source ts with
     | none => .error .malformed
     | some offsets => match bodyAt source offsets with
       | some body => .ok body
       | none => .error .malformed
+
+@[reducible] def extractSourceChars (source : List Char) : Except Error Body :=
+  extractMarkedSourceChars "asm_source" source
 
 @[reducible] def extractSource (source : String) : Except Error Body :=
   extractSourceChars source.toList
 
 /-- Require the syntax-selected positions themselves to match the declaration,
 including empty bodies where comparing sliced text alone loses positions. -/
-@[reducible] def captureSourceChars
-    (command : List Char) (offsets : SourceOffsets) : Except Error Body :=
+@[reducible] def captureMarkedSourceChars
+    (marker : String) (command : List Char) (offsets : SourceOffsets) : Except Error Body :=
   match tokensChars command with
   | none => .error .malformed
-  | some ts => match sourceRanges? command ts with
+  | some ts => match markedRanges? marker command ts with
     | none => .error .malformed
     | some actual =>
       if offsets = actual then
@@ -195,6 +201,10 @@ including empty bodies where comparing sliced text alone loses positions. -/
         | some body => .ok body
         | none => .error .malformed
       else .error .malformed
+
+@[reducible] def captureSourceChars
+    (command : List Char) (offsets : SourceOffsets) : Except Error Body :=
+  captureMarkedSourceChars "asm_source" command offsets
 
 @[reducible] def symbolicStores (body : Body) : List (String × Nat) := body.lines.filterMap fun line =>
   match line.parsed with | .symbolicStore dst value => some (dst,value) | _ => none
