@@ -78,6 +78,28 @@ structure MatchedReturn (selected : ReturnInterpretation)
   conforms : result.Conforms before.machine.memory record.request frontier.accepted
   causal : ReturnCausality history after
 
+/-- Transport to a supplied history at the same original protocol root and
+endpoint, retaining the accepted frontier. Exact log suffix equality supplies
+the history-dependent causal clause; no equality of derivations is claimed. -/
+theorem MatchedReturn.on_history {selected : ReturnInterpretation}
+    {realization : Realization} {initial : ProtocolState}
+    {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
+    {before after : ProtocolState} {frontier actualFrontier : Prefix plan before call record}
+    {history : History plan realization initial call record frontier} {result : ReturnResult}
+    (returned : MatchedReturn selected history result after)
+    (actualHistory : History plan realization initial call record actualFrontier)
+    (accepted : actualFrontier.accepted = frontier.accepted) :
+    MatchedReturn selected actualHistory result after := by
+  have events : actualHistory.providerEvents = history.providerEvents :=
+    List.append_cancel_left (actualHistory.events_eq.symm.trans history.events_eq)
+  refine ⟨returned.ran, ?_, ?_, ?_⟩
+  · simpa only [accepted] using returned.interpreted
+  · simpa only [accepted] using returned.conforms
+  · refine ⟨returned.causal.fresh, returned.causal.valid, returned.causal.historyExtends,
+      returned.causal.entryReturn, ?_⟩
+    intro event member
+    exact returned.causal.effectsReturn event (events ▸ member)
+
 /-- Exact protocol effects follow from the actual return, including custody consumption. -/
 theorem MatchedReturn.effects {selected : ReturnInterpretation}
     {realization : Realization} {initial : ProtocolState}
