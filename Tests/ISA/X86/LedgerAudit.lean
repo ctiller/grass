@@ -87,6 +87,7 @@ import Grass.Platform.Win32.ApiRequest
 import Grass.Platform.Win32.WriteFileCallPlan
 import Grass.Platform.Win32.CallEntry
 import Grass.Platform.Win32.WriteFileStackPlan
+import Grass.Platform.Win32.WriteFilePrepare
 import Grass.Platform.Win32.WriteFileHandoff
 import Grass.Platform.Win32.WriteFilePreservation
 import Grass.Platform.Win32.WriteFileCall
@@ -256,6 +257,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileCallPlan,
    `Grass.Platform.Win32.CallEntry,
    `Grass.Platform.Win32.WriteFileStackPlan,
+   `Grass.Platform.Win32.WriteFilePrepare,
    `Grass.Platform.Win32.WriteFileHandoff,
    `Grass.Platform.Win32.WriteFilePreservation,
    `Grass.Platform.Win32.WriteFileCall,
@@ -330,7 +332,8 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Twelve fixed CPU/ABI obligations, including executable/readable region selection.
 -- Six fixed request/stack contracts are newly enrolled; no existing debt moves.
 -- Shared ABI declarations and the two WriteFile extension checks retain debt.
-def owedBaseline : Nat := 340
+-- Two checked WriteFile request/entry producers retain their external ABI debt.
+def owedBaseline : Nat := 342
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -388,7 +391,8 @@ acquiring a citation.
 -- Runtime, compatibility and shared spatial adapters retain actual evidence.
 -- Shared failure recovery removes one duplicate; memory-MOV provenance adds one projection.
 -- Two endpoint aliases and three shared protocol bookkeeping computations add no model debt.
-def notBehaviourBaseline : Nat := 375
+-- Two preparation helpers resolve checked memory and project retained fifth-slot identity.
+def notBehaviourBaseline : Nat := 377
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -599,6 +603,8 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.ProtocolEntry.issue?,
     `Grass.Platform.Win32.ProtocolEntry.Entry.after,
     `Grass.Platform.Win32.ProtocolEntry.Entry.pendingRecord,
+    `Grass.Platform.Win32.WriteFile.EntryFactory.resolve?,
+    `Grass.Platform.Win32.WriteFile.EntryFactory.prepare?,
     `Grass.Platform.Win32.GetStdHandle.EntryHandoff.record,
     `Grass.Platform.Win32.GetStdHandle.entryHandoff?,
     `Grass.Platform.Win32.GetStdHandle.CallHandoff.frame,
@@ -998,6 +1004,8 @@ def owed : List Name :=
     `Grass.Platform.Win32.ReturnHome.stackRequests,
     `Grass.Platform.Win32.ReturnHome.StackPlanFactory.derive?,
     `Grass.Platform.Win32.ReturnHome.StackPlanFactory.deriveLoaded?,
+    `Grass.Platform.Win32.WriteFile.EntryFactory.requestOf,
+    `Grass.Platform.Win32.WriteFile.EntryFactory.prepareExact?,
     `Grass.Platform.Win32.ReturnHome.Plan,
     `Grass.Platform.Win32.ReturnHome.InitializedReturnQword,
     `Grass.Platform.Win32.WriteFile.Abi.StackPlanFactory.checked?,
