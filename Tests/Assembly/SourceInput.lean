@@ -31,4 +31,11 @@ def commandOffsets : SourceOffsets :=
 example : (captureSourceChars command commandOffsets).toOption = (extractSourceChars command).toOption := by decide +kernel
 example : (captureSourceChars command { commandOffsets with headerStart := commandOffsets.headerStart - 1 }).toOption = none := by decide +kernel
 example : (captureSourceChars command { commandOffsets with bodyFinish := commandOffsets.bodyFinish - 1 }).toOption = none := by decide +kernel
+
+def emptyCommand : List Char := "def café := asm_source {}".toList
+def emptyOffsets : SourceOffsets := ⟨8, 23, 24, 24⟩
+example : (captureSourceChars emptyCommand emptyOffsets).toOption.isSome := by decide +kernel
+-- Equal empty text at a different location does not certify the original range.
+example : (captureSourceChars emptyCommand
+    { emptyOffsets with bodyStart := 25, bodyFinish := 25 }).toOption = none := by decide +kernel
 end Grass.Tests.Assembly.SourceInput
