@@ -115,7 +115,9 @@ comments are historical provenance available in Git, not active instructions.
 - [IMPLEMENTATION_RATCHET.md](IMPLEMENTATION_RATCHET.md) fixes the future
   command, report, mutation, and first-failure contract without claiming that
   the deliberately deferred library or outputs exist.
-- [REVIEW.md](REVIEW.md) is the adversarial review protocol and sign-off form.
+- [REVIEW.md](REVIEW.md#implementation-peer-review) distinguishes semantic boundary
+  review from automated proof checking; it also retains the design attack catalog
+  and major spike sign-off form.
 - [DECISIONS.md](DECISIONS.md) records settled choices and rejected shortcuts.
 - [REFERENCES.md](REFERENCES.md) is the initial source and design-lineage register.
 - [GLOSSARY.md](GLOSSARY.md) fixes vocabulary used across the corpus.
