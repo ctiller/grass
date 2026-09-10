@@ -294,7 +294,14 @@ def doBranch (s : State) (frame : Frame) (callerFrames : List Frame) (n : Nat) :
 argument values off the caller's stack, then either push a fresh frame (a
 defined callee) or hand the platform a `NativeCall` (an imported callee).
 Shared by `call` and — were a table modeled — what `call_indirect` would do
-once it resolved to a concrete index. -/
+once it resolved to a concrete index.
+
+A native return's memory writes are masked back to `memoryLength` for the
+same reason `buildMemory` masks data segments: `writeBytes` is total, so an
+unmasked platform write past the declared size would create addressable
+bytes outside linear memory. A platform whose answer names an out-of-range
+buffer therefore loses those bytes rather than growing the machine's memory
+— see this file's report on the missing `NativeReturn` failure channel. -/
 def beginCall (s : State) (frame : Frame) (callerFrames : List Frame) (funcIdx : Nat)
     (ft : FuncType) : StepOutcome State NativeCall NativeReturn Fault :=
   let nargs := ft.params.length
@@ -313,7 +320,9 @@ def beginCall (s : State) (frame : Frame) (callerFrames : List Frame) (funcIdx :
               args := args
               read := fun addr len => readBytes s.memory addr len }
           let resume : NativeReturn → State := fun ret =>
-            let memory' := ret.writes.foldl (fun mem (addr, bytes) => writeBytes mem addr bytes) s.memory
+            let written := ret.writes.foldl (fun mem (addr, bytes) => writeBytes mem addr bytes) s.memory
+            let memory' : Nat → Option UInt8 :=
+              fun a => if a < s.memoryLength then written a else none
             { s with
               memory := memory'
               frames := { caller with valueStack := ret.results.reverse ++ caller.valueStack } :: callerFrames }
@@ -574,30 +583,85 @@ def step (s : State) : StepOutcome State NativeCall NativeReturn Fault :=
 declared size. Platform bytes are installed first so a module's own data
 segments can legitimately overlap/override the region a loader reserved for
 them (mirrors how an ELF/PE loader lays out the image before its own
-relocations run). -/
+relocations run).
+
+`writeBytes` is total, so an install past `memoryBytes` would *create*
+addressable bytes outside linear memory and make an out-of-bounds read
+succeed. That is why `initial` refuses to start a machine whose installs do
+not fit (`instantiates`): this function is only ever reached for a layout
+that stays inside the declared size. -/
 def buildMemory (m : Module) (ctx : InitialContext) : Nat → Option UInt8 :=
   let base : Nat → Option UInt8 := fun a => if a < m.memoryBytes then some 0 else none
   let withCtx := ctx.initialMemory.foldl (fun mem (addr, bytes) => writeBytes mem addr bytes) base
   m.data.foldl (fun mem d => writeBytes mem d.offset d.bytes) withCtx
 
-/-- The loaded initial state: the start function's frame, globals at their
+/-- Whether every byte `buildMemory` would install — the module's data
+segments and the platform's `initialMemory` — lands inside the declared
+linear memory. Wasm instantiation traps when a data segment does not fit;
+`initial` is total, so it reports the trap by starting the machine at an
+unresolvable function instead. -/
+def instantiates (m : Module) (ctx : InitialContext) : Bool :=
+  m.data.all (fun d => d.offset + d.bytes.length ≤ m.memoryBytes) &&
+    ctx.initialMemory.all (fun p => p.1 + p.2.length ≤ m.memoryBytes)
+
+/-- The function index a context's entry export resolves to, or
+`Module.unresolvedIndex` when the module exports no such name or the initial
+memory layout does not fit. Only `initial` sees both the module and the
+context, so this is the only place the entry name can be resolved
+(`InitialContext`'s docstring). -/
+def entryIndex (m : Module) (ctx : InitialContext) : Nat :=
+  if instantiates m ctx then (m.exportedFunc ctx.startExport).getD m.unresolvedIndex
+  else m.unresolvedIndex
+
+/-- The loaded initial state: the entry export's frame, globals at their
 initializers, and linear memory as built by `buildMemory`. An
-`InitialContext` naming a function this module cannot resolve still
-produces a total `State` — one with an empty label stack and an
-out-of-range function, so the very first `step` faults `undecodable` rather
-than the seam's `initial` needing to be partial. -/
+`InitialContext` naming an export this module does not resolve, and a module
+whose data segments overrun its declared linear memory, both still produce a
+total `State` — one whose frame sits past the function index space, so the
+very first `step` faults `undecodable` (`step_initial_of_unresolved`,
+`step_initial_of_overflow`) rather than the seam's `initial` needing to be
+partial or defaulting to function `0`. -/
 def initial (m : Module) (ctx : InitialContext) : State :=
+  let index := entryIndex m ctx
   let locals :=
-    match m.functionBody ctx.startFunction with
+    match m.functionBody index with
     | none => []
     | some f =>
-        match m.funcTypeOf ctx.startFunction with
+        match m.funcTypeOf index with
         | none => []
         | some ft => ft.params.map ValType.zero ++ f.locals.map ValType.zero
   { module := m
     memory := buildMemory m ctx
     memoryLength := m.memoryBytes
     globals := m.globals.map Global.init
-    frames := [⟨ctx.startFunction, 0, locals, [], []⟩] }
+    frames := [⟨index, 0, locals, [], []⟩] }
+
+/-- A machine started past the function index space gets stuck immediately.
+Shared by the two refusals below. -/
+private theorem step_initial_of_unresolvedIndex (m : Module) (ctx : InitialContext)
+    (index : entryIndex m ctx = m.unresolvedIndex) :
+    step (initial m ctx) = .fault .undecodable := by
+  have body : m.functionBody (entryIndex m ctx) = none := by
+    rw [index]
+    simp [Module.functionBody, Module.unresolvedIndex]
+  simp [step, initial, body]
+
+/-- An unresolvable entry export gets stuck immediately: the first `step`
+faults. This is the refusal that replaces guessing function `0`. -/
+theorem step_initial_of_unresolved (m : Module) (ctx : InitialContext)
+    (unresolved : m.exportedFunc ctx.startExport = none) :
+    step (initial m ctx) = .fault .undecodable :=
+  step_initial_of_unresolvedIndex m ctx (by simp [entryIndex, unresolved])
+
+/-- An initial memory layout that overruns the declared linear memory gets
+stuck immediately, whatever the module exports: Wasm instantiation traps,
+and a total `initial` reports that trap as a machine that cannot take a
+step. Without this refusal `buildMemory`'s total `writeBytes` would create
+addressable bytes outside linear memory and an out-of-bounds read would
+succeed. -/
+theorem step_initial_of_overflow (m : Module) (ctx : InitialContext)
+    (overflow : instantiates m ctx = false) :
+    step (initial m ctx) = .fault .undecodable :=
+  step_initial_of_unresolvedIndex m ctx (by simp [entryIndex, overflow])
 
 end Grass.ISA.Wasm.Target

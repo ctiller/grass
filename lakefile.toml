@@ -31,6 +31,12 @@ globs = ["Grass.+"]
 name = "Tests"
 globs = ["Tests.+"]
 
+# Authored spike programs. Only the hand-proved Wasm/WASI consumer is a build
+# target today; the rest of `Spikes/` is reached through its dependencies.
+[[lean_lib]]
+name = "Spikes"
+roots = ["Spikes.«1_Hello_World».Wasi"]
+
 [[lean_exe]]
 name = "grass-disasm"
 root = "Tools.Disasm"

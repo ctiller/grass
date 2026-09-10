@@ -1412,3 +1412,8 @@ def spec : SpecProcess resources := helloSpec resources
 
 end Grass.Spikes.HelloWorld
 ```
+
+### `Wasi.lean`
+
+Interim hand-proved WASI realization of this spike over the target seams, pending the `verify_assembly` elaboration that will generate it from an authored `ProgramWasi.lean`; recorded here only so the authored-manifest law holds.
+

@@ -105,13 +105,30 @@ def Module.functionBody (m : Module) (index : Nat) : Option Function :=
 /-- Linear memory size in bytes at instantiation. -/
 def Module.memoryBytes (m : Module) : Nat := m.memoryMinPages * 65536
 
-/-- What a platform hands the machine at entry, per `Grass.Target.ISA`: which
-function to run, and any memory contents beyond the module's own data
-segments (a WASI platform lays out argv/envp/environ bytes here before the
-module's declared data segments are installed by `initial`, exactly as an
-ELF/PE loader lays out the initial stack for a native ISA). -/
+/-- The function index a module exports under `name`, if any. Export names
+are unique in a well-formed module, so the first match is the only one. -/
+def Module.exportedFunc (m : Module) (name : String) : Option Nat :=
+  (m.exports.find? (fun e => e.name == name)).map Export.funcIndex
+
+/-- One past the last index of the function index space. `functionBody` is
+`none` here, so a frame entered at this index faults on its first `step`:
+this is the index `initial` uses for an entry export the module does not
+resolve, which is why an unresolvable entry name is a visible refusal rather
+than a silent run of function `0`. -/
+def Module.unresolvedIndex (m : Module) : Nat := m.imports.length + m.functions.length
+
+/-- What a platform hands the machine at entry, per `Grass.Target.ISA`: the
+*export name* of the function to run, and any memory contents beyond the
+module's own data segments (a WASI platform lays out argv/envp/environ bytes
+here before the module's declared data segments are installed by `initial`,
+exactly as an ELF/PE loader lays out the initial stack for a native ISA).
+
+The entry is a name, not an index, because `Grass.Target.Platform.entry :
+Environment → isa.InitialContext` is not handed the module: only `initial`
+sees both, so only `initial` can resolve the name through
+`Module.exportedFunc`. A platform that named an index would be guessing. -/
 structure InitialContext where
-  startFunction : Nat
+  startExport : String
   initialMemory : List (Nat × List UInt8)
 deriving Repr, DecidableEq
 

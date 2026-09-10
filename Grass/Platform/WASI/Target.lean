@@ -25,10 +25,10 @@ minimal Preview1 subset does not implement (`fd_fdstat_get`,
 
 | Import | Decode | Encode on success | Encode on failure/absence |
 |---|---|---|---|
-| `fd_write(fd:i32, iovs:i32, iovs_len:i32, nwritten:i32) -> errno:i32` | `fd∈{1,2}`: `Console.write stdout\|stderr bytes`, bytes gathered by reading the `__wasi_ciovec_t` array at `iovs` (`iovs_len` entries, each `(buf_ptr:u32, buf_len:u32)` little-endian) via `NativeCall.read`, then each buffer itself; unreadable iovec/buffer or any other `fd` → `none` | `errno` result `0` (`ESUCCESS`), `nwritten` written as `u32` at the 4th argument | `errno` result `EIO`, no writes |
-| `fd_read(fd:i32, iovs:i32, iovs_len:i32, nread:i32) -> errno:i32` | `fd = 0`: `Console.read stdin n` where `n` is the sum of the iovec array's declared buffer lengths; any other `fd` or an unreadable iovec array → `none` | `errno` result `0`, delivered bytes distributed front-to-back across the iovec buffers (each capped at its declared length), `nread` written as `u32` at the 4th argument | `errno` result `EIO`, no writes |
+| `fd_write(fd:i32, iovs:i32, iovs_len:i32, nwritten:i32) -> errno:i32` | `fd∈{1,2}`: `Console.write stdout\|stderr bytes`, bytes gathered by reading the `__wasi_ciovec_t` array at `iovs` (`iovs_len` entries, each `(buf_ptr:u32, buf_len:u32)` little-endian) via `NativeCall.read`, then each buffer itself; unreadable iovec/buffer, out-of-range `nwritten` cell, or any other `fd` → `none` | `errno` result `0` (`ESUCCESS`), `nwritten` written as `u32` at the 4th argument | `errno` result `EIO`, no writes |
+| `fd_read(fd:i32, iovs:i32, iovs_len:i32, nread:i32) -> errno:i32` | `fd = 0`: `Console.read stdin n` where `n` is the sum of the iovec array's declared buffer lengths; any other `fd`, an unreadable iovec array or buffer, or an out-of-range `nread` cell → `none` | `errno` result `0`, delivered bytes distributed front-to-back across the iovec buffers (each capped at its declared length), `nread` written as `u32` at the 4th argument | `errno` result `EIO`, no writes |
 | `proc_exit(rval:i32)` (no return) | `Console.exit rval` (terminal) | n/a: `Console.Response (.exit _) = Empty`, eliminated | n/a |
-| `clock_time_get(id:i32, precision:i64, time:i32) -> errno:i32` | `id = 1` (`CLOCK_MONOTONIC`): `Clock.now`; any other clock id → `none` | `errno` result `0`, nanoseconds written as `u64` at the 3rd argument | (never fails: `Clock.Response` is total) |
+| `clock_time_get(id:i32, precision:i64, time:i32) -> errno:i32` | `id = 1` (`CLOCK_MONOTONIC`): `Clock.now`; any other clock id, or an out-of-range `time` cell → `none` | `errno` result `0`, nanoseconds written as `u64` at the 3rd argument | (never fails: `Clock.Response` is total) |
 | anything else, or any import with an unresolved argument/buffer | unsupported: `none` | — | — |
 
 `fd_write`/`fd_read`'s iovec pointer and `clock_time_get`'s `time` pointer are
@@ -39,37 +39,17 @@ platform/ABI detail the portable vocabulary must not know (mirrors
 `Grass.Platform.Linux.Target.X86`'s treatment of `read`/`write`/
 `clock_gettime`'s buffer addresses).
 
-## A seam gap: `entry` cannot see the module's `_start` export
+## Process entry
 
-`Grass.Target.Platform.entry : Environment → isa.InitialContext` is not
-handed the `Raw` program, only the `Environment`. WASI's real convention is
-that the loader runs whichever function the module exports under the name
-`_start` (`wasi_snapshot_preview1.witx`'s "Linking" notes; there is exactly
-one such export in a conforming command module) -- but resolving an export
-name is `Module`-level data (`Grass.ISA.Wasm.Target.Module.exports`,
-`Grass/ISA/Wasm/Target/Native.lean`) that this function structurally cannot
-read. `entry` below fixes `startFunction := 0`, which is correct only for a
-module whose `_start` happens to be function index `0`; the actual resolution
-has to happen wherever `isa.initial : Raw → InitialContext → State` is
-invoked with both the loaded `Module` and this `InitialContext` in hand
-(mirrors `Grass.Platform.Linux.Target`'s reported `mmap`/`Heap.allocate`
-address-space gap: implemented as far as this seam allows, not routed
-around). This minimal subset also does not realize `args_get`/
-`args_sizes_get`/`environ_get`/`environ_sizes_get`, so `initialMemory` lays
-out no argv/envp bytes ahead of the module's own data segments.
-
-## `Grass.ISA.Wasm.isa` does not exist yet
-
-`Grass/ISA/Wasm/Target/` currently has `Instr`, `Encode`, `LEB128` and
-`Native` only -- no `State`/`step`, hence no `Grass.ISA.Wasm.isa` record for
-`Grass.Target.Platform` to be indexed by. Every field below (`entry`,
-`decode`, `encodeReturn`, `Environment`, `Admits`, `Responds`) is already
-built and typechecked against the concrete `NativeCall`/`NativeReturn`/
-`InitialContext` types from `Grass.ISA.Wasm.Target.Native`, so assembling the
-`Grass.Target.Platform` record is a one-line change once `Grass.ISA.Wasm.isa`
-exists (see the commented `platform` definition at the end of this file,
-exactly as `Grass.Platform.Linux.Target` leaves its own `platformX86`/
-`platformAArch64`).
+WASI's convention is that the loader runs whichever function the module
+exports under the name `_start` (`wasi_snapshot_preview1.witx`'s "Linking"
+notes; a conforming command module has exactly one such export). `entry`
+names it; `Grass.ISA.Wasm.Target.initial` resolves the name through the
+module's export section, and an unresolvable name gets stuck on the first
+instruction (`Grass.ISA.Wasm.Target.step_initial_of_unresolved`). This
+minimal subset realizes no `args_get`/`args_sizes_get`/`environ_get`/
+`environ_sizes_get`, so `initialMemory` lays out no argv/envp bytes ahead of
+the module's own data segments.
 -/
 
 namespace Grass.Platform.WASI.Target
@@ -165,11 +145,23 @@ def distributeIovecs : List (Nat × Nat) → List UInt8 → List (Nat × List UI
 
 /-! ## Decode -/
 
+/-- Whether the `width`-byte result cell an import promises to write at
+`call.args[index]` is inside linear memory. `encodeReturn` is a total
+function into `NativeReturn`, which has no failure channel: a write it emits
+for an out-of-range address is simply lost. Every import whose answer writes
+back through a pointer therefore validates that pointer here, so an
+out-of-range one is a refusal (`none`, hence a stuck machine) instead of a
+silently discarded write. A real runtime answers `EFAULT`; this platform's
+`decode` cannot, because the fault is not a `Console`/`Clock` response — see
+the report's `Service.Domain` note. -/
+def writableCell (call : NativeCall) (index width : Nat) : Bool :=
+  ((call.args[index]?).bind i32Nat).any (fun addr => (call.read addr width).isSome)
+
 /-- Decode one WASI Preview1 import call into `Grass.Platform.Hosted.domain`'s
 portable request. See the module docstring's table for the full mapping;
 `none` is either a genuine refusal (an unrealized import, an unrecognized
-`fd`/clock id, or a malformed argument list) or an unreadable iovec/buffer,
-both of which the generic machine tier
+`fd`/clock id, or a malformed argument list) or an unreadable iovec, buffer,
+or result cell, all of which the generic machine tier
 (`Grass.Target.Machine.stuck_of_undecoded`) turns into a stuck state. -/
 def decode (call : NativeCall) : Option domain.Request :=
   if call.moduleName ≠ wasiModuleName then none else
@@ -177,6 +169,7 @@ def decode (call : NativeCall) : Option domain.Request :=
   | "fd_write", [fdV, iovsPtrV, iovsLenV, _nwrittenPtrV] =>
       match i32Nat fdV, i32Nat iovsPtrV, i32Nat iovsLenV with
       | some fd, some iovsPtr, some iovsLen =>
+          if !writableCell call 3 4 then none else
           match iovecAddrs call iovsPtr iovsLen with
           | none => none
           | some addrs =>
@@ -191,9 +184,15 @@ def decode (call : NativeCall) : Option domain.Request :=
       match i32Nat fdV, i32Nat iovsPtrV, i32Nat iovsLenV with
       | some fd, some iovsPtr, some iovsLen =>
           if fd = 0 then
+            if !writableCell call 3 4 then none else
             match iovecAddrs call iovsPtr iovsLen with
             | none => none
-            | some addrs => some (.inl (.inl (.read .stdin (addrs.map Prod.snd).sum)))
+            | some addrs =>
+                -- The buffers are written by `encodeReturn`, which cannot
+                -- fail; reading them here is the bounds check for that write.
+                match readAllBytes call addrs with
+                | none => none
+                | some _ => some (.inl (.inl (.read .stdin (addrs.map Prod.snd).sum)))
           else none
       | _, _, _ => none
   | "proc_exit", [codeV] =>
@@ -202,7 +201,9 @@ def decode (call : NativeCall) : Option domain.Request :=
       | none => none
   | "clock_time_get", [idV, _precisionV, _timePtrV] =>
       match i32Nat idV with
-      | some clockId => if clockId = CLOCK_MONOTONIC then some (.inr .now) else none
+      | some clockId =>
+          if clockId = CLOCK_MONOTONIC ∧ writableCell call 2 8 = true then some (.inr .now)
+          else none
       | none => none
   | _, _ => none
 
@@ -257,37 +258,15 @@ def encodeReturn (call : NativeCall) : (request : domain.Request) → domain.Res
 
 /-! ## Process entry -/
 
-/-- What the platform hands the machine at entry. See the module docstring's
-"seam gap" section: the real `_start` export index is `Module`/`Raw`-level
-data this `Environment → InitialContext` function cannot read, so
-`startFunction` is fixed at `0` here; this subset also realizes no
-`args_get`/`environ_get` family, so no argv/envp bytes are laid out ahead of
-the module's own data segments. -/
+/-- WASI's entry export name (`wasi_snapshot_preview1.witx`, "Linking"). -/
+def startExport : String := "_start"
+
+/-- What the platform hands the machine at entry: the entry export's name,
+and no argv/envp bytes (this subset realizes no `args_get`/`environ_get`
+family). -/
 def entry (_env : Environment) : InitialContext :=
-  { startFunction := 0
+  { startExport := startExport
     initialMemory := [] }
-
-/-! ## Assembling the platform
-
-`Grass.ISA.Wasm.isa` does not exist in this worktree yet (see the module
-docstring). Once it does, assembling `Grass.Target.Platform` is this one-line
-record, exactly mirroring `Grass.Platform.Linux.Target`'s commented
-`platformX86`/`platformAArch64`:
-
-```
--- def platform : Grass.Target.Platform Grass.ISA.Wasm.isa Grass.Platform.Hosted.domain where
---   Environment := Grass.Platform.Hosted.Environment
---   Admits := Grass.Platform.Hosted.Admits
---   entry := Grass.Platform.WASI.Target.entry
---   decode := Grass.Platform.WASI.Target.decode
---   Responds := Grass.Platform.Hosted.Responds
---   encodeReturn := Grass.Platform.WASI.Target.encodeReturn
-```
--/
-
-end Grass.Platform.WASI.Target
-
-namespace Grass.Platform.WASI.Target
 
 /-- The WASI Preview 1 platform for the Wasm ISA: the first fully wired
 platform record of the target seams. -/
