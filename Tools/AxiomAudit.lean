@@ -107,6 +107,8 @@ import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.ProviderResume
+import Grass.Platform.Win32.CallResumeBinding
+import Grass.Platform.Win32.CallResumeHistory
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.RawStep
 import Grass.Platform.Win32.RawServiceMetadata
@@ -115,6 +117,7 @@ import Grass.Platform.Win32.RawEntryEvent
 import Grass.Platform.Win32.RawServicePreservation
 import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.GetStdHandleRuntime
+import Grass.Platform.Win32.ProtocolEntry
 import Grass.Platform.Win32.GetStdHandleStackPlan
 import Grass.Platform.Win32.ReturnHome
 import Grass.Platform.Win32.ReturnHomeStackPlan

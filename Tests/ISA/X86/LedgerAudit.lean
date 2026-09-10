@@ -66,6 +66,8 @@ import Grass.Platform.Win32.ExecutionState
 import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.ProviderResume
+import Grass.Platform.Win32.CallResumeBinding
+import Grass.Platform.Win32.CallResumeHistory
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.RawStep
 import Grass.Platform.Win32.RawServiceMetadata
@@ -74,6 +76,7 @@ import Grass.Platform.Win32.RawEntryEvent
 import Grass.Platform.Win32.RawServicePreservation
 import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.GetStdHandleRuntime
+import Grass.Platform.Win32.ProtocolEntry
 import Grass.Platform.Win32.GetStdHandleStackPlan
 import Grass.Platform.Win32.ReturnHome
 import Grass.Platform.Win32.ReturnHomeStackPlan
@@ -234,6 +237,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawState,
    `Grass.Platform.Win32.CallRuntime,
    `Grass.Platform.Win32.ProviderResume,
+   `Grass.Platform.Win32.CallResumeBinding,
+   `Grass.Platform.Win32.CallResumeHistory,
    `Grass.Platform.Win32.RawStepSignature,
    `Grass.Platform.Win32.RawStep,
    `Grass.Platform.Win32.RawServiceMetadata,
@@ -242,6 +247,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawServicePreservation,
    `Grass.Platform.Win32.ExitProcessRuntime,
    `Grass.Platform.Win32.GetStdHandleRuntime,
+   `Grass.Platform.Win32.ProtocolEntry,
    `Grass.Platform.Win32.GetStdHandleStackPlan,
    `Grass.Platform.Win32.ReturnHome,
    `Grass.Platform.Win32.ReturnHomeStackPlan,
@@ -380,9 +386,11 @@ acquiring a citation.
 -- Fixed dispatch and access factories add thirty checked structural helpers.
 -- Eleven checked carrier projections, loaded-record searches and internal labels.
 -- Thirteen custody predicates and checked adapters add no external behavior.
--- Shared runtime and compatibility adapters retain actual evidence.
+-- Runtime, compatibility and shared spatial adapters retain actual evidence.
+-- Shared failure recovery removes one duplicate; memory-MOV provenance adds one projection.
+-- Two endpoint aliases and three shared protocol bookkeeping computations add no model debt.
 -- Certificate encoding adds one reviewed structural adapter beyond main.
-def notBehaviourBaseline : Nat := 371
+def notBehaviourBaseline : Nat := 376
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -593,6 +601,11 @@ def notBehaviour : List Name :=
     -- Checked GetStdHandle bookkeeping and projections add no provider or CPU
     -- claim beyond the actual CALL, ABI and protocol receipts they retain.
     `Grass.Platform.Win32.GetStdHandle.EntryHandoff.after,
+    `Grass.Platform.Win32.GetStdHandle.EntryHandoff,
+    `Grass.Platform.Win32.WriteFile.EntryHandoff,
+    `Grass.Platform.Win32.ProtocolEntry.issue?,
+    `Grass.Platform.Win32.ProtocolEntry.Entry.after,
+    `Grass.Platform.Win32.ProtocolEntry.Entry.pendingRecord,
     `Grass.Platform.Win32.GetStdHandle.EntryHandoff.record,
     `Grass.Platform.Win32.GetStdHandle.entryHandoff?,
     `Grass.Platform.Win32.GetStdHandle.CallHandoff.frame,

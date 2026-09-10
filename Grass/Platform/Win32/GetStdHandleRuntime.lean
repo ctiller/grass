@@ -1,6 +1,7 @@
 import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.WriteFileCall
 import Grass.Platform.Win32.ReturnHome
+import Grass.Platform.Win32.ProtocolEntry
 
 /-!
 # Checked GetStdHandle entry and runtime initialization
@@ -37,41 +38,16 @@ def StackPlan.requests {state : Execution.State} (plan : StackPlan state) :
   stackRequests plan.returnSlot plan.homeSlot
 
 /-- Checked protocol handoff for the selector and the complete ABI batch. -/
-structure EntryHandoff (before : ExecutionState.State ApiRequest)
-    (abi : StackPlan before.machine) (agent : ContextId) where
-  caller : ContextId
-  control : before.control = .caller caller
-  callerRegistered : before.machine.machine.contexts.lookup caller = some .thread
-  agentRegistered : before.machine.machine.contexts.lookup agent = some .externalAgent
-  clean : before.machine.machine.violations.IsEmpty
-  beforeProtocol : CallProtocol.State ApiRequest
-  projected : before.callProtocol? = some beforeProtocol
-  call : CallProtocol.CallId
-  afterProtocol : CallProtocol.State ApiRequest
-  issued : CallProtocol.handoff? beforeProtocol caller agent
-    (.getStdHandle (selector before.machine)) abi.requests = some (call, afterProtocol)
+abbrev EntryHandoff (before : ExecutionState.State ApiRequest)
+    (abi : StackPlan before.machine) (agent : ContextId) :=
+  ProtocolEntry.Entry before (.getStdHandle (selector before.machine)) abi.requests agent
 
 /-- Run the fixed checked boundary. Refusal leaves the actual input available
 to the caller and does not create a pending occurrence or runtime entry. -/
 def entryHandoff? (before : ExecutionState.State ApiRequest)
     (abi : StackPlan before.machine) (agent : ContextId) :
     Option (EntryHandoff before abi agent) :=
-  match control : before.control with
-  | .caller caller =>
-      if callerRegistered : before.machine.machine.contexts.lookup caller = some .thread then
-      if agentRegistered : before.machine.machine.contexts.lookup agent = some .externalAgent then
-      if clean : before.machine.machine.violations.IsEmpty then
-        match projected : before.callProtocol? with
-        | none => none
-        | some beforeProtocol =>
-            match issued : CallProtocol.handoff? beforeProtocol caller agent
-                (.getStdHandle (selector before.machine)) abi.requests with
-            | none => none
-            | some (call, afterProtocol) => some
-                { caller, control, callerRegistered, agentRegistered, clean,
-                  beforeProtocol, projected, call, afterProtocol, issued }
-      else none else none else none
-  | .pending .. | .terminal => none
+  ProtocolEntry.issue? before (.getStdHandle (selector before.machine)) abi.requests agent
 
 namespace EntryHandoff
 
@@ -79,33 +55,39 @@ variable {before : ExecutionState.State ApiRequest} {abi : StackPlan before.mach
   {agent : ContextId}
 
 def after (handoff : EntryHandoff before abi agent) : ExecutionState.State ApiRequest :=
-  ExecutionState.State.ofCallProtocol handoff.afterProtocol
-    { before.machine with machine := handoff.afterProtocol.machine } rfl
-    (.pending handoff.call handoff.caller agent)
+  ProtocolEntry.Entry.after handoff
 
 def record (handoff : EntryHandoff before abi agent) : CallProtocol.Pending ApiRequest :=
-  ⟨handoff.caller, agent, .getStdHandle (selector before.machine),
-    (GrantMint.mint handoff.beforeProtocol.grantSupply
-      (abi.requests.map (fun loan => loan.grant handoff.caller agent))).1⟩
+  ProtocolEntry.Entry.pendingRecord handoff
 
 theorem after_projected (handoff : EntryHandoff before abi agent) :
     handoff.after.callProtocol? = some handoff.afterProtocol :=
-  ExecutionState.State.ofCallProtocol_callProtocol? _ _ _ _
+  ProtocolEntry.Entry.after_projected handoff
 
 theorem recorded (handoff : EntryHandoff before abi agent) :
     handoff.afterProtocol.pending.lookup handoff.call = some handoff.record :=
-  (CallProtocol.handoff?_records handoff.issued).2.2.2.1
+  ProtocolEntry.Entry.recorded handoff
 
 theorem storage_unchanged (handoff : EntryHandoff before abi agent) :
     handoff.afterProtocol.machine.memory.allocations = before.machine.machine.memory.allocations ∧
-    handoff.afterProtocol.machine.memory.backings = before.machine.machine.memory.backings := by
-  obtain ⟨memory, issued, machine⟩ := (CallProtocol.handoff?_records handoff.issued).2.2.2.2.2
-  have projected := (ExecutionState.State.callProtocol?_fields handoff.projected).1
-  rw [machine]
-  exact ⟨(LoanBatch.allocations_issue? issued).trans
-      (congrArg (fun machine => machine.memory.allocations) projected),
-    (LoanBatch.backings_issue? issued).trans
-      (congrArg (fun machine => machine.memory.backings) projected)⟩
+    handoff.afterProtocol.machine.memory.backings = before.machine.machine.memory.backings :=
+  ProtocolEntry.Entry.storage_unchanged handoff
+
+theorem pending_exact (handoff : EntryHandoff before abi agent) :
+    handoff.afterProtocol.pending = handoff.beforeProtocol.pending.insert handoff.call handoff.record :=
+  ProtocolEntry.Entry.pending_exact handoff
+
+theorem fresh (handoff : EntryHandoff before abi agent) :
+    handoff.beforeProtocol.pending.lookup handoff.call = none :=
+  ProtocolEntry.Entry.fresh handoff
+
+theorem clean_after (handoff : EntryHandoff before abi agent) :
+    handoff.after.machine.machine.violations.IsEmpty :=
+  ProtocolEntry.Entry.clean_after handoff
+
+theorem after_control_consistent (handoff : EntryHandoff before abi agent) :
+    handoff.after.ControlConsistent :=
+  ProtocolEntry.Entry.after_control_consistent handoff
 
 end EntryHandoff
 
@@ -171,7 +153,9 @@ theorem selector_exact (handoff : CallHandoff loaded before receipt agent) :
     handoff.handoff.record.request =
       .getStdHandle (BitVec.setWidth 32 (receipt.result.gpr .rcx)) := by
   have reached := (WriteFile.reachedCall?_fields handoff.reachedExact).1
-  simp [EntryHandoff.record, selector, reached]
+  change ApiRequest.getStdHandle (selector handoff.reached.machine) = _
+  rw [reached]
+  rfl
 
 end CallHandoff
 
