@@ -26,7 +26,27 @@ def Complete.StartsAfter {model : BehaviorModel Outcome}
 end BehaviorModel
 
 namespace BehaviorMatching
-variable {Outcome : Type} {lower : BehaviorModel Outcome} {upper : BehaviorModel Outcome}
+variable {Outcome LowerOutcome UpperOutcome : Type}
+  {lower : BehaviorModel LowerOutcome} {upper : BehaviorModel UpperOutcome}
+
+/-- Relate actual terminal results. Neither absent result can satisfy this
+lifting; a target binding must select the relation on the retained values. -/
+def ResultMatch (relation : LowerOutcome → UpperOutcome → Prop)
+    (left : Option LowerOutcome) (right : Option UpperOutcome) : Prop :=
+  ∃ actual authored, left = some actual ∧ right = some authored ∧ relation actual authored
+
+@[simp] theorem resultMatch_some (relation : LowerOutcome → UpperOutcome → Prop)
+    (actual : LowerOutcome) (authored : UpperOutcome) :
+    ResultMatch relation (some actual) (some authored) ↔ relation actual authored := by
+  simp [ResultMatch]
+
+@[simp] theorem resultMatch_none_left (relation : LowerOutcome → UpperOutcome → Prop)
+    (right : Option UpperOutcome) : ¬ ResultMatch relation none right := by
+  simp [ResultMatch]
+
+@[simp] theorem resultMatch_none_right (relation : LowerOutcome → UpperOutcome → Prop)
+    (left : Option LowerOutcome) : ¬ ResultMatch relation left none := by
+  simp [ResultMatch]
 
 /-- Exact prefixes of both actual continuations meet at unbounded indices. -/
 structure InfiniteAlignment (R : lower.History → upper.History → Prop)
@@ -91,8 +111,11 @@ theorem history_length {model : BehaviorModel Outcome} {before : model.History}
 
 end ReplyExtension
 
-/-- Completion-form matching parameterized by history and wait matching. -/
-inductive CompleteMatch (R : lower.History → upper.History → Prop)
+/-- Completion-form matching parameterized by history, wait, and terminal
+matching. Fixed target bindings use `ResultMatch` for actual result values;
+same-outcome exact correspondence retains equality of optional results. -/
+inductive CompleteMatchWith (outcomes : Option LowerOutcome → Option UpperOutcome → Prop)
+    (R : lower.History → upper.History → Prop)
     (W : (left : lower.History) → (right : upper.History) →
       PermanentWait lower.boundary left → PermanentWait upper.boundary right → Prop) :
     lower.Complete → upper.Complete → Prop where
@@ -100,18 +123,27 @@ inductive CompleteMatch (R : lower.History → upper.History → Prop)
       (leftDone : lower.system.Terminal left.state left.graph)
       (rightDone : upper.system.Terminal right.state right.graph)
       (related : R left right)
-      (outcomes : lower.result left.state left.graph = upper.result right.state right.graph) :
-      CompleteMatch R W (.terminal left leftDone) (.terminal right rightDone)
+      (results : outcomes (lower.result left.state left.graph) (upper.result right.state right.graph)) :
+      CompleteMatchWith outcomes R W (.terminal left leftDone) (.terminal right rightDone)
   | infinite (left : lower.History) (right : upper.History)
       (leftRun : lower.system.InfiniteContinuation left.state left.graph left.path.events)
       (rightRun : upper.system.InfiniteContinuation right.state right.graph right.path.events)
       (alignment : InfiniteAlignment R left right leftRun rightRun) :
-      CompleteMatch R W (.infinite left leftRun) (.infinite right rightRun)
+      CompleteMatchWith outcomes R W (.infinite left leftRun) (.infinite right rightRun)
   | waiting (left : lower.History) (right : upper.History)
       (leftWait : PermanentWait lower.boundary left)
       (rightWait : PermanentWait upper.boundary right)
       (matched : W left right leftWait rightWait) :
-      CompleteMatch R W (.waiting left leftWait) (.waiting right rightWait)
+      CompleteMatchWith outcomes R W (.waiting left leftWait) (.waiting right rightWait)
+
+/-- Equality specializes the shared matcher for models with the same outcome
+type. Heterogeneous target bindings select their terminal relation explicitly. -/
+abbrev CompleteMatch {lower upper : BehaviorModel Outcome} :=
+  @CompleteMatchWith Outcome Outcome lower upper Eq
+
+namespace CompleteMatch
+export CompleteMatchWith (terminal infinite waiting)
+end CompleteMatch
 
 end BehaviorMatching
 end Grass

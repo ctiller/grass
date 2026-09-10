@@ -11,7 +11,8 @@ open RelationalSystem
 
 /-- Interpret each actual request and dependent response. Permitted lower waits
 must be permitted above; no abstract response-existence promise is introduced. -/
-structure DirectedWaitTranslation {Outcome : Type} (lower : BehaviorModel Outcome) (upper : BehaviorModel Outcome) where
+structure DirectedWaitTranslation {LowerOutcome UpperOutcome : Type}
+    (lower : BehaviorModel LowerOutcome) (upper : BehaviorModel UpperOutcome) where
   request : lower.Request → upper.Request
   response : (r : lower.Request) → lower.protocol.Response r →
     upper.protocol.Response (request r)
@@ -32,7 +33,8 @@ def ofExact {Outcome : Type} {lower : BehaviorModel Outcome} {upper : BehaviorMo
 end DirectedWaitTranslation
 
 namespace ImplementationConformance
-variable {Outcome : Type} {lower : BehaviorModel Outcome} {upper : BehaviorModel Outcome}
+variable {LowerOutcome UpperOutcome : Type}
+  {lower : BehaviorModel LowerOutcome} {upper : BehaviorModel UpperOutcome}
 
 abbrev Finite (observe : lower.Observation → upper.Observation) :=
   HistorySimulation lower.system upper.system
@@ -93,29 +95,46 @@ end ExternalNonresponse
 /-- Directed matching reuses strict complete matching and adds only the
 proved external-nonresponse case. Exact correspondence keeps its original
 strict matching relation. Program-owned infinite work has no new matching case. -/
-inductive CompleteMatch {observe : lower.Observation → upper.Observation}
+inductive CompleteMatchWith (outcomes : Option LowerOutcome → Option UpperOutcome → Prop)
+    {observe : lower.Observation → upper.Observation}
     (finite : Finite observe) (waits : DirectedWaitTranslation lower upper) :
     lower.Complete → upper.Complete → Prop where
   | strict {left right}
-      (matched : BehaviorMatching.CompleteMatch finite.Rel (WaitMatch finite waits) left right) :
-      CompleteMatch finite waits left right
+      (matched : BehaviorMatching.CompleteMatchWith outcomes finite.Rel (WaitMatch finite waits) left right) :
+      CompleteMatchWith outcomes finite waits left right
   | externalNonresponse (left : lower.History) (right : upper.History)
       (run : lower.system.InfiniteContinuation left.state left.graph left.path.events)
       (rightWait : PermanentWait upper.boundary right)
       (evidence : ExternalNonresponse finite waits left right run rightWait) :
-      CompleteMatch finite waits (.infinite left run) (.waiting right rightWait)
+      CompleteMatchWith outcomes finite waits (.infinite left run) (.waiting right rightWait)
+
+abbrev CompleteMatch {Outcome : Type} {lower upper : BehaviorModel Outcome} :=
+  @CompleteMatchWith Outcome Outcome lower upper Eq
+
+namespace CompleteMatch
+export CompleteMatchWith (strict externalNonresponse)
+end CompleteMatch
 end ImplementationConformance
 
 /-- Directed complete conformance extends the same actual initialized histories.
 Terminal, infinite, and waiting executions use the shared distinct constructors. -/
-structure ImplementationConformance {Outcome : Type} (lower : BehaviorModel Outcome) (upper : BehaviorModel Outcome)
+structure ImplementationConformanceWith {LowerOutcome UpperOutcome : Type}
+    (lower : BehaviorModel LowerOutcome) (upper : BehaviorModel UpperOutcome)
     (observe : lower.Observation → upper.Observation)
-    (waits : DirectedWaitTranslation lower upper) where
+    (waits : DirectedWaitTranslation lower upper)
+    (outcomes : Option LowerOutcome → Option UpperOutcome → Prop) where
   finite : ImplementationConformance.Finite observe
   completeForth : ∀ {left right}, finite.Rel left right → ∀ complete,
     BehaviorModel.Complete.StartsAfter left complete →
     ∃ other, BehaviorModel.Complete.StartsAfter right other ∧
-      ImplementationConformance.CompleteMatch finite waits complete other
+      ImplementationConformance.CompleteMatchWith outcomes finite waits complete other
+
+/-- Same-outcome conformance is the equality specialization of the shared
+directed matcher, not a separate execution or proof path. -/
+abbrev ImplementationConformance {Outcome : Type} (lower upper : BehaviorModel Outcome)
+    (observe : lower.Observation → upper.Observation)
+    (waits : DirectedWaitTranslation lower upper) :=
+  ImplementationConformanceWith lower upper observe waits Eq
 
 namespace BehaviorCorrespondence
 variable {Outcome : Type} {lower : BehaviorModel Outcome} {upper : BehaviorModel Outcome}
