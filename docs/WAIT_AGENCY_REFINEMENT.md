@@ -70,19 +70,6 @@ this case and rejects non-external activity, completed replies and observation
 disagreement; the existing [implementation tests](../Tests/Refinement/ImplementationConformance.lean)
 still reject omitted errors, waits and program-owned divergence.
 
-## Selected Win32 Hello profile
-
-[RawAgencyProfile](../Grass/Platform/Win32/RawAgencyProfile.lean) explicitly
-assigns provider service by `environment.provider`, API-result observations and
-completed-exit observations to external agency. Caller CPU work and API entry
-are program-owned. `RawStep.pending_external` proves the all-step property for
-an actual pending call with that environment's caller and provider.
-`cpu_not_external` excludes every CPU choice, irrespective of its observation.
-
-This is selected profile semantics with native applicability owed in the model
-ledger. An actor name alone supplies no external-agency interpretation, and
-composed program-owned providers must not inherit this profile by name.
-
 The fixed raw public `BehaviorModel` remains unfinished. In particular, checked
 reply-path completeness and protocol permission at actual raw frontiers still
 need domain proofs. The GetStdHandle gaps include exact protocol handoff/return

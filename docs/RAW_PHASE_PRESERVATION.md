@@ -70,7 +70,5 @@ excluded by the next actual edge. This classification retains the infinite
 stream and makes no permanent-wait or eventual-response claim.
 The [agency and reply-path boundary](WAIT_AGENCY_REFINEMENT.md) separates
 provider service from actual replies and retains a proved external-nonresponse
-case in directed refinement. [RawAgencyProfile](../Grass/Platform/Win32/RawAgencyProfile.lean)
-implements the selected Hello ownership interpretation and proves that every
-actual step at the selected pending cut requires its external agency. This
-classification does not yet construct the fixed raw public `BehaviorModel`.
+case in directed refinement. This shared boundary does not yet construct the
+fixed raw public `BehaviorModel`.
