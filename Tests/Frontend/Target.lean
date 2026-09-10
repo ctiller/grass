@@ -7,7 +7,7 @@ namespace Grass.Tests.Frontend
 inductive Outcome where | success | failure
 
 def resources := ConsoleResourceModel.singleLine
-def message : Specification.TextLine := "Hello, World!"
+def message : Specification.TextLine := "Sample"
 def policy : ConsoleWriteOutcomePolicy Outcome := ⟨.success, .failure, .failure, .failure⟩
 def spec := SpecProcess.ofRelational (Console.writeLineContract resources message policy)
   |>.withLiveness (.terminatesUnder [.environmentResponsive])
@@ -24,7 +24,7 @@ def statics : StaticObjectTable := static_objects {
   rodata align 1 { payload: bytes payload }
 }
 
-example : payload.toList = [72,101,108,108,111,44,32,87,111,114,108,100,33,13,10] := by decide
+example : payload.toList = [83,97,109,112,108,101,13,10] := by decide
 example : projection.captured.view.request.line = message := rfl
 example : projection.captured.target.payload = payload := rfl
 example : targetPolicy.encode .success = 0 := TargetOutcomeProjection.encode_success ..
