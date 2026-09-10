@@ -9,18 +9,17 @@ This layer couples a batch of loans to a request and a fresh call occurrence.
 `handoff?` and `return?` publish the machine, supplies, pending table, and boundary
 trace together. An `Option.none` exposes no partially updated state.
 
-This is not an ABI-return certificate or a happens-before model. Boundary events
-record this protocol's transitions; an instruction/provider refinement must
-still connect them to actual calls and returns. In particular, the conservative
-cross-context conflict checks in `Grass.Op.step` are unchanged.
+Successful doors also extend the canonical bounded synchronization state: a
+handoff joins the caller frontier into the agent and its matched return joins
+the agent frontier back into the caller. This is the abstract release/acquire
+interpretation used by `Grass.Op.step`; it applies only to successful doors in
+this module. Generic loan batches do not create synchronization, and an
+instruction/provider refinement must still justify native call applicability.
 -/
 
 namespace Grass.Op.CallProtocol
 
 open Grass.Core Grass.Memory Grass.Std.Logical
-
-inductive CallTag
-abbrev CallId := Uid CallTag
 
 /-- A requested loan without an identity or a choice of lender/holder. -/
 structure LoanRequest where
@@ -136,8 +135,12 @@ def handoff? {Request : Type} (state : State Request) (caller agent : ContextId)
   let minted := GrantMint.mint state.grantSupply (loans.map (fun loan => loan.grant caller agent))
   let memory ← LoanBatch.issue? state.machine.memory caller minted.1
   let record : Pending Request := ⟨caller, agent, request, minted.1⟩
+  let synchronization ← state.machine.synchronization.handoff?
+    (state.machine.events.map (·.event)) call.1 caller agent record.ids
   if (state.pending.lookup call.1).isSome then none else do
-    let next ← checked? { state.machine with memory := memory } call.2 minted.2
+    let next ← checked? { state.machine with
+        memory := memory
+        synchronization := synchronization } call.2 minted.2
       (state.pending.insert call.1 record)
       (state.boundaries ++ [.handoff call.1 caller agent record.ids])
     pure (call.1, next)
@@ -151,7 +154,11 @@ def return? {Request : Type} (state : State Request) (call : CallId)
   let record ← state.pending.lookup call
   if record.caller ≠ caller ∨ record.agent ≠ agent ∨ record.ids ≠ ids then none else do
     let memory ← LoanBatch.return? state.machine.memory caller record.loans
-    let next ← checked? { state.machine with memory := memory }
+    let synchronization ← state.machine.synchronization.returned?
+      (state.machine.events.map (·.event)) call caller agent ids
+    let next ← checked? { state.machine with
+        memory := memory
+        synchronization := synchronization }
       state.callSupply state.grantSupply (state.pending.erase call)
       (state.boundaries ++ [.returned call caller agent ids])
     pure (record, next)
@@ -280,17 +287,24 @@ theorem return?_matches_occurrence {Request : Type} {state next : State Request}
           | none => simp [returned] at success
           | some memory =>
               simp only [returned, Option.bind_some] at success
-              cases checked : checked? { state.machine with memory := memory }
-                  state.callSupply state.grantSupply (state.pending.erase call)
-                  (state.boundaries ++ [.returned call caller agent ids]) with
-              | none => simp [checked] at success
-              | some checkedState =>
-                  simp only [checked, Option.bind_some] at success
-                  rcases success with ⟨rfl, rfl⟩
-                  refine ⟨rfl, ?_, ?_, ?_⟩
-                  · exact Classical.byContradiction exactMatch.1
-                  · exact Classical.byContradiction exactMatch.2.1
-                  · exact Classical.byContradiction exactMatch.2.2
+              cases synchronized : state.machine.synchronization.returned?
+                  (state.machine.events.map (·.event)) call caller agent ids with
+              | none => simp [synchronized] at success
+              | some synchronization =>
+                  simp only [synchronized, Option.bind_some] at success
+                  cases checked : checked? { state.machine with
+                      memory := memory
+                      synchronization := synchronization }
+                      state.callSupply state.grantSupply (state.pending.erase call)
+                      (state.boundaries ++ [.returned call caller agent ids]) with
+                  | none => simp [checked] at success
+                  | some checkedState =>
+                      simp only [checked, Option.bind_some] at success
+                      rcases success with ⟨rfl, rfl⟩
+                      refine ⟨rfl, ?_, ?_, ?_⟩
+                      · exact Classical.byContradiction exactMatch.1
+                      · exact Classical.byContradiction exactMatch.2.1
+                      · exact Classical.byContradiction exactMatch.2.2
 
 /-- Named observations of a successful bookkeeping return. -/
 structure ReturnEffects {Request : Type} (before after : State Request)
@@ -302,7 +316,12 @@ structure ReturnEffects {Request : Type} (before after : State Request)
   idsMatch : record.ids = ids
   loansReturned : LoanBatch.return? before.machine.memory caller record.loans =
     some after.machine.memory
-  machineUpdated : after.machine = { before.machine with memory := after.machine.memory }
+  synchronizationReturned : before.machine.synchronization.returned?
+    (before.machine.events.map (·.event)) call caller agent ids =
+      some after.machine.synchronization
+  machineUpdated : after.machine = { before.machine with
+    memory := after.machine.memory
+    synchronization := after.machine.synchronization }
   callSupply : after.callSupply = before.callSupply
   grantSupply : after.grantSupply = before.grantSupply
   pending : after.pending = before.pending.erase call
@@ -324,19 +343,27 @@ theorem return?_effects {Request : Type} {state next : State Request}
     | none => simp [returned] at success
     | some memory =>
       simp only [returned, Option.bind_some] at success
-      cases checked : checked? { state.machine with memory := memory }
-          state.callSupply state.grantSupply (state.pending.erase call)
-          (state.boundaries ++ [.returned call caller agent ids]) with
-      | none => simp [checked] at success
-      | some checkedState =>
-        simp only [checked, Option.bind_some] at success
-        rcases success with ⟨rfl, rfl⟩
-        have fields := checked?_fields checked
-        refine ⟨occurrence, exactBoundary.2.1, exactBoundary.2.2.1,
-          exactBoundary.2.2.2, ?_, ?_, fields.2.1, fields.2.2.1,
-          fields.2.2.2.1, fields.2.2.2.2⟩
-        · simpa only [fields.1] using returned
-        · rw [fields.1]
+      cases synchronized : state.machine.synchronization.returned?
+          (state.machine.events.map (·.event)) call caller agent ids with
+      | none => simp [synchronized] at success
+      | some synchronization =>
+        simp only [synchronized, Option.bind_some] at success
+        cases checked : checked? { state.machine with
+            memory := memory
+            synchronization := synchronization }
+            state.callSupply state.grantSupply (state.pending.erase call)
+            (state.boundaries ++ [.returned call caller agent ids]) with
+        | none => simp [checked] at success
+        | some checkedState =>
+          simp only [checked, Option.bind_some] at success
+          rcases success with ⟨rfl, rfl⟩
+          have fields := checked?_fields checked
+          refine ⟨occurrence, exactBoundary.2.1, exactBoundary.2.2.1,
+            exactBoundary.2.2.2, ?_, ?_, ?_, fields.2.1, fields.2.2.1,
+            fields.2.2.2.1, fields.2.2.2.2⟩
+          · simpa only [fields.1] using returned
+          · simpa only [fields.1] using synchronized
+          · rw [fields.1]
 
 /-- `ReturnEffects.unrelated_grant` transports batch framing to the call boundary. -/
 theorem ReturnEffects.unrelated_grant {Request : Type} {before after : State Request}
@@ -369,6 +396,54 @@ theorem ReturnEffects.cells_unchanged {Request : Type} {before after : State Req
     after.machine.memory.cellAt? id offset = before.machine.memory.cellAt? id offset :=
   MemoryState.cellAt?_of_maps_eq effects.allocations_unchanged effects.backings_unchanged id offset
 
+/-- `ReturnEffects.obligations_unchanged` proves a matched protocol return does
+not alter the machine obligation map. -/
+theorem ReturnEffects.obligations_unchanged {Request : Type} {before after : State Request}
+    {call : CallId} {caller agent : ContextId} {ids : List GrantId}
+    {record : Pending Request} (effects : ReturnEffects before after call caller agent ids record) :
+    after.machine.obligations = before.machine.obligations := by
+  rw [effects.machineUpdated]
+
+/-- `ReturnEffects.violations_unchanged` proves a matched protocol return does
+not append an audit violation. -/
+theorem ReturnEffects.violations_unchanged {Request : Type} {before after : State Request}
+    {call : CallId} {caller agent : ContextId} {ids : List GrantId}
+    {record : Pending Request} (effects : ReturnEffects before after call caller agent ids record) :
+    after.machine.violations = before.machine.violations := by
+  rw [effects.machineUpdated]
+
+/-- `ReturnEffects.events_unchanged` proves a matched protocol return preserves
+the committed memory-event history used by the synchronization transition. -/
+theorem ReturnEffects.events_unchanged {Request : Type} {before after : State Request}
+    {call : CallId} {caller agent : ContextId} {ids : List GrantId}
+    {record : Pending Request} (effects : ReturnEffects before after call caller agent ids record) :
+    after.machine.events = before.machine.events := by
+  rw [effects.machineUpdated]
+
+/-- `ReturnEffects.eventSupply_unchanged` proves a matched protocol return does
+not mint a memory-event identity. -/
+theorem ReturnEffects.eventSupply_unchanged {Request : Type} {before after : State Request}
+    {call : CallId} {caller agent : ContextId} {ids : List GrantId}
+    {record : Pending Request} (effects : ReturnEffects before after call caller agent ids record) :
+    after.machine.eventSupply = before.machine.eventSupply := by
+  rw [effects.machineUpdated]
+
+/-- `ReturnEffects.faults_unchanged` proves a matched protocol return preserves
+the architectural fault trace. -/
+theorem ReturnEffects.faults_unchanged {Request : Type} {before after : State Request}
+    {call : CallId} {caller agent : ContextId} {ids : List GrantId}
+    {record : Pending Request} (effects : ReturnEffects before after call caller agent ids record) :
+    after.machine.faults = before.machine.faults := by
+  rw [effects.machineUpdated]
+
+/-- `ReturnEffects.contexts_unchanged` proves a matched protocol return preserves
+the context-kind registry. -/
+theorem ReturnEffects.contexts_unchanged {Request : Type} {before after : State Request}
+    {call : CallId} {caller agent : ContextId} {ids : List GrantId}
+    {record : Pending Request} (effects : ReturnEffects before after call caller agent ids record) :
+    after.machine.contexts = before.machine.contexts := by
+  rw [effects.machineUpdated]
+
 /-- `return?_loans_removed` exposes exact loan consumption through the protocol. -/
 theorem return?_loans_removed {Request : Type} {state next : State Request}
     {call : CallId} {caller agent : ContextId} {ids : List GrantId}
@@ -399,15 +474,22 @@ theorem return?_removes_pending {Request : Type} {state next : State Request}
         | none => simp [returned] at success
         | some memory =>
             simp only [returned, Option.bind_some] at success
-            cases checked : checked? { state.machine with memory := memory }
-                state.callSupply state.grantSupply (state.pending.erase call)
-                (state.boundaries ++ [.returned call caller agent ids]) with
-            | none => simp [checked] at success
-            | some checkedState =>
-                simp only [checked, Option.bind_some] at success
-                rcases success with ⟨rfl, rfl⟩
-                have fields := checked?_fields checked
-                rw [fields.2.2.2.1, FiniteMap.lookup_erase_self]
+            cases synchronized : state.machine.synchronization.returned?
+                (state.machine.events.map (·.event)) call caller agent ids with
+            | none => simp [synchronized] at success
+            | some synchronization =>
+                simp only [synchronized, Option.bind_some] at success
+                cases checked : checked? { state.machine with
+                    memory := memory
+                    synchronization := synchronization }
+                    state.callSupply state.grantSupply (state.pending.erase call)
+                    (state.boundaries ++ [.returned call caller agent ids]) with
+                | none => simp [checked] at success
+                | some checkedState =>
+                    simp only [checked, Option.bind_some] at success
+                    rcases success with ⟨rfl, rfl⟩
+                    have fields := checked?_fields checked
+                    rw [fields.2.2.2.1, FiniteMap.lookup_erase_self]
 
 /-- `return?_replay_rejected` says the same call occurrence cannot return twice. -/
 theorem return?_replay_rejected {Request : Type} {state next : State Request}
@@ -432,7 +514,9 @@ theorem handoff?_records {Request : Type} {state next : State Request}
       next.boundaries = state.boundaries ++
         [.handoff call caller agent (minted.1.map Prod.fst)] ∧
       ∃ memory, LoanBatch.issue? state.machine.memory caller minted.1 = some memory ∧
-        next.machine = { state.machine with memory := memory } := by
+        next.machine = { state.machine with
+          memory := memory
+          synchronization := next.machine.synchronization } := by
   dsimp only
   unfold handoff? at success
   split at success
@@ -445,30 +529,40 @@ theorem handoff?_records {Request : Type} {state next : State Request}
     | some memory =>
         simp only [issued, Option.bind_eq_bind, Option.bind_some] at success
         simp only [Pending.ids] at success
-        split at success
-        · simp at success
-        · cases checked : checked? { state.machine with memory := memory }
-              state.callSupply.fresh.2
-              (GrantMint.mint state.grantSupply
-                (loans.map fun loan => loan.grant caller agent)).2
-              (state.pending.insert state.callSupply.fresh.1
-                ⟨caller, agent, request,
-                  (GrantMint.mint state.grantSupply
-                    (loans.map fun loan => loan.grant caller agent)).1⟩)
-              (state.boundaries ++ [.handoff state.callSupply.fresh.1 caller agent
-                ((GrantMint.mint state.grantSupply
-                  (loans.map fun loan => loan.grant caller agent)).1.map Prod.fst)]) with
-          | none =>
-              rw [checked] at success
-              simp at success
-          | some checkedState =>
-              rw [checked] at success
-              simp only [Option.bind_some] at success
-              rcases success with ⟨rfl, rfl⟩
-              have fields := checked?_fields checked
-              refine ⟨rfl, fields.2.1, fields.2.2.1, ?_, fields.2.2.2.2, memory,
-                rfl, fields.1⟩
-              rw [fields.2.2.2.1, FiniteMap.lookup_insert_self]
+        cases synchronized : state.machine.synchronization.handoff?
+            (state.machine.events.map (·.event)) state.callSupply.fresh.1 caller agent
+            ((GrantMint.mint state.grantSupply
+              (loans.map fun loan => loan.grant caller agent)).1.map Prod.fst) with
+        | none => simp [synchronized] at success
+        | some synchronization =>
+          simp only [synchronized, Option.bind_some] at success
+          split at success
+          · simp at success
+          · cases checked : checked? { state.machine with
+                memory := memory
+                synchronization := synchronization }
+                state.callSupply.fresh.2
+                (GrantMint.mint state.grantSupply
+                  (loans.map fun loan => loan.grant caller agent)).2
+                (state.pending.insert state.callSupply.fresh.1
+                  ⟨caller, agent, request,
+                    (GrantMint.mint state.grantSupply
+                      (loans.map fun loan => loan.grant caller agent)).1⟩)
+                (state.boundaries ++ [.handoff state.callSupply.fresh.1 caller agent
+                  ((GrantMint.mint state.grantSupply
+                    (loans.map fun loan => loan.grant caller agent)).1.map Prod.fst)]) with
+            | none =>
+                rw [checked] at success
+                simp at success
+            | some checkedState =>
+                rw [checked] at success
+                simp only [Option.bind_some] at success
+                rcases success with ⟨rfl, rfl⟩
+                have fields := checked?_fields checked
+                refine ⟨rfl, fields.2.1, fields.2.2.1, ?_, fields.2.2.2.2, memory,
+                  rfl, ?_⟩
+                · rw [fields.2.2.2.1, FiniteMap.lookup_insert_self]
+                · rw [fields.1]
 
 /-- `handoff?_pending` exposes the complete pending-table update made by a
 successful handoff, including the actual minted loan entries. -/
@@ -490,27 +584,104 @@ theorem handoff?_pending {Request : Type} {state next : State Request}
     | some memory =>
         simp only [issued, Option.bind_eq_bind, Option.bind_some] at success
         simp only [Pending.ids] at success
-        split at success
-        · simp at success
-        · cases checked : checked? { state.machine with memory := memory }
-              state.callSupply.fresh.2
-              (GrantMint.mint state.grantSupply
-                (loans.map fun loan => loan.grant caller agent)).2
-              (state.pending.insert state.callSupply.fresh.1
-                ⟨caller, agent, request,
-                  (GrantMint.mint state.grantSupply
-                    (loans.map fun loan => loan.grant caller agent)).1⟩)
-              (state.boundaries ++ [.handoff state.callSupply.fresh.1 caller agent
-                ((GrantMint.mint state.grantSupply
-                  (loans.map fun loan => loan.grant caller agent)).1.map Prod.fst)]) with
-          | none =>
-              rw [checked] at success
-              simp at success
-          | some checkedState =>
-              rw [checked] at success
-              simp only [Option.bind_some] at success
-              rcases success with ⟨rfl, rfl⟩
-              exact (checked?_fields checked).2.2.2.1
+        cases synchronized : state.machine.synchronization.handoff?
+            (state.machine.events.map (·.event)) state.callSupply.fresh.1 caller agent
+            ((GrantMint.mint state.grantSupply
+              (loans.map fun loan => loan.grant caller agent)).1.map Prod.fst) with
+        | none => simp [synchronized] at success
+        | some synchronization =>
+          simp only [synchronized, Option.bind_some] at success
+          split at success
+          · simp at success
+          · cases checked : checked? { state.machine with
+                memory := memory
+                synchronization := synchronization }
+                state.callSupply.fresh.2
+                (GrantMint.mint state.grantSupply
+                  (loans.map fun loan => loan.grant caller agent)).2
+                (state.pending.insert state.callSupply.fresh.1
+                  ⟨caller, agent, request,
+                    (GrantMint.mint state.grantSupply
+                      (loans.map fun loan => loan.grant caller agent)).1⟩)
+                (state.boundaries ++ [.handoff state.callSupply.fresh.1 caller agent
+                  ((GrantMint.mint state.grantSupply
+                    (loans.map fun loan => loan.grant caller agent)).1.map Prod.fst)]) with
+            | none =>
+                rw [checked] at success
+                simp at success
+            | some checkedState =>
+                rw [checked] at success
+                simp only [Option.bind_some] at success
+                rcases success with ⟨rfl, rfl⟩
+                exact (checked?_fields checked).2.2.2.1
+
+/-- `handoff?_synchronization` exposes the exact canonical synchronization
+transition accepted by a successful handoff. -/
+theorem handoff?_synchronization {Request : Type} {state next : State Request}
+    {caller agent : ContextId} {request : Request} {loans : List LoanRequest}
+    {call : CallId} (success : handoff? state caller agent request loans = some (call, next)) :
+    state.machine.synchronization.handoff? (state.machine.events.map (·.event))
+      call caller agent
+      ((GrantMint.mint state.grantSupply
+        (loans.map (fun loan => loan.grant caller agent))).1.map Prod.fst) =
+        some next.machine.synchronization := by
+  unfold handoff? at success
+  split at success
+  · simp at success
+  · skip
+    cases issued : LoanBatch.issue? state.machine.memory caller
+        (GrantMint.mint state.grantSupply
+          (loans.map fun loan => loan.grant caller agent)).1 with
+    | none => simp [issued] at success
+    | some memory =>
+        simp only [issued, Option.bind_eq_bind, Option.bind_some] at success
+        simp only [Pending.ids] at success
+        cases synchronized : state.machine.synchronization.handoff?
+            (state.machine.events.map (·.event)) state.callSupply.fresh.1 caller agent
+            ((GrantMint.mint state.grantSupply
+              (loans.map fun loan => loan.grant caller agent)).1.map Prod.fst) with
+        | none => simp [synchronized] at success
+        | some synchronization =>
+          simp only [synchronized, Option.bind_some] at success
+          split at success
+          · simp at success
+          · cases checked : checked? { state.machine with
+                memory := memory
+                synchronization := synchronization }
+                state.callSupply.fresh.2
+                (GrantMint.mint state.grantSupply
+                  (loans.map fun loan => loan.grant caller agent)).2
+                (state.pending.insert state.callSupply.fresh.1
+                  ⟨caller, agent, request,
+                    (GrantMint.mint state.grantSupply
+                      (loans.map fun loan => loan.grant caller agent)).1⟩)
+                (state.boundaries ++ [.handoff state.callSupply.fresh.1 caller agent
+                  ((GrantMint.mint state.grantSupply
+                    (loans.map fun loan => loan.grant caller agent)).1.map Prod.fst)]) with
+            | none =>
+                rw [checked] at success
+                simp at success
+            | some checkedState =>
+                rw [checked] at success
+                simp only [Option.bind_some] at success
+                rcases success with ⟨rfl, rfl⟩
+                have fields := checked?_fields checked
+                simpa only [fields.1] using synchronized
+
+/-- `handoff?_machine_framing` proves handoff preserves the machine ledgers,
+memory-event history and supply, fault trace, and context-kind registry. -/
+theorem handoff?_machine_framing {Request : Type} {state next : State Request}
+    {caller agent : ContextId} {request : Request} {loans : List LoanRequest}
+    {call : CallId} (success : handoff? state caller agent request loans = some (call, next)) :
+    next.machine.obligations = state.machine.obligations ∧
+      next.machine.violations = state.machine.violations ∧
+      next.machine.events = state.machine.events ∧
+      next.machine.eventSupply = state.machine.eventSupply ∧
+      next.machine.faults = state.machine.faults ∧
+      next.machine.contexts = state.machine.contexts := by
+  obtain ⟨memory, _, machine⟩ := (handoff?_records success).2.2.2.2.2
+  rw [machine]
+  exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 /-- `handoff?_fresh` rules out a prior pending occurrence at the returned call ID,
 using the issued-ID invariant and the actual fresh supply result. -/

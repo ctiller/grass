@@ -762,36 +762,51 @@ theorem ledgerEffectApplicable_iff_isSome (obligations : FiniteMap ObligationId 
 /--
 `ConflictsWithHistory` holds when an event contends with one already performed.
 
-This is the alias check, and `performAccess` calls it: an access whose event would
-conflict with one already in the trace is denied and recorded, exactly like an
-access the state refuses on any other ground.
-
-It consults `MemoryState.SharesBytes`, so a write through a mapped view conflicts
-with a write through the allocation it maps — which `Provenance.SameStorage` alone
-would have missed, because those are distinct allocations by construction.
+The check compares captured backing footprints, so an overlapping access through
+an aliased allocation is still a structural conflict. An unordered cross-context
+conflict is refused and recorded before the prospective event commits.
 
 **Distinct contexts only.** `docs/MEMORY_MODEL.md` §7.3 defines a race over
 "conflicting events from distinct concurrent contexts... unordered by
 happens-before". Two writes by one context to the same bytes are not a race:
 program order sequences them, and denying them would refuse ordinary sequential
-code. The cross-context case is the one this can decide today; the general
-happens-before that would let two contexts be *proved* ordered is M8's. Until
-then, denying every cross-context conflict is the conservative direction — it can
-refuse a program a synchronizing profile would allow, never admit a racy one.
+code. Cross-context conflicts require the canonical synchronous-call frontier
+to order the exact historical event before this prospective event. Empty or
+stale evidence remains conservative. This bounded interpretation does not
+establish general target happens-before or native synchronization adequacy.
 -/
 def ConflictsWithHistory (policy : StepPolicy) (state : MachineState)
     (event : MemoryEvent) : Prop :=
   ∃ earlier ∈ state.events,
     earlier.event.context.id ≠ event.context.id ∧
     MemoryEvent.Conflicts
-      (fun a b => policy.compatible a b = true) earlier.event event
+      (fun a b => policy.compatible a b = true) earlier.event event ∧
+    state.synchronization.ordered (state.events.map (·.event))
+      state.eventSupply.fresh.1 earlier.event event = false
 
 instance (policy : StepPolicy) (state : MachineState) (event : MemoryEvent) :
     Decidable (ConflictsWithHistory policy state event) :=
   inferInstanceAs (Decidable (∃ earlier ∈ state.events,
     earlier.event.context.id ≠ event.context.id ∧
     MemoryEvent.Conflicts
-      (fun a b => policy.compatible a b = true) earlier.event event))
+      (fun a b => policy.compatible a b = true) earlier.event event ∧
+    state.synchronization.ordered (state.events.map (·.event))
+      state.eventSupply.fresh.1 earlier.event event = false))
+
+/-- Every cross-context structural conflict must be ordered individually.
+Ordering one predecessor cannot hide a second unordered predecessor. -/
+theorem not_conflictsWithHistory_of_ordered {policy : StepPolicy} {state : MachineState}
+    {event : MemoryEvent}
+    (ordered : ∀ earlier ∈ state.events,
+      earlier.event.context.id ≠ event.context.id →
+      MemoryEvent.Conflicts (fun a b => policy.compatible a b = true) earlier.event event →
+      state.synchronization.ordered (state.events.map (·.event))
+        state.eventSupply.fresh.1 earlier.event event = true) :
+    ¬ ConflictsWithHistory policy state event := by
+  rintro ⟨earlier, member, distinct, conflict, unordered⟩
+  have yes := ordered earlier member distinct conflict
+  rw [unordered] at yes
+  contradiction
 
 /-- Non-atomic accesses with intersecting read/write footprints conflict under
 any policy. These footprints were captured when each event committed. -/
@@ -811,18 +826,20 @@ theorem conflicts_symm {policy : StepPolicy} {a b : MemoryEvent}
     MemoryEvent.Conflicts (fun x y => policy.compatible x y = true) b a :=
   h.symm (fun x y hxy => policy.compatibleSymm x y hxy)
 
-/-- An earlier non-atomic event from another context with a conflicting stored
-footprint is refused under every policy. -/
+/-- An unordered earlier non-atomic event from another context with a conflicting
+stored footprint is refused under every policy. -/
 theorem conflictsWithHistory_of_not_atomic {policy : StepPolicy} {state : MachineState}
     {event : MemoryEvent} {earlier : ValidMemoryEvent} (hmem : earlier ∈ state.events)
     (hcontext : earlier.event.context.id ≠ event.context.id)
     (hatouch : earlier.event.kind.touchesMemory = true)
     (hbtouch : event.kind.touchesMemory = true)
     (hfootprints : earlier.event.FootprintsConflict event)
-    (hatomic : earlier.event.ordering.atomicity ≠ .atomic) :
+    (hatomic : earlier.event.ordering.atomicity ≠ .atomic)
+    (unordered : state.synchronization.ordered (state.events.map (·.event))
+      state.eventSupply.fresh.1 earlier.event event = false) :
     ConflictsWithHistory policy state event :=
   ⟨earlier, hmem, hcontext,
-    conflicts_of_not_atomic hatouch hbtouch hfootprints hatomic⟩
+    conflicts_of_not_atomic hatouch hbtouch hfootprints hatomic, unordered⟩
 
 /--
 Why this access is refused, or `none` if nothing refuses it.
@@ -1228,6 +1245,12 @@ theorem prepared_event_records_authoritative_mapping {state : MachineState}
     valid.event.mapping = resolved.allocation.mapping :=
   ⟨resolved.allocationLookup, MemoryEvent.mapping_of_ofOutcome h⟩
 
+private def synchronizationAfterEvent (state : MachineState) (event : MemoryEvent) :
+    Synchronization.State :=
+  match state.synchronization.atHistory? (state.events.map (·.event)) with
+  | some frontier => frontier.record event
+  | none => state.synchronization
+
 /--
 Perform one access, recording a certified event or a violation.
 
@@ -1289,6 +1312,7 @@ def performPreparedAccess (policy : StepPolicy) (state : MachineState) (d : Acce
               { state with
                 eventSupply := state.eventSupply.fresh.2
                 events := state.events ++ [valid]
+                synchronization := synchronizationAfterEvent state valid.event
                 -- Authority effects preserve allocation and backing maps exactly,
                 -- so the original resolution transports to the resulting state.
                 -- Commit only the bytes actually written, with initialization

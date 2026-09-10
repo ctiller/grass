@@ -38,8 +38,8 @@ theorem History.events_eq {realization : Realization} {initial : ProtocolState}
     state.machine.events = initial.machine.events ++ history.providerEvents := by
   induction history with
   | handoff frontier ran _ _ _ =>
-      obtain ⟨memory, _, machine⟩ := (CallProtocol.handoff?_records ran).2.2.2.2.2
-      simp [History.providerEvents, machine]
+      have events := (CallProtocol.handoff?_machine_framing ran).2.2.1
+      simpa only [History.providerEvents, List.append_nil] using events
   | @step before after pre post previous action output committed ih =>
       obtain ⟨added, evidence⟩ := committed.causal
       change _ = initial.machine.events ++
