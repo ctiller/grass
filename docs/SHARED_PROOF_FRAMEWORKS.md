@@ -54,10 +54,12 @@ full endpoint assurance or the proposed DSL. The
 frontier and current blockers; the older `2370d929` inventory remains a historical
 lower bound, not a current census.
 
-The next shared rewrites are in progress: memory-model owns canonical
-synchronization state consumed by the same access checker; process owns replacement
-of `Raw.finitePrefixSystem` with the canonical execution system. Neither rewrite
-is claimed delivered here.
+The canonical [Raw.system](../Grass/Platform/Win32/RawPrefix.lean) now replaces
+`Raw.finitePrefixSystem`: it retains terminal call/status results and all pointwise
+actual infinite runs. Existing [execution interfaces](../Grass/Semantics/Execution.lean)
+are universe-generalized rather than duplicated. Memory-model's canonical
+synchronization state consumed by the same access checker remains in progress.
+The published width-read plan remains deferred; no implementation is claimed.
 
 ## API construction framework
 
