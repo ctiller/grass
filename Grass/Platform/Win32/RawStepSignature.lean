@@ -31,7 +31,9 @@ inductive Choice where
   | providerService (call : CallProtocol.CallId) (agent : ContextId)
       (action : WriteFile.Action)
   | providerReturn (call : CallProtocol.CallId) (result : WriteFile.ReturnResult)
-  | stdoutResult (call : CallProtocol.CallId) (handle : BitVec 64)
+      (gpr : Grass.ISA.X86.Gpr → BitVec 64) (rflags : BitVec 64)
+  | stdoutResult (call : CallProtocol.CallId)
+      (gpr : Grass.ISA.X86.Gpr → BitVec 64) (rflags : BitVec 64)
   | exitObservation (call : CallProtocol.CallId) (status : BitVec 32)
 
 /-- Endpoint observation data. Actual endpoint receipts must derive these

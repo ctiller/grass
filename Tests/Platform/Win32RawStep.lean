@@ -1,5 +1,6 @@
 import Grass.Platform.Win32.RawStep
 import Tests.Platform.Win32WriteFileService
+import Tests.Platform.Win32WriteFileConsolePublication
 
 namespace Grass.Tests.Win32RawStep
 
@@ -37,7 +38,7 @@ quiet provider step. The loaded image is irrelevant to this service-only case;
 this fixture does not claim an actual CALL or native dispatch. -/
 theorem quiet_service {image : ImageInput} {inputs : EntryInputs}
     (loaded : LoadedImage image inputs) :
-    RawStep loaded Grass.Tests.Win32WriteFile.noEffects [] before
+    RawStep loaded Grass.Tests.Win32WriteFile.noEffects Grass.Tests.Win32WriteFileConsolePublication.environment [] before
       (.providerService call record.agent action) quietEvent receipt₁.after [] := by
   apply RawStep.service receipt₁
   · exact ⟨by constructor <;> rfl, empty_graph_valid _, empty_graph_valid _,
@@ -50,11 +51,12 @@ theorem quiet_service {image : ImageInput} {inputs : EntryInputs}
 even if the caller supplies otherwise arbitrary suffix and graph data. -/
 theorem service_cannot_acquire_stdout {image : ImageInput} {inputs : EntryInputs}
     {loaded : LoadedImage image inputs} {realization : WriteFile.Realization}
+    {environment : ConsoleEnvironment}
     {graph nextGraph : Graph} {start finish : RawState} {event : Event}
     {id stdoutCall : CallProtocol.CallId} {agent : ContextId} {handle : BitVec 64}
     {chosen : WriteFile.Action}
     (wrong : event.kind = .endpoint (.stdoutAcquired stdoutCall handle)) :
-    ¬ RawStep loaded realization graph start (.providerService id agent chosen)
+    ¬ RawStep loaded realization environment graph start (.providerService id agent chosen)
       event finish nextGraph := by
   intro step
   obtain ⟨_, output, _, _, _, kind, _, _⟩ := step.service_receipt
@@ -78,12 +80,13 @@ theorem call_is_not_plain_completion
 This is a conditional checker diagnostic, not a physical page-fault transfer. -/
 theorem uncovered_keeps_failed_view {image : ImageInput} {inputs : EntryInputs}
     {loaded : LoadedImage image inputs} {realization : WriteFile.Realization}
+    {environment : ConsoleEnvironment}
     {raw : RawState}
     {policy : Grass.ISA.X86.Execution.CpuAccessPolicy}
     (selected : Cpu.policy? loaded raw.machine = some policy)
     (control : raw.control = .caller policy.context) (bad : raw.checked? = none) :
     let event : Event := ⟨[], [], .outsideProfile (.cpu (.faultTransfer .pageFault))⟩
-    RawStep loaded realization [] raw (.cpu (.fault .pageFault)) event
+    RawStep loaded realization environment [] raw (.cpu (.fault .pageFault)) event
       (raw.withMachine raw.machine) [] ∧
     (raw.withMachine raw.machine).checked? = none ∧
     (raw.withMachine raw.machine).calls = raw.calls := by

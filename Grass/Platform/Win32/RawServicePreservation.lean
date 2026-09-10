@@ -12,6 +12,7 @@ open Grass.Platform.Win32.ExecutionState Grass.Platform.Win32.Loader
 
 variable {image : ImageInput} {inputs : EntryInputs}
   {loaded : LoadedImage image inputs} {realization : WriteFile.Realization}
+  {environment : ConsoleEnvironment}
   {call : CallProtocol.CallId}
 
 /-- An actual service edge updates the accepted frontier while retaining the
@@ -19,7 +20,7 @@ original return frame and fifth-argument coordinates at the same runtime key. -/
 theorem service_runtime_frame
     {before after : RawState} {graph nextGraph : Graph}
     {agent : ContextId} {action : WriteFile.Action} {event : Event}
-    (step : RawStep loaded realization graph before (.providerService call agent action)
+    (step : RawStep loaded realization environment graph before (.providerService call agent action)
       event after nextGraph)
     (runtime : WriteFileRuntime)
     (lookup : before.calls.lookup call = some (.writeFile runtime)) :
@@ -42,7 +43,7 @@ theorem service_prefix_runtime
     (raw : Nat → RawState) (graph : Nat → Graph)
     (agent : Nat → ContextId) (action : Nat → WriteFile.Action) (event : Nat → Event)
     (length : Nat)
-    (steps : ∀ n, n < length → RawStep loaded realization (graph n) (raw n)
+    (steps : ∀ n, n < length → RawStep loaded realization environment (graph n) (raw n)
       (.providerService call (agent n) (action n)) (event n) (raw (n + 1)) (graph (n + 1)))
     (runtime : WriteFileRuntime)
     (lookup : (raw 0).calls.lookup call = some (.writeFile runtime))

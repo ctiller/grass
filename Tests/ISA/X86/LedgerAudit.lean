@@ -79,6 +79,8 @@ import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.ConsoleEnvironment
 import Grass.Platform.Win32.WriteFileConsolePublication
 import Grass.Platform.Win32.GetStdHandleReturn
+import Grass.Platform.Win32.GetStdHandleRawReturn
+import Grass.Platform.Win32.EvaluatedCall
 import Grass.Platform.Win32.GetStdHandleResult
 import Grass.Platform.Win32.GetStdHandleRuntime
 import Grass.Platform.Win32.ProtocolEntry
@@ -255,6 +257,8 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.ConsoleEnvironment,
    `Grass.Platform.Win32.WriteFileConsolePublication,
    `Grass.Platform.Win32.GetStdHandleReturn,
+   `Grass.Platform.Win32.GetStdHandleRawReturn,
+   `Grass.Platform.Win32.EvaluatedCall,
    `Grass.Platform.Win32.GetStdHandleResult,
    `Grass.Platform.Win32.GetStdHandleRuntime,
    `Grass.Platform.Win32.ProtocolEntry,
@@ -409,8 +413,9 @@ acquiring a citation.
 -- Nominal aliases, generational construction, finite comparison and supplied-state projection.
 -- Return composition and final projection reuse checked protocol/resume computations.
 -- Comparison with the snapshot's selected stdout route adds no native authority.
+-- The actual checked completion projects its canonical raw event suffix.
 -- Shared observation staging installs supplied register data without native authority.
-def notBehaviourBaseline : Nat := 388
+def notBehaviourBaseline : Nat := 389
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -561,6 +566,7 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.GetStdHandle.ProviderResult.stage,
     `Grass.Platform.Win32.GetStdHandle.Return.complete?,
     `Grass.Platform.Win32.GetStdHandle.Return.Completion.final,
+    `Grass.Platform.Win32.GetStdHandle.Return.Completion.event,
     `Grass.Platform.Win32.WriteFile.ConsolePublication.onStdout,
     -- Bind the fixed policy to an existing successful CALL factory receipt.
     `Grass.Platform.Win32.CallEntry.CallPolicy.ofFactory,
