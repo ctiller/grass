@@ -129,7 +129,21 @@ def execLoadStoreUImm (s : State) (i : LoadStoreUImm) :
     StepOutcome State NativeCall NativeReturn Fault :=
   let addr := s.readGprOrSp i.rn + (i.imm12.setWidth 64) * (BitVec.ofNat 64 (lsScale i.size))
   let size := lsBytes i.size
-  if i.isLoad then
+  if s.deviceAt addr.toNat then
+    -- A device window: the access is a native call the platform gives
+    -- meaning to, never a memory read or write. A load lands the platform's
+    -- `x0` in `rt`; a store's answer is ignored beyond advancing `pc`.
+    if i.isLoad then
+      .external
+        { target := .mmioLoad addr.toNat size, reg := s.x, sp := s.sp,
+          read := fun a n => s.readBytes a n }
+        (fun ret => (s.writeGpr i.rt ret.x0).advancePc)
+    else
+      .external
+        { target := .mmioStore addr.toNat (leBytesOf (s.readGpr i.rt) size), reg := s.x,
+          sp := s.sp, read := fun a n => s.readBytes a n }
+        (fun _ => s.advancePc)
+  else if i.isLoad then
     match s.readBytes addr.toNat size with
     | some bytes => .internal ((s.writeGpr i.rt (bitsOfLE bytes)).advancePc)
     | none => .fault (.readOutsideImage addr.toNat size)
