@@ -61,7 +61,7 @@ private def callerReady? (checked : ExecutionState.State ApiRequest) :
                   rw [control]
                   exact ⟨protocol, projected, ⟨kind, registered⟩, available⟩⟩
               else none
-  | .pending .. | .terminal => none
+  | .pending .. | .terminal .. => none
 
 /-- The concrete prefix retains its loaded image, original raw bookkeeping,
 checked projection, and caller-ready evidence. -/
@@ -120,6 +120,75 @@ private theorem transportedRange {left right : State} (same : left = right)
     (plan : GetStdHandle.StackPlan left) :
     (same ▸ plan).returnSlot.range = plan.returnSlot.range := by cases same; rfl
 
+/-- Consume an actual reached carrier and retain its exact identity. Prefix
+execution and the initial protocol root remain with the caller. -/
+def handoffFrom? (setup : ActualSetup) (before : RawState) :
+    Option { result : ActualHandoff setup // result.preCall.before = before } :=
+  match checkedExact : before.checked? with
+  | none => none
+  | some checked =>
+      match callerReady? checked with
+      | none => none
+      | some callerReady =>
+          match selected : Cpu.policy? setup.loaded checked.machine with
+          | none => none
+          | some policy =>
+              let flags := checked.machine.statusFlags
+              match evaluated : CheckedExecution.normal policy checked.machine flags with
+              | some (.ok (.call called)) =>
+                  let binding := CallEntry.CallPolicy.ofFactory selected called
+                  match planned : GetStdHandle.StackPlanFactory.deriveLoaded? binding with
+                  | .error _ => none
+                  | .ok stack =>
+                      match reachedExact : CallEntry.reachedCall? checked
+                          called.receipt with
+                      | none => none
+                      | some reached =>
+                          have reachedMachine :=
+                            (CallEntry.reachedCall?_fields reachedExact).1
+                          let abi : GetStdHandle.StackPlan reached.machine :=
+                            reachedMachine.symm ▸ stack
+                          match GetStdHandle.entryHandoff? reached abi
+                              setup.inputs.independentContext with
+                          | none => none
+                          | some handoff =>
+                              if caller : handoff.caller = setup.inputs.thread then
+                                let entered : GetStdHandle.CallHandoff setup.loaded checked
+                                    called.receipt setup.inputs.independentContext :=
+                                  { policy := binding
+                                    callerReady := callerReady.property
+                                    reached, reachedExact, abi
+                                    continuation := by
+                                      exact (transportedContinuation
+                                        reachedMachine.symm stack).trans
+                                        (GetStdHandle.StackPlanFactory.loaded_continuation_exact planned)
+                                    returnProvenance := by
+                                      exact (transportedProvenance
+                                        reachedMachine.symm stack).trans
+                                        (ReturnHome.StackPlanFactory.return_provenance_exact planned)
+                                    returnRange := by
+                                      exact (transportedRange
+                                        reachedMachine.symm stack).trans
+                                        (ReturnHome.StackPlanFactory.return_range_exact planned)
+                                    handoff, caller }
+                                let raw : @GetStdHandle.RawCallHandoff setup.image setup.inputs setup.loaded
+                                    before called.fetched.after called.afterRead
+                                    called.afterStore called.displacement
+                                    setup.inputs.independentContext :=
+                                  { checked, checkedExact, receipt := called.receipt,
+                                    entered }
+                                have rawReceipt : raw.receipt = called.receipt := rfl
+                                some ⟨{
+                                  preCall := {
+                                    before := before, checked := checked
+                                    checkedExact := checkedExact
+                                    callerReady := callerReady.property }
+                                  policy := policy, selected := selected, flags := flags
+                                  called := called, evaluated := evaluated, entered := raw
+                                  receiptExact := heq_of_eq rawReceipt }, rfl⟩
+                              else none
+              | _ => none
+
 def actualHandoffFor? (setup : ActualSetup) : Option (ActualHandoff setup) := do
   if covered : CallProtocol.GrantSupplyCovers setup.loaded.initialState.machine.memory
       (FreshSupply.initial : FreshSupply GrantTag) then
@@ -141,70 +210,7 @@ def actualHandoffFor? (setup : ActualSetup) : Option (ActualHandoff setup) := do
                 | .error _ => none
                 | .ok moved =>
                     let before := initial.raw.withMachine moved.result
-                    match checkedExact : before.checked? with
-                    | none => none
-                    | some checked =>
-                        match callerReady? checked with
-                        | none => none
-                        | some callerReady =>
-                            match selected : Cpu.policy? setup.loaded checked.machine with
-                            | none => none
-                            | some policy =>
-                                let flags := checked.machine.statusFlags
-                                match evaluated : CheckedExecution.normal policy checked.machine flags with
-                                | some (.ok (.call called)) =>
-                                    let binding := CallEntry.CallPolicy.ofFactory selected called
-                                    match planned : GetStdHandle.StackPlanFactory.deriveLoaded? binding with
-                                    | .error _ => none
-                                    | .ok stack =>
-                                        match reachedExact : CallEntry.reachedCall? checked
-                                            called.receipt with
-                                        | none => none
-                                        | some reached =>
-                                            have reachedMachine :=
-                                              (CallEntry.reachedCall?_fields reachedExact).1
-                                            let abi : GetStdHandle.StackPlan reached.machine :=
-                                              reachedMachine.symm ▸ stack
-                                            match GetStdHandle.entryHandoff? reached abi
-                                                setup.inputs.independentContext with
-                                            | none => none
-                                            | some handoff =>
-                                                if caller : handoff.caller = setup.inputs.thread then
-                                                  let entered : GetStdHandle.CallHandoff setup.loaded checked
-                                                      called.receipt setup.inputs.independentContext :=
-                                                    { policy := binding
-                                                      callerReady := callerReady.property
-                                                      reached, reachedExact, abi
-                                                      continuation := by
-                                                        exact (transportedContinuation
-                                                          reachedMachine.symm stack).trans
-                                                          (GetStdHandle.StackPlanFactory.loaded_continuation_exact planned)
-                                                      returnProvenance := by
-                                                        exact (transportedProvenance
-                                                          reachedMachine.symm stack).trans
-                                                          (ReturnHome.StackPlanFactory.return_provenance_exact planned)
-                                                      returnRange := by
-                                                        exact (transportedRange
-                                                          reachedMachine.symm stack).trans
-                                                          (ReturnHome.StackPlanFactory.return_range_exact planned)
-                                                      handoff, caller }
-                                                  let raw : @GetStdHandle.RawCallHandoff setup.image setup.inputs setup.loaded
-                                                      before called.fetched.after called.afterRead
-                                                      called.afterStore called.displacement
-                                                      setup.inputs.independentContext :=
-                                                    { checked, checkedExact, receipt := called.receipt,
-                                                      entered }
-                                                  have rawReceipt : raw.receipt = called.receipt := rfl
-                                                  some {
-                                                    preCall := {
-                                                      before := before, checked := checked
-                                                      checkedExact := checkedExact
-                                                      callerReady := callerReady.property }
-                                                    policy := policy, selected := selected, flags := flags
-                                                    called := called, evaluated := evaluated, entered := raw
-                                                    receiptExact := heq_of_eq rawReceipt }
-                                                else none
-                                | _ => none
+                    (handoffFrom? setup before).map Subtype.val
   else none
 
 structure ActualResult where

@@ -26,7 +26,7 @@ def raw : Nat → RawState
   | 0 => before
   | 1 => receipt₁.after
   | 2 => receipt₂.after
-  | _ => { receipt₂.after with control := .terminal }
+  | _ => { receipt₂.after with control := .terminal call 0 }
 
 theorem two_steps {image : ImageInput} {inputs : EntryInputs} (loaded : LoadedImage image inputs) :
     ∀ n, n < 2 → RawStep loaded Grass.Tests.Win32WriteFile.noEffects

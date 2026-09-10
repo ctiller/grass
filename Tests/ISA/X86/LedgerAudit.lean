@@ -73,12 +73,18 @@ import Grass.Platform.Win32.CallResumeBinding
 import Grass.Platform.Win32.CallResumeHistory
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.RawStep
+import Grass.Platform.Win32.RawPhasePreservation
+import Grass.Platform.Win32.RawPrefix
+import Grass.Platform.Win32.RawPendingService
+import Grass.Platform.Win32.RawPrefixSteps
 import Grass.Platform.Win32.RawServiceMetadata
 import Grass.Platform.Win32.RawServiceContinuation
 import Grass.Platform.Win32.RawServicePrefix
 import Grass.Platform.Win32.RawEntryEvent
 import Grass.Platform.Win32.RawServicePreservation
 import Grass.Platform.Win32.ExitProcessRuntime
+import Grass.Platform.Win32.ExitProcessCompletion
+import Grass.Platform.Win32.ExitProcessRawCompletion
 import Grass.Platform.Win32.ConsoleEnvironment
 import Grass.Platform.Win32.WriteFileConsolePublication
 import Grass.Platform.Win32.GetStdHandleReturn
@@ -256,12 +262,18 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.CallResumeHistory,
    `Grass.Platform.Win32.RawStepSignature,
    `Grass.Platform.Win32.RawStep,
+   `Grass.Platform.Win32.RawPhasePreservation,
+   `Grass.Platform.Win32.RawPrefix,
+   `Grass.Platform.Win32.RawPendingService,
+   `Grass.Platform.Win32.RawPrefixSteps,
    `Grass.Platform.Win32.RawServiceMetadata,
    `Grass.Platform.Win32.RawServiceContinuation,
    `Grass.Platform.Win32.RawServicePrefix,
    `Grass.Platform.Win32.RawEntryEvent,
    `Grass.Platform.Win32.RawServicePreservation,
    `Grass.Platform.Win32.ExitProcessRuntime,
+   `Grass.Platform.Win32.ExitProcessCompletion,
+   `Grass.Platform.Win32.ExitProcessRawCompletion,
    `Grass.Platform.Win32.ConsoleEnvironment,
    `Grass.Platform.Win32.WriteFileConsolePublication,
    `Grass.Platform.Win32.GetStdHandleReturn,
@@ -359,7 +371,7 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Static selector/route/result policy and observed-register API acceptance.
 -- External process applicability and formal source anchors remain owed.
 -- The bounded live writable/synchronous publication attribution policy.
-def owedBaseline : Nat := 347
+def owedBaseline : Nat := 349
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -426,7 +438,7 @@ acquiring a citation.
 -- The actual checked completion projects its canonical raw event suffix.
 -- Shared observation staging installs supplied register data without native authority.
 -- Checked WriteFile resume construction and computed final carrier.
-def notBehaviourBaseline : Nat := 396
+def notBehaviourBaseline : Nat := 399
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -572,6 +584,9 @@ def notBehaviour : List Name :=
     -- Packages the existing checked PE writer, reader and roundtrip theorem.
     -- It introduces no alternate serialization, loader rule or format fact.
     `Grass.Artifact.PE.encoding,
+    -- Instantiate the existing exact raw relation and loader/protocol root; no new hardware rule.
+    `Grass.Platform.Win32.Raw.initialState,
+    `Grass.Platform.Win32.Raw.finitePrefixSystem,
     -- Nominal data and comparison over the separately owed ABI list. The stage
     -- installs supplied observations; it asserts no actual provider transition.
     `Grass.Platform.Win32.ProcessId,
@@ -584,6 +599,7 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.GetStdHandle.Return.Completion.final,
     `Grass.Platform.Win32.WriteFile.Return.Completion.event,
     `Grass.Platform.Win32.GetStdHandle.Return.Completion.event,
+    `Grass.Platform.Win32.ExitProcess.Completion.event,
     `Grass.Platform.Win32.WriteFile.ConsolePublication.onStdout,
     -- Bind the fixed policy to an existing successful CALL factory receipt.
     `Grass.Platform.Win32.CallEntry.CallPolicy.ofFactory,
@@ -1051,6 +1067,8 @@ def owed : List Name :=
     `Grass.Platform.Win32.GetStdHandle.ProviderResult.observe?,
     `Grass.Platform.Win32.WriteFile.ConsolePublication.matches?,
     `Grass.Platform.Win32.ExitProcess.status,
+    `Grass.Platform.Win32.ExitProcess.complete?,
+    `Grass.Platform.Win32.ExitProcess.Completion.after,
     -- Fixed request widths and callee stack custody retain external ABI debt.
     `Grass.Platform.Win32.ApiRequest,
     `Grass.Platform.Win32.WriteFile.Abi.InitializedReturnQword,
