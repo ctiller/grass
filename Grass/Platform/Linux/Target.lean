@@ -1,5 +1,6 @@
 import Grass.Platform.Linux.Target.X86
 import Grass.Target.Platform
+import Grass.ISA.X86.Target
 
 /-!
 # The Linux platform
@@ -55,13 +56,13 @@ is the only remaining change.
 
 namespace Grass.Platform.Linux.Target
 
--- def platformX86 : Grass.Target.Platform Grass.ISA.X86.isa Grass.Platform.Hosted.domain where
---   Environment := Grass.Platform.Hosted.Environment
---   Admits := Grass.Platform.Hosted.Admits
---   entry := Grass.Platform.Linux.Target.X86.entry
---   decode := Grass.Platform.Linux.Target.X86.decode
---   Responds := Grass.Platform.Hosted.Responds
---   encodeReturn := Grass.Platform.Linux.Target.X86.encodeReturn
+def platformX86 : Grass.Target.Platform Grass.ISA.X86.isa Grass.Platform.Hosted.domain where
+  Environment := Grass.Platform.Hosted.Environment
+  Admits := Grass.Platform.Hosted.Admits
+  entry := Grass.Platform.Linux.Target.X86.entry
+  decode := Grass.Platform.Linux.Target.X86.decode
+  Responds := Grass.Platform.Hosted.Responds
+  encodeReturn := Grass.Platform.Linux.Target.X86.encodeReturn
 
 -- def platformAArch64 : Grass.Target.Platform Grass.ISA.AArch64.isa Grass.Platform.Hosted.domain where
 --   Environment := Grass.Platform.Hosted.Environment

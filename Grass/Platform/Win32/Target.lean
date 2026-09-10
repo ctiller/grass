@@ -5,6 +5,8 @@ import Grass.Platform.Win32.Target.Abi
 import Grass.Platform.Win32.Target.Decode
 import Grass.Platform.Win32.Target.Return
 import Grass.Platform.Win32.Target.Entry
+import Grass.ISA.X86.Target
+import Grass.Target.Platform
 
 /-!
 # The Win32 (x86-64) platform
@@ -138,44 +140,26 @@ def Responds : Grass.Platform.Hosted.Environment → (r : domain.Request) →
     domain.Response r → Grass.Platform.Hosted.Environment → Prop :=
   Grass.Platform.Hosted.Responds.sum Grass.Platform.Hosted.Responds Native.responds
 
-end Grass.Platform.Win32.Target
-
-/-!
-## Dependency not yet available: `Grass.ISA.X86.isa`
-
-The x86 ISA record (`Instr`, `encode`/`decode`, `State`, `step`) does not
-exist yet in this tree — only `Grass/ISA/X86/Target/Native.lean`
-(`NativeCall`, `NativeReturn`, `InitialContext`, `Fault`) and
-`Grass/ISA/X86/Target/Encode.lean` are present, and this module is built
-entirely against those. `decode`/`encodeReturn`/`entry` above already have
-exactly the shapes `Grass.Target.Platform` needs
-(`NativeCall → Option D.Request`,
-`NativeCall → (r : D.Request) → D.Response r → NativeReturn`,
-`Environment → InitialContext`), and `Admits`/`Responds` above are complete,
-so once `Grass.ISA.X86.isa` lands (assigning `isa.NativeCall`,
-`isa.NativeReturn` and `isa.InitialContext` to exactly the types
-`Native.lean` already declares, as that file's own module docstring
-anticipates), the only new code this platform needs is pure wiring:
-
-```
+/-- The Win32 instance of `Grass.Target.Platform`, assembled from the pieces
+above now that `Grass.ISA.X86.isa` (`Grass/ISA/X86/Target.lean`) exists:
+pure wiring, as anticipated. `StackConfig` stays parameterized —
+`Grass.Platform.Hosted.Environment` carries no stack-placement fields, a
+per-run loader decision rather than a portable "world outside the program"
+fact — so `entry`'s stack configuration is supplied by whoever assembles
+`platform` for a concrete run, not baked into `Environment` itself. -/
 def platform (imports : List Grass.Target.ImportSymbol)
-    (config : StackConfig Environment) :
+    (config : StackConfig Grass.Platform.Hosted.Environment) :
     Grass.Target.Platform Grass.ISA.X86.isa domain :=
-  { Environment := Environment
+  { Environment := Grass.Platform.Hosted.Environment
     Admits := Admits
     entry := entry config
     decode := decode imports
     Responds := Responds
     encodeReturn := encodeReturn }
-```
 
-`StackConfig` (`Grass/Platform/Win32/Target/Entry.lean`) stays parameterized
-even after `isa` lands: `Grass.Platform.Hosted.Environment` (now available)
-carries no stack-placement fields at all — a per-run loader decision, not a
-portable "world outside the program" fact a specification could observe —
-so `entry`'s stack configuration is supplied by whoever assembles `platform`
-for a concrete run, not baked into `Environment` itself.
+end Grass.Platform.Win32.Target
 
+/-!
 ## Build
 
 `lake build Grass.Platform.Win32.Target` (this file) also builds every
