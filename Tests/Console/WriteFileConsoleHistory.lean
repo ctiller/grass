@@ -27,8 +27,8 @@ def handoffHistory : History runtime.loanPlan Grass.Tests.Win32WriteFile.noEffec
     call record prefix₀ :=
   .handoff prefix₀ rfl Grass.Tests.Win32WriteFile.prepared handoffCausality rfl
 
-def captured : CapturedSpecification Grass.ConsoleResourceModel.singleLine Bool :=
-  CapturedSpecification.ofLine _ "\u000b\u0016!" ⟨true, false, false, false⟩
+def captured : Grass.SpecProcess Grass.ConsoleResourceModel.singleLine :=
+  Grass.SpecProcess.ofRelational (Grass.Console.writeLineContract _ "\u000b\u0016!" ⟨true, false, false, false⟩)
 
 def projection : CapturedTargetProjection captured Bool :=
   captured.project ⟨Grass.Specification.TextEncoding.utf8, ""⟩ id
@@ -37,7 +37,7 @@ theorem projection_payload_exact : projection.target.payload = Grass.Tests.Win32
 
 def startCut : OutputCut projection.target.payload := ⟨0, by decide⟩
 
-def upper : projection.system.History :=
+def upper : projection.componentSystem.History :=
   Grass.Console.Behavior.pendingAt projection.target.payload startCut
 
 def start : Start projection record where

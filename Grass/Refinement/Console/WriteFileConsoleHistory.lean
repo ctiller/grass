@@ -17,8 +17,8 @@ open Grass.Console Grass.Semantics Grass.Std.Logical Grass.Op
 open Grass.Platform.Win32 Grass.Platform.Win32.WriteFile
 open Grass.Platform.Win32.ExecutionState
 
-variable {R Outcome Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
-  {spec : CapturedSpecification resources Outcome}
+variable {R Status : Type} [Grass.Resource.ResourceModel R] {resources : R}
+  {spec : Grass.SpecProcess resources}
   {projection : CapturedTargetProjection spec Status}
   {realization : Realization} {before : RawState} {initial : ProtocolState}
   {call : CallProtocol.CallId} {record : CallProtocol.Pending Request}
