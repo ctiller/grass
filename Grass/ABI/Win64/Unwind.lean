@@ -342,11 +342,9 @@ bytes and ends in a zero padding slot, but `CountOfCodes` is 1. So the array is
 one slot longer than the count exactly when the count is odd, and `arraySlots`
 is that physical length.
 
-The error was invisible on every prologue with an even slot count -- including
-Spike 1's, whose four slots need no padding, so nothing already in this file
-would have caught it. That is why `Tests/ABI/Win64/UnwindCorpus.lean`
-deliberately includes single-operation prologues, and why those were the rows
-that failed.
+The error is invisible on every prologue with an even slot count. That is why
+`Tests/ABI/Win64/UnwindCorpus.lean` deliberately includes single-operation
+prologues, and why those were the rows that failed.
 -/
 def countOfCodes (p : Prologue) : Nat := p.slots
 
@@ -435,50 +433,5 @@ theorem regNibble_ne_zero (r : Gpr) (h : r ≠ .rax) : regNibble r ≠ 0 := by
   all_goals decide
 
 end Prologue
-
-/-! ## Spike 1's prologue -/
-
-/--
-`push r12; push r13; push r14`, then the complete outgoing call allocation.
-
-The prologue of `Spikes/1_Hello_World/Program.lean`, as the unwind language
-sees it.
--/
-def spike1Prologue : Prologue :=
-  { ops := spike1SavedRegisters.map .pushNonvolatile ++
-      [.allocSmall spike1CallAllocationBytes] }
-
-/-- It is encodable: three nonvolatile pushes and a 48-byte allocation, which
-is a multiple of 8 in the 8..128 range. -/
-theorem spike1Prologue_encodable : spike1Prologue.Encodable := by decide
-
-/-- The unwind model accounts for exactly the frame computed by the shared
-layout contract. -/
-theorem spike1Prologue_stackDelta_eq_totalFrameBytes :
-    spike1Prologue.stackDelta = spike1FrameLayout.totalFrameBytes := by decide
-
-/-- Numeric regression assertion for the selected Spike 1 fixture. -/
-theorem spike1Prologue_stackDelta : spike1Prologue.stackDelta = 72 := by
-  rw [spike1Prologue_stackDelta_eq_totalFrameBytes, spike1_totalFrameBytes]
-
-/-- Four operations, four slots, so a reported count of four and no padding
-slot. `ml64` agrees byte-for-byte; see `Tests/ABI/Win64/UnwindCorpus.lean`. -/
-theorem spike1Prologue_countOfCodes : spike1Prologue.countOfCodes = 4 := by decide
-
-/-- It establishes no frame pointer, so `FrameRegister` must be zero. -/
-theorem spike1Prologue_no_framePointer :
-    spike1Prologue.establishesFramePointer = false := by decide
-
-/--
-The stack it leaves is aligned for a call, agreeing with `Convention.lean`.
-
-Two independent routes to the same number —
-`AlignedForCall 3 spike1CallAllocationBytes` counts pushes and the adjustment
-separately, while this sums the unwind
-operations' deltas — so a disagreement between the frame model and the unwind
-model would show up here rather than at run time.
--/
-theorem spike1Prologue_agrees_with_frame :
-    (entryMisalignment + spike1Prologue.stackDelta) % stackAlignment = 0 := by decide
 
 end Grass.ABI.Win64

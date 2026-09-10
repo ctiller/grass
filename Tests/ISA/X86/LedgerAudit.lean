@@ -1008,13 +1008,8 @@ def notBehaviour : List Name :=
     `Grass.ABI.Win64.CallFrameLayout.callAllocationRange,
     `Grass.ABI.Win64.CallFrameLayout.frameRange,
     `Grass.ABI.Win64.CallFrameLayout.savedRegisterRange,
-    -- Fixtures: Spike 1's prologue and a frame-pointer example, which are
-    -- values this corpus chose rather than facts about Windows.
-    `Grass.ABI.Win64.spike1Prologue, `Grass.ABI.Win64.spike1Layout,
-    `Grass.ABI.Win64.spike1SavedRegisters,
-    `Grass.ABI.Win64.spike1FrameLayout,
-    `Grass.ABI.Win64.spike1CallAllocationBytes,
-    `Grass.ABI.Win64.spike1UnwindInfo, `Grass.ABI.Win64.framePointerLayout,
+    -- A frame-pointer example chosen by the corpus rather than a fact about Windows.
+    `Grass.ABI.Win64.framePointerLayout,
     `Grass.Platform.Win32.GetStdHandleResult.WellFormed,
     `Grass.Platform.Win32.UsableHandle.mk?,
     `Grass.Platform.Win32.ExcessWriteCount,
