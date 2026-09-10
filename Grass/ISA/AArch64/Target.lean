@@ -17,32 +17,45 @@ import Grass.Target.ISA
 
 ## Coverage
 
-Resolved-instruction families with a proved round-trip and wired-up
-semantics: move-wide (`movz`/`movn`/`movk`), add/subtract immediate
-(`add`/`adds`/`sub`/`subs`/`cmp`/`cmn` as `setFlags` + destination-register
-choices — no separate alias constructors), add/subtract shifted-register
-(same six mnemonics, register form, `lsl`/`lsr`/`asr` shift), logical
-immediate (`and`/`orr`/`eor`, restricted to a 64-bit contiguous low-order
-bitmask — see `Grass.ISA.AArch64.Target.Encoding.LogicalImm`), load/store
-unsigned-offset (`ldr`/`str`/`ldrb`/`strb`, 64/32-bit and byte), `cbz`
-(reusing `Grass.ISA.AArch64.Control.CompareZero`, already cited and proved
-there), `svc` (reusing `Control.SupervisorCall`, stepping to `.external`
-carrying `CallTarget.supervisor`), and `hlt` (stepping to `.halted`).
+Fifteen resolved-instruction families, each with a proved round-trip,
+pairwise dispatch disjointness against every other family, and wired-up
+semantics:
+
+- move-wide (`movz`/`movn`/`movk`);
+- add/subtract immediate and shifted-register (`add`/`adds`/`sub`/`subs`/
+  `cmp`/`cmn` as `setFlags` + destination-register choices — no separate
+  alias constructors; `lsl`/`lsr`/`asr` shift on the register form);
+- logical immediate (`and`/`orr`/`eor`, restricted to a 64-bit contiguous
+  low-order bitmask — see `Target.Encoding.LogicalImm`) and logical
+  shifted-register (`and`/`orr`/`eor`/`ands`, restricted to `N = 0`; `mov`
+  and `tst` fall out of the zero-register/discard-on-write convention rather
+  than a separate alias constructor);
+- load/store unsigned-offset (`ldr`/`str`/`ldrb`/`strb`, 64/32-bit and byte);
+- `cbz`/`svc` (reusing `Grass.ISA.AArch64.Control.CompareZero`/
+  `SupervisorCall`, already cited and proved there) and the dedicated
+  `cbnz` (the same shape, `Control.lean` being out of scope for this pass);
+- `hlt` (steps to `.halted`) and `nop` (`hint #0`, steps forward);
+- `b`/`bl` (imm26, `bl` writes `pc + 4` to `x30`), `br`/`blr`/`ret`
+  (register-indirect, ordinary control transfer — no import slot modeled),
+  and `b.cond` (imm19 + the full 16-way NZCV condition table);
+- `adr`/`adrp` (PC-relative address; `adrp` masks the low 12 bits of `pc`).
+
+`svc` steps to `.external` carrying `CallTarget.supervisor`; every other
+family is `.internal` except `hlt` (`.halted`).
 
 Not covered — encoded nowhere in `Target.Encoding`, so absent from `Instr`,
 `step`, and every proof, rather than present with an unverified encoding or
 an unproved dispatch case (`docs/TARGET_SEAMS.md` rule 5, and the brief's
-"leave a family out rather than leave a gap"): `mov` (register), `and`/`orr`/
-`eor` shifted-register, `lsl`/`lsr`/`asr` immediate, `b`, `bl`, `b.cond`,
-`cbnz`, `tbz`/`tbnz`, `adr`/`adrp`, `ldp`/`stp` (any addressing mode),
-register-offset and pre/post-index load/store, `br`/`blr`/`ret`, `brk`,
-`nop`, `mul`, `udiv`/`sdiv`, `csel`/`cset`. `Grass/ISA/AArch64/Target/
-Encoding.lean`'s module docstring records why: this pass established, for
-each covered family, an inequality against every earlier family's fixed bits
-provable without `bv_decide`'s SAT backend (the axiom
-`docs/DECISIONS.md` 31 rejects); the families above were left for a
-follow-up that budgets the same care per family rather than shipped with a
-guessed bit layout or a dispatch gap.
+"leave a family out rather than leave a gap"): `tbz`/`tbnz`, `ldp`/`stp` (any
+addressing mode), register-offset and pre/post-index load/store immediate9,
+`brk`, `madd`/`mul`, `udiv`/`sdiv`, `csel`/`csinc`/`cset`, `ubfm`/`sbfm`
+(`lsl`/`lsr`/`asr` immediate). `Grass/ISA/AArch64/Target/Encoding.lean`'s
+module docstring records why: this pass established, for each covered
+family, an inequality against every earlier family's fixed bits provable
+without `bv_decide`'s SAT backend (the axiom `docs/DECISIONS.md` 31
+rejects); the families above were left for a follow-up that budgets the same
+care per family rather than shipped with a guessed bit layout or a dispatch
+gap.
 -/
 
 namespace Grass.ISA.AArch64

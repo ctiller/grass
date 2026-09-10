@@ -44,20 +44,32 @@ still no `bv_decide` SAT call.
 
 ## Coverage
 
-Eight families, chosen because a leak-free (or `cases`-closeable) shared
+Fifteen families, chosen because a leak-free (or `cases`-closeable) shared
 window against every earlier family could be established within this pass:
 move-wide (`movz`/`movn`/`movk`), add/sub immediate (covering `adds`/`subs`/
 `cmp`/`cmn` as `setFlags`+operand choices), add/sub shifted-register (same
 coverage, register form), logical immediate (`and`/`orr`/`eor`, restricted —
 see `LogicalImm`), load/store unsigned-offset (`ldr`/`str`/`ldrb`/`strb`),
-`cbz` and `svc` (reused from `Control`), and `hlt`. `b`/`bl`/`b.cond`/`cbnz`/
-`tbz`/`tbnz`/`adr`/`adrp`/`ldp`/`stp`/`br`/`blr`/`ret`/`brk`/`nop`/`mov`
-(register)/`lsl`/`lsr`/`asr`/`mul`/`udiv`/`sdiv`/`csel`/`cset` and the
-register-offset and pre/post-index load/store addressing modes are not
-covered: left out rather than shipped with an unverified encoding or an
-un-discharged dispatch proof, per the brief's "leave a family out rather than
-leave a gap." See the module docstring on `Grass.ISA.AArch64.Target` for the
-full accounting.
+`cbz` and `svc` (reused from `Control`), `hlt`, unconditional branch
+immediate (`b`/`bl`), unconditional branch register (`br`/`blr`/`ret`),
+conditional branch (`b.cond`), `cbnz` (a dedicated struct — `Control.lean` is
+out of scope for this pass, so it is not `CompareZero` plus an `op` bit),
+PC-relative address (`adr`/`adrp`), logical shifted-register (`and`/`orr`/
+`eor`/`ands`, restricted — see `LogicalShiftedReg`), and `nop`.
+
+Nine of the fifteen families' dispatch windows were widened past the
+original eight's shared `(23, 6)`/`(24, 5)` pair: `decode_none_at`/
+`decodeX_none_at` generalize the same per-family proof shape over an
+arbitrary `(pos, len, tag)` instead of hardcoding one window, and `BranchImm`
+(clean only at `[30:26]`) and `BranchReg` (clean only at `[31:25]`, `[20:16]`,
+or a subwindow) needed windows besides those two altogether.
+
+`tbz`/`tbnz`, `ldp`/`stp`, register-offset and pre/post-index load/store,
+`brk`, `mul`/`madd`, `udiv`/`sdiv`, `csel`/`cset`, and `lsl`/`lsr`/`asr`
+immediate (`ubfm`/`sbfm`) are not covered: left out rather than shipped with
+an unverified encoding or an un-discharged dispatch proof, per the brief's
+"leave a family out rather than leave a gap." See the module docstring on
+`Grass.ISA.AArch64.Target` for the full accounting.
 -/
 
 namespace Grass.ISA.AArch64.Target
@@ -455,6 +467,321 @@ theorem Hlt.marker24_7 (i : Hlt) : (i.encode).extractLsb' 24 7 = 0b1010100#7 := 
 theorem Hlt.marker21 (i : Hlt) : (i.encode).extractLsb' 21 11 = 0b11010100010#11 := by
   unfold Hlt.encode; bv_decide
 
+
+/-! ## Family 9: unconditional branch immediate (`b`, `bl`) -/
+
+/-- `op(1) 00101 imm26(26)`. `op = false` is `b`, `true` is `bl`. Arm DDI
+0602 ID032025, "Unconditional branch (immediate)". The only fixed-bit window
+this family has is `[30:26]`; everything else is `op` or `imm26`. -/
+structure BranchImm where
+  op : BitVec 1
+  imm26 : BitVec 26
+  deriving DecidableEq, Repr
+
+def BranchImm.encode (i : BranchImm) : BitVec 32 := i.op ++ (0b00101#5) ++ i.imm26
+
+def BranchImm.decode (w : BitVec 32) : Option BranchImm :=
+  let cand : BranchImm := ⟨w.extractLsb' 31 1, w.extractLsb' 0 26⟩
+  if cand.encode = w then some cand else none
+
+theorem BranchImm.decode_encode (i : BranchImm) : BranchImm.decode i.encode = some i := by
+  have h31 : (i.encode).extractLsb' 31 1 = i.op := by unfold BranchImm.encode; bv_decide
+  have h0 : (i.encode).extractLsb' 0 26 = i.imm26 := by unfold BranchImm.encode; bv_decide
+  unfold BranchImm.decode
+  simp [h31, h0]
+
+
+theorem BranchImm.marker26_3 (i : BranchImm) : (i.encode).extractLsb' 26 3 = 0b101#3 := by
+  unfold BranchImm.encode; bv_decide
+
+theorem BranchImm.marker26_5 (i : BranchImm) : (i.encode).extractLsb' 26 5 = 0b00101#5 := by
+  unfold BranchImm.encode; bv_decide
+
+/-! ## Family 10: unconditional branch register (`br`, `blr`, `ret`) -/
+
+inductive BranchRegOp where
+  | br | blr | ret
+  deriving DecidableEq, Repr
+
+def BranchRegOp.code : BranchRegOp → BitVec 4
+  | .br => 0b0000 | .blr => 0b0001 | .ret => 0b0010
+
+def BranchRegOp.ofCode (c : BitVec 4) : Option BranchRegOp :=
+  if c = 0b0000 then some .br
+  else if c = 0b0001 then some .blr
+  else if c = 0b0010 then some .ret
+  else none
+
+/-- `1101011 opc(4) 11111 000000 Rn(5) 00000`. `opc = 0000/0001/0010` is
+`br`/`blr`/`ret`; other `opc` values (`eret`, `drps`, the pointer-
+authentication forms) are excluded by construction. `br`/`blr` land through
+`Rn` as an ordinary indirect control transfer — this ISA does not model an
+import slot or a return-address predictor. Arm DDI 0602 ID032025,
+"Unconditional branch (register)". -/
+structure BranchReg where
+  op : BranchRegOp
+  rn : BitVec 5
+  deriving DecidableEq, Repr
+
+def BranchReg.encode (i : BranchReg) : BitVec 32 :=
+  (0b1101011#7) ++ i.op.code ++ (0b11111#5) ++ (0b000000#6) ++ i.rn ++ (0b00000#5)
+
+def BranchReg.decode (w : BitVec 32) : Option BranchReg :=
+  match BranchRegOp.ofCode (w.extractLsb' 21 4) with
+  | none => none
+  | some op =>
+    let cand : BranchReg := ⟨op, w.extractLsb' 5 5⟩
+    if cand.encode = w then some cand else none
+
+theorem BranchReg.decode_encode (i : BranchReg) : BranchReg.decode i.encode = some i := by
+  have hop : (i.encode).extractLsb' 21 4 = i.op.code := by unfold BranchReg.encode; bv_decide
+  have h5 : (i.encode).extractLsb' 5 5 = i.rn := by unfold BranchReg.encode; bv_decide
+  have hcode : BranchRegOp.ofCode i.op.code = some i.op := by cases i.op <;> decide
+  unfold BranchReg.decode
+  rw [hop, hcode]
+  simp [h5]
+
+
+theorem BranchReg.marker25_4 (i : BranchReg) : (i.encode).extractLsb' 25 4 = 0b1011#4 := by
+  unfold BranchReg.encode; bv_decide
+
+theorem BranchReg.marker16_5 (i : BranchReg) : (i.encode).extractLsb' 16 5 = 0b11111#5 := by
+  unfold BranchReg.encode; bv_decide
+
+theorem BranchReg.marker25_5 (i : BranchReg) : (i.encode).extractLsb' 25 5 = 0b01011#5 := by
+  unfold BranchReg.encode; bv_decide
+
+theorem BranchReg.marker25_6 (i : BranchReg) : (i.encode).extractLsb' 25 6 = 0b101011#6 := by
+  unfold BranchReg.encode; bv_decide
+
+theorem BranchReg.marker25_7 (i : BranchReg) : (i.encode).extractLsb' 25 7 = 0b1101011#7 := by
+  unfold BranchReg.encode; bv_decide
+
+theorem BranchReg.marker26_5 (i : BranchReg) : (i.encode).extractLsb' 26 5 = 0b10101#5 := by
+  unfold BranchReg.encode; bv_decide
+
+theorem BranchReg.marker10_11 (i : BranchReg) : (i.encode).extractLsb' 10 11 = 0b11111000000#11 := by
+  unfold BranchReg.encode; bv_decide
+
+/-! ## Family 11: conditional branch (`b.cond`) -/
+
+/-- `01010100 imm19(19) 0 cond(4)`. `cond` is a raw 4-bit field: every one of
+the 16 encodings (including `1110`/`1111`, both "always") is a legal
+`b.cond`, so unlike the enum-restricted families this one has no `ofCode`
+partial function. Arm DDI 0602 ID032025, "Compare & branch, and conditional
+branch (immediate)". -/
+structure CondBranch where
+  imm19 : BitVec 19
+  cond : BitVec 4
+  deriving DecidableEq, Repr
+
+def CondBranch.encode (i : CondBranch) : BitVec 32 :=
+  (0b01010100#8) ++ i.imm19 ++ (0b0#1) ++ i.cond
+
+def CondBranch.decode (w : BitVec 32) : Option CondBranch :=
+  let cand : CondBranch := ⟨w.extractLsb' 5 19, w.extractLsb' 0 4⟩
+  if cand.encode = w then some cand else none
+
+theorem CondBranch.decode_encode (i : CondBranch) : CondBranch.decode i.encode = some i := by
+  have h5 : (i.encode).extractLsb' 5 19 = i.imm19 := by unfold CondBranch.encode; bv_decide
+  have h0 : (i.encode).extractLsb' 0 4 = i.cond := by unfold CondBranch.encode; bv_decide
+  unfold CondBranch.decode
+  simp [h5, h0]
+
+theorem CondBranch.marker24_5 (i : CondBranch) : (i.encode).extractLsb' 24 5 = 0b10100#5 := by
+  unfold CondBranch.encode; bv_decide
+
+theorem CondBranch.marker24_7 (i : CondBranch) : (i.encode).extractLsb' 24 7 = 0b1010100#7 := by
+  unfold CondBranch.encode; bv_decide
+
+theorem CondBranch.marker24_8 (i : CondBranch) : (i.encode).extractLsb' 24 8 = 0b01010100#8 := by
+  unfold CondBranch.encode; bv_decide
+
+theorem CondBranch.marker26_5 (i : CondBranch) : (i.encode).extractLsb' 26 5 = 0b10101#5 := by
+  unfold CondBranch.encode; bv_decide
+
+theorem CondBranch.marker25_7 (i : CondBranch) : (i.encode).extractLsb' 25 7 = 0b0101010#7 := by
+  unfold CondBranch.encode; bv_decide
+
+/-! ## Family 12: compare-and-branch-if-nonzero (`cbnz`) -/
+
+/-- `sf 0110101 imm19(19) Rt(5)`: `Grass.ISA.AArch64.Control.CompareZero`
+with its `op` bit (the one this repository does not own, since `Control.lean`
+is out of scope for this pass) fixed to `1` instead of `0`. A dedicated
+struct rather than an edit to `CompareZero`, per the file ownership for this
+pass. Arm DDI 0602 ID032025, "Compare and branch (immediate)". -/
+structure Cbnz where
+  sf : BitVec 1
+  imm19 : BitVec 19
+  rt : BitVec 5
+  deriving DecidableEq, Repr
+
+def Cbnz.encode (i : Cbnz) : BitVec 32 := i.sf ++ (0b0110101#7) ++ i.imm19 ++ i.rt
+
+def Cbnz.decode (w : BitVec 32) : Option Cbnz :=
+  let cand : Cbnz := ⟨w.extractLsb' 31 1, w.extractLsb' 5 19, w.extractLsb' 0 5⟩
+  if cand.encode = w then some cand else none
+
+theorem Cbnz.decode_encode (i : Cbnz) : Cbnz.decode i.encode = some i := by
+  have h31 : (i.encode).extractLsb' 31 1 = i.sf := by unfold Cbnz.encode; bv_decide
+  have h5 : (i.encode).extractLsb' 5 19 = i.imm19 := by unfold Cbnz.encode; bv_decide
+  have h0 : (i.encode).extractLsb' 0 5 = i.rt := by unfold Cbnz.encode; bv_decide
+  unfold Cbnz.decode
+  simp [h31, h5, h0]
+
+theorem Cbnz.marker24_5 (i : Cbnz) : (i.encode).extractLsb' 24 5 = 0b10101#5 := by
+  unfold Cbnz.encode; bv_decide
+
+theorem Cbnz.marker24_7 (i : Cbnz) : (i.encode).extractLsb' 24 7 = 0b0110101#7 := by
+  unfold Cbnz.encode; bv_decide
+
+theorem Cbnz.marker26_5 (i : Cbnz) : (i.encode).extractLsb' 26 5 = 0b01101#5 := by
+  unfold Cbnz.encode; bv_decide
+
+theorem Cbnz.marker25_6 (i : Cbnz) : (i.encode).extractLsb' 25 6 = 0b011010#6 := by
+  unfold Cbnz.encode; bv_decide
+
+/-! ## Family 13: PC-relative address (`adr`, `adrp`) -/
+
+/-- `op(1) immlo(2) 10000 immhi(19) Rd(5)`. `op = false` is `adr` (the
+21-bit signed `immhi:immlo` byte offset added to the instruction's own PC);
+`op = true` is `adrp` (the same offset, scaled by `<<< 12` and added to PC
+with its low 12 bits masked off first — the page, not the byte, address).
+Arm DDI 0602 ID032025, "PC-rel. addressing". -/
+structure AdrAdrp where
+  op : BitVec 1
+  immlo : BitVec 2
+  immhi : BitVec 19
+  rd : BitVec 5
+  deriving DecidableEq, Repr
+
+def AdrAdrp.encode (i : AdrAdrp) : BitVec 32 :=
+  i.op ++ i.immlo ++ (0b10000#5) ++ i.immhi ++ i.rd
+
+def AdrAdrp.decode (w : BitVec 32) : Option AdrAdrp :=
+  let cand : AdrAdrp :=
+    ⟨w.extractLsb' 31 1, w.extractLsb' 29 2, w.extractLsb' 5 19, w.extractLsb' 0 5⟩
+  if cand.encode = w then some cand else none
+
+theorem AdrAdrp.decode_encode (i : AdrAdrp) : AdrAdrp.decode i.encode = some i := by
+  have h31 : (i.encode).extractLsb' 31 1 = i.op := by unfold AdrAdrp.encode; bv_decide
+  have h29 : (i.encode).extractLsb' 29 2 = i.immlo := by unfold AdrAdrp.encode; bv_decide
+  have h5 : (i.encode).extractLsb' 5 19 = i.immhi := by unfold AdrAdrp.encode; bv_decide
+  have h0 : (i.encode).extractLsb' 0 5 = i.rd := by unfold AdrAdrp.encode; bv_decide
+  unfold AdrAdrp.decode
+  simp [h31, h29, h5, h0]
+
+theorem AdrAdrp.marker24_5 (i : AdrAdrp) : (i.encode).extractLsb' 24 5 = 0b10000#5 := by
+  unfold AdrAdrp.encode; bv_decide
+
+theorem AdrAdrp.marker26_3 (i : AdrAdrp) : (i.encode).extractLsb' 26 3 = 0b100#3 := by
+  unfold AdrAdrp.encode; bv_decide
+
+theorem AdrAdrp.marker25_4 (i : AdrAdrp) : (i.encode).extractLsb' 25 4 = 0b1000#4 := by
+  unfold AdrAdrp.encode; bv_decide
+
+/-! ## Family 14: logical shifted-register (`and`/`orr`/`eor`/`ands`) -/
+
+inductive LogicalShiftOp where
+  | and | orr | eor | ands
+  deriving DecidableEq, Repr
+
+def LogicalShiftOp.code : LogicalShiftOp → BitVec 2
+  | .and => 0b00 | .orr => 0b01 | .eor => 0b10 | .ands => 0b11
+
+def LogicalShiftOp.ofCode (c : BitVec 2) : Option LogicalShiftOp :=
+  if c = 0b00 then some .and
+  else if c = 0b01 then some .orr
+  else if c = 0b10 then some .eor
+  else if c = 0b11 then some .ands
+  else none
+
+/-- `sf opc(2) 01010 shift(2) N Rm(5) imm6(6) Rn(5) Rd(5)`, restricted to
+`N = 0` (`bic`/`orn`/`eon`/`bics`, the negated forms, are excluded by
+construction). `opc = 00/01/10/11` is `and`/`orr`/`eor`/`ands`;
+`orr xd, xzr, xm` is `mov xd, xm` and `ands` with `rd = xzr` is `tst` —
+both already fall out of the state layer's zero-register/discard-on-write
+convention (`State.readGpr`/`State.writeGpr`), so no separate alias
+constructor is needed. Arm DDI 0602 ID032025, "Logical (shifted register)". -/
+structure LogicalShiftedReg where
+  sf : BitVec 1
+  opc : LogicalShiftOp
+  shift : ShiftType
+  rm : BitVec 5
+  imm6 : BitVec 6
+  rn : BitVec 5
+  rd : BitVec 5
+  deriving DecidableEq, Repr
+
+def LogicalShiftedReg.encode (i : LogicalShiftedReg) : BitVec 32 :=
+  i.sf ++ i.opc.code ++ (0b01010#5) ++ i.shift.code ++ (0b0#1) ++ i.rm ++ i.imm6 ++ i.rn ++ i.rd
+
+def LogicalShiftedReg.decode (w : BitVec 32) : Option LogicalShiftedReg :=
+  match LogicalShiftOp.ofCode (w.extractLsb' 29 2) with
+  | none => none
+  | some opc =>
+    match ShiftType.ofCode (w.extractLsb' 22 2) with
+    | none => none
+    | some shift =>
+      let cand : LogicalShiftedReg :=
+        ⟨w.extractLsb' 31 1, opc, shift, w.extractLsb' 16 5, w.extractLsb' 10 6,
+          w.extractLsb' 5 5, w.extractLsb' 0 5⟩
+      if cand.encode = w then some cand else none
+
+theorem LogicalShiftedReg.decode_encode (i : LogicalShiftedReg) :
+    LogicalShiftedReg.decode i.encode = some i := by
+  have hopc : (i.encode).extractLsb' 29 2 = i.opc.code := by
+    unfold LogicalShiftedReg.encode; bv_decide
+  have hshift : (i.encode).extractLsb' 22 2 = i.shift.code := by
+    unfold LogicalShiftedReg.encode; bv_decide
+  have h31 : (i.encode).extractLsb' 31 1 = i.sf := by unfold LogicalShiftedReg.encode; bv_decide
+  have h16 : (i.encode).extractLsb' 16 5 = i.rm := by unfold LogicalShiftedReg.encode; bv_decide
+  have h10 : (i.encode).extractLsb' 10 6 = i.imm6 := by unfold LogicalShiftedReg.encode; bv_decide
+  have h5 : (i.encode).extractLsb' 5 5 = i.rn := by unfold LogicalShiftedReg.encode; bv_decide
+  have h0 : (i.encode).extractLsb' 0 5 = i.rd := by unfold LogicalShiftedReg.encode; bv_decide
+  have hcodeOpc : LogicalShiftOp.ofCode i.opc.code = some i.opc := by cases i.opc <;> decide
+  have hcodeShift : ShiftType.ofCode i.shift.code = some i.shift := by cases i.shift <;> decide
+  unfold LogicalShiftedReg.decode
+  rw [hopc, hcodeOpc, hshift, hcodeShift]
+  simp [h31, h16, h10, h5, h0]
+
+theorem LogicalShiftedReg.marker24_5 (i : LogicalShiftedReg) :
+    (i.encode).extractLsb' 24 5 = 0b01010#5 := by unfold LogicalShiftedReg.encode; bv_decide
+
+theorem LogicalShiftedReg.marker26_3 (i : LogicalShiftedReg) :
+    (i.encode).extractLsb' 26 3 = 0b010#3 := by unfold LogicalShiftedReg.encode; bv_decide
+
+theorem LogicalShiftedReg.marker25_4 (i : LogicalShiftedReg) :
+    (i.encode).extractLsb' 25 4 = 0b0101#4 := by unfold LogicalShiftedReg.encode; bv_decide
+
+/-! ## Family 15: `nop` -/
+
+/-- `hint #0`, the fixed word `0xD503201F`. No fields: every other `hint`
+immediate, and every other system instruction, is out of scope. Arm DDI
+0602 ID032025, "NOP". -/
+structure Nop where
+  deriving DecidableEq, Repr
+
+def Nop.encode (_ : Nop) : BitVec 32 := 0xD503201F#32
+
+def Nop.decode (w : BitVec 32) : Option Nop := if w = 0xD503201F#32 then some ⟨⟩ else none
+
+theorem Nop.decode_encode (i : Nop) : Nop.decode i.encode = some i := by
+  cases i; unfold Nop.decode Nop.encode; decide
+
+theorem Nop.marker24_5 (i : Nop) : (i.encode).extractLsb' 24 5 = 0b10101#5 := by
+  cases i; unfold Nop.encode; decide
+
+theorem Nop.marker26_5 (i : Nop) : (i.encode).extractLsb' 26 5 = 0b10101#5 := by
+  cases i; unfold Nop.encode; decide
+
+theorem Nop.marker24_7 (i : Nop) : (i.encode).extractLsb' 24 7 = 0b1010101#7 := by
+  cases i; unfold Nop.encode; decide
+
+theorem Nop.marker10_11 (i : Nop) : (i.encode).extractLsb' 10 11 = 0b00011001000#11 := by
+  cases i; unfold Nop.encode; decide
+
+
 /-! ## The closed union -/
 
 /-- Resolved A64 instructions. Every operand is concrete (a register field,
@@ -469,6 +796,13 @@ inductive Instr where
   | cbz (i : CompareZero)
   | svc (imm : BitVec 16)
   | hlt (i : Hlt)
+  | branchImm (i : BranchImm)
+  | branchReg (i : BranchReg)
+  | condBranch (i : CondBranch)
+  | cbnz (i : Cbnz)
+  | adrAdrp (i : AdrAdrp)
+  | logicalShiftedReg (i : LogicalShiftedReg)
+  | nop (i : Nop)
   deriving DecidableEq, Repr
 
 def Instr.toWord : Instr → BitVec 32
@@ -480,6 +814,13 @@ def Instr.toWord : Instr → BitVec 32
   | .cbz i => i.encode
   | .svc imm => svcEncode imm
   | .hlt i => i.encode
+  | .branchImm i => i.encode
+  | .branchReg i => i.encode
+  | .condBranch i => i.encode
+  | .cbnz i => i.encode
+  | .adrAdrp i => i.encode
+  | .logicalShiftedReg i => i.encode
+  | .nop i => i.encode
 
 /-- Canonical encoding of one instruction: its word, little-endian. -/
 def encode (instr : Instr) : List UInt8 := wordToBytes instr.toWord
@@ -511,6 +852,27 @@ def decodeSvc (w : BitVec 32) : Option (Instr × Nat) :=
 def decodeHlt (w : BitVec 32) : Option (Instr × Nat) :=
   match Hlt.decode w with | some i => some (.hlt i, 4) | none => none
 
+def decodeBranchImm (w : BitVec 32) : Option (Instr × Nat) :=
+  match BranchImm.decode w with | some i => some (.branchImm i, 4) | none => none
+
+def decodeBranchReg (w : BitVec 32) : Option (Instr × Nat) :=
+  match BranchReg.decode w with | some i => some (.branchReg i, 4) | none => none
+
+def decodeCondBranch (w : BitVec 32) : Option (Instr × Nat) :=
+  match CondBranch.decode w with | some i => some (.condBranch i, 4) | none => none
+
+def decodeCbnz (w : BitVec 32) : Option (Instr × Nat) :=
+  match Cbnz.decode w with | some i => some (.cbnz i, 4) | none => none
+
+def decodeAdrAdrp (w : BitVec 32) : Option (Instr × Nat) :=
+  match AdrAdrp.decode w with | some i => some (.adrAdrp i, 4) | none => none
+
+def decodeLogicalShiftedReg (w : BitVec 32) : Option (Instr × Nat) :=
+  match LogicalShiftedReg.decode w with | some i => some (.logicalShiftedReg i, 4) | none => none
+
+def decodeNop (w : BitVec 32) : Option (Instr × Nat) :=
+  match Nop.decode w with | some i => some (.nop i, 4) | none => none
+
 /-- Decode one instruction from the head of a byte list: the families are
 tried in a fixed order, each fully self-verifying (it accepts a word only if
 re-encoding its own extracted fields reproduces that word exactly), so an
@@ -521,7 +883,9 @@ def decode (bytes : List UInt8) : Option (Instr × Nat) :=
   | b0 :: b1 :: b2 :: b3 :: _ =>
     let w := bytesToWord b0 b1 b2 b3
     decodeMoveWide w <|> decodeAddSubImm w <|> decodeLogicalImm w <|> decodeLoadStoreUImm w <|>
-      decodeAddSubShiftedReg w <|> decodeCbz w <|> decodeSvc w <|> decodeHlt w
+      decodeAddSubShiftedReg w <|> decodeCbz w <|> decodeSvc w <|> decodeHlt w <|>
+      decodeBranchImm w <|> decodeBranchReg w <|> decodeCondBranch w <|> decodeCbnz w <|>
+      decodeAdrAdrp w <|> decodeLogicalShiftedReg w <|> decodeNop w
   | _ => none
 
 /-- If `encodeA`'s own encoding always shows `tag` at `(pos, len)` (every
@@ -535,6 +899,272 @@ theorem encode_ne_of_marker_ne {A : Type} (encodeA : A → BitVec 32) {pos len :
     (hne : tag ≠ w.extractLsb' pos len) : encodeA a ≠ w := by
   intro heq
   exact hne (by rw [← marker a, heq])
+
+/-! ## Generic dispatch-window helpers for families 9-15
+
+Families 1-8 above each prove `decodeX_none_Y` at one or two specific
+`(pos, len)` windows. Families 9-15 need a few more windows against those
+eight (still only the literal-mismatch technique `encode_ne_of_marker_ne`
+uses, never a `bv_decide` inequality), so instead of one hardcoded lemma per
+new window this section adds a single `decode_none_at` / `decodeX_none_at`
+pair per family 1-8, generalized over `(pos, len, tag)`: the identical proof
+shape as e.g. `MoveWide_decode_none_A`, just not committed to one window. -/
+
+theorem MoveWide.decode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : MoveWide, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : MoveWide.decode w = none := by
+  unfold MoveWide.decode
+  cases MoveWideOp.ofCode (w.extractLsb' 29 2) with
+  | none => rfl
+  | some op => exact if_neg (encode_ne_of_marker_ne MoveWide.encode marker _ w hne)
+
+theorem decodeMoveWide_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : MoveWide, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeMoveWide w = none := by
+  unfold decodeMoveWide; rw [MoveWide.decode_none_at marker hne]
+
+theorem AddSubImm.decode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : AddSubImm, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : AddSubImm.decode w = none := by
+  unfold AddSubImm.decode
+  exact if_neg (encode_ne_of_marker_ne AddSubImm.encode marker _ w hne)
+
+theorem decodeAddSubImm_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : AddSubImm, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeAddSubImm w = none := by
+  unfold decodeAddSubImm; rw [AddSubImm.decode_none_at marker hne]
+
+theorem LogicalImm.decode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : LogicalImm, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : LogicalImm.decode w = none := by
+  unfold LogicalImm.decode
+  cases LogicalOp.ofCode (w.extractLsb' 29 2) with
+  | none => rfl
+  | some opc => exact if_neg (encode_ne_of_marker_ne LogicalImm.encode marker _ w hne)
+
+theorem decodeLogicalImm_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : LogicalImm, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeLogicalImm w = none := by
+  unfold decodeLogicalImm; rw [LogicalImm.decode_none_at marker hne]
+
+theorem LoadStoreUImm.decode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : LoadStoreUImm, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : LoadStoreUImm.decode w = none := by
+  unfold LoadStoreUImm.decode
+  cases LsSize.ofCode (w.extractLsb' 30 2) with
+  | none => rfl
+  | some size => exact if_neg (encode_ne_of_marker_ne LoadStoreUImm.encode marker _ w hne)
+
+theorem decodeLoadStoreUImm_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : LoadStoreUImm, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeLoadStoreUImm w = none := by
+  unfold decodeLoadStoreUImm; rw [LoadStoreUImm.decode_none_at marker hne]
+
+theorem AddSubShiftedReg.decode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : AddSubShiftedReg, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : AddSubShiftedReg.decode w = none := by
+  unfold AddSubShiftedReg.decode
+  cases ShiftType.ofCode (w.extractLsb' 22 2) with
+  | none => rfl
+  | some shift => exact if_neg (encode_ne_of_marker_ne AddSubShiftedReg.encode marker _ w hne)
+
+theorem decodeAddSubShiftedReg_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : AddSubShiftedReg, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeAddSubShiftedReg w = none := by
+  unfold decodeAddSubShiftedReg; rw [AddSubShiftedReg.decode_none_at marker hne]
+
+theorem CompareZero.decode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : CompareZero, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : CompareZero.decode w = none := by
+  unfold CompareZero.decode
+  exact if_neg (encode_ne_of_marker_ne CompareZero.encode marker _ w hne)
+
+theorem decodeCbz_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : CompareZero, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeCbz w = none := by
+  unfold decodeCbz; rw [CompareZero.decode_none_at marker hne]
+
+theorem svcDecode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ imm : BitVec 16, (svcEncode imm).extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : svcDecode w = none := by
+  unfold svcDecode Grass.ISA.AArch64.SupervisorCall.decode
+  exact if_neg (encode_ne_of_marker_ne Grass.ISA.AArch64.SupervisorCall.encode marker _ w hne)
+
+theorem decodeSvc_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ imm : BitVec 16, (svcEncode imm).extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeSvc w = none := by
+  unfold decodeSvc; rw [svcDecode_none_at marker hne]
+
+theorem Hlt.decode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : Hlt, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : Hlt.decode w = none := by
+  unfold Hlt.decode
+  exact if_neg (encode_ne_of_marker_ne Hlt.encode marker _ w hne)
+
+theorem decodeHlt_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : Hlt, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeHlt w = none := by
+  unfold decodeHlt; rw [Hlt.decode_none_at marker hne]
+
+/-! ## Extra fixed-bit windows on families 1-8, for dispatching families 9-15
+
+Every theorem below is the same `unfold X.encode; bv_decide` structural
+identity as `MoveWide.marker23` etc. above, just at a window one of families
+9-15 needs. `26 3`/`26 5` distinguish against `BranchImm` (whose only clean
+window is bits `[30:26]`, split at width 3 or 5 depending on whether the
+compared family's own fixed bits reach bit 26); `25 4`/`16 5`/`25 5`/`25 6`/
+`25 7` distinguish against `BranchReg` (clean only at bits `[31:25]`, `[20:16]`,
+or subwindows of the former, since its `opc` occupies `[24:21]`). -/
+
+theorem MoveWide.marker26_3 (i : MoveWide) : (i.encode).extractLsb' 26 3 = 0b100#3 := by
+  unfold MoveWide.encode; bv_decide
+
+theorem MoveWide.marker25_4 (i : MoveWide) : (i.encode).extractLsb' 25 4 = 0b1001#4 := by
+  unfold MoveWide.encode; bv_decide
+
+theorem AddSubImm.marker26_3 (i : AddSubImm) : (i.encode).extractLsb' 26 3 = 0b100#3 := by
+  unfold AddSubImm.encode; bv_decide
+
+theorem AddSubImm.marker25_4 (i : AddSubImm) : (i.encode).extractLsb' 25 4 = 0b1000#4 := by
+  unfold AddSubImm.encode; bv_decide
+
+theorem LogicalImm.marker26_3 (i : LogicalImm) : (i.encode).extractLsb' 26 3 = 0b100#3 := by
+  unfold LogicalImm.encode; bv_decide
+
+theorem LogicalImm.marker16_5 (i : LogicalImm) : (i.encode).extractLsb' 16 5 = 0b00000#5 := by
+  unfold LogicalImm.encode; bv_decide
+
+theorem LoadStoreUImm.marker26_3 (i : LoadStoreUImm) : (i.encode).extractLsb' 26 3 = 0b110#3 := by
+  unfold LoadStoreUImm.encode; bv_decide
+
+theorem LoadStoreUImm.marker25_5 (i : LoadStoreUImm) : (i.encode).extractLsb' 25 5 = 0b11100#5 := by
+  unfold LoadStoreUImm.encode; bv_decide
+
+theorem AddSubShiftedReg.marker26_3 (i : AddSubShiftedReg) :
+    (i.encode).extractLsb' 26 3 = 0b010#3 := by unfold AddSubShiftedReg.encode; bv_decide
+
+theorem AddSubShiftedReg.marker25_4 (i : AddSubShiftedReg) :
+    (i.encode).extractLsb' 25 4 = 0b0101#4 := by unfold AddSubShiftedReg.encode; bv_decide
+
+theorem CompareZero.marker26_5 (i : CompareZero) : i.encode.extractLsb' 26 5 = 0b01101#5 := by
+  unfold CompareZero.encode; bv_decide
+
+theorem CompareZero.marker25_6 (i : CompareZero) : i.encode.extractLsb' 25 6 = 0b011010#6 := by
+  unfold CompareZero.encode; bv_decide
+
+theorem svcMarker26_5 (imm : BitVec 16) : (svcEncode imm).extractLsb' 26 5 = 0b10101#5 := by
+  unfold svcEncode Grass.ISA.AArch64.SupervisorCall.encode; bv_decide
+
+theorem svcMarker25_7 (imm : BitVec 16) : (svcEncode imm).extractLsb' 25 7 = 0b1101010#7 := by
+  unfold svcEncode Grass.ISA.AArch64.SupervisorCall.encode; bv_decide
+
+theorem svcMarker24_8 (imm : BitVec 16) : (svcEncode imm).extractLsb' 24 8 = 0b11010100#8 := by
+  unfold svcEncode Grass.ISA.AArch64.SupervisorCall.encode; bv_decide
+
+theorem Hlt.marker26_5 (i : Hlt) : (i.encode).extractLsb' 26 5 = 0b10101#5 := by
+  unfold Hlt.encode; bv_decide
+
+theorem Hlt.marker25_7 (i : Hlt) : (i.encode).extractLsb' 25 7 = 0b1101010#7 := by
+  unfold Hlt.encode; bv_decide
+
+theorem Hlt.marker24_8 (i : Hlt) : (i.encode).extractLsb' 24 8 = 0b11010100#8 := by
+  unfold Hlt.encode; bv_decide
+
+theorem BranchImm.decode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : BranchImm, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : BranchImm.decode w = none := by
+  unfold BranchImm.decode
+  exact if_neg (encode_ne_of_marker_ne BranchImm.encode marker _ w hne)
+
+theorem decodeBranchImm_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : BranchImm, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeBranchImm w = none := by
+  unfold decodeBranchImm; rw [BranchImm.decode_none_at marker hne]
+
+theorem decodeBranchImm_self (i : BranchImm) : decodeBranchImm i.encode = some (.branchImm i, 4) := by
+  unfold decodeBranchImm; rw [BranchImm.decode_encode]
+
+theorem BranchReg.decode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : BranchReg, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : BranchReg.decode w = none := by
+  unfold BranchReg.decode
+  cases BranchRegOp.ofCode (w.extractLsb' 21 4) with
+  | none => rfl
+  | some op => exact if_neg (encode_ne_of_marker_ne BranchReg.encode marker _ w hne)
+
+theorem decodeBranchReg_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : BranchReg, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeBranchReg w = none := by
+  unfold decodeBranchReg; rw [BranchReg.decode_none_at marker hne]
+
+theorem decodeBranchReg_self (i : BranchReg) : decodeBranchReg i.encode = some (.branchReg i, 4) := by
+  unfold decodeBranchReg; rw [BranchReg.decode_encode]
+
+theorem CondBranch.decode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : CondBranch, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : CondBranch.decode w = none := by
+  unfold CondBranch.decode
+  exact if_neg (encode_ne_of_marker_ne CondBranch.encode marker _ w hne)
+
+theorem decodeCondBranch_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : CondBranch, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeCondBranch w = none := by
+  unfold decodeCondBranch; rw [CondBranch.decode_none_at marker hne]
+
+theorem decodeCondBranch_self (i : CondBranch) :
+    decodeCondBranch i.encode = some (.condBranch i, 4) := by
+  unfold decodeCondBranch; rw [CondBranch.decode_encode]
+
+theorem Cbnz.decode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : Cbnz, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : Cbnz.decode w = none := by
+  unfold Cbnz.decode
+  exact if_neg (encode_ne_of_marker_ne Cbnz.encode marker _ w hne)
+
+theorem decodeCbnz_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : Cbnz, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeCbnz w = none := by
+  unfold decodeCbnz; rw [Cbnz.decode_none_at marker hne]
+
+theorem decodeCbnz_self (i : Cbnz) : decodeCbnz i.encode = some (.cbnz i, 4) := by
+  unfold decodeCbnz; rw [Cbnz.decode_encode]
+
+theorem AdrAdrp.decode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : AdrAdrp, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : AdrAdrp.decode w = none := by
+  unfold AdrAdrp.decode
+  exact if_neg (encode_ne_of_marker_ne AdrAdrp.encode marker _ w hne)
+
+theorem decodeAdrAdrp_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : AdrAdrp, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeAdrAdrp w = none := by
+  unfold decodeAdrAdrp; rw [AdrAdrp.decode_none_at marker hne]
+
+theorem decodeAdrAdrp_self (i : AdrAdrp) : decodeAdrAdrp i.encode = some (.adrAdrp i, 4) := by
+  unfold decodeAdrAdrp; rw [AdrAdrp.decode_encode]
+
+theorem LogicalShiftedReg.decode_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : LogicalShiftedReg, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : LogicalShiftedReg.decode w = none := by
+  unfold LogicalShiftedReg.decode
+  cases LogicalShiftOp.ofCode (w.extractLsb' 29 2) with
+  | none => rfl
+  | some opc =>
+    cases ShiftType.ofCode (w.extractLsb' 22 2) with
+    | none => rfl
+    | some shift => exact if_neg (encode_ne_of_marker_ne LogicalShiftedReg.encode marker _ w hne)
+
+theorem decodeLogicalShiftedReg_none_at {w : BitVec 32} {pos len : Nat} {tag : BitVec len}
+    (marker : ∀ i : LogicalShiftedReg, i.encode.extractLsb' pos len = tag)
+    (hne : tag ≠ w.extractLsb' pos len) : decodeLogicalShiftedReg w = none := by
+  unfold decodeLogicalShiftedReg; rw [LogicalShiftedReg.decode_none_at marker hne]
+
+theorem decodeLogicalShiftedReg_self (i : LogicalShiftedReg) :
+    decodeLogicalShiftedReg i.encode = some (.logicalShiftedReg i, 4) := by
+  unfold decodeLogicalShiftedReg; rw [LogicalShiftedReg.decode_encode]
+
+theorem decodeNop_self (i : Nop) : decodeNop i.encode = some (.nop i, 4) := by
+  unfold decodeNop; rw [Nop.decode_encode]
 
 theorem MoveWide_decode_none_A {w : BitVec 32} (hne : (0b100101#6 : BitVec 6) ≠ w.extractLsb' 23 6) :
     MoveWide.decode w = none := by
@@ -754,5 +1384,116 @@ theorem decode_encode (instr : Instr) :
     rw [decodeCbz_none_C (by rw [Hlt.marker24_7]; decide)]
     rw [decodeSvc_none_D (by rw [Hlt.marker21]; decide)]
     rw [decodeHlt_self]; rfl
+  | branchImm i =>
+    simp only [Instr.toWord, decode, wordToBytes, List.cons_append, List.nil_append]
+    rw [bytesToWord_wordToBytes']
+    rw [decodeMoveWide_none_at MoveWide.marker26_3 (by rw [BranchImm.marker26_3]; decide)]
+    rw [decodeAddSubImm_none_at AddSubImm.marker26_3 (by rw [BranchImm.marker26_3]; decide)]
+    rw [decodeLogicalImm_none_at LogicalImm.marker26_3 (by rw [BranchImm.marker26_3]; decide)]
+    rw [decodeLoadStoreUImm_none_at LoadStoreUImm.marker26_3 (by rw [BranchImm.marker26_3]; decide)]
+    rw [decodeAddSubShiftedReg_none_at AddSubShiftedReg.marker26_3
+      (by rw [BranchImm.marker26_3]; decide)]
+    rw [decodeCbz_none_at CompareZero.marker26_5 (by rw [BranchImm.marker26_5]; decide)]
+    rw [decodeSvc_none_at svcMarker26_5 (by rw [BranchImm.marker26_5]; decide)]
+    rw [decodeHlt_none_at Hlt.marker26_5 (by rw [BranchImm.marker26_5]; decide)]
+    rw [decodeBranchImm_self]; rfl
+  | branchReg i =>
+    simp only [Instr.toWord, decode, wordToBytes, List.cons_append, List.nil_append]
+    rw [bytesToWord_wordToBytes']
+    rw [decodeMoveWide_none_at MoveWide.marker25_4 (by rw [BranchReg.marker25_4]; decide)]
+    rw [decodeAddSubImm_none_at AddSubImm.marker25_4 (by rw [BranchReg.marker25_4]; decide)]
+    rw [decodeLogicalImm_none_at LogicalImm.marker16_5 (by rw [BranchReg.marker16_5]; decide)]
+    rw [decodeLoadStoreUImm_none_at LoadStoreUImm.marker25_5 (by rw [BranchReg.marker25_5]; decide)]
+    rw [decodeAddSubShiftedReg_none_at AddSubShiftedReg.marker25_4
+      (by rw [BranchReg.marker25_4]; decide)]
+    rw [decodeCbz_none_at CompareZero.marker25_6 (by rw [BranchReg.marker25_6]; decide)]
+    rw [decodeSvc_none_at svcMarker25_7 (by rw [BranchReg.marker25_7]; decide)]
+    rw [decodeHlt_none_at Hlt.marker25_7 (by rw [BranchReg.marker25_7]; decide)]
+    rw [decodeBranchImm_none_at BranchImm.marker26_5 (by rw [BranchReg.marker26_5]; decide)]
+    rw [decodeBranchReg_self]; rfl
+  | condBranch i =>
+    simp only [Instr.toWord, decode, wordToBytes, List.cons_append, List.nil_append]
+    rw [bytesToWord_wordToBytes']
+    rw [decodeMoveWide_none_at MoveWide.marker24 (by rw [CondBranch.marker24_5]; decide)]
+    rw [decodeAddSubImm_none_at AddSubImm.marker24 (by rw [CondBranch.marker24_5]; decide)]
+    rw [decodeLogicalImm_none_at LogicalImm.marker24 (by rw [CondBranch.marker24_5]; decide)]
+    rw [decodeLoadStoreUImm_none_at LoadStoreUImm.marker24 (by rw [CondBranch.marker24_5]; decide)]
+    rw [decodeAddSubShiftedReg_none_at AddSubShiftedReg.marker24
+      (by rw [CondBranch.marker24_5]; decide)]
+    rw [decodeCbz_none_at CompareZero.marker24_7 (by rw [CondBranch.marker24_7]; decide)]
+    rw [decodeSvc_none_at svcMarker24_8 (by rw [CondBranch.marker24_8]; decide)]
+    rw [decodeHlt_none_at Hlt.marker24_8 (by rw [CondBranch.marker24_8]; decide)]
+    rw [decodeBranchImm_none_at BranchImm.marker26_5 (by rw [CondBranch.marker26_5]; decide)]
+    rw [decodeBranchReg_none_at BranchReg.marker25_7 (by rw [CondBranch.marker25_7]; decide)]
+    rw [decodeCondBranch_self]; rfl
+  | cbnz i =>
+    simp only [Instr.toWord, decode, wordToBytes, List.cons_append, List.nil_append]
+    rw [bytesToWord_wordToBytes']
+    rw [decodeMoveWide_none_at MoveWide.marker24 (by rw [Cbnz.marker24_5]; decide)]
+    rw [decodeAddSubImm_none_at AddSubImm.marker24 (by rw [Cbnz.marker24_5]; decide)]
+    rw [decodeLogicalImm_none_at LogicalImm.marker24 (by rw [Cbnz.marker24_5]; decide)]
+    rw [decodeLoadStoreUImm_none_at LoadStoreUImm.marker24 (by rw [Cbnz.marker24_5]; decide)]
+    rw [decodeAddSubShiftedReg_none_at AddSubShiftedReg.marker24 (by rw [Cbnz.marker24_5]; decide)]
+    rw [decodeCbz_none_at CompareZero.marker24 (by rw [Cbnz.marker24_5]; decide)]
+    rw [decodeSvc_none_at svcMarker24 (by rw [Cbnz.marker24_5]; decide)]
+    rw [decodeHlt_none_at Hlt.marker24 (by rw [Cbnz.marker24_5]; decide)]
+    rw [decodeBranchImm_none_at BranchImm.marker26_5 (by rw [Cbnz.marker26_5]; decide)]
+    rw [decodeBranchReg_none_at BranchReg.marker25_6 (by rw [Cbnz.marker25_6]; decide)]
+    rw [decodeCondBranch_none_at CondBranch.marker24_5 (by rw [Cbnz.marker24_5]; decide)]
+    rw [decodeCbnz_self]; rfl
+  | adrAdrp i =>
+    simp only [Instr.toWord, decode, wordToBytes, List.cons_append, List.nil_append]
+    rw [bytesToWord_wordToBytes']
+    rw [decodeMoveWide_none_at MoveWide.marker24 (by rw [AdrAdrp.marker24_5]; decide)]
+    rw [decodeAddSubImm_none_at AddSubImm.marker24 (by rw [AdrAdrp.marker24_5]; decide)]
+    rw [decodeLogicalImm_none_at LogicalImm.marker24 (by rw [AdrAdrp.marker24_5]; decide)]
+    rw [decodeLoadStoreUImm_none_at LoadStoreUImm.marker24 (by rw [AdrAdrp.marker24_5]; decide)]
+    rw [decodeAddSubShiftedReg_none_at AddSubShiftedReg.marker24
+      (by rw [AdrAdrp.marker24_5]; decide)]
+    rw [decodeCbz_none_at CompareZero.marker24 (by rw [AdrAdrp.marker24_5]; decide)]
+    rw [decodeSvc_none_at svcMarker24 (by rw [AdrAdrp.marker24_5]; decide)]
+    rw [decodeHlt_none_at Hlt.marker24 (by rw [AdrAdrp.marker24_5]; decide)]
+    rw [decodeBranchImm_none_at BranchImm.marker26_3 (by rw [AdrAdrp.marker26_3]; decide)]
+    rw [decodeBranchReg_none_at BranchReg.marker25_4 (by rw [AdrAdrp.marker25_4]; decide)]
+    rw [decodeCondBranch_none_at CondBranch.marker24_5 (by rw [AdrAdrp.marker24_5]; decide)]
+    rw [decodeCbnz_none_at Cbnz.marker24_5 (by rw [AdrAdrp.marker24_5]; decide)]
+    rw [decodeAdrAdrp_self]; rfl
+  | logicalShiftedReg i =>
+    simp only [Instr.toWord, decode, wordToBytes, List.cons_append, List.nil_append]
+    rw [bytesToWord_wordToBytes']
+    rw [decodeMoveWide_none_at MoveWide.marker24 (by rw [LogicalShiftedReg.marker24_5]; decide)]
+    rw [decodeAddSubImm_none_at AddSubImm.marker24 (by rw [LogicalShiftedReg.marker24_5]; decide)]
+    rw [decodeLogicalImm_none_at LogicalImm.marker24 (by rw [LogicalShiftedReg.marker24_5]; decide)]
+    rw [decodeLoadStoreUImm_none_at LoadStoreUImm.marker24
+      (by rw [LogicalShiftedReg.marker24_5]; decide)]
+    rw [decodeAddSubShiftedReg_none_at AddSubShiftedReg.marker24
+      (by rw [LogicalShiftedReg.marker24_5]; decide)]
+    rw [decodeCbz_none_at CompareZero.marker24 (by rw [LogicalShiftedReg.marker24_5]; decide)]
+    rw [decodeSvc_none_at svcMarker24 (by rw [LogicalShiftedReg.marker24_5]; decide)]
+    rw [decodeHlt_none_at Hlt.marker24 (by rw [LogicalShiftedReg.marker24_5]; decide)]
+    rw [decodeBranchImm_none_at BranchImm.marker26_3 (by rw [LogicalShiftedReg.marker26_3]; decide)]
+    rw [decodeBranchReg_none_at BranchReg.marker25_4 (by rw [LogicalShiftedReg.marker25_4]; decide)]
+    rw [decodeCondBranch_none_at CondBranch.marker24_5 (by rw [LogicalShiftedReg.marker24_5]; decide)]
+    rw [decodeCbnz_none_at Cbnz.marker24_5 (by rw [LogicalShiftedReg.marker24_5]; decide)]
+    rw [decodeAdrAdrp_none_at AdrAdrp.marker24_5 (by rw [LogicalShiftedReg.marker24_5]; decide)]
+    rw [decodeLogicalShiftedReg_self]; rfl
+  | nop i =>
+    simp only [Instr.toWord, decode, wordToBytes, List.cons_append, List.nil_append]
+    rw [bytesToWord_wordToBytes']
+    rw [decodeMoveWide_none_at MoveWide.marker24 (by rw [Nop.marker24_5]; decide)]
+    rw [decodeAddSubImm_none_at AddSubImm.marker24 (by rw [Nop.marker24_5]; decide)]
+    rw [decodeLogicalImm_none_at LogicalImm.marker24 (by rw [Nop.marker24_5]; decide)]
+    rw [decodeLoadStoreUImm_none_at LoadStoreUImm.marker24 (by rw [Nop.marker24_5]; decide)]
+    rw [decodeAddSubShiftedReg_none_at AddSubShiftedReg.marker24 (by rw [Nop.marker24_5]; decide)]
+    rw [decodeCbz_none_at CompareZero.marker24 (by rw [Nop.marker24_5]; decide)]
+    rw [decodeSvc_none_at svcMarker24 (by rw [Nop.marker24_5]; decide)]
+    rw [decodeHlt_none_at Hlt.marker24 (by rw [Nop.marker24_5]; decide)]
+    rw [decodeBranchImm_none_at BranchImm.marker26_5 (by rw [Nop.marker26_5]; decide)]
+    rw [decodeBranchReg_none_at BranchReg.marker10_11 (by rw [Nop.marker10_11]; decide)]
+    rw [decodeCondBranch_none_at CondBranch.marker24_5 (by rw [Nop.marker24_5]; decide)]
+    rw [decodeCbnz_none_at Cbnz.marker24_7 (by rw [Nop.marker24_7]; decide)]
+    rw [decodeAdrAdrp_none_at AdrAdrp.marker24_5 (by rw [Nop.marker24_5]; decide)]
+    rw [decodeLogicalShiftedReg_none_at LogicalShiftedReg.marker24_5 (by rw [Nop.marker24_5]; decide)]
+    rw [decodeNop_self]; rfl
 
 end Grass.ISA.AArch64.Target
