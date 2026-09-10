@@ -90,11 +90,11 @@ theorem returned_body
     (_produced : prepareCountCall? callBefore call binding ready evaluated selectedLocal
       buffer bytes fifth provider = some entered)
     (prior : CallRuntimeTable)
-    {realization : Realization}
+    {realization : Realization} {environment : ConsoleEnvironment}
     (raw : Nat → RawState) (graph : Nat → Raw.Graph)
     (agent : Nat → ContextId) (action : Nat → Action) (event : Nat → Raw.Event)
     (length : Nat) (root : raw 0 = entered.rawAfter prior)
-    (steps : ∀ n, n < length → Raw.RawStep loaded realization (graph n) (raw n)
+    (steps : ∀ n, n < length → Raw.RawStep loaded realization environment (graph n) (raw n)
       (.providerService entered.handoff.call (agent n) (action n))
       (event n) (raw (n + 1)) (graph (n + 1)))
     {providerState after : ProtocolState}
