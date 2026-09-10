@@ -120,7 +120,9 @@ theorem signed_displacement {frame rootOffset} {source : SourceResolve.Result fr
 
 end StoreInstruction
 
-/-- The actual fetched source store and its continuous initialized data write. -/
+/-- The actual fetched source store and its continuous initialized data write.
+`frameOffset` locates the runtime frame within the actual allocation; source
+coordinates determine only the displacement and width. -/
 structure StoreNormal {frame : SourceFrame.Result} {rootOffset : Nat}
     (source : SourceResolve.Result frame rootOffset)
     (before : State) (afterFetch afterStore : MachineState) where
@@ -131,10 +133,12 @@ structure StoreNormal {frame : SourceFrame.Result} {rootOffset : Nat}
   intent : access.descriptor.intent = .write
   initialization : access.descriptor.initialization = .readsNothing
   producesInitialized : access.descriptor.producesInitialized = true
-  range : access.descriptor.range = instruction.range
+  frameOffset : Nat
+  range : access.descriptor.range =
+    ⟨frameOffset + instruction.displacement, instruction.range.size⟩
   base : MachineAddress
   placed : access.run.resolved.allocation.base = some base
-  rsp : before.gpr .rsp = addressOf base instruction.rspRootOffset
+  rsp : before.gpr .rsp = addressOf base frameOffset
   supplied : access.writeData
     (afterFetch.noteContext access.run.context access.run.contextKind) access.descriptor =
       instruction.payload
@@ -154,9 +158,9 @@ theorem address_exact {frame rootOffset} {source : SourceResolve.Result frame ro
     (receipt : StoreNormal source before afterFetch afterStore) :
     receipt.access.descriptor.address = .numeric (before.gpr .rsp +
       BitVec.signExtend 64 (BitVec.ofNat 32 receipt.instruction.displacement)) :=
-  receipt.access.address_of_rsp receipt.base receipt.instruction.rspRootOffset
+  receipt.access.address_of_rsp receipt.base receipt.frameOffset
     receipt.instruction.displacement receipt.placed receipt.rsp
-    (by rw [receipt.range]; exact receipt.instruction.range_start)
+    (by rw [receipt.range])
     receipt.instruction.signed_displacement
 
 /-- `execution` injects the source-selected witnesses into the single x86 normal
@@ -230,7 +234,9 @@ theorem gpr_frame {frame rootOffset} {source : SourceResolve.Result frame rootOf
 
 end StoreNormal
 
-/-- An actual source-selected DWORD local load with an initialized data read. -/
+/-- An actual source-selected DWORD local load with an initialized data read.
+`frameOffset` is the runtime allocation-local RSP offset, independent of the
+static source root coordinate. -/
 structure LoadNormal {frame : SourceFrame.Result} {rootOffset : Nat}
     (source : SourceResolve.Result frame rootOffset)
     (before : State) (afterFetch afterLoad : MachineState) where
@@ -240,10 +246,12 @@ structure LoadNormal {frame : SourceFrame.Result} {rootOffset : Nat}
   access : MemoryAccess site.fetch afterLoad
   intent : access.descriptor.intent = .read
   initialization : access.descriptor.initialization = .allBytesInitialized
-  range : access.descriptor.range = selection.result.address.range
+  frameOffset : Nat
+  range : access.descriptor.range =
+    ⟨frameOffset + selection.result.address.displacement, selection.result.address.width⟩
   base : MachineAddress
   placed : access.run.resolved.allocation.base = some base
-  rsp : before.gpr .rsp = addressOf base selection.result.address.rootOffset
+  rsp : before.gpr .rsp = addressOf base frameOffset
 
 namespace LoadNormal
 
@@ -283,9 +291,9 @@ theorem address_exact {frame rootOffset} {source : SourceResolve.Result frame ro
     (receipt : LoadNormal source before afterFetch afterLoad) :
     receipt.access.descriptor.address = .numeric (before.gpr .rsp +
       BitVec.signExtend 64 (BitVec.ofNat 32 receipt.selection.result.address.displacement)) := by
-  apply receipt.access.address_of_rsp receipt.base receipt.selection.result.address.rootOffset
+  apply receipt.access.address_of_rsp receipt.base receipt.frameOffset
     receipt.selection.result.address.displacement receipt.placed receipt.rsp
-  · rw [receipt.range]; rfl
+  · rw [receipt.range]
   · unfold BitVec.signExtend
     rw [receipt.selection.result.address.signed_displacement]
     rfl
