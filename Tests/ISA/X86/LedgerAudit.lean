@@ -125,6 +125,7 @@ import Grass.Platform.Win32.WriteFileRuntimeLinked
 import Grass.Platform.Win32.ApiDispatch
 import Grass.Platform.Linux.Syscall
 import Grass.Platform.Linux.X86
+import Grass.Platform.Win32.ProviderContract
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
 import Grass.Artifact.PE.ExceptionBinding
@@ -320,6 +321,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileRuntimeLinked,
    `Grass.Platform.Win32.ApiDispatch,
    `Grass.Platform.Linux.Syscall, `Grass.Platform.Linux.X86,
+   `Grass.Platform.Win32.ProviderContract,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
@@ -464,7 +466,10 @@ acquiring a citation.
 -- Shared access extraction replaces one obsolete instance entry with three aliases.
 -- Thirteen bare-metal nominal, carrier-arithmetic, projection and forwarding
 -- helpers add no hardware fact; their selected profile remains separately owed.
-def notBehaviourBaseline : Nat := 415
+
+-- Three selected provider-response definitions project existing endpoint laws;
+-- they add no native response, wait permission or provider applicability claim.
+def notBehaviourBaseline : Nat := 413
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -657,6 +662,11 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.ApiDispatch.select?,
     `Grass.Platform.Win32.ApiDispatch.Binding.MatchesRequest,
     `Grass.Platform.Win32.ApiDispatch.ofCall?,
+    -- Selected response carriers and exact projections of existing endpoint
+    -- evidence; no response path or permanent-wait authority is supplied.
+    `Grass.Platform.Win32.ProviderContract.ApiResponse,
+    `Grass.Platform.Win32.ProviderContract.WriteFileAllowed,
+    `Grass.Platform.Win32.ProviderContract.Allowed,
     -- Actual receipt projections and computed runtime frontier updates.
     `Grass.Platform.Win32.WriteFile.CallHandoff.runtime,
     `Grass.Platform.Win32.WriteFile.CallHandoff.rawAfter,

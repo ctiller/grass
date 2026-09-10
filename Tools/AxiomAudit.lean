@@ -31,6 +31,7 @@ import Grass.Platform.Win32.RawTerminal
 import Grass.Platform.Win32.RawGetStdHandlePending
 import Grass.Platform.Win32.RawPendingInfinite
 import Grass.Platform.Win32.RawPrefix
+import Grass.Platform.Win32.ProviderContract
 import Grass.Assembly.PrologueFactory
 import Grass.Assembly.CodeWriteFrame
 import Grass.Assembly.LoadedCodeRoot
