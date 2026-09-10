@@ -1,6 +1,8 @@
 import Grass.Platform.Win32.ConsoleEnvironment
-import Grass.Platform.Win32.RawStep
+import Grass.Platform.Win32.EvaluatedCall
+import Grass.Platform.Win32.ApiDispatch
 import Grass.Platform.Win32.CallResumeBinding
+import Grass.Platform.Win32.ProviderResumeFinalization
 
 /-!
 # Observed GetStdHandle provider result
@@ -43,8 +45,7 @@ def stage {image : ImageInput} {inputs : EntryInputs} {loaded : LoadedImage imag
     {receipt : CallNormal before.machine afterFetch afterRead afterStore displacement}
     {agent : ContextId} (entered : GetStdHandle.CallHandoff loaded before receipt agent)
     (prior : CallRuntimeTable) (gpr : Gpr → BitVec 64) (rflags : BitVec 64) : RawState :=
-  { entered.afterRaw prior with
-    machine := { (entered.afterRaw prior).machine with gpr := gpr, rflags := rflags } }
+  ProviderResume.observeRegisters (entered.afterRaw prior) gpr rflags
 
 @[simp] theorem stage_rAX {image : ImageInput} {inputs : EntryInputs}
     {loaded : LoadedImage image inputs} {before : ExecutionState.State ApiRequest}
@@ -170,7 +171,7 @@ theorem resumeLink (_observed : Receipt loaded environment entered evaluated pri
       (.getStdHandle entered.frame) entered.frame receipt := by
   have original := (entered.resumeInputs prior).2
   exact
-    { runtimeLookup := by simp [stage]
+    { runtimeLookup := by simp [stage, ProviderResume.observeRegisters]
       runtimeFrame := original.runtimeFrame
       entryRsp := original.entryRsp
       continuation := original.continuation
