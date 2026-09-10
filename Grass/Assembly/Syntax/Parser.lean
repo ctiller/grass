@@ -2,14 +2,20 @@ import Lean
 import Lean.Elab.Term
 import Grass.Assembly.Syntax.AST
 
-/-! The authored `asm_source { ... }` front end: an x86-64 Intel-syntax
-operand grammar (registers, immediates, `[...]` memory references,
+/-! The authored `asm_source { ... }` front end: an x86-64 Intel-syntax and
+AArch64 operand grammar (registers, immediates, `[...]` memory references,
 `sizeof(...)`, frame-local operands) elaborated to the target-generic
 `Grass.Assembly.Syntax.Source` AST. Nothing here knows a program's label
 names, register allocation, or instruction schedule; every keyword below is
-ordinary Intel-syntax vocabulary (`ptr`, `qword`, `rip`, ...) or an annotation
-name the spikes already use (`@placement`, `@invariant`, ...). Lowering a
-`Source` to a concrete ISA `Instr` is a later, separate module. -/
+ordinary Intel-syntax or A64 vocabulary (`ptr`, `qword`, `rip`, ...) or an
+annotation name the spikes already use (`@placement`, `@invariant`, ...).
+Every mnemonic, including a dotted A64 spelling such as `b.eq`, is accepted
+uniformly through the ordinary `ident` grammar this front end already used
+for x86 mnemonics: this front end supports every mnemonic spelling and does
+not know which ones exist, so an A64-specific mnemonic needs no grammar
+change, only operands and register spellings it did not previously
+recognize. Lowering a `Source` to a concrete ISA `Instr` is a later, separate
+module. -/
 namespace Grass.Assembly.Syntax
 
 open Lean Lean.Parser
@@ -60,9 +66,37 @@ declare_syntax_cat asmMemBody
 /-- `rip + name`, tried before the general base form so that `rip` is never
 mistaken for a base register. -/
 syntax (name := asmMemBodyRip) (priority := high) ripKw "+" ident : asmMemBody
+/-- AArch64 `[base, #disp]`, e.g. `[x1, #16]`, `[sp, #-8]`. Tried before the
+general base form: the comma is not a token `asmMemBodyGeneral`'s
+`asmMemTerm` repetition ever consumes, so without this dedicated production
+`[x1, #16]` would parse `x1` as a zero-term general body and then fail to
+find the closing `]` right after it. `[base]` alone (no comma) is already
+covered by `asmMemBodyGeneral` with zero terms, giving the same zero
+displacement this AArch64 form would. -/
+syntax (name := asmMemBodyAArch64Offset) (priority := high)
+  ident "," "#" ("-")? num : asmMemBody
 /-- `base` followed by zero or more signed terms, e.g. `rax`, `rax+r9`,
-`rbx+rax*2`, `r9+rdi*2+2`, `rsp+SortFrame.flushPtr`, `r14-1`. -/
+`rbx+rax*2`, `r9+rdi*2+2`, `rsp+SortFrame.flushPtr`, `r14-1`, or a bare
+AArch64 base with an implicit zero offset, e.g. `x1`. -/
 syntax (name := asmMemBodyGeneral) ident (asmMemTerm)* : asmMemBody
+
+/-! AArch64's `!` (pre-index) and `, #disp` (post-index) memory suffixes,
+written after the closing `]` of an `asmOperandMem`. Declared as their own
+category, rather than as two more sibling `asmOperand` productions, so the
+choice between "no suffix", "!", and ", #disp" is one optional slot inside
+the single existing `asmOperandMem` rule instead of three separately-
+prioritized alternatives racing each other on the shared `[`/`]` prefix: a
+plain `[base]` operand followed by a real next operand starting with `,`
+(the ordinary x86 case, e.g. `mov [rsp+SortFrame.flushPtr], rax`) must fail
+`asmMemSuffixPostIndex` and leave the `,` for the operand list's own
+separator, exactly as before this addition. `atomic` on the `"," "#"` pair
+is required for that: without it, a partial match (the `,` present, but not
+followed by `#`) is a hard parse error rather than a clean "this alternative
+does not apply", since Lean's `(asmMemSuffix)?` does not itself roll back a
+failure that already consumed a token. -/
+declare_syntax_cat asmMemSuffix
+syntax (name := asmMemSuffixPreIndex) "!" : asmMemSuffix
+syntax (name := asmMemSuffixPostIndex) atomic("," "#") ("-")? num : asmMemSuffix
 
 /-! ## Operand grammar -/
 
@@ -71,12 +105,18 @@ declare_syntax_cat asmOperand
 /-- `sizeof(name)`, tried before the bare-identifier form so `sizeof` is
 never mistaken for a symbol operand. -/
 syntax (name := asmOperandSizeOf) (priority := high) sizeofKw "(" ident ")" : asmOperand
-/-- A memory reference, with or without an explicit size prefix. -/
-syntax (name := asmOperandMem) (priority := high) (asmMemSize ptrKw)? "[" asmMemBody "]" : asmOperand
+/-- A memory reference, with or without an explicit size prefix, and with or
+without an AArch64 pre-index or post-index suffix (`asmMemSuffix`):
+`[base+disp]`, `[rip+name]`, `[base, #disp]`, `[base, #disp]!`, or
+`[base], #disp`. -/
+syntax (name := asmOperandMem) (priority := high)
+  (asmMemSize ptrKw)? "[" asmMemBody "]" (asmMemSuffix)? : asmOperand
 /-- A negative integer immediate. -/
 syntax (name := asmOperandNegImm) (priority := high) "-" num : asmOperand
 /-- A non-negative integer immediate. -/
 syntax (name := asmOperandImm) num : asmOperand
+/-- An AArch64 `#`-prefixed immediate, e.g. `#0`, `#64`, `#-16`. -/
+syntax (name := asmOperandHashImm) "#" ("-")? num : asmOperand
 /-- A bare name: a register, a declared frame local, `name.addr`, or any
 other symbolic constant. Disambiguated after parsing. -/
 syntax (name := asmOperandBare) ident : asmOperand
@@ -154,6 +194,15 @@ private def natOf (stx : Syntax) : Except String Nat :=
   | some n => .ok n
   | none => .error s!"expected a numeral, got '{stx}'"
 
+/-- A numeral preceded by an optional `-` group (the shape every
+`("-")? num` production above uses: `asmWithStackClauseDecl`'s init,
+`asmOperandNegImm`, `asmOperandHashImm`, `asmMemBodyAArch64Offset`,
+`asmMemSuffixPostIndex`), as a signed `Int`. `negGroup` is the optional
+node itself (empty when `-` was absent), not the `-` token. -/
+private def signedNumOf (negGroup : Syntax) (numStx : Syntax) : Except String Int := do
+  let n ← natOf numStx
+  pure <| if negGroup.getArgs.isEmpty then Int.ofNat n else -(Int.ofNat n)
+
 /-- The result of classifying one signed term following a memory operand's
 base register: a possibly-scaled index register, a symbolic displacement, or
 a literal integer contribution to the displacement. -/
@@ -219,6 +268,12 @@ private def memBodyOf (stx : Syntax) :
     let terms ← (stx.getArg 1).getArgs.toList.mapM memTermOf
     let (index, disp) ← combineMemTerms terms
     pure (some base, index, disp)
+  | ``asmMemBodyAArch64Offset => do
+    let base := identText (stx.getArg 0)
+    if !isRegisterName base then
+      throw s!"'{base}' is not a recognized register and cannot be a memory base"
+    let value ← signedNumOf (stx.getArg 3) (stx.getArg 4)
+    pure (some base, none, .int value)
   | k => .error s!"unsupported memory operand '{k}'"
 
 private def memSizeOf (stx : Syntax) : Except String MemSize :=
@@ -249,6 +304,9 @@ private partial def operandOf (stx : Syntax) : Except String Operand :=
   | ``asmOperandNegImm => do
     let n ← natOf (stx.getArg 1)
     pure (.imm (-(Int.ofNat n)))
+  | ``asmOperandHashImm => do
+    let value ← signedNumOf (stx.getArg 1) (stx.getArg 2)
+    pure (.imm value)
   | ``asmOperandSizeOf =>
     .ok (.sizeOf (identText (stx.getArg 2)))
   | ``asmOperandMem => do
@@ -256,7 +314,17 @@ private partial def operandOf (stx : Syntax) : Except String Operand :=
     let size ← if sizeGroup.getArgs.isEmpty then pure none
       else some <$> memSizeOf (sizeGroup.getArg 0)
     let (base, index, disp) ← memBodyOf (stx.getArg 2)
-    pure (.mem size base index disp)
+    let suffixGroup := stx.getArg 4
+    if suffixGroup.getArgs.isEmpty then
+      pure (.mem size base index disp .offset)
+    else
+      let suffix := suffixGroup.getArg 0
+      match suffix.getKind with
+      | ``asmMemSuffixPreIndex => pure (.mem size base index disp .preIndex)
+      | ``asmMemSuffixPostIndex => do
+          let value ← signedNumOf (suffix.getArg 2) (suffix.getArg 3)
+          pure (.mem size base index (.int value) .postIndex)
+      | k => .error s!"unsupported memory operand suffix '{k}'"
   | k => .error s!"unsupported operand '{k}'"
 
 private def annotationOf (stx : Syntax) : Except String Annotation :=
