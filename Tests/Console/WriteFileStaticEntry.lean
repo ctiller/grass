@@ -45,9 +45,8 @@ def inputs : EntryInputs :=
       if register = .rdx then preferredBase image + BitVec.ofNat 64 (objectBinding.span.rva + cut.offset)
       else if register = .r8 then BitVec.ofNat 64 cut.remaining.length
       else if register = .r9 then
-        Grass.Tests.Win32WriteFileStackPlan.inputs.gpr .r9 -
-          BitVec.ofNat 64 Grass.Tests.Win32WriteFileStackPlan.request.countSlot.range.start +
-          BitVec.ofNat 64 selectedLocal.result.address.range.start
+        Grass.Tests.Win32WriteFileStackPlan.inputs.gpr .rsp +
+          BitVec.ofNat 64 selectedLocal.result.address.displacement
       else Grass.Tests.Win32WriteFileStackPlan.inputs.gpr register }
 def loaded := (initialize? image inputs).get (by decide +kernel)
 def incoming := loaded.initialState
@@ -76,7 +75,7 @@ theorem actual_suffix : result.2.val.handoff.record.request.bytes = .fromList [5
 theorem nonzero_object_and_cut : objectBinding.object.offset = 8 ∧ cut.offset = 1 := by decide +kernel
 theorem current_input : InputMatches called.result.machine.memory result.2.val.handoff.record.request :=
   WriteFileStaticArgument.requestOf_input called.result result.1
-    (WriteFileCountArgument.argument binding.policy selectedLocal)
+    (WriteFileCountArgument.argument binding.policy called.receipt selectedLocal)
 
 def wrongSource := (SourceResolve.resolve? Grass.Tests.Console.WriteFileCountEntry.source.2.splice
   (symbols 1) 0x1000).get (by decide +kernel)

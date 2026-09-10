@@ -13,7 +13,7 @@ open Grass.Platform.Win32 Grass.Platform.Win32.WriteFile
 open Grass.Platform.Win32.Loader Grass.Platform.Win32.ExecutionState
 open WriteAllX86 WriteFileLoad WriteFileResume
 
-/-- Supply the static count local to the existing incoming-state checker.
+/-- Place the source count local at the actual pre-CALL frame origin.
 Actual CALL evaluation is an occurrence obligation; how R9 acquired its value
 is deliberately absent from the callee contract. -/
 def prepareCountCall? {image : ImageInput} {inputs : EntryInputs}
@@ -27,10 +27,10 @@ def prepareCountCall? {image : ImageInput} {inputs : EntryInputs}
     (buffer : Argument) (bytes : Vec Byte) (fifth : Argument) (provider : ContextId) :
     Option (CallHandoff loaded before call
       (EntryFactory.requestOf call.result buffer
-        (WriteFileCountArgument.argument binding.policy selectedLocal) bytes) provider) :=
+        (WriteFileCountArgument.argument binding.policy call selectedLocal) bytes) provider) :=
   if selectedLocal.result.slot = "transferred" then
     WriteFileSourceEntry.prepareCall? before call binding ready buffer
-      (WriteFileCountArgument.argument binding.policy selectedLocal) bytes fifth provider
+      (WriteFileCountArgument.argument binding.policy call selectedLocal) bytes fifth provider
   else none
 
 theorem prepareCountCall?_slot {image : ImageInput} {inputs : EntryInputs}
@@ -49,25 +49,82 @@ theorem prepareCountCall?_slot {image : ImageInput} {inputs : EntryInputs}
   · assumption
   · contradiction
 
+/-- The actual return-slot read anchors the stack allocation used by the later
+source load. Only intervening read/guard/fetch memory frames are used. -/
+theorem body_base
+    {image : ImageInput} {inputs : EntryInputs} {loaded : LoadedImage image inputs}
+    {callBefore : State} {afterFetch afterTarget afterCall : MachineState} {displacement : BitVec 32}
+    {call : CallNormal callBefore afterFetch afterTarget afterCall displacement}
+    {current : RawState} {callId : CallProtocol.CallId} {runtime : CallRuntime} {saved : ReturnFrame}
+    (resume : ProviderResume.Success loaded current callId runtime saved call)
+    (guard : TestZeroRun .rax resume.after.machine)
+    {frame : SourceFrame.Result} {rootOffset : Nat} {source : SourceResolve.Result frame rootOffset}
+    {bodyPolicy : CpuAccessPolicy} (body : WriteAllBody.Run bodyPolicy source guard.result)
+    (selected : Cpu.policy? loaded guard.result = some bodyPolicy) :
+    resume.slot.receipt.run.resolved.allocation.base = some body.load.source.base := by
+  have provenance : body.load.source.access.descriptor.provenance = resume.slot.receipt.descriptor.provenance := by
+    rw [body.load.descriptor_exact]
+    exact (MemoryMoveFactory.memoryMove_load_stack body.load.ran).trans
+      ((WriteFileCountArgument.stack_same resume.originalPolicy.selected selected).trans
+        (resume.originalPolicy.stack.symm.trans resume.slot.receipt.slotProvenance.symm))
+  have memory : body.load.fetched.after.memory = current.machine.machine.memory := by
+    exact body.load.source.site.fetch.state_frame.1.trans
+      ((guard_frame guard).2.trans (resume_memory resume))
+  have bodyLookup := body.load.source.access.run.resolved.allocationLookup
+  change body.load.fetched.after.memory.allocations.lookup
+    body.load.source.access.descriptor.provenance.root = _ at bodyLookup
+  rw [memory] at bodyLookup
+  have atSlot := (congrArg (fun p : Provenance =>
+    current.machine.machine.memory.allocations.lookup p.root) provenance).symm.trans bodyLookup
+  have same : body.load.source.access.run.resolved.allocation = resume.slot.receipt.run.resolved.allocation :=
+    Option.some.inj (atSlot.symm.trans resume.slot.receipt.run.resolved.allocationLookup)
+  rw [← same]
+  exact body.load.source.placed
+
+theorem body_frame
+    {image : ImageInput} {inputs : EntryInputs} {loaded : LoadedImage image inputs}
+    {callBefore : State} {afterFetch afterTarget afterCall : MachineState} {displacement : BitVec 32}
+    {call : CallNormal callBefore afterFetch afterTarget afterCall displacement}
+    {current : RawState} {callId : CallProtocol.CallId} {runtime : CallRuntime} {saved : ReturnFrame}
+    (resume : ProviderResume.Success loaded current callId runtime saved call)
+    (guard : TestZeroRun .rax resume.after.machine)
+    {frame : SourceFrame.Result} {rootOffset : Nat} {source : SourceResolve.Result frame rootOffset}
+    {bodyPolicy : CpuAccessPolicy} (body : WriteAllBody.Run bodyPolicy source guard.result)
+    (selected : Cpu.policy? loaded guard.result = some bodyPolicy) :
+    body.load.source.frameOffset = call.storeDescriptor.range.stop := by
+  obtain ⟨base, placed, origin⟩ := resume.slot.receipt.slot_origin
+  have sameBase : base = body.load.source.base :=
+    Option.some.inj (placed.symm.trans (body_base resume guard body selected))
+  subst base
+  have rsp := body.load.source.rsp_toNat
+  have restored : guard.result.gpr .rsp = callBefore.gpr .rsp :=
+    (congrArg (fun gpr => gpr .rsp) (guard_frame guard).1).trans resume.rsp_original
+  have exactRsp := congrArg BitVec.toNat restored
+  omega
+
 theorem body_argument {image : ImageInput} {inputs : EntryInputs}
     {loaded : LoadedImage image inputs} {callPolicy bodyPolicy : CpuAccessPolicy}
     {callBefore loadBefore : State} {frame : SourceFrame.Result} {rootOffset : Nat}
+    {afterFetch afterTarget afterCall : MachineState} {displacement : BitVec 32}
+    (call : CallNormal callBefore afterFetch afterTarget afterCall displacement)
     {source : SourceResolve.Result frame rootOffset}
     (callSelected : Cpu.policy? loaded callBefore = some callPolicy)
     (selectedLocal : SourceResolve.LoadSelection source)
     (body : WriteAllBody.Run bodyPolicy source loadBefore)
     (bodySelected : Cpu.policy? loaded loadBefore = some bodyPolicy)
-    (sameSlot : body.load.source.selection.result.slot = selectedLocal.result.slot) :
+    (sameSlot : body.load.source.selection.result.slot = selectedLocal.result.slot)
+    (origin : body.load.source.frameOffset = call.storeDescriptor.range.stop) :
     body.load.source.access.descriptor.provenance =
-        (WriteFileCountArgument.argument callPolicy selectedLocal).provenance ∧
+        (WriteFileCountArgument.argument callPolicy call selectedLocal).provenance ∧
       body.load.source.access.descriptor.range =
-        (WriteFileCountArgument.argument callPolicy selectedLocal).range := by
+        (WriteFileCountArgument.argument callPolicy call selectedLocal).range := by
   refine ⟨?_, ?_⟩
   · rw [body.load.descriptor_exact]
     exact (MemoryMoveFactory.memoryMove_load_stack body.load.ran).trans
       (WriteFileCountArgument.stack_same callSelected bodySelected)
-  · exact body.load.source.range.trans
-      (WriteFileCountArgument.range_same body.load.source.selection selectedLocal sameSlot)
+  · rw [body.load.source.range, origin,
+      WriteFileCountArgument.address_same body.load.source.selection selectedLocal sameSlot]
+    rfl
 
 /-- The checked incoming-state contract and static local binding close the
 return/body composition without any executed-LEA or count-identity premise. -/
@@ -86,7 +143,7 @@ theorem returned_body
     (evaluated : Raw.EvaluatedCall loaded callBefore call)
     (buffer : Argument) (bytes : Vec Byte) (fifth : Argument) {provider : ContextId}
     (entered : CallHandoff loaded callBefore call
-      (EntryFactory.requestOf call.result buffer (WriteFileCountArgument.argument binding.policy selectedLocal) bytes) provider)
+      (EntryFactory.requestOf call.result buffer (WriteFileCountArgument.argument binding.policy call selectedLocal) bytes) provider)
     (_produced : prepareCountCall? callBefore call binding ready evaluated selectedLocal
       buffer bytes fifth provider = some entered)
     (prior : CallRuntimeTable)
@@ -140,8 +197,8 @@ theorem returned_body
   have named := prepareCountCall?_slot _produced
   have bodySlot := (WriteAllBody.load_operand body.selected body.load.source.selection
     (body.load.source.selected.symm.trans body.checksSource.loadSelected)).2
-  have argument := body_argument binding.selected selectedLocal body bodyPolicySelected
-    (bodySlot.trans named.symm)
+  have argument := body_argument call binding.selected selectedLocal body bodyPolicySelected
+    (bodySlot.trans named.symm) (body_frame resume guard body bodyPolicySelected)
   exact WriteFileResume.returned_body_bound entered prior raw graph agent action event length root steps
     returned projected resume _resumeRan output success positive guard guards guardSource body
     _bodySelected bodyPolicySelected argument.1 argument.2 placed
