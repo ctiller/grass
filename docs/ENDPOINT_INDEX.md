@@ -120,7 +120,7 @@ root build, and the trust audit of 75 declarations and 8 executable test modules
 passing. Source freshness passed for 22 embedding modules. This fixture does not
 establish whole Hello.
 
-### Approved semantic correction, migration pending
+### Approved semantic correction and relative gate
 
 Process and architecture confirm the latest user-approved boundary: “on error”
 is conditional, so an infallible implementation can satisfy that contract.
@@ -134,16 +134,31 @@ a proof of Windows internals. Preserve actual diagnostic causes.
 The optional-outcome machinery is stopped; no optional-outcome flags or framework
 follow from this decision. Older symmetric back-coverage counterexamples diagnose
 an overstrong implementation interface, not an obligation to manufacture errors.
-Process owns the generic directed relation and shared completion substrate;
-architecture owns the authorized `RealizationProfile.waits` and
-`RealizationCertificate.correspondence` migration. This correction is **not yet
-implemented** at this status update.
+Process's generic relation is delivered as `36ebd13c`, integrated on the
+certificate branch as `04b8e23f`: `Grass/Refinement/ImplementationConformance.lean`
+defines `DirectedWaitTranslation`, `ImplementationConformance` and the exact-to-directed
+adapters `DirectedWaitTranslation.ofExact` and
+`BehaviorCorrespondence.toImplementationConformance`. Architecture's relative
+gate change `ab646796`, integrated as `6b784003`, uses the directed translation
+in `RealizationProfile.waits` and directed conformance in
+`RealizationCertificate.correspondence`. Exact artifact binding and admitted-input
+entry/safety remain. Inspect these deliveries with `git show <commit>:<path>`;
+the gate is in `Grass/Refinement/Realization.lean`.
+
+Spikes reports the combined 245-job focused build and independent Sol review
+passed. Expanded scoped audit checkpoint `a5a495f3` covers 2,009 declarations
+in 26 modules, including `Realization`. These are **relative certificate
+deliveries**, not whole-public-root or trust acceptance: the known legacy
+`Grass.Certificate` migration failure remains. Matching covers actual histories,
+replies and the existing classified terminal/infinite/wait completions; it adds
+no completion-existence field. Internal deadlock classification remains separate
+research, with no production policy adopted.
 
 The decision record is available as
 `git show 2ae59a56:docs/HELLO_ENDPOINT_MODEL.md`. Its earlier fixed-environment
 signatures remain explicitly provisional; do not treat them as an accepted,
 implemented complete-correspondence model. This note records the latest decision
-without claiming the public gate or the Hello endpoint has migrated.
+without claiming the public verified-emission gate or the Hello endpoint has migrated.
 
 ## Deliveries beyond the initial snapshot
 

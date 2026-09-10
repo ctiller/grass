@@ -636,11 +636,11 @@ retain their own obligations. Relevant choice, scheduling, divergence, pending
 and complete-history structure must be covered; equality of terminating outputs
 alone is insufficient. An API implementing a concept is a recorded external
 correspondence claim, not a proof of Windows internals; actual diagnostic causes
-must remain visible. The generic relation and certificate gate migration are
-implementation work in progress; this semantic correction does not certify their
-delivery. Internal deadlock classification is separate pending work and does not
+must remain visible. The generic relation and relative certificate gate now have
+reviewed delivery checkpoints; the public verified-emission root remains pending.
+Internal deadlock classification is separate pending work and does not
 silently add a mandatory completion or progress field. See the
-[current migration status](ENDPOINT_INDEX.md#approved-semantic-correction-migration-pending).
+[current migration status](ENDPOINT_INDEX.md#approved-semantic-correction-and-relative-gate).
 
 Optimization may change instruction traces, layout, timing, or internal API
 structure only if it preserves the selected functional observation and every
