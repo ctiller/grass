@@ -1,4 +1,6 @@
 import Grass.Platform.Linux.Target.X86
+import Grass.Platform.Linux.Target.AArch64
+import Grass.ISA.AArch64.Target
 import Grass.Target.Platform
 
 /-!
@@ -9,19 +11,19 @@ Assembles `Grass.Platform.Linux.Target.X86`/`.AArch64`'s ABI-specific
 `Environment`/`Admits`/`Responds`/`domain` into `Grass.Target.Platform`
 instances for each ISA this platform hosts.
 
-`Grass.ISA.X86.isa`/`Grass.ISA.AArch64.isa` -- the whole-machine `Instr`/
-`encode`/`decode`/`State`/`step` records `Grass.Target.Platform` is indexed
-by -- do not exist in this worktree yet (only the `Native` call surface each
-ISA's `Target` module exports does: `Grass/ISA/X86/Target/Native.lean`,
-`Grass/ISA/AArch64/Target/Native.lean`). `platformX86`/`platformAArch64`
-below are commented out for exactly that reason; every field they would need
-(`entry`, `decode`, `encodeReturn`, `Environment`, `Admits`, `Responds`) is
-already built and typechecked against the concrete `NativeCall`/
-`NativeReturn`/`InitialContext` types, so assembling the record is a one-line
-change once its `isa` argument exists. See the report for the exact
-dependency and for a distinct, structural seam gap this file's `encodeReturn`
-had to accommodate rather than fix (`Console.Request.exit`'s terminal/`Empty`
-shape, `Grass/Target/Machine.lean`'s `Step.terminal`).
+`Grass.ISA.X86.isa` -- the whole-machine `Instr`/`encode`/`decode`/`State`/
+`step` record `Grass.Target.Platform` is indexed by -- does not exist in this
+worktree yet (only the `Native` call surface `Grass/ISA/X86/Target/
+Native.lean` exports does). `platformX86` below stays commented out for
+exactly that reason; every field it would need (`entry`, `decode`,
+`encodeReturn`, `Environment`, `Admits`, `Responds`) is already built and
+typechecked against the concrete `NativeCall`/`NativeReturn`/`InitialContext`
+types, so assembling the record is a one-line change once its `isa` argument
+exists. `Grass.ISA.AArch64.isa` now exists (`Grass/ISA/AArch64/Target.lean`),
+so `platformAArch64` below is wired up. See the report for a distinct,
+structural seam gap this file's `encodeReturn` had to accommodate rather than
+fix (`Console.Request.exit`'s terminal/`Empty` shape, `Grass/Target/
+Machine.lean`'s `Step.terminal`).
 
 ## `mmap`/`Heap.allocate` and the ISA's address space
 
@@ -63,12 +65,12 @@ namespace Grass.Platform.Linux.Target
 --   Responds := Grass.Platform.Hosted.Responds
 --   encodeReturn := Grass.Platform.Linux.Target.X86.encodeReturn
 
--- def platformAArch64 : Grass.Target.Platform Grass.ISA.AArch64.isa Grass.Platform.Hosted.domain where
---   Environment := Grass.Platform.Hosted.Environment
---   Admits := Grass.Platform.Hosted.Admits
---   entry := Grass.Platform.Linux.Target.AArch64.entry
---   decode := Grass.Platform.Linux.Target.AArch64.decode
---   Responds := Grass.Platform.Hosted.Responds
---   encodeReturn := Grass.Platform.Linux.Target.AArch64.encodeReturn
+def platformAArch64 : Grass.Target.Platform Grass.ISA.AArch64.isa Grass.Platform.Hosted.domain where
+  Environment := Grass.Platform.Hosted.Environment
+  Admits := Grass.Platform.Hosted.Admits
+  entry := Grass.Platform.Linux.Target.AArch64.entry
+  decode := Grass.Platform.Linux.Target.AArch64.decode
+  Responds := Grass.Platform.Hosted.Responds
+  encodeReturn := Grass.Platform.Linux.Target.AArch64.encodeReturn
 
 end Grass.Platform.Linux.Target
