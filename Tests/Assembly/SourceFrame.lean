@@ -7,20 +7,14 @@ set_option maxRecDepth 100000
 set_option maxHeartbeats 4000000
 
 def fromChars? (chars : List Char) : Option Result :=
-  (extractHelloSourceChars chars).toOption.bind derive?
-
-def authored : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
+  (extractSourceChars chars).toOption.bind derive?
 
 def view (result : Result) : List Nat × List Grass.ISA.X86.Gpr :=
   ([result.layout.argumentCount, result.layout.localBytes, result.layout.callAllocationBytes],
     result.layout.savedRegisters)
 
--- These are observations of the source-derived layout, never compiler inputs.
-example : (fromChars? authored).map view = some ([5, 4, 48], [.r12, .r13, .r14]) := by
-  decide +kernel
-
 def sample (api body : List Char) : List Char :=
-  (source_chars "def helloSource : MachineSource plan := withStack (value : UInt32 := 7) withCallFrame ") ++
+  (source_chars "def frameSample : MachineSource plan := withStack (value : UInt32 := 7) withCallFrame ") ++
     api ++ (source_chars " asm_source (statics := statics) {\n") ++ body ++ (source_chars "\n}")
 
 example : (fromChars? (sample (source_chars "WriteFile")

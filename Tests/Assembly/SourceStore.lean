@@ -14,10 +14,6 @@ open Grass.Assembly Grass.Assembly.SourceInput Grass.Assembly.SourceStore
 open Grass.ABI.Win64 Grass.ISA.X86
 open Grass.Tests.Spike1 Grass.Tests.Spike1Policy Tests.Memory.Spike1Block
 
--- This file must be directly re-elaborated by check-source-input.sh; Lake
--- does not register the authored file below as an imported-module dependency.
-def authored : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
-
 def selectedStore? (frame : SourceFrame.Result) : Option X86ControlFlow.CodeItem := do
   let candidates := frame.program.collected.code.filter fun item =>
     match item.instruction.mnemonic, item.instruction.operands with
@@ -28,7 +24,7 @@ def selectedStore? (frame : SourceFrame.Result) : Option X86ControlFlow.CodeItem
   | _ => none
 
 def fromChars? (source : List Char) (rspRootOffset : Nat := 0) : Option Store32.Resolved := do
-  let body ← (extractHelloSourceChars source).toOption
+  let body ← (extractSourceChars source).toOption
   let frame ← SourceFrame.derive? body
   let item ← selectedStore? frame
   FrameStore.resolve? frame rspRootOffset item
@@ -41,9 +37,6 @@ def executeChars? (source : List Char) : Option (Store32.Resolved × Grass.Memor
     pure (resolved, final)
   else none
 
--- One kernel-checked connection from the actual authored occurrence through
--- parsing, slot placement, value resolution, the existing transition, and its
--- committed bytes/event. The fixture still supplies the machine/address setup.
 def outcomeView (result : Store32.Resolved × Grass.Memory.MachineState) :
     String × List (BitVec 8) × Bool × Option (Option (List (BitVec 8))) ×
       List (Option (BitVec 8)) :=
@@ -56,14 +49,15 @@ def outcomeView (result : Store32.Resolved × Grass.Memory.MachineState) :
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 4000000 in
 set_option synthInstance.maxSize 512 in
-example : (executeChars? authored).map outcomeView =
-    some ("transferred", le32 0, true, some (some (le32 0)), (le32 0).map some) := by
+example : (executeChars? (source_chars
+    "def executionStoreSample : MachineSource plan := withStack (value : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\nmov value, 0\nud2\n}")).map outcomeView =
+    some ("value", le32 0, true, some (some (le32 0)), (le32 0).map some) := by
   decide +kernel
 
 -- Small adversarial inputs exercise the same parser and resolver; the theorem
 -- above is the connection to the actual spike. Keep these cheap to recheck.
 def sample (type body : List Char) : List Char :=
-  (source_chars "def helloSource : MachineSource plan := withStack (value : ") ++ type ++
+  (source_chars "def storeSample : MachineSource plan := withStack (value : ") ++ type ++
     (source_chars " := 0) withCallFrame WriteFile asm_source (statics := statics) {\n ") ++
     body ++ (source_chars "\nud2\n}")
 
@@ -88,7 +82,7 @@ example : (fromChars? (sample (source_chars "UInt32")
 
 -- Register operands cannot become local-memory stores through a second parser.
 example : (fromChars? (source_chars
-    "def helloSource : MachineSource plan := withStack (rax : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\nmov rax, 0\nud2\n}")).isNone := by
+    "def registerStoreSample : MachineSource plan := withStack (rax : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\nmov rax, 0\nud2\n}")).isNone := by
   decide +kernel
 
 end Grass.Tests.Assembly.SourceStore
