@@ -6,7 +6,7 @@ lake() { "$lake_exe" "$@"; }
 
 # This is the current construction gate, not a completed VerifiedProgram gate.
 lake build Grass.Assembly.X86 Grass.Platform.Win32 Grass.Spec.Console Grass.Spec.Resource Tests.Frontend.Source
-lake build Grass.Refinement.Console.WriteFileStaticEntry Tests.Platform.Win32LoaderEntry Tests.Console.WriteFileCountEntry Tests.Platform.Win32GetStdHandleRawReturn
+lake build Grass.Refinement.Console.WriteFileStaticEntry Grass.Platform.Win32.RawPrefix Grass.Platform.Win32.RawEntryEvent Tests.Platform.Win32LoaderEntry Tests.Console.WriteFileCountEntry Tests.Platform.Win32GetStdHandleRawReturn
 mkdir -p .lake/build/lib/lean/Spikes/1_Hello_World
 lake env lean Spikes/1_Hello_World/Spec.lean -o .lake/build/lib/lean/Spikes/1_Hello_World/Spec.olean
 
@@ -83,4 +83,4 @@ perl -0777 -e '
 ' Tools/AxiomAudit.lean > "$audit"
 printf "Focused frontend import-closure declaration audit only; NOT a full repository census or audit-trust adversarial probes. Counts below are computed for this run.\n"
 lake env lean "$audit"
-printf "Unchanged Hello frontend and actual-prefix WriteFile entry fixture pass; unsupported source rejected. Initial raw-prefix preservation, deadlock freedom, certificate suffix and full repository trust gates remain outside this check.\n"
+printf "Unchanged Hello frontend and loader-rooted finite WriteFile entry prefix pass; unsupported source rejected. Native/causal correspondence, deadlock freedom, certificate suffix and full repository trust gates remain outside this check.\n"
