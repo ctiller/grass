@@ -73,16 +73,11 @@ historical identity reuse and patch framing. It also initializes a PE produced
 from the unchanged authored Grass Hello World through `SourceLinkedImage`.
 These are executable model tests, separate from universal kernel proofs.
 
-[`run-grass-hello.sh`](../probes/windows/run-grass-hello.sh) launches the same
-Grass-authored program as a native PE, with redirected byte streams and a
-timeout. The Lean exporter is host plumbing; the binary body is Grass, with no
-C/Python implementation. Generated binaries and observations stay under
-`.lake/grass-windows-probes`.
-The exporter reads authored bytes at runtime and passes those exact characters
-to the source linker, avoiding cached source embeddings. It records the input
-snapshot whose hash the launcher reports; the supplied static payload is also
-recorded as the expected output. Bash owns orchestration, with `--emit-only`
-available on Linux and a narrow PowerShell helper for Windows process capture.
+The former source-reading Hello exporter and runner have been deleted under the
+[specialization removal plan](HELLO_SPECIALIZATION_REMOVAL.md). They used test
+fixtures and an independently supplied static payload. Their observations below
+are historical structural-image results, not validation of the complete
+authored program or its `VerifiedProgram` emission.
 
 The initial 2026-09-09 sample produced a 3,584-byte image with five sections,
 entry RVA 4096, exact 15-byte output, empty stderr and exit status zero. The host
