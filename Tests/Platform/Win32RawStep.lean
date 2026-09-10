@@ -33,12 +33,14 @@ theorem empty_graph_realizes (state : WriteFile.ProtocolState) :
 
 def quietEvent : Event := ⟨[], [], .internal⟩
 
+def noReturnInterpretation : WriteFile.ReturnInterpretation := fun _ _ _ _ _ _ _ => False
+
 /-- Construct the installed case from the actual five-loan handoff and checked
 quiet provider step. The loaded image is irrelevant to this service-only case;
 this fixture does not claim an actual CALL or native dispatch. -/
 theorem quiet_service {image : ImageInput} {inputs : EntryInputs}
     (loaded : LoadedImage image inputs) :
-    RawStep loaded Grass.Tests.Win32WriteFile.noEffects Grass.Tests.Win32WriteFileConsolePublication.environment [] before
+    RawStep loaded Grass.Tests.Win32WriteFile.noEffects Grass.Tests.Win32WriteFileConsolePublication.environment noReturnInterpretation [] before
       (.providerService call record.agent action) quietEvent receipt₁.after [] := by
   apply RawStep.service receipt₁
   · exact ⟨by constructor <;> rfl, empty_graph_valid _, empty_graph_valid _,
@@ -56,7 +58,7 @@ theorem service_cannot_acquire_stdout {image : ImageInput} {inputs : EntryInputs
     {id stdoutCall : CallProtocol.CallId} {agent : ContextId} {handle : BitVec 64}
     {chosen : WriteFile.Action}
     (wrong : event.kind = .endpoint (.stdoutAcquired stdoutCall handle)) :
-    ¬ RawStep loaded realization environment graph start (.providerService id agent chosen)
+    ¬ RawStep loaded realization environment noReturnInterpretation graph start (.providerService id agent chosen)
       event finish nextGraph := by
   intro step
   obtain ⟨_, output, _, _, _, kind, _, _⟩ := step.service_receipt
@@ -86,7 +88,7 @@ theorem uncovered_keeps_failed_view {image : ImageInput} {inputs : EntryInputs}
     (selected : Cpu.policy? loaded raw.machine = some policy)
     (control : raw.control = .caller policy.context) (bad : raw.checked? = none) :
     let event : Event := ⟨[], [], .outsideProfile (.cpu (.faultTransfer .pageFault))⟩
-    RawStep loaded realization environment [] raw (.cpu (.fault .pageFault)) event
+    RawStep loaded realization environment noReturnInterpretation [] raw (.cpu (.fault .pageFault)) event
       (raw.withMachine raw.machine) [] ∧
     (raw.withMachine raw.machine).checked? = none ∧
     (raw.withMachine raw.machine).calls = raw.calls := by

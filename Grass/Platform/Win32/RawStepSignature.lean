@@ -88,6 +88,15 @@ theorem Event.between_appends {before after : RawState} {kind : EventKind}
     (Event.between before after kind).Appends before after := by
   simp [Event.between, Event.Appends, memoryExact, boundariesExact]
 
+/-- Append evidence determines both canonical event suffixes. -/
+theorem Event.between_suffixes {before after : RawState} {kind : EventKind}
+    {memory : List ValidMemoryEvent} {boundaries : List CallProtocol.Boundary}
+    (memoryExact : after.machine.machine.events = before.machine.machine.events ++ memory)
+    (boundariesExact : after.metadata.boundaries = before.metadata.boundaries ++ boundaries) :
+    (Event.between before after kind).memory = memory ∧
+      (Event.between before after kind).boundaries = boundaries := by
+  simp [Event.between, memoryExact, boundariesExact]
+
 /-- A graph node is represented only by an actual memory event or protocol
 boundary in this raw state, even when its metadata does not currently pack. -/
 def Represented (state : RawState) : WriteFile.CausalNode → Prop
