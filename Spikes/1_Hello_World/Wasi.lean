@@ -26,9 +26,7 @@ printed nothing would satisfy this theorem too. The trace-level obligation is
 `PortableProgramCertificate`'s, not this module's.
 -/
 
-namespace Grass.Programs.HelloWorld.Wasi
-
-open Grass.Spikes.HelloWorld
+namespace Grass.Spikes.HelloWorld.Wasi
 
 open Grass.ISA.Wasm (Value ValType FuncType)
 open Grass.ISA.Wasm.Target
@@ -494,4 +492,4 @@ theorem adequate :
     (Machine.behavior platform program spec.root eventOf inputOf).Adequate :=
   Machine.adequate_of_invariant invariant spec.root eventOf inputOf covers
 
-end Grass.Programs.HelloWorld.Wasi
+end Grass.Spikes.HelloWorld.Wasi

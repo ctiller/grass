@@ -31,20 +31,11 @@ globs = ["Grass.+"]
 name = "Tests"
 globs = ["Tests.+"]
 
-# The authored spikes' precious specifications, the only spike modules that
-# build today. Lake's glob parser cannot name a module under `1_Hello_World`
-# (it drops the closing guillemet), so the roots list them one by one.
+# Authored spike programs. Only the hand-proved Wasm/WASI consumer is a build
+# target today; the rest of `Spikes/` is reached through its dependencies.
 [[lean_lib]]
 name = "Spikes"
-roots = ["Spikes.«1_Hello_World».Spec"]
-
-# Hand-proved program realizations over the target seams: the end-to-end
-# consumers of the machine tier that a future `verify_assembly` will generate
-# from the authored spikes. They live outside `Spikes/` (decision 97: that
-# directory holds only author-maintained source) and outside `Grass/`.
-[[lean_lib]]
-name = "Programs"
-globs = ["Programs.+"]
+roots = ["Spikes.«1_Hello_World».Wasi"]
 
 [[lean_exe]]
 name = "grass-disasm"
