@@ -464,7 +464,7 @@ theorem entropy_or_descends {before after : waitingPlan.LogicalProcessNetwork}
       | [] => rfl
       | observation :: _ => observation.elim) step.nonempty
   | send edge _ _ _ => exact edge.elim
-  | receive edge _ _ _ => exact edge.elim
+  | receive edge _ _ _ _ _ _ => exact edge.elim
   | requestCancel edge _ _ _ => exact edge.elim
   | acknowledgeCancel edge _ _ _ => exact edge.elim
   | timeout _ _ _ _ => exact Or.inl trivial
@@ -675,7 +675,7 @@ theorem nothing_moves_the_empty_world {after : waitingPlan.LogicalProcessNetwork
       | [] => rfl
       | observation :: _ => observation.elim)
   | send edge _ _ _ => exact edge.elim
-  | receive edge _ _ _ => exact edge.elim
+  | receive edge _ _ _ _ _ _ => exact edge.elim
   | requestCancel edge _ _ _ => exact edge.elim
   | acknowledgeCancel edge _ _ _ => exact edge.elim
   | timeout edge _ _ _ => exact edge.elim

@@ -96,17 +96,20 @@ theorem the_lens_does_not_own_the_route_table :
 /-! ## A real step inside it -/
 
 /--
-**The receive is a step of the selected subgraph.**
+**The receive and its receiver-local step are inside the selected subgraph.**
 
-Its whole scope — the wire escrow — is interior. This is the check that
-`Selects` is satisfiable at all: it demands the *whole* scope, so a lens that
-owned the connection role but not its channel would select no channel step.
+Its whole scope — wire escrow, session cursor, and exact receiver instance — is
+interior. This is the check that `Selects` is satisfiable at all: it demands the
+*whole* scope, so a lens that owned the connection role but not its channel
+would select no channel step.
 -/
 theorem the_receive_is_inside : connectionLens.Selects receiveStep := by
   intro fragment inScope
-  rcases (receive_scope_is_the_session fragment).mp inScope with isEscrow | isSession
+  rcases (receive_scope_is_the_session fragment).mp inScope with
+    isEscrow | isSession | isReceiver
   · exact Or.inl isEscrow
   · exact Or.inr (Or.inl isSession)
+  · exact Or.inr (Or.inr ⟨wire.receiver.instanceId, isReceiver⟩)
 
 /-! ## And an invariant outside it, framed -/
 
@@ -220,8 +223,9 @@ declare it" was true of every non-commit step of every plan and checked nothing.
 -/
 theorem the_connection_refinement_is_silent : ¬ receiveStep.scope .pending := by
   intro emits
-  rcases (receive_scope_is_the_session _).mp emits with isEscrow | isSession
+  rcases (receive_scope_is_the_session _).mp emits with isEscrow | isSession | isReceiver
   · exact absurd isEscrow (by simp)
   · exact absurd isSession (by simp)
+  · exact absurd isReceiver (by simp)
 
 end Grass.Process.Tests.Lens

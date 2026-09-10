@@ -16,8 +16,8 @@ lists is not the one a consumer meets. Applying it to a step written before it
 existed is the check on that.
 
 `the_receive_is_silent` is also a small confirmation that the scope discipline
-is doing work in the direction that matters here. The receive was authored with
-a scope naming its session and nothing else; that it emits nothing is a
+is doing work in the direction that matters here. The receive names its escrow,
+session cursor, and exact receiver instance; that it emits nothing is a
 consequence a later module read off the declaration, not a fact its author
 stated.
 -/
@@ -35,7 +35,7 @@ open Grass.Process.Tests.Commit (afterBeep quietRunCoalesces beep_is_committed)
 /--
 **The receive does not write the trace.**
 
-Read off its declared scope, which names the session fragment and nothing else.
+Read off its declared scope, whose receiver-local step does not move the pending trace.
 -/
 theorem the_receive_is_silent : ¬ receiveStep.Emits := by
   intro emits
@@ -174,10 +174,13 @@ theorem the_receive_extends_the_trace :
 theorem the_commit_and_the_receive_are_independent : beepCommit.Independent receiveStep := by
   intro fragment inCommit inReceive
   obtain ⟨_, isTrace⟩ := inCommit
-  rcases (receive_scope_is_the_session fragment).mp inReceive with isEscrow | isSession
+  rcases (receive_scope_is_the_session fragment).mp inReceive with
+    isEscrow | isSession | isReceiver
   · rw [isEscrow] at isTrace
     rcases isTrace with h | h <;> exact absurd h (by simp)
   · rw [isSession] at isTrace
+    rcases isTrace with h | h <;> exact absurd h (by simp)
+  · rw [isReceiver] at isTrace
     rcases isTrace with h | h <;> exact absurd h (by simp)
 
 /--
