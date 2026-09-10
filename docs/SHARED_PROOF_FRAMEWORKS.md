@@ -30,22 +30,22 @@ need is reusable verified construction, not identical domain vocabulary.
 Current integrated source inspected at `a39e22ae`. These are bounded production
 adoptions, distinct from the declaration/DSL proposal below:
 
-- [ProtocolEntry.issue?](../Grass/Platform/Win32/ProtocolEntry.lean) is the shared
+- ProtocolEntry.issue? is the shared
   checked handoff used by the actual GetStdHandle entry producer in
-  [GetStdHandleRuntime](../Grass/Platform/Win32/GetStdHandleRuntime.lean) and
-  [WriteFileHandoff](../Grass/Platform/Win32/WriteFileHandoff.lean). Their request
+  GetStdHandleRuntime and
+  WriteFileHandoff. Their request
   preparation and loan obligations remain API-specific.
 - `ProviderResume.observeRegisters` is used by
-  [GetStdHandleResult](../Grass/Platform/Win32/GetStdHandleResult.lean) and
-  [WriteFileReturnCompletion](../Grass/Platform/Win32/WriteFileReturnCompletion.lean)
+  GetStdHandleResult and
+  WriteFileReturnCompletion
   to stage observed registers without inventing provider memory effects.
-- [ProviderResumeFinalization](../Grass/Platform/Win32/ProviderResumeFinalization.lean)
+- ProviderResumeFinalization
   supplies the shared final-state, protocol-consumption and log laws to actual
-  [GetStdHandleReturn](../Grass/Platform/Win32/GetStdHandleReturn.lean) and
+  GetStdHandleReturn and
   WriteFileReturnCompletion. This dual adoption is implemented, not an interface-only trial.
 - `Raw.Event.between_suffixes` is used by both actual
-  [GetStdHandleRawReturn](../Grass/Platform/Win32/GetStdHandleRawReturn.lean) and
-  [WriteFileRawReturn](../Grass/Platform/Win32/WriteFileRawReturn.lean) consumers.
+  GetStdHandleRawReturn and
+  WriteFileRawReturn consumers.
   The exact return/read suffixes do not establish native or cross-log causal ordering.
 
 This closes those specific reuse obligations, not every duplication family,
@@ -54,7 +54,7 @@ full endpoint assurance or the proposed DSL. The
 frontier and current blockers; the older `2370d929` inventory remains a historical
 lower bound, not a current census.
 
-The canonical [Raw.system](../Grass/Platform/Win32/RawPrefix.lean) now replaces
+The canonical Raw.system now replaces
 `Raw.finitePrefixSystem`: it retains terminal call/status results and all pointwise
 actual infinite runs. Existing [execution interfaces](../Grass/Semantics/Execution.lean)
 are universe-generalized rather than duplicated. Memory-model's canonical

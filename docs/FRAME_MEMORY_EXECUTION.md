@@ -1,14 +1,14 @@
 # Source-derived frame memory execution
 
-[FrameMemoryExecution](../Grass/Assembly/FrameMemoryExecution.lean) connects a
+FrameMemoryExecution connects a
 resolved source occurrence to an actual instruction fetch and its continuous
-data access. [FrameMemorySource](../Grass/Assembly/FrameMemorySource.lean)
+data access. FrameMemorySource
 selects body stores, inserted initializers, stack arguments, and DWORD loads
 from the same `SourceResolve.Result`. Its constructors return computable
 witnesses from the actual output list. Frame offsets and instruction bytes
 come from those witnesses, rather than separate literal inputs.
 
-[SourceFetch](../Grass/Assembly/SourceFetch.lean) retains the actual initialized
+SourceFetch retains the actual initialized
 CPU-virtual fetch, the exact selected output, and an explicit image placement
 equation. Its `rip_exact` theorem derives absolute RIP as the loaded-image base
 plus the source RVA. The caller still establishes the loader/code-region

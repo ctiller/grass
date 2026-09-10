@@ -1,6 +1,6 @@
 # Preferred-base initialization checkpoint
 
-[`LoaderEntry.initialize?`](../Grass/Platform/Win32/LoaderEntry.lean) computes a
+`LoaderEntry.initialize?` computes a
 bounded initial state for exact checked PE output. Its input is an
 instruction-independent `PE.ImagePlan` plus host bytes equal to `writeImage`.
 `ImageInput.read_exact` connects those bytes to the independent complete PE

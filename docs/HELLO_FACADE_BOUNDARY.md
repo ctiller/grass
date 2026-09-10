@@ -141,11 +141,11 @@ statics remain on the computable data side of that boundary.
 
 The proposed source value retains the actual authored term and wrappers,
 evaluated statics, and a successful chain through
-[SourceFrame](../Grass/Assembly/SourceFrame.lean),
-[SourceSplice](../Grass/Assembly/SourceSplice.lean) at root offset zero,
-[StaticSection](../Grass/Assembly/StaticSection.lean),
-[SourceImportRequests](../Grass/Assembly/SourceImportRequests.lean), and
-[SourceLinkedImage](../Grass/Assembly/SourceLinkedImage.lean).
+SourceFrame,
+SourceSplice at root offset zero,
+StaticSection,
+SourceImportRequests, and
+SourceLinkedImage.
 These witnesses bind the same inputs and constructor-selected layout throughout;
 an independently supplied image or a copied instruction listing loses the
 required source connection. Structural construction evidence is still separate
@@ -159,7 +159,7 @@ For the inspected branch example, use
 
 Root review entry points are
 [Semantics/SpecProcess.lean](../Grass/Semantics/SpecProcess.lean),
-[Console/CapturedProjection.lean](../Grass/Console/CapturedProjection.lean),
+Console/CapturedProjection.lean,
 the neutral boundary and linked-image modules above, and the unchanged Hello
 program. `Grass/Console/Contract.lean` is on the certificate-root branch rather
 than this draft's base `97d9a9bd`; inspect its captured contract/view with

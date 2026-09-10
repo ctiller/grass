@@ -175,9 +175,9 @@ the pinned revision (use `git show 2370d929:<path>` for that source).
 
 | Finding | Shared mechanism to assess | Starting consumer locations |
 |---|---|---|
-| DUP-01 | Checked API entry handoff and preservation | [WriteFileHandoff](Grass/Platform/Win32/WriteFileHandoff.lean), [GetStdHandleRuntime](Grass/Platform/Win32/GetStdHandleRuntime.lean), [ExitProcessRuntime](Grass/Platform/Win32/ExitProcessRuntime.lean) |
+| DUP-01 | Checked API entry handoff and preservation | WriteFileHandoff, GetStdHandleRuntime, ExitProcessRuntime |
 | DUP-02 | Width-indexed completed-read construction and laws | [ReadValue32](Grass/ISA/X86/Execution/ReadValue32.lean), [ReadValue64](Grass/ISA/X86/Execution/ReadValue64.lean) |
-| DUP-03 | All-or-none list traversal, order and successful-element provenance | [SourceInitialization](Grass/Assembly/SourceInitialization.lean), [SourceImportRequests](Grass/Assembly/SourceImportRequests.lean), [SourceImportBindings](Grass/Assembly/SourceImportBindings.lean), [PE Exceptions](Grass/Artifact/PE/Exceptions.lean) |
+| DUP-03 | All-or-none list traversal, order and successful-element provenance | SourceInitialization, SourceImportRequests, SourceImportBindings, [PE Exceptions](Grass/Artifact/PE/Exceptions.lean) |
 | DUP-04 | Counted parser/writer recovery with exact suffix | [ImageReader](Grass/Artifact/PE/ImageReader.lean), [ExceptionReader](Grass/Artifact/PE/ExceptionReader.lean) |
 | DUP-05 | Access-free execution receipt construction | [BodyComputationFactory](Grass/ISA/X86/Execution/BodyComputationFactory.lean), [ComputationFactory](Grass/ISA/X86/Execution/ComputationFactory.lean) |
 | DUP-06 | Access-failure mapping that retains the actual reached state | [PushFactory](Grass/ISA/X86/Execution/PushFactory.lean), [CallFactory](Grass/ISA/X86/Execution/CallFactory.lean), [MemoryMoveFactory](Grass/ISA/X86/Execution/MemoryMoveFactory.lean), [ReturnSlotFactory](Grass/ISA/X86/Execution/ReturnSlotFactory.lean), [FetchFactory](Grass/ISA/X86/Execution/FetchFactory.lean) |

@@ -1,6 +1,6 @@
 # Raw phase preservation
 
-[RawPhasePreservation](../Grass/Platform/Win32/RawPhasePreservation.lean)
+RawPhasePreservation
 extracts local facts from the actual fixed raw relation:
 
 - API entry establishes a checked pending state for the loaded caller and
@@ -14,7 +14,7 @@ extracts local facts from the actual fixed raw relation:
   (since removed from `Tests/` as internal-only coverage) joined an actual
   GetStdHandle return to a CPU suffix at the exact same state and graph.
 
-[RawPrefix](../Grass/Platform/Win32/RawPrefix.lean) defines `Raw.system` and reuses
+RawPrefix defines `Raw.system` and reuses
 `RelationalSystem.ExecutionPrefix` for finite histories. Its root is computed
 from the selected loaded machine, actual grant-supply coverage, fresh protocol
 bookkeeping, loaded caller and empty runtime table and graph. Universe lifts
@@ -29,7 +29,7 @@ changing that raw infinite stream; implementation remains pending.
 This is a relative operational system. A full `BehaviorModel` still needs a
 faithful external wait boundary and its public observation mapping.
 
-[RawTerminal](../Grass/Platform/Win32/RawTerminal.lean) proves that any actual
+RawTerminal proves that any actual
 edge into terminal control is a checked ExitProcess completion. Every terminal
 loader-rooted prefix therefore retains a preceding run and a final actual exit
 edge with the exact process, call, status and event. Terminal control admits no
@@ -45,13 +45,13 @@ connection through the lowering adapter. Main `0993922c` includes the actual
 native cleanup or obligation discharge. Neither refusal nor outside-profile
 execution counts as successful termination or permitted external waiting.
 
-[RawPrefixSteps](../Grass/Platform/Win32/RawPrefixSteps.lean) decomposes an
+RawPrefixSteps decomposes an
 existing prefix propositionally into finite state, graph and choice witnesses,
 with exactly its recorded events and endpoints. It reuses the generic
-[Steps theorem](../Grass/Semantics/ExecutionSteps.lean); the witnesses are not
+Steps theorem; the witnesses are not
 unique or a canonical choice sequence. No second history carrier is introduced.
 
-[RawPendingService](../Grass/Platform/Win32/RawPendingService.lean) proves that
+RawPendingService proves that
 an actual pending-to-pending edge is service for the same call, caller and
 provider, exposing its receipt, action, publication and graph facts. To use the
 service-history fold, establish those pending phases for the contiguous segment
@@ -60,14 +60,14 @@ prefixes nor equal endpoints supply that entry ancestry. Its `pending_segment`
 theorem derives the intermediate controls from the actual entry's pending
 control and the indexed slice's internal/publication events. Return and exit
 observations are excluded by the slice condition, not reclassified as service.
-[RawGetStdHandlePending](../Grass/Platform/Win32/RawGetStdHandlePending.lean)
+RawGetStdHandlePending
 classifies outgoing choices using exact pending control and the same call's
 GetStdHandle runtime entry: every actual outgoing edge is a stdout-result edge
 for that call. This excludes CPU work and WriteFile service at that frontier.
 It does not establish reply existence for every allowed provider observation,
 or permission for permanent nonresponse. Those are separate obligations before
 this frontier can supply a full external wait boundary.
-[RawPendingInfinite](../Grass/Platform/Win32/RawPendingInfinite.lean) classifies
+RawPendingInfinite classifies
 an actual infinite stream starting at pending control. Either caller control
 occurs at some supplied index, or every point retains the exact initial pending
 call, caller and provider. In the latter case every edge exposes its actual

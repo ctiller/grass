@@ -11,15 +11,15 @@ start at [the facade boundary](HELLO_FACADE_BOUNDARY.md) and
 
 | Need | Defining module and useful declarations |
 |---|---|
-| Keep all Windows API occurrences in one protocol state | [ApiRequest.lean](../Grass/Platform/Win32/ApiRequest.lean): `ApiRequest`, `ProtocolState`, `embedPending`, `selectPending` |
-| Resolve the semantic input/count arguments | [WriteFileArguments.lean](../Grass/Platform/Win32/WriteFileArguments.lean): `Request`, `Prepared` |
-| Fix semantic and ABI custody together | [WriteFileCallPlan.lean](../Grass/Platform/Win32/WriteFileCallPlan.lean): `LoanPlan.requests`, `Abi.StackPlan.loanPlan` |
-| Issue and retain the exact full batch | [WriteFileHandoff.lean](../Grass/Platform/Win32/WriteFileHandoff.lean): `EntryHandoff.recorded`, `pendingAt`, `initialPrefix` |
-| Connect an actual CALL and selected Windows policy | [WriteFileCall.lean](../Grass/Platform/Win32/WriteFileCall.lean): `CallPolicy.ofFactory`, `reachedCall?`, `CallHandoff` |
-| Preserve protected storage and actual CALL-saved bytes | [WriteFilePreservation.lean](../Grass/Platform/Win32/WriteFilePreservation.lean), [WriteFileCallPreservation.lean](../Grass/Platform/Win32/WriteFileCallPreservation.lean): `Abi.CallNormal.saved_return_cell_preserved_after_return` |
-| Initialize runtime from the reached call | [WriteFileRuntime.lean](../Grass/Platform/Win32/WriteFileRuntime.lean): `CallHandoff.runtime`, `rawAfter`, `runtime_restoredRsp` |
-| Continue the same accepted frontier | [WriteFileService.lean](../Grass/Platform/Win32/WriteFileService.lean): `ServiceReceipt`, `after`, `frontier_continuity`, `ServiceEdge` |
-| Find raw carrier and edge-signature ownership | [CallRuntime.lean](../Grass/Platform/Win32/CallRuntime.lean), [RawState.lean](../Grass/Platform/Win32/RawState.lean), [RawStepSignature.lean](../Grass/Platform/Win32/RawStepSignature.lean); architecture owns their shared boundary |
+| Keep all Windows API occurrences in one protocol state | ApiRequest.lean: `ApiRequest`, `ProtocolState`, `embedPending`, `selectPending` |
+| Resolve the semantic input/count arguments | WriteFileArguments.lean: `Request`, `Prepared` |
+| Fix semantic and ABI custody together | WriteFileCallPlan.lean: `LoanPlan.requests`, `Abi.StackPlan.loanPlan` |
+| Issue and retain the exact full batch | WriteFileHandoff.lean: `EntryHandoff.recorded`, `pendingAt`, `initialPrefix` |
+| Connect an actual CALL and selected Windows policy | WriteFileCall.lean: `CallPolicy.ofFactory`, `reachedCall?`, `CallHandoff` |
+| Preserve protected storage and actual CALL-saved bytes | WriteFilePreservation.lean, WriteFileCallPreservation.lean: `Abi.CallNormal.saved_return_cell_preserved_after_return` |
+| Initialize runtime from the reached call | WriteFileRuntime.lean: `CallHandoff.runtime`, `rawAfter`, `runtime_restoredRsp` |
+| Continue the same accepted frontier | WriteFileService.lean: `ServiceReceipt`, `after`, `frontier_continuity`, `ServiceEdge` |
+| Find raw carrier and edge-signature ownership | CallRuntime.lean, RawState.lean, RawStepSignature.lean; architecture owns their shared boundary |
 
 `ProtocolState` is the full `CallProtocol.State ApiRequest`, including
 GetStdHandle, WriteFile and ExitProcess occurrences. Selecting a WriteFile view
@@ -66,7 +66,7 @@ on the selected `Realization`, not exhaustive raw-step or provider adequacy.
 
 ## Conditional prefix evidence
 
-[`WriteFile.lean`](../Grass/Platform/Win32/WriteFile.lean) supplies a conditional
+`WriteFile.lean` supplies a conditional
 pending-prefix evidence layer for the synchronous Hello World provider. It does
 not implement a Win32 provider, discharge physical ABI applicability, or extend
 the common memory checker with happens-before.
@@ -108,7 +108,7 @@ returns `some`. It does not claim a conforming provider write exists yet.
 
 ## Conditional nonresponse evidence
 
-[`WriteFileNonresponse.lean`](../Grass/Platform/Win32/WriteFileNonresponse.lean)
+`WriteFileNonresponse.lean`
 consumes a reached `History` in two separate ways. `InfiniteContinuation` carries
 actual `CommittedStep` evidence at every edge for the same occurrence, record and
 realization. `historyAt` recursively extends the exact supplied root history;
@@ -139,7 +139,7 @@ fixture's single committed edge.
 
 ## Matched return and caller continuation
 
-The [matched-return consumer](../Grass/Platform/Win32/WriteFileReturn.lean)
+The matched-return consumer
 requires a reached `History`, the exact successful `CallProtocol.return?`, and
 explicit physical result correspondence. It preserves the raw 32-bit BOOL:
 any nonzero value requires an initialized little-endian DWORD at the count slot,

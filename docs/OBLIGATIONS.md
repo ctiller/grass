@@ -102,7 +102,7 @@ other duties still need their own permitted terminal outcomes. Neither a duty's
 kind alone nor the occurrence of exit supplies a universal discharge rule.
 No generic droppable flag, new disposition or global policy framework is implied.
 
-The neutral [ExitProcessCompletion](../Grass/Platform/Win32/ExitProcessCompletion.lean)
+The neutral ExitProcessCompletion
 producer checks the exit observation
 and changes control. Concrete obligation accounting belongs to the terminal or
 protocol consumer. At main `0993922c`, the producer and `RawStep.completedExit`
