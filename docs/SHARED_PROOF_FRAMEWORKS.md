@@ -27,6 +27,16 @@ need is reusable verified construction, not identical domain vocabulary.
 
 ## Evidence and present status
 
+Published reuse checkpoint: Windows `f8185863` migrates both actual GetStdHandle
+and WriteFile entry producers to ProtocolEntry.issue?, removing duplicated
+checker and preservation-proof bodies. Architecture inspected the final clean
+six-file delta; the supplier reports independent review and full build, trust,
+source, declaration, ledger and documentation gates passed. The constructive
+fixture tests shared CP/ABI construction, not GetStdHandle dispatch or native
+provider identity. This closes the bounded two-consumer CP-entry migration;
+ExitProcess and the rest of DUP-01 remain outside that closure. Integration is
+recommended to spikes, not asserted by this checkpoint record.
+
 Source inspection used main checkout revision `c8eb4243`, together with the
 architecture delta `3887deed`. The bounded duplication inventory is pinned to
 `2370d929`; it is a lower bound, not a complete stack census.
