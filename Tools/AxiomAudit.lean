@@ -1,4 +1,7 @@
 import Lean
+import Grass.Artifact.ELF.Header
+import Grass.Platform.Linux.Syscall
+import Grass.Platform.Linux.X86
 import Grass.Op.AccessFactory
 import Grass.Op.AccessRun
 import Grass.Op.ReadObservation
