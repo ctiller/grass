@@ -18,6 +18,12 @@ def store : Store :=
 
 def before : State := ⟨⟨1⟩, 4, [], [.i32 5, .i32 4]⟩
 
+/-- Independent source-site-to-outcome check, not a direct call to localStep. -/
+example : (match LocalRun.check store ⟨⟨1⟩, 2, [], [.i32 3, .i32 7]⟩ with
+    | .ok run => run.site.instruction == .i32Sub &&
+        run.outcome == .next ⟨⟨1⟩, 3, [], [.i32 4]⟩
+    | .error _ => false) = true := by decide
+
 example : (match HostInvocation.check store before with
     | .ok call => call.arguments == [.i32 4, .i32 5] &&
         call.hostId == ⟨19⟩ && call.continuation.pc == 5 && call.continuation.stack == []
