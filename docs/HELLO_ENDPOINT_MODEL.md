@@ -139,6 +139,19 @@ Spinning or retry steps alone do not establish meaningful progress. Derive
 dependencies from exact live participants and resource identities; ordinary
 memory safety and loan invariants do not prove this obligation.
 
+The authored logical frontier has a direct, smaller result:
+[`ObservedBehavior.terminal_or_permitted_wait`](../Grass/Console/ObservedFrontier.lean)
+classifies every actual history of the exact console denotation as terminal or
+holding a permitted permanent wait on that same history's output cut or selected
+observation. The [contract-binding tests](../Tests/Console/ObservedFrontier.lean)
+use the `writeLineContract` and `SpecProcess.withLiveness` construction of
+`helloSpec`; the proof consumes no responsiveness assumption or complete-run
+witness. This is logical frontier evidence, not a separate deadlock admission
+gate. It does not establish the shared closed-subset property for a raw program.
+Raw Hello still needs the actual reachable phase invariant, provider return and
+completion edges, and caller/provider agency interpretation tied to the same
+source, loaded image, realization and resource state.
+
 Acceptance requires one reached success path and adverse cases for absent or
 invalid stdout, raw false BOOL after accepted output, zero progress, short
 writes, pending exit, and wrong-route rejection. These exercise the concrete

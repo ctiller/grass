@@ -17,6 +17,7 @@ import Grass.Semantics.BehaviorContract
 import Grass.Semantics.Environment
 import Grass.Semantics.SpecificationDemands
 import Grass.Console.ObservedBehavior
+import Grass.Console.ObservedFrontier
 import Grass.Console.ObservedEmbedding
 import Grass.Console.ObservedEmbeddingSteps
 import Grass.Console.Contract
