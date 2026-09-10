@@ -32,16 +32,17 @@ def ApiResponse : ApiRequest → Type
   | .exitProcess _ => Unit
 
 /-- An allowed WriteFile result projects an actual matched return for this same
-call and selected pending record.  `MatchedReturn.conforms` retains the existing
+call, selected pending record, and selected raw-system realization.
+`MatchedReturn.conforms` retains the existing
 memory/count observation; no second BOOL rule is introduced here. -/
-def WriteFileAllowed (interpretation : WriteFile.ReturnInterpretation)
+def WriteFileAllowed (realization : WriteFile.Realization)
+    (interpretation : WriteFile.ReturnInterpretation)
     (call : CallProtocol.CallId) (record : CallProtocol.Pending ApiRequest)
     (result : WriteFile.ReturnResult) : Prop :=
   ∃ (request : WriteFile.Request) (writeRecord : CallProtocol.Pending WriteFile.Request),
     record.request = .writeFile request ∧
     WriteFile.selectPending record = some writeRecord ∧
-    ∃ (plan : WriteFile.LoanPlan) (realization : WriteFile.Realization)
-      (initial before after : WriteFile.ProtocolState)
+    ∃ (plan : WriteFile.LoanPlan) (initial before after : WriteFile.ProtocolState)
       (frontier : WriteFile.Prefix plan before call writeRecord)
       (history : WriteFile.History plan realization initial call writeRecord frontier),
       WriteFile.MatchedReturn interpretation history result after
@@ -49,13 +50,15 @@ def WriteFileAllowed (interpretation : WriteFile.ReturnInterpretation)
 /-- Fixed allowance for the selected pending record.  A request with a
 different payload has no response under this occurrence's contract. -/
 def Allowed (environment : ConsoleEnvironment)
+    (realization : WriteFile.Realization)
     (interpretation : WriteFile.ReturnInterpretation)
     (call : CallProtocol.CallId) (record : CallProtocol.Pending ApiRequest) :
     (request : ApiRequest) → ApiResponse request → Prop
   | .getStdHandle selector, handle =>
       record.request = .getStdHandle selector ∧ environment.getStdAllowed selector handle
   | .writeFile request, result =>
-      record.request = .writeFile request ∧ WriteFileAllowed interpretation call record result
+      record.request = .writeFile request ∧
+        WriteFileAllowed realization interpretation call record result
   -- Unit identifies the sole response shape; it does not witness a terminal edge.
   | .exitProcess status, () => record.request = .exitProcess status
 
