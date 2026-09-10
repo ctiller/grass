@@ -39,7 +39,7 @@ abbrev system {image : ImageInput} {inputs : EntryInputs} (loaded : LoadedImage 
     (environment : ConsoleEnvironment)
     (covered : CallProtocol.GrantSupplyCovers loaded.initialState.machine.memory
       (FreshSupply.initial : FreshSupply GrantTag)) :=
-  Raw.finitePrefixSystem loaded Grass.Tests.Win32WriteFile.noEffects environment
+  Raw.system loaded Grass.Tests.Win32WriteFile.noEffects environment
     Grass.Tests.Win32RawStep.noReturnInterpretation covered
 
 /-- Bounded checked raw CPU edges with an explicitly empty graph. The graph

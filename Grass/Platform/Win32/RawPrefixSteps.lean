@@ -12,12 +12,12 @@ open Grass.Platform.Win32.ExecutionState Grass.Platform.Win32.Loader
 
 /-- An admitted loader-rooted prefix decomposes into actual raw edges with
 exact indexed events, root and endpoint. It supplies no service classification. -/
-theorem finitePrefix_indexed_witnesses {image : ImageInput} {inputs : EntryInputs}
+theorem prefix_indexed_witnesses {image : ImageInput} {inputs : EntryInputs}
     {loaded : LoadedImage image inputs} {realization : WriteFile.Realization}
     {environment : ConsoleEnvironment} {interpretation : WriteFile.ReturnInterpretation}
     {covered : CallProtocol.GrantSupplyCovers loaded.initialState.machine.memory
       (FreshSupply.initial : FreshSupply GrantTag)}
-    (execution : (finitePrefixSystem loaded realization environment interpretation covered).ExecutionPrefix) :
+    (execution : (system loaded realization environment interpretation covered).ExecutionPrefix) :
     ∃ (states : Fin (execution.events.length + 1) → RawState)
       (graphs : Fin (execution.events.length + 1) → Graph)
       (choices : Fin execution.events.length → Choice),
@@ -31,7 +31,7 @@ theorem finitePrefix_indexed_witnesses {image : ImageInput} {inputs : EntryInput
           (execution.events.get index).down (states index.succ) (graphs index.succ) := by
   obtain ⟨states, graphs, choices, first, firstGraph, last, lastGraph, steps⟩ :=
     execution.runs.steps.exists_indexed_witnesses
-  obtain ⟨root, rootGraph⟩ := finitePrefix_initial execution
+  obtain ⟨root, rootGraph⟩ := prefix_initial execution
   exact ⟨fun index => (states index).down, fun index => (graphs index).down, choices,
     (congrArg ULift.down first).trans root, (congrArg ULift.down firstGraph).trans rootGraph,
     congrArg ULift.down last, congrArg ULift.down lastGraph, steps⟩

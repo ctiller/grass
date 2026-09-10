@@ -14,15 +14,23 @@ extracts local facts from the actual fixed raw relation:
   [composition test](../Tests/Platform/Win32RawPhasePreservation.lean) joins an
   actual GetStdHandle return to a CPU suffix at the exact same state and graph.
 
-[RawPrefix](../Grass/Platform/Win32/RawPrefix.lean) reuses
+[RawPrefix](../Grass/Platform/Win32/RawPrefix.lean) defines `Raw.system` and reuses
 `RelationalSystem.ExecutionPrefix` for finite histories. Its root is computed
 from the selected loaded machine, actual grant-supply coverage, fresh protocol
 bookkeeping, loaded caller and empty runtime table and graph. Universe lifts
 only align the existing carrier with raw choices; each step is the exact raw
-relation. Its unused terminal and infinite-consistency fields are false
-scaffolding, **not raw completion semantics**. No completion, deadlock, progress
-or termination conclusion may be drawn from those fields. Replace this view
-with the canonical raw system when complete semantics are available.
+relation. A terminal state retains its exit call and status; `Raw.result`
+projects that payload. Every pointwise actual infinite step stream is admitted,
+with no fairness or responsiveness condition. Infinite service is not silently
+identified with a finite wait, and silent CPU divergence remains represented.
+This is a relative operational system. A full `BehaviorModel` still needs a
+faithful external wait boundary and its public observation mapping.
+
+[RawTerminal](../Grass/Platform/Win32/RawTerminal.lean) proves that any actual
+edge into terminal control is a checked ExitProcess completion. Every terminal
+loader-rooted prefix therefore retains a preceding run and a final actual exit
+edge with the exact process, call, status and event. Terminal control admits no
+next raw step; archived bookkeeping need not be empty.
 
 These clauses do not prove enabledness or Hello deadlock freedom. Frontend must
 retain the actual loader-to-entry prefix; a computed endpoint alone is
