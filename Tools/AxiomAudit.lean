@@ -44,6 +44,9 @@ import Grass.Artifact.Wasm.Target
 import Grass.Assembly.Lower.AArch64
 import Grass.Assembly.Lower.Layout
 import Grass.Assembly.Lower.Lowering
+import Grass.Assembly.Lower.Wasm
+import Grass.Assembly.Lower.X86
+import Grass.Assembly.Lower.X86Lengths
 import Grass.Assembly.Syntax.AST
 import Grass.Assembly.Syntax.Parser
 import Grass.Assembly.Syntax.Wellformed
@@ -163,7 +166,10 @@ import Grass.ISA.X86.RegisterSemantics
 import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.Sources
 import Grass.ISA.X86.Target
+import Grass.ISA.X86.Target.Core.Operands
+import Grass.ISA.X86.Target.Core.Prefixes
 import Grass.ISA.X86.Target.Encode
+import Grass.ISA.X86.Target.Ledger
 import Grass.ISA.X86.Target.Native
 import Grass.ISA.X86.Target.State
 import Grass.Memory.Access

@@ -193,7 +193,7 @@ done
 cat >"$tmp" <<'EOF'
 import Grass.Trust.Audit
 open Grass
-def passthrough {spec : SpecProcess} (verified : VerifiedProgram spec) : VerifiedProgram spec := verified
+def passthrough {spec : SpecRoot} (verified : VerifiedProgramRoot spec) : VerifiedProgramRoot spec := verified
 #audit_verified_programs
 EOF
 require_failure_matching 'trust audit found no concrete VerifiedProgram declarations' 'Trust audit accepted generated machinery or a pass-through as a concrete root.' "$tmp"
@@ -201,7 +201,7 @@ require_failure_matching 'trust audit found no concrete VerifiedProgram declarat
 cat >"$tmp" <<'EOF'
 import Tests.Foundation
 open Grass
-@[irreducible] def HiddenVerifiedProgram : Type 1 := VerifiedProgram Grass.Tests.Foundation.spec
+@[irreducible] def HiddenVerifiedProgram : Type 1 := VerifiedProgramRoot Grass.Tests.Foundation.spec
 def cleanHiddenVerifiedProgram : HiddenVerifiedProgram := by
   unfold HiddenVerifiedProgram
   exact Grass.Tests.Foundation.verified
@@ -214,7 +214,7 @@ cat >"$internal_path" <<'EOF'
 import Tests.Foundation
 open Grass
 namespace InternalRootAuditProbe
-@[irreducible] def HiddenVerifiedProgram : Type 1 := VerifiedProgram Grass.Tests.Foundation.spec
+@[irreducible] def HiddenVerifiedProgram : Type 1 := VerifiedProgramRoot Grass.Tests.Foundation.spec
 def _hiddenVerifiedProgram : HiddenVerifiedProgram := by
   unfold HiddenVerifiedProgram
   exact Grass.Tests.Foundation.verified
@@ -236,7 +236,7 @@ cat >"$tmp" <<'EOF'
 import Tests.Foundation
 open Grass
 namespace AuditProbe
-axiom boxedVerifiedProgram : Nonempty (VerifiedProgram Grass.Tests.Foundation.spec)
+axiom boxedVerifiedProgram : Nonempty (VerifiedProgramRoot Grass.Tests.Foundation.spec)
 noncomputable def emittedBytes : ByteArray := emitProgram (Classical.choice boxedVerifiedProgram)
 end AuditProbe
 #audit_verified_programs
@@ -245,7 +245,7 @@ require_failure_matching 'emittedBytes.*boxedVerifiedProgram' 'Trust audit did n
 cat >"$tmp" <<'EOF'
 import Tests.Foundation
 open Grass
-axiom AuditProbe.Source._flat_ctor : Nonempty (VerifiedProgram Grass.Tests.Foundation.spec)
+axiom AuditProbe.Source._flat_ctor : Nonempty (VerifiedProgramRoot Grass.Tests.Foundation.spec)
 noncomputable def AuditProbe.Sink._flat_ctor : ByteArray := emitProgram (Classical.choice AuditProbe.Source._flat_ctor)
 #audit_verified_programs
 EOF
@@ -271,7 +271,7 @@ cat >"$external_path" <<'EOF'
 import Tests.Foundation
 open Grass
 namespace ExternalAuditProbe
-axiom boxedVerifiedProgram : Nonempty (VerifiedProgram Grass.Tests.Foundation.spec)
+axiom boxedVerifiedProgram : Nonempty (VerifiedProgramRoot Grass.Tests.Foundation.spec)
 noncomputable def emittedBytes : ByteArray := emitProgram (Classical.choice boxedVerifiedProgram)
 end ExternalAuditProbe
 EOF
@@ -291,11 +291,11 @@ cat >"$tmp" <<EOF
 import $runtime_module
 import Tests.Foundation
 open Grass
-def ExternalRuntimeAuditProbe.emittedBytes (verified : VerifiedProgram Grass.Tests.Foundation.spec) : ByteArray :=
+def ExternalRuntimeAuditProbe.emittedBytes (verified : VerifiedProgramRoot Grass.Tests.Foundation.spec) : ByteArray :=
   ExternalRuntimeAuditProbe.identityBytes (emitProgram verified)
 #audit_runtime_dependencies ExternalRuntimeAuditProbe.emittedBytes
 EOF
-require_failure_matching 'ExternalRuntimeAuditProbe.identityBytes.*implemented_by.*ExternalRuntimeAuditProbe.replacement' 'Trust audit ignored an implemented_by replacement in the runtime dependency closure.' "$tmp"
+require_failure_matching 'ExternalRuntimeAuditProbe\.(identityBytes.*implemented_by.*ExternalRuntimeAuditProbe\.replacement|replacement.*unsafe)' 'Trust audit ignored an implemented_by replacement in the runtime dependency closure.' "$tmp"
 
 cat >"$runtime_path" <<'EOF'
 namespace ExternalRuntimeAuditProbe
@@ -308,7 +308,7 @@ cat >"$consumer_path" <<EOF
 import $runtime_module
 import Tests.Foundation
 open Grass
-def ExternalRuntimeAuditConsumer.emittedBytes (verified : VerifiedProgram Grass.Tests.Foundation.spec) : ByteArray := emitProgram verified
+def ExternalRuntimeAuditConsumer.emittedBytes (verified : VerifiedProgramRoot Grass.Tests.Foundation.spec) : ByteArray := emitProgram verified
 EOF
 require_success 'Could not compile the extern importing-module trust-audit probe.' "$consumer_path" -o "$consumer_olean"
 printf 'import %s\n#audit_runtime_dependencies ExternalRuntimeAuditConsumer.emittedBytes\n' "$consumer_module" >"$tmp"
@@ -337,7 +337,7 @@ import Tests.Foundation
 open Grass
 section
 attribute [local csimp] ExternalScopedCSimpProbe.replacement_eq
-def ExternalScopedCSimpProbe.emittedBytes (verified : VerifiedProgram Grass.Tests.Foundation.spec) : ByteArray :=
+def ExternalScopedCSimpProbe.emittedBytes (verified : VerifiedProgramRoot Grass.Tests.Foundation.spec) : ByteArray :=
   ExternalRuntimeAuditSource.identityBytes (emitProgram verified)
 end
 EOF

@@ -53,7 +53,7 @@ write, read and prove rather than two.
   structured exception, not for loading.
 -/
 
-namespace Grass.Artifact.PE
+namespace Grass.Artifact.PE.Target
 
 open Grass.Target
 
@@ -614,5 +614,11 @@ def format (machine : UInt16) : Format Sectioned where
   read_write := read_write machine
   rawOf := rawOf
   rawOf_assemble := rawOf_assemble
+
+end Grass.Artifact.PE.Target
+
+namespace Grass.Artifact.PE
+
+export Target (format)
 
 end Grass.Artifact.PE
