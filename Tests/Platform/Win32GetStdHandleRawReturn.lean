@@ -34,6 +34,7 @@ def regressionFor (actual : Grass.Tests.Win32HelloCall.ActualResult)
     | .error _ => none
     | .ok completion =>
       let step : Raw.RawStep setup.loaded Grass.Tests.Win32WriteFile.noEffects environment
+          Grass.Tests.Win32RawStep.noReturnInterpretation
           [] (entered.afterRaw prior) (.stdoutResult entered.handoff.call gpr rflags)
           completion.event completion.final [] :=
         completion.rawStep completed (Grass.Tests.Win32RawStep.empty_graph_valid _)

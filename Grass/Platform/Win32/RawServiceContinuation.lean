@@ -16,6 +16,7 @@ open Grass.Platform.Win32.ExecutionState Grass.Platform.Win32.Loader
 variable {image : ImageInput} {inputs : EntryInputs}
   {loaded : LoadedImage image inputs} {realization : WriteFile.Realization}
   {environment : ConsoleEnvironment}
+  {interpretation : WriteFile.ReturnInterpretation}
   {call : CallProtocol.CallId}
 
 /-- `service_suffix_metadata` proves that every edge in an explicitly
@@ -23,7 +24,7 @@ service-classified suffix preserves the entire protocol metadata. -/
 theorem service_suffix_metadata
     (raw : Nat → RawState) (graph : Nat → Graph)
     (agent : Nat → ContextId) (action : Nat → WriteFile.Action) (event : Nat → Event)
-    (steps : ∀ n, RawStep loaded realization environment (graph n) (raw n)
+    (steps : ∀ n, RawStep loaded realization environment interpretation (graph n) (raw n)
       (.providerService call (agent n) (action n)) (event n) (raw (n + 1)) (graph (n + 1)))
     (n : Nat) : (raw n).metadata = (raw 0).metadata := by
   induction n with
@@ -37,7 +38,7 @@ provider adequacy, arbitrary-suffix classification or permanent wait is asserted
 theorem service_suffix_continuation
     (raw : Nat → RawState) (graph : Nat → Graph)
     (agent : Nat → ContextId) (action : Nat → WriteFile.Action) (event : Nat → Event)
-    (steps : ∀ n, RawStep loaded realization environment (graph n) (raw n)
+    (steps : ∀ n, RawStep loaded realization environment interpretation (graph n) (raw n)
       (.providerService call (agent n) (action n)) (event n) (raw (n + 1)) (graph (n + 1)))
     {plan : WriteFile.LoanPlan} {initial state : WriteFile.ProtocolState}
     {record : CallProtocol.Pending WriteFile.Request}

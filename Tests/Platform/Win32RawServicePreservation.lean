@@ -18,7 +18,7 @@ def rawAt : Nat → RawState
 
 theorem two_steps {image : ImageInput} {inputs : EntryInputs}
     (loaded : LoadedImage image inputs) (n : Nat) (bounded : n < 2) :
-    RawStep loaded Grass.Tests.Win32WriteFile.noEffects Grass.Tests.Win32WriteFileConsolePublication.environment [] (rawAt n)
+    RawStep loaded Grass.Tests.Win32WriteFile.noEffects Grass.Tests.Win32WriteFileConsolePublication.environment noReturnInterpretation [] (rawAt n)
       (.providerService call record.agent action) quietEvent (rawAt (n + 1)) [] := by
   cases n with
   | zero => exact quiet_service loaded
@@ -59,6 +59,7 @@ theorem zero_edges {image : ImageInput} {inputs : EntryInputs}
   have preserved := RawStep.service_prefix_runtime (loaded := loaded) (call := call)
     (realization := Grass.Tests.Win32WriteFile.noEffects)
     (environment := Grass.Tests.Win32WriteFileConsolePublication.environment)
+    (interpretation := noReturnInterpretation)
     rawAt (fun _ => []) (fun _ => record.agent) (fun _ => action) (fun _ => quietEvent)
     0 (fun n impossible => False.elim (Nat.not_lt_zero n impossible))
     runtime (by rfl) record (by rfl) 0 (Nat.le_refl 0)
