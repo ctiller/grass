@@ -51,7 +51,7 @@ def entryHandoff? (before : ExecutionState.State ApiRequest) (agent : ContextId)
                 { caller, control, callerRegistered, agentRegistered, clean,
                   beforeProtocol, projected, call, afterProtocol, issued }
       else none else none else none
-  | .pending .. | .terminal => none
+  | .pending .. | .terminal .. => none
 
 namespace EntryHandoff
 

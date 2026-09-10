@@ -77,6 +77,7 @@ import Grass.Platform.Win32.RawServiceContinuation
 import Grass.Platform.Win32.RawEntryEvent
 import Grass.Platform.Win32.RawServicePreservation
 import Grass.Platform.Win32.ExitProcessRuntime
+import Grass.Platform.Win32.ExitProcessCompletion
 import Grass.Platform.Win32.ConsoleEnvironment
 import Grass.Platform.Win32.WriteFileConsolePublication
 import Grass.Platform.Win32.GetStdHandleReturn
@@ -258,6 +259,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawEntryEvent,
    `Grass.Platform.Win32.RawServicePreservation,
    `Grass.Platform.Win32.ExitProcessRuntime,
+   `Grass.Platform.Win32.ExitProcessCompletion,
    `Grass.Platform.Win32.ConsoleEnvironment,
    `Grass.Platform.Win32.WriteFileConsolePublication,
    `Grass.Platform.Win32.GetStdHandleReturn,
@@ -355,7 +357,7 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Static selector/route/result policy and observed-register API acceptance.
 -- External process applicability and formal source anchors remain owed.
 -- The bounded live writable/synchronous publication attribution policy.
-def owedBaseline : Nat := 347
+def owedBaseline : Nat := 349
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -1044,6 +1046,8 @@ def owed : List Name :=
     `Grass.Platform.Win32.GetStdHandle.ProviderResult.observe?,
     `Grass.Platform.Win32.WriteFile.ConsolePublication.matches?,
     `Grass.Platform.Win32.ExitProcess.status,
+    `Grass.Platform.Win32.ExitProcess.complete?,
+    `Grass.Platform.Win32.ExitProcess.Completion.after,
     -- Fixed request widths and callee stack custody retain external ABI debt.
     `Grass.Platform.Win32.ApiRequest,
     `Grass.Platform.Win32.WriteFile.Abi.InitializedReturnQword,

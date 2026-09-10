@@ -61,7 +61,7 @@ private def callerReady? (checked : ExecutionState.State ApiRequest) :
                   rw [control]
                   exact ⟨protocol, projected, ⟨kind, registered⟩, available⟩⟩
               else none
-  | .pending .. | .terminal => none
+  | .pending .. | .terminal .. => none
 
 /-- The concrete prefix retains its loaded image, original raw bookkeeping,
 checked projection, and caller-ready evidence. -/
