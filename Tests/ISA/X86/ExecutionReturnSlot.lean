@@ -69,4 +69,19 @@ private def mismatchRetainsRead : Bool := match corruptedResult with
   | _ => false
 example : mismatchRetainsRead = true := by decide
 
+/-- An observed provider RSP naming another valid stack slot is rejected
+before a read, even though the original saved return address remains intact. -/
+private def displacedRsp : State :=
+  { call.result with gpr := fun register =>
+      if register = .rsp then call.result.gpr .rsp - 8 else call.result.gpr register }
+
+private def wrongRspRefuses : Bool :=
+  match ReturnSlotFactory.read cpu call.receipt displacedRsp with
+  | .error (.wrongSlot reached _ _) =>
+      reached.gpr .rsp == displacedRsp.gpr .rsp &&
+        reached.machine.events.length == call.result.machine.events.length
+  | _ => false
+
+example : wrongRspRefuses = true := by decide
+
 end Grass.Tests.ExecutionReturnSlot

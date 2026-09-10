@@ -90,6 +90,7 @@ import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.ProviderResume
 import Grass.Platform.Win32.ProviderResumeFinalization
+import Grass.Platform.Win32.WriteFileReturnCompletion
 import Grass.Platform.Win32.CallResumeBinding
 import Grass.Platform.Win32.CallResumeHistory
 import Grass.Platform.Win32.RawStepSignature
