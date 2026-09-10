@@ -97,9 +97,9 @@ theorem Decoded.parsed {fetch : AArch64BootFetch.Word policy entry} {cpu : Cpu}
   rw [← decoded.noTrailing]
   exact decoded.body.source.parsed
 
-/-- Actual post-fetch memory is the shared receipt's endpoint, even if the body
+/-- Actual post-fetch machine state is the shared receipt's endpoint, even if the body
 is unsupported. This does not assert that SVC's system effects have executed. -/
-def completedFetchMemory {cpu : Cpu} (result : Result policy entry cpu) : Option MachineState :=
+def completedFetchState {cpu : Cpu} (result : Result policy entry cpu) : Option MachineState :=
   match result with
   | .fetched fetch _ _ => some fetch.read.after
   | _ => none
