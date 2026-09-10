@@ -21,8 +21,6 @@ retrieval location, exact anchor, and a locator.
 
 ## What makes this ABI easy to get wrong
 
-Four things, and Spike 1 touches all four.
-
 - **Shadow space is the caller's job and is always present.** Every call site
   reserves 32 bytes above the return address, even for a function taking no
   arguments, and even though the arguments were passed in registers. A callee
@@ -384,41 +382,5 @@ theorem savedRegisterSlots_disjoint (layout : CallFrameLayout) {left right : Nat
   · exact Or.inl (layout.savedRegisterSlots_ordered ordered leftInRange)
 
 end CallFrameLayout
-
-/-- Spike 1's saved registers, in machine push order. -/
-def spike1SavedRegisters : List Gpr := [.r12, .r13, .r14]
-
-/-- The manually supplied Spike 1 inputs to the generic frame calculation. -/
-def spike1FrameLayout : CallFrameLayout where
-  argumentCount := 5
-  localBytes := 4
-  localAlignment := 4
-  savedRegisters := spike1SavedRegisters
-
-theorem spike1FrameLayout_admissible : spike1FrameLayout.Admissible := by decide
-
-/-- The computed call allocation: shadow space, fifth-argument slot, separate
-four-byte local, and whatever final alignment the calculation requires. -/
-def spike1CallAllocationBytes : Nat := spike1FrameLayout.callAllocationBytes
-
-theorem spike1_stackArgumentBytes : spike1FrameLayout.stackArgumentBytes = 8 := by decide
-theorem spike1_localOffset : spike1FrameLayout.localOffset = 40 := by decide
-theorem spike1_callAllocationBytes : spike1CallAllocationBytes = 48 := by decide
-theorem spike1_totalFrameBytes : spike1FrameLayout.totalFrameBytes = 72 := by decide
-
-theorem spike1_savedRegisterOffsets :
-    spike1FrameLayout.savedRegisterOffset 0 = 64 ∧
-    spike1FrameLayout.savedRegisterOffset 1 = 56 ∧
-    spike1FrameLayout.savedRegisterOffset 2 = 48 := by decide
-
-/-- Spike 1's call alignment is an instance of the generic layout contract. -/
-theorem spike1_prologue_aligned : AlignedForCall 3 spike1CallAllocationBytes := by
-  simpa [spike1FrameLayout, spike1SavedRegisters, spike1CallAllocationBytes] using
-    spike1FrameLayout.callAllocation_aligned
-
-/-- The same prologue without the shadow space is still aligned, which is why
-the two concerns must be checked separately: alignment does not imply the
-shadow space is there. -/
-theorem spike1_prologue_aligned_without_shadow : AlignedForCall 3 0 := by decide
 
 end Grass.ABI.Win64
