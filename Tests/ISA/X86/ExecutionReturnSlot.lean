@@ -54,6 +54,9 @@ example : success.afterRead.memory = call.afterStore.memory ∧
     success.afterRead.obligations = call.afterStore.obligations := success.receipt.state_frame
 example : success.receipt.descriptor.range = call.receipt.storeDescriptor.range :=
   success.receipt.slotRange
+example : ∃ base, success.receipt.run.resolved.allocation.base = some base ∧
+    base.toNat + call.receipt.storeDescriptor.range.stop = (before.gpr .rsp).toNat :=
+  success.receipt.slot_origin
 
 /-- A provider may replace the slot before this read; the actual read is retained on mismatch. -/
 private def corrupted : State :=

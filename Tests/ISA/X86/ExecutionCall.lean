@@ -148,6 +148,10 @@ example : receipt.result.gpr .rsp = 0x4038 := by decide
 example : List.ofFn (fun i : Fin 8 => afterS.memory.cellAt? chainedAlloc (56 + i)) =
     (le64 (BitVec.ofNat 64 0x1006)).map (fun byte => some (byte, true)) := by decide
 example : afterS.events.length = 3 := by decide
+example : (0x4000 : MachineAddress).toNat + receipt.storeDescriptor.range.stop =
+    (before.gpr .rsp).toNat := receipt.store_stop_toNat 0x4000 (by rfl)
+example : addressOf 0x4000 receipt.storeDescriptor.range.stop = before.gpr .rsp :=
+  receipt.store_stop_address 0x4000 (by rfl)
 example : ∃ fetched target saved,
     receipt.result.machine.events = before.machine.events ++ [fetched, target, saved] := by
   obtain ⟨fetched, target, saved, events, _, _, _⟩ := receipt.events_exact
