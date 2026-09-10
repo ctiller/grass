@@ -49,7 +49,7 @@ inverse law, and it needs three things of the input, all of which
 address is non-zero, and every stored RVA fits its field.
 -/
 
-namespace Grass.Artifact.PE
+namespace Grass.Artifact.PE.Target
 
 open Grass.Artifact.Binary
 
@@ -530,4 +530,4 @@ theorem parseIdata_writeIdata (base : Nat) (libs : List Library) (positive : 0 <
     parseLibHintNames_writeLibHintNames libs _ symbolAscii,
     parseDllNames_writeDllNames_nil libs nameAscii, zipLibraries_maps]
 
-end Grass.Artifact.PE
+end Grass.Artifact.PE.Target

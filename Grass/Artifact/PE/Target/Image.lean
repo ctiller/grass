@@ -99,7 +99,7 @@ image derives from data it keeps: `SizeOfCode`, `SizeOfInitializedData`,
 section headers' `SizeOfRawData`/`PointerToRawData`.
 -/
 
-namespace Grass.Artifact.PE
+namespace Grass.Artifact.PE.Target
 
 open Grass.Artifact.Binary
 
@@ -562,4 +562,4 @@ theorem read_write (machine : UInt16) (artifact : Artifact) :
     readSectionHeaders_writeSectionEntries, splitPayloads_writePayloads, and_self,
     artifact.sectionCountBound, ↓reduceDIte]
 
-end Grass.Artifact.PE
+end Grass.Artifact.PE.Target

@@ -165,6 +165,8 @@ import Grass.ISA.X86.RegisterSemantics
 import Grass.ISA.X86.Rel32
 import Grass.ISA.X86.Sources
 import Grass.ISA.X86.Target
+import Grass.ISA.X86.Target.Core.Operands
+import Grass.ISA.X86.Target.Core.Prefixes
 import Grass.ISA.X86.Target.Encode
 import Grass.ISA.X86.Target.Ledger
 import Grass.ISA.X86.Target.Native
