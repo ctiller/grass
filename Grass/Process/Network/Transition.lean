@@ -882,7 +882,12 @@ step in the program, vacuously and wrongly.
 regions its own role may write, so `ProcessGraph.sharedAccess` still decides who
 touches what.
 -/
-structure StepsLocally (before after : plan.LogicalProcessNetwork)
+/-
+The effects common to a local protocol transition and a channel-delivered local
+transition. Scope remains specific to the transition family that consumes these
+effects.
+-/
+structure LocalStepEffects (before after : plan.LogicalProcessNetwork)
     (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
     (event : (plan.topology.protocol kind).Event)
     (emitted : Trace boundary.Observation)
@@ -994,6 +999,16 @@ structure StepsLocally (before after : plan.LogicalProcessNetwork)
       plan.sharedUpdate kind event (fromKind ▸ fromInstance.localState)
         (toKind ▸ toInstance.localState) issued localEmitted region
         (before.shared region) (after.shared region)
+
+/-- One instance takes a local protocol step. The common operational effects
+are kept in `LocalStepEffects`; this structure supplies the local-step scope. -/
+structure StepsLocally (before after : plan.LogicalProcessNetwork)
+    (kind : plan.topology.ProcessKind) (slot : plan.topology.InstanceId kind)
+    (event : (plan.topology.protocol kind).Event)
+    (emitted : Trace boundary.Observation)
+    (issued : Bag (plan.topology.protocol kind).Demand)
+    (localEmitted : ObservationSegment (plan.topology.protocol kind).Observation) :
+    Prop extends LocalStepEffects plan before after kind slot event emitted issued localEmitted where
   /--
   Its slot, the regions it wrote, the observation trace **if it actually
   emitted**, and nothing else.
