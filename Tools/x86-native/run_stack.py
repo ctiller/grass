@@ -13,7 +13,7 @@ SIZE = 65536
 ENTRY_OFFSET = SIZE - 120  # ABI entry RSP is 8 modulo 16.
 INPUT = [0xFEDCBA9876543210 + i * 0x102030405 for i in range(16)]
 FLAGS = 0xAD7
-COVERAGE = 'a2b0d896b93776986ee5abd0dd3da228a22462a8456e0129c7470c3cc2ee012d'
+COVERAGE = '3b3d4abe76cd4736179a0fdd990cf67935711a6f5bf4043db58b9eea703e5547'
 
 
 def coverage_identity(raw):

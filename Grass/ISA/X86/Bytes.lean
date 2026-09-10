@@ -14,10 +14,8 @@ those theorems whether or not it has anything to do with x86 — a model with
 `reg` and `rm` transposed throughout round-trips perfectly and emits
 instructions no processor will execute.
 
-The opcode bytes were the visible symptom: `Tests/ISA/X86/Spike1Addressing.lean`
-tabulated `FF 15 d32` and `C7 84 24 d32 imm32`, and the bytes `FF`, `8D` and
-`C7` appeared nowhere in the repository. Only the ModR/M and SIB bytes were
-modeled, so "golden bytes" covered two bytes of a seven-byte instruction.
+Checking only ModR/M and SIB leaves opcode, displacement and immediate bytes
+unexamined. Complete instruction bytes are required for differential validation.
 
 With `toBytes` the model emits a complete instruction, which is what an
 independent assembler can be compared against. `docs/VALIDATION.md` §2 puts the

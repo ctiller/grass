@@ -6,10 +6,10 @@ namespace Grass.Tests.Assembly.X86BranchLayout
 open Grass.Assembly SourceInput X86Source X86ControlFlow X86BranchLayout
 
 def wrap (body : List Char) : List Char :=
-  (source_chars "def helloSource := asm_source {\n") ++ body ++ (source_chars "\n}")
+  (source_chars "def branchSample := asm_source {\n") ++ body ++ (source_chars "\n}")
 
 def layoutChars? (chars : List Char) : Option Result := do
-  let body ← (extractHelloSourceChars chars).toOption
+  let body ← (extractSourceChars chars).toOption
   let statements ← (parseBody body).toOption
   let checked ← check? statements
   layout? checked
@@ -51,12 +51,6 @@ example : layoutChars? (wrap (source_chars
   "lea r9, transferred.addr\nud2")) = none := by decide +kernel
 example : layoutChars? (wrap (source_chars
   "arg WriteFile.overlapped, 0\nud2")) = none := by decide +kernel
-
-def authored : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
-
-/-- The unchanged Spike still contains symbolic slots, addresses, and an
-external call, so this closed/local-branch layer refuses the whole program. -/
-example : layoutChars? authored = none := by decide +kernel
 
 theorem every_emitted_instruction_decodes (result : Result) (encoding : Grass.ISA.X86.InsnEncoding)
     (member : encoding ∈ result.encodings) (rest : Grass.Std.Logical.ByteSeq) :

@@ -3,16 +3,15 @@ import Grass.Assembly.FrameLea
 import Grass.Assembly.FrameLoad
 import Grass.Assembly.FrameStore
 import Grass.Assembly.RipRelative
-import Grass.Assembly.Win32Constants
 import Grass.Assembly.X86BranchLayout
 
 /-! A total, ambiguity-rejecting template boundary for each checked
 source instruction. RIP/static/import targets remain symbols; branches retain
-checked CFG indices. Hello has 50 retained statements and 42 `CodeItem`s.
+checked CFG indices.
 
-Final composition must not prepend `SourcePrologue.generated` to all 42 outputs:
-that would duplicate the three authored pushes. It must replace the checked
-saved prefix by the generated equivalent prefix plus allocation, insert any
+Final composition must not prepend `SourcePrologue.generated` to every output:
+that would duplicate the checked saved-register prefix. It must replace that
+prefix by its generated equivalent plus allocation, insert any
 separately proved local initializers at that boundary, and then append outputs
 corresponding to `frame.saved.rest`. Branch indices retained here are original
 checked-source indices; final layout must translate every index at or beyond the
@@ -63,8 +62,6 @@ inductive Output (frame : SourceFrame.Result) (rootOffset : Nat) where
       (exact : FrameLea.resolve? frame rootOffset origin = some resolved)
   | argument (origin : CodeItem) (resolved : FrameArgument.Result)
       (exact : FrameArgument.resolve? frame rootOffset origin = some resolved)
-  | constant (origin : CodeItem) (resolved : Win32Constants.Result)
-      (exact : Win32Constants.resolve? frame origin = some resolved)
   | branch (origin : CodeItem) (sourceFlow : Flow) (kind : BranchSourceKind)
       (label : String) (targetIndex continuation : Nat)
       (instructionExact : origin.instruction = ⟨kind.mnemonic, [.symbol label]⟩)
@@ -88,7 +85,7 @@ inductive Output (frame : SourceFrame.Result) (rootOffset : Nat) where
 
 def Output.origin {frame rootOffset} : Output frame rootOffset → CodeItem
   | .closed origin .. | .store origin .. | .load origin .. | .lea origin ..
-  | .argument origin .. | .constant origin .. | .branch origin ..
+  | .argument origin .. | .branch origin ..
   | .ripAddress origin .. | .ripCall origin .. | .sizeOf32 origin .. => origin
 
 def Output.template {frame rootOffset} : Output frame rootOffset → Template
@@ -97,7 +94,6 @@ def Output.template {frame rootOffset} : Output frame rootOffset → Template
   | .load _ resolved _ => .encoded resolved.encoding
   | .lea _ resolved _ => .encoded resolved.encoding
   | .argument _ resolved _ => .encoded resolved.encoding
-  | .constant _ resolved _ => .encoded resolved.encoding
   | .branch _ _ kind _ target _ _ _ => .branch kind.encodingKind target
   | .ripAddress _ destination symbol prototype .. => .ripAddress destination symbol prototype
   | .ripCall _ _ symbol _ prototype .. => .ripCall symbol prototype
@@ -123,8 +119,6 @@ private def singletonResolve {frame : SourceFrame.Result} {rootOffset : Nat}
     | some result => [Output.lea item result h] | none => []
   let argument := match h : FrameArgument.resolve? frame rootOffset item with
     | some result => [Output.argument item result h] | none => []
-  let constant := match h : Win32Constants.resolve? frame item with
-    | some result => [Output.constant item result h] | none => []
   let symbolic : List (Output frame rootOffset) :=
     match hs : item.instruction, hf : flow with
     | ⟨.jmp, [.symbol label]⟩, .jump target =>
@@ -152,7 +146,7 @@ private def singletonResolve {frame : SourceFrame.Result} {rootOffset : Nat}
         | some prototype => [.sizeOf32 item destination symbol prototype hs hp]
         | none => []
     | _, _ => []
-  closed ++ store ++ load ++ lea ++ argument ++ constant ++ symbolic
+  closed ++ store ++ load ++ lea ++ argument ++ symbolic
 
 def classify? (frame : SourceFrame.Result) (rootOffset : Nat)
     (item : CodeItem) (flow : Flow) : Option (Output frame rootOffset) :=

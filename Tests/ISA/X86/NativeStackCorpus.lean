@@ -1,5 +1,4 @@
 import Grass.Assembly.SourcePrologue
-import Tests.Assembly.SourceLiteral
 import Tests.ISA.X86.CorpusCommon
 
 /-!
@@ -85,16 +84,13 @@ example : (allocationBoundaryLayout 96).callAllocationBytes = 128 := by decide
 example : allocationRows.map Row.rspDecrease = [112, 128] := by decide
 
 def sourcePrologue? (chars : List Char) : Option SourcePrologue.Result := do
-  let body ← (SourceInput.extractHelloSourceChars chars).toOption
+  let body ← (SourceInput.extractSourceChars chars).toOption
   let frame ← SourceFrame.derive? body
   SourcePrologue.generate? frame
 
 def sample (saved : List Char) : List Char :=
-  (source_chars "def helloSource : MachineSource plan := withStack (value : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\n") ++
-    saved ++ (source_chars "\nud2\n}")
-
-def authored : List Char :=
-  include_source_chars "../../../Spikes/1_Hello_World/Program.lean"
+  "def stackCorpusCase : MachineSource plan := withStack (value : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\n".toList ++
+    saved ++ "\nud2\n}".toList
 
 def prologueRow? (label : String) (chars : List Char) : Option Row := do
   let result ← sourcePrologue? chars
@@ -106,17 +102,16 @@ def prologueRow? (label : String) (chars : List Char) : Option Row := do
       flagsPreserved := false
       basis := "SourceFrame.derive?+SourcePrologue.generate?+unwind.stackDelta" }
 
-/-! Each prologue is emitted exactly once from `Result.generated`.  The authored
-Spike 1 source supplies the three-extended-register case; the other public
-source builders exercise mixed one/two-byte PUSH encodings and the complete
-Win64 nonvolatile GPR set (excluding RSP, which has no unwind description). -/
+/-! Each prologue is emitted exactly once from `Result.generated`. These
+standalone source values exercise mixed one/two-byte PUSH encodings and the
+complete Win64 nonvolatile GPR set (excluding RSP, which has no unwind
+description). -/
 def prologueRows : List Row :=
   [ prologueRow? "mixed-rbx-r12"
-      (sample (source_chars "push rbx\npush r12"))
-  , prologueRow? "authored-spike1" authored
+      (sample "push rbx\npush r12".toList)
   , prologueRow? "all-nonvolatile"
-      (sample (source_chars
-        "push rbx\npush rbp\npush rsi\npush rdi\npush r12\npush r13\npush r14\npush r15"))
+      (sample
+        "push rbx\npush rbp\npush rsi\npush rdi\npush r12\npush r13\npush r14\npush r15".toList)
   ].reduceOption
 
 def rows : List Row := pushRows ++ allocationRows ++ prologueRows
@@ -139,7 +134,7 @@ def emit (row : Row) : IO Unit :=
 /-! Fail closed before emitting any partial corpus.  These executable checks
 bound validation data; they are not propositions used as proof authority. -/
 def generate : IO Unit := do
-  unless rows.length == 21 do
+  unless rows.length == 20 do
     throw (IO.userError "native stack corpus: incomplete population")
   unless decide (labels rows).Nodup do
     throw (IO.userError "native stack corpus: duplicate label")
@@ -149,7 +144,7 @@ def generate : IO Unit := do
     throw (IO.userError "native stack corpus: body exceeds 255 bytes")
   unless rows.all (fun row => row.rspDecrease ≤ 8192) do
     throw (IO.userError "native stack corpus: stack decrease exceeds 8192 bytes")
-  unless prologueRows.length == 3 &&
+  unless prologueRows.length == 2 &&
       prologueRows.all (fun row => 1 < row.pushedRegisterIndices.length) do
     throw (IO.userError "native stack corpus: generated prologue population is incomplete")
   rows.forM emit

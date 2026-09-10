@@ -7,10 +7,8 @@ open Grass.Assembly Grass.ISA.X86
 set_option maxRecDepth 100000
 set_option maxHeartbeats 4000000
 
-def authored : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
-
 def fromChars? (chars : List Char) : Option Grass.Assembly.FrameLea.Result := do
-  let body ← (SourceInput.extractHelloSourceChars chars).toOption
+  let body ← (SourceInput.extractSourceChars chars).toOption
   let frame ← SourceFrame.derive? body
   match frame.program.collected.code.filterMap (Grass.Assembly.FrameLea.resolve? frame 0) with
   | [result] => some result
@@ -21,13 +19,8 @@ def view (result : Grass.Assembly.FrameLea.Result) :
   (result.destination, result.slot, result.address.displacement,
     result.address.width, result.encoding.toBytes)
 
--- Every observation is downstream of the actual, unchanged Hello source.
-example : (fromChars? authored).map view =
-    some (.r9, "transferred", 40, 4, [0x4C, 0x8D, 0x8C, 0x24, 0x28, 0, 0, 0]) := by
-  decide +kernel
-
 def sample (locals body : List Char) : List Char :=
-  (source_chars "def helloSource : MachineSource plan := ") ++ locals ++
+  (source_chars "def leaSample : MachineSource plan := ") ++ locals ++
     (source_chars " withCallFrame WriteFile asm_source (statics := statics) {\n") ++
     body ++ (source_chars "\nud2\n}")
 

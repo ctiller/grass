@@ -4,11 +4,12 @@ import Tests.Assembly.SourceLiteral
 namespace Grass.Tests.Assembly.SourceImportRequests
 open Grass.Assembly.SourceImportRequests
 
-def authored : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
+def source : List Char := source_chars
+  "def importSample : MachineSource plan := withCallFrame ExitProcess asm_source (statics := objects) {\n  call qword ptr [rip + __imp_GetStdHandle]\n  call qword ptr [rip + __imp_ExitProcess]\n  ud2\n}"
 
 def actual : Option (List String × List String × List Grass.Std.Logical.ByteArray ×
     Grass.Std.Logical.ByteArray) := do
-  let body ← (Grass.Assembly.SourceInput.extractHelloSourceChars authored).toOption
+  let body ← (Grass.Assembly.SourceInput.extractSourceChars source).toOption
   let frame ← Grass.Assembly.SourceFrame.derive? body
   let splice ← Grass.Assembly.SourceSplice.derive? frame 0
   let result ← resolve? splice "selected-library.dll"
@@ -16,10 +17,9 @@ def actual : Option (List String × List String × List Grass.Std.Logical.ByteAr
     result.entries.map (fun entry => entry.nativeSymbol.name), result.library.name)
 
 example : actual = some
-    (["__imp_GetStdHandle", "__imp_WriteFile", "__imp_ExitProcess"],
-     ["__imp_GetStdHandle", "__imp_WriteFile", "__imp_ExitProcess"],
+    (["__imp_GetStdHandle", "__imp_ExitProcess"],
+     ["__imp_GetStdHandle", "__imp_ExitProcess"],
      [Grass.Std.Logical.Text.utf8 "GetStdHandle",
-      Grass.Std.Logical.Text.utf8 "WriteFile",
       Grass.Std.Logical.Text.utf8 "ExitProcess"],
      Grass.Std.Logical.Text.utf8 "selected-library.dll") := by decide +kernel
 

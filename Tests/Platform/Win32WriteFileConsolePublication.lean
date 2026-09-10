@@ -27,8 +27,8 @@ def binding : HandleBinding :=
 
 def environment : ConsoleEnvironment :=
   { process
-    caller := Grass.Tests.Spike1.mainThread
-    provider := Grass.Tests.Spike1.apiAgent
+    caller := Grass.Tests.Win32WriteFile.mainThread
+    provider := Grass.Tests.Win32WriteFile.apiAgent
     standardHandles := { value := fun _ => 123 }
     bindings := FiniteMap.empty.insert 123 binding
     stdoutRoute := stdout }
@@ -49,13 +49,13 @@ theorem exact_quiet_publication_is_stdout : onStdout environment observation = t
   (matches? environment receipt { observation with process := otherProcess } == false)
 
 def wrongCallerEnvironment : ConsoleEnvironment :=
-  { environment with caller := Grass.Tests.Spike1.apiAgent }
+  { environment with caller := Grass.Tests.Win32WriteFile.apiAgent }
 
 #eval check "different caller rejected"
   (matches? wrongCallerEnvironment receipt observation == false)
 
 def wrongProviderEnvironment : ConsoleEnvironment :=
-  { environment with provider := Grass.Tests.Spike1.mainThread }
+  { environment with provider := Grass.Tests.Win32WriteFile.mainThread }
 
 #eval check "different provider rejected"
   (matches? wrongProviderEnvironment receipt observation == false)

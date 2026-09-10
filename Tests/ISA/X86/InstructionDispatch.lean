@@ -1,29 +1,11 @@
 import Grass.ISA.X86.Execution.Dispatch
-import Tests.Assembly.SourceResolve
 import Tests.Op.FakeIsa
 
 namespace Grass.Tests.ISA.X86.InstructionDispatch
 
-open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical Grass.Assembly
-  Grass.Assembly.SourceResolve Grass.ISA.X86 Grass.ISA.X86.Execution
+open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical
+  Grass.ISA.X86 Grass.ISA.X86.Execution
 open Grass.Tests.FakeIsa
-
--- Embed here so the source-freshness gate rechecks this consumer against the current authored file.
-private def authored : List Char := include_source_chars "../../../Spikes/1_Hello_World/Program.lean"
-
-private def inventory : Option (Nat × List Nat × List Nat) := do
-  let symbols ← Grass.Tests.Assembly.SourceResolve.checkedSymbols
-  let body ← (SourceInput.extractHelloSourceChars authored).toOption
-  let frame ← SourceFrame.derive? body
-  let splice ← SourceSplice.derive? frame 0
-  let result ← resolve? splice symbols 1000
-  let selected := result.outputs.filterMap fun output =>
-    if (Instruction.select output.encoding).isSome then some output.index else none
-  let unsupported := result.outputs.filterMap fun output =>
-    if (Instruction.select output.encoding).isSome then none else some output.index
-  pure (result.outputs.length, selected, unsupported)
-
-example : inventory = some (44, List.range 44, []) := by decide +kernel
 
 private inductive Case where | push | truncated | unsupported | trailing
 deriving DecidableEq, Repr

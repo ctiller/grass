@@ -5,7 +5,7 @@ namespace Grass.Tests.Console.CapturedDemands
 open Grass.Console
 
 private def base : CapturedSpecification ConsoleResourceModel.singleLine Bool :=
-  CapturedSpecification.ofLine _ "Hello, World!" ⟨true, false, false, false⟩
+  CapturedSpecification.ofLine _ "Sample" ⟨true, false, false, false⟩
 
 private def once := base.withLiveness .terminatesUnderBoundaryResponse
 private def twice := once.withLiveness .terminatesUnderBoundaryResponse
