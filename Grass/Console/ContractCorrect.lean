@@ -19,7 +19,10 @@ theorem observedTerminatesUnderResponsive {Outcome : Type} (request : LineReques
     (rendering : LineRendering) :
     (ObservedBehavior.model request rendering).TerminatesUnderResponsive := by
   let model := ObservedBehavior.model request rendering
-  refine ⟨⟨model.respondingWitness (observedResponsiveAdequate request rendering)⟩, ?_⟩
+  have eventual : model.InfiniteEventuallyReplies := by
+    intro history occurrence pending continuation
+    exact False.elim (ObservedBehavior.no_infinite_continuation continuation)
+  refine ⟨⟨model.respondingWitness (observedResponsiveAdequate request rendering) eventual⟩, ?_⟩
   intro strategy _adequate responsive history generated
   rcases generated with ⟨continuation, compatible⟩
   cases continuation with

@@ -5,11 +5,11 @@ namespace Grass.Tests.Semantics.BoundaryTiming
 open RelationalSystem
 
 private def spinning : RelationalSystem Unit where
-  State := Unit
+  State := Nat
   Choice := Unit
   Graph := Unit
   Initial := fun _ _ => True
-  Step := fun _ _ _ _ _ _ => True
+  Step := fun _ state _ _ next _ => next = state + 1
   Terminal := fun _ _ => False
   InfiniteConsistent := fun _ _ _ _ _ => True
   Extends := fun _ _ => True
@@ -23,27 +23,43 @@ private def protocol : WaitProtocol Unit where
   AllowsPermanentWait := fun _ => True
 
 private def boundary : spinning.WaitBoundary protocol where
-  Occurrence := Unit
-  request := id
-  Pending := fun _ _ => True
+  Occurrence := Nat
+  request := fun _ => ()
+  Pending := fun history occurrence => history.state = occurrence
+  External := fun _ _ => True
   Reply := fun _ _ _ => True
   reply_unique := fun _ _ _ _ _ _ => rfl
   nonterminal := by simp [spinning]
-  step_reply := by intros; exact ⟨(), trivial, trivial⟩
-  reply_step := by intros; exact ⟨(), (), (), (), trivial, trivial⟩
+  step_external := by intros; trivial
+  step_pending_or_reply := by intros; right; exact ⟨(), trivial, trivial⟩
+  reply_allowed := by intros; trivial
+  reply_ends := by
+    intro history occurrence pending response choice event next nextGraph step reply later
+    change next = occurrence at later
+    have step' : (show Nat from next) = (show Nat from history.state) + 1 := by
+      simpa only [spinning] using step
+    have pending' : (show Nat from history.state) = occurrence := pending
+    have impossible : occurrence = occurrence + 1 :=
+      later.symm.trans (step'.trans (congrArg (· + 1) pending'))
+    omega
+  reply_path := by
+    intro history occurrence pending response allowed
+    exact ⟨history.state, history.graph, .nil, by intros; contradiction, pending, (), (),
+      Nat.succ (show Nat from history.state), history.graph, trivial, by
+        simp only [spinning]⟩
 
 private def history : spinning.History :=
-  History.initial (state := ()) (graph := ()) trivial
+  History.initial (state := (0 : Nat)) (graph := ()) trivial
 
 private def forever : spinning.InfiniteContinuation history.state history.graph
     history.path.events where
-  stateAt := fun _ => ()
+  stateAt := fun index => index
   graphAt := fun _ => ()
   choiceAt := fun _ => ()
   eventAt := fun _ => ()
   stateZero := rfl
   graphZero := rfl
-  step := fun _ => trivial
+  step := by intro index; simp [spinning]
   consistent := trivial
 
 /-- Responsiveness excludes only permanent nonresponse, so it coexists with a

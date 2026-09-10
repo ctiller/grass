@@ -74,3 +74,7 @@ call, caller and provider. In the latter case every edge exposes its actual
 service receipt, choice, output and causal graph evidence. Terminal control is
 excluded by the next actual edge. This classification retains the infinite
 stream and makes no permanent-wait or eventual-response claim.
+The [agency and reply-path boundary](WAIT_AGENCY_REFINEMENT.md) separates
+provider service from actual replies and retains a proved external-nonresponse
+case in directed refinement. This shared boundary does not yet construct the
+fixed raw public `BehaviorModel`.

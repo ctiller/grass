@@ -38,7 +38,7 @@ abbrev Finite (observe : lower.Observation → upper.Observation) :=
   HistorySimulation lower.system upper.system
     (fun history => (lower.observe history).map observe) upper.observe
 
-/-- Every actual reply-headed extension has a matching upper extension of the
+/-- Every actual service-and-reply extension has a matching upper extension of the
 same related frontier, including its dependent reply interpretation. -/
 structure WaitMatch {observe : lower.Observation → upper.Observation}
     (finite : Finite observe) (waits : DirectedWaitTranslation lower upper)
@@ -55,10 +55,55 @@ structure WaitMatch {observe : lower.Observation → upper.Observation}
       (requestExact ▸ waits.response _ answer),
       finite.Rel extension.history other.history
 
-abbrev CompleteMatch {observe : lower.Observation → upper.Observation}
-    (finite : Finite observe) (waits : DirectedWaitTranslation lower upper) :=
-  BehaviorMatching.CompleteMatch finite.Rel (WaitMatch finite waits)
+/-- `ExternalNonresponse` retains an actual infinite lower execution. After
+its explicit finite cut, the same permitted external occurrence stays pending,
+every actual choice requires external agency, no choice is its completed reply,
+and every reached suffix history matches the same upper waiting history.
+It does not identify the infinite run with a stationary lower wait. -/
+structure ExternalNonresponse {observe : lower.Observation → upper.Observation}
+    (finite : Finite observe) (waits : DirectedWaitTranslation lower upper)
+    (left : lower.History) (right : upper.History)
+    (run : lower.system.InfiniteContinuation left.state left.graph left.path.events)
+    (rightWait : PermanentWait upper.boundary right) where
+  cut : Nat
+  leftWait : PermanentWait lower.boundary (left.append (run.prefixPath cut))
+  matched : WaitMatch finite waits (left.append (run.prefixPath cut)) right leftWait rightWait
+  pending : ∀ index, lower.boundary.Pending
+    (left.append (run.prefixPath (cut + index))) leftWait.occurrence
+  external : ∀ index, lower.boundary.External leftWait.occurrence (run.choiceAt (cut + index))
+  unanswered : ∀ index response,
+    ¬ lower.boundary.Reply leftWait.occurrence response (run.choiceAt (cut + index))
+  related : ∀ index, finite.Rel (left.append (run.prefixPath (cut + index))) right
 
+namespace ExternalNonresponse
+
+/-- `observations` exposes equality at every actual suffix cut from the same
+finite simulation law; silent labels alone cannot hide a later publication. -/
+theorem observations {observe : lower.Observation → upper.Observation}
+    {finite : Finite observe} {waits : DirectedWaitTranslation lower upper}
+    {left : lower.History} {right : upper.History}
+    {run : lower.system.InfiniteContinuation left.state left.graph left.path.events}
+    {rightWait : PermanentWait upper.boundary right}
+    (evidence : ExternalNonresponse finite waits left right run rightWait) (index : Nat) :
+    (lower.observe (left.append (run.prefixPath (evidence.cut + index)))).map observe =
+      upper.observe right := finite.observations (evidence.related index)
+
+end ExternalNonresponse
+
+/-- Directed matching reuses strict complete matching and adds only the
+proved external-nonresponse case. Exact correspondence keeps its original
+strict matching relation. Program-owned infinite work has no new matching case. -/
+inductive CompleteMatch {observe : lower.Observation → upper.Observation}
+    (finite : Finite observe) (waits : DirectedWaitTranslation lower upper) :
+    lower.Complete → upper.Complete → Prop where
+  | strict {left right}
+      (matched : BehaviorMatching.CompleteMatch finite.Rel (WaitMatch finite waits) left right) :
+      CompleteMatch finite waits left right
+  | externalNonresponse (left : lower.History) (right : upper.History)
+      (run : lower.system.InfiniteContinuation left.state left.graph left.path.events)
+      (rightWait : PermanentWait upper.boundary right)
+      (evidence : ExternalNonresponse finite waits left right run rightWait) :
+      CompleteMatch finite waits (.infinite left run) (.waiting right rightWait)
 end ImplementationConformance
 
 /-- Directed complete conformance extends the same actual initialized histories.
@@ -85,6 +130,7 @@ def toImplementationConformance (exact : Grass.BehaviorCorrespondence lower uppe
     intro left right related complete starts
     obtain ⟨other, otherStarts, matched⟩ := exact.completeForth related complete starts
     refine ⟨other, otherStarts, ?_⟩
+    apply ImplementationConformance.CompleteMatch.strict
     cases matched with
     | terminal left right leftDone rightDone related outcomes =>
       exact .terminal left right leftDone rightDone related outcomes

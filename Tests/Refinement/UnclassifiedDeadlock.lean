@@ -30,11 +30,15 @@ def boundary : system.WaitBoundary protocol where
   Occurrence := Empty
   request occurrence := nomatch occurrence
   Pending _ occurrence := nomatch occurrence
+  External occurrence := nomatch occurrence
   Reply occurrence := nomatch occurrence
   reply_unique occurrence := nomatch occurrence
   nonterminal _ occurrence := nomatch occurrence
-  step_reply _ occurrence := nomatch occurrence
-  reply_step _ occurrence := nomatch occurrence
+  step_external _ occurrence := nomatch occurrence
+  step_pending_or_reply _ occurrence := nomatch occurrence
+  reply_allowed _ occurrence := nomatch occurrence
+  reply_ends _ occurrence := nomatch occurrence
+  reply_path _ occurrence := nomatch occurrence
 
 def model : BehaviorModel Unit where
   Event := Unit

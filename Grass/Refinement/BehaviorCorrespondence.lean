@@ -39,8 +39,8 @@ namespace InfiniteAlignment
 export BehaviorMatching.InfiniteAlignment (mk)
 end InfiniteAlignment
 
-/-- An actual boundary reply followed by its retained finite continuation.
-The first transition is mandatory; a reply cannot disappear into nil stutter. -/
+/-- An actual finite service path followed by the occurrence's first reply and
+its retained finite continuation. -/
 abbrev ReplyExtension (model : BehaviorModel Outcome) (history : model.History)
     (waiting : PermanentWait model.boundary history)
     (answer : model.protocol.Response (model.boundary.request waiting.occurrence)) :=
@@ -63,12 +63,13 @@ theorem history_extends {model : BehaviorModel Outcome} {before : model.History}
     History.Extension before extension.history :=
   BehaviorMatching.ReplyExtension.history_extends extension
 
-/-- The actual reply contributes one transition before the retained tail. -/
+/-- The service prefix and actual reply contribute before the retained tail. -/
 theorem history_length {model : BehaviorModel Outcome} {before : model.History}
     {waiting : PermanentWait model.boundary before}
     {answer : model.protocol.Response (model.boundary.request waiting.occurrence)}
     (extension : ReplyExtension model before waiting answer) :
-    extension.history.path.length = before.path.length + (1 + extension.tail.length) :=
+    extension.history.path.length = before.path.length +
+      (extension.beforeReply.length + 1 + extension.tail.length) :=
   BehaviorMatching.ReplyExtension.history_length extension
 
 end ReplyExtension
