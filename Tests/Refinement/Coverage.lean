@@ -11,11 +11,10 @@ example : BehaviorCorrespondence successOnly successOnly id
     (WaitTranslation.refl successOnly) :=
   BehaviorCorrespondence.refl successOnly
 
-example : ImplementationConformance successOnly successOnly id
-    (DirectedWaitTranslation.ofExact (WaitTranslation.refl successOnly)) :=
+example : ImplementationConformance successOnly successOnly id :=
   (BehaviorCorrespondence.refl successOnly).toImplementationConformance
 
-example : ImplementationConformance successOnly successOrError id successTranslation :=
+example : ImplementationConformance successOnly successOrError id :=
   successConformance
 
 example : ¬ ∃ waits : WaitTranslation successOnly successOrError,

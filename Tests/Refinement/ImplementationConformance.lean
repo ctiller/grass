@@ -92,16 +92,6 @@ def successOrErrorInitial : successOrError.History :=
 def successOrErrorErrorInitial : successOrError.History :=
   .initial (state := false) (graph := ()) trivial
 
-def successTranslation : DirectedWaitTranslation successOnly successOrError where
-  request := fun request => nomatch request
-  response := fun request => nomatch request
-  allowed := by
-    intro request
-    exact nomatch request
-  permanent := by
-    intro request
-    exact nomatch request
-
 def successFinite : Grass.ImplementationConformance.Finite
     (lower := successOnly) (upper := successOrError) id where
   Rel := fun _ right => right = successOrErrorInitial
@@ -132,8 +122,7 @@ theorem no_wait_success_only {history : successOnly.History}
     (waiting : PermanentWait successOnly.boundary history) : False := by
   exact waiting.not_terminal trivial
 
-def successConformance : Grass.ImplementationConformance successOnly successOrError id
-    successTranslation where
+def successConformance : Grass.ImplementationConformance successOnly successOrError id where
   finite := successFinite
   completeForth := by
     intro left right related complete starts
@@ -154,8 +143,7 @@ def successConformance : Grass.ImplementationConformance successOnly successOrEr
 completion with the same outcome. -/
 theorem terminal_counterpart_required {Outcome : Type} {lower upper : BehaviorModel Outcome}
     {observe : lower.Observation → upper.Observation}
-    {waits : DirectedWaitTranslation lower upper}
-    (conformance : Grass.ImplementationConformance lower upper observe waits)
+    (conformance : Grass.ImplementationConformance lower upper observe)
     {left : lower.History} {right : upper.History} {lowerHistory : lower.History}
     (related : conformance.finite.Rel left right)
     (finished : lower.system.Terminal lowerHistory.state lowerHistory.graph)
@@ -176,8 +164,7 @@ theorem terminal_counterpart_required {Outcome : Type} {lower upper : BehaviorMo
 suffix can be entirely owned by the selected external agency. -/
 theorem infinite_counterpart_required {Outcome : Type} {lower upper : BehaviorModel Outcome}
     {observe : lower.Observation → upper.Observation}
-    {waits : DirectedWaitTranslation lower upper}
-    (conformance : Grass.ImplementationConformance lower upper observe waits)
+    (conformance : Grass.ImplementationConformance lower upper observe)
     {left : lower.History} {right : upper.History} {lowerHistory : lower.History}
     (related : conformance.finite.Rel left right)
     (run : lower.system.InfiniteContinuation lowerHistory.state lowerHistory.graph lowerHistory.path.events)
@@ -201,8 +188,7 @@ theorem infinite_counterpart_required {Outcome : Type} {lower upper : BehaviorMo
 an actual upper permanent-wait witness. -/
 theorem waiting_counterpart_required {Outcome : Type} {lower upper : BehaviorModel Outcome}
     {observe : lower.Observation → upper.Observation}
-    {waits : DirectedWaitTranslation lower upper}
-    (conformance : Grass.ImplementationConformance lower upper observe waits)
+    (conformance : Grass.ImplementationConformance lower upper observe)
     {left : lower.History} {right : upper.History} {lowerHistory : lower.History}
     (related : conformance.finite.Rel left right)
     (waiting : PermanentWait lower.boundary lowerHistory)
@@ -219,8 +205,8 @@ theorem waiting_counterpart_required {Outcome : Type} {lower upper : BehaviorMod
 
 /-- A lower actual error cannot conform to a success-only upper model: terminal
 matching requires equality of the two outcomes. -/
-theorem error_cannot_be_omitted {waits : DirectedWaitTranslation successOrError successOnly}
-    (conformance : Grass.ImplementationConformance successOrError successOnly id waits) : False := by
+theorem error_cannot_be_omitted
+    (conformance : Grass.ImplementationConformance successOrError successOnly id) : False := by
   obtain ⟨right, empty, related⟩ := conformance.finite.initialForth
     successOrErrorErrorInitial rfl
   obtain ⟨upperHistory, upperFinished, upperStarts, outcomes⟩ := terminal_counterpart_required conformance
@@ -292,19 +278,9 @@ def loopingRun (history : looping.History) :
   step := fun _ => trivial
   consistent := trivial
 
-def loopingTranslation : DirectedWaitTranslation looping successOnly where
-  request := fun request => nomatch request
-  response := fun request => nomatch request
-  allowed := by
-    intro request
-    exact nomatch request
-  permanent := by
-    intro request
-    exact nomatch request
-
 /-- The actual looping lower completion cannot be omitted by a terminal-only upper model. -/
 theorem divergence_cannot_be_omitted
-    (conformance : Grass.ImplementationConformance looping successOnly id loopingTranslation) : False := by
+    (conformance : Grass.ImplementationConformance looping successOnly id) : False := by
   obtain ⟨right, empty, related⟩ := conformance.finite.initialForth loopingInitial rfl
   obtain ⟨upperHistory, upperRun, upperStarts⟩ := infinite_counterpart_required conformance
     related (loopingRun loopingInitial) (History.Extension.refl _)
@@ -405,20 +381,10 @@ def waitingLowerWitness : PermanentWait waitingLower.boundary waitingLowerInitia
   pending := trivial
   permitted := trivial
 
-def waitingTranslation : DirectedWaitTranslation waitingLower waitingUpper where
-  request := id
-  response := fun request response => nomatch response
-  allowed := by
-    intro request response
-    exact nomatch response
-  permanent := by
-    intro request permitted
-    trivial
-
 /-- The actual permitted lower permanent wait cannot be omitted by an upper
 boundary whose pending predicate is false. -/
 theorem waiting_cannot_be_omitted
-    (conformance : Grass.ImplementationConformance waitingLower waitingUpper id waitingTranslation) :
+    (conformance : Grass.ImplementationConformance waitingLower waitingUpper id) :
     False := by
   obtain ⟨right, empty, related⟩ := conformance.finite.initialForth waitingLowerInitial rfl
   obtain ⟨upperHistory, upperWaiting, upperStarts⟩ := waiting_counterpart_required conformance

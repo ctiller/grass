@@ -143,12 +143,6 @@ private def low : BehaviorModel Empty where
   terminal_result := by simp [lowSystem]
   terminal_no_step := by simp [lowSystem]
 
-private def directed : DirectedWaitTranslation high low where
-  request := id
-  response := fun _ _ => ()
-  allowed := by intro _ _ _; trivial
-  permanent := by intro _ _; trivial
-
 private def exact : WaitTranslation high low where
   request := id
   response := fun _ _ => ()
@@ -158,17 +152,14 @@ private def exact : WaitTranslation high low where
 
 /-- These aliases are interface-only checks: they do not construct a simulation
 or claim behavior correspondence or implementation conformance. -/
-private abbrev DirectedAcrossUniverses := DirectedWaitTranslation high low
 private abbrev CorrespondenceAcrossUniverses :=
   BehaviorCorrespondence high low (fun _ => ()) exact
 private abbrev ConformanceAcrossUniverses :=
-  ImplementationConformance high low (fun _ => ()) directed
+  ImplementationConformance high low (fun _ => ())
 
-private def directedProjection (translation : DirectedAcrossUniverses) :
-    DirectedWaitTranslation high low := translation
 private def correspondenceProjection (candidate : CorrespondenceAcrossUniverses) :
     BehaviorCorrespondence high low (fun _ => ()) exact := candidate
 private def conformanceProjection (candidate : ConformanceAcrossUniverses) :
-    ImplementationConformance high low (fun _ => ()) directed := candidate
+    ImplementationConformance high low (fun _ => ()) := candidate
 
 end Grass.Tests.Semantics.BehaviorUniverses

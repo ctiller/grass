@@ -7,8 +7,7 @@ namespace Grass.Tests.Refinement.ForwardInclusion
 open RelationalSystem
 open Grass.Tests.Refinement.ImplementationConformance
 
-example : Grass.ImplementationConformance successOnly successOrError id
-    successTranslation := successConformance
+example : Grass.ImplementationConformance successOnly successOrError id := successConformance
 
 /-- Exact correspondence cannot erase the abstract error alternative. -/
 theorem no_exact_correspondence

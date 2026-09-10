@@ -49,7 +49,6 @@ def profile (resources : R) : RealizationProfile (contract resources) where
   interpretation := ()
   execution := fun _ _ => successOnly
   observe := fun _ _ => id
-  waits := fun _ _ => successTranslation
   safety := fun _ _ => noSafety
 
 /-- The actual directed fixture constructs the complete relative certificate;

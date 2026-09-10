@@ -104,12 +104,6 @@ def quietRun :
 
 def permanent : PermanentWait model.boundary initial := ⟨(), rfl, trivial⟩
 
-def translation : DirectedWaitTranslation model model where
-  request := id
-  response := fun _ response => response
-  allowed := by intros; trivial
-  permanent := by intros; trivial
-
 def finite : Grass.ImplementationConformance.Finite (lower := model) (upper := model) id where
   Rel := fun _ _ => True
   initialForth := by
@@ -126,15 +120,14 @@ def finite : Grass.ImplementationConformance.Finite (lower := model) (upper := m
     intro left right related count
     exact ⟨0, trivial⟩
 
-theorem waitMatch : Grass.ImplementationConformance.WaitMatch finite translation initial initial
+theorem waitMatch : Grass.ImplementationConformance.WaitMatch finite initial initial
     (⟨(), rfl, trivial⟩) permanent where
   related := trivial
-  requestExact := rfl
   replyForth := by
     intro answer allowed extension
-    exact ⟨extension, trivial⟩
+    exact Or.inl ⟨answer, trivial, extension, trivial⟩
 
-def evidence : Grass.ImplementationConformance.ExternalNonresponse finite translation initial initial
+def evidence : Grass.ImplementationConformance.ExternalNonresponse finite initial initial
     quietRun permanent where
   cut := 0
   leftWait := ⟨(), rfl, trivial⟩
@@ -146,7 +139,7 @@ def evidence : Grass.ImplementationConformance.ExternalNonresponse finite transl
 
 /-- The new directed constructor matches a concrete lower infinite execution
 to the same upper permanent wait. -/
-theorem directedMatch : Grass.ImplementationConformance.CompleteMatch finite translation
+theorem directedMatch : Grass.ImplementationConformance.CompleteMatch finite
     (.infinite initial quietRun) (.waiting initial permanent) :=
   .externalNonresponse initial initial quietRun permanent evidence
 
@@ -174,7 +167,7 @@ theorem strict_infinite_has_upper_run {left : model.History}
     {leftRun : model.system.InfiniteContinuation left.state left.graph left.path.events}
     {complete : model.Complete}
     (matched : BehaviorMatching.CompleteMatch finite.Rel
-      (Grass.ImplementationConformance.WaitMatch finite translation)
+      (Grass.ImplementationConformance.WaitMatch finite)
       (.infinite left leftRun) complete) :
     ∃ right rightRun, complete = .infinite right rightRun := by
   cases matched with
@@ -202,12 +195,6 @@ abbrev observedModel : BehaviorModel Unit where
 def observedInitial : observedModel.History := .initial (state := false) (graph := ()) rfl
 
 def observedPermanent : PermanentWait observedModel.boundary observedInitial := ⟨(), rfl, trivial⟩
-
-def observedTranslation : DirectedWaitTranslation observedModel observedModel where
-  request := id
-  response := fun _ response => response
-  allowed := by intros; trivial
-  permanent := by intros; trivial
 
 private def observedRelation : HistoryRelation system system
     (fun history => (observedModel.observe history).map id) observedModel.observe where
@@ -254,7 +241,7 @@ private theorem quiet_prefix_observation_count (length : Nat) :
 every suffix cut, so no candidate can hide it behind the fixed upper wait. -/
 theorem observed_publication_rules_out_external_nonresponse
     (candidate : Grass.ImplementationConformance.ExternalNonresponse observedFinite
-      observedTranslation observedInitial observedInitial observedQuietRun observedPermanent) : False := by
+      observedInitial observedInitial observedQuietRun observedPermanent) : False := by
   have equal := Grass.ImplementationConformance.ExternalNonresponse.observations candidate 1
   have lengths := congrArg List.length equal
   have lowerCount := quiet_prefix_observation_count (candidate.cut + 1)

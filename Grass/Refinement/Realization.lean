@@ -22,8 +22,6 @@ structure RealizationProfile {R : Type} [Resource.ResourceModel R] {resources : 
   execution : Std.Logical.ByteArray → contract.Input → BehaviorModel contract.Outcome
   observe : (bytes : Std.Logical.ByteArray) → (input : contract.Input) →
     (execution bytes input).Observation → (contract.denotation interpretation input).Observation
-  waits : (bytes : Std.Logical.ByteArray) → (input : contract.Input) →
-    DirectedWaitTranslation (execution bytes input) (contract.denotation interpretation input)
   safety : Std.Logical.ByteArray → contract.Input → DemandFamily.{0}
 
 /-- `RealizationCertificate.compiled` binds the artifact to deterministic construction for
@@ -45,7 +43,6 @@ structure RealizationCertificate {R : Type} [Resource.ResourceModel R] {resource
     ImplementationConformance (profile.execution (profile.encoding.write artifact) input)
       (contract.denotation profile.interpretation input)
       (profile.observe (profile.encoding.write artifact) input)
-      (profile.waits (profile.encoding.write artifact) input)
 
 namespace RealizationCertificate
 variable {R : Type} [Resource.ResourceModel R] {resources : R}

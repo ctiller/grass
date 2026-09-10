@@ -198,8 +198,7 @@ abbrev model : BehaviorModel Unit where
 example : BehaviorCorrespondence model model id (WaitTranslation.refl model) :=
   BehaviorCorrespondence.refl model
 
-example : ImplementationConformance model model id
-    (DirectedWaitTranslation.ofExact (WaitTranslation.refl model)) :=
+example : ImplementationConformance model model id :=
   (BehaviorCorrespondence.refl model).toImplementationConformance
 
 end HistoryFixture
