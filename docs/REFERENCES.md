@@ -62,6 +62,18 @@ The separate [AMD source migration](AMD_SOURCE_MIGRATION.md) repairs the active
 profile's dead locator. It does not attach these additional instruction laws
 to the ledger or settle the remaining misplaced-REX claim.
 
+### ELF64
+
+- Xinuos, *System V generic ABI, ELF Object File Format*,
+  [ELF Header](https://gabi.xinuos.com/elf/02-eheader.html), sections 2.1–2.3,
+  accessed 2026-09-09: ELF64 field order and widths, identification bytes,
+  version, header size, and byte order. The bounded implementation is indexed
+  in [Linux platform implementation](LINUX_PLATFORM.md); header parsing does
+  not establish loader admissibility or instruction semantics.
+- The same ABI's [assigned machine values](https://gabi.xinuos.com/elf/a-emachine.html),
+  accessed 2026-09-09, assigns `EM_X86_64 = 62` and `EM_AARCH64 = 183` used
+  by the header fixtures.
+
 ### Win32 x64 and PE/COFF
 
 - Microsoft, *Vectored Exception Handling* (native validation harness; retrieved
@@ -277,6 +289,22 @@ instructions and ABI metadata retain their own vendor anchors.
   The [Wasm ISA boundary](WASM_ISA.md) identifies the implemented subset and
   explicitly outstanding validation, grammar and runtime adequacy obligations.
   The Core version is selected independently of the WASI provider version.
+
+### Linux native syscall boundary
+
+- Linux kernel x86-64 syscall table and native entry path:
+  https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/arch/x86/entry
+- Linux kernel architecture-generic syscall numbers, including AArch64:
+  https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/uapi/asm-generic/unistd.h
+- Linux kernel AArch64 EL0 syscall entry (`do_el0_svc`):
+  https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/arch/arm64/kernel/entry-common.c
+- Linux kernel error-pointer encoding and `MAX_ERRNO`:
+  https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/linux/err.h
+
+These sources govern the direct kernel boundary: syscall identity, physical
+argument selection, and raw negative error results. Libc wrapper translation,
+restart handling, signal delivery, and instruction-level entry effects require
+their own sources and connection proofs.
 
 ## Internal predecessor material
 

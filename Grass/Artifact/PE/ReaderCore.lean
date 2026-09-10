@@ -1,4 +1,4 @@
-import Grass.Artifact.Binary.EndianLaws
+import Grass.Artifact.Binary.ReaderCore
 
 /-! # Sequential PE reader glue -/
 
@@ -7,11 +7,8 @@ namespace Grass.Artifact.PE
 open Grass.Grammar Grass.Std.Logical
 
 /-- Continue a field read with its unconsumed suffix, preserving failures. -/
-def continueRead {α β : Type} (result : ParseResult α)
+abbrev continueRead {α β : Type} (result : ParseResult α)
     (next : α → Std.Logical.ByteArray → ParseResult β) : ParseResult β :=
-  match result with
-  | .done value rest => next value rest
-  | .needMore hint => .needMore hint
-  | .invalid error => .invalid error
+  Binary.continueRead result next
 
 end Grass.Artifact.PE

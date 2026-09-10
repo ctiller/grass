@@ -33,7 +33,7 @@ theorem readSectionContents_write_append (sections : List PlacedSection)
       simp only [List.map_cons, writePlacedContentsList, Vec.append_assoc,
         readSectionContents, start, ↓reduceIte, size]
       rw [takeExact_append (head.length_paddedContents headContains)]
-      simp only [continueRead]
+      simp only [Grass.Artifact.Binary.continueRead]
       have next : RawContiguous (cursor + head.rawSpan.size) tail := by
         simpa [FileSpan.endOffset, contiguous.1] using contiguous.2
       rw [ih (cursor + head.rawSpan.size) next
@@ -90,13 +90,13 @@ theorem readImage_writeImage (plan : ImagePlan) :
       (plan.writable.placementFields member).2.2.2.2.1⟩) contains
   simp only [Vec.append_empty] at rawReads
   unfold writeImage writeAlignedHeaders writeUnpaddedHeaders
-  simp only [Vec.append_assoc, readImage, readHeaderPrefix_write_append, continueRead,
+  simp only [Vec.append_assoc, readImage, readHeaderPrefix_write_append, Grass.Artifact.Binary.continueRead,
     readOptionalHeader_write_append,
     expectedHeaderPrefix, countValue]
-  change continueRead (readSectionHeaders plan.layout.placed.toList.length
+  change Grass.Artifact.Binary.continueRead (readSectionHeaders plan.layout.placed.toList.length
     (writeSectionTableList plan.layout.placed.toList ++ _)) _ = _
   rw [readSectionHeaders_write_append]
-  simp only [continueRead, headerValue]
+  simp only [Grass.Artifact.Binary.continueRead, headerValue]
   have bounded := ntHeaders_end_le_firstRawOffset canonicalPeOffset
     plan.layout.placed.length canonicalFileAlignment
   have endEq : canonicalPeOffset + peSignatureSize + coffHeaderSize +

@@ -16,9 +16,9 @@ deriving DecidableEq, Repr
 
 /-- Decode one complete record, retaining its unconsumed suffix. -/
 def readRuntimeFunction (input : Std.Logical.ByteArray) : ParseResult ParsedRuntimeFunction :=
-  continueRead (takeLittleEndian 4 input) fun beginRva input =>
-  continueRead (takeLittleEndian 4 input) fun endRva input =>
-  continueRead (takeLittleEndian 4 input) fun unwindRva input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun beginRva input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun endRva input =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 input) fun unwindRva input =>
   .done ⟨beginRva, endRva, unwindRva⟩ input
 
 /-- Decode a caller-selected count. The whole-table entry point derives this
@@ -26,8 +26,8 @@ count from the supplied byte extent. -/
 def readRuntimeFunctions : Nat → Std.Logical.ByteArray → ParseResult (List ParsedRuntimeFunction)
   | 0, input => .done [] input
   | count + 1, input =>
-      continueRead (readRuntimeFunction input) fun head rest =>
-      continueRead (readRuntimeFunctions count rest) fun tail rest => .done (head :: tail) rest
+      Grass.Artifact.Binary.continueRead (readRuntimeFunction input) fun head rest =>
+      Grass.Artifact.Binary.continueRead (readRuntimeFunctions count rest) fun tail rest => .done (head :: tail) rest
 
 /-- Read an exact table extent; incomplete record lengths are rejected. -/
 def readRuntimeTable (input : Std.Logical.ByteArray) : ParseResult (List ParsedRuntimeFunction) :=
@@ -57,7 +57,7 @@ theorem readRuntimeFunction_write_append (function : ResolvedRuntimeFunction)
     readRuntimeFunction (writeRuntimeFunction function ++ suffix) =
       .done function.expectedRecord suffix := by
   simp [readRuntimeFunction, writeRuntimeFunction, Vec.append_assoc,
-    takeLittleEndian_writeLittleEndian_append, continueRead,
+    takeLittleEndian_writeLittleEndian_append, Grass.Artifact.Binary.continueRead,
     ResolvedRuntimeFunction.expectedRecord]
 
 /-- The independent table reader recovers every record in order. -/
@@ -69,7 +69,7 @@ theorem readRuntimeFunctions_write_append (functions : List ResolvedRuntimeFunct
   | nil => simp [readRuntimeFunctions, writeRuntimeFunctions]
   | cons head tail ih =>
       simp only [List.length_cons, writeRuntimeFunctions, readRuntimeFunctions,
-        Vec.append_assoc, readRuntimeFunction_write_append, continueRead, ih, List.map_cons]
+        Vec.append_assoc, readRuntimeFunction_write_append, Grass.Artifact.Binary.continueRead, ih, List.map_cons]
 
 /-- Exact meaningful table bytes determine the record count without caller input. -/
 theorem readRuntimeTable_write (functions : List ResolvedRuntimeFunction) :

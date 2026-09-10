@@ -31,16 +31,16 @@ deriving DecidableEq
 
 /-- Decode every field of one PE image section header and leave the exact suffix. -/
 def readSectionHeader (input : Std.Logical.ByteArray) : ParseResult ParsedSectionHeader :=
-  continueRead (takeExact 8 input) fun name rest0 =>
-  continueRead (takeLittleEndian 4 rest0) fun virtualSize rest1 =>
-  continueRead (takeLittleEndian 4 rest1) fun virtualAddress rest2 =>
-  continueRead (takeLittleEndian 4 rest2) fun rawSize rest3 =>
-  continueRead (takeLittleEndian 4 rest3) fun rawOffset rest4 =>
-  continueRead (takeLittleEndian 4 rest4) fun relocationPointer rest5 =>
-  continueRead (takeLittleEndian 4 rest5) fun linePointer rest6 =>
-  continueRead (takeLittleEndian 2 rest6) fun relocationCount rest7 =>
-  continueRead (takeLittleEndian 2 rest7) fun lineCount rest8 =>
-  continueRead (takeLittleEndian 4 rest8) fun characteristics rest9 =>
+  Grass.Artifact.Binary.continueRead (takeExact 8 input) fun name rest0 =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 rest0) fun virtualSize rest1 =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 rest1) fun virtualAddress rest2 =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 rest2) fun rawSize rest3 =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 rest3) fun rawOffset rest4 =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 rest4) fun relocationPointer rest5 =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 rest5) fun linePointer rest6 =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 2 rest6) fun relocationCount rest7 =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 2 rest7) fun lineCount rest8 =>
+  Grass.Artifact.Binary.continueRead (takeLittleEndian 4 rest8) fun characteristics rest9 =>
   .done (ParsedSectionHeader.mk name virtualSize virtualAddress rawSize rawOffset
     relocationPointer linePointer relocationCount lineCount characteristics) rest9
 
@@ -63,7 +63,7 @@ theorem readSectionHeader_writeSectionHeader_append (placed : PlacedSection)
     (suffix : Std.Logical.ByteArray) :
     readSectionHeader (writeSectionHeader placed ++ suffix) =
       .done placed.expectedSectionHeader suffix := by
-  simp [readSectionHeader, continueRead, writeSectionHeader,
+  simp [readSectionHeader, Grass.Artifact.Binary.continueRead, writeSectionHeader,
     PlacedSection.expectedSectionHeader, Vec.append_assoc, SectionName.length_write]
 
 end Grass.Artifact.PE
