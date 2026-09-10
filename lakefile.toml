@@ -31,11 +31,12 @@ globs = ["Grass.+"]
 name = "Tests"
 globs = ["Tests.+"]
 
-# Authored spike programs. Only the hand-proved Wasm/WASI consumer is a build
-# target today; the rest of `Spikes/` is reached through its dependencies.
+# The authored spikes' precious specifications, the only spike modules that
+# build today. Lake cannot glob a module under `1_Hello_World` (its glob
+# parser drops the closing guillemet), so the roots name modules one by one.
 [[lean_lib]]
 name = "Spikes"
-roots = ["Spikes.«1_Hello_World».Wasi"]
+roots = ["Spikes.«1_Hello_World».Spec"]
 
 [[lean_exe]]
 name = "grass-disasm"
