@@ -170,7 +170,8 @@ theorem check_sound {α : Type} (environment : Identifier → Option (Operand α
   | some source =>
     exact ⟨source, rfl, by simpa [check?, parsed] using accepted⟩
 
-/-- The semantic result preserves exactly the four selected operand lanes. -/
+/-- `Grass.Shader.WGSL.Composite.decode_lanes` identifies the semantic result's
+four lanes with the four successful operand selections. -/
 theorem decode_lanes {α : Type} (environment : Identifier → Option (Operand α)) (source : Source)
     (x y z w : α)
     (hx : select? environment source.first = some x)
