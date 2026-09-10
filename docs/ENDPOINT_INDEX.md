@@ -123,6 +123,18 @@ their separate obligations above. Existing
 derives the shared ReturnHome plan plus WriteFile extensions, including the later
 fifth-slot separation checks.
 
+Source-entry delivery `4a172bd4`, integrated on the certificate branch as
+`3c572e90`, adds `Grass/Refinement/Console/WriteFileSourceEntry.lean`.
+Its inspected `prepareCall?` composes reached CALL, preparation, stack plan and
+protocol entry with the exact receipt and original metadata. `prepareSourceCall?`
+uses the canonical `SourceLea.argument` with an explicit checked-evaluator witness.
+The specialized `returned_body` requires the successful producer equation and
+removes the generic `requestSlot` premise by construction. It still does not
+construct the source-LEA-to-pre-CALL setup ancestry or whole Hello; the other
+return/body premises remain. Spikes reports independent Sol review and a combined
+304-job focused build passed. Shared finalization extraction remains unpublished
+at this checkpoint; no GetStdHandle production adoption is claimed.
+
 The structured Hello fixture at the inspected `31ad186e` had a trust-gate
 setup-extraction defect, so that checkpoint is not acceptance evidence.
 The repair is integrated as `d7c63bab`, with independent review, the 595-job
