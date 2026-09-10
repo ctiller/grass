@@ -59,6 +59,11 @@ def select (encoding : InsnEncoding) : Option (Selection encoding) :=
           tryInstruction encoding (.above bits)
   | _ => none
 
+/-- `select_complete` recovers every typed branch from its production encoding. -/
+theorem select_complete (instruction : BranchInstruction) :
+    (select instruction.encoding).map (·.instruction) = some instruction := by
+  cases instruction <;> simp [select, tryInstruction, encoding, kind, displacement, Rel32.encode]
+
 end BranchInstruction
 
 structure BranchNormal (before : State) (afterFetch afterCompute : MachineState)
