@@ -1,6 +1,6 @@
 import Grass.ISA.X86.EndianBridge
 import Grass.ISA.X86.Execution.AccessRun
-import Grass.Op.ReadCompletion
+import Grass.Op.ReadObservation
 
 /-!
 # Exact DWORD values from completed frame reads
@@ -34,26 +34,19 @@ namespace ReadValue32
 `Option.get` comes from the completed access itself. -/
 def observed {before after : MachineState} {descriptor : AccessDescriptor}
     {run : AccessRun before after descriptor} (read : ReadValue32 run) : ByteSeq :=
-  run.complete.committed.observed.get
-    (run.complete.committed.observedPresent read.reads)
+  Grass.Op.AccessFactory.AccessRun.readBytes run read.reads
 
 /-- The completion's observation is exactly the proof-extracted byte sequence. -/
 theorem observed_exact {before after : MachineState} {descriptor : AccessDescriptor}
     {run : AccessRun before after descriptor} (read : ReadValue32 run) :
     run.complete.committed.observed = some read.observed := by
-  exact (Option.some_get
-    (run.complete.committed.observedPresent read.reads)).symm
+  exact Grass.Op.AccessFactory.AccessRun.readBytes_exact run read.reads
 
 /-- The proof-extracted observation has DWORD width. -/
 theorem observed_width {before after : MachineState} {descriptor : AccessDescriptor}
     {run : AccessRun before after descriptor} (read : ReadValue32 run) :
     read.observed.length = 4 := by
-  obtain ⟨bytes, observedBytes, bytesLength, _⟩ :=
-    Grass.Op.CompleteCommitted.readOnly_bytes run.complete read.reads read.writes
-  have same : read.observed = bytes := by
-    apply Option.some.inj
-    exact read.observed_exact.symm.trans observedBytes
-  rw [same, bytesLength, read.width]
+  rw [observed, Grass.Op.AccessFactory.AccessRun.readBytes_length run read.reads, read.width]
 
 /-- The fixed-width representation of the exact completed observation. -/
 def bytes {before after : MachineState} {descriptor : AccessDescriptor}
@@ -78,22 +71,13 @@ theorem observed_backing {before after : MachineState} {descriptor : AccessDescr
     {run : AccessRun before after descriptor} (read : ReadValue32 run) :
     read.observed = observedBytes run.resolved
       (read.indeterminate (before.noteContext run.context run.contextKind) descriptor) := by
-  have answer : (Oracle.ofMemory read.writeData read.indeterminate).answerResolved
-      (before.noteContext run.context run.contextKind) descriptor run.resolved =
-        some run.complete := by
-    rw [← read.memoryOracle]
-    exact run.answerResolved
-  have exactBacking := Oracle.ofMemory_observed_of_answerResolved
-    read.writeData read.indeterminate
-    (before.noteContext run.context run.contextKind) descriptor run.resolved
-    run.complete answer read.reads
-  exact Option.some.inj (read.observed_exact.symm.trans exactBacking)
+  exact Grass.Op.AccessFactory.AccessRun.readBytes_backing run read.writeData read.indeterminate read.memoryOracle read.reads
 
 /-- Preparation certifies initialization of the exact resolved backing span. -/
 theorem initialized {before after : MachineState} {descriptor : AccessDescriptor}
     {run : AccessRun before after descriptor} (read : ReadValue32 run) :
     run.resolved.RangeInitialized :=
-  rangeInitialized_of_prepareAccess_allBytesInitialized run.prepared read.initialization
+  Grass.Op.AccessFactory.AccessRun.initialized run read.initialization
 
 /-- If the actual observed bytes are x86's `le32` representation of a DWORD,
 the value decoded through the grammar's little-endian representation is that

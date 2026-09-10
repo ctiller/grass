@@ -1,7 +1,7 @@
 import Grass.ISA.X86.Execution.AccessRun
 import Grass.ISA.X86.Execution.DecodedSite
 import Grass.ISA.X86.Execution.State
-import Grass.Op.ReadCompletion
+import Grass.Op.ReadObservation
 import Grass.Op.PreparedPlacement
 
 /-!
@@ -60,14 +60,9 @@ def afterState {before : State} {after : MachineState}
 theorem observed_exact {before : State} {after : MachineState}
     (fetch : FetchedSite before after) :
     fetch.run.complete.committed.observed = some fetch.site.encoding.toBytes := by
-  have answer : (Oracle.ofMemory fetch.writeData fetch.indeterminate).answerResolved
-      (before.machine.noteContext fetch.run.context fetch.run.contextKind)
-      fetch.descriptor fetch.run.resolved = some fetch.run.complete := by
-    rw [← fetch.memoryOracle]
-    exact fetch.run.answerResolved
-  have observed := Oracle.ofMemory_observed_of_answerResolved fetch.writeData fetch.indeterminate
-    (before.machine.noteContext fetch.run.context fetch.run.contextKind) fetch.descriptor
-    fetch.run.resolved fetch.run.complete answer (by rw [fetch.intent]; rfl)
+  have reads : fetch.descriptor.intent.reads = true := by rw [fetch.intent]; rfl
+  have observed := Grass.Op.AccessFactory.AccessRun.completion_observed_backing fetch.run fetch.writeData fetch.indeterminate
+    fetch.memoryOracle reads
   rw [fetch.site.bytesExact, fetch.noTrailing, List.append_nil] at observed
   exact observed
 
@@ -80,7 +75,7 @@ theorem extent_exact {before : State} {after : MachineState}
 /-- Preparation certifies initialization of the exact fetched backing span. -/
 theorem initialized {before : State} {after : MachineState}
     (fetch : FetchedSite before after) : fetch.run.resolved.RangeInitialized :=
-  rangeInitialized_of_prepareAccess_allBytesInitialized fetch.run.prepared fetch.initialization
+  Grass.Op.AccessFactory.AccessRun.initialized fetch.run fetch.initialization
 
 /-- `state_frame` derives memory and obligation preservation from the neutral read. -/
 theorem state_frame {before : State} {after : MachineState}

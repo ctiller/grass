@@ -30,12 +30,19 @@ structure ObservedFetch (before : State) (after : MachineState) where
 
 namespace ObservedFetch
 
-/-- The exact backing observation supplied to the memory oracle. -/
+/-- The byte sequence carried by the actual completed execute read. -/
 def bytes {before : State} {after : MachineState}
     (fetch : ObservedFetch before after) : ByteSeq :=
-  observedBytes fetch.run.resolved
-    (fetch.indeterminate (before.machine.noteContext fetch.run.context fetch.run.contextKind)
-      fetch.descriptor)
+  Grass.Op.AccessFactory.AccessRun.readBytes fetch.run (by rw [fetch.intent]; rfl)
+
+/-- The concrete oracle ties the actual completed bytes to the resolved backing observation. -/
+theorem bytes_backing {before : State} {after : MachineState}
+    (fetch : ObservedFetch before after) :
+    fetch.bytes = observedBytes fetch.run.resolved
+      (fetch.indeterminate (before.machine.noteContext fetch.run.context fetch.run.contextKind)
+        fetch.descriptor) :=
+  Grass.Op.AccessFactory.AccessRun.readBytes_backing fetch.run fetch.writeData
+    fetch.indeterminate fetch.memoryOracle (by rw [fetch.intent]; rfl)
 
 theorem placement {before : State} {after : MachineState}
     (fetch : ObservedFetch before after) :
@@ -49,7 +56,7 @@ theorem placement {before : State} {after : MachineState}
 
 theorem initialized {before : State} {after : MachineState}
     (fetch : ObservedFetch before after) : fetch.run.resolved.RangeInitialized :=
-  rangeInitialized_of_prepareAccess_allBytesInitialized fetch.run.prepared fetch.initialization
+  Grass.Op.AccessFactory.AccessRun.initialized fetch.run fetch.initialization
 
 theorem state_frame {before : State} {after : MachineState}
     (fetch : ObservedFetch before after) :
@@ -63,14 +70,7 @@ theorem state_frame {before : State} {after : MachineState}
 theorem observed_exact {before : State} {after : MachineState}
     (fetch : ObservedFetch before after) :
     fetch.run.complete.committed.observed = some fetch.bytes := by
-  have answer : (Oracle.ofMemory fetch.writeData fetch.indeterminate).answerResolved
-      (before.machine.noteContext fetch.run.context fetch.run.contextKind)
-      fetch.descriptor fetch.run.resolved = some fetch.run.complete := by
-    rw [← fetch.memoryOracle]
-    exact fetch.run.answerResolved
-  exact Oracle.ofMemory_observed_of_answerResolved fetch.writeData fetch.indeterminate
-    (before.machine.noteContext fetch.run.context fetch.run.contextKind) fetch.descriptor
-    fetch.run.resolved fetch.run.complete answer (by rw [fetch.intent]; rfl)
+  exact Grass.Op.AccessFactory.AccessRun.readBytes_exact fetch.run (by rw [fetch.intent]; rfl)
 
 theorem completed_event {before : State} {after : MachineState}
     (fetch : ObservedFetch before after) :

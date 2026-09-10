@@ -1,6 +1,6 @@
 import Grass.ISA.X86.EndianBridge
 import Grass.ISA.X86.Execution.AccessRun
-import Grass.Op.ReadCompletion
+import Grass.Op.ReadObservation
 
 /-!
 # Exact QWORD values from completed reads
@@ -27,23 +27,17 @@ namespace ReadValue64
 
 def observed {before after : MachineState} {descriptor : AccessDescriptor}
     {run : AccessRun before after descriptor} (read : ReadValue64 run) : ByteSeq :=
-  run.complete.committed.observed.get
-    (run.complete.committed.observedPresent read.reads)
+  Grass.Op.AccessFactory.AccessRun.readBytes run read.reads
 
 theorem observed_exact {before after : MachineState} {descriptor : AccessDescriptor}
     {run : AccessRun before after descriptor} (read : ReadValue64 run) :
     run.complete.committed.observed = some read.observed :=
-  (Option.some_get (run.complete.committed.observedPresent read.reads)).symm
+  Grass.Op.AccessFactory.AccessRun.readBytes_exact run read.reads
 
 theorem observed_width {before after : MachineState} {descriptor : AccessDescriptor}
     {run : AccessRun before after descriptor} (read : ReadValue64 run) :
     read.observed.length = 8 := by
-  obtain ⟨bytes, observedBytes, bytesLength, _⟩ :=
-    Grass.Op.CompleteCommitted.readOnly_bytes run.complete read.reads read.writes
-  have same : read.observed = bytes := by
-    apply Option.some.inj
-    exact read.observed_exact.symm.trans observedBytes
-  rw [same, bytesLength, read.width]
+  rw [observed, Grass.Op.AccessFactory.AccessRun.readBytes_length run read.reads, read.width]
 
 def bytes {before after : MachineState} {descriptor : AccessDescriptor}
     {run : AccessRun before after descriptor} (read : ReadValue64 run) :
@@ -63,21 +57,12 @@ theorem observed_backing {before after : MachineState} {descriptor : AccessDescr
     {run : AccessRun before after descriptor} (read : ReadValue64 run) :
     read.observed = observedBytes run.resolved
       (read.indeterminate (before.noteContext run.context run.contextKind) descriptor) := by
-  have answer : (Oracle.ofMemory read.writeData read.indeterminate).answerResolved
-      (before.noteContext run.context run.contextKind) descriptor run.resolved =
-        some run.complete := by
-    rw [← read.memoryOracle]
-    exact run.answerResolved
-  have exactBacking := Oracle.ofMemory_observed_of_answerResolved
-    read.writeData read.indeterminate
-    (before.noteContext run.context run.contextKind) descriptor run.resolved
-    run.complete answer read.reads
-  exact Option.some.inj (read.observed_exact.symm.trans exactBacking)
+  exact Grass.Op.AccessFactory.AccessRun.readBytes_backing run read.writeData read.indeterminate read.memoryOracle read.reads
 
 theorem initialized {before after : MachineState} {descriptor : AccessDescriptor}
     {run : AccessRun before after descriptor} (read : ReadValue64 run) :
     run.resolved.RangeInitialized :=
-  rangeInitialized_of_prepareAccess_allBytesInitialized run.prepared read.initialization
+  Grass.Op.AccessFactory.AccessRun.initialized run read.initialization
 
 theorem value_of_observed_eq_le64 {before after : MachineState}
     {descriptor : AccessDescriptor} {run : AccessRun before after descriptor}

@@ -26,12 +26,25 @@ namespace ObservedFetch
 def reachedState {before : State} {after : Grass.Memory.MachineState}
     (_fetch : ObservedFetch before after) : State := { before with machine := after }
 
+private theorem castDecodedSite_rest {rip : BitVec 64}
+    {actual backing : Std.Logical.ByteSeq}
+    (h : actual = backing) (site : DecodedSite rip actual) :
+    (h ▸ site : DecodedSite rip backing).rest = site.rest := by
+  subst backing
+  rfl
+
 private def decoded {before : State} {after : Grass.Memory.MachineState}
     (fetch : ObservedFetch before after) : Except ApplicabilityFailure (FetchedSite before after) :=
   match DecodedSite.check before.rip fetch.bytes with
   | .error error => .error (.decode error)
   | .ok site =>
       if noTrailing : site.rest = [] then
+        let backingSite : DecodedSite before.rip
+            (Grass.Memory.observedBytes fetch.run.resolved
+              (fetch.indeterminate
+                (before.machine.noteContext fetch.run.context fetch.run.contextKind)
+                fetch.descriptor)) :=
+          fetch.bytes_backing ▸ site
         .ok
           { descriptor := fetch.descriptor
             run := fetch.run
@@ -44,8 +57,9 @@ private def decoded {before : State} {after : Grass.Memory.MachineState}
             authorityEffect := fetch.authorityEffect
             address := fetch.address
             placed := fetch.placed
-            site := site
-            noTrailing := noTrailing }
+            site := backingSite
+            noTrailing :=
+              (castDecodedSite_rest fetch.bytes_backing site).trans noTrailing }
       else .error .trailingBytes
 
 /-- `dispatch` selects a family from the whole actual observation using the fixed classifier. -/
