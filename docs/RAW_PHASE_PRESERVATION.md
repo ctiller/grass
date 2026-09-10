@@ -24,12 +24,14 @@ scaffolding, **not raw completion semantics**. No completion, deadlock, progress
 or termination conclusion may be drawn from those fields. Replace this view
 with the canonical raw system when complete semantics are available.
 
-These clauses do not prove enabledness or Hello deadlock freedom. Frontend must
-retain the actual loader-to-entry prefix; a computed endpoint alone is
-insufficient. WriteFile requires the same enclosing history and publication
-connection through the lowering adapter. Exit needs an actual terminal edge
-with retained status. Neither refusal nor outside-profile execution counts as
-successful termination or permitted external waiting.
+These clauses do not prove enabledness or Hello deadlock freedom. The certificate
+fixture at `f9145e4a` now retains the actual 24-edge loader-to-first-WriteFile-entry
+prefix; see the [endpoint index](ENDPOINT_INDEX.md#issued-call-resume-status).
+WriteFile still requires the original-entry segment and enclosing history/publication
+connection through the lowering adapter. Main `0993922c` includes the actual
+`RawStep.completedExit` edge, retained status and `terminal_no_step`; this is not
+native cleanup or obligation discharge. Neither refusal nor outside-profile
+execution counts as successful termination or permitted external waiting.
 
 [RawPrefixSteps](../Grass/Platform/Win32/RawPrefixSteps.lean) decomposes an
 existing prefix propositionally into finite state, graph and choice witnesses,
