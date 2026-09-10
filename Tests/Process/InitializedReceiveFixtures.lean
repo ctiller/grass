@@ -1,5 +1,5 @@
 import Tests.Process.PreservationFixtures
-import Tests.Process.EscrowReceiveUpdate
+import Grass.Process.Network.EscrowReceive
 
 /-! A fully initialized spawn-send-receive path for the atomic channel receive.
 The original `wire` deliberately aliases the root's generation; `freshWire`
@@ -11,7 +11,7 @@ open Grass.Process
 open Grass.Process.Tests
 open Grass.Process.Tests.World (ServerWorld withRoot)
 open Grass.Process.Tests.Channel
-open Grass.Process.Tests.EscrowReceiveUpdate
+open Grass.Process.EscrowLedger
 
 noncomputable section
 open Classical
