@@ -391,7 +391,7 @@ acquiring a citation.
 -- Shared runtime and compatibility adapters retain actual evidence.
 -- Certificate encoding adds one reviewed structural adapter beyond main.
 -- The shared settled-state view retains data and asserts no transition.
-def notBehaviourBaseline : Nat := 374
+def notBehaviourBaseline : Nat := 375
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -573,6 +573,7 @@ def notBehaviour : List Name :=
     -- The provider resume reads the actual retained slot and packages the
     -- reached platform state; it does not claim that an x86 RET was fetched.
     `Grass.Platform.Win32.ProviderResume.afterReturn,
+    `Grass.Platform.Win32.ProviderResume.observeRegisters,
     `Grass.Platform.Win32.ProviderResume.returnFrame?,
     `Grass.Platform.Win32.ProviderResume.PreservesNonvolatile,
     `Grass.Platform.Win32.ProviderResume.WriteFileOutput,
