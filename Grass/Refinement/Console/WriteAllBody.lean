@@ -71,12 +71,12 @@ theorem sourceLoad_result {frame : SourceFrame.Result} {rootOffset : Nat}
   rw [destination]
 
 /-- The selected authored load writes EAX; this is recovered from source syntax. -/
-theorem load_destination {frame : SourceFrame.Result} {rootOffset : Nat}
+theorem load_operand {frame : SourceFrame.Result} {rootOffset : Nat}
     {source : SourceResolve.Result frame rootOffset}
     (selected : WriteAllGuardSource.Selection source)
     (selection : SourceResolve.LoadSelection source)
     (same : selection.output = selected.candidate.load.output) :
-    selection.result.destination = .rax := by
+    selection.result.destination = .rax ∧ selection.result.slot = "transferred" := by
   have sourceSyntax := selected.valid.2.1
   rw [← same] at sourceSyntax
   unfold WriteAllLoopSource.originInstruction at sourceSyntax
@@ -87,8 +87,15 @@ theorem load_destination {frame : SourceFrame.Result} {rootOffset : Nat}
   rw [item, Option.some.inj sourceSyntax] at instruction
   simp only [WriteAllGuardSource.loadInstruction, X86Source.Instruction.mk.injEq,
     List.cons.injEq, X86Source.Operand.register.injEq,
-    X86Source.Register.mk.injEq] at instruction
-  exact instruction.2.1.1.symm
+    X86Source.Register.mk.injEq, X86Source.Operand.symbol.injEq] at instruction
+  exact ⟨instruction.2.1.1.symm, instruction.2.2.1.symm⟩
+
+theorem load_destination {frame : SourceFrame.Result} {rootOffset : Nat}
+    {source : SourceResolve.Result frame rootOffset}
+    (selected : WriteAllGuardSource.Selection source)
+    (selection : SourceResolve.LoadSelection source)
+    (same : selection.output = selected.candidate.load.output) :
+    selection.result.destination = .rax := (load_operand selected selection same).1
 
 theorem load_gpr_frame {frame : SourceFrame.Result} {rootOffset : Nat}
     {source : SourceResolve.Result frame rootOffset} {before : State}
@@ -158,6 +165,19 @@ theorem FactoryLoad.actual_result {policy : CpuAccessPolicy} {frame : SourceFram
       success.execution.result = load.source.result :=
   ⟨⟨load.fetched, .load load.encoded load.receipt load.fetchExact⟩,
     load.ran, load.result_exact.symm⟩
+
+theorem FactoryLoad.descriptor_exact {policy : CpuAccessPolicy} {frame : SourceFrame.Result}
+    {rootOffset : Nat} {source : SourceResolve.Result frame rootOffset} {before : State}
+    (load : FactoryLoad policy source before) :
+    load.source.access.descriptor = load.receipt.access.descriptor := by
+  rcases load with ⟨fetched, instruction, encoded, afterData, receipt, fetchExact, ran,
+    selection, site, sameFetch, selected, range, base, placed, rsp, instructionSelected⟩
+  rcases site with ⟨output, outputAt, fetch, space, observed, codeBase, codePlaced,
+    codeOffset, image, placement, start⟩
+  dsimp only at sameFetch
+  subst fetch
+  unfold FactoryLoad.source
+  rfl
 
 /-- Continuous load, TEST/JZ/CMP/JA and ADD/SUB/JMP, all bound to the same
 selected authored body and loaded code region. -/
