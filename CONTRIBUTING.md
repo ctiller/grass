@@ -14,6 +14,9 @@ both the annotated document and its comment-free authored source.
 
 ## Making a change
 
+The [endpoint index](docs/ENDPOINT_INDEX.md) helps locate code and its design
+owner; the [validation command map](docs/CHECKS.md) explains check coverage.
+
 1. Keep the precious portable specification minimal. Generated expansions,
    routine adapters, manifests, and bookkeeping do not belong in it.
 2. Keep first-class assembly visible and authorable. Helpers may remove proof
@@ -77,6 +80,107 @@ another independent look. Never force-push shared branches.
 Reviewers apply [the substantive review standard](docs/REVIEW.md), challenging
 specification adequacy, proof feasibility, proof economics, assembly freedom,
 change blast radius, source authority, and fitness for the implementation brief.
+
+## Shared guarantees and second consumers
+
+Accepted architecture delivery guidance, approved by Craig and reported by
+architecture on 2026-09-09. Every shared guarantee has an owner. Before
+implementation, separate the domain-specific obligations from mechanical
+checked construction and general laws. At the **second consumer**, reuse the
+existing implementation or extract shared construction/laws. A new consumer
+uses that shared implementation unless architecture approves separate treatment
+with a concrete reason. Review asks what a
+**third consumer** would still need to prove.
+
+Architecture owns this rule and its exceptions; library owns shared laws,
+specialists integrate their consumers, and the auditor compares new consumers
+with existing ones during bounded audits. An exception record needs only the
+guarantee, owner, consumers, concrete reason for separate treatment, and revisit
+trigger. Record it with the owning design or reviewed change rather than adding
+a separate coordination system.
+
+Shared implementation and actual adoption are delivery criteria, not optional
+cleanup: duplication must be controlled to preserve forward progress.
+Reuse closure requires existing consumers to use the shared construction/laws,
+preserving exact indices, refusal behavior and guarantees, with appropriate
+focused checks. A common type alone, generated copies of proof scripts,
+similar-looking code or a lower line count does not prove closure. Remove the
+old duplicate implementations once both consumers adopt the shared one;
+compatibility aliases may remain. An approved exception records the distinct obligation rather than
+claiming shared reuse has been completed.
+
+This is not a mandate for speculative abstraction or an automatic cleanup
+campaign. Spikes sequences work, and the unchanged authored
+`Program → helloVerified → emitProgram` chain remains the priority.
+Major milestones trigger the existing [cleanup audits](docs/SPIKE1_BOUNDARY_REVIEW.md#responsibility):
+architecture coordinates the required audit, and spikes schedules its
+actions or records deferral with a rationale and revisit point. The audit does
+not require every cleanup to finish before implementation continues.
+
+### Proposed evaluation: instruction and API declarations
+
+Craig proposes evaluating instruction/API DSLs as a possible way to express
+the distinction above. This is an evaluation idea, not an implementation mandate
+or a new project. Existing semantic structures remain authoritative. Declarations
+would supply the distinct encoding, operands, effects, access and fault
+obligations for instructions, or ABI, request, loan and outcome obligations for
+APIs; shared verified elaborators or constructors would prove common mechanics
+once. Generating copies of proof scripts alone would not achieve that reuse.
+
+Any evaluation preserves first-class authored assembly and custom implementations;
+instruction and API vocabularies may stay separate. Compare two meaningfully
+different instructions and two APIs, then ask what a third consumer must author.
+Judge proof burden, retained guarantees and expressiveness, not line count.
+Spikes sequences any evaluation; this note starts no automatic DSL build.
+The ReturnHome dual-consumer extraction is a concrete case study for that
+evaluation, not evidence by itself that a DSL would help.
+
+### Initial bounded trial
+
+The already accepted ReturnHome trial requires **both GetStdHandle and WriteFile**
+to consume the canonical producer, loan pair and frame projection in the same
+change. Publishing a common type is insufficient; one consumer now and a second
+independent producer pending later cleanup do not satisfy it. Supplier
+implementation is still pending. The API-specific obligations remain separate.
+
+Architecture's raw-entry work uses or factors shared checked-handoff and log
+laws rather than adding per-API copies. Inspected delivery `3887deed` is a
+concrete example: `Grass/Platform/Win32/RawEntryEvent.lean` supplies one
+`call_handoff_appends` theorem consumed by all three WriteFile, GetStdHandle and
+ExitProcess `CallHandoff.rawStep` adapters. Each uses computed `Event.between`
+and derives append evidence from the actual CALL and checked handoff, avoiding
+three separately authored entry-log proofs. Inspect it with
+`git show 3887deed:Grass/Platform/Win32/RawEntryEvent.lean`.
+
+Graph-ordering premises remain explicit; this shared construction proves no
+native adequacy or complete profile. It does not close the broader DUP-01
+family, the seven-family audit below, or the pending ReturnHome migration. This is bounded work within
+spikes' sequence, not a blanket rewrite of existing implementations.
+
+The auditor's *Cross-consumer duplication sweep*, pinned to `2370d929`, reports
+seven **additional evidenced families**, excluding that ReturnHome trial. This
+is a lower bound, not an exhaustive census. It alleges no wrong output and
+reports no measured savings. The following is a compact projection of that
+report; links are navigation into the checkout, while the evidence belongs to
+the pinned revision (use `git show 2370d929:<path>` for that source).
+
+| Finding | Shared mechanism to assess | Starting consumer locations |
+|---|---|---|
+| DUP-01 | Checked API entry handoff and preservation | [WriteFileHandoff](Grass/Platform/Win32/WriteFileHandoff.lean), [GetStdHandleRuntime](Grass/Platform/Win32/GetStdHandleRuntime.lean), [ExitProcessRuntime](Grass/Platform/Win32/ExitProcessRuntime.lean) |
+| DUP-02 | Width-indexed completed-read construction and laws | [ReadValue32](Grass/ISA/X86/Execution/ReadValue32.lean), [ReadValue64](Grass/ISA/X86/Execution/ReadValue64.lean) |
+| DUP-03 | All-or-none list traversal, order and successful-element provenance | [SourceInitialization](Grass/Assembly/SourceInitialization.lean), [SourceImportRequests](Grass/Assembly/SourceImportRequests.lean), [SourceImportBindings](Grass/Assembly/SourceImportBindings.lean), [PE Exceptions](Grass/Artifact/PE/Exceptions.lean) |
+| DUP-04 | Counted parser/writer recovery with exact suffix | [ImageReader](Grass/Artifact/PE/ImageReader.lean), [ExceptionReader](Grass/Artifact/PE/ExceptionReader.lean) |
+| DUP-05 | Access-free execution receipt construction | [BodyComputationFactory](Grass/ISA/X86/Execution/BodyComputationFactory.lean), [ComputationFactory](Grass/ISA/X86/Execution/ComputationFactory.lean) |
+| DUP-06 | Access-failure mapping that retains the actual reached state | [PushFactory](Grass/ISA/X86/Execution/PushFactory.lean), [CallFactory](Grass/ISA/X86/Execution/CallFactory.lean), [MemoryMoveFactory](Grass/ISA/X86/Execution/MemoryMoveFactory.lean), [ReturnSlotFactory](Grass/ISA/X86/Execution/ReturnSlotFactory.lean), [FetchFactory](Grass/ISA/X86/Execution/FetchFactory.lean) |
+| DUP-07 | Placement recovery indexed by the same successful access run and address plan | [PushFactory](Grass/ISA/X86/Execution/PushFactory.lean), [CallFactory](Grass/ISA/X86/Execution/CallFactory.lean), [MemoryMoveFactory](Grass/ISA/X86/Execution/MemoryMoveFactory.lean), [ReturnSlotFactory](Grass/ISA/X86/Execution/ReturnSlotFactory.lean) |
+
+Architecture reports library read-only triage complete: DUP-06 followed by
+DUP-05 are recommended to spikes, with DUP-02 the next substantive family.
+These are recommendations; implementation awaits spikes' sequencing. Four of
+the seven are substantial proof/construction
+families and three are smaller helpers. The report's speculative FrameLoad/
+FrameLea and StaticSectionPacking candidates are excluded from the count, as are
+already-shared runtime table updates and superficially similar domain laws.
 
 ## Spike-first rebuild workflow
 

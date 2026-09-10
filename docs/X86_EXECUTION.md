@@ -134,9 +134,10 @@ initialized read immediately after the PUSH store; it is not a POP or unwind.
 `ObservedFetch` and `Dispatch` select only from actual fetched bytes. Decode,
 trailing-byte and unsupported-instruction failures retain the reached fetch
 state. `InstructionDispatch` embeds the authored source directly and computes
-the production pipeline inventory; its four unsupported entries are the memory
-MOV forms owned by the memory implementation. CALL and UD2 recognition supplies
-syntax only, with no execution or event-delivery theorem.
+the production pipeline inventory, including the four memory MOV occurrences.
+All 44 authored outputs are classified. Classification alone supplies no
+execution or event-delivery theorem; CALL execution uses `CallFactory.call`,
+while UD2 delivery remains unmodeled.
 
 `CpuAccessPolicy` and `AddressPlan.descriptor` compute access ranges from current
 allocation placement and fixed code/stack provenance. `RunFactory` constructs
@@ -204,6 +205,46 @@ Windows supplies the provider and register correspondence.
 Remaining work composes final emitted source, fixed factory results, CALL target
 reads and return-address writes, and actual prefix receipts for unwind reversal.
 Rejected, denied and permitted fault outcomes remain separate.
+
+`BodyComputationFactory.arithmetic`, `branch` and `lea` construct the bounded
+body instructions from actual fetches and fixed access-free operation steps.
+Arithmetic checks the supplied six status bits against the production partial
+flags relation, then computes the full RFLAGS image while clearing RF. An
+incompatible status choice is a checker rejection, not a physical fault.
+The branch helper checks the signed target bound only when the branch is taken.
+
+The `arithmeticFromFetched`, `branchFromFetched` and `leaFromFetched` helpers
+reuse an existing `FetchFactory.Success`. The MOV, SUB RSP, PUSH and CALL
+factories also expose `moveFromFetched`, `subRspFromFetched`, `pushFromFetched`
+and `callFromFetched`; their existing entry points still perform their own fetch.
+These helpers support one shared checked dispatcher without a second fetch
+event. They remain constructive normal-case helpers, not exhaustive CPU
+execution semantics.
+
+`MemoryMoveSelection.select` adds the bounded RSP-relative memory MOV forms to
+the fixed classifier. The source inventory now classifies all 44 unchanged
+Hello outputs; recognition of UD2 still supplies no invalid-opcode transfer.
+`MemoryMoveFactory.memoryMove` constructs the actual fetch and data operation.
+The immediate operand supplies store bytes, while a DWORD load observes the
+current initialized backing and clears the upper half of its destination.
+`MemoryAccess` retains the same non-oracle policy fields across phases and an
+explicit concrete memory oracle for the data step. This lets a fetch use its
+empty write callback while the later store uses its decoded payload.
+
+`CheckedExecution.normal` performs one actual fetch and dispatches to these
+constructors. Its typed success retains the normal receipt, including the full
+CALL evidence needed by a platform handoff; its typed failure retains the
+original factory diagnostic. Arithmetic status choices, including SUB RSP,
+must satisfy the instruction's constraints. A rejected choice yields no
+checked transition.
+
+`CheckedExecution.CheckedStep` is exactly the graph of
+`CheckedExecution.evaluate`. `normal_checked_cases` recovers the actual typed
+evaluation behind a normal checked edge, rather than accepting a standalone
+receipt as execution evidence. Fault, trap, interruption and abort choices
+currently expose the unchanged input prefix as an unimplemented transfer.
+Determinism is per explicit choice and covers this checker; it supplies no
+physical execution coverage, event priority or platform-delivery theorem.
 No total x86 execution or partial-unwind proof is claimed by these files.
 The [exact Hello coverage plan](X86_HELLO_COVERAGE.md) assigns the other emitted
 forms without replacing the production source with a second instruction list.

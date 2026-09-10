@@ -8,6 +8,17 @@ meet. A later implementation may reveal that an interface is inconvenient; it
 may not silently weaken a demand. Changes to a normative demand require an
 explicit decision record and renewed review of affected documents.
 
+## Find code and current evidence
+
+- [Endpoint index](ENDPOINT_INDEX.md): start at authored `helloVerified` and
+  `bytes`, then find implemented components, remaining connections and authors.
+- [Validation command map](CHECKS.md): choose a check by the claim it supports,
+  including fresh source and ledger audits.
+- [Module structure](MODULES.md): intended dependency direction; proposed paths
+  are not an inventory of implemented modules.
+
+These navigation pages do not replace the normative owners below.
+
 ## Authority
 
 When documents conflict, authority is:
@@ -53,6 +64,10 @@ comments are historical provenance available in Git, not active instructions.
 
 ## Review and delivery
 
+- [DISASM.md](DISASM.md) proposes the imported-binary evidence pipeline and
+  memory-safety proof boundary; [DISASM_CORPUS.md](DISASM_CORPUS.md) proposes
+  acceptance using spike outputs followed by safe and unsafe compiled C fixtures.
+  These are feature proposals, not new normative owners or implementation claims.
 - [VISION.md](VISION.md) explains the large-system objective and the tradeoffs
   against which spike proof economy is judged.
 - [PROOF_FEASIBILITY.md](PROOF_FEASIBILITY.md) gives constructive proof sketches,
@@ -104,6 +119,18 @@ comments are historical provenance available in Git, not active instructions.
 - [DECISIONS.md](DECISIONS.md) records settled choices and rejected shortcuts.
 - [REFERENCES.md](REFERENCES.md) is the initial source and design-lineage register.
 - [GLOSSARY.md](GLOSSARY.md) fixes vocabulary used across the corpus.
+
+## Implementation notes and historical assessments
+
+These complement the owner documents and review records above. Read each
+note's revision and limitations before relying on its implementation status.
+
+| Topic | Entry points |
+|---|---|
+| Windows format, loading and API behavior | [PE model](WINDOWS_PE.md), [loader initialization](WINDOWS_LOADER_INITIALIZATION.md), [WriteFile](WINDOWS_WRITEFILE.md) |
+| Bounded instruction and memory execution | [x86 execution](X86_EXECUTION.md), [Hello instruction coverage](X86_HELLO_COVERAGE.md), [source-derived frame memory](FRAME_MEMORY_EXECUTION.md) |
+| External instruction source migration | [AMD APM source migration](AMD_SOURCE_MIGRATION.md) |
+| Historical vocabulary and recorded defects | [memory vocabulary assessment](MEMORY_VOCABULARY.md), [resource-class elaboration defect](DEFECT_SEMANTICS_RESOURCE_CLASSES.md) |
 
 ## Normative language
 

@@ -87,6 +87,117 @@ make `MachineSource plan`, verification and emission consume that selection.
 Keep platform requirements distinct from independently keyed author demands.
 Do not select another root or provider dictionary through ambient search.
 
+## Draft frontend type decision for root review
+
+Status: architecture-supplied draft, 2026-09-09; **not an implementation or a
+ratified declaration signature**. The certificate-root effort is implementing
+and settling the final declarations. This section records the proposed identity
+connections behind the unchanged authored surface; it adds no delivery gate.
+The existing migration requirements below still apply: the public gate migrates
+to the resource-indexed root, without an adapter through legacy finite `accepts`.
+
+### Plan, source and certificate indices
+
+| Proposed shape | Identity retained and reason |
+|---|---|
+| `PlatformPlan : Specification.RequirementSet → Type 2` | A closed inductive type. Its initial constructor quantifies the exact resource-indexed `spec`, takes `projection : TargetProjection spec .win10X64`, and returns `PlatformPlan (spec.driverBoundary projection.view).requirements` |
+| `PlatformPlan.win10X64SynchronousStdoutOnly projection` | The authored constructor spelling is retained; its layout defaults are fixed by that constructor, not independently selected while building its source |
+| `MachineSource plan` | Indexed by the **full plan value**. A requirement-set index alone loses the exact specification and projection because distinct specifications can require the same capabilities |
+| `VerifiedProgram spec` | Its proposed constructor retains the projection, a `MachineSource` of that exact Win10 plan, and a `RealizationCertificate` for `fixedWin10Profile projection`. The profile is determined by the selected projection, not an arbitrary replaceable field |
+
+Architecture reports an accepted elaboration correction: the plan lives in
+`Type 2` because it existentially captures an actual `SpecProcess resources`
+living in `Type 2`. This supersedes the earlier `Type 1` proposal without changing
+the semantic identity requirement or full-plan source index. The constructor's
+boundary index uses the exact retained `projection.view`. The unchanged authored
+annotation `PlatformPlan spec.driverBoundary.requirements` still needs its
+requested default-view elaboration regression; this note does not claim that
+regression has passed.
+
+Here `fixedWin10Profile` and the internal constructor/type shapes are proposed
+names for root review, not declarations claimed to exist. Preserving
+`VerifiedProgram spec` and `emitProgram` syntax does not preserve the old
+certificate's meaning or permit the old gate to remain an alternate path.
+
+`spec.driverBoundary` is a derived capability view of the exact captured root.
+Its `Specification.RequirementSet` describes platform requirements; it is
+distinct from `authorRequirements` and authored liveness requests. Deriving
+that view does not turn author theorems into provider capabilities or compiler
+certificate fields. The neutral boundary vocabulary remains owned by
+[Specification/Boundary.lean](../Grass/Specification/Boundary.lean).
+
+### Computable authored data and semantic interpretation
+
+Public `TargetOutcomeProjection` stores `successOrFailure` **data**: the success
+outcome and success/failure codes. The unchanged
+[Hello outcome type](../Spikes/1_Hello_World/Spec.lean) has no `DecidableEq`
+instance. Its [authored policy and payload](../Spikes/1_Hello_World/Program.lean)
+therefore must not acquire a noncomputable dependency merely to construct this
+selection. Semantic interpretation may use noncomputable equality or functions;
+construction of the authored policy, encoding the line, and evaluating its
+statics remain on the computable data side of that boundary.
+
+### Source identity and reusable construction evidence
+
+The proposed source value retains the actual authored term and wrappers,
+evaluated statics, and a successful chain through
+[SourceFrame](../Grass/Assembly/SourceFrame.lean),
+[SourceSplice](../Grass/Assembly/SourceSplice.lean) at root offset zero,
+[StaticSection](../Grass/Assembly/StaticSection.lean),
+[SourceImportRequests](../Grass/Assembly/SourceImportRequests.lean), and
+[SourceLinkedImage](../Grass/Assembly/SourceLinkedImage.lean).
+These witnesses bind the same inputs and constructor-selected layout throughout;
+an independently supplied image or a copied instruction listing loses the
+required source connection. Structural construction evidence is still separate
+from execution and specification correspondence.
+
+Do not define generic `MachineSource` as the specialized Hello
+`SourceWitness.Result`: that witness also requires the Hello loop and guards.
+Keep those consumer-specific obligations outside the generic source carrier.
+For the inspected branch example, use
+`git show ea34b67b:Grass/Assembly/SourceWitness.lean`.
+
+Root review entry points are
+[Semantics/SpecProcess.lean](../Grass/Semantics/SpecProcess.lean),
+[Console/CapturedProjection.lean](../Grass/Console/CapturedProjection.lean),
+the neutral boundary and linked-image modules above, and the unchanged Hello
+program. `Grass/Console/Contract.lean` is on the certificate-root branch rather
+than this draft's base `97d9a9bd`; inspect its captured contract/view with
+`git show ea34b67b:Grass/Console/Contract.lean`. Those branch locations help review
+the proposal; they do not claim the public frontend migration is complete.
+
+## Accepted shared returning-call construction
+
+Status: accepted refactor direction reported by architecture, agreed with spikes
+and Windows on 2026-09-09 in response to the user's reuse requirement.
+Implementation is pending the certificate-root Sol implementer and Windows;
+the module names below describe their intended ownership, not delivered code.
+
+The shared returning-call construction is accepted only when **both
+GetStdHandle and WriteFile consume it now**. Reuse by the second API is part of
+this change, not deferred cleanup. A second independent return/home producer
+does not satisfy this direction.
+
+| Shared boundary | Owner and intended consumer connection |
+|---|---|
+| `CallEntry.lean` | Certificate-root Sol owns the generic fixed CALL policy and reached-state conversion |
+| `ReturnHome.lean` | Certificate-root Sol owns the shared return/home plan and checked producer from an actual CALL; both returning APIs consume this producer |
+| WriteFile extension and producer | Windows retains WriteFile-specific requirements and invokes the shared producer rather than reproducing its return/home construction |
+| Existing public entry points | Preserve consumers through aliases or adapters onto the shared implementation |
+
+This shares construction machinery, not native API semantics. WriteFile's
+buffer, count slot, fifth argument and publication remain API-specific;
+ExitProcess remains nonreturning. Shared initialized-return vocabulary and
+constants move to a lower dependency layer to avoid cycles. Runtime frame
+projection stays downstream in `CallRuntime`; `ReturnHome` must not import
+`CallRuntime`. If `Argument`/`Resolved` extraction is needed, extract the
+existing representation once instead of adding a duplicate.
+
+Mechanical factoring of call-protocol entry is a subsequent bounded step,
+not a prerequisite to this shared producer. Spikes owns acceptance and Windows
+and root own the implementation; this note records their agreed boundary
+without claiming that either API has already migrated.
+
 ## Terminal frontier decision
 
 The owned Hello requirement includes terminal status, and the standard

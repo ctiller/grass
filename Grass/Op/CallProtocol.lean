@@ -242,7 +242,6 @@ theorem Metadata.pack?_eq_none {Request : Type} (metadata : Metadata Request)
   by_cases covered : GrantSupplyCovers machine.memory metadata.grantSupply <;>
     by_cases valid : PendingTableValid machine.memory metadata.callSupply metadata.pending <;>
     simp [Metadata.pack?, checked?, covered, valid]
-
 /-- `step?_metadata` states that every successful ordinary protocol step preserves
 the call supply, grant supply, pending occurrences, and boundary trace exactly. -/
 theorem step?_metadata {Request : Type} {state next : State Request}

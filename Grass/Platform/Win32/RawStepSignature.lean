@@ -6,6 +6,7 @@ import Grass.ISA.X86.Execution.CallFactory
 import Grass.ISA.X86.Execution.ReturnSlotFactory
 import Grass.ISA.X86.Execution.ComputationFactory
 import Grass.ISA.X86.Execution.PushFactory
+import Grass.ISA.X86.Execution.CheckedStep
 
 /-!
 # Fixed Windows raw-step interface
@@ -43,6 +44,7 @@ inductive Observation where
 
 /-- A reached applicability diagnostic does not assert a physical outcome. -/
 inductive Failure where
+  | checked (reason : CheckedExecution.Failure)
   | cpu (reason : ApplicabilityFailure)
   | fetch (reason : FetchFactory.Failure)
   | computation (reason : ComputationFactory.Failure)
@@ -69,6 +71,20 @@ structure Event where
 def Event.Appends (event : Event) (before after : RawState) : Prop :=
   after.machine.machine.events = before.machine.machine.events ++ event.memory ∧
     after.metadata.boundaries = before.metadata.boundaries ++ event.boundaries
+
+/-- Compute suffix data from the canonical logs. This does not assert that the
+earlier logs are prefixes; `between_appends` requires that separate evidence. -/
+def Event.between (before after : RawState) (kind : EventKind) : Event :=
+  ⟨after.machine.machine.events.drop before.machine.machine.events.length,
+   after.metadata.boundaries.drop before.metadata.boundaries.length, kind⟩
+
+/-- Exact append evidence makes the computed suffix the edge's actual logs. -/
+theorem Event.between_appends {before after : RawState} {kind : EventKind}
+    {memory : List ValidMemoryEvent} {boundaries : List CallProtocol.Boundary}
+    (memoryExact : after.machine.machine.events = before.machine.machine.events ++ memory)
+    (boundariesExact : after.metadata.boundaries = before.metadata.boundaries ++ boundaries) :
+    (Event.between before after kind).Appends before after := by
+  simp [Event.between, Event.Appends, memoryExact, boundariesExact]
 
 /-- A graph node is represented only by an actual memory event or protocol
 boundary in this raw state, even when its metadata does not currently pack. -/
