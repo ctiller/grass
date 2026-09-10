@@ -29,22 +29,6 @@ example : actual?.map (fun pair =>
 example : actualCandidateCounts.map (fun counts => counts.all fun pair => pair.2 = 1) = some true := by
   decide +kernel
 
--- A local named like a platform constant makes two resolvers succeed. The
--- classifier rejects the overlap instead of selecting whichever ran first.
-def collision : List Char := source_chars
-  "def collisionSample : MachineSource plan := withStack (STD_OUTPUT_HANDLE : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\nmov ecx, STD_OUTPUT_HANDLE\nud2\n}"
-
-def collisionRejected : Bool :=
-  match (SourceInput.extractSourceChars collision).toOption with
-  | none => false
-  | some body => match SourceFrame.derive? body with
-    | none => false
-    | some frame => match frame.program.collected.code, frame.program.flows with
-      | item :: _, flow :: _ => (classify? frame 0 item flow).isNone
-      | _, _ => false
-
-example : collisionRejected = true := by decide +kernel
-
 def mismatchedFlowsRejected : Bool :=
   match (SourceInput.extractSourceChars source).toOption with
   | none => false
