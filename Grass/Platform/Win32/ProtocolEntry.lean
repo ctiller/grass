@@ -46,7 +46,7 @@ def issue? (before : ExecutionState.State ApiRequest) (request : ApiRequest)
                 { caller, control, callerRegistered, agentRegistered, clean,
                   beforeProtocol, projected, call, afterProtocol, issued }
       else none else none else none
-  | .pending .. | .terminal => none
+  | .pending .. | .terminal .. => none
 
 namespace Entry
 

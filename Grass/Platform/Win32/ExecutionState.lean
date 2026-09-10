@@ -24,7 +24,7 @@ or any completed instruction sequence. -/
 inductive Control where
   | caller (caller : ContextId)
   | pending (call : CallProtocol.CallId) (caller provider : ContextId)
-  | terminal
+  | terminal (call : CallProtocol.CallId) (status : BitVec 32)
 deriving DecidableEq, Repr
 
 /-- One x86 architectural state and all checked call-protocol metadata. -/
@@ -64,7 +64,7 @@ def State.ControlConsistent {Request : Type} (state : State Request) : Prop :=
         (∃ kind, protocol.machine.contexts.lookup provider = some kind) ∧
         ∃ record, protocol.pending.lookup call = some record ∧
           record.caller = caller ∧ record.agent = provider
-  | .terminal => True
+  | .terminal _ _ => True
 
 /-- Build a carrier from a checked call-protocol state and an x86 state that
 contains that protocol state's machine.  The protocol metadata is retained
