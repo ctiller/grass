@@ -6,7 +6,7 @@ import Grass.ISA.X86.RegisterDecode
 # Normal register arithmetic completion
 
 This bounded adapter covers the production register-direct ADD, SUB, CMP,
-TEST, and XOR encodings at 32 and 64 bits, plus signed CMP immediate. Undefined
+TEST, and XOR encodings at 32 and 64 bits, plus signed CMP and AND immediates. Undefined
 status flags remain relational through `Flags.Allows`; the adapter never picks
 a representative value for them.
 -/
@@ -23,6 +23,8 @@ inductive ArithmeticInstruction where
   | xor (width : BasicInstructions.Width) (destination source : Gpr)
   | cmpImmediate (width : BasicInstructions.Width) (destination : Gpr)
       (immediate : ImmediateArithmetic.Immediate)
+  | andImmediate (width : BasicInstructions.Width) (destination : Gpr)
+      (immediate : ImmediateArithmetic.Immediate)
 deriving DecidableEq, Repr
 
 namespace ArithmeticInstruction
@@ -35,6 +37,8 @@ def encoding : ArithmeticInstruction → InsnEncoding
   | .xor width destination source => BasicInstructions.xorRegReg width destination source
   | .cmpImmediate width destination immediate =>
       ImmediateArithmetic.encode .cmp width destination immediate
+  | .andImmediate width destination immediate =>
+      ImmediateArithmetic.encode .and width destination immediate
 
 structure Selection (encoding : InsnEncoding) where
   instruction : ArithmeticInstruction
@@ -43,7 +47,7 @@ structure Selection (encoding : InsnEncoding) where
 def destination : ArithmeticInstruction → Gpr
   | .add _ destination _ | .sub _ destination _ | .cmp _ destination _
   | .test _ destination _ | .xor _ destination _
-  | .cmpImmediate _ destination _ => destination
+  | .cmpImmediate _ destination _ | .andImmediate _ destination _ => destination
 
 def effect (instruction : ArithmeticInstruction) (state : State) : RegisterSemantics.Effect :=
   match instruction with
@@ -58,6 +62,8 @@ def effect (instruction : ArithmeticInstruction) (state : State) : RegisterSeman
   | .xor width destination source => RegisterSemantics.evaluate .xor width
       (state.gpr destination) (state.gpr source) state.statusFlags
   | .cmpImmediate width destination immediate => RegisterSemantics.evaluateImmediate .cmp width
+      (state.gpr destination) immediate state.statusFlags
+  | .andImmediate width destination immediate => RegisterSemantics.evaluateImmediate .and width
       (state.gpr destination) immediate state.statusFlags
 
 private def ofRegisterSelection {encoding : InsnEncoding}
@@ -84,8 +90,10 @@ private def selectImmediate (encoding : InsnEncoding) : Option (Selection encodi
     | .i8 bits => some (ImmediateArithmetic.Immediate.i8 bits)
     | .i32 bits => some (ImmediateArithmetic.Immediate.i32 bits)
     | _ => none
-  let instruction := .cmpImmediate operands.width operands.destination immediate
-  if h : instruction.encoding = encoding then some ⟨instruction, h⟩ else none
+  let andInstruction := .andImmediate operands.width operands.destination immediate
+  if h : andInstruction.encoding = encoding then some ⟨andInstruction, h⟩ else
+    let cmpInstruction := .cmpImmediate operands.width operands.destination immediate
+    if h : cmpInstruction.encoding = encoding then some ⟨cmpInstruction, h⟩ else none
 
 /-- Select the bounded arithmetic family by equality with production encoders. -/
 def select (encoding : InsnEncoding) : Option (Selection encoding) :=

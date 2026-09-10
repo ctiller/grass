@@ -221,15 +221,37 @@ These helpers support one shared checked dispatcher without a second fetch
 event. They remain constructive normal-case helpers, not exhaustive CPU
 execution semantics.
 
-`MemoryMoveSelection.select` adds the bounded RSP-relative memory MOV forms to
-the fixed classifier. The source inventory now classifies all 44 unchanged
+`MemoryMoveSelection.select` recognizes the bounded RSP-relative immediate
+stores and DWORD loads, plus QWORD register stores and loads using the modeled
+memory operands. Effective addresses use the actual fetched fallthrough for
+RIP-relative operands. RSP bases, including indexed forms, use stack provenance;
+other operands use the policy's data selector. Missing data provenance retains
+the post-fetch state and address in a distinct diagnostic.
+The source inventory classifies all 44 unchanged
 Hello outputs; recognition of UD2 still supplies no invalid-opcode transfer.
 `MemoryMoveFactory.memoryMove` constructs the actual fetch and data operation.
-The immediate operand supplies store bytes, while a DWORD load observes the
-current initialized backing and clears the upper half of its destination.
+An immediate or source register supplies store bytes. Loads observe the current
+initialized backing; DWORD loads clear the upper half of their destination.
 `MemoryAccess` retains the same non-oracle policy fields across phases and an
 explicit concrete memory oracle for the data step. This lets a fetch use its
 empty write callback while the later store uses its decoded payload.
+
+`SyscallEntry.enter` provides a separate configured legacy 64-bit SYSCALL entry.
+It retains the actual fetch, saves its fallthrough in RCX and incoming flags in
+R11, applies the configured flags mask, and selects LSTAR. Its visible CPL/CS/SS
+projection uses the same configuration. Admission excludes FRED and the modeled
+CET phases, requires canonical LSTAR, and restricts incoming RF and STAR selector
+low bits to the documented common profile. These restrictions produce an
+outside-profile result, not a modeled hardware fault. Hidden segment caches,
+serialization, physical configuration correspondence, and kernel service/return
+remain outside this receipt. The generic dispatcher still refuses SYSCALL
+because its policy carries no privileged configuration.
+
+Completed reads share `Grass.Op.AccessFactory.AccessRun` observation laws.
+`ReadValue32` and `ReadValue64` add x86 width and byte-order interpretation;
+`FetchedSite` connects the same concrete backing observation to decoding, while
+`ObservedFetch` retains the actual completion bytes before successful decoding.
+The shared laws preserve the exact run and concrete memory-oracle equation.
 
 `CheckedExecution.normal` performs one actual fetch and dispatches to these
 constructors. Its typed success retains the normal receipt, including the full

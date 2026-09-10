@@ -94,7 +94,7 @@ def generate : IO Unit := do
       for immediate in ([.i8 0, .i8 127, .i8 128, .i8 255,
           .i32 0x7FFFFFFF, .i32 0x80000000, .i32 0xFFFFFFFF] :
           List ImmediateArithmetic.Immediate) do
-        for kind in [ImmediateArithmetic.Kind.sub, .cmp] do
+        for kind in [ImmediateArithmetic.Kind.and, .sub, .cmp] do
           let effect := evaluateImmediate kind width (registerValue initial destination) immediate initialFlags
           emit s!"arith-{destination.index.val}-{widthText width}-{repr kind}-{repr immediate}"
             (ImmediateArithmetic.encode kind width destination immediate).toBytes

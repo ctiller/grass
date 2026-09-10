@@ -1,4 +1,5 @@
 import Lean
+import Grass.ISA.X86.Execution.SyscallEntry
 import Grass.Platform.Win32.RawPhasePreservation
 import Grass.Platform.Win32.RawPendingService
 import Grass.Platform.Win32.RawPrefixSteps
@@ -24,6 +25,9 @@ import Grass.Artifact.PE.Imported
 import Grass.Op.Completion
 import Grass.Op.CompletedAccess
 import Grass.Op.ReadCompletion
+import Grass.Op.AccessRun
+import Grass.Op.AccessFactory
+import Grass.Op.ReadObservation
 import Grass.Op.ReadBytes
 import Grass.Op.PreparedPlacement
 import Grass.ISA.X86.Execution.AccessRun

@@ -22,6 +22,7 @@ open Grass.Core Grass.Memory Grass.Op
 inductive AccessPurpose where
   | fetch
   | dataRead
+  | dataWrite
   | stackRead
   | stackWrite
 deriving DecidableEq, Repr
@@ -34,7 +35,7 @@ structure CpuAccessPolicy where
   cause : EventCause
   code : Provenance
   stack : Provenance
-  /-- The fixed platform resolves a readable data span; absence is an applicability gap. -/
+  /-- The fixed platform resolves a readable or writable data span; absence is an applicability gap. -/
   data : MachineAddress → Nat → Option Provenance := fun _ _ => none
   /-- The target's declared access-fault vocabulary; declaration is not fault exclusion. -/
   faults : AccessPurpose → List FaultClassId
@@ -83,13 +84,16 @@ def descriptor {memory : MemoryState} {provenance : Provenance} {address : Machi
     provenance := provenance
     range := ⟨plan.offset, width⟩
     intent := match purpose with
-      | .fetch => .execute | .dataRead | .stackRead => .read | .stackWrite => .write
+      | .fetch => .execute | .dataRead | .stackRead => .read
+      | .dataWrite | .stackWrite => .write
     requiredPermission := match purpose with
-      | .fetch => .readExecute | .dataRead | .stackRead => .readOnly | .stackWrite => .readWrite
+      | .fetch => .readExecute | .dataRead | .stackRead => .readOnly
+      | .dataWrite | .stackWrite => .readWrite
     alignment := 1
     initialization := match purpose with
-      | .fetch | .dataRead | .stackRead => .allBytesInitialized | .stackWrite => .readsNothing
-    producesInitialized := match purpose with | .stackWrite => true | _ => false
+      | .fetch | .dataRead | .stackRead => .allBytesInitialized
+      | .dataWrite | .stackWrite => .readsNothing
+    producesInitialized := match purpose with | .dataWrite | .stackWrite => true | _ => false
     ordering := .plain
     admittedFaults := policy.faults purpose
     restartability := .restartable

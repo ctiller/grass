@@ -4,6 +4,7 @@ import Grass.ISA.X86.Execution.MoveSelection
 import Grass.ISA.X86.Execution.ArithmeticNormal
 import Grass.ISA.X86.Execution.BranchNormal
 import Grass.ISA.X86.Execution.LeaNormal
+import Grass.ISA.X86.SyscallEncoding
 
 /-!
 # Fixed canonical instruction classification
@@ -26,6 +27,7 @@ inductive Instruction where
   | branch (instruction : BranchInstruction)
   | lea (instruction : LeaInstruction)
   | callRip (displacement : BitVec 32)
+  | syscall
   | ud2
 deriving DecidableEq, Repr
 
@@ -40,6 +42,7 @@ def encoding? : Instruction → Option InsnEncoding
   | .branch instruction => some instruction.encoding
   | .lea instruction => instruction.encoding?
   | .callRip displacement => callMem64 (.ripRelative displacement)
+  | .syscall => some SyscallEncoding.encoding
   | .ud2 => some BasicInstructions.ud2
 
 structure Selection (encoding : InsnEncoding) where
@@ -51,12 +54,15 @@ private def accept (encoding : InsnEncoding) (instruction : Instruction) :
   if same : instruction.encoding? = some encoding then some ⟨instruction, same⟩ else none
 
 private def selectControl (encoding : InsnEncoding) : Option (Selection encoding) :=
-  match encoding.disp with
-  | .d32 displacement =>
-      match accept encoding (.callRip displacement) with
-      | some selected => some selected
-      | none => accept encoding .ud2
-  | _ => accept encoding .ud2
+  match accept encoding .syscall with
+  | some selected => some selected
+  | none =>
+      match encoding.disp with
+      | .d32 displacement =>
+          match accept encoding (.callRip displacement) with
+          | some selected => some selected
+          | none => accept encoding .ud2
+      | _ => accept encoding .ud2
 
 /-- `select` uses fixed family priority and retains whole-encoding equality. -/
 def select (encoding : InsnEncoding) : Option (Selection encoding) :=

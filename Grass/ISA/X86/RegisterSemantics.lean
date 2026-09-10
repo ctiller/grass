@@ -1,10 +1,10 @@
 import Grass.ISA.X86.ImmediateArithmetic
 
 /-!
-Operand-local x86-64 register semantics for the Hello arithmetic family.
+Operand-local x86-64 register semantics.
 
 Authority: Intel SDM Vol. 1 §3.4.1.1/§3.4.3.1 and Vol. 2 ADD, SUB, CMP,
-TEST, XOR, MOV instruction entries; AMD APM Vol. 1 flags/register sections and
+TEST, XOR, AND, MOV instruction entries; AMD APM Vol. 1 flags/register sections and
 Vol. 3 corresponding instruction entries. The AMD source migration repairs the
 active retrieval pin, but this module's declaration-to-ledger attachment and
 the profile's remaining confirmation debt stay open. Executable tests do not
@@ -134,12 +134,23 @@ def evaluate (kind : Kind) (width : BasicInstructions.Width) (destination source
     let effect := narrow kind destination source flags
     ⟨effect.write.map (writeBack .w64 destination), effect.flags⟩
 
+def evaluateAnd (width : BasicInstructions.Width) (destination source : BitVec 64) : Effect :=
+  match width with
+  | .w32 =>
+      let result := destination.setWidth 32 &&& source.setWidth 32
+      ⟨some (writeBack .w32 destination result), logicalFlags result⟩
+  | .w64 =>
+      let result := destination &&& source
+      ⟨some result, logicalFlags result⟩
+
 /-- Sign extension is selected by the same typed immediate as the encoder. -/
 def evaluateImmediate (kind : ImmediateArithmetic.Kind) (width : BasicInstructions.Width)
     (destination : BitVec 64) (immediate : ImmediateArithmetic.Immediate)
     (flags : Flags Bool) : Effect :=
-  evaluate (match kind with | .sub => .sub | .cmp => .cmp) width destination
-    (BitVec.ofInt 64 immediate.toInt) flags
+  match kind with
+  | .and => evaluateAnd width destination (BitVec.ofInt 64 immediate.toInt)
+  | .sub => evaluate .sub width destination (BitVec.ofInt 64 immediate.toInt) flags
+  | .cmp => evaluate .cmp width destination (BitVec.ofInt 64 immediate.toInt) flags
 
 def Effect.destination (effect : Effect) (old : BitVec 64) : BitVec 64 :=
   effect.write.getD old
@@ -164,6 +175,10 @@ theorem logical_af_undefined (kind : Kind) (hk : kind = .test ∨ kind = .xor)
     (width : BasicInstructions.Width) (a b : BitVec 64) (flags : Flags Bool) :
     (evaluate kind width a b flags).flags.af = none := by
   rcases hk with rfl | rfl <;> cases width <;> rfl
+
+theorem and_af_undefined (width : BasicInstructions.Width) (a b : BitVec 64)
+    : (evaluateAnd width a b).flags.af = none := by
+  cases width <;> rfl
 
 theorem w32_write_clears_high (kind : Kind) (a b result : BitVec 64) (flags : Flags Bool)
     (h : (evaluate kind .w32 a b flags).write = some result) :

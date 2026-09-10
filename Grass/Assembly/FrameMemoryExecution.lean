@@ -106,6 +106,11 @@ theorem isa_displacement {frame rootOffset} {source : SourceResolve.Result frame
     instruction.isa.displacement = BitVec.ofNat 32 instruction.displacement := by
   cases instruction <;> rfl
 
+theorem isa_operand {frame rootOffset} {source : SourceResolve.Result frame rootOffset}
+    (instruction : StoreInstruction source) :
+    instruction.isa.operand = .base .rsp (BitVec.ofNat 32 instruction.displacement) := by
+  cases instruction <;> rfl
+
 theorem signed_displacement {frame rootOffset} {source : SourceResolve.Result frame rootOffset}
     (instruction : StoreInstruction source) :
     BitVec.signExtend 64 (BitVec.ofNat 32 instruction.displacement) =
@@ -179,7 +184,8 @@ def execution {frame rootOffset} {source : SourceResolve.Result frame rootOffset
     initialization := receipt.initialization
     producesInitialized := receipt.producesInitialized
     address := by simpa [MemoryMoveNormal.Instruction.effectiveAddress,
-      receipt.instruction.isa_displacement] using receipt.address_exact
+      MemoryMoveNormal.Instruction.operandAddress,
+      receipt.instruction.isa_operand] using receipt.address_exact
     width := by rw [receipt.range]; exact receipt.instruction.isa_width
     payload := receipt.instruction.payload
     payloadExact := receipt.instruction.isa_payload

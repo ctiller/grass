@@ -201,6 +201,8 @@ def opcodeTable : List OpcodeSpec :=
       mnemonic := "mov ah, imm8; mov spl, imm8 under any REX" },
     { escape := true, opcode := 0x0B, hasModrm := false, immSize := .none,
       mnemonic := "ud2" },
+    { escape := true, opcode := 0x05, hasModrm := false, immSize := .none,
+      mnemonic := "syscall" },
     { escape := true, opcode := 0x84, hasModrm := false, immSize := .i32,
       mnemonic := "jz rel32" },
     { escape := true, opcode := 0x87, hasModrm := false, immSize := .i32,

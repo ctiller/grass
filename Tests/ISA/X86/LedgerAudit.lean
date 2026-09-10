@@ -15,6 +15,7 @@ import Grass.ISA.X86.Execution.MemoryAccess
 import Grass.ISA.X86.Execution.MemoryWrite
 import Grass.ISA.X86.Execution.ReadValue32
 import Grass.ISA.X86.Execution.MemoryMoveFactory
+import Grass.ISA.X86.Execution.SyscallEntry
 import Grass.ISA.X86.Execution.MemoryMoveSelection
 import Grass.ISA.X86.Execution.MemoryMoveNormal
 import Grass.ISA.X86.Execution.SubRspNormal
@@ -212,7 +213,8 @@ The citation machinery itself is not modeled behaviour and is not audited: a
 def auditedModules : List Name :=
   [`Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.BasicInstructions,
-   `Grass.ISA.X86.Rel32,
+   `Grass.ISA.X86.Rel32, `Grass.ISA.X86.SyscallEncoding,
+   `Grass.ISA.X86.Execution.SyscallEntry,
    `Grass.ISA.X86.ImmediateArithmetic,
    `Grass.ISA.X86.RegisterSemantics, `Grass.ISA.X86.RegisterDecode,
    `Grass.ISA.X86.RegisterLaws,
@@ -378,7 +380,9 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Static selector/route/result policy and observed-register API acceptance.
 -- External process applicability and formal source anchors remain owed.
 -- The bounded live writable/synchronous publication attribution policy.
-def owedBaseline : Nat := 349
+-- AND, general memory MOV, and the bounded legacy SYSCALL projection add ten
+-- explicit semantic/profile definitions. Source inspection is not enrollment.
+def owedBaseline : Nat := 357
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -444,7 +448,9 @@ acquiring a citation.
 -- The actual checked completion projects its canonical raw event suffix.
 -- Shared observation staging installs supplied register data without native authority.
 -- Checked WriteFile resume construction and computed final carrier.
-def notBehaviourBaseline : Nat := 400
+-- Five projection/receipt-construction helpers reuse separately owed semantics.
+-- Generic Op extraction replaces one local instance with three compatibility aliases.
+def notBehaviourBaseline : Nat := 402
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -584,6 +590,7 @@ A permanent claim, one line of reasoning each. Anything here is asserting that a
 reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
+  `Grass.ISA.X86.Execution.MemoryMoveFactory.usesRspBase ::
   [
     -- Instantiate the existing exact raw relation and loader/protocol root; no new hardware rule.
     `Grass.Platform.Win32.Raw.initialState,
@@ -867,6 +874,11 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.MemoryMoveSelection.select,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.Success.result,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.Success.provenance,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.Success.instruction,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Load64Normal.read,
+    `Grass.ISA.X86.Execution.SyscallEntry.Normal.controlProjection,
+    `Grass.ISA.X86.Execution.SyscallEntry.fromFetched,
+    `Grass.ISA.X86.Execution.SyscallEntry.enter,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.reached,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.fromSite,
     `Grass.ISA.X86.Execution.MemoryMoveFactory.fromFetched,
@@ -904,7 +916,9 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.RunFactory.accessFree,
     `Grass.ISA.X86.Execution.RunFactory.accessFreeOperation,
     `Grass.ISA.X86.Execution.RunFactory.instHasOperationFacetsFixedAccessFreeOperation,
-    `Grass.ISA.X86.Execution.RunFactory.instHasOperationFacetsSingletonAccessOperation,
+    `Grass.ISA.X86.Execution.AccessRun,
+    `Grass.ISA.X86.Execution.RunFactory.AccessFailure,
+    `Grass.ISA.X86.Execution.RunFactory.AccessSuccess,
     `Grass.ISA.X86.Execution.RunFactory.noFaultPlan,
     `Grass.ISA.X86.Execution.RunFactory.singletonOperation,
     -- Factory packaging and explicit applicability routing over separately
@@ -1260,6 +1274,11 @@ def owed : List Name :=
     `Grass.ISA.X86.RegisterSemantics.narrow,
     `Grass.ISA.X86.RegisterSemantics.evaluate,
     `Grass.ISA.X86.RegisterSemantics.evaluateImmediate,
+    `Grass.ISA.X86.RegisterSemantics.evaluateAnd,
+    `Grass.ISA.X86.SyscallEncoding.encoding,
+    `Grass.ISA.X86.Execution.SyscallEntry.Admitted,
+    `Grass.ISA.X86.Execution.SyscallEntry.control,
+    `Grass.ISA.X86.Execution.SyscallEntry.Normal.result,
     `Grass.ISA.X86.RegisterSemantics.Instruction.encoding,
     `Grass.ISA.X86.RegisterSemantics.Instruction.registersAfter,
     `Grass.ISA.X86.RegisterDecode.reconstruct,
@@ -1321,6 +1340,11 @@ def owed : List Name :=
     `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.payload?,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.encode?,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.effectiveAddress,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Instruction.operandAddress,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.StoreRegister64Normal.result,
+    `Grass.ISA.X86.Execution.MemoryMoveNormal.Load64Normal.result,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.selectedProvenance,
+    `Grass.ISA.X86.Execution.MemoryMoveFactory.selectedPurpose,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.StoreNormal.result,
     `Grass.ISA.X86.Execution.MemoryMoveNormal.LoadNormal.result,
     `Grass.ISA.X86.ImmediateArithmetic.Immediate.opcode,

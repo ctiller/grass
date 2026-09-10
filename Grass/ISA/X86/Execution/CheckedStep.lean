@@ -99,6 +99,7 @@ private def bodyFailure : BodyComputationFactory.Failure → Option CpuOutcome
 private def memoryMoveFailure : MemoryMoveFactory.Failure → CpuOutcome
   | .fetch reason => fetchFailure reason
   | .unsupported reached encoding => .outsideProfile reached (.instruction encoding)
+  | .missingData reached address => .outsideProfile reached (.missingData address)
   | .address reached reason => .outsideProfile reached (.addressPlanning reason)
   | .access reached _ reason => .outsideProfile reached (accessReason reason)
 
@@ -138,7 +139,7 @@ def normal (policy : CpuAccessPolicy) (before : State)
           match MemoryMoveFactory.fromFetched fetched with
           | .error reason => some (.error (.memoryMove reason))
           | .ok execution => some (.ok (.memoryMove ⟨fetched, execution⟩))
-      | .ud2 => some (.error (.unsupported
+      | .syscall | .ud2 => some (.error (.unsupported
           { before with machine := fetched.after } fetched.dispatched.fetch.site.encoding))
 
 def Failure.outcome : Failure → Option CpuOutcome

@@ -1,5 +1,26 @@
 # Initial campaign and open finding
 
+## AND immediate extension, 2026-09-09
+
+The current protected campaign contains 1,204 cases: 450 register MOV, 630
+immediate arithmetic, 120 register-boundary and four retained Hello operand
+cases. The immediate arithmetic population now includes 210 AND cases alongside
+the existing 210 SUB and 210 CMP cases. AND compares CF/PF/ZF/SF/OF with mask
+`0x8C5`; its undefined AF is excluded. In total, 953 rows use the full modeled
+status mask `0x8D5`, while 251 AND/TEST/XOR rows use `0x8C5`.
+
+The reviewed coverage identity is
+`580b2678ac969eee75b29aeef37e0eba698563fb2428e8bae5bf8be5b4fd6a10`.
+It binds labels, input registers, input flags and prediction bases, and retains
+the existing exclusion of emitted bytes and predicted outputs.
+
+The optimized protected run retained at
+`target/x86-native/and-immediate-campaign-hello-moves-final/` completed all
+1,204 cases with zero mismatches, 12 harness controls and one corpus-intake
+control. The recorded host is Windows 11 build 26200, GenuineIntel CPUID leaf 1
+EAX `0xB06A2`, with the hypervisor bit set and microcode unknown. This is hosted
+machine evidence; it does not establish a physical or bare-metal result.
+
 ## Scratch-stack follow-up
 
 The success-only extension described in [STACK.md](STACK.md) was validated on

@@ -13,7 +13,7 @@ REGS = 'rax rcx rdx rbx rsp rbp rsi rdi r8 r9 r10 r11 r12 r13 r14 r15'.split()
 FLAGS_MASK = 0x8D5  # CF/PF/AF/ZF/SF/OF; OS-owned/reserved flags are not predictions.
 # Coverage identity excludes emitted bytes and expected outputs: changes to the
 # model must reach the hardware comparator, not ask users to bless a new digest.
-COVERAGE_SHA256 = '9bdf88e1e44543f42dd87e923e8d9ca0affd0a091f67c6248ff282273f50b643'
+COVERAGE_SHA256 = '580b2678ac969eee75b29aeef37e0eba698563fb2428e8bae5bf8be5b4fd6a10'
 
 
 def require(condition, detail):
@@ -117,6 +117,7 @@ def parse_corpus_flags(label, field):
     require(value is not None, f'modeled flags required for {label}')
     expected_mask = (FLAGS_MASK & ~0x10
                      if label.startswith(('boundary-test-', 'boundary-xor-'))
+                     or '-Grass.ISA.X86.ImmediateArithmetic.Kind.and-' in label
                      or label == 'hello-test-eax-eax' else FLAGS_MASK)
     require(mask == expected_mask, f'flag mask for {label}')
     return value, mask
@@ -171,10 +172,10 @@ def main():
         cases.append(dict(label=label, code=code, before=before, expected=after,
                           flags_in=int(flags_in, 16), flags_out=flags_out,
                           flags_mask=flags_mask, basis=basis))
-    # 450 MOV + 420 immediate arithmetic + 120 register boundaries + 4 Hello operations.
-    require(len(cases) == 994, f'unreviewed population change: {len(cases)}')
+    # 450 MOV + 630 immediate arithmetic + 120 register boundaries + 4 Hello operations.
+    require(len(cases) == 1204, f'unreviewed population change: {len(cases)}')
     require(sum(case['flags_mask'] == FLAGS_MASK for case in cases) == 953 and
-            sum(case['flags_mask'] == FLAGS_MASK & ~0x10 for case in cases) == 41,
+            sum(case['flags_mask'] == FLAGS_MASK & ~0x10 for case in cases) == 251,
             'modeled flag-mask population')
     metadata = dict(schema=1, adapter='windows-veh', os=platform.platform(),
                     started_utc=datetime.now(timezone.utc).isoformat(),
@@ -201,11 +202,13 @@ def main():
             out.write(json.dumps(dict(case=case, actual=actual, differences=errors)) + '\n')
             out.flush()
     summary = dict(cases=len(cases), mismatches=failures, mov_cases=470,
-                   immediate_arithmetic_cases=420, boundary_register_cases=120,
-                   hello_operation_cases=4, modeled_register_cases=994,
+                   mov_matrix_cases=450,
+                   immediate_arithmetic_cases=630, and_immediate_cases=210,
+                   boundary_register_cases=120,
+                   hello_operation_cases=4, modeled_register_cases=1204,
                    fully_defined_status_flag_cases=953,
-                   logical_defined_status_flag_cases=41,
-                   logical_af_undefined_cases=41, harness_controls=12,
+                   logical_defined_status_flag_cases=251,
+                   logical_af_undefined_cases=251, harness_controls=12,
                    corpus_controls=intake_controls)
     (args.output / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
     print(json.dumps(summary))

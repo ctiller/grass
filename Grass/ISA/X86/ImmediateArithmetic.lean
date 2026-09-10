@@ -1,7 +1,7 @@
 import Grass.ISA.X86.BasicInstructions
 import Grass.ISA.X86.EncodingTemplate
 
-/-! Register-direct Group 1 arithmetic with typed immediate widths. -/
+/-! Register-direct Group 1 AND, SUB, and CMP with typed immediate widths. -/
 namespace Grass.ISA.X86.ImmediateArithmetic
 
 open Grass.ISA.X86 Grass.Std.Logical
@@ -9,6 +9,7 @@ open Grass.ISA.X86.BasicInstructions
 
 /-- The Group 1 operations needed by the Hello source. -/
 inductive Kind where
+  | and
   | sub
   | cmp
 deriving DecidableEq, Repr
@@ -32,6 +33,7 @@ private def Immediate.isa : Immediate → Grass.ISA.X86.Immediate
 def Immediate.size (immediate : Immediate) : Nat := immediate.isa.size
 
 private def Kind.extension : Kind → BitVec 3
+  | .and => 4
   | .sub => 5
   | .cmp => 7
 

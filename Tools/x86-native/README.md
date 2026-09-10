@@ -44,21 +44,23 @@ The population is generated once in
   values expose wrong operand selection; nonzero high halves expose missed
   zero-extension. Predictions call Grass's `RegisterSemantics` transfer, which
   reuses `writeBack`.
-* 420 SUB/CMP immediate cases: those 15 destinations, both widths, signed imm8
+* 630 AND/SUB/CMP immediate cases: those 15 destinations, both widths, signed imm8
   endpoints (0, 127, -128, -1) and imm32 endpoints (maximum, minimum, -1).
   Emission calls `ImmediateArithmetic.encode`; interpretation calls its `toInt`.
-  Both SUB and CMP now predict all six arithmetic flags through the public
+  AND compares CF/PF/ZF/SF/OF with mask `0x8C5`, leaving architecturally
+  undefined AF unconstrained. SUB and CMP compare all six modeled arithmetic
+  flags with mask `0x8D5` through the public
   `RegisterSemantics.evaluateImmediate` transfer.
 * 120 register boundary cases cover all six modeled families at both widths,
   with zero, carry/borrow, nibble carry, signed overflow and high-half inputs.
 * Four cases use Hello's exact operand selections: TEST EAX,EAX; CMP EAX,R14D;
-  ADD R13,RAX; SUB R14D,EAX. Total population: 994.
+  ADD R13,RAX; SUB R14D,EAX. Total population: 1204.
 
 All 15 initialized GPRs are compared, including unchanged registers. RSP is
 captured at entry and exit and checked unchanged. It is not a corpus input.
 MOV cases compare CF/PF/AF/ZF/SF/OF preservation from a deliberately set initial
 pattern. ADD/SUB/CMP compare all six defined status flags (mask `0x8D5`);
-TEST/XOR compare CF/PF/ZF/SF/OF (mask `0x8C5`), leaving undefined AF unconstrained.
+AND/TEST/XOR compare CF/PF/ZF/SF/OF (mask `0x8C5`), leaving undefined AF unconstrained.
 Other RFLAGS bits, SIMD/x87 state and memory are outside this campaign's declared
 observation surface. Boundary cases are finite model validation, not exhaustive
 arithmetic coverage or a whole-machine transition proof.

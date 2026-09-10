@@ -24,6 +24,18 @@ sufficient declaration-level anchors.
 
 Register semantics anchors inspected on 2026-09-09:
 
+- AND-immediate uses the Intel SDM 092 AND operation/flags entry and AMD APM
+  24594 revision 3.38 AND, pages 93–94. The defined flags and undefined AF are
+  distinct from the register write-width rule.
+- The bounded legacy 64-bit SYSCALL projection uses Intel SDM 092 Vol. 2B,
+  pages 4-698–4-700, and AMD APM 24594 revision 3.38, pages 484–487 (included
+  in the pinned 40332 revision 4.10 collection). The current Intel entry includes
+  FRED and phase-specific CET branches. The initial common profile excludes
+  those branches, requires incoming RF clear and a ring-zero STAR selector,
+  and leaves hidden segment caches, instruction ordering, provider return,
+  and correspondence to actual machine configuration outside its coverage.
+  These inspected anchors do not discharge declaration-level citation debt.
+
 - Intel SDM revision 092,
   [Volumes 2A–2D](https://cdrdv2-public.intel.com/922478/325383-092-sdm-vol-2abcd.pdf):
   ADD 3-14–3-15; CMP 3-161–3-162; MOV 4-28–4-30; SUB 4-684–4-685;
