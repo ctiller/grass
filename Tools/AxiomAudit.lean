@@ -7,6 +7,9 @@ import Grass.Platform.Win32
 import Grass.Artifact.Encoding
 import Grass.Artifact.PE.Encoding
 import Grass.Refinement.BehaviorCorrespondence
+import Grass.Refinement.BehaviorMatching
+import Grass.Refinement.HistorySimulation
+import Grass.Refinement.ImplementationConformance
 import Grass.Refinement.BehaviorCorrespondenceLaws
 import Grass.Refinement.Realization
 import Grass.Semantics.BehaviorModel
