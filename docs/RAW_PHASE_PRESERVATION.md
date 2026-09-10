@@ -23,6 +23,9 @@ relation. A terminal state retains its exit call and status; `Raw.result`
 projects that payload. Every pointwise actual infinite step stream is admitted,
 with no fairness or responsiveness condition. Infinite service is not silently
 identified with a finite wait, and silent CPU divergence remains represented.
+The approved [directed-waiting change](SEMANTICS.md#selected-agency-and-directed-waiting)
+will relate a witnessed external-nonresponse suffix to an authored wait without
+changing that raw infinite stream; implementation remains pending.
 This is a relative operational system. A full `BehaviorModel` still needs a
 faithful external wait boundary and its public observation mapping.
 
@@ -33,8 +36,9 @@ edge with the exact process, call, status and event. Terminal control admits no
 next raw step; archived bookkeeping need not be empty.
 
 These clauses do not prove enabledness or Hello deadlock freedom. The certificate
-fixture at `f9145e4a` now retains the actual 24-edge loader-to-first-WriteFile-entry
-prefix; see the [endpoint index](ENDPOINT_INDEX.md#issued-call-resume-status).
+fixture at `2b160c4d` retains the actual 24-edge loader-to-first-WriteFile-entry
+prefix and selected NULL/INVALID terminal runs; see the
+[endpoint index](ENDPOINT_INDEX.md#issued-call-resume-status).
 WriteFile still requires the original-entry segment and enclosing history/publication
 connection through the lowering adapter. Main `0993922c` includes the actual
 `RawStep.completedExit` edge, retained status and `terminal_no_step`; this is not

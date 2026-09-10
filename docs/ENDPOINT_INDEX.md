@@ -7,7 +7,7 @@ describes this revision unless a later inspected delivery or interview report is
 explicitly named below.
 
 Latest mechanical connection update: [issued-call resume status](#issued-call-resume-status),
-covering main `0993922c` and certificate `f9145e4a`. Earlier delivery sections explain
+covering main `a3b4ed9a` and certificate `2b160c4d`. Earlier delivery sections explain
 the retained carrier, service, dispatch and checked-CPU boundaries.
 
 ## Start from the authored output
@@ -56,14 +56,17 @@ their own status labels; a reviewed direction is not an implemented declaration.
 
 ## Issued-call resume status
 
-Current consolidated snapshot: main `0993922c` and certificate `f9145e4a`.
+Current consolidated snapshot: main `a3b4ed9a` and certificate `2b160c4d`.
 The retained **24-edge loader-rooted Hello prefix reaches the first WriteFile
 entry**. This replaces the earlier missing-initial-prefix status; it is one
 checked finite execution, not whole-Hello or public-emission acceptance.
+The same authored-source fixture now also retains NULL (14 edges) and INVALID
+(16 edges) runs ending at terminal status 1. Spikes reports the full frontend
+gate passed; these selected executions do not establish all-run coverage.
 
 | Find | Implemented connection at this snapshot | Remaining boundary |
 |---|---|---|
-| Hello entry prefix | Certificate `Tests/Frontend/WriteFilePrefix.lean.in`: `Result machineSource`, `inspected`; `Tests/Frontend/check.sh` injects the unchanged authored source and retains the actual `ExecutionPrefix` through GetStdHandle entry/return and first WriteFile entry | Provider registers are observed inputs and the graph is empty; this fixture does not establish native/causal correspondence, all runs or the certificate suffix |
+| Hello entry prefix | Certificate `Tests/Frontend/WriteFilePrefix.lean.in`: `Result machineSource stdout`, `inspected`; `Tests/Frontend/check.sh` injects the unchanged authored source and retains the actual `ExecutionPrefix` through GetStdHandle entry/return to first WriteFile entry or the selected sentinel's terminal path | Provider registers are observed inputs and the graph is empty; this fixture does not establish native/causal correspondence, all runs or the certificate suffix |
 | Incoming WriteFile arguments | Certificate `Grass/Refinement/Console/WriteFileStaticEntry.lean` composes canonical static buffer/count arguments with the actual CALL and existing checked preparation; count placement uses the original runtime frame | The [incoming-state contract](PLATFORM_ABI.md#incoming-state-contract) requires exact provenance, range, memory and CALL binding, not an executed LEA or another prescribed register recipe |
 | Installed returns | [RawStep.lean](../Grass/Platform/Win32/RawStep.lean): `getStdHandleReturn`, `writeFileReturn`; [GetStdHandleRawReturn](../Grass/Platform/Win32/GetStdHandleRawReturn.lean), [WriteFileRawReturn](../Grass/Platform/Win32/WriteFileRawReturn.lean) | The derivation fixes one image, console environment, realization and return interpretation; observed results and the original provider-history connection remain real premises |
 | Shared finalization | Both actual return consumers use [ProviderResumeFinalization](../Grass/Platform/Win32/ProviderResumeFinalization.lean) for final state, exact runtime/pending consumption, logs and replay rejection | Dual production adoption is closed; it does not establish native provider identity, full ABI applicability or physical return |
@@ -71,9 +74,11 @@ checked finite execution, not whole-Hello or public-emission acceptance.
 | Finite service/history transport | [RawPrefixSteps](../Grass/Platform/Win32/RawPrefixSteps.lean): `finitePrefix_indexed_witnesses`; [RawPendingService](../Grass/Platform/Win32/RawPendingService.lean): `pending_to_pending_service`; [WriteFileReturnHistory](../Grass/Platform/Win32/WriteFileReturnHistory.lean): `returnedAfterService` | Extracts actual finite witnesses and same-call pending service edges, then transports matched return to the constructed service history. Connecting the contiguous segment to its original entry in the enclosing execution is still underway |
 
 Certificate-only paths above can be inspected with
-`git show f9145e4a:<path>`. The prefix reuses
-[RawPrefix](../Grass/Platform/Win32/RawPrefix.lean) and its computed loader root;
-its unused completion fields are scaffolding, not terminal/infinite semantics.
+`git show 2b160c4d:<path>`. The prefix now uses canonical
+[Raw.system](../Grass/Platform/Win32/RawPrefix.lean), its computed loader root,
+terminal call/status projection and admission of all pointwise actual infinite
+runs. Existing execution interfaces are universe-generalized; the old finite-only
+completion scaffolding has been replaced. A faithful wait boundary remains owed.
 See [raw phase preservation](RAW_PHASE_PRESERVATION.md) for the exact local clauses
 and their limits. In particular, a retained initial prefix does not by itself
 supply every subsequent segment's original handoff or prove enabledness.
@@ -89,7 +94,10 @@ implementation owner for this correction; Windows and frontend consume it.
 
 The next connection is the original-entry service segment and enclosing provider
 history, followed by the remaining source/body and certificate composition.
-Raw deadlock preservation, external/native applicability and the public
+The [selected agency and directed-waiting decision](SEMANTICS.md#selected-agency-and-directed-waiting)
+is approved but undelivered: exact correspondence stays strict, while directed
+conformance will admit a concrete external-nonresponse witness retaining the raw
+infinite run and every observation. Raw deadlock preservation, external/native applicability and the public
 `helloVerified`/`emitProgram` endpoint remain open. No spike is complete.
 The authored programs and annotated source snapshots remain the acceptance surface.
 
