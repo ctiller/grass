@@ -132,8 +132,22 @@ The specialized `returned_body` requires the successful producer equation and
 removes the generic `requestSlot` premise by construction. It still does not
 construct the source-LEA-to-pre-CALL setup ancestry or whole Hello; the other
 return/body premises remain. Spikes reports independent Sol review and a combined
-304-job focused build passed. Shared finalization extraction remains unpublished
-at this checkpoint; no GetStdHandle production adoption is claimed.
+304-job focused build passed.
+
+Shared finalization now has **both real production consumers** at certificate
+checkpoint `c6ded4d2`. Main `95675923` delivers
+[GetStdHandleReturn.lean](../Grass/Platform/Win32/GetStdHandleReturn.lean):
+observed-result, same-call `complete?` uses `ProviderResume.finalized_*` for
+fields, other-call preservation, protocol consumption/replay rejection and logs.
+The inspected `Grass/Refinement/Console/WriteFileFinalize.lean` at `c6ded4d2`
+delegates to those same laws in
+[ProviderResumeFinalization.lean](../Grass/Platform/Win32/ProviderResumeFinalization.lean).
+This closes the specific dual-adoption obligation. Spikes reports boundary review
+accepted, root/certificate focused builds (249/296 jobs), root audit (31,112
+declarations/360 modules), certificate ledger and supplier build/trust checks
+passed. These do not establish broader cleanup, native applicability, physical
+return or the public `VerifiedProgram` endpoint. Removal of unused LEA-specific
+lowering wrappers is still unpublished at this update.
 
 The [incoming-state contract rule](PLATFORM_ABI.md#incoming-state-contract)
 separates the checked call state from its setup recipe. The source-LEA premise
