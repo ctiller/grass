@@ -86,6 +86,27 @@ each disposition to the exact declared success, failure, abort, or unknown
 result. A platform profile's permission to abandon an obligation does not by
 itself prove that the program specification reports that abandonment.
 
+### Observed process exit
+
+The approved Exit direction checks the exact fixed process, current Exit call
+occurrence and observed status. Terminal control retains the call/status and
+remaining memory, pending calls, grants, contexts and runtime data as an inert
+archive. It does not require a universally empty inventory or establish native
+cleanup. Every `RawStep` constructor must reject terminal operational control;
+retaining archived data must not permit execution to resume.
+
+Exit itself may discharge some duties when the owning protocol's law establishes
+that effect for the exact duty identity, kind, owner, process scope and observed
+exit/outcome. Use the existing `TerminalOutcome` with disposition `.discharged`;
+other duties still need their own permitted terminal outcomes. Neither a duty's
+kind alone nor the occurrence of exit supplies a universal discharge rule.
+No generic droppable flag, new disposition or global policy framework is implied.
+
+The planned neutral `ExitProcessCompletion` producer checks the exit observation
+and changes control. Concrete obligation accounting belongs to the terminal or
+protocol consumer. This is a decision and implementation requirement, not a claim
+that this producer or all terminal `RawStep` guards have been delivered.
+
 ## 4. Emergency failure
 
 An expected failure retains all safety and failure-postcondition proofs. An

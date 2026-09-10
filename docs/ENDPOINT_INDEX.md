@@ -169,6 +169,12 @@ establish whole Hello.
 
 ### Approved semantic correction and relative gate
 
+The [observed process-exit decision](OBLIGATIONS.md#observed-process-exit) requires
+exact process/call/status checking, inert terminal archives and rejection of every
+subsequent `RawStep`. Exit discharges a duty only under its owning protocol's exact
+law; it implies neither empty inventories nor native cleanup. The neutral producer
+and terminal guards are requirements here, not a delivered endpoint claim.
+
 Process and architecture confirm the latest user-approved boundary: “on error”
 is conditional, so an infallible implementation can satisfy that contract.
 Generic implementation conformance covers **every actual history, result,
