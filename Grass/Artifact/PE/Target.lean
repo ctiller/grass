@@ -13,11 +13,44 @@ programs `assemble` accepts, how a `Sectioned` becomes an image, and how an
 image gives its program back.
 
 `ImageBase` is the lowest section address rounded down to 64 KiB and every
-section's RVA is its absolute address minus that base, so the addresses a
-`Sectioned` carries are the addresses the loader maps.
-`IMAGE_FILE_RELOCS_STRIPPED` in `Characteristics` and the absence of
-`DYNAMIC_BASE`/`HIGH_ENTROPY_VA` in `DllCharacteristics` are what oblige the
-loader to honor them.
+section's RVA is its absolute address minus that base — the addresses a
+`Sectioned` carries are the addresses the loader maps *when it honors the
+requested base*, but decision 17 requires ASLR: `Characteristics` clears
+`IMAGE_FILE_RELOCS_STRIPPED` and `DllCharacteristics` sets `DYNAMIC_BASE` and
+`HIGH_ENTROPY_VA` (`Grass.Artifact.PE.Target.Image.coffFixed`,
+`optionalWindows`), so the loader remains free to rebase the image.
+
+## Base relocations
+
+Grass programs address memory only through RIP-relative operands and the
+import slots `Sectioned.imports` names; `Sectioned` has no field that could
+express an absolute (base-relative) relocation, so there is never a
+relocation entry for `assemble` to emit — refusing a program that "needs" one
+is therefore vacuous by construction, not a missing check. What ASLR still
+needs is the *directory itself*: Microsoft, PE Format, "The .reloc Section
+(Image Only)", describes each block as a 4-byte page RVA and a 4-byte block
+size that includes the header, with the entries (if any) following; a block
+with zero following entries is a legal, if unusual, empty block. `assemble`
+always emits exactly one such empty block — naming the page containing the
+program's entry point, which is what keeps a well-formed, if inert, directory
+present for a `DYNAMIC_BASE` loader — rather than reserving a whole `.reloc`
+section for content that names zero relocations: the block is appended after
+the import directory's own content, inside the same `.idata` section, and
+`Grass.Artifact.PE.Target.Image.Artifact.relocDirRva`/`relocDirSize` (data
+directory 5) point at it directly. A future `Sectioned` extension that could
+express an absolute relocation would need this format's cooperation to emit a
+non-empty block; today's `Sectioned` cannot ask for one.
+
+## Exception directory
+
+When `program.sections` carries a section named `.pdata` — the lowering tier
+emits its bytes from `Grass.ABI.Win64.UnwindBytes`; this module never
+generates unwind data — `assemble` points data directory 3 (Exception Table)
+at that section's own RVA/size. Otherwise the directory stays zero.
+`Artifact.hasUnwind` and `assemble_hasUnwind` expose which case held, so a
+downstream platform profile that requires unwind metadata
+(`docs/HELLO_UNWIND_BOUNDARY.md`) can demand it without this module deciding
+that policy.
 
 ## Imports
 
@@ -46,16 +79,21 @@ write, read and prove rather than two.
   ascending and clear of the mapped headers. The writer places sections where
   the program says, so it refuses a layout it cannot repair rather than moving
   code the program has already resolved addresses against.
-- No exception directory (`.pdata`), no base relocations, no TLS, no
-  resources, no debug directory, no `CheckSum`: data directories other than
-  the import table are zero. A 64-bit Windows image without `.pdata` cannot
-  unwind through its own frames, which matters for a program that raises a
-  structured exception, not for loading.
+- No TLS, no resources, no debug directory, no `CheckSum`: data directories
+  other than import (1), exception (3) and base relocation (5) are zero.
+  Exception directory 3 is populated only when the program supplies a
+  `.pdata` section (see `Artifact.hasUnwind`); a 64-bit Windows image without
+  one cannot unwind through its own frames, which matters for a program that
+  raises a structured exception, not for loading. Base relocation directory 5
+  is always populated, but only with a single empty block (see "Base
+  relocations" above): Grass programs have no absolute relocation for
+  `Sectioned` to carry, so ASLR is honest without one.
 -/
 
 namespace Grass.Artifact.PE.Target
 
 open Grass.Target
+open Grass.Artifact.Binary
 
 /-! ## The eight-byte section `Name` field -/
 
@@ -281,6 +319,49 @@ def libraries (program : Sectioned) : List Library :=
 def importsOf (base : Nat) (libs : List Library) : List Grass.Target.ImportSymbol :=
   libs.flatMap fun lib => symbolsOf lib.name (base + lib.iatRva) lib.symbols
 
+/-! ## The empty base-relocation block -/
+
+/-- The whole empty base-relocation block: a 4-byte page RVA and a 4-byte
+`SizeOfBlock` of 8 (the header alone), no entries. Microsoft, PE Format, "The
+.reloc Section (Image Only)". -/
+def relocBlockSize : Nat := 8
+
+/-- The page (`SectionAlignment`-aligned RVA) the block names: the page
+containing the program's entry point. The choice is inert — the block has no
+entries, so nothing is ever relocated through it — but naming a real code page
+rather than RVA 0 keeps the block legible to a reader inspecting the image. -/
+def relocPageRva (program : Sectioned) : Nat :=
+  (program.entry - baseAddress program) / sectionAlign * sectionAlign
+
+/-- The block's bytes. -/
+def relocBlock (program : Sectioned) : List UInt8 :=
+  writeU32LE (UInt32.ofNat (relocPageRva program)) ++ writeU32LE (UInt32.ofNat relocBlockSize)
+
+@[simp] theorem length_relocBlock (program : Sectioned) : (relocBlock program).length = 8 := by
+  simp [relocBlock]
+
+/-! ## The exception directory -/
+
+/-- The program's `.pdata` section, if it supplied one. This format never
+generates unwind data (`Grass.ABI.Win64.UnwindBytes` is the lowering tier's
+job); it only looks for the name. -/
+def findPdata (program : Sectioned) : Option Grass.Target.Section :=
+  program.sections.find? fun sec => sec.name == ".pdata"
+
+/-- `IMAGE_DIRECTORY_ENTRY_EXCEPTION`'s RVA: the located `.pdata` section's
+address against the image base, or zero when the program has none. -/
+def exceptionRvaOf (program : Sectioned) : UInt32 :=
+  match findPdata program with
+  | some sec => UInt32.ofNat (sec.virtualAddress - baseAddress program)
+  | none => 0
+
+/-- `IMAGE_DIRECTORY_ENTRY_EXCEPTION`'s size: the located `.pdata` section's
+own byte length, or zero when the program has none. -/
+def exceptionSizeOf (program : Sectioned) : UInt32 :=
+  match findPdata program with
+  | some sec => UInt32.ofNat sec.bytes.length
+  | none => 0
+
 /-! ## Well-formedness -/
 
 /-- `Sectioned.Disjoint`, `.EntryExecutable` and `.ImportsReadable` are plain
@@ -357,10 +438,11 @@ def Fits (program : Sectioned) : Prop :=
     sec.name.toList.length ≤ 8 ∧
     sec.bytes.length + fileAlign < 4294967296 ∧
     sec.endAddress - baseAddress program + sectionAlign < 4294967296) ∧
-  idataRva program + idataSize (libraries program) + sectionAlign < 4294967296 ∧
+  idataRva program + (idataSize (libraries program) + relocBlockSize) + sectionAlign <
+    4294967296 ∧
   descriptorTableSize (libraries program).length < 4294967296 ∧
   sizeOfHeadersOf (program.sections.length + 1) + totalRawSize program.sections +
-    roundUp (idataSize (libraries program)) fileAlign < 4294967296 ∧
+    roundUp (idataSize (libraries program) + relocBlockSize) fileAlign < 4294967296 ∧
   baseAddress program < 18446744073709551616 ∧
   program.stackBytes < 18446744073709551616 ∧
   baseAddress program ≤ program.entry ∧
@@ -425,14 +507,18 @@ def mkSections (base : Nat) : (sections : List Grass.Target.Section) →
 
 /-- The appended import section: `IMAGE_SCN_CNT_INITIALIZED_DATA |
 IMAGE_SCN_MEM_READ`. The Import Address Table it names lives in the program's
-own sections, so `.idata` itself never needs to be writable. -/
+own sections, so `.idata` itself never needs to be writable. Its content is
+the import directory followed by the empty base-relocation block
+(`relocBlock`): both are read-only initialized data with no reason to occupy
+separate sections, and `relocDirRva`/`relocDirSize` (in `assemble`) point
+directly at the trailing block rather than at a section boundary. -/
 def idataSection (program : Sectioned)
-    (sizeBound : (writeIdata (idataRva program) (libraries program)).length + fileAlign <
-      4294967296) : PeSection :=
+    (sizeBound : (writeIdata (idataRva program) (libraries program) ++
+        relocBlock program).length + fileAlign < 4294967296) : PeSection :=
   { nameBytes := idataName
     nameLength := length_idataName
     rva := UInt32.ofNat (idataRva program)
-    bytes := writeIdata (idataRva program) (libraries program)
+    bytes := writeIdata (idataRva program) (libraries program) ++ relocBlock program
     sizeBound := sizeBound
     readable := true
     writable := false
@@ -444,16 +530,20 @@ def imageSections (program : Sectioned) (elig : Eligible program) : List PeSecti
   mkSections (baseAddress program) program.sections
       (fun sec member => ⟨(elig.2.2.2.2.1.1 sec member).1, (elig.2.2.2.2.1.1 sec member).2.1⟩) ++
     [idataSection program (by
-      rw [length_writeIdata]
+      rw [List.length_append, length_writeIdata, length_relocBlock]
       have bound := elig.2.2.2.2.1.2.1
-      simp only [fileAlign, sectionAlign] at bound ⊢
+      simp only [fileAlign, sectionAlign, relocBlockSize] at bound ⊢
       omega)]
 
 @[simp] theorem length_imageSections (program : Sectioned) (elig : Eligible program) :
     (imageSections program elig).length = program.sections.length + 1 := by
   simp [imageSections]
 
-/-- Assemble a PE32+ image, refusing a program that is not `Eligible`. -/
+/-- Assemble a PE32+ image, refusing a program that is not `Eligible`. A
+program needing an absolute (base-relative) relocation cannot be refused here
+by name, because `Sectioned` has no field that could express one — see the
+module docstring's "Base relocations" section; the relocation directory this
+always emits is unconditionally empty. -/
 def assemble (program : Sectioned) : Option Artifact :=
   if h : Eligible program then
     some (Artifact.mk (UInt64.ofNat (baseAddress program))
@@ -465,7 +555,11 @@ def assemble (program : Sectioned) : Option Artifact :=
         have := h.2.2.2.2.1.2.2.2.2.2.2.2.2
         omega)
       (UInt32.ofNat (idataRva program))
-      (UInt32.ofNat (descriptorTableSize (libraries program).length)))
+      (UInt32.ofNat (descriptorTableSize (libraries program).length))
+      (exceptionRvaOf program)
+      (exceptionSizeOf program)
+      (UInt32.ofNat (idataRva program + idataSize (libraries program)))
+      (UInt32.ofNat relocBlockSize))
   else none
 
 /-! ## What an image carries -/
@@ -573,7 +667,8 @@ theorem rawOf_assemble (program : Sectioned) (artifact : Artifact) :
     unfold rawOf
     simp only [baseEq, carriedSections, recoveredImports, countEq, Nat.succ_ne_zero, ↓reduceIte,
       imageSections, idataSection, List.dropLast_concat, List.getLast?_concat, Nat.add_sub_cancel,
-      parseIdata_writeIdata (idataRva program) (libraries program) (idataRva_pos program)
+      parseIdata_writeIdata_append (idataRva program) (libraries program) (relocBlock program)
+        (idataRva_pos program)
         (by rw [libraries] at idataBound ⊢; omega)
         (by
           intro lib member
@@ -601,6 +696,96 @@ theorem rawOf_assemble (program : Sectioned) (artifact : Artifact) :
       show baseAddress program + (UInt32.ofNat (program.entry - baseAddress program)).toNat =
           program.entry from by
         rw [UInt32.toNat_ofNat', Nat.mod_eq_of_lt entryBound]; omega]
+  next => simp at success
+
+/-! ## `hasUnwind` -/
+
+/-- Every constructed section's `nameBytes` field names it exactly, so
+searching the container's own sections for a name reduces to searching the
+program's original sections for the same name spelled through `nameField`. -/
+theorem mkSections_hasName (base : Nat) (target : List UInt8) :
+    ∀ (sections : List Grass.Target.Section)
+      (bound : ∀ sec ∈ sections, sec.name.toList.length ≤ 8 ∧
+        sec.bytes.length + fileAlign < 4294967296),
+      (∃ pe ∈ mkSections base sections bound, pe.nameBytes = target) ↔
+        ∃ sec ∈ sections, nameField sec.name = target := by
+  intro sections
+  induction sections with
+  | nil => intro bound; simp [mkSections]
+  | cons sec sections ih =>
+      intro bound
+      simp only [mkSections, List.mem_cons]
+      constructor
+      · rintro ⟨pe, hmem, heq⟩
+        rcases hmem with heq2 | hmem
+        · rw [heq2] at heq
+          exact ⟨sec, Or.inl rfl, heq⟩
+        · obtain ⟨s, hs, heq'⟩ := (ih (fun t m => bound t (List.mem_cons_of_mem _ m))).mp
+            ⟨pe, hmem, heq⟩
+          exact ⟨s, Or.inr hs, heq'⟩
+      · rintro ⟨s, hmem, heq⟩
+        rcases hmem with heq2 | hmem
+        · rw [heq2] at heq
+          exact ⟨toPeSection base sec (bound sec (List.mem_cons_self ..)).1
+            (bound sec (List.mem_cons_self ..)).2, Or.inl rfl, heq⟩
+        · obtain ⟨pe, hpe, heq'⟩ := (ih (fun t m => bound t (List.mem_cons_of_mem _ m))).mpr
+            ⟨s, hmem, heq⟩
+          exact ⟨pe, Or.inr hpe, heq'⟩
+
+/-- An ASCII name that fits the eight-byte field spells `.pdata` exactly when
+its field bytes equal `pdataNameField`. -/
+theorem nameField_eq_pdataNameField_iff {s : String} (ascii : AsciiName s)
+    (fits : s.toList.length ≤ 8) : nameField s = pdataNameField ↔ s = ".pdata" := by
+  constructor
+  · intro h
+    have step : decodeNameField (nameField s) = s := decodeNameField_nameField ascii
+    rw [h] at step
+    have compute : decodeNameField pdataNameField = ".pdata" := by decide
+    rw [compute] at step
+    exact step.symm
+  · intro h
+    subst h
+    decide
+
+/-- `Artifact.hasUnwind` reports exactly whether the assembled program
+supplied a `.pdata` section: the exception directory (`exceptionRvaOf`,
+`exceptionSizeOf` in `assemble`) is populated on precisely this condition, and
+downstream (the certificate's platform tier) can demand it for Win32 profiles
+that require unwind metadata. -/
+theorem assemble_hasUnwind (program : Sectioned) (artifact : Artifact) :
+    assemble program = some artifact →
+      (artifact.hasUnwind ↔ ∃ s ∈ program.sections, s.name = ".pdata") := by
+  intro success
+  unfold assemble at success
+  split at success
+  next elig =>
+    obtain ⟨_wf, _ascending, placed, _importsPlaced, fits, ascii⟩ := elig
+    obtain ⟨sectionFits, _idataBound, _directoryBound, _fileBound, _baseBound, _stackBound,
+      _baseLe, _entryBound, _countBound⟩ := fits
+    injection success with success
+    subst success
+    unfold Artifact.hasUnwind
+    rw [decide_eq_true_eq]
+    simp only [imageSections]
+    constructor
+    · rintro ⟨pe, member, eq⟩
+      rw [List.mem_append, List.mem_singleton] at member
+      rcases member with memberMk | heqIdata
+      · obtain ⟨sec, memberSec, nameEq⟩ :=
+          (mkSections_hasName (baseAddress program) pdataNameField program.sections _).mp
+            ⟨pe, memberMk, eq⟩
+        exact ⟨sec, memberSec,
+          (nameField_eq_pdataNameField_iff (ascii sec memberSec)
+            (sectionFits sec memberSec).1).mp nameEq⟩
+      · rw [heqIdata] at eq
+        simp only [idataSection] at eq
+        exact absurd eq (by decide)
+    · rintro ⟨sec, member, nameEq⟩
+      have nameFieldEq : nameField sec.name = pdataNameField := by rw [nameEq]; decide
+      obtain ⟨pe, memberPe, eq⟩ :=
+        (mkSections_hasName (baseAddress program) pdataNameField program.sections _).mpr
+          ⟨sec, member, nameFieldEq⟩
+      exact ⟨pe, List.mem_append.mpr (Or.inl memberPe), eq⟩
   next => simp at success
 
 /-- The PE32+ executable `Format`, parameterized by the COFF `Machine` field

@@ -11,7 +11,7 @@ Format authority: Microsoft, PE Format
 "Section Table (Section Headers)" (`Name`) and "Hint/Name Table".
 -/
 
-namespace Grass.Artifact.PE
+namespace Grass.Artifact.PE.Target
 
 /-- One ASCII character as a name byte. -/
 def nameByte (c : Char) : UInt8 := UInt8.ofNat c.toNat
@@ -95,4 +95,4 @@ theorem parseCString_append {xs : List UInt8} (nonzero : ∀ b ∈ xs, b ≠ 0) 
       have tail : ∀ b ∈ xs, b ≠ 0 := fun b member => nonzero b (List.mem_cons_of_mem _ member)
       simp [parseCString, head, ih tail]
 
-end Grass.Artifact.PE
+end Grass.Artifact.PE.Target

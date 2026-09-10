@@ -36,7 +36,7 @@ COFF File Header (Object and Image), 20 bytes at offset 68:
 | `TimeDateStamp` | 0 (`coffFixed`) |
 | `PointerToSymbolTable`, `NumberOfSymbols` | 0 (`coffFixed`) |
 | `SizeOfOptionalHeader` | 240 (`coffFixed`) |
-| `Characteristics` | `0x0023` = `RELOCS_STRIPPED | EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE` (`coffFixed`) |
+| `Characteristics` | `0x0022` = `EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE` (`coffFixed`); `RELOCS_STRIPPED` (`0x0001`) is cleared because a base-relocation directory is always present |
 
 Optional Header Standard Fields (Image Only), 24 bytes at offset 88:
 
@@ -62,7 +62,7 @@ Optional Header Windows-Specific Fields (Image Only), 88 bytes:
 | `SizeOfHeaders` | headers rounded up to 512 |
 | `CheckSum` | 0 (not required for a non-driver image) |
 | `Subsystem` | 3, `IMAGE_SUBSYSTEM_WINDOWS_CUI` |
-| `DllCharacteristics` | `0x0100`, `NX_COMPAT` alone: no `DYNAMIC_BASE` (`0x0040`) and no `HIGH_ENTROPY_VA` (`0x0020`), so the absolute addresses a `Sectioned` carries are the addresses the loader uses |
+| `DllCharacteristics` | `0x8160` = `HIGH_ENTROPY_VA (0x0020) | DYNAMIC_BASE (0x0040) | NX_COMPAT (0x0100) | TERMINAL_SERVER_AWARE (0x8000)`: the loader is free to choose the base, per decision 17 |
 | `SizeOfStackReserve` | `stackReserve` |
 | `SizeOfStackCommit` | `0x1000` (`optionalTail`) |
 | `SizeOfHeapReserve`, `SizeOfHeapCommit` | `0x100000`, `0x1000` (`optionalTail`) |
@@ -70,7 +70,12 @@ Optional Header Windows-Specific Fields (Image Only), 88 bytes:
 | `NumberOfRvaAndSizes` | 16 (`optionalTail`) |
 
 Optional Header Data Directories (Image Only), 128 bytes: entry 1 (Import
-Table) is `importDirRva`/`importDirSize`; all fifteen others are zero.
+Table) is `importDirRva`/`importDirSize`; entry 3 (Exception Table) is
+`exceptionDirRva`/`exceptionDirSize`, populated when the assembled program
+carries a `.pdata` section and zero otherwise; entry 5 (Base Relocation Table)
+is `relocDirRva`/`relocDirSize`, always populated (`Grass.Artifact.PE.assemble`
+always emits an, if necessary empty, relocation block — see its docstring);
+entries 0, 2, 4 and 6 through 15 are zero.
 
 Section Table (Section Headers), 40 bytes each:
 
@@ -95,8 +100,9 @@ field to be the caller's, and recomputes `SizeOfHeaders`, `SizeOfRawData` and
 every file offset from `NumberOfSections` and `VirtualSize` instead of reading
 them. The fields it consumes without checking are exactly the ones a canonical
 image derives from data it keeps: `SizeOfCode`, `SizeOfInitializedData`,
-`SizeOfUninitializedData`, `BaseOfCode`, the windows-specific block, and the
-section headers' `SizeOfRawData`/`PointerToRawData`.
+`SizeOfUninitializedData`, `BaseOfCode`, the windows-specific block, the
+exception/relocation directory RVAs and sizes, and the section headers'
+`SizeOfRawData`/`PointerToRawData`.
 -/
 
 namespace Grass.Artifact.PE.Target
@@ -161,6 +167,13 @@ def headersEnd (sectionCount : Nat) : Nat := 328 + sectionHeaderBytes * sectionC
 /-- `SizeOfHeaders`: everything before the first section's raw data. -/
 def sizeOfHeadersOf (sectionCount : Nat) : Nat := roundUp (headersEnd sectionCount) fileAlign
 
+/-- The section-table `Name` field spelling `.pdata`, spelled as bytes for the
+same reason `Grass.Artifact.PE.idataName` is: no `String` decoding enters the
+definition of whether an image carries unwind metadata. -/
+def pdataNameField : List UInt8 := [0x2e, 0x70, 0x64, 0x61, 0x74, 0x61, 0, 0]
+
+theorem length_pdataNameField : pdataNameField.length = 8 := rfl
+
 /-- A section in the container: the raw eight-byte `Name` field, the RVA, the
 bytes, and the three permission bits `Characteristics` carries. `sizeBound`
 is what makes `VirtualSize` and `SizeOfRawData` round-trip through their
@@ -177,7 +190,13 @@ structure PeSection where
 deriving DecidableEq
 
 /-- The PE32+ image container. `importDirRva`/`importDirSize` are data
-directory 1; both are zero when the image imports nothing. -/
+directory 1 (import table); both are zero when the image imports nothing.
+`exceptionDirRva`/`exceptionDirSize` are data directory 3 (exception table);
+both are zero when the program carries no `.pdata`. `relocDirRva`/`relocDirSize`
+are data directory 5 (base relocation table); `Grass.Artifact.PE.assemble`
+always populates these two, since decision 17 requires the directory to exist
+even though Grass programs never need an actual relocation entry (only
+RIP-relative addressing and import-slot calls). -/
 structure Artifact where
   imageBase : UInt64
   entryRva : UInt32
@@ -187,7 +206,22 @@ structure Artifact where
   sectionCountBound : sections.length < 65536
   importDirRva : UInt32
   importDirSize : UInt32
+  exceptionDirRva : UInt32
+  exceptionDirSize : UInt32
+  relocDirRva : UInt32
+  relocDirSize : UInt32
 deriving DecidableEq
+
+/-- Whether the image carries an exception directory: some section is named
+`.pdata`. This format never generates `.pdata`/`.xdata` bytes itself
+(`Grass.ABI.Win64.UnwindBytes` is the lowering tier's job); it only records
+whether the assembled program supplied one, so a downstream platform profile
+that requires unwind metadata (`docs/HELLO_UNWIND_BOUNDARY.md`) can demand
+this field. Defined over `a.sections` (not independently stored) so it needs
+no serialization and no extra `read_write` proof: `read_write` already proves
+`sections` round-trips exactly, and this is a pure function of it. -/
+def Artifact.hasUnwind (a : Artifact) : Bool :=
+  decide (∃ s ∈ a.sections, s.nameBytes = pdataNameField)
 
 /-- `SizeOfRawData`: a section's bytes padded to `FileAlignment`. -/
 def rawSize (sec : PeSection) : Nat := roundUp sec.bytes.length fileAlign
@@ -233,11 +267,13 @@ def peSignature : List UInt8 := [0x50, 0x45, 0, 0]
 
 /-- The COFF fields after `NumberOfSections`: `TimeDateStamp`,
 `PointerToSymbolTable`, `NumberOfSymbols`, `SizeOfOptionalHeader`,
-`Characteristics`. `0x0023` is `IMAGE_FILE_RELOCS_STRIPPED |
-IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_LARGE_ADDRESS_AWARE`: stripped
-relocations are what forbid the loader to move the image. -/
+`Characteristics`. `0x0022` is `IMAGE_FILE_EXECUTABLE_IMAGE |
+IMAGE_FILE_LARGE_ADDRESS_AWARE` with `IMAGE_FILE_RELOCS_STRIPPED` (`0x0001`)
+cleared: base relocations are present (`Grass.Artifact.PE.assemble` always
+emits the base-relocation directory, decision 17), so the loader remains free
+to move the image. Microsoft, PE Format, "COFF File Header (Object and Image)". -/
 def coffFixed : List UInt8 :=
-  writeU32LE 0 ++ writeU32LE 0 ++ writeU32LE 0 ++ writeU16LE 240 ++ writeU16LE 0x0023
+  writeU32LE 0 ++ writeU32LE 0 ++ writeU32LE 0 ++ writeU16LE 240 ++ writeU16LE 0x0022
 
 @[simp] theorem length_coffFixed : coffFixed.length = 16 := by simp [coffFixed]
 
@@ -254,11 +290,20 @@ def optionalSizes (code initializedData : UInt32) : List UInt8 :=
     (optionalSizes code initializedData).length = 14 := by simp [optionalSizes]
 
 /-- The windows-specific fields between `ImageBase` and `SizeOfStackReserve`.
-`DllCharacteristics = 0x0100` is `NX_COMPAT` alone. -/
+`DllCharacteristics = 0x8160` combines, from Microsoft's PE Format
+"DllCharacteristics" bit table: `IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA`
+(`0x0020`), `IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE` (`0x0040`),
+`IMAGE_DLLCHARACTERISTICS_NX_COMPAT` (`0x0100`) and
+`IMAGE_DLLCHARACTERISTICS_TERMINAL_SERVER_AWARE` (`0x8000`). Setting
+`DYNAMIC_BASE`/`HIGH_ENTROPY_VA` is decision 17's ASLR requirement; it is only
+honest alongside a present, non-stripped base-relocation directory (`coffFixed`
+clears `IMAGE_FILE_RELOCS_STRIPPED`, and `assemble` always emits one), since a
+loader that rebases an image with no relocation table to fix up would corrupt
+every absolute address the image never had a chance to declare. -/
 def optionalWindows (imageSize headerSize : UInt32) : List UInt8 :=
   writeU32LE 4096 ++ writeU32LE 512 ++ writeU16LE 6 ++ writeU16LE 0 ++ writeU16LE 0 ++
     writeU16LE 0 ++ writeU16LE 6 ++ writeU16LE 0 ++ writeU32LE 0 ++ writeU32LE imageSize ++
-    writeU32LE headerSize ++ writeU32LE 0 ++ writeU16LE 3 ++ writeU16LE 0x0100
+    writeU32LE headerSize ++ writeU32LE 0 ++ writeU16LE 3 ++ writeU16LE 0x8160
 
 @[simp] theorem length_optionalWindows (imageSize headerSize : UInt32) :
     (optionalWindows imageSize headerSize).length = 40 := by simp [optionalWindows]
@@ -270,17 +315,23 @@ def optionalTail : List UInt8 :=
 
 @[simp] theorem length_optionalTail : optionalTail.length = 32 := by simp [optionalTail]
 
-/-- One all-zero data directory entry: RVA and size. -/
+/-- One all-zero data directory entry: RVA and size. Reused for directory 0
+(export), directory 2 (resource) and directory 4 (certificate table): this
+format never populates any of the three. -/
 def dataDirectoryZero : List UInt8 := writeU32LE 0 ++ writeU32LE 0
 
 @[simp] theorem length_dataDirectoryZero : dataDirectoryZero.length = 8 := by
   simp [dataDirectoryZero]
 
-/-- Data directories 2 through 15, all zero. -/
-def dataDirectoryTail : List UInt8 := List.replicate 112 0
+/-- Data directories 6 through 15, all zero: debug, architecture, global
+pointer, TLS, load config, bound import, IAT, delay import, CLR header,
+reserved. Directories 3 (exception) and 5 (base relocation) are written
+separately, from `Artifact.exceptionDirRva`/`exceptionDirSize` and
+`relocDirRva`/`relocDirSize`. -/
+def dataDirectoryZeroTail : List UInt8 := List.replicate 80 0
 
-@[simp] theorem length_dataDirectoryTail : dataDirectoryTail.length = 112 := by
-  simp [dataDirectoryTail]
+@[simp] theorem length_dataDirectoryZeroTail : dataDirectoryZeroTail.length = 80 := by
+  simp [dataDirectoryZeroTail]
 
 /-- The section-header fields a linked image never uses. -/
 def sectionHeaderZeros : List UInt8 := List.replicate 12 0
@@ -337,8 +388,14 @@ def writeHeaders (machine : UInt16) (artifact : Artifact) : List UInt8 :=
     writeU64LE artifact.imageBase ++
     optionalWindows (UInt32.ofNat (sizeOfImage artifact.sections.length artifact.sections))
       (UInt32.ofNat (sizeOfHeadersOf artifact.sections.length)) ++
-    writeU64LE artifact.stackReserve ++ optionalTail ++ dataDirectoryZero ++
-    writeU32LE artifact.importDirRva ++ writeU32LE artifact.importDirSize ++ dataDirectoryTail ++
+    writeU64LE artifact.stackReserve ++ optionalTail ++
+    dataDirectoryZero ++
+    writeU32LE artifact.importDirRva ++ writeU32LE artifact.importDirSize ++
+    dataDirectoryZero ++
+    writeU32LE artifact.exceptionDirRva ++ writeU32LE artifact.exceptionDirSize ++
+    dataDirectoryZero ++
+    writeU32LE artifact.relocDirRva ++ writeU32LE artifact.relocDirSize ++
+    dataDirectoryZeroTail ++
     writeSectionEntries (sizeOfHeadersOf artifact.sections.length) artifact.sections
 
 /-- The complete image: headers, header padding to `SizeOfHeaders`, then the
@@ -458,9 +515,27 @@ def read (machine : UInt16) (bytes : List UInt8) : Option Artifact :=
   match readU32LE bytes with
   | none => none
   | some (importDirSize, bytes) =>
-  match takeBytes 112 bytes with
+  match takeBytes 8 bytes with
   | none => none
-  | some (directoryTail, bytes) =>
+  | some (resourceDirectory, bytes) =>
+  match readU32LE bytes with
+  | none => none
+  | some (exceptionDirRva, bytes) =>
+  match readU32LE bytes with
+  | none => none
+  | some (exceptionDirSize, bytes) =>
+  match takeBytes 8 bytes with
+  | none => none
+  | some (certificateDirectory, bytes) =>
+  match readU32LE bytes with
+  | none => none
+  | some (relocDirRva, bytes) =>
+  match readU32LE bytes with
+  | none => none
+  | some (relocDirSize, bytes) =>
+  match takeBytes 80 bytes with
+  | none => none
+  | some (directoryZeroTail, bytes) =>
   match readSectionHeaders sectionCount.toNat bytes with
   | none => none
   | some (headers, bytes) =>
@@ -472,10 +547,12 @@ def read (machine : UInt16) (bytes : List UInt8) : Option Artifact :=
   | some sections =>
       if h : dos = dosHeader ∧ signature = peSignature ∧ readMachine = machine ∧
           coff = coffFixed ∧ magic = optionalMagic ∧ tail = optionalTail ∧
-          exportDirectory = dataDirectoryZero ∧ directoryTail = dataDirectoryTail ∧
+          exportDirectory = dataDirectoryZero ∧ resourceDirectory = dataDirectoryZero ∧
+          certificateDirectory = dataDirectoryZero ∧ directoryZeroTail = dataDirectoryZeroTail ∧
           sections.length < 65536 then
         some { imageBase, entryRva, stackReserve, sections,
-               sectionCountBound := h.2.2.2.2.2.2.2.2, importDirRva, importDirSize }
+               sectionCountBound := h.2.2.2.2.2.2.2.2.2.2, importDirRva, importDirSize,
+               exceptionDirRva, exceptionDirSize, relocDirRva, relocDirSize }
       else none
 
 /-- A section's header fields as the reader recovers them. -/
@@ -535,8 +612,14 @@ theorem splitPayloads_writePayloads (sections : List PeSection) :
     splitPayloads (sections.map headerFields) (writePayloads sections) = some sections := by
   simpa using splitPayloads_writePayloads_append sections []
 
-/-- The reader inverts the writer exactly, for every artifact and every
-`machine`. -/
+-- The reader inverts the writer exactly, for every artifact and every
+-- `machine`. The acceptance condition's final `dite` is resolved by an
+-- explicit proof term (`dif_pos`) rather than `↓reduceDIte`/`decide`: with
+-- eleven conjuncts (two more data directories than the legacy nine-conjunct
+-- condition), letting the elaborator search a `Decidable`-instance reduction
+-- for the whole conjunction is what pushes this past the default heartbeat
+-- budget, not any open-ended part of the proof itself. Every conjunct but the
+-- last is `rfl` once the preceding rewrites have made both sides identical.
 theorem read_write (machine : UInt16) (artifact : Artifact) :
     read machine (write machine artifact) = some artifact := by
   have countEq : (UInt16.ofNat artifact.sections.length).toNat = artifact.sections.length := by
@@ -548,7 +631,9 @@ theorem read_write (machine : UInt16) (artifact : Artifact) :
         (0 : UInt8)).length =
       sizeOfHeadersOf artifact.sections.length - headersEnd artifact.sections.length :=
     List.length_replicate ..
-  simp only [write, writeHeaders, List.append_assoc]
+  unfold write
+  unfold writeHeaders
+  simp only [List.append_assoc]
   unfold read
   simp only [takeBytes_append_of_eq length_dosHeader, takeBytes_append_of_eq length_peSignature,
     takeBytes_append_of_eq length_coffFixed, takeBytes_append_of_eq length_optionalMagic,
@@ -556,10 +641,11 @@ theorem read_write (machine : UInt16) (artifact : Artifact) :
     takeBytes_append_of_eq (length_optionalWindows _ _),
     takeBytes_append_of_eq length_optionalTail,
     takeBytes_append_of_eq length_dataDirectoryZero,
-    takeBytes_append_of_eq length_dataDirectoryTail, takeBytes_append_of_eq padLength,
+    takeBytes_append_of_eq length_dataDirectoryZeroTail, takeBytes_append_of_eq padLength,
     takeBytes_writeU32LE_append, readU16LE_writeU16LE_append,
     readU32LE_writeU32LE_append, readU64LE_writeU64LE_append, countEq,
-    readSectionHeaders_writeSectionEntries, splitPayloads_writePayloads, and_self,
-    artifact.sectionCountBound, ↓reduceDIte]
+    readSectionHeaders_writeSectionEntries, splitPayloads_writePayloads]
+  rw [dif_pos (⟨trivial, trivial, trivial, trivial, trivial, trivial, trivial, trivial, trivial,
+    trivial, artifact.sectionCountBound⟩ : _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _)]
 
 end Grass.Artifact.PE.Target

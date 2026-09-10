@@ -530,4 +530,33 @@ theorem parseIdata_writeIdata (base : Nat) (libs : List Library) (positive : 0 <
     parseLibHintNames_writeLibHintNames libs _ symbolAscii,
     parseDllNames_writeDllNames_nil libs nameAscii, zipLibraries_maps]
 
+/-- The append form: an `.idata` payload this format emitted, followed by
+arbitrary trailing bytes (the empty base-relocation block `.idata` now carries
+after its own content, `Grass.Artifact.PE.idataSection`), still gives back the
+exact import requirement, with the trailing bytes discarded rather than
+required to be empty. -/
+theorem parseIdata_writeIdata_append (base : Nat) (libs : List Library) (rest : List UInt8)
+    (positive : 0 < base)
+    (bound : base + idataSize libs < 18446744073709551616)
+    (iatBound : ∀ lib ∈ libs, lib.iatRva < 4294967296)
+    (nameAscii : ∀ lib ∈ libs, AsciiName lib.name)
+    (symbolAscii : ∀ lib ∈ libs, ∀ s ∈ lib.symbols, AsciiName s) :
+    parseIdata libs.length (writeIdata base libs ++ rest) = some libs := by
+  have iltsBound : base + hintNamesOffset libs + hintNamesTotal libs <
+      18446744073709551616 := by
+    have expand : idataSize libs = hintNamesOffset libs + hintNamesTotal libs + dllNamesSize libs :=
+      rfl
+    omega
+  have padLength :
+      (List.replicate (descriptorPad libs.length) (0 : UInt8)).length =
+        descriptorPad libs.length := List.length_replicate ..
+  simp only [writeIdata, List.append_assoc]
+  unfold parseIdata
+  simp only [parseDescriptors_writeDescriptors base (iltsOffset libs.length) (dllNamesOffset libs)
+      libs _ iatBound,
+    takeBytes_append_of_eq padLength,
+    parseIlts_writeIlts base (hintNamesOffset libs) libs _ positive iltsBound,
+    parseLibHintNames_writeLibHintNames libs _ symbolAscii,
+    parseDllNames_writeDllNames libs rest nameAscii, zipLibraries_maps]
+
 end Grass.Artifact.PE.Target
