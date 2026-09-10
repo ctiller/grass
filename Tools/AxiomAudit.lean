@@ -146,6 +146,7 @@ import Grass.Refinement.Console.WriteAllHead
 import Grass.Refinement.Console.WriteAllFactory
 import Grass.Refinement.Console.WriteAllBody
 import Grass.Refinement.Console.WriteFileCountAddress
+import Grass.Refinement.Console.WriteFileResume
 import Grass.Refinement.Console.WriteAllGuards
 import Grass.Refinement.Console.WriteFileLoad
 import Grass.Assembly.SourceInput
