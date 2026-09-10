@@ -72,6 +72,39 @@ ISA trap receipts, confined provider memory effects and output observation,
 return/terminal transitions, and exact loaded-source execution must be connected
 before any whole-program Linux assurance claim is made.
 
+## AArch64 source adapter
+
+[`AArch64.lean`](../Grass/Platform/Linux/AArch64.lean) consumes the accepted
+AArch64 source/body checkpoint `f06f2162`. Its `DecodedRequest` is indexed by the
+exact `SourceWord bytes` and the same `Cpu` that indexes the ISA request. The
+checked producer accepts only the selected SVC-zero source form and recognized
+native syscall numbers, deriving all arguments from that CPU. It proves the
+original bytes equal the exact SVC-zero encoding plus the parser's suffix,
+and ties the syscall identity to the low 32 bits of that CPU's X8.
+
+This is a checked source interpretation. SVC-zero is an emitted-profile
+restriction, not a claim that Linux rejects all other immediates. The decoded
+ISA request supplies no actual instruction fetch, exception admission, Linux
+kernel routing or provider result. Those missing connections are not replaced
+with caller-selected predicates or a fabricated call occurrence.
+
+[Adapter tests](../Tests/Platform/LinuxAArch64.lean) invoke the shared source
+parser and check read/write selection, high number bits and suffix handling,
+then reject a different immediate, unsupported word/number and short source.
+The focused adapter plus AArch64 control tests pass 20 jobs. The source,
+number and argument theorems are conditional on the same checked inputs;
+native AArch64 execution remains unobserved.
+
+Sol independently reviewed this adapter with no blocking semantic findings.
+The broader `lake build Grass Tests.Platform.LinuxAArch64
+Tests.ISA.AArch64.Control Tests.Platform.LinuxSyscall` check passed 396 jobs.
+A fresh citation census passed with 760 definitions, including two additional
+explicitly owed adapter definitions (359 total owed, 395 mechanical, 6 cited).
+A fresh imported-closure trust audit with the foundation and Linux tests passed
+2,479 project declarations; the three adapter theorem roots use only
+`propext` and `Quot.sound`.
+The full-suite limitation described below remains inherited from the baseline.
+
 ## Checked checkpoint evidence
 
 Semantic review separated the syscall decoder, ELF parser and native observer.

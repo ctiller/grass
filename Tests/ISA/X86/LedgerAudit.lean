@@ -120,6 +120,7 @@ import Grass.Platform.Win32.WriteFileRuntimeLinked
 import Grass.Platform.Win32.ApiDispatch
 import Grass.Platform.Linux.Syscall
 import Grass.Platform.Linux.X86
+import Grass.Platform.Linux.AArch64
 import Grass.Artifact.PE.ImageRoundTrip
 import Grass.Artifact.PE.LayoutBinding
 import Grass.Artifact.PE.ExceptionBinding
@@ -312,6 +313,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileRuntimeLinked,
    `Grass.Platform.Win32.ApiDispatch,
    `Grass.Platform.Linux.Syscall, `Grass.Platform.Linux.X86,
+   `Grass.Platform.Linux.AArch64,
    `Grass.Artifact.PE.Description, `Grass.Artifact.PE.Layout,
    `Grass.Artifact.PE.Imports, `Grass.Artifact.PE.Validation,
    `Grass.Artifact.PE.Exceptions, `Grass.Artifact.PE.ExceptionReader,
@@ -385,7 +387,9 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- register, argument-width, and raw-error semantics. Primary Linux kernel
 -- anchors are reviewed in REFERENCES.md and the Linux modules; formal ledger
 -- attachment remains owed, so none is promoted to cited or native proof.
-def owedBaseline : Nat := 357
+-- Two additional AArch64 source-bound adapter definitions retain native
+-- register selection and the explicit SVC-zero emitted profile.
+def owedBaseline : Nat := 359
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -1445,6 +1449,8 @@ def owed : List Name :=
     `Grass.Platform.Linux.Syscall.X86.captureRequest,
     `Grass.Platform.Linux.Syscall.X86.decodeRequest?,
     `Grass.Platform.Linux.Syscall.X86.decodeResult,
+    `Grass.Platform.Linux.Syscall.AArch64.captureRequest,
+    `Grass.Platform.Linux.Syscall.AArch64.decode?,
     -- The opcode table is the largest single block of uncited vendor fact in
     -- the tree: every row asserts what follows an opcode in the byte stream.
     `Grass.ISA.X86.opcodeTable, `Grass.ISA.X86.decodeInsn,
