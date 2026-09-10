@@ -26,7 +26,7 @@ def Complete.StartsAfter {model : BehaviorModel Outcome}
 end BehaviorModel
 
 namespace BehaviorMatching
-variable {Outcome : Type} {lower upper : BehaviorModel Outcome}
+variable {Outcome : Type} {lower : BehaviorModel Outcome} {upper : BehaviorModel Outcome}
 
 /-- Exact prefixes of both actual continuations meet at unbounded indices. -/
 structure InfiniteAlignment (R : lower.History → upper.History → Prop)

@@ -9,7 +9,7 @@ open RelationalSystem
 
 /-- A selected request interpretation preserves permitted nonresponse and
 matches every allowed response in both directions. -/
-structure WaitTranslation {Outcome : Type} (lower upper : BehaviorModel Outcome) where
+structure WaitTranslation {Outcome : Type} (lower : BehaviorModel Outcome) (upper : BehaviorModel Outcome) where
   request : lower.Request → upper.Request
   response : (r : lower.Request) → lower.protocol.Response r →
     upper.protocol.Response (request r)
@@ -21,7 +21,7 @@ structure WaitTranslation {Outcome : Type} (lower upper : BehaviorModel Outcome)
     upper.protocol.AllowsPermanentWait (request r)
 
 namespace BehaviorCorrespondence
-variable {Outcome : Type} {lower upper : BehaviorModel Outcome}
+variable {Outcome : Type} {lower : BehaviorModel Outcome} {upper : BehaviorModel Outcome}
 
 abbrev Finite (observe : lower.Observation → upper.Observation) :=
   HistoryRelation lower.system upper.system
@@ -110,7 +110,7 @@ end BehaviorCorrespondence
 
 /-- Complete coverage extends the same related finite histories; no independent
 prefix/tail witnesses or authored theorem demands enter this interface. -/
-structure BehaviorCorrespondence {Outcome : Type} (lower upper : BehaviorModel Outcome)
+structure BehaviorCorrespondence {Outcome : Type} (lower : BehaviorModel Outcome) (upper : BehaviorModel Outcome)
     (observe : lower.Observation → upper.Observation) (waits : WaitTranslation lower upper) where
   finite : BehaviorCorrespondence.Finite observe
   completeForth : ∀ {left right}, finite.Rel left right → ∀ complete,

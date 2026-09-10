@@ -11,7 +11,7 @@ open RelationalSystem
 
 /-- Interpret each actual request and dependent response. Permitted lower waits
 must be permitted above; no abstract response-existence promise is introduced. -/
-structure DirectedWaitTranslation {Outcome : Type} (lower upper : BehaviorModel Outcome) where
+structure DirectedWaitTranslation {Outcome : Type} (lower : BehaviorModel Outcome) (upper : BehaviorModel Outcome) where
   request : lower.Request → upper.Request
   response : (r : lower.Request) → lower.protocol.Response r →
     upper.protocol.Response (request r)
@@ -22,7 +22,7 @@ structure DirectedWaitTranslation {Outcome : Type} (lower upper : BehaviorModel 
 
 namespace DirectedWaitTranslation
 
-def ofExact {Outcome : Type} {lower upper : BehaviorModel Outcome}
+def ofExact {Outcome : Type} {lower : BehaviorModel Outcome} {upper : BehaviorModel Outcome}
     (exact : WaitTranslation lower upper) : DirectedWaitTranslation lower upper where
   request := exact.request
   response := exact.response
@@ -32,7 +32,7 @@ def ofExact {Outcome : Type} {lower upper : BehaviorModel Outcome}
 end DirectedWaitTranslation
 
 namespace ImplementationConformance
-variable {Outcome : Type} {lower upper : BehaviorModel Outcome}
+variable {Outcome : Type} {lower : BehaviorModel Outcome} {upper : BehaviorModel Outcome}
 
 abbrev Finite (observe : lower.Observation → upper.Observation) :=
   HistorySimulation lower.system upper.system
@@ -63,7 +63,7 @@ end ImplementationConformance
 
 /-- Directed complete conformance extends the same actual initialized histories.
 Terminal, infinite, and waiting executions use the shared distinct constructors. -/
-structure ImplementationConformance {Outcome : Type} (lower upper : BehaviorModel Outcome)
+structure ImplementationConformance {Outcome : Type} (lower : BehaviorModel Outcome) (upper : BehaviorModel Outcome)
     (observe : lower.Observation → upper.Observation)
     (waits : DirectedWaitTranslation lower upper) where
   finite : ImplementationConformance.Finite observe
@@ -73,7 +73,7 @@ structure ImplementationConformance {Outcome : Type} (lower upper : BehaviorMode
       ImplementationConformance.CompleteMatch finite waits complete other
 
 namespace BehaviorCorrespondence
-variable {Outcome : Type} {lower upper : BehaviorModel Outcome}
+variable {Outcome : Type} {lower : BehaviorModel Outcome} {upper : BehaviorModel Outcome}
 variable {observe : lower.Observation → upper.Observation} {waits : WaitTranslation lower upper}
 
 /-- Forget only reverse coverage. The exact relation, runs, cuts, request

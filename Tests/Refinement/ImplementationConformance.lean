@@ -30,7 +30,7 @@ abbrev terminalSystem : RelationalSystem Unit where
     intro before state choice event next after step
     exact False.elim step
 
-abbrev noRequests : WaitProtocol Empty where
+abbrev noRequests : WaitProtocol.{0, 0} Empty where
   Response := fun request => nomatch request
   Allowed := fun request => nomatch request
   AllowsPermanentWait := fun request => nomatch request
