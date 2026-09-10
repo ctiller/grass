@@ -112,6 +112,9 @@ jobs:
       - name: Audit docstring claims
         run: ./tools/grass-tools/target/release/docstring-audit
 
+      - name: Report seam ledger coverage
+        run: lake env lean Tests/ISA/X86/SeamLedgerAudit.lean
+
       - name: Audit observation coverage
         run: ./tools/grass-tools/target/release/coverage-audit
   unwind:
