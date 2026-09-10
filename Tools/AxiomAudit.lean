@@ -43,6 +43,7 @@ import Grass.Assembly.CodeWriteFrame
 import Grass.Assembly.LoadedCodeRoot
 import Grass.Assembly.LoadedFetchObservation
 import Grass.Assembly.SourceFetchPolicy
+import Grass.Assembly.SourceBranchExecution
 import Grass.Disasm.Linear
 import Grass.Disasm.StoreAttempt
 import Grass.Disasm.Spatial
@@ -128,6 +129,7 @@ import Grass.Platform.Win32.CallResumeBinding
 import Grass.Platform.Win32.CallResumeHistory
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.RawStep
+import Grass.Platform.Win32.RawSourceBranch
 import Grass.Platform.Win32.RawServiceMetadata
 import Grass.Platform.Win32.RawServiceContinuation
 import Grass.Platform.Win32.RawServicePrefix
