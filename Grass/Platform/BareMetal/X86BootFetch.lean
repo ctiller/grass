@@ -35,7 +35,8 @@ def observed (success : BootFetch.Success policy entry) (gpr : Gpr → BitVec 64
 
 /-- `observed_bytes` ensures the ISA view has no independent byte source. -/
 theorem observed_bytes (success : BootFetch.Success policy entry) (gpr : Gpr → BitVec 64)
-    (rflags : BitVec 64) : (observed success gpr rflags).bytes = success.bytes := rfl
+    (rflags : BitVec 64) : (observed success gpr rflags).bytes = success.bytes :=
+  success.observed_backing.symm
 
 /-- `decode` applies the existing x86 decoder to the committed observation.
 The result may retain trailing bytes; this is a byte-consumption adapter, not
