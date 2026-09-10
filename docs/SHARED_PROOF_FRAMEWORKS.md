@@ -1,8 +1,8 @@
 # Shared proof frameworks and declaration fronts
 
-Architecture proposal, 2026-09-09. This document proposes how to remove recurring
-proof obligations from new consumers. It does not claim that the migrations or
-DSLs below are implemented. Spikes owns implementation sequencing; architecture
+Architecture guidance and declaration-front proposal, 2026-09-09. The status
+section records implemented shared construction; the optional DSLs remain
+proposals for removing recurring authoring obligations. Spikes owns implementation sequencing; architecture
 owns shared boundaries and exceptions. Existing assembly and semantic structures
 remain authoritative.
 
@@ -27,55 +27,53 @@ need is reusable verified construction, not identical domain vocabulary.
 
 ## Evidence and present status
 
-Source inspection used main checkout revision `c8eb4243`, together with the
-architecture delta `3887deed`. The bounded duplication inventory is pinned to
-`2370d929`; it is a lower bound, not a complete stack census.
+Current integrated source inspected at `a39e22ae`. These are bounded production
+adoptions, distinct from the declaration/DSL proposal below:
 
-* `CallEntry.CallPolicy.ofFactory` and `reachedCall?` already centralize fixed
-  policy binding and carrier repacking from the actual CALL.
-* `ReturnHome.StackPlanFactory.deriveLoaded?` computes return/home coordinates,
-  initialized continuation and separation from that CALL. It offers a real
-  shared producer, rather than only a common record shape.
-* `ReadValue32` and `ReadValue64` still repeat observed-byte extraction, length,
-  backing, initialization and endian arguments with widths four and eight.
-* `GetStdHandle.EntryHandoff` and `WriteFile.EntryHandoff` still repeat control,
-  context, cleanliness and protocol checks, output construction, and storage
-  preservation. Their requests, loan obligations and typed views differ.
-* `3887deed` makes all three raw API entry adapters use one actual CALL/handoff
-  log law. This prevents another proof family; it does not close all API-entry
-  duplication. Independent review, full 577-job build and fresh declaration
-  audit passed for that delta.
+- [ProtocolEntry.issue?](../Grass/Platform/Win32/ProtocolEntry.lean) is the shared
+  checked handoff used by the actual GetStdHandle entry producer in
+  [GetStdHandleRuntime](../Grass/Platform/Win32/GetStdHandleRuntime.lean) and
+  [WriteFileHandoff](../Grass/Platform/Win32/WriteFileHandoff.lean). Their request
+  preparation and loan obligations remain API-specific.
+- `ProviderResume.observeRegisters` is used by
+  [GetStdHandleResult](../Grass/Platform/Win32/GetStdHandleResult.lean) and
+  [WriteFileReturnCompletion](../Grass/Platform/Win32/WriteFileReturnCompletion.lean)
+  to stage observed registers without inventing provider memory effects.
+- [ProviderResumeFinalization](../Grass/Platform/Win32/ProviderResumeFinalization.lean)
+  supplies the shared final-state, protocol-consumption and log laws to actual
+  [GetStdHandleReturn](../Grass/Platform/Win32/GetStdHandleReturn.lean) and
+  WriteFileReturnCompletion. This dual adoption is implemented, not an interface-only trial.
+- `Raw.Event.between_suffixes` is used by both actual
+  [GetStdHandleRawReturn](../Grass/Platform/Win32/GetStdHandleRawReturn.lean) and
+  [WriteFileRawReturn](../Grass/Platform/Win32/WriteFileRawReturn.lean) consumers.
+  The exact return/read suffixes do not establish native or cross-log causal ordering.
 
-Windows reports dual ReturnHome adoption under validation; library reports
-reviewed Push/Call access-failure adoption in `c13468d1` with broad checks still
-running. Those reports are not treated here as completed integration evidence.
+This closes those specific reuse obligations, not every duplication family,
+full endpoint assurance or the proposed DSL. The
+[endpoint index](ENDPOINT_INDEX.md#issued-call-resume-status) records the execution
+frontier and current blockers; the older `2370d929` inventory remains a historical
+lower bound, not a current census.
 
-Follow-up inspection at main `71cf80bf` verifies that RunFactory owns the
-access-failure mapping and Push/Call now invoke it. This establishes those two
-consumers' adoption, not migration of the other three factory consumers.
-Windows subsequently published dual ReturnHome adoption in `2e391f29`; its
-reported full build and review passed, with fresh trust/source checks pending.
+The next shared rewrites are in progress: memory-model owns canonical
+synchronization state consumed by the same access checker; process owns replacement
+of `Raw.finitePrefixSystem` with the canonical execution system. Neither rewrite
+is claimed delivered here.
 
 ## API construction framework
 
-Extract a protocol-level checked handoff producer beneath API-specific modules.
-Its inputs are the exact reached `ExecutionState.State ApiRequest`, concrete
-`ApiRequest`, ordered `List LoanRequest`, and agent. Its result is indexed by all
-four inputs and retains the actual projection and `CallProtocol.handoff?`
-equations. It checks caller control, both registered contexts and cleanliness
-once. It computes the fresh CallId, exact protocol result, pending control and
-whole heterogeneous record once.
+Use the existing `ProtocolEntry.Entry` and `ProtocolEntry.issue?` beneath the
+API-specific modules. The producer is indexed by the exact reached
+`ExecutionState.State ApiRequest`, concrete request, ordered loan batch and agent.
+It retains the actual projection and `CallProtocol.handoff?` equations while
+checking caller control, registered contexts and cleanliness. Its shared laws
+cover projection, exact pending record, unrelated pending preservation, storage,
+boundary append and freshness.
 
-Prove output projection, recorded pending lookup, unrelated pending preservation,
-storage preservation, boundary append and freshness once for that receipt.
-Keep this module independent of WriteFile. API wrappers may expose typed record
-views, but must derive those views from the canonical heterogeneous record.
-They may not rebuild a second handoff checker.
-
-For WriteFile, use the existing `selectPending` and
-`embedPending_of_selectPending_eq_some` bridge to obtain the typed record with
-the same caller, agent, request and minted IDs. Recomputing a plausible typed
-record from mint inputs would miss this reuse boundary.
+GetStdHandle and WriteFile already use this implementation. Typed wrappers and
+semantic projections may remain; they must use the canonical heterogeneous
+receipt rather than rebuild its checks or reconstruct another record from mint
+inputs. New declaration syntax must select this existing producer and retain its
+exact inputs and success equations, not trigger another extraction project.
 
 The proposed API declaration interface supplies:
 
@@ -88,7 +86,7 @@ The proposed API declaration interface supplies:
 | Runtime payload constructor | Payload-specific data is derived from the same entry receipt and plan |
 | Provider semantic adapter | Service, result, failure and temporal obligations specific to this API |
 
-Trial consumers are GetStdHandle and WriteFile: one has only the return/home
+Declaration-front trial consumers are GetStdHandle and WriteFile: one has only the return/home
 pair, the other has semantic buffer/count loans plus a fifth argument and
 partial-output behavior. Preserve WriteFile's current ordered batch exactly.
 ExitProcess is the third-consumer challenge: it must reuse checked handoff and
@@ -135,8 +133,8 @@ than registration-order selection. Unannotated custom assembly remains usable
 through the same explicit checked constructors.
 
 Evaluate this front with GetStdHandle and WriteFile, then ExitProcess as above.
-Success means authoring API-specific facts once and removing the repeated
-handoff machinery; a shorter spelling for unchanged duplicate proofs fails.
+Success means authoring API-specific facts once while retaining the implemented
+shared handoff machinery; generating fresh duplicate proofs fails.
 
 ### Authoring contract and trial worksheet
 
@@ -155,9 +153,9 @@ describes the required connection; it does not introduce a second request model.
 
 | Trial | Authored once | Derived by shared machinery | Still owed outside the declaration |
 |---|---|---|---|
-| GetStdHandle | RCX low-DWORD selector, API identity and result meaning | Actual CALL binding, common return/home plan, checked handoff, fresh occurrence, record and logs | Actual result/return connection and provider adequacy |
-| WriteFile | Handle/buffer/count/fifth-argument ABI checks, semantic loans, partial-output model | Same CALL and ReturnHome construction, whole-batch handoff and general preservation laws | API-specific separation/protection, service/output correspondence, actual return connection |
-| ExitProcess | RCX low-DWORD status and nonreturning classification | Same checked handoff with the selected slice's empty loan batch, occurrence and logs | Terminal observation and native teardown behavior; entry success proves neither |
+| GetStdHandle | RCX low-DWORD selector, API identity and result meaning | Actual CALL binding, return/home plan, shared checked handoff, observed-register staging and actual return/finalization | External provider/native applicability; observed results remain explicit inputs |
+| WriteFile | Handle/buffer/count/fifth-argument ABI checks, semantic loans, partial-output model | Same CALL and ReturnHome construction, whole-batch handoff, shared staging and actual return/finalization | Original-entry/enclosing service-history and output correspondence, external/native applicability |
+| ExitProcess | RCX low-DWORD status and nonreturning classification | Checked entry with the selected slice's empty loan batch; completed modeled exit checks exact process/call/status and retains an inert archive | Native applicability and particular duty accounting under [owning protocol laws](OBLIGATIONS.md#observed-process-exit); no universal teardown or empty-inventory requirement |
 
 For all three, neither caller nor attribute author supplies a free CallId,
 before/after log, continuation address, pending record or shared preservation
