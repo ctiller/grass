@@ -148,10 +148,11 @@ theorem returned_body
       buffer bytes fifth provider = some entered)
     (prior : CallRuntimeTable)
     {realization : Realization} {environment : ConsoleEnvironment}
+    {interpretation : ReturnInterpretation}
     (raw : Nat → RawState) (graph : Nat → Raw.Graph)
     (agent : Nat → ContextId) (action : Nat → Action) (event : Nat → Raw.Event)
     (length : Nat) (root : raw 0 = entered.rawAfter prior)
-    (steps : ∀ n, n < length → Raw.RawStep loaded realization environment (graph n) (raw n)
+    (steps : ∀ n, n < length → Raw.RawStep loaded realization environment interpretation (graph n) (raw n)
       (.providerService entered.handoff.call (agent n) (action n))
       (event n) (raw (n + 1)) (graph (n + 1)))
     {providerState after : ProtocolState}
@@ -160,7 +161,7 @@ theorem returned_body
       entered.handoff.call entered.handoff.record frontier}
     {relation : WriteFileHistory.HandoffRelation (plan := entered.abi.loanPlan) projection}
     {aligned : WriteFileHistory.Aligned relation history}
-    {interpretation : ReturnInterpretation} {result : ReturnResult}
+    {result : ReturnResult}
     (returned : WriteFileHistory.Returned aligned interpretation result after)
     (projected : (raw length).metadata.pack? (raw length).machine.machine = some providerState)
     {runtime : WriteFileRuntime}
