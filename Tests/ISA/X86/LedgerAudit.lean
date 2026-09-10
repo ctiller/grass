@@ -58,6 +58,7 @@ import Grass.Platform.Win32.WriteFileNonresponse
 import Grass.Platform.Win32.WriteFileStabilization
 import Grass.Platform.Win32.WriteFileReturn
 import Grass.Platform.Win32.WriteFileReturnCompletion
+import Grass.Platform.Win32.WriteFileReturnHistory
 import Grass.Platform.Win32.LoaderEntry
 import Grass.Platform.Win32.LoadedAccess
 import Grass.Platform.Win32.LoadedDataAccess
@@ -240,6 +241,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileStabilization,
    `Grass.Platform.Win32.WriteFileResult, `Grass.Platform.Win32.WriteFileReturn,
    `Grass.Platform.Win32.WriteFileReturnCompletion,
+   `Grass.Platform.Win32.WriteFileReturnHistory,
    `Grass.Platform.Win32.LoaderImage, `Grass.Platform.Win32.LoaderRegion,
    `Grass.Platform.Win32.LoaderEntry,
    `Grass.Platform.Win32.LoadedAccess, `Grass.Platform.Win32.CpuVocabulary,
