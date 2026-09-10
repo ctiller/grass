@@ -17,21 +17,22 @@ coverage remain unimplemented. A container/decoder refusal is not a claim that
 the input is invalid for its actual platform.
 
 ```text
-lake build grass-disasm grass-disasm-hello Tests.Disasm.Linear
-lake exe grass-disasm-hello Spikes/1_Hello_World/Program.lean payload.bin .lake/hello.exe
-lake exe grass-disasm pe .lake/hello.exe
+lake build grass-disasm Tests.Disasm.Linear
+lake exe grass-disasm pe input.exe
 lake exe grass-disasm raw input.bin 4096
 python Tools/disasm/check.py
 ```
 
-The Hello fixture exporter uses `SourceLinkedImage.buildExcept` and `writeImage`
-on the actual source's assembly projection plus explicit payload file bytes.
-It does not elaborate surrounding Lean declarations, derive data from a source
-`def payload`, or claim to emit that complete source program. The smoke test
-supplies the Hello CRLF payload explicitly. This exercises the production
-composition seam while the accepted end-to-end spike artifact is pending.
-Its output is structural evidence, not an accepted `VerifiedProgram`; it is
-never executed by these commands.
+The source-reading Hello exporter has been deleted. The disassembler consumes
+binary inputs; it does not construct a substitute for a verified program.
+Bare `python Tools/disasm/check.py` checks raw decoding and malformed PE input
+only; it no longer tests an accepted PE container. Use
+`python Tools/disasm/check.py --pe-artifact input.exe` to test accepted-container
+byte retention and header-mutation refusal against an independently supplied artifact
+whose executable sections are supported by the decoder.
+Automatic accepted-PE CLI coverage is currently missing until a separate
+artifact-producing validation job supplies that input. The removed Hello
+exporter is not replaced by another source reconstruction fixture.
 
 Raw addresses use decimal input. PE listing addresses are RVAs, not loaded
 virtual addresses. Listings cover executable sections' file-backed virtual

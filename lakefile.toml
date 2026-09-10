@@ -35,7 +35,3 @@ globs = ["Tests.+"]
 [[lean_exe]]
 name = "grass-disasm"
 root = "Tools.Disasm"
-
-[[lean_exe]]
-name = "grass-disasm-hello"
-root = "Tools.DisasmHello"

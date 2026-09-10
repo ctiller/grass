@@ -1,7 +1,7 @@
-"""Exercise the real CLI/exporter, including byte retention on refused input.
+"""Exercise the binary-input CLI, including byte retention on refused input.
 
 This is runtime validation. Grass.Disasm.Linear owns the universal byte laws.
-Run after lake build grass-disasm grass-disasm-hello Tests.Disasm.Linear.
+Run after lake build grass-disasm Tests.Disasm.Linear.
 """
 import json
 import argparse
@@ -14,7 +14,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 BIN = ROOT / ".lake" / "build" / "bin"
 SUFFIX = ".exe" if os.name == "nt" else ""
 CLI = BIN / ("grass-disasm" + SUFFIX)
-EXPORT = BIN / ("grass-disasm-hello" + SUFFIX)
 
 
 def invoke(*args, expected=0):
@@ -33,6 +32,8 @@ def main():
                         help="validate real artifacts emitted by build-c.ps1")
     parser.add_argument("--compiled-sequence", type=pathlib.Path,
                         help="validate real two-store artifacts emitted by build-sequence.ps1")
+    parser.add_argument("--pe-artifact", type=pathlib.Path,
+                        help="test a supplied fully decodable PE; no source exporter is used")
     options = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="disasm-", dir=ROOT / ".lake") as directory:
         work = pathlib.Path(directory)
@@ -58,70 +59,41 @@ def main():
                 assert row["fileOffset"] == cursor - base
                 cursor += len(bytes.fromhex(row["bytes"]))
 
-        image = work / "hello.exe"
-        payload = work / "payload.bin"
-        payload.write_bytes(b"Hello, World!\r\n")
-        exported = subprocess.run(
-            [str(EXPORT), str(ROOT / "Spikes/1_Hello_World/Program.lean"), str(payload), str(image)],
-            capture_output=True, text=True,
-        )
-        assert exported.returncode == 0, exported.stderr
-        assert "no end-to-end safety certificate" in exported.stdout
-        assert "Surrounding source declarations are not elaborated" in exported.stdout
-        report = invoke("pe", image)
-        data = image.read_bytes()
-        decoded = 0
-        for section in report["report"]["sections"]:
-            if not section["executable"]:
-                continue
-            listing = section["listing"]
-            start = section["fileOffset"]
-            size = listing["byteLength"]
-            assert reconstruct(listing) == data[start:start + size]
-            assert listing["stop"] is None
-            decoded += len(listing["rows"])
-        assert decoded > 0
-
-        # Truncation and unrelated bytes cannot appear as accepted containers.
-        for contents in (data[:30], b"not a PE image"):
+        # Malformed-input tests do not depend on a program-specific exporter.
+        for contents in (b"MZ", b"not a PE image"):
             raw.write_bytes(contents)
             refused = invoke("pe", raw, expected=2)
             assert refused["report"]["parse"] != "accepted-bounded-imported-container"
 
-        # Explicit data inputs must affect the artifact; the exporter must not
-        # silently replace them with a hardcoded Hello string.
-        payload.write_bytes(b"X")
-        changed = work / "changed.exe"
-        subprocess.run([str(EXPORT), str(ROOT / "Spikes/1_Hello_World/Program.lean"),
-                        str(payload), str(changed)], check=True, capture_output=True)
-        assert changed.read_bytes() != data
+        if options.pe_artifact:
+            image = options.pe_artifact
+            report = invoke("pe", image)
+            data = image.read_bytes()
+            decoded = 0
+            for section in report["report"]["sections"]:
+                if not section["executable"]:
+                    continue
+                listing = section["listing"]
+                start = section["fileOffset"]
+                size = listing["byteLength"]
+                assert reconstruct(listing) == data[start:start + size]
+                assert listing["stop"] is None
+                decoded += len(listing["rows"])
+            assert decoded > 0
 
-        # The declared contract extracts assembly, not surrounding Lean values.
-        # This explicit control prevents a future whole-source assurance claim.
-        source = (ROOT / "Spikes/1_Hello_World/Program.lean").read_text(encoding="utf-8")
-        declaration = "def payload : ByteArray := projection.encodeLine message"
-        assert declaration in source
-        mutated_source = work / "ChangedPayload.lean"
-        mutated_source.write_text(source.replace(declaration,
-                                  'def payload : ByteArray := Text.utf8 "X"'), encoding="utf-8")
-        same_explicit_data = work / "same-explicit-data.exe"
-        projected = subprocess.run([str(EXPORT), str(mutated_source), str(payload),
-                                    str(same_explicit_data)], check=True, capture_output=True, text=True)
-        assert same_explicit_data.read_bytes() == changed.read_bytes()
-        assert "Surrounding source declarations are not elaborated" in projected.stdout
+            # Mutate actual artifact offsets; no writer-normalization is involved.
+            nt = report["report"]["ntHeaderOffset"]
+            mutations = [(60, (63).to_bytes(4, "little")),
+                         (60, (len(data) + 4096).to_bytes(4, "little")),
+                         (nt, b"PX\0\0"),
+                         (nt + 20, (0).to_bytes(2, "little")),
+                         (nt + 24 + 60, (0).to_bytes(4, "little"))]
+            for offset, replacement in mutations:
+                mutant = bytearray(data)
+                mutant[offset:offset + len(replacement)] = replacement
+                raw.write_bytes(mutant)
+                invoke("pe", raw, expected=2)
 
-        # Mutate actual artifact offsets; no writer-normalization is involved.
-        nt = report["report"]["ntHeaderOffset"]
-        mutations = [(60, (63).to_bytes(4, "little")),
-                     (60, (len(data) + 4096).to_bytes(4, "little")),
-                     (nt, b"PX\0\0"),
-                     (nt + 20, (0).to_bytes(2, "little")),
-                     (nt + 24 + 60, (0).to_bytes(4, "little"))]
-        for offset, replacement in mutations:
-            mutant = bytearray(data)
-            mutant[offset:offset + len(replacement)] = replacement
-            raw.write_bytes(mutant)
-            invoke("pe", raw, expected=2)
 
         if options.compiled_c:
             for name, displacement in (("store_safe", "04"), ("store_oob", "08")):
@@ -208,7 +180,10 @@ def main():
                     assert reconstruct(mixed["linearListing"]) == mutated[start:start + 14]
             print("Actual two-store C artifacts inspected; second OOB candidate localized; execution remains unresolved.")
 
-        print(f"Disasm CLI checks passed; actual structural Hello decoded {decoded} instructions.")
+        if not (options.pe_artifact or options.compiled_c or options.compiled_sequence):
+            print("Raw decoding and malformed PE checks passed; accepted-PE coverage was not run.")
+        else:
+            print("Disasm CLI checks passed for the supplied binary inputs; no verified-program claim.")
 
 
 if __name__ == "__main__":
