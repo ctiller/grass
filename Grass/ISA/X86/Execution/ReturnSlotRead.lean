@@ -55,6 +55,39 @@ theorem restoredRsp {callBefore : State} {afterFetch afterTarget afterCall : Mac
   rw [sameAddress]
   exact BitVec.sub_add_cancel _ _
 
+/-- `slot_origin` identifies the current read's original CALL slot end with the
+original pre-CALL RSP even when provider execution changed the surrounding memory. -/
+theorem slot_origin {callBefore : State} {afterFetch afterTarget afterCall : MachineState}
+    {displacement : BitVec 32} {call : CallNormal callBefore afterFetch afterTarget afterCall displacement}
+    {beforeReturn : State} {afterRead : MachineState}
+    (receipt : ReturnSlotRead call beforeReturn afterRead) :
+    ∃ base, receipt.run.resolved.allocation.base = some base ∧
+      base.toNat + call.storeDescriptor.range.stop = (callBefore.gpr .rsp).toNat := by
+  obtain ⟨base, placed⟩ := receipt.placed
+  obtain ⟨fits, preparedAddress⟩ :=
+    prepared_base_fits_and_address receipt.run.prepared placed
+  have within := receipt.run.resolved.coordinates.withinView
+  have width : receipt.descriptor.range.size = 8 := by
+    rw [receipt.slotRange, call.storeWidth]
+  have startLt : receipt.descriptor.range.start <
+      receipt.run.resolved.allocation.extent.stop := by
+    rw [ByteRange.Contains] at within
+    rw [ByteRange.stop, width] at within
+    omega
+  have addressNat := congrArg BitVec.toNat
+    (Address.numeric.inj (preparedAddress.symm.trans
+      (receipt.slotAddress.trans call.storeAddress)))
+  rw [toNat_addressOf fits startLt] at addressNat
+  have under : (8 : BitVec 64) ≤ callBefore.gpr .rsp :=
+    BitVec.le_def.mpr (by simpa using call.stackNoUnderflow)
+  rw [BitVec.toNat_sub_of_le under] at addressNat
+  have eight : (8 : BitVec 64).toNat = 8 := by decide
+  rw [eight] at addressNat
+  refine ⟨base, placed, ?_⟩
+  have rspBound := call.stackNoUnderflow
+  rw [← receipt.slotRange, ByteRange.stop, width]
+  omega
+
 theorem state_frame {callBefore : State} {afterFetch afterTarget afterCall : MachineState}
     {displacement : BitVec 32} {call : CallNormal callBefore afterFetch afterTarget afterCall displacement}
     {beforeReturn : State} {afterRead : MachineState}
