@@ -9,6 +9,7 @@ import Grass.Platform.Win32.RawTerminal
 import Grass.Platform.Win32.RawGetStdHandlePending
 import Grass.Platform.Win32.RawPendingInfinite
 import Grass.Platform.Win32.RawPrefix
+import Grass.Platform.Win32.ProviderContract
 import Grass.Frontend.Target
 import Grass.Frontend.Source
 import Grass.Frontend.AssemblySyntax
