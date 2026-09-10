@@ -1,5 +1,7 @@
 import Lean
 import Grass.Platform.Win32.RawPhasePreservation
+import Grass.Platform.Win32.RawPendingService
+import Grass.Platform.Win32.RawPrefixSteps
 import Grass.Platform.Win32.RawPrefix
 import Grass.Frontend.Target
 import Grass.Frontend.Source
