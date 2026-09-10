@@ -1,11 +1,12 @@
-import Grass.Refinement.BehaviorCorrespondence
+import Grass.Refinement.ImplementationConformance
 import Grass.Semantics.BehaviorContract
 import Grass.Artifact.Encoding
 
 /-! Relative realization algebra, not the public verified-emission gate.
 The selected profile is an explicit parameter. A concrete platform must supply
 its fixed execution and mandatory safety definitions before these witnesses
-can support public target assurance. Authored theorem demands are not used. -/
+can support public target assurance. Directed implementation conformance does
+not transfer arbitrary authored theorems; their demands remain separate. -/
 
 namespace Grass
 
@@ -22,12 +23,14 @@ structure RealizationProfile {R : Type} [Resource.ResourceModel R] {resources : 
   observe : (bytes : Std.Logical.ByteArray) → (input : contract.Input) →
     (execution bytes input).Observation → (contract.denotation interpretation input).Observation
   waits : (bytes : Std.Logical.ByteArray) → (input : contract.Input) →
-    WaitTranslation (execution bytes input) (contract.denotation interpretation input)
+    DirectedWaitTranslation (execution bytes input) (contract.denotation interpretation input)
   safety : Std.Logical.ByteArray → contract.Input → DemandFamily.{0}
 
 /-- `RealizationCertificate.compiled` binds the artifact to deterministic construction for
-the exact program. Its `entry`, `safety`, and `correspondence` fields cover all admitted inputs with
-loaded entry, safety and full correspondence evidence; author demands remain separate. -/
+the exact program. Its `entry`, `safety`, and `correspondence` cover all admitted inputs with
+loaded entry, safety, actual-history and classified-completion conformance.
+No abstract error alternative must be manufactured. This record does not add
+completion existence or classify internal deadlock; author demands remain separate. -/
 structure RealizationCertificate {R : Type} [Resource.ResourceModel R] {resources : R}
     {contract : BehaviorContract resources} (profile : RealizationProfile contract)
     (program : profile.Program) where
@@ -39,7 +42,7 @@ structure RealizationCertificate {R : Type} [Resource.ResourceModel R] {resource
   safety : ∀ input, contract.admits input →
     DemandCertificateFamily (profile.safety (profile.encoding.write artifact) input)
   correspondence : ∀ input, contract.admits input →
-    BehaviorCorrespondence (profile.execution (profile.encoding.write artifact) input)
+    ImplementationConformance (profile.execution (profile.encoding.write artifact) input)
       (contract.denotation profile.interpretation input)
       (profile.observe (profile.encoding.write artifact) input)
       (profile.waits (profile.encoding.write artifact) input)
