@@ -37,7 +37,7 @@ structure Token where
   finish : Nat
 deriving Repr, DecidableEq
 
-private def wordChar (c : Char) : Bool := c.isAlphanum || c = '_' || c = '«' || c = '»'
+private def wordChar (c : Char) : Bool := c.isAlphanum || c = '_' || c.toNat ≥ 128
 @[reducible] private def lexAux :
     Nat → List Char → Nat → Bool → Nat → Bool → List Char → List Token → Option (List Token)
   | 0, _, _, _, _, _, _, _ => none
@@ -181,12 +181,20 @@ private def wordChar (c : Char) : Bool := c.isAlphanum || c = '_' || c = '«' ||
 @[reducible] def extractSource (source : String) : Except Error Body :=
   extractSourceChars source.toList
 
-/-- Capture syntax-selected ranges only when they exactly describe the declaration parser's result. -/
+/-- Require the syntax-selected positions themselves to match the declaration,
+including empty bodies where comparing sliced text alone loses positions. -/
 @[reducible] def captureSourceChars
     (command : List Char) (offsets : SourceOffsets) : Except Error Body :=
-  match bodyAt command offsets, extractSourceChars command with
-  | some captured, .ok extracted => if captured = extracted then .ok captured else .error .malformed
-  | _, _ => .error .malformed
+  match tokensChars command with
+  | none => .error .malformed
+  | some ts => match sourceRanges? command ts with
+    | none => .error .malformed
+    | some actual =>
+      if offsets = actual then
+        match bodyAt command offsets with
+        | some body => .ok body
+        | none => .error .malformed
+      else .error .malformed
 
 @[reducible] def symbolicStores (body : Body) : List (String × Nat) := body.lines.filterMap fun line =>
   match line.parsed with | .symbolicStore dst value => some (dst,value) | _ => none

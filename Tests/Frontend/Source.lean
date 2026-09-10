@@ -1,6 +1,5 @@
-import Grass.Frontend.Source
+import Grass.Frontend.AssemblySyntax
 import Tests.Frontend.Target
-import Tests.Assembly.SourceLiteral
 
 namespace Grass.Tests.Frontend
 
@@ -15,27 +14,46 @@ def otherProjection : TargetProjection otherSpec .win10X64 :=
 def otherPlan : PlatformPlan otherSpec.driverBoundary.requirements :=
   PlatformPlan.win10X64SynchronousStdoutOnly otherProjection
 
-example : spec.driverBoundary.requirements = otherSpec.driverBoundary.requirements := rfl
 example (_value : MachineSource plan) : True := by
   fail_if_success have : MachineSource otherPlan := _value
   trivial
 
--- Fixture ingress only: the production command elaborator captures its own
--- input range and passes the actually elaborated table to the same producer.
-def authored : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
+-- Structural assembly construction, independent of any prescribed API sequence.
+def arrêt : MachineSource plan :=
+  withCallFrame ExitProcess asm_source (statics := statics) {
+start:
+  mov ecx, 7
+  call qword ptr [rip + __imp_ExitProcess]
+  ud2
+}
 
-theorem source_present : (MachineSource.ofHello? plan authored statics).isSome = true := by
-  decide +kernel
+def localCode : MachineSource plan :=
+  withStack (scratch : UInt32 := 3)
+  withStack (spare : UInt32 := 9)
+  withCallFrame ExitProcess asm_source (statics := statics) {
+begin:
+  mov eax, scratch
+  mov ecx, spare
+  call qword ptr [rip + __imp_ExitProcess]
+  ud2
+}
 
-def source : MachineSource plan := (MachineSource.ofHello? plan authored statics).get source_present
+example : arrêt.table = statics := rfl
+example : arrêt.construction.frame.header.locals = [] := by decide +kernel
+example : localCode.construction.frame.header.locals.map (·.name) = ["scratch", "spare"] := by decide +kernel
+example : localCode.construction.frame.header.locals.map (·.initialValue.toNat) = [3, 9] := by decide +kernel
+example : (Assembly.SourceInput.captureSourceChars arrêt.authored arrêt.offsets).toOption =
+    some arrêt.body := arrêt.ingress
+example : (MachineSource.ofSource? plan arrêt.authored
+    { arrêt.offsets with bodyStart := arrêt.offsets.bodyStart + 1 } statics).isNone := by decide +kernel
+example : (MachineSource.ofSource? plan [] arrêt.offsets statics).isNone := by decide +kernel
 
-theorem source_table_exact : source.table = statics := by
-  exact (MachineSource.ofHello?_inputs (Option.some_get source_present).symm).2
-
-theorem source_authored_exact : source.authored = authored := by
-  exact (MachineSource.ofHello?_inputs (Option.some_get source_present).symm).1
-
--- Invalid source is rejected before any artifact can be supplied.
-example : (MachineSource.ofHello? plan [] statics).isSome = false := by decide
+/-- error: unsupported stack-local type; this construction backend supports UInt32 -/
+#guard_msgs in
+def unsupportedLocal : MachineSource plan :=
+  withStack (wide : UInt64 := 0)
+  withCallFrame ExitProcess asm_source (statics := statics) {
+  ud2
+}
 
 end Grass.Tests.Frontend

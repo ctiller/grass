@@ -1,91 +1,112 @@
 import Lean
 import Grass.Frontend.Source
 
-/-!
-# Authored assembly command syntax
-
-This module captures the current Hello declaration losslessly and elaborates
-it through the existing checked source producers.
--/
-
+/-! Exact command syntax capture for checked structural assembly construction. -/
 namespace Grass.Frontend.AssemblySyntax
-
 open Lean Parser Elab Command
 
-/-- Consume the current assembly body as one lossless atom.  Spike 1's body
-contains no braces; the closing brace therefore terminates this narrow parser.
-The atom's source information retains the original body characters. -/
+/-- Scan balanced braces without treating quoted text or comments as delimiters. -/
+partial def bodyFn (depth : Nat) (quoted escaped lineComment : Bool) (block : Nat) : ParserFn := fun c s =>
+  let pos := s.pos
+  if h : c.atEnd pos then s.mkUnexpectedError "unterminated assembly body"
+  else
+    let ch := c.get' pos h
+    let next := s.next' c pos h
+    let following := c.get next.pos
+    if lineComment then bodyFn depth false false (ch != '\n') 0 c next
+    else if block > 0 then
+      if ch == '/' && following == '-' then bodyFn depth false false false (block + 1) c (next.next c next.pos)
+      else if ch == '-' && following == '/' then bodyFn depth false false false (block - 1) c (next.next c next.pos)
+      else bodyFn depth false false false block c next
+    else if quoted then
+      if escaped then bodyFn depth true false false 0 c next
+      else if ch == '\\' then bodyFn depth true true false 0 c next
+      else bodyFn depth (ch != '"') false false 0 c next
+    else if ch == '-' && following == '-' then bodyFn depth false false true 0 c (next.next c next.pos)
+    else if ch == '/' && following == '-' then bodyFn depth false false false 1 c (next.next c next.pos)
+    else if ch == '"' then bodyFn depth true false false 0 c next
+    else if ch == '{' then bodyFn (depth + 1) false false false 0 c next
+    else if ch == '}' then
+      if depth == 0 then s else bodyFn (depth - 1) false false false 0 c next
+    else bodyFn depth false false false 0 c next
+
 def assemblyBody : Parser where
-  fn := rawFn (takeUntilFn (fun c => c = '}'))
+  fn := rawFn (bodyFn 0 false false false 0)
 
 @[combinator_formatter assemblyBody]
 def assemblyBodyFormatter : Lean.PrettyPrinter.Formatter :=
   Lean.PrettyPrinter.Formatter.visitAtom Name.anonymous
-
 @[combinator_parenthesizer assemblyBody]
 def assemblyBodyParenthesizer : Lean.PrettyPrinter.Parenthesizer :=
   Lean.PrettyPrinter.Parenthesizer.visitToken
 
-/-- Internal handoff from the lossless command parser to the checked source
-elaborator.  Its arguments are the exact declaration text, selected plan, and
-evaluated static-object table.  The hook converts the literal directly to the
-logical character list expected by source construction. -/
-syntax (name := machineSourceCapture)
-  "__grass_machine_source_capture" "(" term "," term "," term ")" : term
+declare_syntax_cat assemblyLocal
+syntax "withStack" "(" ident ":" ident ":=" num ")" : assemblyLocal
+syntax (name := assemblyDefinition)
+  "def" ident ":" &"MachineSource" ident ":=" assemblyLocal*
+  &"withCallFrame" ident &"asm_source" "(" &"statics" ":=" ident ")"
+  "{" assemblyBody "}" : command
 
-/-- The elaborator only constructs a proof term checked by Lean's kernel.
-Source text becomes literal data; no file read or native proof authority is used. -/
+syntax (name := machineSourceCapture)
+  "__grass_machine_source_capture" "(" term "," term "," term "," term ")" : term
+
+/-- Literal input and ranges are checked in the kernel by the same producer
+used independently of elaboration. No file IO or executable proof authority. -/
 elab_rules : term
-  | `(__grass_machine_source_capture ($source:str, $plan, $statics)) => do
+  | `(__grass_machine_source_capture ($source:str, $offsets, $plan, $statics)) => do
       let chars ← Lean.Elab.Term.exprToSyntax (toExpr source.getString.toList)
       let result ← `(term|
-        (Grass.MachineSource.ofHello? $plan $chars $statics).get
+        (Grass.MachineSource.ofSource? $plan $chars $offsets $statics).get
           (by
             set_option maxRecDepth 100000 in
             set_option maxHeartbeats 16000000 in
             decide +kernel))
       Lean.Elab.Term.elabTerm result none
 
-/-- The intentionally narrow first `asm_source` command surface.  Wrapper and
-body spelling is captured from the original command rather than reconstructed
-from pretty-printed syntax. -/
-@[command_parser] def helloAssemblyDefinition : Parser := leading_parser
-  "def" >> ident >> ":" >> nonReservedSymbol "MachineSource" true >> ident >> ":=" >>
-  nonReservedSymbol "withStack" true >> "(" >> ident >> ":" >>
-    nonReservedSymbol "UInt32" true >> ":=" >> Parser.Term.num >> ")" >>
-  nonReservedSymbol "withCallFrame" true >> ident >>
-    nonReservedSymbol "asm_source" true >>
-  "(" >> nonReservedSymbol "statics" true >> ":=" >> ident >> ")" >>
-  "{" >> assemblyBody >> "}"
+private def originalStart (stx : Syntax) : CommandElabM String.Pos.Raw := do
+  let some pos := stx.getPos? (canonicalOnly := true)
+    | throwErrorAt stx "assembly syntax has no original source start"
+  return pos
+private def originalEnd (stx : Syntax) : CommandElabM String.Pos.Raw := do
+  let some pos := stx.getTailPos? (canonicalOnly := true)
+    | throwErrorAt stx "assembly syntax has no original source end"
+  return pos
 
-private def exactSource (stx : Syntax) : CommandElabM String := do
-  let some start := stx.getPos? (canonicalOnly := true)
-    | throwErrorAt stx "assembly declaration has no original source start"
-  let some finish := stx.getTailPos? (canonicalOnly := true)
-    | throwErrorAt stx "assembly declaration has no original source end"
-  let fileMap ← getFileMap
-  return String.Pos.Raw.extract fileMap.source start finish
-
-/-- Identifiers in this fixed command grammar are direct children; the raw
-assembly body is an atom and never contributes identifiers to this selection. -/
-private def identifiers (stx : Syntax) : List Syntax :=
-  stx.getArgs.toList.filter Syntax.isIdent
-
-@[command_elab Grass.Frontend.AssemblySyntax.helloAssemblyDefinition]
-def elabHelloAssemblyDefinition : CommandElab := fun stx => do
-    let ids := identifiers stx
-    let triple ← match ids with
-      | name :: plan :: _local :: _callFrame :: staticSyntax :: [] =>
-          pure (name, plan, staticSyntax)
-      | _ => throwErrorAt stx "malformed assembly declaration capture"
-    let name : Ident := ⟨triple.1⟩
-    let plan : Term := ⟨triple.2.1⟩
-    let staticTerm : Term := ⟨triple.2.2⟩
-    let machineSource : Term := ⟨mkIdent `Grass.MachineSource⟩
-    let authored := Syntax.mkStrLit (← exactSource stx)
-    let expanded ← `(command|
-      def $name : $machineSource $plan :=
-        __grass_machine_source_capture ($authored, $plan, $staticTerm))
-    elabCommand expanded
+@[command_elab assemblyDefinition]
+def elabAssemblyDefinition : CommandElab := fun stx => do
+  -- Destructure the command grammar, whose repeated locals form one syntax node.
+  -- Identifier counts and local names do not determine the selected plan/table.
+  let #[_, nameSyntax, _, _, planSyntax, _, localsSyntax, _, _, _, _, _, _, staticSyntax,
+      _, opening, _, closing] := stx.getArgs
+    | throwErrorAt stx "malformed assembly command syntax"
+  for localSyntax in localsSyntax.getArgs do
+    match localSyntax with
+    | `(assemblyLocal| withStack ($_name:ident : $localType:ident := $_value:num)) =>
+      unless localType.getId == `UInt32 do
+        throwErrorAt localType "unsupported stack-local type; this construction backend supports UInt32"
+    | _ => throwErrorAt localSyntax "malformed stack-local declaration"
+  let name : Ident := ⟨nameSyntax⟩
+  let plan : Term := ⟨planSyntax⟩
+  let statics : Term := ⟨staticSyntax⟩
+  let start ← originalStart stx
+  let finish ← originalEnd stx
+  let headerStart ← originalEnd nameSyntax
+  let headerFinish ← originalStart opening
+  let bodyStart ← originalEnd opening
+  let bodyFinish ← originalStart closing
+  let source := (← getFileMap).source
+  let relative (pos : String.Pos.Raw) : Nat :=
+    (String.Pos.Raw.extract source start pos).toList.length
+  let hs := Syntax.mkNumLit (toString (relative headerStart))
+  let hf := Syntax.mkNumLit (toString (relative headerFinish))
+  let bs := Syntax.mkNumLit (toString (relative bodyStart))
+  let bf := Syntax.mkNumLit (toString (relative bodyFinish))
+  let offsets ← `(term| Grass.Assembly.SourceInput.SourceOffsets.mk $hs $hf $bs $bf)
+  let authored := Syntax.mkStrLit (String.Pos.Raw.extract source start finish)
+  let machineSource : Term := ⟨mkIdent `Grass.MachineSource⟩
+  let expanded ← `(command|
+    def $name : $machineSource $plan :=
+      __grass_machine_source_capture ($authored, $offsets, $plan, $statics))
+  elabCommand expanded
 
 end Grass.Frontend.AssemblySyntax
