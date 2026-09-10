@@ -59,6 +59,7 @@ import Grass.Platform.Win32.RawState
 import Grass.Platform.Win32.CallRuntime
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.GetStdHandleRuntime
+import Grass.Platform.Win32.ProtocolEntry
 import Grass.Platform.Win32.GetStdHandleStackPlan
 import Grass.Platform.Win32.ReturnHome
 import Grass.Platform.Win32.ReturnHomeStackPlan
@@ -206,6 +207,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.CallRuntime,
    `Grass.Platform.Win32.RawStepSignature,
    `Grass.Platform.Win32.GetStdHandleRuntime,
+   `Grass.Platform.Win32.ProtocolEntry,
    `Grass.Platform.Win32.GetStdHandleStackPlan,
    `Grass.Platform.Win32.ReturnHome,
    `Grass.Platform.Win32.ReturnHomeStackPlan,
@@ -322,7 +324,9 @@ acquiring a citation.
 -- Nine runtime data/view operations use existing ABI data and assert no execution.
 -- Five runtime capture/update adapters introduce no additional ABI behavior.
 -- Seven logical import selectors/adapters derive existing layout and API data.
-def notBehaviourBaseline : Nat := 293
+-- Two endpoint aliases and three shared protocol bookkeeping computations
+-- introduce no new external behavior or discharge existing model debt.
+def notBehaviourBaseline : Nat := 298
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -511,6 +515,11 @@ def notBehaviour : List Name :=
     -- Checked GetStdHandle bookkeeping and projections add no provider or CPU
     -- claim beyond the actual CALL, ABI and protocol receipts they retain.
     `Grass.Platform.Win32.GetStdHandle.EntryHandoff.after,
+    `Grass.Platform.Win32.GetStdHandle.EntryHandoff,
+    `Grass.Platform.Win32.WriteFile.EntryHandoff,
+    `Grass.Platform.Win32.ProtocolEntry.issue?,
+    `Grass.Platform.Win32.ProtocolEntry.Entry.after,
+    `Grass.Platform.Win32.ProtocolEntry.Entry.pendingRecord,
     `Grass.Platform.Win32.GetStdHandle.EntryHandoff.record,
     `Grass.Platform.Win32.GetStdHandle.entryHandoff?,
     `Grass.Platform.Win32.GetStdHandle.CallHandoff.frame,
