@@ -255,6 +255,25 @@ structure LoadNormal {frame : SourceFrame.Result} {rootOffset : Nat}
 
 namespace LoadNormal
 
+/-- `rsp_toNat` derives the nonwrapping runtime frame origin from the actual
+prepared load's allocation bounds and placement. -/
+theorem rsp_toNat {frame rootOffset} {source : SourceResolve.Result frame rootOffset}
+    {before : State} {afterFetch afterLoad : MachineState}
+    (receipt : LoadNormal source before afterFetch afterLoad) :
+    (before.gpr .rsp).toNat = receipt.base.toNat + receipt.frameOffset := by
+  have fits := (prepared_base_fits_and_address receipt.access.run.prepared receipt.placed).1
+  have within := receipt.access.run.resolved.coordinates.withinView
+  have width := receipt.selection.result.load_width
+  have frameLt : receipt.frameOffset < receipt.access.run.resolved.allocation.extent.stop := by
+    have rangeStop := congrArg ByteRange.stop receipt.range
+    change receipt.selection.result.address.width = 4 at width
+    simp only [ByteRange.stop] at rangeStop
+    simp only [ByteRange.Contains, ByteRange.stop] at within
+    change receipt.frameOffset < receipt.access.run.resolved.allocation.extent.start +
+      receipt.access.run.resolved.allocation.extent.size
+    omega
+  rw [receipt.rsp, toNat_addressOf fits frameLt]
+
 def isa {frame rootOffset} {source : SourceResolve.Result frame rootOffset}
     {before : State} {afterFetch afterLoad : MachineState}
     (receipt : LoadNormal source before afterFetch afterLoad) : MemoryMoveNormal.Instruction :=

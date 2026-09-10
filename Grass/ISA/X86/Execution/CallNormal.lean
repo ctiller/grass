@@ -152,6 +152,52 @@ theorem store_placement {before : State} {afterFetch afterRead afterStore : Mach
   obtain ⟨fits, address⟩ := prepared_base_fits_and_address receipt.storeRun.prepared placed
   exact ⟨base, placed, fits, Address.numeric.inj (address.symm.trans receipt.storeAddress)⟩
 
+/-- `store_stop_toNat` identifies the actual return-slot end with pre-CALL RSP. -/
+theorem store_stop_toNat {before : State} {afterFetch afterRead afterStore : MachineState}
+    {displacement : BitVec 32}
+    (receipt : CallNormal before afterFetch afterRead afterStore displacement)
+    (base : MachineAddress)
+    (placed : receipt.storeRun.resolved.allocation.base = some base) :
+    base.toNat + receipt.storeDescriptor.range.stop = (before.gpr .rsp).toNat := by
+  obtain ⟨fits, address⟩ := prepared_base_fits_and_address receipt.storeRun.prepared placed
+  have within := receipt.storeRun.resolved.coordinates.withinView
+  have startLt : receipt.storeDescriptor.range.start <
+      receipt.storeRun.resolved.allocation.extent.stop := by
+    rw [ByteRange.Contains] at within
+    rw [ByteRange.stop, receipt.storeWidth] at within
+    omega
+  have addressNat := congrArg BitVec.toNat
+    (Address.numeric.inj (address.symm.trans receipt.storeAddress))
+  rw [toNat_addressOf fits startLt] at addressNat
+  have under : (8 : BitVec 64) ≤ before.gpr .rsp :=
+    BitVec.le_def.mpr (by simpa using receipt.stackNoUnderflow)
+  rw [BitVec.toNat_sub_of_le under] at addressNat
+  have eight : (8 : BitVec 64).toNat = 8 := by decide
+  rw [eight] at addressNat
+  have rspBound := receipt.stackNoUnderflow
+  rw [ByteRange.stop, receipt.storeWidth]
+  omega
+
+/-- `store_stop_address` identifies the address after the return slot with pre-CALL RSP. -/
+theorem store_stop_address {before : State} {afterFetch afterRead afterStore : MachineState}
+    {displacement : BitVec 32}
+    (receipt : CallNormal before afterFetch afterRead afterStore displacement)
+    (base : MachineAddress)
+    (placed : receipt.storeRun.resolved.allocation.base = some base) :
+    addressOf base receipt.storeDescriptor.range.stop = before.gpr .rsp := by
+  apply BitVec.eq_of_toNat_eq
+  have stopEq := receipt.store_stop_toNat base placed
+  have within := receipt.storeRun.resolved.coordinates.withinView
+  have fits := (prepared_base_fits_and_address receipt.storeRun.prepared placed).1
+  have stopLt : receipt.storeDescriptor.range.stop < 2 ^ 64 := by
+    rw [FitsAllocation] at fits
+    omega
+  simp only [addressOf, BitVec.toNat_add, BitVec.toNat_ofNat]
+  rw [Nat.mod_eq_of_lt stopLt]
+  rw [Nat.mod_eq_of_lt (by rw [stopEq]; exact (before.gpr .rsp).isLt)]
+  exact stopEq
+
+
 theorem rsp_exact {before : State} {afterFetch afterRead afterStore : MachineState}
     {displacement : BitVec 32}
     (receipt : CallNormal before afterFetch afterRead afterStore displacement) :
