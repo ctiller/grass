@@ -57,7 +57,8 @@ theorem pending_to_pending_service {image : ImageInput} {inputs : EntryInputs}
       exact ⟨_, _, _, receipt, rfl, rfl, rfl, rfl, kind, priorCausal, nextCausal,
         Control.pending.inj (nextPending.symm.trans receipt.after_control)⟩
 
-/-- Before the next completion observation, an actual internal or publication
+/-- `pending_internal_or_publication` proves that before the next completion
+observation, an actual internal or publication
 edge preserves the pending identity. Publication's call identity is justified
 by the service inversion, not assumed from the event label. -/
 theorem pending_internal_or_publication {image : ImageInput} {inputs : EntryInputs}
