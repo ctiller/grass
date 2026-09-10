@@ -214,18 +214,12 @@ def encodeReturn (call : NativeCall) : (request : domain.Request) → domain.Res
       | some address =>
           { rax := UInt64.ofNat address, rdx := none, writes := [], clobbers := [.rcx, .r11] }
       | none => { rax := negative ENOSYS, rdx := none, writes := [], clobbers := [.rcx, .r11] }
-  | .inl (.inr (.release _handle)), response =>
-      -- `munmap`'s converse effect -- narrowing what the process may access
-      -- -- has no counterpart in `NativeReturn`: only `maps` exists, adding
-      -- regions, never removing one. This profile therefore over-approximates
-      -- on the safe-for-the-program-but-unsound-for-the-kernel-model side: a
-      -- successful `release` still leaves the released region readable and
-      -- writable in `State.regions`, so an access after `munmap` that a real
-      -- kernel would fault (`SIGSEGV`) is admitted here instead of refused.
-      -- Closing this needs an `unmaps` effect (region removal by base
-      -- address) symmetric to `maps`; not added in this slice.
+  | .inl (.inr (.release handle)), response =>
+      -- `munmap(addr, len)` removes the mapping at `addr`: `handle` is that
+      -- address (see the module docstring), so a successful release unmaps
+      -- the region `.allocate` installed there.
       match response with
-      | true => { rax := 0, rdx := none, writes := [], clobbers := [.rcx, .r11] }
+      | true => { rax := 0, rdx := none, writes := [], clobbers := [.rcx, .r11], unmaps := [handle] }
       | false => { rax := negative EINVAL, rdx := none, writes := [], clobbers := [.rcx, .r11] }
   | .inr .now, response =>
       { rax := 0, rdx := none

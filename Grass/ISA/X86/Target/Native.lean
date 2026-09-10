@@ -111,10 +111,13 @@ structure NativeReturn where
   into `State.regions` and zero-fills their bytes in `State.mem` before
   applying `writes` (a `write` into a region this same return just mapped
   must see it already installed and zeroed, not the other way around --
-  see `Grass.ISA.X86.Target.execInstr`'s `.syscall` arm). No unmapping
-  effect exists in this profile yet: releasing a handle (`munmap`,
-  `HeapFree`) never removes a region here. -/
+  see `Grass.ISA.X86.Target.execInstr`'s `.syscall` arm). -/
   maps : List MappedRegion := []
+  /-- Base addresses of regions this answer releases (a successful `munmap`,
+  `HeapFree`), applied after `writes` -- see `execInstr`'s `.syscall` arm for
+  why. Defaults to `[]` so every native call that never unmaps memory is
+  unaffected by this field's existence. -/
+  unmaps : List Nat := []
 deriving Inhabited
 
 /-- Why a step could not execute.

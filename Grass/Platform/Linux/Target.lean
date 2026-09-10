@@ -39,13 +39,14 @@ success case now sets `maps := [{ base := address, size := bytes,
 readable := true, writable := true }]`, so `mmap`'s answer both hands back
 the address value and actually backs it with fresh, accessible memory.
 
-What remains open: `.release`/`munmap` has no counterpart effect --
-`NativeReturn` can add regions but not remove one, so a released region stays
-accessible in `State.regions` after a successful `munmap`. This profile
-over-approximates in the safe-for-the-program direction (never refuses an
-access a real kernel would allow) but not in the kernel-fidelity direction
-(admits an access after `munmap` a real kernel would fault). See the
-`.release` case's own comment in `Grass.Platform.Linux.Target.X86`/`.AArch64`.
+`NativeReturn` now also carries `unmaps : List Nat` (default `[]`), the
+converse effect: base addresses of regions the answer releases, which
+`execInstr`/`applySvcReturn` remove from `State.regions` after applying
+`writes`. This module's `.release` success case sets `unmaps := [handle]`
+(`handle` being the address `mmap` returned, per this module's own opaque-
+handle-is-an-address convention above), so a successful `munmap` now actually
+removes the released region: an access there after `munmap` faults, matching
+a real kernel's `SIGSEGV`, instead of being admitted.
 
 Separately, `Grass.Platform.Hosted.Heap.respondsHeap` (`Grass/Platform/
 Hosted/Heap.lean`) now requires a successful `.allocate`'s address to be

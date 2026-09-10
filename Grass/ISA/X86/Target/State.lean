@@ -143,6 +143,20 @@ def mapRegion (s : State) (r : Region) : State :=
 def mapRegions (s : State) (rs : List Region) : State :=
   rs.foldl (fun st r => st.mapRegion r) s
 
+/-- Remove every region whose base address is `base` (a successful `munmap`/
+`HeapFree` releasing the handle a prior `mapRegion` installed at that
+address). `mem` is left untouched: once `regions` no longer covers those
+addresses, `readableAt`/`writableAt`/`executableAt` all report `false` there
+regardless of what `mem` still holds, so a post-unmap access faults exactly
+as an address that was never mapped would -- there is no need to also
+scrub `mem`. -/
+def unmapRegion (s : State) (base : Nat) : State :=
+  { s with regions := s.regions.filter fun r => r.base != base }
+
+/-- Remove every region named in `bases`, in order, via `unmapRegion`. -/
+def unmapRegions (s : State) (bases : List Nat) : State :=
+  bases.foldl (fun st b => st.unmapRegion b) s
+
 /-- Greedily read as many consecutive executable, mapped bytes as available
 starting at `addr`, up to a bound. Stops at the first unreadable or
 unmapped byte rather than failing outright, so a short instruction near the

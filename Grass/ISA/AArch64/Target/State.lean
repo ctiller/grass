@@ -125,6 +125,20 @@ def State.mapRegion (s : State) (r : Region) : State :=
 def State.mapRegions (s : State) (rs : List Region) : State :=
   rs.foldl (fun st r => st.mapRegion r) s
 
+/-- Remove every region whose base address is `base` (a successful `munmap`/
+`HeapFree` releasing the handle a prior `mapRegion` installed at that
+address). `mem` is left untouched: once `regions` no longer covers those
+addresses, `State.readable`/`writable`/`executableAt` all report `false`
+there regardless of what `mem` still holds, so a post-unmap access faults
+exactly as an address that was never mapped would -- there is no need to
+also scrub `mem`. -/
+def State.unmapRegion (s : State) (base : Nat) : State :=
+  { s with regions := s.regions.filter fun r => r.base != base }
+
+/-- Remove every region named in `bases`, in order, via `State.unmapRegion`. -/
+def State.unmapRegions (s : State) (bases : List Nat) : State :=
+  bases.foldl (fun st b => st.unmapRegion b) s
+
 /-- Read a little-endian `BitVec 64` (byte count from `n`, `n ∈ {1, 4, 8}`
 is all this ISA uses) from `n` bytes, least-significant byte first. -/
 def bitsOfLE (bytes : List UInt8) : BitVec 64 :=

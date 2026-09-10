@@ -303,7 +303,14 @@ def execInstr (s : State) (instr : Instr) (len : Nat) :
             (ret.maps.map fun m =>
               { base := m.base, size := m.size, readable := m.readable, writable := m.writable,
                 executable := false })
-          ret.writes.foldl (fun st (aw : Nat × List UInt8) => st.writeBytes aw.1 aw.2) mapped)
+          let written :=
+            ret.writes.foldl (fun st (aw : Nat × List UInt8) => st.writeBytes aw.1 aw.2) mapped
+          -- `unmaps` after `writes`: a same-return write into a region being
+          -- released here is meaningless (nothing after this return can ever
+          -- observe it), and applying the unmap last means no later step of
+          -- this same return can undo it by writing into the now-released
+          -- range.
+          written.unmapRegions ret.unmaps)
   | .ud2 => .fault .explicitUndefined
   | .hlt => .halted
   | .nop => .internal next

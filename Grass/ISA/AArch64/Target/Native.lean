@@ -84,15 +84,17 @@ newly mapped (a successful `mmap`/heap allocation). `clobbers` lists
 registers the call convention destroys beyond `x0`/`x1` (nothing here claims
 which ABI that is; a platform fills it from its own convention). `maps`
 defaults to `[]` so every native call that never maps memory (console I/O,
-the clock, `munmap`/`HeapFree`) is unaffected by this field's existence. No
-unmapping effect exists in this profile yet: releasing a handle never
-removes a region here. -/
+the clock, `munmap`/`HeapFree`) is unaffected by this field's existence.
+`unmaps` is the converse effect: base addresses of regions this answer
+releases (a successful `munmap`, `HeapFree`), applied after `writes` -- see
+`applySvcReturn`'s docstring for why -- and also defaults to `[]`. -/
 structure NativeReturn where
   x0 : BitVec 64
   x1 : Option (BitVec 64) := none
   writes : List (Nat × List UInt8) := []
   clobbers : List Reg := []
   maps : List MappedRegion := []
+  unmaps : List Nat := []
 
 /-- Why a step could not proceed. Every constructor here makes the machine
 stuck, which is the point: memory and control safety is the absence of a

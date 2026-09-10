@@ -187,13 +187,12 @@ def encodeReturn (call : NativeCall) : (request : domain.Request) → domain.Res
       match response with
       | some address => { x0 := BitVec.ofNat 64 address, x1 := none, writes := [], clobbers := [] }
       | none => { x0 := (negative ENOSYS).toBitVec, x1 := none, writes := [], clobbers := [] }
-  | .inl (.inr (.release _handle)), response =>
-      -- Over-approximates on release: see
-      -- `Grass.Platform.Linux.Target.X86.encodeReturn`'s `.release` case.
-      -- `NativeReturn` has no region-removal effect, so a successful
-      -- `munmap` here still leaves the region readable/writable afterward.
+  | .inl (.inr (.release handle)), response =>
+      -- `munmap(addr, len)` removes the mapping at `addr`: `handle` is that
+      -- address (see the module docstring), so a successful release unmaps
+      -- the region `.allocate` installed there.
       match response with
-      | true => { x0 := 0, x1 := none, writes := [], clobbers := [] }
+      | true => { x0 := 0, x1 := none, writes := [], clobbers := [], unmaps := [handle] }
       | false => { x0 := (negative EINVAL).toBitVec, x1 := none, writes := [], clobbers := [] }
   | .inr .now, response =>
       { x0 := 0, x1 := none

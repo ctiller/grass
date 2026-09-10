@@ -98,27 +98,43 @@ def encodeReturn (call : NativeCall) (request : domain.Request) :
       -- type itself says a resumed continuation after `.exit` cannot exist,
       -- eliminated rather than constructed.
       fun response => nomatch response
-  | .inl (.inl (.inr (.allocate ..))) =>
+  | .inl (.inl (.inr (.allocate bytes))) =>
       -- HeapAlloc(...); RAX is the allocated address, or `NULL` on failure
-      -- (Microsoft Learn, "HeapAlloc function").
+      -- (Microsoft Learn, "HeapAlloc function", heapapi.h: HeapAlloc returns
+      -- a pointer to a block of at least `bytes` readable/writable bytes).
+      -- On success this answer also maps `[address, address + bytes)`
+      -- read/write, non-executable, mirroring Linux `mmap`'s `.allocate`
+      -- case (`Grass.Platform.Linux.Target.X86.encodeReturn`) -- without it
+      -- the returned pointer would be inaccessible to the machine exactly as
+      -- an unmapped `mmap` address would be.
       fun response =>
         match response with
-        | some address => simpleReturn (UInt64.ofNat address)
+        | some address =>
+            { rax := UInt64.ofNat address, rdx := none, writes := [], clobbers := callClobbers
+              maps := [{ base := address, size := bytes, readable := true, writable := true }] }
         | none => simpleReturn 0
-  | .inl (.inl (.inr (.reallocate ..))) =>
+  | .inl (.inl (.inr (.reallocate handle bytes))) =>
       -- HeapReAlloc(...); RAX is the (possibly relocated) address, or
       -- `NULL` on failure. Whether the original block survives a failed
       -- reallocation is an environment/`Responds` fact, not an
-      -- `encodeReturn` one.
+      -- `encodeReturn` one. On success, HeapReAlloc may move the block
+      -- (Microsoft Learn, "HeapReAlloc function"): the old region at
+      -- `handle` is released (`unmaps`) and a fresh region of `bytes` bytes
+      -- is mapped at the (possibly identical) returned `address`.
       fun response =>
         match response with
-        | some address => simpleReturn (UInt64.ofNat address)
+        | some address =>
+            { rax := UInt64.ofNat address, rdx := none, writes := [], clobbers := callClobbers
+              unmaps := [handle]
+              maps := [{ base := address, size := bytes, readable := true, writable := true }] }
         | none => simpleReturn 0
-  | .inl (.inl (.inr (.release ..))) =>
-      -- HeapFree(...); RAX/return is nonzero on success, zero on failure.
+  | .inl (.inl (.inr (.release handle))) =>
+      -- HeapFree(...); RAX/return is nonzero on success, zero on failure. A
+      -- successful free removes the block's region (Microsoft Learn,
+      -- "HeapFree function"), mirroring Linux `munmap`'s `.release` case.
       fun response =>
         match response with
-        | true => simpleReturn 1
+        | true => { rax := 1, rdx := none, writes := [], clobbers := callClobbers, unmaps := [handle] }
         | false => simpleReturn 0
   | .inl (.inr .now) =>
       -- BOOL QueryPerformanceCounter(LARGE_INTEGER *lpPerformanceCount);
