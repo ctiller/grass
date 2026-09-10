@@ -149,4 +149,6 @@ Strong implementation-comment claims (including "ensures", "prevents", "cannot",
 or transition invariant. If no mechanism enforces the claim, state it as an
 intended invariant or open obligation. This includes theorem docstrings: the
 statement may be weaker than the prose. The `docstring-audit` tool checks named
-enforcement shallowly; substantive peer review checks that it proves the claim.
+enforcement shallowly; [semantic review](REVIEW.md#implementation-peer-review)
+checks that the statement and its actual implementation connection support the
+claim. Routine erased proof bodies rely on kernel and automated trust checks.

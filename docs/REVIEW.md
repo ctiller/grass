@@ -1,5 +1,11 @@
 # Adversarial review protocol
 
+For implementation work, start with [implementation peer review](#implementation-peer-review).
+The design review order, attack questions and sign-off form below apply to the
+relevant semantic boundary or major spike review, not every commit. Select the
+questions that challenge the changed claim; do not replay the entire catalog for
+routine proof bodies or packaging.
+
 Every spike review must apply the cross-view audit in
 [SPIKE_AUTHORING.md](SPIKE_AUTHORING.md). Reviewing only the annotated document
 or only the comment-free authored directory is incomplete.
@@ -416,101 +422,77 @@ Residual trust accepted:
 
 ## Implementation peer review
 
-Review the actual diff and surrounding implementation at each checkpoint.
-Use fresh review contexts at major boundaries.
+Review changed meaning and computational behavior, not the number of commits,
+proof scripts or contributing agents. Independent semantic review covers new or
+changed statements, definitions, premises, quantifiers, non-vacuity, model and
+external applicability claims, trust boundaries, artifact provenance, exact
+receipt/consumer connections, and algorithms that change behavior. A correct
+proof of the wrong theorem, or a conclusion supplied as a premise, does not close
+an implementation obligation.
 
-### 1 Intent and architecture
+The central question is **“What bad behavior does this theorem allow?”** Look for
+a behavior satisfying the hypotheses while escaping the intended guarantee:
+vacuity, omitted outcomes/waits/divergence, an assumed conclusion, the wrong CALL
+or artifact identity, a blocked subset hidden by unrelated progress, or a gap
+between the model and emitted bytes. A small counterexample or model fixture is
+useful when practical; this is not a mandatory per-lemma refutation report.
 
-- The implementation matches its normative requirement.
-- Behavior, proof demand, trust assumptions, and public interfaces are not
-  silently weakened.
-- The change respects module direction, sharding, and invalidation boundaries.
-- Novel policy is explicit rather than invented by automation.
+One semantic boundary review covers a cohesive slice and its subsequent routine
+proof completion. The author identifies the semantic delta and relevant checks;
+the domain owner or peer examines the actual statements, assumptions and
+implementation connection. Architecture resolves cross-boundary questions. Reopen
+review when those boundaries change, including imported definitions, typeclass
+instances, reducibility or consumer wiring that change meaning without changing
+the displayed theorem type. These are responsibilities, not new registration or
+approval steps; authorized direct integration continues.
 
-### 2 Lean and proof integrity
+### Proof bodies and computed producers
 
-- The theorem is strong, non-vacuous, and connected to its consumer and root.
-- No axiom, `sorry`, unchecked certificate, test, execution, or digest replaces
-  proof.
-- Automation consumes declared invariants and exposes residual goals.
-- Existentials, opaque certificates, source closure, parser/writer laws, and
-  emitted artifacts retain their authority connections.
-- Stable names do not hide changed semantic dependencies.
+Once the intended proposition, assumptions and actual implementation connection
+are established, Lean typechecking and the automated trust audit are the proof
+review for an erased proof body. Routine proof refactors, plumbing and packaging
+under that unchanged boundary need targeted checks, not repeated independent
+Sol or other agent reviews. Plumbing is routine only while exact state indices,
+source/artifact identity and consumer binding retain their established meaning.
 
-For every material Lean theorem added, changed, or newly relied upon, review is
-about the proposition and its use—not whether a declaration happens to compile.
-The reviewer records a proportionate proof assessment covering the following
-questions. Closely related routine lemmas may be assessed as one family.
+Classify by meaning, not `by` syntax: a tactic block can construct a `Type`-valued
+receipt, program or checked producer with computational behavior. Changes to such
+output need appropriate deterministic validation and semantic review when the
+behavior or connection changes. Kernel acceptance alone does not establish that
+a model describes a native API, ISA or other external implementation.
 
-1. **Role and adequacy.** What claim does the theorem establish, which root or
-   exported contract consumes it, and why is that claim the right strength for
-   the normative demand? The report also states what the theorem does *not*
-   establish when a plausible stronger reading would be unsafe. A green build,
-   impressive theorem name, or large declaration count is not adequacy evidence.
-2. **Quantification and coverage.** Inputs, API results, schedules, faults,
-   allocation choices, and other admitted entropy are universally quantified at
-   the correct boundary. Concrete evaluations, fuzz cases, examples, and
-   execution traces are fixtures only. They may refute a theorem or validate a
-   model boundary; they never prove domain coverage. `bv_decide` is acceptable
-   when it produces a kernel-checked proof of the universally quantified finite
-   proposition. `native_decide` is not proof authority, and a closed point proof
-   is acceptable only for a genuinely closed point claim.
-3. **Method and trust.** The proof method matches the structure of the claim:
-   induction covers every constructor or recursive descent; extensional proofs
-   compare every observable component; decidability procedures close the stated
-   proposition rather than a sampled surrogate; and imported lemmas have the
-   required hypotheses. The transitive axiom/unsafe audit must satisfy
-   [FOUNDATION.md](FOUNDATION.md). Automation must be a checked certificate
-   producer or consumer with a documented residual-goal boundary, never hidden
-   invariant discovery or admission.
-4. **Non-vacuity and adversarial resistance.** Premises are jointly inhabitable,
-   conclusions discriminate good from bad behavior, and representation or
-   refinement relations actually connect the two intended objects. For each
-   material theorem family the reviewer attempts a proportionate refutation:
-   construct a negative instance, weaken a hypothesis, remove a guard, mutate a
-   relation, or otherwise try to preserve acceptance while violating the claimed
-   property. The report states the attempted refutation and what rejected it, or
-   explains concretely why a meaningful refutation was impractical. Such attacks
-   challenge the statement and connection; they do not replace universal proof.
-5. **Proof economy and generality.** Prefer a small reusable lemma over repeated
-   case splits, and a structural theorem over pointwise enumeration. Concision
-   means that domain structure and reusable library laws carry the argument; it
-   is not raw line minimization, proof-term opacity, or a one-line tactic that
-   conceals unbounded search and brittle residual obligations. Bespoke proof is
-   justified when the implementation is genuinely novel or the theorem is
-   intrinsically local.
+### Checks and evidence
 
-The review record for a Lean-bearing change summarizes why the
-important theorem families are adequate, how universal coverage was checked,
-which refutations were attempted and survived, which proof/trust audits ran,
-and any meaningful insufficiency that remains.
-It need not reproduce proofs line by line, but it must be specific enough that a
-later reviewer can distinguish a proved contract from a fixture, convention, or
-aspirational comment.
+The [foundation trust policy](FOUNDATION.md) still rejects `sorry`/`admit`,
+unapproved axioms, `native_decide`, unsafe proof authority and unverified compiled
+replacements (`implemented_by`, `extern`, `csimp`) in the verified dependency
+closure. Kernel-checked decision procedures remain valid for their stated claims.
 
-### 3 Implementation and assembly
+Automate deterministic inventories, dependency/axiom and compiled-override
+checks, source mirrors and accounting. Run the relevant typechecking, trust and
+targeted tests for the changed slice; record their actual scope and results.
+A scoped audit names its declarations or imported module cohort and is not a
+whole-root trust result. An unrelated baseline failure does not force repeated
+full-tree audits to accept a bounded result; preserve that limitation explicitly.
+An interface fixture does not demonstrate actual production adoption: inspect
+or deterministically check the real consumer and its exact binding.
 
-- Relevant failure, partial I/O, nondeterminism, faults, cancellation, cleanup,
-  and incoming entropy are handled.
-- Memory, provenance, ownership, races, obligations, ABI, CFG, and block
-  contracts are respected.
-- Generated instruction fragments remain inspectable and replaceable by raw
-  same-contract assembly.
-- Serialization retains its round-trip, accepted-input, and format laws.
+Use the relevant attack questions above for changed semantic boundaries. Maintain
+discriminating negative controls for tests and audit tools, but do not repeat a
+mutation campaign or proof-method report for every routine lemma. Repeat checks
+when changed code, failures or unresolved concerns justify them. Keep one concise
+slice-level conclusion with its evidence and open obligations; no per-commit
+checklist, duplicate prose review or new human confirmation gate is required.
 
-### 4 Tests and external validation
+### Examples
 
-- Positive tests exercise intended paths without masquerading as proof.
-- Negative and mutation fixtures reject relevant weakenings.
-- API, ISA, and protocol claims retain citations and boundary probes.
-- The reviewer independently runs risk-proportionate checks and records them.
-- Claimed build and `.olean` locality has the required evidence.
-
-Every test, audit, probe, mutation, or negative fixture offered as assurance must
-be shown to discriminate the defect class it claims to exclude. Normally this
-means running a negative control: reintroduce the defect, remove the intended
-guard, or supply a known-invalid specimen and observe the check fail for the
-claimed reason. If a safe negative control is impractical, the review records
-why and what weaker evidence was obtained. A guard that cannot be made to fail
-is not evidence for that exclusion claim, even when it remains a useful positive
-regression test.
+- Replacing the proof of `CallProtocol.return?_callerPending_false` with shared
+  checked laws, under the same proposition and semantic dependencies, uses
+  typechecking and trust checks. It does not need another tactic review.
+- Replacing exact `BehaviorCorrespondence` with directed
+  `ImplementationConformance`, or changing a delivery's receiver effect or scope,
+  changes the guarantee and requires semantic review.
+- A second consumer using an established helper with unchanged semantics uses
+  targeted checks and evidence of actual adoption. Changing its exact CALL
+  receipt, source/artifact binding or interface reopens boundary review; compiling
+  only an interface test does not close the production connection.

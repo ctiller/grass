@@ -62,7 +62,8 @@ Development proceeds one spike at a time, beginning with the existing Hello
 World source. The Lean correctness specification and prose implementation brief
 are maintained inputs; implementation is rebuilt beneath them. See
 [docs/VISION.md](docs/VISION.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
-Changes receive independent peer review under [docs/REVIEW.md](docs/REVIEW.md).
+Semantic boundary changes receive peer review; routine proof work uses automated
+checks under [docs/REVIEW.md](docs/REVIEW.md#implementation-peer-review).
 The former agent coordination system and implementation plans are retired; Git
 history and the retained agent branches preserve their spare parts.
 

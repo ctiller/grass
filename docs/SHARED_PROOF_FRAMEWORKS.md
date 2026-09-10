@@ -330,7 +330,9 @@ consumer before declaring the abstraction sufficient.
 
 Validation includes positive construction with actual receipts, discriminating
 refusal/mismatch cases, preserved intermediate-state indices, appropriate build
-and trust checks, and independent review of the consumer diff. Compare authored
+and trust checks, and [semantic review](REVIEW.md#implementation-peer-review) of
+changed consumer boundaries. Routine adoption under an established contract uses
+targeted checks and evidence of actual production use. Compare authored
 obligations before and after; generated line counts do not measure proof burden.
 
 Every major spike milestone triggers a cleanup audit: inspect new consumers for
