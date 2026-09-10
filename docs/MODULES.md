@@ -54,12 +54,6 @@ Grass/
     Manifest/    measured shards and hierarchical composition certificates
   Unsafe/        raw construction, import, stepping, and emission
   Emit.lean      verified-program emission facade
-  Programs/
-    HelloWin64/
-    SortWin64/
-    GzipWin64/
-    Http2Win64/
-    CubeWin64Vulkan/
 Tests/
 Tools/
 docs/
