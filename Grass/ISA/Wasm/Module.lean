@@ -155,7 +155,8 @@ def Artifact.emit (source : Module) : Option Artifact :=
   | none => none
   | some bytes => some ⟨source, bytes, h⟩
 
-/-- A changed artifact cannot reuse the source binding from another output. -/
+/-- `Artifact.check` returns an artifact when `Module.encode` matches the supplied
+bytes, retaining that equality in `Artifact.emitted`. -/
 def Artifact.check (source : Module) (bytes : ByteSeq) : Option Artifact :=
   if h : source.encode = some bytes then some ⟨source, bytes, h⟩ else none
 
