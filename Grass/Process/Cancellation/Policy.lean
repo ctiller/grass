@@ -295,6 +295,96 @@ theorem composePolicy_covers {leftSummary rightSummary : ProcessScopeSummary}
       leftSummary.blockingCalls ++ rightSummary.blockingCalls
     rw [leftCovers.2, rightCovers.2]
 
+/-- A point declared by the left policy is dispatched to the left policy. -/
+theorem composePolicy_pointPolicy_left {left right : CancellationPolicy}
+    {point : CancellationPointId} (declared : point ∈ left.points) :
+    (composePolicy left right).pointPolicy point = left.pointPolicy point := by
+  simp [composePolicy, declared]
+
+/-- A point declared by the right policy is dispatched to the right policy
+when the composed point list is duplicate-free. -/
+theorem composePolicy_pointPolicy_right {left right : CancellationPolicy}
+    {point : CancellationPointId} (distinct : (left.points ++ right.points).Nodup)
+    (declared : point ∈ right.points) :
+    (composePolicy left right).pointPolicy point = right.pointPolicy point := by
+  have notLeft : point ∉ left.points := by
+    intro inLeft
+    exact (List.nodup_append.mp distinct).2.2 point inLeft point declared rfl
+  simp [composePolicy, notLeft]
+
+/-- A call declared by the left policy is dispatched to the left policy. -/
+theorem composePolicy_callDisposition_left {left right : CancellationPolicy}
+    {call : BlockingCallId} (declared : call ∈ left.blockingCalls) :
+    (composePolicy left right).callDisposition call = left.callDisposition call := by
+  simp [composePolicy, declared]
+
+/-- A call declared by the right policy is dispatched to the right policy
+when the composed call list is duplicate-free. -/
+theorem composePolicy_callDisposition_right {left right : CancellationPolicy}
+    {call : BlockingCallId}
+    (distinct : (left.blockingCalls ++ right.blockingCalls).Nodup)
+    (declared : call ∈ right.blockingCalls) :
+    (composePolicy left right).callDisposition call = right.callDisposition call := by
+  have notLeft : call ∉ left.blockingCalls := by
+    intro inLeft
+    exact (List.nodup_append.mp distinct).2.2 call inLeft call declared rfl
+  simp [composePolicy, notLeft]
+
+/-- Composition preserves the requirement that atomic-region dispositions
+name a region declared by the composed policy. -/
+theorem composePolicy_regionsDeclared {left right : CancellationPolicy}
+    (leftDeclared : left.RegionsDeclared) (rightDeclared : right.RegionsDeclared)
+    (callsDistinct : (left.blockingCalls ++ right.blockingCalls).Nodup) :
+    (composePolicy left right).RegionsDeclared := by
+  intro call inCalls region disposition
+  rcases List.mem_append.mp inCalls with inLeft | inRight
+  · rw [composePolicy_callDisposition_left inLeft] at disposition
+    obtain ⟨bounded, inRegions, exactRegion⟩ :=
+      leftDeclared call inLeft region disposition
+    exact ⟨bounded, List.mem_append_left _ inRegions, exactRegion⟩
+  · rw [composePolicy_callDisposition_right callsDistinct inRight] at disposition
+    obtain ⟨bounded, inRegions, exactRegion⟩ :=
+      rightDeclared call inRight region disposition
+    exact ⟨bounded, List.mem_append_right _ inRegions, exactRegion⟩
+
+/-- Composition preserves the requirement that cancellable dispositions name
+a point governed by the composed policy. -/
+theorem composePolicy_pointsDeclared {left right : CancellationPolicy}
+    (leftDeclared : left.PointsDeclared) (rightDeclared : right.PointsDeclared)
+    (callsDistinct : (left.blockingCalls ++ right.blockingCalls).Nodup) :
+    (composePolicy left right).PointsDeclared := by
+  intro call inCalls point disposition
+  rcases List.mem_append.mp inCalls with inLeft | inRight
+  · rw [composePolicy_callDisposition_left inLeft] at disposition
+    exact List.mem_append_left _ (leftDeclared call inLeft point disposition)
+  · rw [composePolicy_callDisposition_right callsDistinct inRight] at disposition
+    exact List.mem_append_right _ (rightDeclared call inRight point disposition)
+
+/-- Compose two independently checked scope certificates into the certificate
+for their aggregate scope. -/
+def compose {leftSummary rightSummary : ProcessScopeSummary}
+    (left : ScopedCancellationCertificate leftSummary)
+    (right : ScopedCancellationCertificate rightSummary)
+    (compatible : Compatible leftSummary rightSummary)
+    (pointsDistinct :
+      (leftSummary.publicCancellationPoints ++
+        rightSummary.publicCancellationPoints).Nodup)
+    (callsDistinct :
+      (leftSummary.blockingCalls ++ rightSummary.blockingCalls).Nodup)
+    (scope : ScopeId) :
+    ScopedCancellationCertificate
+      (composeSummary leftSummary rightSummary compatible pointsDistinct
+        callsDistinct scope) where
+  policy := composePolicy left.policy right.policy
+  exact := composePolicy_covers left.exact right.exact compatible pointsDistinct
+    callsDistinct scope
+  regionsDeclared := by
+    apply composePolicy_regionsDeclared left.regionsDeclared right.regionsDeclared
+    simpa [left.exact.2, right.exact.2] using callsDistinct
+  pointsDeclared := by
+    apply composePolicy_pointsDeclared left.pointsDeclared right.pointsDeclared
+    simpa [left.exact.2, right.exact.2] using callsDistinct
+
 end ScopedCancellationCertificate
 
 end Grass.Process
