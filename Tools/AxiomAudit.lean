@@ -75,6 +75,8 @@ import Grass.Platform.Win32.WriteFileStabilization
 import Grass.Platform.Win32.WriteFileServiceContinuation
 import Grass.Refinement.Console.WriteFileHistory
 import Grass.Refinement.Console.WriteFileStaticArgument
+import Grass.Refinement.Console.WriteFileConsoleHistory
+import Grass.Platform.Win32.WriteFileConsolePublication
 import Grass.Refinement.Console.WriteFileNonresponse
 import Grass.Refinement.Console.WriteFileEventualNonresponse
 import Grass.Platform.Win32.WriteFileReturn
