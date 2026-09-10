@@ -7,6 +7,26 @@ entries with machine-validated citation records as specified by
 
 ## Authoritative external sources
 
+### Shader composite primitives
+
+Inspected 2026-09-09 for the bounded vector constructor/component models:
+
+- Khronos, SPIR-V Unified 1.6 revision 7,
+  [physical layout](https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#PhysicalLayout),
+  [OpCompositeConstruct](https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#OpCompositeConstruct),
+  and [OpCompositeExtract](https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#OpCompositeExtract).
+  These instruction entries do not change the cube's selected SPIR-V 1.5 profile.
+- Khronos SPIRV-Headers tag `1.5.4`,
+  [SPIR-V 1.5 revision 4 core grammar](https://raw.githubusercontent.com/KhronosGroup/SPIRV-Headers/1.5.4/include/spirv/unified1/spirv.core.grammar.json),
+  supplies the instruction opcode and operand-layout cross-check.
+- W3C, WebGPU Shading Language, Candidate Recommendation Draft, 31 August 2026,
+  [vector types](https://www.w3.org/TR/2026/CRD-WGSL-20260831/#vector-types),
+  [vector access](https://www.w3.org/TR/2026/CRD-WGSL-20260831/#vector-access-expression),
+  and [the four-component vector constructor](https://www.w3.org/TR/2026/CRD-WGSL-20260831/#vec4-builtin).
+
+[Shader primitive scope](SHADER_PRIMITIVES.md) separates local transfer and
+serialization evidence from the remaining full module/provider obligations.
+
 ### x86-64
 
 - Intel, *Intel 64 and IA-32 Architectures Software Developer's Manuals*,
@@ -280,6 +300,15 @@ These sources govern the direct kernel boundary: syscall identity, physical
 argument selection, and raw negative error results. Libc wrapper translation,
 restart handling, signal delivery, and instruction-level entry effects require
 their own sources and connection proofs.
+## WebAssembly integer and invocation family
+
+- W3C, [WebAssembly Core Specification 2.0](https://www.w3.org/TR/wasm-core-2/):
+  Syntax/Values and Types; Binary Format/Values (signed and unsigned LEB128),
+  Instructions and Modules; Execution/Runtime Structure, Numeric Instructions,
+  Variable Instructions and Control Instructions (call/host invocation).
+  The [Wasm ISA boundary](WASM_ISA.md) identifies the implemented subset and
+  explicitly outstanding validation, grammar and runtime adequacy obligations.
+  The Core version is selected independently of the WASI provider version.
 
 ## Internal predecessor material
 

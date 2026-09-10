@@ -8,10 +8,8 @@ open Grass.Assembly.FrameArgument Grass.Platform.Win32.Signatures
 set_option maxRecDepth 100000
 set_option maxHeartbeats 4000000
 
-def authored : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
-
 def fromChars? (chars : List Char) : Option Result := do
-  let body ← (SourceInput.extractHelloSourceChars chars).toOption
+  let body ← (SourceInput.extractSourceChars chars).toOption
   let frame ← SourceFrame.derive? body
   match frame.program.collected.code.filterMap (resolve? frame 0) with
   | [result] => some result
@@ -20,13 +18,8 @@ def fromChars? (chars : List Char) : Option Result := do
 def view (result : Result) : Api × String × Nat × Nat × List (BitVec 8) :=
   (result.api, result.field, result.index, result.displacement, result.encoding.toBytes)
 
-example : (fromChars? authored).map view = some
-    (.writeFile, "overlapped", 4, 32,
-      [0x48, 0xC7, 0x84, 0x24, 0x20, 0, 0, 0, 0, 0, 0, 0]) := by
-  decide +kernel
-
 def sample (api body : List Char) : List Char :=
-  (source_chars "def helloSource : MachineSource plan := withStack (value : UInt32 := 0) withCallFrame ") ++
+  (source_chars "def argumentSample : MachineSource plan := withStack (value : UInt32 := 0) withCallFrame ") ++
     api ++ (source_chars " asm_source (statics := statics) {\n") ++ body ++
     (source_chars "\nud2\n}")
 
@@ -52,7 +45,7 @@ example : (fromChars? (sample (source_chars "WriteFile")
   decide +kernel
 
 def sampleLocals (locals body : List Char) : List Char :=
-  (source_chars "def helloSource : MachineSource plan := ") ++ locals ++
+  (source_chars "def localArgumentSample : MachineSource plan := ") ++ locals ++
     (source_chars " withCallFrame WriteFile asm_source (statics := statics) {\n") ++ body ++
     (source_chars "\nud2\n}")
 

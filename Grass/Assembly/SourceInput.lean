@@ -1,4 +1,4 @@
-/-! Narrow, lossless ingress for the actual Spike 1 `asm_source` body. -/
+/-! Narrow, lossless ingress for one authored `asm_source` declaration. -/
 namespace Grass.Assembly.SourceInput
 
 inductive ParsedLine where
@@ -18,7 +18,15 @@ structure Body where
   bodyChars : List Char
   lines : List SourceLine
 deriving Repr, DecidableEq
-inductive Error where | missing | ambiguous (count : Nat) | malformed
+inductive Error where | malformed
+deriving Repr, DecidableEq
+
+/-- Half-open character ranges supplied by the syntax frontend for an exact command. -/
+structure SourceOffsets where
+  headerStart : Nat
+  headerFinish : Nat
+  bodyStart : Nat
+  bodyFinish : Nat
 deriving Repr, DecidableEq
 inductive TokenKind where
   | word (value : String) | leftParen | rightParen | colon | assign | leftBrace | rightBrace
@@ -29,7 +37,7 @@ structure Token where
   finish : Nat
 deriving Repr, DecidableEq
 
-private def wordChar (c : Char) : Bool := c.isAlphanum || c = '_' || c = '«' || c = '»'
+private def wordChar (c : Char) : Bool := c.isAlphanum || c = '_' || c.toNat ≥ 128
 @[reducible] private def lexAux :
     Nat → List Char → Nat → Bool → Nat → Bool → List Char → List Token → Option (List Token)
   | 0, _, _, _, _, _, _, _ => none
@@ -74,11 +82,11 @@ private def wordChar (c : Char) : Bool := c.isAlphanum || c = '_' || c = '«' ||
 @[reducible] def tokensChars (source : List Char) : Option (List Token) :=
   if source.contains '\'' then none
   else lexAux (source.length + 1) source 0 false 0 false [] []
-@[reducible] private def bodyEnd? : List Token → Nat → Option Nat
+@[reducible] private def bodyEnd? : List Token → Nat → Option (Token × List Token)
   | [], _ => none
   | t::ts, depth => match t.kind with
     | .leftBrace => bodyEnd? ts (depth+1)
-    | .rightBrace => if depth=1 then some t.start else bodyEnd? ts (depth-1)
+    | .rightBrace => if depth=1 then some (t, ts) else bodyEnd? ts (depth-1)
     | _ => bodyEnd? ts depth
 @[reducible] private def assemblyStart? : List Token → Option (Token × List Token)
   | [] => none
@@ -93,20 +101,20 @@ private def wordChar (c : Char) : Bool := c.isAlphanum || c = '_' || c = '«' ||
           | _ => brace after
       brace ts
     | _ => assemblyStart? ts
-@[reducible] private def candidates : List Token → List (Nat × Nat × Nat)
-  | a::b::ts => match a.kind, b.kind with
-    | .word "def", .word "helloSource" => match assemblyStart? ts with
-      | some (brace, after) => match bodyEnd? after 1 with
-        | some finish => (b.finish, brace.start, finish)::candidates ts | none => candidates ts
-      | none => candidates ts
-    | _, _ => candidates (b::ts)
-  | _ => []
+@[reducible] private def whitespace (c : Char) : Bool :=
+  c = ' ' || c = '\t' || c = '\r' || c = '\n'
 
-@[reducible] private def helloSourceCount : List Token → Nat
-  | a :: b :: rest =>
-    (if a.kind = .word "def" && b.kind = .word "helloSource" then 1 else 0) +
-      helloSourceCount (b :: rest)
-  | _ => 0
+@[reducible] private def sourceRanges? (source : List Char) (ts : List Token) : Option SourceOffsets :=
+  match ts with
+  | declaration :: name :: rest => match declaration.kind, name.kind with
+    | .word "def", .word _ => do
+      if declaration.start != 0 then none
+      let (brace, afterBrace) ← assemblyStart? rest
+      let (close, afterClose) ← bodyEnd? afterBrace 1
+      if !afterClose.isEmpty || !(source.drop close.finish).all whitespace then none
+      some ⟨name.finish, brace.start, brace.finish, close.start⟩
+    | _, _ => none
+  | _ => none
 
 @[reducible] private def space (c : Char) : Bool := c = ' ' || c = '\t' || c = '\r'
 @[reducible] private def trimLeft (cs : List Char) : List Char := cs.dropWhile space
@@ -152,22 +160,41 @@ private def wordChar (c : Char) : Bool := c.isAlphanum || c = '_' || c = '«' ||
   if unsafeLexicalContext then number (fun _ => .unsupported) lines 1
   else number parseLineChars lines 1
 
-@[reducible] def extractHelloSourceChars (source : List Char) : Except Error Body :=
+@[reducible] private def bodyAt (source : List Char) (offsets : SourceOffsets) : Option Body :=
+  if offsets.headerStart > offsets.headerFinish || offsets.headerFinish >= offsets.bodyStart ||
+      offsets.bodyStart > offsets.bodyFinish || offsets.bodyFinish > source.length then none
+  else
+    let headerChars := (source.drop offsets.headerStart).take (offsets.headerFinish-offsets.headerStart)
+    let bodyChars := (source.drop offsets.bodyStart).take (offsets.bodyFinish-offsets.bodyStart)
+    some ⟨String.ofList headerChars, headerChars, String.ofList bodyChars, bodyChars,
+      sourceLines bodyChars⟩
+
+@[reducible] def extractSourceChars (source : List Char) : Except Error Body :=
   match tokensChars source with
   | none => .error .malformed
-  | some ts =>
-    let found := candidates ts
-    if found.length != helloSourceCount ts then .error .malformed else match found with
-    | [] => .error .missing
-    | [(hs, bs, finish)] =>
-      let header := String.ofList ((source.drop hs).take (bs-hs))
-      let bodyChars := (source.drop (bs+1)).take (finish-bs-1)
-      let text := String.ofList bodyChars
-      .ok ⟨header, (source.drop hs).take (bs-hs), text, bodyChars, sourceLines bodyChars⟩
-    | many => .error (.ambiguous many.length)
+  | some ts => match sourceRanges? source ts with
+    | none => .error .malformed
+    | some offsets => match bodyAt source offsets with
+      | some body => .ok body
+      | none => .error .malformed
 
-@[reducible] def extractHelloSource (source : String) : Except Error Body :=
-  extractHelloSourceChars source.toList
+@[reducible] def extractSource (source : String) : Except Error Body :=
+  extractSourceChars source.toList
+
+/-- Require the syntax-selected positions themselves to match the declaration,
+including empty bodies where comparing sliced text alone loses positions. -/
+@[reducible] def captureSourceChars
+    (command : List Char) (offsets : SourceOffsets) : Except Error Body :=
+  match tokensChars command with
+  | none => .error .malformed
+  | some ts => match sourceRanges? command ts with
+    | none => .error .malformed
+    | some actual =>
+      if offsets = actual then
+        match bodyAt command offsets with
+        | some body => .ok body
+        | none => .error .malformed
+      else .error .malformed
 
 @[reducible] def symbolicStores (body : Body) : List (String × Nat) := body.lines.filterMap fun line =>
   match line.parsed with | .symbolicStore dst value => some (dst,value) | _ => none
@@ -186,6 +213,3 @@ private def wordChar (c : Char) : Bool := c.isAlphanum || c = '_' || c = '«' ||
     scan ts
 
 end Grass.Assembly.SourceInput
-
-
-

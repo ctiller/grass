@@ -7,17 +7,16 @@ namespace Grass.Tests.Assembly.SavedPrefix
 open Grass.Assembly SourceInput X86Source X86ControlFlow SavedPrefix
 
 def wrap (body : List Char) : List Char :=
-  (source_chars "def helloSource := asm_source {\n") ++ body ++ (source_chars "\n}")
+  (source_chars "def savedPrefixSample := asm_source {\n") ++ body ++ (source_chars "\n}")
 
 def extractChars? (chars : List Char) : Option Result := do
-  let body ← (extractHelloSourceChars chars).toOption
+  let body ← (extractSourceChars chars).toOption
   let statements ← (parseBody body).toOption
   let program ← check? statements
   extract? program
 
-def authored : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
-
-example : (extractChars? authored).map Result.registers = some [.r12, .r13, .r14] := by
+example : (extractChars? (wrap (source_chars
+    "push r12\npush r13\npush r14\nud2"))).map Result.registers = some [.r12, .r13, .r14] := by
   decide +kernel
 
 example : (extractChars? (wrap (source_chars "ud2"))).map Result.registers = some [] := by decide

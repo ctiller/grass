@@ -190,6 +190,13 @@ ELF machine tag cannot establish effective EL or feature state. Terra independen
 reviewed the segment checker, installation connection and final request backfill
 and found no blocking semantic issues in this scope.
 
+Polonius GNU readelf 2.45 independently inspected the exact Lean-emitted segment
+fixture: 4,098 bytes, AArch64 ET_EXEC, entry `0x400000`, one PT_LOAD at file
+offset `0x1000` and virtual address `0x400000`, file size 2, memory size 4,
+read/execute flags and alignment `0x1000`. SHA-256:
+`350bdb04b40eb83749f12a9fd695b9b087ecbe2dd98e53b23219ecbf8c550ebd`.
+This checks the serialized format independently; the fixture was not executed.
+
 ## Historical initial checkpoint evidence
 
 Semantic review separated the syscall decoder, ELF parser and native observer.

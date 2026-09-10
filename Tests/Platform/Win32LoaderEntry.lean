@@ -1,11 +1,9 @@
 import Grass.Platform.Win32.LoaderEntry
-import Grass.Assembly.PrologueFactory
 import Tests.Artifact.PE.ImageWriter
-import Tests.Assembly.SourceLinkedImage
 
-/-! Initialization fixtures and an actual Grass Hello World source-to-plan
-consumer. These validate model construction; they do not execute a Windows
-binary or establish physical loader correspondence. -/
+/-! Loader initialization tests over explicit PE descriptions and environment
+data. These validate model construction; they do not execute a Windows binary
+or establish physical loader correspondence. -/
 
 namespace Grass.Tests.Win32LoaderEntry
 
@@ -111,56 +109,4 @@ private def check (label : String) (passed : Bool) : IO Unit :=
   check "IAT exact little endian plus framing" (decide (patchContents [⟨100, 0x0807060504030201⟩] 99
     (.fromList [42, 0, 0, 0, 0, 0, 0, 0, 0, 43]) =
       Vec.fromList [42, 1, 2, 3, 4, 5, 6, 7, 8, 43]))
-/-- Production source linking is reused; no Python/C or handwritten instruction
-bytes stand in for the authored Grass program in this integration fixture. -/
-def helloPlanFrom? (source : List Char) : Option PE.ImagePlan := do
-  let body ← (Grass.Assembly.SourceInput.extractHelloSourceChars source).toOption
-  let frame ← Grass.Assembly.SourceFrame.derive? body
-  let splice ← Grass.Assembly.SourceSplice.derive? frame 0
-  let statics ← Grass.Assembly.StaticSection.layout?
-    (Grass.Tests.Assembly.SourceLinkedImage.staticTable Grass.Tests.Assembly.SourceLinkedImage.payload)
-    Grass.Tests.Assembly.SourceLinkedImage.staticName 0x40000040
-  let requests ← Grass.Assembly.SourceImportRequests.resolve? splice "kernel32.dll"
-  let linked ← Grass.Assembly.SourceLinkedImage.build? splice statics
-    { codeName := Grass.Tests.Assembly.SourceLinkedImage.codeName
-      codeCharacteristics := 0x60000020
-      pdataName := Grass.Tests.Assembly.SourceLinkedImage.pdataName
-      xdataName := Grass.Tests.Assembly.SourceLinkedImage.xdataName } requests
-  pure linked.plan
-
-/-- Model fixture over the checked-in source embedding; the native exporter
-supplies freshly read source to `helloPlanFrom?` instead. -/
-def helloPlan? : Option PE.ImagePlan := helloPlanFrom? Grass.Tests.Assembly.SourceResolve.authored
-
-/-- Initialize the exact source-linked PE using explicit three-symbol target data. -/
-def helloEntry? : Option (Nat × Bool) := do
-  let plan ← helloPlan?
-  let input : ImageInput := ⟨plan, (PE.writeImage plan).toHostBytes, rfl⟩
-  let loaded ← initialize? input (inputsFor plan
-    (.fromList [.fromList [0x7ff01000, 0x7ff02000, 0x7ff03000]]))
-  pure (loaded.initialState.rip.toNat,
-    loaded.initialState.gpr .rax == 0x1234 && loaded.initialState.rflags == 0x202)
-
-#eval check "actual Grass source entry" (helloEntry? == some (0x140001000, true))
-
-/-- Execute the complete source-derived prologue from the actual loaded entry.
-Expected stack and event deltas come from the same derived frame, not literals. -/
-def helloPrologue? : Option Bool := do
-  let body ← (Grass.Assembly.SourceInput.extractHelloSourceChars
-    Grass.Tests.Assembly.SourceResolve.authored).toOption
-  let frame ← Grass.Assembly.SourceFrame.derive? body
-  let splice ← Grass.Assembly.SourceSplice.derive? frame 0
-  let plan ← helloPlan?
-  let image : ImageInput := ⟨plan, (PE.writeImage plan).toHostBytes, rfl⟩
-  let loaded ← initialize? image (inputsFor plan
-    (.fromList [.fromList [0x7ff01000, 0x7ff02000, 0x7ff03000]]))
-  match Grass.Assembly.PrologueFactory.execute loaded splice.prologue loaded.initialState with
-  | .error _ => none
-  | .ok result => some ((result.1.gpr .rsp).toNat ==
-        (loaded.initialState.gpr .rsp).toNat - splice.prologue.frame.layout.totalFrameBytes &&
-      result.1.machine.events.length == loaded.initialState.machine.events.length +
-        2 * splice.prologue.frame.saved.registers.length + 1)
-
-#eval check "actual Grass source prologue" (helloPrologue? == some true)
-
 end Grass.Tests.Win32LoaderEntry

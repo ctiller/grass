@@ -1,11 +1,22 @@
 import Grass.Platform.Win32.WriteFile
-import Tests.Memory.CallProtocol
 
 namespace Grass.Tests.Win32WriteFile
 
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical
 open Grass.Platform.Win32.WriteFile
-open Grass.Tests.Spike1
+
+private def allocSupply : FreshSupply AllocTag := .initial
+private def epochSupply : FreshSupply EpochTag := .initial
+private def contextSupply : FreshSupply ContextTag := .initial
+
+def stackAlloc : AllocId := allocSupply.fresh.1
+def epoch : EpochId := epochSupply.fresh.1
+def mainThread : ContextId := contextSupply.fresh.1
+def apiAgent : ContextId := contextSupply.fresh.2.fresh.1
+def stackBaseAddress : MachineAddress := 0x1000
+def stackProvenance : Provenance :=
+  { space := .cpuVirtual, root := stackAlloc, epoch := epoch, source := .stack
+    rootExtent := ⟨0, 4096⟩, path := [] }
 
 def plan : LoanPlan := ⟨[]⟩
 
@@ -17,8 +28,9 @@ private def fixtureBackingRecord : BackingRecord :=
   { capacity := 4096, bytes := ByteStore.empty.write 0 bytes.toList true }
 
 def allocation : AllocationRecord :=
-  { Tests.Memory.Spike1Block.stackRecord with
-    backing := fixtureBacking, origin := 0 }
+  { extent := ⟨0, 4096⟩, epoch := epoch, space := .cpuVirtual, source := .stack
+    owners := [mainThread], permission := .readWrite, live := true
+    backing := fixtureBacking, origin := 0, base := some stackBaseAddress }
 
 private def installed? : Option MemoryState :=
   MemoryState.empty.installBacking? fixtureBacking fixtureBackingRecord
@@ -53,27 +65,23 @@ theorem lookup_exact (root : AllocId) :
     rw [MemoryState.allocations_installBacking? installed_from_door]
     rfl
 
-def resolved (range : ByteRange) (contained : stackProvenance.extent.Contains range) :
+private theorem resolvedAllocation_eq (range : ByteRange)
+    (success : (memory.resolveAccess? stackProvenance range).toOption.isSome) :
+    ((memory.resolveAccess? stackProvenance range).toOption.get success).allocation = allocation := by
+  have found :=
+    ((memory.resolveAccess? stackProvenance range).toOption.get success).allocationLookup
+  rw [lookup_exact] at found
+  simp at found
+  exact found.2.symm
+
+def resolved (range : ByteRange)
+    (success : (memory.resolveAccess? stackProvenance range).toOption.isSome) :
     Resolved memory ⟨stackProvenance, range⟩ where
-  allocation := allocation
-  backing := fixtureBackingRecord
-  allocationLookup := by change memory.allocations.lookup stackAlloc = some allocation; decide
-  backingLookup := by change memory.backings.lookup fixtureBacking = some fixtureBackingRecord; decide
-  allocationLive := rfl
-  epochAgrees := rfl
-  spaceAgrees := rfl
-  sourceAgrees := rfl
-  extentAgrees := rfl
-  provenanceNested := by change stackProvenance.Nested; decide
-  rangeInProvenance := contained
-  coordinates :=
-    { withinView := by
-        rw [show allocation.extent = stackProvenance.rootExtent by rfl]
-        exact (Provenance.extent_within_root (by decide)).trans contained
-      viewWithinBacking := by decide }
+  toResolvedAccess :=
+    (memory.resolveAccess? stackProvenance range).toOption.get success
   base := stackBaseAddress
-  placed := rfl
-  noWrap := by decide
+  placed := by rw [resolvedAllocation_eq range success]; rfl
+  noWrap := by rw [resolvedAllocation_eq range success]; decide
 
 def prepared : Prepared memory request where
   buffer := resolved ⟨0, 3⟩ (by decide)
@@ -140,9 +148,49 @@ def startHistory : History plan noEffects initial call record initialPrefix :=
 
 theorem initial_output_empty : initialPrefix.output = .fromList [] := rfl
 
+private def vocabulary : AdmittedVocabulary :=
+  { addressSpaces := .cpuOnly
+    faultClasses := ⟨[.pageFault, .generalProtection]⟩
+    allocationSources := ⟨[.stack]⟩
+    provenanceStepKinds := ⟨[]⟩
+    auditViolationClasses := ⟨AuditViolationClass.emittedByTransition⟩
+    obligationKinds := ⟨[]⟩, orderingModes := ⟨[]⟩, orderingScopes := ⟨[]⟩
+    contextKinds := ⟨[.thread, .externalAgent]⟩
+    initializationJustifications := ⟨[]⟩, atomicityJustifications := ⟨[]⟩
+    faultVisibilityRules := ⟨[]⟩, grantKinds := ⟨[.loan]⟩, protocols := ⟨[]⟩ }
+
+private def profile : MemoryProfile :=
+  { id := ⟨"test.win32.writefile"⟩, vocabularyVersion := 1, vocabulary := vocabulary
+    package :=
+      { accessDescriptorSoundness := True
+        rangeProvenanceInitializationPreservation := preservationLaws
+        permissionEnforcementAndFaultFidelity := True
+        loanMapLaws := MemoryState.loanMapLaws
+        consistencyGraphWellFormedness := True
+        raceFreedomConsequences := True, synchronizationAndObligationTransfer := True
+        allocatorFreshnessTeardownEpoch := MemoryState.allocatorLaws
+        callStackFrameLifetime := True
+        erasurePreservation := True, validationMetadata := True } }
+
+private def policy : StepPolicy :=
+  { profile := profile
+    requiredFacets := [.memoryEffects, .faults, .restartability, .ordering]
+    oracle := .ofMemory (fun _ d => List.replicate d.range.size 0)
+      (fun _ _ _ => 0)
+    authorities := []
+    violationClassesDeclared := by decide
+    vocabularyWellFormed := by decide }
+
+private inductive QuietOp where | run
+
+private instance : HasOperationFacets QuietOp where
+  facets _ :=
+    { memoryEffects := some .none_, faults := some []
+      restartability := some .notRestartable, ordering := some .plain }
+
 def quietAction : Action where
-  policy := Grass.Tests.Spike1Policy.policy
-  operation := SomeOperation.of Grass.Tests.Spike1Policy.Op.leaPayload
+  policy := policy
+  operation := SomeOperation.of QuietOp.run
   kind := .externalAgent
   cause := ⟨⟨"writefile.quiet"⟩⟩
   faultAt := fun _ => .none
@@ -221,7 +269,7 @@ theorem wrong_call_rejected : ∀ call state, handed = some (call, state) →
 theorem initialized_bytes_match : InputMatches memory request := prepared.input
 
 theorem uninitialized_input_rejected :
-    ¬ InputMatches Tests.Memory.Spike1Block.state₀ request := by decide
+    ¬ InputMatches .empty request := by decide
 
 theorem substituted_bytes_rejected :
     ¬ InputMatches memory { request with bytes := .fromList [11, 99, 33] } := by decide
@@ -257,8 +305,11 @@ theorem universal_order_rejected (state : ProtocolState) :
 
 /-- The count-slot access used to check actual synchronous handoff ordering. -/
 def countWrite : AccessDescriptor :=
-  Grass.Tests.Spike1.access stackProvenance ⟨16, 4⟩
-    (addressOf stackBaseAddress 16) .write .readWrite 4 false true
+  { context := mainThread, address := .numeric (addressOf stackBaseAddress 16)
+    space := .cpuVirtual, provenance := stackProvenance, range := ⟨16, 4⟩
+    intent := .write, requiredPermission := .readWrite, alignment := 4
+    initialization := .readsNothing, producesInitialized := true
+    admittedFaults := [.pageFault, .generalProtection], authorityEffect := [] }
 
 inductive CountOp where
   | caller | provider
@@ -271,7 +322,7 @@ instance : HasOperationFacets CountOp where
       restartability := some .notRestartable, ordering := some .plain }
 
 def zeroPolicy : StepPolicy :=
-  { Grass.Tests.Spike1Policy.policy with
+  { policy with
     oracle := .ofMemory (fun _ d => List.replicate d.range.size 0) (fun _ _ _ => 0) }
 
 def zeroedOutcome := Grass.Op.step zeroPolicy initial.machine (SomeOperation.of CountOp.caller)
