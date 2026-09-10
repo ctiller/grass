@@ -135,6 +135,12 @@ return/body premises remain. Spikes reports independent Sol review and a combine
 304-job focused build passed. Shared finalization extraction remains unpublished
 at this checkpoint; no GetStdHandle production adoption is claimed.
 
+The [incoming-state contract rule](PLATFORM_ABI.md#incoming-state-contract)
+separates the checked call state from its setup recipe. The source-LEA premise
+above describes that delivered helper, not a mandatory WriteFile contract:
+lowering is to remove that restriction while preserving canonical argument and
+actual CALL binding. No completed replacement is claimed here.
+
 The structured Hello fixture at the inspected `31ad186e` had a trust-gate
 setup-extraction defect, so that checkpoint is not acceptance evidence.
 The repair is integrated as `d7c63bab`, with independent review, the 595-job

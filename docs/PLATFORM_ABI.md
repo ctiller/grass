@@ -139,6 +139,31 @@ shape, thread-local/hidden state, callbacks, ghost transfer, obligations,
 faults, interruption, cancellation, and progress. Call sites prove the entry
 contract; returns and exceptional exits prove their respective postconditions.
 
+### Incoming-state contract
+
+A call checks a contract for its actual incoming state: reached registers and
+memory, canonical argument provenance and ranges, permissions and loan obligations,
+ABI stack/frame requirements, and exact call/provider binding. Where an interface
+claims an actual CALL occurrence, it must retain that occurrence's receipt;
+matching numeric register values alone creates neither provenance nor authority.
+
+How execution established that state belongs to the caller's lowering/setup
+proof. LEA, MOV, an already-correct register or a preserved value can satisfy the
+same entry contract. A particular instruction or adjacency is not a callee
+requirement unless the API semantics actually require it. Source arguments still
+need their exact source, loaded-image and current-memory connection, independently
+of the register setup recipe.
+
+Reuse an adequate existing contract and checked producer. For WriteFile,
+`WriteFile.EntryFactory.prepare?` checks the supplied state and canonical arguments
+and returns the existing `WriteFile.Abi.Entry`; it does not require a parallel
+entry-contract type. The contract is discharged by composing existing stages:
+the stack-plan factory adds fifth-slot separation, protocol entry issues the
+loans, and the actual CALL policy and handoff retain occurrence/provider binding.
+Preparation alone establishes neither all permission/loan obligations nor native
+provider identity. See the [endpoint index](ENDPOINT_INDEX.md#issued-call-resume-status)
+for the delivered producer and the remaining lowering connections.
+
 Over-approximating clobbers or resource use is acceptable. Omitting a permitted
 behavior is unsound.
 
