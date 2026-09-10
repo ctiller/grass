@@ -7,7 +7,7 @@ describes this revision unless a later inspected delivery or interview report is
 explicitly named below.
 
 Latest mechanical connection update: [issued-call resume status](#issued-call-resume-status),
-covering `98b9147e`, `ba7b01ec`, `5be3f92e` and `4141cb7f`. Earlier delivery sections explain
+covering main `0993922c` and certificate `f9145e4a`. Earlier delivery sections explain
 the retained carrier, service, dispatch and checked-CPU boundaries.
 
 ## Start from the authored output
@@ -56,116 +56,42 @@ their own status labels; a reviewed direction is not an implemented declaration.
 
 ## Issued-call resume status
 
-Inspected source at `31ad186e`, 2026-09-09. The following are bounded mechanical
-connections, not whole-spike completion. Initial linkage and finite service
-history are no longer merely extra premises for consumers rooted in these
-actual handoff witnesses:
+Current consolidated snapshot: main `0993922c` and certificate `f9145e4a`.
+The retained **24-edge loader-rooted Hello prefix reaches the first WriteFile
+entry**. This replaces the earlier missing-initial-prefix status; it is one
+checked finite execution, not whole-Hello or public-emission acceptance.
 
-| Connection | Implemented evidence | Boundary still to connect |
+| Find | Implemented connection at this snapshot | Remaining boundary |
 |---|---|---|
-| Shared checked protocol entry, `5be3f92e` | [ProtocolEntry.lean](../Grass/Platform/Win32/ProtocolEntry.lean): `Entry`, `issue?` and general projection, pending-record, freshness and storage laws. Both [GetStdHandleRuntime](../Grass/Platform/Win32/GetStdHandleRuntime.lean) and [WriteFileHandoff](../Grass/Platform/Win32/WriteFileHandoff.lean) use it through their actual entry producers; duplicated entry construction was removed | API-specific requests, loans and observations remain distinct; this is not a native provider or endpoint certificate |
-| Original CALL and initial resume inputs, `98b9147e` | [CallResumeBinding.lean](../Grass/Platform/Win32/CallResumeBinding.lean): both APIs' `CallHandoff.resumeInputs` derive `ProviderResume.PolicyBinding` and `Link` from the same actual CALL, reached plan and computed runtime insertion | Initial linkage does not establish a later return or provider transfer |
-| Finite WriteFile service history, `ba7b01ec` | [CallResumeHistory.lean](../Grass/Platform/Win32/CallResumeHistory.lean): `WriteFile.CallHandoff.resumeInputsAfterService` starts at that issued CALL's `rawAfter`, follows the supplied finite same-call `providerService` edges, and derives the original frame link, whole metadata/pending-record agreement, fifth slot and loan plan at the endpoint | It does not include settlement, return-slot read, resumed caller execution, arbitrary non-service edges or infinite-history coverage |
+| Hello entry prefix | Certificate `Tests/Frontend/WriteFilePrefix.lean.in`: `Result machineSource`, `inspected`; `Tests/Frontend/check.sh` injects the unchanged authored source and retains the actual `ExecutionPrefix` through GetStdHandle entry/return and first WriteFile entry | Provider registers are observed inputs and the graph is empty; this fixture does not establish native/causal correspondence, all runs or the certificate suffix |
+| Incoming WriteFile arguments | Certificate `Grass/Refinement/Console/WriteFileStaticEntry.lean` composes canonical static buffer/count arguments with the actual CALL and existing checked preparation; count placement uses the original runtime frame | The [incoming-state contract](PLATFORM_ABI.md#incoming-state-contract) requires exact provenance, range, memory and CALL binding, not an executed LEA or another prescribed register recipe |
+| Installed returns | [RawStep.lean](../Grass/Platform/Win32/RawStep.lean): `getStdHandleReturn`, `writeFileReturn`; [GetStdHandleRawReturn](../Grass/Platform/Win32/GetStdHandleRawReturn.lean), [WriteFileRawReturn](../Grass/Platform/Win32/WriteFileRawReturn.lean) | The derivation fixes one image, console environment, realization and return interpretation; observed results and the original provider-history connection remain real premises |
+| Shared finalization | Both actual return consumers use [ProviderResumeFinalization](../Grass/Platform/Win32/ProviderResumeFinalization.lean) for final state, exact runtime/pending consumption, logs and replay rejection | Dual production adoption is closed; it does not establish native provider identity, full ABI applicability or physical return |
+| Completed Exit | [ExitProcessCompletion](../Grass/Platform/Win32/ExitProcessCompletion.lean): `complete?`; `RawStep.completedExit`, `exit_result`, `terminal_no_step` | Exact observed process/call/status is checked and archived data cannot enable another raw edge; no native cleanup or blanket obligation discharge follows |
+| Finite service/history transport | [RawPrefixSteps](../Grass/Platform/Win32/RawPrefixSteps.lean): `finitePrefix_indexed_witnesses`; [RawPendingService](../Grass/Platform/Win32/RawPendingService.lean): `pending_to_pending_service`; [WriteFileReturnHistory](../Grass/Platform/Win32/WriteFileReturnHistory.lean): `returnedAfterService` | Extracts actual finite witnesses and same-call pending service edges, then transports matched return to the constructed service history. Connecting the contiguous segment to its original entry in the enclosing execution is still underway |
 
-The generic `ProviderResume.Link` remains a data-agreement proposition. These
-new consumers derive its relevant issuance/history connection; equal frame
-coordinates alone still do not establish that connection for an arbitrary
-supplied `Link`.
+Certificate-only paths above can be inspected with
+`git show f9145e4a:<path>`. The prefix reuses
+[RawPrefix](../Grass/Platform/Win32/RawPrefix.lean) and its computed loader root;
+its unused completion fields are scaffolding, not terminal/infinite semantics.
+See [raw phase preservation](RAW_PHASE_PRESERVATION.md) for the exact local clauses
+and their limits. In particular, a retained initial prefix does not by itself
+supply every subsequent segment's original handoff or prove enabledness.
 
-The separately inspected lowering delivery `4141cb7f` connects **same-issued-CALL
-finite history → matched settlement → computed slot read → raw BOOL guard →
-source body**, conditionally. This historical LEA-specific wrapper is superseded
-by the incoming-state count-entry delivery below. Inspect it with
-`git show 4141cb7f:Grass/Refinement/Console/WriteFileResume.lean`, theorem
-`returned_body`. It transports the original pre-CALL cursor, derives the original
-frame, preserves R12/RSP and settled memory, and connects the source load's exact
-range and provenance. It still consumes `requestSlot` equating the request's
-count slot with `SourceLea.argument`, actual provider BOOL/GPR evidence,
-`resumeRan`, the original pre-CALL cursor, and checked guard/body execution
-witnesses (including successful BOOL and positive count). It does not install a
-raw return edge, restore raw caller control, consume runtime state or establish
-physical transfer. Spikes reports integration as `38536c7e`.
+The current concrete positive-trace blocker is in
+[Op.Step](../Grass/Op/Step.lean), `ConflictsWithHistory`: conflicting plain accesses
+from different contexts are rejected without consuming evidence that they are
+ordered by happens-before. See
+[the WriteFile regression](../Tests/Platform/Win32WriteFile.lean),
+`provider_denial_is_the_ordering_blocker`. Adding a causal graph after execution
+does not make that evidence part of the access check. Memory-model is the sole
+implementation owner for this correction; Windows and frontend consume it.
 
-[ProviderResume.lean](../Grass/Platform/Win32/ProviderResume.lean)
-computes the checked slot read and resume candidate under the original CALL's
-policy. Its `resume` still consumes actual reached-state
-`PreservesNonvolatile` evidence, and `WriteFileOutput` relates the actual low
-32 bits of RAX to the raw BOOL. Neither deriving `PolicyBinding` nor preserving
-the frame manufactures those provider observations. The modeled GPR table does
-not cover XMM, MXCSR, x87 control state or direction-flag adequacy. Matched
-return still needs actual `CallProtocol.return?` settlement with the full
-recorded loan IDs; `MatchedReturn.effects` and `consumed` are existing
-conditional laws for that evidence. The composition consumes the checked
-candidate and source execution witnesses; producing those at the actual endpoint,
-including exact-stage slot-read permission and physical provider-transfer
-correspondence, remains an obligation. No fetched native RET is claimed.
-
-The checked request/entry producer is delivered in Windows checkpoint `4f431cee`:
-inspect `git show 4f431cee:Grass/Platform/Win32/WriteFilePrepare.lean`.
-`WriteFile.EntryFactory.requestOf` fixes the request from the actual state,
-canonical provenance-carrying buffer/count arguments and bytes; `prepare?` also
-takes the supplied fifth slot and computes `Abi.Entry` with `Prepared` for that
-same request, or refuses failed spatial, initialization, size or ABI checks.
-It derives the handle from RCX and requested count from low 32-bit R8, checks
-RDX/R9 and the fifth-slot stack address, and never reconstructs count provenance
-from R9 alone. `requestOf_countSlot`, `requestOf_buffer`, `requestOf_bytes`,
-`requestOf_handle`, `requestOf_requested` and `prepare?_fifthSlot` retain the exact
-supplied inputs. The inspected fixture at
-`Tests/Platform/Win32WriteFilePrepare.lean` connects actual CALL → preparation →
-stack plan → protocol entry, retaining the canonical count slot in the pending
-record; Windows reports review and validation passed.
-
-This closes the missing checked preparation step. The source suffix buffer and
-outer source-to-loaded-image correspondence still need their lowering connection.
-Provider BOOL, settlement/resume and physical correspondence retain
-their separate obligations above. Existing
-[WriteFileStackPlan.lean](../Grass/Platform/Win32/WriteFileStackPlan.lean)
-`Abi.StackPlanFactory.deriveLoaded?` consumes an already supplied `Entry` and
-derives the shared ReturnHome plan plus WriteFile extensions, including the later
-fifth-slot separation checks.
-
-Count-entry rewrite `8f213c0c`, integrated on the certificate branch as `a3375cee`,
-uses `Grass/Refinement/Console/WriteFileCountArgument.lean` to compute the static
-source-local count argument from the selected frame and fixed loaded stack.
-`Grass/Refinement/Console/WriteFileCountEntry.lean` provides `prepareCountCall?`
-and `returned_body`, using the existing incoming-state checker without an executed
-LEA or separate `requestSlot` premise. The generic `WriteFileSourceEntry.prepareCall?`
-still composes reached CALL, preparation, stack plan and protocol entry, retaining
-the exact receipt and original metadata. Unused `prepareSourceCall?` and old
-LEA-specific return/body wrappers were deleted; `WriteFileResume.returned_body_bound`
-is the shared descriptor-bound composition. Actual LEA remains an optional producer.
-
-Spikes reports the combined 299-job build passed. The fixture accepts preexisting
-correct R9 with no LEA and rejects wrong-local, shifted-frame, width and space
-mismatches. It combines a separate source selection with an actual-CALL image;
-outer source-to-loaded-image correspondence remains owed, along with the other
-return/body premises. This is not public-gate or main Console migration.
-
-Shared finalization now has **both real production consumers** at certificate
-checkpoint `c6ded4d2`. Main `95675923` delivers
-[GetStdHandleReturn.lean](../Grass/Platform/Win32/GetStdHandleReturn.lean):
-observed-result, same-call `complete?` uses `ProviderResume.finalized_*` for
-fields, other-call preservation, protocol consumption/replay rejection and logs.
-The inspected `Grass/Refinement/Console/WriteFileFinalize.lean` at `c6ded4d2`
-delegates to those same laws in
-[ProviderResumeFinalization.lean](../Grass/Platform/Win32/ProviderResumeFinalization.lean).
-This closes the specific dual-adoption obligation. Spikes reports boundary review
-accepted, root/certificate focused builds (249/296 jobs), root audit (31,112
-declarations/360 modules), certificate ledger and supplier build/trust checks
-passed. These do not establish broader cleanup, native applicability, physical
-return or the public `VerifiedProgram` endpoint.
-
-The [incoming-state contract rule](PLATFORM_ABI.md#incoming-state-contract)
-separates the checked call state from its setup recipe. The count-entry rewrite
-implements that distinction while retaining canonical arguments and actual CALL
-binding; it does not prove the remaining outer execution connection.
-
-The structured Hello fixture at the inspected `31ad186e` had a trust-gate
-setup-extraction defect, so that checkpoint is not acceptance evidence.
-The repair is integrated as `d7c63bab`, with independent review, the 595-job
-root build, and the trust audit of 75 declarations and 8 executable test modules
-passing. Source freshness passed for 22 embedding modules. This fixture does not
-establish whole Hello.
+The next connection is the original-entry service segment and enclosing provider
+history, followed by the remaining source/body and certificate composition.
+Raw deadlock preservation, external/native applicability and the public
+`helloVerified`/`emitProgram` endpoint remain open. No spike is complete.
+The authored programs and annotated source snapshots remain the acceptance surface.
 
 ### Approved semantic correction and relative gate
 
@@ -173,7 +99,8 @@ The [observed process-exit decision](OBLIGATIONS.md#observed-process-exit) requi
 exact process/call/status checking, inert terminal archives and rejection of every
 subsequent `RawStep`. Exit discharges a duty only under its owning protocol's exact
 law; it implies neither empty inventories nor native cleanup. The neutral producer
-and terminal guards are requirements here, not a delivered endpoint claim.
+and terminal no-step machinery are now installed as indexed above; concrete duty
+accounting and the public endpoint are separate obligations.
 
 Process and architecture confirm the latest user-approved boundary: “on error”
 is conditional, so an infallible implementation can satisfy that contract.

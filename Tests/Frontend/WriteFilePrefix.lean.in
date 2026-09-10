@@ -3,15 +3,17 @@ import Grass.Refinement.Console.WriteFileStaticEntry
 import Tests.Console.WriteFileCountEntry
 import Grass.Platform.Win32.RawPrefix
 import Grass.Platform.Win32.RawEntryEvent
+import Grass.Platform.Win32.ExitProcessRawCompletion
 
 -- INCLUDE_AUTHORED_HELLO
 
 /-! One checked finite prefix from the actual authored image's loader/protocol
 root through GetStdHandle entry, an allowed observed provider result, return,
-and WriteFile entry. The existing ExecutionPrefix retains every raw edge.
+and either WriteFile entry or the stdout-unavailable ExitProcess completion.
+The existing ExecutionPrefix retains every raw edge.
 Provider registers are an observation and the graph is explicitly empty;
 native execution, causal correspondence, and properties of all runs remain open.
-The finite view's unused completion fields supply no completion semantics. -/
+The canonical raw system supplies terminal semantics; this fixture establishes only these selected executions. -/
 namespace Grass.Tests.Frontend.WriteFilePrefix
 
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical Grass.Artifact
@@ -39,7 +41,7 @@ abbrev system {image : ImageInput} {inputs : EntryInputs} (loaded : LoadedImage 
     (environment : ConsoleEnvironment)
     (covered : CallProtocol.GrantSupplyCovers loaded.initialState.machine.memory
       (FreshSupply.initial : FreshSupply GrantTag)) :=
-  Raw.finitePrefixSystem loaded Grass.Tests.Win32WriteFile.noEffects environment
+  Raw.system loaded Grass.Tests.Win32WriteFile.noEffects environment
     Grass.Tests.Win32RawStep.noReturnInterpretation covered
 
 /-- Bounded checked raw CPU edges with an explicitly empty graph. The graph
@@ -86,10 +88,109 @@ def advanceTo {image : ImageInput} {inputs : EntryInputs}
         | _ => throw "execution instruction or flags"
       else throw "CPU caller control"
 
+def completeExit {image : ImageInput} {inputs : EntryInputs}
+    (loaded : LoadedImage image inputs) (environment : ConsoleEnvironment)
+    (covered : CallProtocol.GrantSupplyCovers loaded.initialState.machine.memory
+      (FreshSupply.initial : FreshSupply GrantTag))
+    (pending : (system loaded environment covered).ExecutionPrefix)
+    (empty : pending.graph.down = []) (call : CallProtocol.CallId) (status expectedStatus : BitVec 32) :
+    Except String (system loaded environment covered).ExecutionPrefix := do
+  let observed : ExitProcess.Observation := ⟨environment.process, call, status⟩
+  unless observed.status == expectedStatus do throw "authored Exit status differs"
+  match completed : ExitProcess.complete? environment pending.state.down observed with
+  | none => throw "Exit completion observation refused"
+  | some completion =>
+    have edge : (system loaded environment covered).Step pending.graph pending.state
+        (.exitObservation call status) ⟨completion.event⟩ ⟨completion.after⟩ ⟨[]⟩ := by
+      change Raw.RawStep _ _ _ _ pending.graph.down pending.state.down _ _ _ []
+      rw [empty]
+      exact ExitProcess.Completion.rawStep (loaded := loaded)
+        (realization := Grass.Tests.Win32WriteFile.noEffects)
+        (interpretation := Grass.Tests.Win32RawStep.noReturnInterpretation)
+        (graph := []) (nextGraph := []) completion completed (Grass.Tests.Win32RawStep.empty_graph_valid _)
+        (Grass.Tests.Win32RawStep.empty_graph_valid _) (Raw.Graph.extends_refl [])
+    let finished := pending.step edge
+    unless finished.state.down.control == .terminal call expectedStatus do
+      throw "Exit completion did not retain terminal status"
+    unless (ExitProcess.complete? environment finished.state.down observed).isNone do
+      throw "terminal Exit completion replay accepted"
+    return finished
+
+def finishExit {image : ImageInput} {inputs : EntryInputs}
+    (loaded : LoadedImage image inputs) (environment : ConsoleEnvironment)
+    (covered : CallProtocol.GrantSupplyCovers loaded.initialState.machine.memory
+      (FreshSupply.initial : FreshSupply GrantTag))
+    (execution : (system loaded environment covered).ExecutionPrefix)
+    (empty : execution.graph.down = []) (encoding : InsnEncoding) (expectedStatus : BitVec 32) :
+    Except String (system loaded environment covered).ExecutionPrefix := do
+  let raw := execution.state.down
+  match checkedExact : raw.checked? with
+  | none => throw "Exit checked state"
+  | some checked =>
+    match projected : checked.callProtocol? with
+    | none => throw "Exit protocol"
+    | some protocol =>
+      if control : checked.control = .caller inputs.thread then
+      if registered : protocol.machine.contexts.lookup inputs.thread = some .thread then
+      if available : CallProtocol.callerPending protocol inputs.thread = false then
+        have ready : checked.ControlConsistent := by
+          unfold ExecutionState.State.ControlConsistent
+          rw [control]
+          exact ⟨protocol, projected, ⟨.thread, registered⟩, available⟩
+        match selected : Cpu.policy? loaded checked.machine with
+        | none => throw "Exit CPU policy"
+        | some cpu =>
+          match evaluated : CheckedExecution.normal cpu checked.machine checked.machine.statusFlags with
+          | some (.ok (.call called)) =>
+            unless called.receipt.fetch.site.encoding == encoding do
+              throw "Exit fetched encoding differs from source"
+            let binding := WriteFile.CallPolicy.ofFactory selected called
+            let actual : Raw.EvaluatedCall loaded checked called.receipt :=
+              { policy := cpu, selected, flags := checked.machine.statusFlags
+                success := called, evaluated, receiptExact := HEq.rfl }
+            match reachedExact : WriteFile.reachedCall? checked called.receipt with
+            | none => throw "reached Exit CALL"
+            | some reached =>
+              let some handoff := ExitProcess.entryHandoff? reached inputs.independentContext
+                | throw "Exit entry handoff"
+              if caller : handoff.caller = inputs.thread then
+                let entered : ExitProcess.CallHandoff loaded checked called.receipt inputs.independentContext :=
+                  { policy := binding, callerReady := ready, reached, reachedExact, handoff, caller }
+                match dispatchSelected : ApiDispatch.select? loaded
+                    (called.receipt.fetch.site.fallthroughRip + BitVec.ofInt 64 called.displacement.toInt)
+                    called.receipt.read.value with
+                | none => throw "Exit dispatch"
+                | some dispatch =>
+                  if api : dispatch.api = .exitProcess then
+                    have requestMatches : dispatch.MatchesRequest (.exitProcess (ExitProcess.status reached.machine)) :=
+                      api.symm
+                    have beforeExact : checked.raw raw.calls = raw := RawState.checked?_raw checkedExact
+                    have entryEdge : (system loaded environment covered).Step execution.graph execution.state
+                        (.apiEntry (.exitProcess (ExitProcess.status reached.machine)) inputs.independentContext)
+                        ⟨Raw.Event.between raw (handoff.initRaw raw.calls) .internal⟩
+                        ⟨handoff.initRaw raw.calls⟩ ⟨[]⟩ := by
+                      change Raw.RawStep _ _ _ _ execution.graph.down raw _ _ _ []
+                      rw [empty]
+                      simpa only [beforeExact] using entered.rawStep (calls := raw.calls)
+                        (realization := Grass.Tests.Win32WriteFile.noEffects) (environment := environment)
+                        (interpretation := Grass.Tests.Win32RawStep.noReturnInterpretation)
+                        actual dispatch dispatchSelected requestMatches
+                        (Grass.Tests.Win32RawStep.empty_graph_valid _) (Grass.Tests.Win32RawStep.empty_graph_valid _)
+                        (Raw.Graph.extends_refl [])
+                    let pending := execution.step entryEdge
+                    completeExit loaded environment covered pending rfl handoff.call
+                      (ExitProcess.status reached.machine) expectedStatus
+                  else throw "Exit request dispatch"
+              else throw "Exit caller identity"
+          | _ => throw "checked Exit CALL"
+      else throw "Exit caller already pending"
+      else throw "Exit caller registration"
+      else throw "Exit caller control"
+
 /-- Test result keeps the exact authored image and the existing proof-bearing
 prefix available to downstream consumers; reporting does not replace it. -/
 abbrev Result {requirements : Specification.RequirementSet} {plan : PlatformPlan requirements}
-    (machineSource : MachineSource plan) :=
+    (machineSource : MachineSource plan) (stdout : BitVec 64) :=
   Σ inputs : EntryInputs,
     Σ loaded : LoadedImage
       ⟨machineSource.construction.linked.plan,
@@ -97,11 +198,11 @@ abbrev Result {requirements : Specification.RequirementSet} {plan : PlatformPlan
       Σ' covered : CallProtocol.GrantSupplyCovers loaded.initialState.machine.memory
         (FreshSupply.initial : FreshSupply GrantTag),
         (system loaded (Grass.Tests.Win32GetStdHandleReturn.environmentFor
-          inputs.thread inputs.independentContext 55) covered).ExecutionPrefix
+          inputs.thread inputs.independentContext stdout) covered).ExecutionPrefix
 
 def inspected {requirements : Specification.RequirementSet} {plan : PlatformPlan requirements}
-    (machineSource : MachineSource plan) (expectedPayload : Grass.ByteArray) :
-    Except String (Result machineSource) := do
+    (machineSource : MachineSource plan) (expectedPayload : Grass.ByteArray) (stdout : BitVec 64) :
+    Except String (Result machineSource stdout) := do
   let linked := machineSource.construction.linked
   let image : ImageInput := ⟨linked.plan, (PE.writeImage linked.plan).toHostBytes, rfl⟩
   let inputs := Grass.Tests.Win32LoaderEntry.inputsFor linked.plan
@@ -110,7 +211,7 @@ def inspected {requirements : Specification.RequirementSet} {plan : PlatformPlan
   let setup : Grass.Tests.Win32HelloCall.ActualSetup :=
     { body := machineSource.body, frame := machineSource.construction.frame
       splice := machineSource.construction.splice, image, inputs, loaded }
-  let environment := Grass.Tests.Win32GetStdHandleReturn.environmentFor inputs.thread inputs.independentContext 55
+  let environment := Grass.Tests.Win32GetStdHandleReturn.environmentFor inputs.thread inputs.independentContext stdout
   let some getStdOutput := (linked.source.outputs.find? fun output =>
     match output.detail with
     | .ripImport name _ _ => name == "__imp_GetStdHandle"
@@ -131,7 +232,7 @@ def inspected {requirements : Specification.RequirementSet} {plan : PlatformPlan
     let entered := handoff.entered.entered
     let evaluated := Grass.Tests.Win32GetStdHandleReturn.evaluatedFor handoff
     let gpr : Gpr → BitVec 64 := fun register =>
-      if register = .rax then 55 else entered.reached.machine.gpr register
+      if register = .rax then stdout else entered.reached.machine.gpr register
     let some observed :=
       (GetStdHandle.ProviderResult.observe? loaded environment entered evaluated
         handoff.preCall.before.calls gpr entered.reached.machine.rflags).toOption | throw "observed GetStd result"
@@ -153,6 +254,19 @@ def inspected {requirements : Specification.RequirementSet} {plan : PlatformPlan
       let returned := pending.step (completion.rawStep completed
         (Grass.Tests.Win32RawStep.empty_graph_valid _) (Grass.Tests.Win32RawStep.empty_graph_valid _)
         (Raw.Graph.extends_refl []))
+      if stdout == 0 || stdout == GetStdHandleResult.invalidHandleValue then
+        let some exitOutput := (linked.source.outputs.find? fun output =>
+          match output.detail with
+          | .ripImport name _ _ => name == "__imp_ExitProcess"
+          | _ => false) | throw "source Exit CALL"
+        let exitAddress : MachineAddress := BitVec.ofNat 64
+          ((preferredBase image).toNat + SourceResolve.sourceOffset linked.source.codeBase
+            linked.source.splice.finalSizes exitOutput.index)
+        let .ok atExit := advanceTo loaded environment covered exitAddress
+          (linked.source.outputs.length + 1) returned rfl | throw "unavailable stdout branch"
+        let .ok finished := finishExit loaded environment covered atExit.val atExit.property exitOutput.encoding 1
+          | throw "unavailable stdout Exit completion"
+        return ⟨inputs, loaded, covered, finished⟩
       let some callOutput := (linked.source.outputs.find? fun output =>
         match output.detail with
         | .ripImport name _ _ => name == "__imp_WriteFile"
@@ -170,7 +284,7 @@ def inspected {requirements : Specification.RequirementSet} {plan : PlatformPlan
         | throw "reached static payload"
       let some countLocal := Grass.Tests.Console.WriteFileCountEntry.selectLoad? linked.source
         | throw "source count local"
-      unless before.gpr .rcx == 55 && before.gpr .rdx == buffer.address &&
+      unless before.gpr .rcx == stdout && before.gpr .rdx == buffer.address &&
           before.gpr .r8 == BitVec.ofNat 64 expectedPayload.length && buffer.bytes == expectedPayload do
         throw "reached WriteFile registers differ from original payload/handle"
       let some stackArgument :=
@@ -252,16 +366,21 @@ def inspected {requirements : Specification.RequirementSet} {plan : PlatformPlan
   else throw "initial grant coverage"
 
 def report {requirements : Specification.RequirementSet} {plan : PlatformPlan requirements}
-    {machineSource : MachineSource plan} (result : Result machineSource) : String :=
-  s!"Actual loader-rooted ExecutionPrefix ({result.2.2.2.events.length} edges) reaches WriteFile entry with the original payload and runtime-placed count local."
+    {machineSource : MachineSource plan} {stdout : BitVec 64} (result : Result machineSource stdout) : String :=
+  match result.2.2.2.state.down.control with
+  | .terminal _ status =>
+      s!"Actual stdout sentinel {stdout} reaches terminal status {status.toNat} through {result.2.2.2.events.length} retained raw edges."
+  | _ => s!"Actual loader-rooted ExecutionPrefix ({result.2.2.2.events.length} edges) reaches WriteFile entry with the original payload and runtime-placed count local."
 
 def run {requirements : Specification.RequirementSet} {plan : PlatformPlan requirements}
-    (machineSource : MachineSource plan) (expectedPayload : Grass.ByteArray) : IO Unit := do
-  match inspected machineSource expectedPayload with
+    (machineSource : MachineSource plan) (expectedPayload : Grass.ByteArray) (stdout : BitVec 64) : IO Unit := do
+  match inspected machineSource expectedPayload stdout with
   | .error stage => throw (IO.userError stage)
   | .ok result =>
     IO.println (report result)
 
-#eval run helloSource payload
+#eval run helloSource payload 55
+#eval run helloSource payload 0
+#eval run helloSource payload GetStdHandleResult.invalidHandleValue
 
 end Grass.Tests.Frontend.WriteFilePrefix
