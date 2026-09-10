@@ -154,17 +154,20 @@ The step relations.
 Both are inhabited and both change the world, which is the point: a contract
 whose relations are empty, or whose send goes nowhere, proves nothing.
 -/
-def liveSteps : ChannelSteps serverTopology () ServerMessage ServerWorld where
+def liveStepsAt (channel : serverTopology.ChannelId ()) :
+    ChannelSteps serverTopology () ServerMessage ServerWorld where
   Send := fun message occurrence before after =>
-    occurrence.1 = wire ∧
-      (before.sessions () wire).status = .open ∧
-      ⟨message, occurrence⟩ ∉ (before.inFlight () wire).created ∧
-      (after.inFlight () wire).Outstanding ⟨message, occurrence⟩
+    occurrence.1 = channel ∧
+      (before.sessions () channel).status = .open ∧
+      ⟨message, occurrence⟩ ∉ (before.inFlight () channel).created ∧
+      (after.inFlight () channel).Outstanding ⟨message, occurrence⟩
   Receive := fun message occurrence before after =>
-    occurrence.1 = wire ∧
-      (before.inFlight () wire).Outstanding ⟨message, occurrence⟩ ∧
-      (before.sessions () wire).delivered = 0 ∧
-      (after.sessions () wire).delivered = (before.sessions () wire).delivered + 1
+    occurrence.1 = channel ∧
+      (before.inFlight () channel).Outstanding ⟨message, occurrence⟩ ∧
+      (before.sessions () channel).delivered = 0 ∧
+      (after.sessions () channel).delivered = (before.sessions () channel).delivered + 1
+
+def liveSteps : ChannelSteps serverTopology () ServerMessage ServerWorld := liveStepsAt wire
 
 /-! ## The assertions, each reading exactly the fragments it is allowed to -/
 
@@ -214,8 +217,8 @@ noncomputable def trivialAssertion : NetworkAssertion serverAgreement :=
 
 /-! ## The contract -/
 
-noncomputable def liveChannel :
-    ChannelContract () ServerMessage serverAgreement liveSteps where
+noncomputable def liveChannelAt (channel : serverTopology.ChannelId ()) :
+    ChannelContract () ServerMessage serverAgreement (liveStepsAt channel) where
   senderOutput := serverSenderOutput
   receiverInput := serverReceiverInput
   SessionOpen := sessionOpen
@@ -242,6 +245,9 @@ noncomputable def liveChannel :
     rintro _ occurrence before after ⟨isWire, _, atZero, advanced⟩ _ _
     show (after.sessions () occurrence.1).delivered = 1
     rw [isWire, advanced, atZero]
+
+noncomputable def liveChannel :
+    ChannelContract () ServerMessage serverAgreement liveSteps := liveChannelAt wire
 
 /-! ## The triples do something -/
 

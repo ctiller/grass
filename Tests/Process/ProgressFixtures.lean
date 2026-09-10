@@ -59,9 +59,12 @@ theorem the_receive_emits_nothing
     emitted = [] := by
   have same : beforeReceive.observations = afterReceive.observations :=
     receiveAsStep.transition.touchesOnly .observations (by
-      rintro (isEscrow | isSession)
+      intro inScope
+      rcases (Grass.Process.Tests.Transition.receive_scope_is_the_session _).mp inScope with
+        isEscrow | isSession | isReceiver
       · exact absurd isEscrow (by simp)
-      · exact absurd isSession (by simp))
+      · exact absurd isSession (by simp)
+      · exact absurd isReceiver (by simp))
   rw [← same] at appended
   have lengths := congrArg List.length appended
   simp only [List.length_append] at lengths

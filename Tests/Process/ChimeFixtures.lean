@@ -492,7 +492,7 @@ theorem produces_or_descends {before after : chimingPlan.LogicalProcessNetwork}
   | environmentViolation _ _ violation _ _ => exact violation.elim
   | processTermination _ _ result _ _ => exact result.elim
   | send edge _ _ _ => exact edge.elim
-  | receive edge _ _ _ => exact edge.elim
+  | receive edge _ _ _ _ _ _ => exact edge.elim
   | requestCancel edge _ _ _ => exact edge.elim
   | acknowledgeCancel edge _ _ _ => exact edge.elim
   | timeout edge _ _ _ => exact edge.elim
@@ -616,7 +616,7 @@ theorem nothing_happens_after_the_chime {after : chimingPlan.LogicalProcessNetwo
   | environmentViolation _ _ violation _ _ => exact violation.elim
   | processTermination _ _ result _ _ => exact result.elim
   | send edge _ _ _ => exact edge.elim
-  | receive edge _ _ _ => exact edge.elim
+  | receive edge _ _ _ _ _ _ => exact edge.elim
   | requestCancel edge _ _ _ => exact edge.elim
   | acknowledgeCancel edge _ _ _ => exact edge.elim
   | timeout edge _ _ _ => exact edge.elim

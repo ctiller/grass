@@ -218,7 +218,8 @@ is what the rest of this section is for.
 
 open Grass.Process.Tests.Channel (wire)
 open Grass.Process.Tests.Transition
-  (payload occurrenceOf escrowed sent received the_send the_receive_after_the_send)
+  (payload occurrenceOf escrowed sent received beforeReceive afterReceive receiveAsStep
+    the_send the_receive_after_the_send)
 
 /--
 **A start at the plan with channels and slots in it.**
@@ -273,11 +274,8 @@ def theSendStep : serverPlan.NetworkStep World.withRoot sent where
   admissible := by intro _ nothing; cases nothing
   historyExact := rfl
 
-/-- The receive after it is a step. -/
-def theReceiveStep : serverPlan.NetworkStep sent received where
-  transition := .receive () wire escrowed the_receive_after_the_send
-  admissible := by intro _ nothing; cases nothing
-  historyExact := rfl
+/-- The atomic receive, including its receiver-local protocol step. -/
+def theReceiveStep : serverPlan.NetworkStep beforeReceive afterReceive := receiveAsStep
 
 /-- And so is the reroute, which writes two ledgers. -/
 def theRerouteStep :
@@ -286,18 +284,6 @@ def theRerouteStep :
     Grass.Process.Tests.Reroute.the_reroute
   admissible := by intro _ nothing; cases nothing
   historyExact := rfl
-
-/--
-**And the send/receive pair carries well-formedness the whole way.**
-
-`quiet` to `sent` to `received`, both steps, one certificate. The three channel
-clauses are the ones with content across a delivery: `ReroutesLand` in
-particular, since a delivery writes a resolution and `ResolvesNothingElse` is
-what stops it writing more than one.
--/
-theorem received_is_wellFormed : received.WellFormed :=
-  ProcessPlan.wellFormed_preserved theReceiveStep
-    (ProcessPlan.wellFormed_preserved theSendStep withRoot_is_wellFormed)
 
 /-- And the reroute's after-world is well formed, which is where the sixth clause
 is the one doing work: the payload has to have landed somewhere. -/

@@ -49,8 +49,8 @@ open Grass.Process.Tests.Transition (serverPlan beforeReceive afterReceive recei
 write it.**
 
 The bridge from `ProcessGraph.sharedAccess` — a static declaration — to a fact
-about every step of every execution. Only `processStep` names a region in its
-scope, and only for regions its own role may write.
+about every step of every execution. A local process step or the receiver-local
+half of a delivery names a region only when its own role may write it.
 -/
 theorem touching_a_region_needs_write_access
     {before after : serverPlan.LogicalProcessNetwork}
@@ -69,6 +69,19 @@ theorem touching_a_region_needs_write_access
         exact same.symm
       rw [← same]
       exact step.writesPermitted named moved
+  | receive edge session occurrence _ _ _ step =>
+    rcases touches with isEscrow | isSession | isReceiver | isPending | isRegion
+    · exact absurd isEscrow (by simp)
+    · exact absurd isSession (by simp)
+    · exact absurd isReceiver (by simp)
+    · exact absurd isPending.2 (by simp)
+    · rcases isRegion with ⟨named, moved, namedRegion⟩
+      refine ⟨(serverTopology.endpoints edge).2, ?_⟩
+      have same : named = region := by
+        injection namedRegion with equal
+        exact equal.symm
+      rw [← same]
+      exact step.receiverStep.writesPermitted named moved
   | _ => exact absurd touches (by simp [ProcessPlan.NetworkTransition.scope])
 
 /--
