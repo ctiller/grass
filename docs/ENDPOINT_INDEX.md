@@ -115,9 +115,10 @@ that missing request/entry-production step.
 
 The structured Hello fixture at the inspected `31ad186e` had a trust-gate
 setup-extraction defect, so that checkpoint is not acceptance evidence.
-Spikes reports the repair integrated as `d7c63bab`, with independent review,
-supplier checks and root full build passing; final root trust validation was
-still running at this update. This fixture status does not establish whole Hello.
+The repair is integrated as `d7c63bab`, with independent review, the 595-job
+root build, and the trust audit of 75 declarations and 8 executable test modules
+passing. Source freshness passed for 22 embedding modules. This fixture does not
+establish whole Hello.
 
 ### Approved semantic correction, migration pending
 
