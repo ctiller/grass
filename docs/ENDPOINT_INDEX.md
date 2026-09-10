@@ -1,4 +1,4 @@
-# Finding the spike endpoint
+# Finding spike implementations
 
 Navigation snapshot inspected at `f3b69bfa`, 2026-09-09, informed by interviews
 with `architecture` and `spikes`. This page routes readers to code and its owning
@@ -6,11 +6,63 @@ documents; it does not change their contracts or certify a milestone. Status
 describes this revision unless a later inspected delivery or interview report is
 explicitly named below.
 
-Latest mechanical connection update: [issued-call resume status](#issued-call-resume-status),
-covering main `a3b4ed9a` and certificate `2b160c4d`. Earlier delivery sections explain
-the retained carrier, service, dispatch and checked-CPU boundaries.
+Current navigation starts with the [cross-stack implementation matrix](#cross-stack-implementation-matrix)
+at main `8fc533af`. All five spikes, platforms and targets proceed in parallel.
+The older Hello sections below are checkpoint history: deleted fixture evidence
+does not establish current implementation or public verification.
+
+## Cross-stack implementation matrix
+
+User direction: all five spikes and all selected platforms/targets proceed in
+parallel, with unchanged precious specifications, shared checked mechanisms and
+no bespoke program recipes or mock verification. This is capability coverage,
+not a Cartesian product: CPU hosts and shader invocations differ; WASI does not
+imply native Vulkan. WGSL is a shader language target, not a machine ISA.
+
+Baseline `8fc533af`, supplemented by the owner reports below. **No spike has a
+checked public source → verification → emission chain.** A component check applies
+only to its named revision and scope, not a fresh full-baseline build. Work in
+progress, assignments and authored design files are not checked implementations.
+Alternate source syntax must be inherent to the target, not a changed precious spec.
+
+| Spike / owner | Present component evidence | Missing implementation |
+|---|---|---|
+| [1 Hello](../Spikes/1_Hello_World/) / spikes | Reusable Win32/x86 components below; frontend reports checked generic source capture at `ea0368bc` (`Grass/Assembly/SourceInput.lean`, branch evidence) | Public certificate, general verification/synthesis and emission; deleted 24/14/16-edge fixtures do not count |
+| [2 Sort](../Spikes/2_Sort/) / library | [Vec](../Grass/Std/Logical/Vec.lean), [Order](../Grass/Std/Logical/Order.lean) and shared grammar foundations retained | Stable sort, byte-line/order and descriptor representation; Windows input/heap APIs and full chain. Current generic sort transport work is in progress |
+| [3 Gzip](../Spikes/3_Gzip/) / grammar | [Grammar](../Grass/Grammar/) typed/prefix/endian/canonical foundations, reviewed `2034833a`, integrated `fb960238`/`e7f6740b`; consumed by PE | No gzip/DEFLATE codec or compiled spike spec; input/heap APIs and full chain. Compression connection is in progress |
+| [4 HTTP/2 server](../Spikes/4_Web_Server/) / process | [Process/Network](../Grass/Process/Network/), [Weave](../Grass/Process/Weave/) and [ByteFlow](../Grass/Process/ByteFlow/) transition, invariant and conservation foundations | HTTP/2/HPACK and `Std.Process.Network` surface, actual server/cancellation composition, socket/thread/time APIs and full chain; no server completion evidence |
+| [5 Spinning cube](../Spikes/5_Spinning_Cube/) / vulkan | Authored source only for this endpoint; no checked Vulkan or shader artifact at the baseline | Window/callback/message loop, Vulkan lifecycle/device/sync/presentation, shader execution/refinement and full chain |
+
+| Platform / owner | Checked component evidence | Missing / in progress |
+|---|---|---|
+| Windows / windows | [PE](../Grass/Artifact/PE/) parser/writer/layout and [Win32](../Grass/Platform/Win32/) preferred-base loader, import dispatch, GetStdHandle/WriteFile/ExitProcess, protocol loans and conditional raw return/Exit laws. Owner reports scoped 135 checks after cleanup; no fresh full pass claimed | APIs listed per spike, native/provider applicability and complete programs; wrapper removal exposed a direct-import build repair |
+| Linux / linux | No Linux/ELF implementation in the baseline; no checked delta reported | Syscall model/probes and ELF64 parser/writer in progress; actual ISA trap, provider completion, loading and spike closure absent |
+| WASI / wasi | No baseline implementation or passed WASI check reported | Preview1 `fd_write`/`proc_exit` decoder/import boundary in progress; provider accesses/results, terminal, artifact/runtime and spike connections absent |
+| Bare metal / memory-model | No baseline platform module or checked endpoint evidence | Platform entry/runtime, I/O/terminal and source/artifact connections need concrete owner evidence |
+
+| Target / owner | Checked component evidence | Missing / in progress |
+|---|---|---|
+| x86 / x86 | [CheckedStep](../Grass/ISA/X86/Execution/CheckedStep.lean) fetch/typed arithmetic, memory, branch, stack and CALL cases retained. Owner's `002c0b65` report: 555-job build, scoped axiom/trust/ledger checks passed | SYSCALL receipt and further spike instruction families; trap/interrupt/abort remain outside-profile, not native adequacy |
+| AArch64 / aarch64 | No baseline implementation or checked delta reported | CBZ decode/control and SVC request slice in progress; fetch/exceptions, memory/platform and source connections absent |
+| Wasm / wasm | Local `Grass/ISA/Wasm/Types.lean` build reported passed, **uncommitted**; no checked module artifact | Typed source-call/host invocation and WASI consumer in progress; encoding/execution and full spike connections absent |
+| SPIR-V / spirv | No baseline implementation or checked shader artifact | Typed composite word/checker/transfer slice in progress; full module/entry/CFG/FP/storage/sync/provider connection absent |
+| WGSL / spirv | No baseline implementation or checked shader artifact | Typed composite expression/checker/transfer slice in progress; shader validation/execution and provider/artifact connection absent |
+
+Frontend's structural backend is currently x86/Win32 only. Branch `ea0368bc`
+checks generic standalone declaration/range capture, not any spike's public
+verification. The old certificate is stale; target-model/deadlock suppliers and
+general verification remain open. Authored demand/liveness proofs stay outside
+`VerifiedProgram`; they are not a required or optional lowering checklist.
+Generic service-path and external-nonresponse support is checked in certificate
+commit `07e176f7` (root reports 238 focused tests passed), with the Hello-specific
+agency profile removed. Inspect `docs/WAIT_AGENCY_REFINEMENT.md` at that commit;
+actual raw wait agency, deadlock and the public gate remain missing.
+Use `git show <commit>:<path>` for branch evidence. Owners report scoped checks;
+this matrix neither upgrades them to whole-stack assurance nor reinstates deleted
+fixtures. Architecture owns cross-target boundaries; spikes integrates evidence.
 
 ## Start from the authored output
+
 
 [Hello Program.lean](../Spikes/1_Hello_World/Program.lean) ends in
 `helloVerified : VerifiedProgram spec` and `bytes := emitProgram helloVerified`.
@@ -56,7 +108,12 @@ their own status labels; a reviewed direction is not an implemented declaration.
 
 ## Issued-call resume status
 
-Current consolidated snapshot: main `a3b4ed9a` and certificate `2b160c4d`.
+Historical snapshot: main `a3b4ed9a` and certificate `2b160c4d`.
+The Hello prefix template, partial-source gate, and program-specific static/count
+and loop/guard adapters described below have since been deleted. They are not
+current implementation evidence. See the approved
+[removal plan](HELLO_SPECIALIZATION_REMOVAL.md); general full-source verification
+and emission remain incomplete. The following records the retired checkpoint.
 The retained **24-edge loader-rooted Hello prefix reaches the first WriteFile
 entry**. This replaces the earlier missing-initial-prefix status; it is one
 checked finite execution, not whole-Hello or public-emission acceptance.
@@ -93,9 +150,9 @@ Hello-specific integration is being removed under the approved
 The next connection is the original-entry service segment and enclosing provider
 history, followed by the remaining source/body and certificate composition.
 The [selected agency and directed-waiting decision](SEMANTICS.md#selected-agency-and-directed-waiting)
-is approved but undelivered: exact correspondence stays strict, while directed
-conformance will admit a concrete external-nonresponse witness retaining the raw
-infinite run and every observation. Raw deadlock preservation, external/native applicability and the public
+was undelivered at this historical snapshot. Generic support is now checked at
+`07e176f7` as recorded in the matrix; actual raw agency remains missing.
+Raw deadlock preservation, external/native applicability and the public
 `helloVerified`/`emitProgram` endpoint remain open. No spike is complete.
 The authored programs and annotated source snapshots remain the acceptance surface.
 

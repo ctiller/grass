@@ -13,7 +13,7 @@ private def malformed : InsnEncoding :=
     disp := .none
     imm := .none }
 
-example : ¬malformed.WellFormed := by native_decide
+example : ¬malformed.WellFormed := by decide
 
 private def admitted : Raw .x86Instruction :=
   Unsafe.Construct.x86Instruction malformed .encodingShape

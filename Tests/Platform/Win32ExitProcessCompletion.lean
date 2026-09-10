@@ -14,7 +14,7 @@ It does not claim native process termination or responsiveness.
 namespace Grass.Tests.Win32ExitProcessCompletion
 
 open Grass.Core Grass.Std.Logical Grass.Platform.Win32
-open Grass.Platform.Win32.ExecutionState Grass.Tests.Spike1
+open Grass.Platform.Win32.ExecutionState Grass.Tests.Win32WriteFile
 
 private def cpu : Grass.ISA.X86.Execution.State :=
   { machine := Grass.Tests.Win32ApiRequest.afterStd.machine.noteContext apiAgent .externalAgent

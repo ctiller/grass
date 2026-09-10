@@ -58,8 +58,9 @@ The comment-free expected Lean source for all five design spikes is in
 to the annotated spike documents and generated expansions is
 [docs/SPIKE_AUTHORING.md](docs/SPIKE_AUTHORING.md).
 
-Development proceeds one spike at a time, beginning with the existing Hello
-World source. The Lean correctness specification and prose implementation brief
+Development proceeds across all five spikes, platforms and targets in parallel;
+see the [implementation matrix](docs/ENDPOINT_INDEX.md#cross-stack-implementation-matrix).
+The Lean correctness specification and prose implementation brief
 are maintained inputs; implementation is rebuilt beneath them. See
 [docs/VISION.md](docs/VISION.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 Semantic boundary changes receive peer review; routine proof work uses automated

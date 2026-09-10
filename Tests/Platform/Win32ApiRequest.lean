@@ -8,7 +8,7 @@ namespace Grass.Tests.Win32ApiRequest
 
 open Grass.Core Grass.Memory Grass.Op Grass.Op.CallProtocol Grass.Std.Logical
 open Grass.Platform.Win32 Grass.Platform.Win32.WriteFile
-open Grass.Tests.Spike1
+open Grass.Tests.Win32WriteFile
 
 private def contextSupply : FreshSupply ContextTag := .initial
 

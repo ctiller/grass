@@ -9,7 +9,6 @@ namespace Grass.Tests.Win32WriteFileReturn
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical
 open Grass.Platform.Win32.WriteFile
 open Grass.Tests.Win32WriteFile
-open Grass.Tests.Spike1
 
 /-- The existing reached quiet prefix permits exactly the protocol bookkeeping
 return for its same pending occurrence and loan identifiers. -/

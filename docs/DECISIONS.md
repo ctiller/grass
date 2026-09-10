@@ -810,8 +810,11 @@ to imitate compiler-selected storage or CFG structure.
     the agent-bus helper, coordination protocol, and per-layer implementation
     plans while retaining all existing branches as spare parts. Independent peer
     review remains required; CONTRIBUTING.md owns the simplified workflow.
-    Complete the existing spikes in order, changing their authored surface only
-    for demonstrated defects or an unreasonable realization. This retires the
+    The former sequential spike order is superseded by the later user direction:
+    implement all five spikes, all selected platforms and targets in parallel,
+    preserving precious specifications and using shared checked mechanisms.
+    [The implementation matrix](ENDPOINT_INDEX.md#cross-stack-implementation-matrix)
+    separates evidence from assignments. This retires the
     workflow in decisions 107–115, not substantive proof, safety, source identity,
     or spike acceptance requirements. Internal implementation interfaces remain
     revisable without silently weakening those requirements.

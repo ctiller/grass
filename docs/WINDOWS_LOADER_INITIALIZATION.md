@@ -69,8 +69,8 @@ not discharge it.
 
 [`Win32LoaderEntry`](../Tests/Platform/Win32LoaderEntry.lean) checks missing and
 extra import data, reused IDs, context/flags/stack failures, physical aliases,
-historical identity reuse and patch framing. It also initializes a PE produced
-from the unchanged authored Grass Hello World through `SourceLinkedImage`.
+historical identity reuse and patch framing using source-independent PE data.
+The separate Hello image and prologue construction helpers have been deleted.
 These are executable model tests, separate from universal kernel proofs.
 
 The former source-reading Hello exporter and runner have been deleted under the
