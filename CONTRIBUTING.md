@@ -67,19 +67,22 @@ commands is an end-to-end proof of the eventual assembler or executable.
 
 ## Review
 
-Every product change receives independent peer review of the actual diff and
-relevant surrounding code. The author may commit and push a reviewed checkpoint;
-there is no bus registration, nomination, role assignment, or reviewer-owned
-merge requirement. Review findings and checks are recorded with the checkpoint
-or pull request. Unresolved findings block acceptance. Reviewers run risk-proportionate checks
-on the reviewed candidate and report exact commands and results. A reviewer who
-authors material fixes needs another independent reviewer for those fixes. Use
-fresh reviewer contexts at major boundaries so inherited assumptions receive
-another independent look. Never force-push shared branches.
+Independent semantic review covers new or changed contracts, assumptions,
+definitions, trust and implementation/consumer connections, once per cohesive
+slice. Once those boundaries are established, routine proof bodies, plumbing and
+packaging use Lean typechecking, automated trust audits and targeted checks;
+they do not require another independent review merely because a commit or agent
+produced them. Changes to semantic dependencies can reopen review even when the
+theorem's displayed type is unchanged. See the
+[implementation review standard](docs/REVIEW.md#implementation-peer-review).
 
-Reviewers apply [the substantive review standard](docs/REVIEW.md), challenging
-specification adequacy, proof feasibility, proof economics, assembly freedom,
-change blast radius, source authority, and fitness for the implementation brief.
+Keep the semantic conclusion, remaining findings and actual check results with
+the slice's checkpoint or pull request; no per-commit review form is required.
+Unresolved semantic findings block acceptance of the affected claim. Fresh
+contexts are useful for major new boundaries, not mandatory for routine fixes.
+Authors may commit, push and directly merge within the authorized scope; this
+standard adds no human confirmation, role registration or reviewer-owned merge
+gate. Never force-push shared branches.
 
 ## Shared guarantees and second consumers
 
@@ -193,9 +196,10 @@ Internal library interfaces may change to meet that acceptance surface.
 As completed spike work reveals better abstractions, assign bounded rewrite
 agents to rebuild earlier implementation around them. Keep the main effort
 advancing the spikes. Each rewrite names its consumers, preserves the authored
-specification and required public laws, and passes deterministic checks and
-independent review before integration. For repeated populations, prefer a shared
-Lean description with general proofs over separately maintained instances.
+specification and required public laws, and passes deterministic checks with
+semantic review where the boundary changes under the standard above. For repeated
+populations, prefer a shared Lean description with general proofs over separately
+maintained instances.
 
 Work through the active spike's complete specification-to-artifact chain. Add or
 refine library code when that chain needs it; do not build independent layers
