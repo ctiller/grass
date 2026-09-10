@@ -440,7 +440,7 @@ acquiring a citation.
 -- The actual checked completion projects its canonical raw event suffix.
 -- Shared observation staging installs supplied register data without native authority.
 -- Checked WriteFile resume construction and computed final carrier.
-def notBehaviourBaseline : Nat := 399
+def notBehaviourBaseline : Nat := 400
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
