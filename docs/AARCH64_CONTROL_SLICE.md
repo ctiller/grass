@@ -18,9 +18,9 @@ condition or SVC request. This is not an all-machine-transition VC theorem.
 
 ## Explicit remaining obligations
 
-- These CPU projections have no separate memory store. Actual fetch provenance,
-  current-code binding, permissions, alignment and profile admission are still
-  needed from the machine/memory realization.
+- These CPU projections have no separate memory store. General reached-machine
+  fetch, current-code binding and profile admission remain needed. The first-boot
+  adapter below supplies a narrower actual physical execute-read connection.
 - CBZ describes normal instruction-body control. Debug/interrupt outcomes,
   system effects of BranchTo and any later target-fetch fault are not modeled.
 - SVC records a decoded exception request. Arm's `CheckForSVCTrap` and configured
@@ -54,3 +54,29 @@ retrieval metadata. The instruction diagrams and operation entries were inspecte
 at PDF pages 142/1012 (printed 139/1009). PDFs are reference-only and are not
 committed. The generic citation records currently reside under the X86 directory;
 reusing them imports no x86 semantics or dual-vendor policy.
+
+## First-boot execute-read connection
+
+`Grass/ISA/AArch64/BootControl.lean` consumes the memory owner's
+`AArch64BootFetch.Word` from `d95e4817` and `bf6e5d6e`. Its `run` checks CPU PC
+against the admitted entry, invokes the existing fetch once, and decodes the
+actual observed bytes under an explicit `a64LittleEndian` convention. Successful
+decoding retains exact source parsing and the body outcome. Unsupported decoding
+retains the same completed fetch and reached memory/event instead of returning
+to the original snapshot. Width, alignment and access failures retain their
+upstream classifications; `run_fetchFailure` and `run_fetched` prove transport.
+
+This is restricted to the first instruction from an admitted fresh physical boot
+snapshot. It is not an arbitrary later reached-state fetch, physical-to-virtual
+translation, Linux admission, or proof that firmware selected the execution
+regime. BootFetch uses a fixed no-fault access attempt; preservation of its
+failures does not establish coverage of hardware fault executions. SVC remains
+an unadmitted exception request. The completed fetch event is not a completed
+exception occurrence or provider call.
+
+`lake build Tests.ISA.AArch64.BootControl` passes (54 dependency/target jobs).
+Separate one-read fixtures check taken/untaken CBZ, SVC request, unsupported NOP
+with retained read event, PC mismatch, width and alignment refusals. They are
+instruction partitions, not a per-spike CPU path. The five printed bridge axioms
+are limited to `propext`, `Classical.choice` and `Quot.sound`. No native execution
+claim or full-repository test result is attached to this adapter.
