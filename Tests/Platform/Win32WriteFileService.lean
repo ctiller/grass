@@ -6,7 +6,7 @@ namespace Grass.Tests.Win32WriteFileService
 open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical
 open Grass.Platform.Win32 Grass.Platform.Win32.ExecutionState
 open Grass.Platform.Win32.WriteFile
-open Grass.Tests.Spike1
+open Grass.Tests.Win32WriteFile
 
 def returnSlot : Argument := ⟨stackProvenance, ⟨128, 8⟩⟩
 def homeSlot : Argument := ⟨stackProvenance, ⟨136, 32⟩⟩

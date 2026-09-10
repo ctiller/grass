@@ -11,7 +11,7 @@ private def cpu : Grass.ISA.X86.Execution.State :=
 
 private def checked : State ApiRequest :=
   State.ofCallProtocol afterWrite cpu rfl
-    (.pending writeCall Grass.Tests.Spike1.mainThread Grass.Tests.Spike1.apiAgent)
+    (.pending writeCall Grass.Tests.Win32WriteFile.mainThread Grass.Tests.Win32WriteFile.apiAgent)
 
 example : checked.raw.checked? = some checked := checked.raw_checked?
 

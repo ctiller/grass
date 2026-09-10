@@ -1,4 +1,8 @@
 import Lean.Elab.Command
+import Grass.Platform.BareMetal.BootMemory
+import Grass.Platform.BareMetal.BootFetch
+import Grass.Platform.BareMetal.X86BootFetch
+import Grass.Platform.BareMetal.AArch64BootFetch
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.BasicInstructions
 import Grass.ISA.X86.Rel32
@@ -210,7 +214,9 @@ citation under `docs/DECISIONS.md` 21.
 The citation machinery itself is not modeled behaviour and is not audited: a
 `Citation` record makes no claim about a processor. -/
 def auditedModules : List Name :=
-  [`Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
+  [`Grass.Platform.BareMetal.BootMemory, `Grass.Platform.BareMetal.BootFetch,
+   `Grass.Platform.BareMetal.X86BootFetch, `Grass.Platform.BareMetal.AArch64BootFetch,
+   `Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.BasicInstructions,
    `Grass.ISA.X86.Rel32,
    `Grass.ISA.X86.ImmediateArithmetic,
@@ -378,7 +384,9 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Static selector/route/result policy and observed-register API acceptance.
 -- External process applicability and formal source anchors remain owed.
 -- The bounded live writable/synchronous publication attribution policy.
-def owedBaseline : Nat := 349
+-- Fifteen bare-metal admission/profile and ISA-consumption commitments remain
+-- explicit debt. Checked model execution does not cite native applicability.
+def owedBaseline : Nat := 364
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -444,7 +452,10 @@ acquiring a citation.
 -- The actual checked completion projects its canonical raw event suffix.
 -- Shared observation staging installs supplied register data without native authority.
 -- Checked WriteFile resume construction and computed final carrier.
-def notBehaviourBaseline : Nat := 400
+-- Shared access extraction replaces one obsolete instance entry with three aliases.
+-- Thirteen bare-metal nominal, carrier-arithmetic, projection and forwarding
+-- helpers add no hardware fact; their selected profile remains separately owed.
+def notBehaviourBaseline : Nat := 415
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -585,6 +596,25 @@ reader could not be misled by its absence from the trust ledger.
 -/
 def notBehaviour : List Name :=
   [
+    -- Nominal boot source identity and arithmetic over the existing numeric
+    -- carrier; no claim about a board's physical width or complete memory map.
+    `Grass.Platform.BareMetal.BootMemory.bootRamSource,
+    `Grass.Platform.BareMetal.BootMemory.PhysicalWindow.numericRange,
+    `Grass.Platform.BareMetal.BootMemory.PhysicalWindow.WellFormed,
+    `Grass.Platform.BareMetal.BootMemory.PhysicalMap.WellFormed,
+    `Grass.Platform.BareMetal.BootMemory.allocationPlacement,
+    -- Retain the supplied snapshot and project the already checked entry record.
+    `Grass.Platform.BareMetal.BootMemory.Admission.machine,
+    `Grass.Platform.BareMetal.BootMemory.Entry.provenance,
+    `Grass.Platform.BareMetal.BootMemory.Entry.pc,
+    -- Forward the selected shared access factory and its actual completion.
+    `Grass.Platform.BareMetal.BootFetch.Success,
+    `Grass.Platform.BareMetal.BootFetch.Success.bytes,
+    `Grass.Platform.BareMetal.BootFetch.fetch,
+    -- Embed supplied CPU values and the same executed access, without a new
+    -- x86 transfer rule or a physical-to-virtual translation assertion.
+    `Grass.Platform.BareMetal.X86BootFetch.state,
+    `Grass.Platform.BareMetal.X86BootFetch.observed,
     -- Instantiate the existing exact raw relation and loader/protocol root; no new hardware rule.
     `Grass.Platform.Win32.Raw.initialState,
     `Grass.Platform.Win32.Raw.system,
@@ -904,7 +934,10 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Execution.RunFactory.accessFree,
     `Grass.ISA.X86.Execution.RunFactory.accessFreeOperation,
     `Grass.ISA.X86.Execution.RunFactory.instHasOperationFacetsFixedAccessFreeOperation,
-    `Grass.ISA.X86.Execution.RunFactory.instHasOperationFacetsSingletonAccessOperation,
+    -- Transparent aliases retain the shared producer's exact receipt/failure types.
+    `Grass.ISA.X86.Execution.AccessRun,
+    `Grass.ISA.X86.Execution.RunFactory.AccessFailure,
+    `Grass.ISA.X86.Execution.RunFactory.AccessSuccess,
     `Grass.ISA.X86.Execution.RunFactory.noFaultPlan,
     `Grass.ISA.X86.Execution.RunFactory.singletonOperation,
     -- Factory packaging and explicit applicability routing over separately
@@ -1058,6 +1091,26 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    -- Selected post-firmware source, ownership, RAM/device placement, freshness
+    -- and executable-entry contracts. No native boot correspondence is closed.
+    `Grass.Platform.BareMetal.BootMemory.BootRAMSource,
+    `Grass.Platform.BareMetal.BootMemory.LiveAllocationAdmissible,
+    `Grass.Platform.BareMetal.BootMemory.AllLiveAllocationsAdmissible,
+    `Grass.Platform.BareMetal.BootMemory.LivePlacementPair,
+    `Grass.Platform.BareMetal.BootMemory.LivePlacementsDisjoint,
+    `Grass.Platform.BareMetal.BootMemory.MemoryAdmissible,
+    `Grass.Platform.BareMetal.BootMemory.Fresh,
+    `Grass.Platform.BareMetal.BootMemory.Admissible,
+    `Grass.Platform.BareMetal.BootMemory.admit?,
+    `Grass.Platform.BareMetal.BootMemory.entry?,
+    -- Physical RAM, selected memory oracle and execute-access descriptor policy.
+    `Grass.Platform.BareMetal.BootFetch.ramSpace,
+    `Grass.Platform.BareMetal.BootFetch.memoryPolicy,
+    `Grass.Platform.BareMetal.BootFetch.descriptor,
+    -- ISA byte consumption remains separate from firmware, translation and
+    -- exception-entry applicability; these checks do not discharge that debt.
+    `Grass.Platform.BareMetal.X86BootFetch.decode,
+    `Grass.Platform.BareMetal.AArch64BootFetch.fetchWord,
     -- Fixed console table/sentinel policy and observed API/ABI acceptance.
     `Grass.Platform.Win32.ConsoleEnvironment.standardHandle?,
     `Grass.Platform.Win32.ConsoleEnvironment.routeOf?,
