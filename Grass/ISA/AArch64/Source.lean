@@ -34,7 +34,9 @@ theorem SourceWord.bytes_exact {bytes : Std.Logical.ByteArray} (source : SourceW
     bytes = emitWord source.word ++ source.rest :=
   takeLittleEndian_done source.parsed
 
-/-- Checked receipt packing preserves the binary parser's refusal and suffix. -/
+/-- Pack successful parses into `SourceWord`, whose `SourceWord.parsed` field
+records the exact suffix equation; forward the parser's refusal constructors.
+`readSource_needMore` proves forwarding of the short-input result. -/
 def readSource (bytes : Std.Logical.ByteArray) : ParseResult (SourceWord bytes) :=
   match h : takeLittleEndian 4 bytes with
   | .done word rest => .done ⟨word, rest, h⟩ rest
