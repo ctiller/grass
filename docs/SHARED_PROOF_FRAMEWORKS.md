@@ -58,7 +58,7 @@ The canonical [Raw.system](../Grass/Platform/Win32/RawPrefix.lean) now replaces
 `Raw.finitePrefixSystem`: it retains terminal call/status results and all pointwise
 actual infinite runs. Existing [execution interfaces](../Grass/Semantics/Execution.lean)
 are universe-generalized rather than duplicated. Memory-model's canonical
-synchronization state consumed by the same access checker remains in progress.
+synchronization state is now consumed by the same access checker.
 The published width-read plan remains deferred; no implementation is claimed.
 
 ## API construction framework

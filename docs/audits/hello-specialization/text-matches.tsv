@@ -1,0 +1,994 @@
+path	variant	line	text
+CONTRIBUTING.md	c544d854afe7	117	`Program → helloVerified → emitProgram` chain remains the priority.
+CONTRIBUTING.md	c544d854afe7	118	Major milestones trigger the existing [cleanup audits](docs/SPIKE1_BOUNDARY_REVIEW.md#responsibility):
+CONTRIBUTING.md	c544d854afe7	190	Complete Hello World, sort, gzip, HTTP/2 server, then spinning cube, in order.
+Grass/ABI/Win64/Convention.lean	113f938007b7	24	Four things, and Spike 1 touches all four.
+Grass/ABI/Win64/Convention.lean	113f938007b7	388	/-- Spike 1's saved registers, in machine push order. -/
+Grass/ABI/Win64/Convention.lean	113f938007b7	389	def spike1SavedRegisters : List Gpr := [.r12, .r13, .r14]
+Grass/ABI/Win64/Convention.lean	113f938007b7	391	/-- The manually supplied Spike 1 inputs to the generic frame calculation. -/
+Grass/ABI/Win64/Convention.lean	113f938007b7	392	def spike1FrameLayout : CallFrameLayout where
+Grass/ABI/Win64/Convention.lean	113f938007b7	396	savedRegisters := spike1SavedRegisters
+Grass/ABI/Win64/Convention.lean	113f938007b7	398	theorem spike1FrameLayout_admissible : spike1FrameLayout.Admissible := by decide
+Grass/ABI/Win64/Convention.lean	113f938007b7	402	def spike1CallAllocationBytes : Nat := spike1FrameLayout.callAllocationBytes
+Grass/ABI/Win64/Convention.lean	113f938007b7	404	theorem spike1_stackArgumentBytes : spike1FrameLayout.stackArgumentBytes = 8 := by decide
+Grass/ABI/Win64/Convention.lean	113f938007b7	405	theorem spike1_localOffset : spike1FrameLayout.localOffset = 40 := by decide
+Grass/ABI/Win64/Convention.lean	113f938007b7	406	theorem spike1_callAllocationBytes : spike1CallAllocationBytes = 48 := by decide
+Grass/ABI/Win64/Convention.lean	113f938007b7	407	theorem spike1_totalFrameBytes : spike1FrameLayout.totalFrameBytes = 72 := by decide
+Grass/ABI/Win64/Convention.lean	113f938007b7	409	theorem spike1_savedRegisterOffsets :
+Grass/ABI/Win64/Convention.lean	113f938007b7	410	spike1FrameLayout.savedRegisterOffset 0 = 64 ∧
+Grass/ABI/Win64/Convention.lean	113f938007b7	411	spike1FrameLayout.savedRegisterOffset 1 = 56 ∧
+Grass/ABI/Win64/Convention.lean	113f938007b7	412	spike1FrameLayout.savedRegisterOffset 2 = 48 := by decide
+Grass/ABI/Win64/Convention.lean	113f938007b7	414	/-- Spike 1's call alignment is an instance of the generic layout contract. -/
+Grass/ABI/Win64/Convention.lean	113f938007b7	415	theorem spike1_prologue_aligned : AlignedForCall 3 spike1CallAllocationBytes := by
+Grass/ABI/Win64/Convention.lean	113f938007b7	416	simpa [spike1FrameLayout, spike1SavedRegisters, spike1CallAllocationBytes] using
+Grass/ABI/Win64/Convention.lean	113f938007b7	417	spike1FrameLayout.callAllocation_aligned
+Grass/ABI/Win64/Convention.lean	113f938007b7	422	theorem spike1_prologue_aligned_without_shadow : AlignedForCall 3 0 := by decide
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	346	Spike 1's, whose four slots need no padding, so nothing already in this file
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	439	/-! ## Spike 1's prologue -/
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	444	The prologue of `Spikes/1_Hello_World/Program.lean`, as the unwind language
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	447	def spike1Prologue : Prologue :=
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	448	{ ops := spike1SavedRegisters.map .pushNonvolatile ++
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	449	[.allocSmall spike1CallAllocationBytes] }
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	453	theorem spike1Prologue_encodable : spike1Prologue.Encodable := by decide
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	457	theorem spike1Prologue_stackDelta_eq_totalFrameBytes :
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	458	spike1Prologue.stackDelta = spike1FrameLayout.totalFrameBytes := by decide
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	460	/-- Numeric regression assertion for the selected Spike 1 fixture. -/
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	461	theorem spike1Prologue_stackDelta : spike1Prologue.stackDelta = 72 := by
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	462	rw [spike1Prologue_stackDelta_eq_totalFrameBytes, spike1_totalFrameBytes]
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	466	theorem spike1Prologue_countOfCodes : spike1Prologue.countOfCodes = 4 := by decide
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	469	theorem spike1Prologue_no_framePointer :
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	470	spike1Prologue.establishesFramePointer = false := by decide
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	476	`AlignedForCall 3 spike1CallAllocationBytes` counts pushes and the adjustment
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	481	theorem spike1Prologue_agrees_with_frame :
+Grass/ABI/Win64/Unwind.lean	5cd62e2f8a62	482	(entryMisalignment + spike1Prologue.stackDelta) % stackAlignment = 0 := by decide
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	956	/-! ## Spike 1
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	963	actual encoded instructions. Spike 1 pushes `r12`, `r13` and `r14`,
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	969	/-- Spike 1's prologue with offsets: three two-byte pushes ending at 2, 4 and 6,
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	971	def spike1Layout : Layout :=
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	976	, ⟨.allocSmall spike1CallAllocationBytes, 10⟩ ]
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	980	theorem spike1Layout_wellFormed : spike1Layout.WellFormed := by decide
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	983	theorem spike1Layout_prologue : spike1Layout.prologue = spike1Prologue := by decide
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	986	theorem spike1Layout_padding : spike1Layout.padding = [] := by decide
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	988	/-- Spike 1's `UNWIND_INFO`: no handler, no frame pointer. -/
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	989	def spike1UnwindInfo : UnwindInfo :=
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	990	{ layout := spike1Layout
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	993	layoutWellFormed := spike1Layout_wellFormed
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	1002	`spike1Layout` establishes no frame pointer, so it exercises none of the frame
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	1036	The exact `.xdata` bytes for Spike 1.
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	1048	theorem spike1UnwindInfo_toBytes :
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	1049	spike1UnwindInfo.toBytes =
+Grass/ABI/Win64/UnwindBytes.lean	e927c51971b9	1058	theorem spike1UnwindInfo_length : spike1UnwindInfo.toBytes.length = 12 := by decide
+Grass/Assembly/SourceInput.lean	56136a9eeb60	1	/-! Narrow, lossless ingress for the actual Spike 1 `asm_source` body. -/
+Grass/Assembly/SourceInput.lean	56136a9eeb60	98	"| .word ""def"", .word ""helloSource"" => match assemblyStart? ts with"
+Grass/Assembly/SourceInput.lean	56136a9eeb60	105	@[reducible] private def helloSourceCount : List Token → Nat
+Grass/Assembly/SourceInput.lean	56136a9eeb60	107	"(if a.kind = .word ""def"" && b.kind = .word ""helloSource"" then 1 else 0) +"
+Grass/Assembly/SourceInput.lean	56136a9eeb60	108	helloSourceCount (b :: rest)
+Grass/Assembly/SourceInput.lean	56136a9eeb60	155	@[reducible] def extractHelloSourceChars (source : List Char) : Except Error Body :=
+Grass/Assembly/SourceInput.lean	56136a9eeb60	160	if found.length != helloSourceCount ts then .error .malformed else match found with
+Grass/Assembly/SourceInput.lean	56136a9eeb60	169	@[reducible] def extractHelloSource (source : String) : Except Error Body :=
+Grass/Assembly/SourceInput.lean	56136a9eeb60	170	extractHelloSourceChars source.toList
+Grass/Assembly/SourceTemplates.lean	3c994550a4cf	11	checked CFG indices. Hello has 50 retained statements and 42 `CodeItem`s.
+Grass/Assembly/Win32Constants.lean	bf8949438924	6	/-! Lower the two named Win32 constants used by the Spike 1 source.  Values
+Grass/Assembly/X86Source.lean	1a5650a8fdec	4	/-! Complete syntactic ingress for the instruction forms used by Spike 1. -/
+Grass/Console/TargetProjection.lean	ea3105375bdb	60	/-- The representation selected by authored Windows Hello; no message or policy
+Grass/ISA/X86/Bytes.lean	63a60f5a6407	17	The opcode bytes were the visible symptom: `Tests/ISA/X86/Spike1Addressing.lean`
+Grass/ISA/X86/Bytes.lean	63a60f5a6407	267	the form Spike 1 depends on;
+Grass/ISA/X86/Decode.lean	9fea6d87f2c3	31	The opcodes below are the ones this profile models, which is Spike 1's
+Grass/ISA/X86/Decode.lean	9fea6d87f2c3	140	Spike 1's instruction set, plus the forms the probe corpus executes. Anything
+Grass/ISA/X86/Execution/Instruction.lean	e6b2952dbb35	12	another opcode table or a handwritten Hello sequence. Classification does not
+Grass/ISA/X86/Execution/LeaNormal.lean	a2c8a4545114	4	/-! Bounded normal completion for the two 64-bit LEA addressing forms emitted by Hello. -/
+Grass/ISA/X86/ImmediateArithmetic.lean	fc3099667fb0	10	/-- The Group 1 operations needed by the Hello source. -/
+Grass/ISA/X86/Register.lean	9a4441ed2727	12	x86-64 has three different answers for one question, and Spike 1 depends on all
+Grass/ISA/X86/Register.lean	9a4441ed2727	21	`Spikes/1_Hello_World/Program.lean` writes `r14d` and then uses `r13`/`r14` as
+Grass/ISA/X86/Register.lean	9a4441ed2727	236	because `FF /2` is a near branch, and `Spikes/1_Hello_World/Program.lean` opens
+Grass/ISA/X86/RegisterLaws.lean	b1b0d72578b0	4	Pure arithmetic and branch-predicate laws for Hello's register operations.
+Grass/ISA/X86/RegisterSemantics.lean	ecf39c970169	4	Operand-local x86-64 register semantics for the Hello arithmetic family.
+Grass/Memory/Access.lean	278175b3abd7	366	"`Tests/Memory/Spike1Reference.lean` saying ""`AccessDescriptor.committedWriteRange` is"
+Grass/Memory/AddressSpace.lean	81fbd8d68ba6	377	symbolic space under `win32.processHeap` -- an allocator name Spike 1's own profile uses
+Grass/Memory/Apply.lean	d05847463318	343	`Tests/Memory/Spike1Block.lean` and `Tests/Memory/StraightLineBlock.lean` both run
+Grass/Memory/Apply.lean	d05847463318	1238	suffices to discharge a straight-line Spike 1 block *without a bespoke local
+Grass/Memory/Audit.lean	36769f113fb1	18	the `@audit(.stdoutUnavailable)` annotations in the Spike 1 source, which
+Grass/Memory/Audit.lean	36769f113fb1	264	Every address in the Spike 1 fixtures contradicted the placement the same fixture
+Grass/Memory/Authority.lean	34c76943f132	97	`Spikes/1_Hello_World` lends a frame slot to `WriteFile` and reads it back after
+Grass/Memory/State.lean	7c2088bdd344	4381	say anything. It said anything: every Spike 1 fixture's address contradicted the
+Grass/Platform/Win32/Console.lean	669467bd30f5	7	`docs/HELLO_WORLD.md` names, modeled as the contracts
+Grass/Platform/Win32/Console.lean	669467bd30f5	44	a response that would otherwise be a success, and `Spikes/1_Hello_World` carries
+Grass/Platform/Win32/Console.lean	669467bd30f5	51	"progress. `docs/HELLO_WORLD.md` requires it to be ""handled as an explicit"
+Grass/Platform/Win32/Console.lean	669467bd30f5	100	`Spikes/1_Hello_World/Program.lean` tests both — `test rax, rax` then
+Grass/Platform/Win32/Console.lean	669467bd30f5	233	`docs/HELLO_WORLD.md` fixes the product profile as
+Grass/Platform/Win32/Console.lean	669467bd30f5	250	partial write the whole Spike 1 loop exists to handle — and may be **zero**,
+Grass/Platform/Win32/Console.lean	669467bd30f5	319	Kept explicit because it is the response `docs/HELLO_WORLD.md` requires the
+Grass/Platform/Win32/Console.lean	669467bd30f5	383	function returning `Unit`, because `docs/HELLO_WORLD.md` requires that
+Grass/Platform/Win32/Console.lean	669467bd30f5	387	`Spikes/1_Hello_World/Program.lean` still places `ud2` after the call. That is
+Grass/Platform/Win32/Console.lean	669467bd30f5	397	/-- The exit status for a successful run, per `docs/HELLO_WORLD.md`: zero. -/
+Grass/Platform/Win32/Console.lean	669467bd30f5	402	`docs/HELLO_WORLD.md` gives one public `.failure` outcome, so
+Grass/Platform/Win32/RawPhasePreservation.lean	9507d8c7df30	4	clauses, not enabledness or a classification of every reachable Hello state.
+Grass/Process/Sequential/Machine.lean	eb5ea5e53d69	20	This module is that interface and nothing else. A Hello World author writes a
+Grass/Refinement/Console/WriteHistory.lean	56a57656c5fd	16	It is not Hello's complete-history contract, a responsiveness theorem, or a
+Grass/Std/Console/Process.lean	ea0433673e3f	7	This is a portable implementation model for Hello's byte-write loop, using the
+Grass/Std/Console/Process.lean	ea0433673e3f	24	infinite-pending semantics or responsive-strategy theorem required by Hello.
+Grass/Std/Logical/Text.lean	173a692f2ff2	67	"frontend puts into `String.ofByteArray` when it lexes `""Hello, World!""` from a"
+Grass/Std/Logical/Text.lean	173a692f2ff2	71	`Spikes/1_Hello_World/Spec.lean`'s message is the observable the whole first
+Grass/Std/Logical/Vec.lean	bd236c976b53	768	`Spikes/1_Hello_World` gives its own terminal. -/
+README.md	30f160bdc868	43	The first end-to-end target is a Win32 x64 PE32+ Hello World using
+README.md	30f160bdc868	61	Development proceeds one spike at a time, beginning with the existing Hello
+Spikes/1_Hello_World/Program.lean	07ea21de464b	4	import Spikes.«1_Hello_World».Spec
+Spikes/1_Hello_World/Program.lean	07ea21de464b	6	namespace Grass.Spikes.HelloWorld
+Spikes/1_Hello_World/Program.lean	07ea21de464b	8	def policy : TargetOutcomeProjection HelloOutcome UInt32 :=
+Spikes/1_Hello_World/Program.lean	07ea21de464b	10	(success := HelloOutcome.success)
+Spikes/1_Hello_World/Program.lean	07ea21de464b	25	def helloStatics : StaticObjectTable := static_objects {
+Spikes/1_Hello_World/Program.lean	07ea21de464b	29	def helloSource : MachineSource plan :=
+Spikes/1_Hello_World/Program.lean	07ea21de464b	31	withCallFrame WriteFile asm_source (statics := helloStatics) {
+Spikes/1_Hello_World/Program.lean	07ea21de464b	92	def helloVerified : VerifiedProgram spec := by
+Spikes/1_Hello_World/Program.lean	07ea21de464b	95	with helloSource
+Spikes/1_Hello_World/Program.lean	07ea21de464b	97	def bytes : ByteArray := emitProgram helloVerified
+Spikes/1_Hello_World/Program.lean	07ea21de464b	99	end Grass.Spikes.HelloWorld
+Spikes/1_Hello_World/Spec.lean	06789ced138e	4	namespace Grass.Spikes.HelloWorld
+Spikes/1_Hello_World/Spec.lean	06789ced138e	9	"def message : TextLine := ""Hello, World!"""
+Spikes/1_Hello_World/Spec.lean	06789ced138e	11	inductive HelloOutcome
+Spikes/1_Hello_World/Spec.lean	06789ced138e	15	def outcomePolicy : ConsoleWriteOutcomePolicy HelloOutcome where
+Spikes/1_Hello_World/Spec.lean	06789ced138e	21	def helloContract {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+Spikes/1_Hello_World/Spec.lean	06789ced138e	25	def helloSpec {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+Spikes/1_Hello_World/Spec.lean	06789ced138e	27	SpecProcess.ofRelational (helloContract resources)
+Spikes/1_Hello_World/Spec.lean	06789ced138e	30	theorem helloSpecCorrect {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+Spikes/1_Hello_World/Spec.lean	06789ced138e	31	(resources : R) : MeetsAllSpecificationTheorems (helloSpec resources) :=
+Spikes/1_Hello_World/Spec.lean	06789ced138e	34	def spec : SpecProcess resources := helloSpec resources
+Spikes/1_Hello_World/Spec.lean	06789ced138e	36	end Grass.Spikes.HelloWorld
+Spikes/README.md	9f6ef9eea867	4	`docs/SPIKE_1.md` through `docs/SPIKE_5.md`. They are design fixtures, not a compiled Grass
+Spikes/README.md	9f6ef9eea867	43	The list is descriptive, not a mandatory template. Hello World uses only
+Spikes/README.md	9f6ef9eea867	56	| 1 Hello World | [`1_Hello_World`](1_Hello_World/) | [`docs/SPIKE_1.md`](../docs/SPIKE_1.md) |
+Tests/ABI/Win64/UnwindCorpus.lean	aabecc8714a2	214	/-- Spike 1's prologue, as the differential sees it. -/
+Tests/ABI/Win64/UnwindCorpus.lean	aabecc8714a2	215	def spike1Rows : List Row :=
+Tests/ABI/Win64/UnwindCorpus.lean	aabecc8714a2	216	"[ rowOf ""spike1"""
+Tests/ABI/Win64/UnwindCorpus.lean	aabecc8714a2	218	.alloc spike1CallAllocationBytes] ].reduceOption
+Tests/ABI/Win64/UnwindCorpus.lean	aabecc8714a2	223	pushAllocRows ++ frameRows ++ spike1Rows
+Tests/ABI/Win64/UnwindCorpus.lean	aabecc8714a2	225	/-- The Spike 1 row agrees with the theorem in `UnwindBytes.lean`, so the
+Tests/ABI/Win64/UnwindCorpus.lean	aabecc8714a2	228	theorem spike1Row_matches_theorem :
+Tests/ABI/Win64/UnwindCorpus.lean	aabecc8714a2	229	"(spike1Rows.map Row.xdata) = [""010a04000a5206e004d002c0""] := by"
+Tests/Artifact/PE/Exceptions.lean	8e5cd4950b18	6	Root's Hello composition still owns source-derived ABI validity and execution. -/
+Tests/Assembly/FrameArgument.lean	d9b13b62ceba	11	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/FrameArgument.lean	d9b13b62ceba	14	let body ← (SourceInput.extractHelloSourceChars chars).toOption
+Tests/Assembly/FrameArgument.lean	d9b13b62ceba	29	"(source_chars ""def helloSource : MachineSource plan := withStack (value : UInt32 := 0) withCallFrame "") ++"
+Tests/Assembly/FrameArgument.lean	d9b13b62ceba	55	"(source_chars ""def helloSource : MachineSource plan := "") ++ locals ++"
+Tests/Assembly/FrameLea.lean	bd127ceb88e9	10	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/FrameLea.lean	bd127ceb88e9	13	let body ← (SourceInput.extractHelloSourceChars chars).toOption
+Tests/Assembly/FrameLea.lean	bd127ceb88e9	24	-- Every observation is downstream of the actual, unchanged Hello source.
+Tests/Assembly/FrameLea.lean	bd127ceb88e9	30	"(source_chars ""def helloSource : MachineSource plan := "") ++ locals ++"
+Tests/Assembly/FrameLoad.lean	31cf7df032ab	9	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/FrameLoad.lean	31cf7df032ab	12	let body ← (SourceInput.extractHelloSourceChars chars).toOption
+Tests/Assembly/FrameLoad.lean	31cf7df032ab	28	"(source_chars ""def helloSource : MachineSource plan := "") ++ locals ++"
+Tests/Assembly/SavedPrefix.lean	1e61230d0dad	10	"(source_chars ""def helloSource := asm_source {\n"") ++ body ++ (source_chars ""\n}"")"
+Tests/Assembly/SavedPrefix.lean	1e61230d0dad	13	let body ← (extractHelloSourceChars chars).toOption
+Tests/Assembly/SavedPrefix.lean	1e61230d0dad	18	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/SourceFrame.lean	6d6799f3f0e6	10	(extractHelloSourceChars chars).toOption.bind derive?
+Tests/Assembly/SourceFrame.lean	6d6799f3f0e6	12	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/SourceFrame.lean	6d6799f3f0e6	23	"(source_chars ""def helloSource : MachineSource plan := withStack (value : UInt32 := 7) withCallFrame "") ++"
+Tests/Assembly/SourceFrameHeader.lean	69cf16e820f3	12	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/SourceFrameHeader.lean	69cf16e820f3	15	(extractHelloSourceChars authored).toOption.bind parse? =
+Tests/Assembly/SourceFrameHeader.lean	69cf16e820f3	16	"some ⟨""plan"", [⟨""transferred"", 0⟩], ""WriteFile"", ""helloStatics""⟩ := by"
+Tests/Assembly/SourceImportRequests.lean	f4903822daf7	7	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/SourceImportRequests.lean	f4903822daf7	11	let body ← (Grass.Assembly.SourceInput.extractHelloSourceChars authored).toOption
+Tests/Assembly/SourceInitialization.lean	d77cb4ce034c	8	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/SourceInitialization.lean	d77cb4ce034c	12	let body ← (SourceInput.extractHelloSourceChars chars).toOption
+Tests/Assembly/SourceInitialization.lean	d77cb4ce034c	27	"(source_chars ""def helloSource : MachineSource plan := "") ++ locals ++"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	8	"def spike1Program : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	9	theorem spike1_source_ingress :
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	10	(extractHelloSourceChars spike1Program).toOption.map (fun body =>
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	15	"example : (extractHelloSource ""def other := asm_source { mov transferred, 0 }"").toOption = none := by decide"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	16	example : (extractHelloSource
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	17	"""def helloSource := asm_source { mov transferred, 0 }\n\"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	18	"def helloSource := asm_source { mov transferred, 0 }"").toOption = none := by decide"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	19	"example : (extractHelloSource ""def helloSource := asm_source { nested { }"").toOption = none := by decide"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	20	example : (extractHelloSource
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	21	"""-- def helloSource := asm_source { bogus }\n\"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	22	"def helloSource := asm_source (statics := x) { mov transferred, 0 }"").toOption.isSome := by decide"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	23	example : (extractHelloSource
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	24	"""def decoy := \""def helloSource := asm_source { bogus }\""\n\"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	25	"def helloSource := asm_source { mov transferred, 0 }"").toOption.isSome := by decide"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	26	example : (extractHelloSource
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	27	"""def helloSource := asm_source { /- } /- nested -/ misleading -/ mov transferred, 0 }"").toOption.isSome := by decide"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	28	"example : (extractHelloSource ""def helloSource := asm_source { /- unterminated"").toOption = none := by decide"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	29	"example : (extractHelloSource ""def helloSource := \""unterminated"").toOption = none := by decide"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	30	example : (extractHelloSource
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	31	"""def helloSource := asm_source { /- unterminated\n\"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	32	"def helloSource := asm_source { mov transferred, 0 }"").toOption = none := by decide"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	33	example : (extractHelloSource
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	34	"""def helloSource := asm_source { \""ignored\nmov transferred, 7\"" }"").toOption.map"
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	36	example : (extractHelloSource
+Tests/Assembly/SourceInput.lean	2b8e23ae979c	37	"""def helloSource := withStack (x : UInt64 := 0) asm_source { mov x, 0 }"").toOption.map"
+Tests/Assembly/SourceLinkedImage.lean	785dc6f83ac9	13	"def payload : Grass.Std.Logical.ByteArray := Text.utf8 ""Hello, World!\r\n"""
+Tests/Assembly/SourceLinkedImage.lean	785dc6f83ac9	23	let body ← (SourceInput.extractHelloSourceChars SourceResolve.authored).toOption
+Tests/Assembly/SourceLinkedImageErrors.lean	5ea0f160000d	18	let body ← requireSome (SourceInput.extractHelloSourceChars SourceResolve.authored).toOption
+Tests/Assembly/SourcePrologue.lean	16a6c2044d96	9	let body ← (extractHelloSourceChars chars).toOption
+Tests/Assembly/SourcePrologue.lean	16a6c2044d96	13	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/SourcePrologue.lean	16a6c2044d96	27	"(source_chars ""def helloSource : MachineSource plan := withStack (value : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\n"") ++"
+Tests/Assembly/SourceResolve.lean	370accbceb3b	8	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/SourceResolve.lean	370accbceb3b	18	let body ← (SourceInput.extractHelloSourceChars authored).toOption
+Tests/Assembly/SourceResolve.lean	370accbceb3b	39	match (SourceInput.extractHelloSourceChars authored).toOption >>= SourceFrame.derive? with
+Tests/Assembly/SourceSplice.lean	aa7cd12a7f6e	10	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/SourceSplice.lean	aa7cd12a7f6e	13	let body ← (SourceInput.extractHelloSourceChars authored).toOption
+Tests/Assembly/SourceSplice.lean	aa7cd12a7f6e	28	let body ← (SourceInput.extractHelloSourceChars authored).toOption
+Tests/Assembly/SourceSplice.lean	aa7cd12a7f6e	41	"""def helloSource : MachineSource plan := withStack (value : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\nmov value, 0\nud2\n}"""
+Tests/Assembly/SourceSplice.lean	aa7cd12a7f6e	44	let body ← (SourceInput.extractHelloSourceChars zeroSavedSource).toOption
+Tests/Assembly/SourceStore.lean	0d2a39afdde0	6	import Tests.Memory.Spike1Policy
+Tests/Assembly/SourceStore.lean	0d2a39afdde0	15	open Grass.Tests.Spike1 Grass.Tests.Spike1Policy Tests.Memory.Spike1Block
+Tests/Assembly/SourceStore.lean	0d2a39afdde0	19	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/SourceStore.lean	0d2a39afdde0	31	let body ← (extractHelloSourceChars source).toOption
+Tests/Assembly/SourceStore.lean	0d2a39afdde0	66	"(source_chars ""def helloSource : MachineSource plan := withStack (value : "") ++ type ++"
+Tests/Assembly/SourceStore.lean	0d2a39afdde0	91	"""def helloSource : MachineSource plan := withStack (rax : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\nmov rax, 0\nud2\n}"")).isNone := by"
+Tests/Assembly/SourceTemplates.lean	0b1c8ec8465f	10	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/SourceTemplates.lean	0b1c8ec8465f	13	let body ← (SourceInput.extractHelloSourceChars authored).toOption
+Tests/Assembly/SourceTemplates.lean	0b1c8ec8465f	19	let body ← (SourceInput.extractHelloSourceChars authored).toOption
+Tests/Assembly/SourceTemplates.lean	0b1c8ec8465f	34	"""def helloSource : MachineSource plan := withStack (STD_OUTPUT_HANDLE : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\nmov ecx, STD_OUTPUT_HANDLE\nud2\n}"""
+Tests/Assembly/SourceTemplates.lean	0b1c8ec8465f	37	match (SourceInput.extractHelloSourceChars collision).toOption with
+Tests/Assembly/SourceTemplates.lean	0b1c8ec8465f	48	match (SourceInput.extractHelloSourceChars authored).toOption with
+Tests/Assembly/SourceTemplates.lean	0b1c8ec8465f	58	"""def helloSource : MachineSource plan := withCallFrame WriteFile asm_source (statics := statics) {\nmov eax, UNKNOWN\nud2\n}"""
+Tests/Assembly/SourceTemplates.lean	0b1c8ec8465f	61	match (SourceInput.extractHelloSourceChars unsupported).toOption with
+Tests/Assembly/SourceUnwind.lean	0de4cb720dd4	10	authored Hello prologue. This does not execute an unwind or load an image. -/
+Tests/Assembly/SourceUnwind.lean	0de4cb720dd4	12	let body ← (SourceInput.extractHelloSourceChars SourceResolve.authored).toOption
+Tests/Assembly/Store32Execution.lean	04c1b07c185d	2	import Tests.Memory.Spike1Policy
+Tests/Assembly/Store32Execution.lean	04c1b07c185d	4	/-! The resolved value is enforced through the existing Spike 1 transition. -/
+Tests/Assembly/Store32Execution.lean	04c1b07c185d	8	open Grass.Tests.Spike1 Grass.Tests.Spike1Policy Tests.Memory.Spike1Block
+Tests/Assembly/Win32Constants.lean	ae47797c3013	8	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/Win32Constants.lean	ae47797c3013	11	let body ← (SourceInput.extractHelloSourceChars chars).toOption
+Tests/Assembly/Win32Constants.lean	ae47797c3013	50	"(source_chars ""def helloSource : MachineSource plan := "") ++"
+Tests/Assembly/X86BranchLayout.lean	370eed209f7f	9	"(source_chars ""def helloSource := asm_source {\n"") ++ body ++ (source_chars ""\n}"")"
+Tests/Assembly/X86BranchLayout.lean	370eed209f7f	12	let body ← (extractHelloSourceChars chars).toOption
+Tests/Assembly/X86BranchLayout.lean	370eed209f7f	55	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/X86ClosedEncoding.lean	cfdd959ec8d7	9	"def spike1Program : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/X86ClosedEncoding.lean	cfdd959ec8d7	11	(extractHelloSourceChars spike1Program).toOption.bind fun body => (parseBody body).toOption
+Tests/Assembly/X86ControlFlow.lean	9325b6a65682	9	let body ← (extractHelloSourceChars chars).toOption
+Tests/Assembly/X86ControlFlow.lean	9325b6a65682	13	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/X86ControlFlow.lean	9325b6a65682	25	"(source_chars ""def helloSource := asm_source {\n"") ++ body ++ (source_chars ""\n}"")"
+Tests/Assembly/X86Source.lean	2a370831042c	9	"def spike1Program : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/X86Source.lean	2a370831042c	11	(extractHelloSourceChars spike1Program).toOption.bind fun body => (parseBody body).toOption
+Tests/Assembly/X86Source.lean	2a370831042c	13	/-- The unchanged Spike 1 body is consumed completely; unsupported nonblank lines
+Tests/Assembly/X86Source.lean	2a370831042c	18	((extractHelloSourceChars spike1Program).toOption.bind fun body =>
+Tests/Assembly/X86Source.lean	2a370831042c	22	(extractHelloSource source).toOption.bind fun body => (parseBody body).toOption
+Tests/Assembly/X86Source.lean	2a370831042c	24	"example : parseText ""def helloSource := asm_source { frobnicate rax }"" = none := by decide +kernel"
+Tests/Assembly/X86Source.lean	2a370831042c	25	"example : parseText ""def helloSource := asm_source { @audit(.orphan) }"" = none := by decide +kernel"
+Tests/Assembly/X86Source.lean	2a370831042c	26	"example : parseText ""def helloSource := asm_source { push eax }"" = none := by decide +kernel"
+Tests/Assembly/X86Source.lean	2a370831042c	27	"example : parseText ""def helloSource := asm_source { call qword ptr [rip + import] extra }"" = none := by"
+Tests/Assembly/X86Source.lean	2a370831042c	30	"example : parseText ""def helloSource := asm_source { mov rax, ecx }"" = none := by decide +kernel"
+Tests/Assembly/X86Source.lean	2a370831042c	31	"example : parseText ""def helloSource := asm_source { test r14d, rax }"" = none := by decide +kernel"
+Tests/Assembly/X86Source.lean	2a370831042c	32	"example : parseText ""def helloSource := asm_source { @audit(foo [:=]) }"" = none := by decide +kernel"
+Tests/Assembly/X86Source.lean	2a370831042c	33	"example : parseText ""def helloSource := asm_source { label: @audit(.broken }"" = none := by decide +kernel"
+Tests/Assembly/X86Source.lean	2a370831042c	34	"example : parseText ""def helloSource := asm_source { label: @terminal(.success) junk }"" = none := by"
+Tests/Assembly/X86Source.lean	2a370831042c	36	"example : parseText ""def helloSource := asm_source { label: @placement [handle r12] }"" = none := by"
+Tests/Assembly/X86Source.lean	2a370831042c	38	"example : parseText ""def helloSource := asm_source { label: @placement [handle := r12,] }"" = none := by"
+Tests/Assembly/X86Source.lean	2a370831042c	40	"example : parseText ""def helloSource := asm_source { label: @invariant loop(payload,) }"" = none := by"
+Tests/Assembly/X86Source.lean	2a370831042c	42	"example : parseText ""def helloSource := asm_source { label: @placement [handle := r12, handle := r13] }"" ="
+Tests/Console/CapturedDemands.lean	64f22c5cdb5b	8	"CapturedSpecification.ofLine _ ""Hello, World!"" ⟨true, false, false, false⟩"
+Tests/ISA/X86/InstructionDispatch.lean	4d1eb55009b5	12	"private def authored : List Char := include_source_chars ""../../../Spikes/1_Hello_World/Program.lean"""
+Tests/ISA/X86/InstructionDispatch.lean	4d1eb55009b5	16	let body ← (SourceInput.extractHelloSourceChars authored).toOption
+Tests/ISA/X86/LedgerAudit.lean	0f86e8d99000	1011	-- Fixtures: Spike 1's prologue and a frame-pointer example, which are
+Tests/ISA/X86/LedgerAudit.lean	0f86e8d99000	1013	`Grass.ABI.Win64.spike1Prologue, `Grass.ABI.Win64.spike1Layout,
+Tests/ISA/X86/LedgerAudit.lean	0f86e8d99000	1014	`Grass.ABI.Win64.spike1SavedRegisters,
+Tests/ISA/X86/LedgerAudit.lean	0f86e8d99000	1015	`Grass.ABI.Win64.spike1FrameLayout,
+Tests/ISA/X86/LedgerAudit.lean	0f86e8d99000	1016	`Grass.ABI.Win64.spike1CallAllocationBytes,
+Tests/ISA/X86/LedgerAudit.lean	0f86e8d99000	1017	`Grass.ABI.Win64.spike1UnwindInfo, `Grass.ABI.Win64.framePointerLayout,
+Tests/ISA/X86/NativeCorpus.lean	5860dc7bb719	110	-- Exact operations emitted by the current Hello lowering path.
+Tests/ISA/X86/NativeCorpus.lean	5860dc7bb719	112	"[ (""hello-test-eax-eax"", ⟨.test, .w32, .rax, .rax⟩)"
+Tests/ISA/X86/NativeCorpus.lean	5860dc7bb719	113	", (""hello-cmp-eax-r14d"", ⟨.cmp, .w32, .rax, .r14⟩)"
+Tests/ISA/X86/NativeCorpus.lean	5860dc7bb719	114	", (""hello-add-r13-rax"", ⟨.add, .w64, .r13, .rax⟩)"
+Tests/ISA/X86/NativeCorpus.lean	5860dc7bb719	115	", (""hello-sub-r14d-eax"", ⟨.sub, .w32, .r14, .rax⟩) ] do"
+Tests/ISA/X86/NativeCorpus.lean	5860dc7bb719	116	"emitRegister label instruction ""Hello-production-Instruction.encoding+Instruction.effect"""
+Tests/ISA/X86/NativeStackCorpus.lean	319d09763e5f	88	let body ← (SourceInput.extractHelloSourceChars chars).toOption
+Tests/ISA/X86/NativeStackCorpus.lean	319d09763e5f	93	"(source_chars ""def helloSource : MachineSource plan := withStack (value : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\n"") ++"
+Tests/ISA/X86/NativeStackCorpus.lean	319d09763e5f	97	"include_source_chars ""../../../Spikes/1_Hello_World/Program.lean"""
+Tests/ISA/X86/NativeStackCorpus.lean	319d09763e5f	110	Spike 1 source supplies the three-extended-register case; the other public
+Tests/ISA/X86/NativeStackCorpus.lean	319d09763e5f	116	", prologueRow? ""authored-spike1"" authored"
+Tests/ISA/X86/RipCorpus.lean	5b1a235b4fbc	7	assembler, and it is the form Spike 1 depends on most: every import call and the
+Tests/ISA/X86/Spike1Addressing.lean	0f26740492e6	4	# Spike 1 addressing encodings
+Tests/ISA/X86/Spike1Addressing.lean	0f26740492e6	7	`Spikes/1_Hello_World/Program.lean`, checked by decision at build time.
+Tests/ISA/X86/Spike1Addressing.lean	0f26740492e6	9	`Tests/Memory/Spike1Reference.lean` declares the *memory effects* of the same
+Tests/ISA/X86/Spike1Addressing.lean	0f26740492e6	36	Spike 1 uses exactly these, and no others:
+Tests/ISA/X86/Spike1Addressing.lean	0f26740492e6	60	namespace Grass.Tests.ISA.X86.Spike1
+Tests/ISA/X86/Spike1Addressing.lean	0f26740492e6	167	`rsp`'s low three bits. Spike 1 keeps the standard-output handle in `r12` across
+Tests/ISA/X86/Spike1Addressing.lean	0f26740492e6	174	Spike 1 uses `r13` as the payload cursor. `mod=00` with `r13`'s low bits is the
+Tests/ISA/X86/Spike1Addressing.lean	0f26740492e6	181	/-- `rsp` has no encoding as an index register, so no form of Spike 1's
+Tests/ISA/X86/Spike1Addressing.lean	0f26740492e6	186	/-! ## Round-trip on the exact Spike 1 forms
+Tests/ISA/X86/Spike1Addressing.lean	0f26740492e6	212	end Grass.Tests.ISA.X86.Spike1
+Tests/Memory/CallProtocol.lean	c161079143bf	3	import Tests.Memory.Spike1Policy
+Tests/Memory/CallProtocol.lean	c161079143bf	5	/-! Concrete acceptance and refusal checks for occurrence-bound Spike 1 loans. -/
+Tests/Memory/CallProtocol.lean	c161079143bf	10	open Grass.Tests.Spike1 Tests.Memory.Spike1Block Grass.Tests.Spike1Policy
+Tests/Memory/CallProtocol.lean	c161079143bf	199	CallProtocol.step? pending policy (SomeOperation.of Spike1Policy.Op.movEcxImm)
+Tests/Memory/CallProtocolOrdering.lean	bd477d605f7b	3	import Tests.Memory.Spike1Policy
+Tests/Memory/CallProtocolOrdering.lean	bd477d605f7b	17	open Grass.Tests.Spike1 Tests.Memory.Spike1Block Grass.Tests.Spike1Policy
+Tests/Memory/CallProtocolOrdering.lean	bd477d605f7b	31	{ Grass.Tests.Spike1Policy.policy with
+Tests/Memory/CallProtocolOrdering.lean	bd477d605f7b	32	oracle := .ofMemory writeData Grass.Tests.Spike1Policy.indeterminateByte }
+Tests/Memory/Placement.lean	08bf6f326690	127	compared it to the placement, so every Spike 1 fixture's address contradicted the
+Tests/Memory/Placement.lean	08bf6f326690	214	its docstring records that every address in the Spike 1 fixtures contradicted the
+Tests/Memory/RiskOneCases.lean	745e37abc722	1	import Tests.Memory.Spike1Reference
+Tests/Memory/RiskOneCases.lean	745e37abc722	32	condition in the `Tests/Memory/Spike1Block.lean` idiom stops working and an induction
+Tests/Memory/RiskOneCases.lean	745e37abc722	56	open Grass.Core Grass.Memory Grass.Tests.Spike1
+Tests/Memory/Spike1Block.lean	3881cd089cf5	2	import Tests.Memory.Spike1Reference
+Tests/Memory/Spike1Block.lean	3881cd089cf5	5	# The Spike 1 straight-line block
+Tests/Memory/Spike1Block.lean	3881cd089cf5	8	Spike 1 block. `Tests/Memory/StraightLineBlock.lean` proves the discharge is
+Tests/Memory/Spike1Block.lean	3881cd089cf5	11	descriptors `Tests/Memory/Spike1Reference.lean` declares for
+Tests/Memory/Spike1Block.lean	3881cd089cf5	12	`Spikes/1_Hello_World/Program.lean`.
+Tests/Memory/Spike1Block.lean	3881cd089cf5	16	`Spike1Reference.lean` wraps these same descriptors in `SubstepSequence`s for
+Tests/Memory/Spike1Block.lean	3881cd089cf5	54	namespace Tests.Memory.Spike1Block
+Tests/Memory/Spike1Block.lean	3881cd089cf5	56	open Grass.Core Grass.Memory Grass.Std.Logical Grass.Tests.Spike1
+Tests/Memory/Spike1Block.lean	3881cd089cf5	100	Rebuilt through `Grass.Tests.Spike1.access` from the same provenances the
+Tests/Memory/Spike1Block.lean	3881cd089cf5	140	`mov transferred, 0` left. In `Spikes/1_Hello_World/Program.lean` the reload reads
+Tests/Memory/Spike1Block.lean	3881cd089cf5	145	"exit criterion ""a straight-line Spike 1 block discharges"" was met about a block that"
+Tests/Memory/Spike1Block.lean	3881cd089cf5	146	is not Spike 1's. Review found it.
+Tests/Memory/Spike1Block.lean	3881cd089cf5	261	This is Spike 1's data flow, and the fixture asserted the opposite for as long as it
+Tests/Memory/Spike1Block.lean	3881cd089cf5	297	program.** `Spike1Reference.lean`'s `movEaxTransferred` says its
+Tests/Memory/Spike1Block.lean	3881cd089cf5	316	end Tests.Memory.Spike1Block
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	2	import Tests.Memory.Spike1Block
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	5	# The Spike 1 reference set, stepped
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	9	did. `Tests/Memory/Spike1Block.lean` runs `runBlock`, the `applyAccess`-level
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	38	namespace Grass.Tests.Spike1Policy
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	40	open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical Grass.Tests.Spike1
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	41	open Tests.Memory.Spike1Block
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	45	/-- The vocabulary Spike 1's instructions actually use.
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	52	Spike 1: it declares no profile-specific ordering, cites no initialization rule, and
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	67	-- §6's call lends the frame slot it passes, so `loan` is Spike 1's; `frame` is
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	70	-- Spike 1 declares no obligation protocols, because its reference set creates no
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	78	"{ id := ⟨""spike1.win64""⟩, vocabularyVersion := 1, vocabulary := vocabulary"
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	114	`Tests/Memory/Spike1Reference.lean` — the point is that the *reference* set steps,
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	117	/-- Spike 1's memory-touching instruction forms. -/
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	183	{ memoryEffects := some (.single Tests.Memory.Spike1Block.agentWrite)
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	192	"Grass.Op.step policy state (SomeOperation.of op) mainThread .thread ⟨⟨""spike1""⟩⟩"
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	196	The one reference case that had no theorem. `Spike1Reference.ud2Containment`'s own
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	209	".thread ⟨⟨""spike1""⟩⟩ (faultAt := fun seq =>"
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	263	would refuse Spike 1's central case.
+Tests/Memory/Spike1Policy.lean	b32cb2dbdaa4	454	end Grass.Tests.Spike1Policy
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	7	# Spike 1 reference access declarations
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	11	exact instruction mix in `Spikes/1_Hello_World/Program.lean`, against the sealed
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	18	The stack geometry is the one fixed by `docs/SPIKE_1.md`: three saved registers
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	39	namespace Grass.Tests.Spike1
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	63	/-- The first epoch of both allocations; nothing is reused in Spike 1. -/
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	70	/-- The single thread Spike 1 runs on. -/
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	74	"""external API agent"" among the execution context kinds, and Spike 1's whole point is"
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	93	Grass.ABI.Win64.spike1FrameLayout
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	132	/-- The `HelloWorld` body frame, from call-site RSP through the saved registers. -/
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	134	"{ kind := .frame, label := ⟨""helloFrame""⟩,"
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	151	a saved nonvolatile register. `Spikes/1_Hello_World/Program.lean` pushes `r12`,
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	198	"Fifteen bytes: `docs/SPIKE_1.md` §1 says ""the 15 UTF-8 bytes `Hello, World!"
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	201	review counted, in the file whose mandate is the exact Spike 1 instruction mix. -/
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	339	carried one — `Spike1Policy`'s vocabulary declared `grantKinds := ⟨[.loan]⟩` for a
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	400	/-! ## Two cases from outside Spike 1
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	402	Spike 1 does not contain either of these. They are here because an adversarial
+Tests/Memory/Spike1Reference.lean	4a70dd4f4f26	697	end Grass.Tests.Spike1
+Tests/Platform/Win32ApiRequest.lean	aeb5368f1bd7	11	open Grass.Tests.Spike1
+Tests/Platform/Win32ExitProcessCompletion.lean	7cb5a15f2d61	17	open Grass.Platform.Win32.ExecutionState Grass.Tests.Spike1
+Tests/Platform/Win32ExitProcessRuntime.lean	ea080c61c26d	7	open Grass.Tests.Win32ApiRequest Grass.Tests.Spike1
+Tests/Platform/Win32GetStdHandleRawReturn.lean	a4f9505d11dd	5	/-! Actual Grass Hello CALL followed by the bounded raw GetStdHandle result
+Tests/Platform/Win32GetStdHandleRawReturn.lean	a4f9505d11dd	17	def regressionFor (actual : Grass.Tests.Win32HelloCall.ActualResult)
+Tests/Platform/Win32GetStdHandleRawReturn.lean	a4f9505d11dd	60	match Grass.Tests.Win32HelloCall.actualHandoff? with
+Tests/Platform/Win32GetStdHandleReturn.lean	a4ff20734ca1	2	import Tests.Platform.Win32HelloCall
+Tests/Platform/Win32GetStdHandleReturn.lean	a4ff20734ca1	5	# Actual Hello GetStdHandle return fixture
+Tests/Platform/Win32GetStdHandleReturn.lean	a4ff20734ca1	8	`Win32HelloCall`.  The supplied provider registers remain observations: no
+Tests/Platform/Win32GetStdHandleReturn.lean	a4ff20734ca1	35	def evaluatedFor {setup : Grass.Tests.Win32HelloCall.ActualSetup}
+Tests/Platform/Win32GetStdHandleReturn.lean	a4ff20734ca1	36	(handoff : Grass.Tests.Win32HelloCall.ActualHandoff setup) :
+Tests/Platform/Win32GetStdHandleReturn.lean	a4ff20734ca1	53	def regressionFor (actual : Grass.Tests.Win32HelloCall.ActualResult) : Option Bool := do
+Tests/Platform/Win32GetStdHandleReturn.lean	a4ff20734ca1	54	let setup : Grass.Tests.Win32HelloCall.ActualSetup := actual.setup
+Tests/Platform/Win32GetStdHandleReturn.lean	a4ff20734ca1	55	let handoff : Grass.Tests.Win32HelloCall.ActualHandoff setup := actual.handoff
+Tests/Platform/Win32GetStdHandleReturn.lean	a4ff20734ca1	104	Grass.Tests.Win32HelloCall.actualHandoff?.bind regressionFor
+Tests/Platform/Win32HelloCall.lean	8007d88605c3	10	# Actual source-linked Hello prefix through GetStdHandle handoff
+Tests/Platform/Win32HelloCall.lean	8007d88605c3	21	namespace Grass.Tests.Win32HelloCall
+Tests/Platform/Win32HelloCall.lean	8007d88605c3	85	let body ← (Grass.Assembly.SourceInput.extractHelloSourceChars
+Tests/Platform/Win32HelloCall.lean	8007d88605c3	89	let plan ← Grass.Tests.Win32LoaderEntry.helloPlan?
+Tests/Platform/Win32HelloCall.lean	8007d88605c3	259	"unless passed do throw (IO.userError ""actual Hello GetStdHandle CALL prefix refused"")"
+Tests/Platform/Win32HelloCall.lean	8007d88605c3	264	end Grass.Tests.Win32HelloCall
+Tests/Platform/Win32LoaderEntry.lean	80b60cf85f2d	6	/-! Initialization fixtures and an actual Grass Hello World source-to-plan
+Tests/Platform/Win32LoaderEntry.lean	80b60cf85f2d	116	def helloPlanFrom? (source : List Char) : Option PE.ImagePlan := do
+Tests/Platform/Win32LoaderEntry.lean	80b60cf85f2d	117	let body ← (Grass.Assembly.SourceInput.extractHelloSourceChars source).toOption
+Tests/Platform/Win32LoaderEntry.lean	80b60cf85f2d	132	supplies freshly read source to `helloPlanFrom?` instead. -/
+Tests/Platform/Win32LoaderEntry.lean	80b60cf85f2d	133	def helloPlan? : Option PE.ImagePlan := helloPlanFrom? Grass.Tests.Assembly.SourceResolve.authored
+Tests/Platform/Win32LoaderEntry.lean	80b60cf85f2d	136	def helloEntry? : Option (Nat × Bool) := do
+Tests/Platform/Win32LoaderEntry.lean	80b60cf85f2d	137	let plan ← helloPlan?
+Tests/Platform/Win32LoaderEntry.lean	80b60cf85f2d	144	"#eval check ""actual Grass source entry"" (helloEntry? == some (0x140001000, true))"
+Tests/Platform/Win32LoaderEntry.lean	80b60cf85f2d	148	def helloPrologue? : Option Bool := do
+Tests/Platform/Win32LoaderEntry.lean	80b60cf85f2d	149	let body ← (Grass.Assembly.SourceInput.extractHelloSourceChars
+Tests/Platform/Win32LoaderEntry.lean	80b60cf85f2d	153	let plan ← helloPlan?
+Tests/Platform/Win32LoaderEntry.lean	80b60cf85f2d	164	"#eval check ""actual Grass source prologue"" (helloPrologue? == some true)"
+Tests/Platform/Win32ProbeCases.lean	ea5c6a6db463	9	share Hello World's production PE entry, imports and emitter, with inherited
+Tests/Platform/Win32RawState.lean	1b3a5696fb4e	14	(.pending writeCall Grass.Tests.Spike1.mainThread Grass.Tests.Spike1.apiAgent)
+Tests/Platform/Win32WriteFile.lean	6eba746eec2a	8	open Grass.Tests.Spike1
+Tests/Platform/Win32WriteFile.lean	6eba746eec2a	20	{ Tests.Memory.Spike1Block.stackRecord with
+Tests/Platform/Win32WriteFile.lean	6eba746eec2a	144	policy := Grass.Tests.Spike1Policy.policy
+Tests/Platform/Win32WriteFile.lean	6eba746eec2a	145	operation := SomeOperation.of Grass.Tests.Spike1Policy.Op.leaPayload
+Tests/Platform/Win32WriteFile.lean	6eba746eec2a	224	¬ InputMatches Tests.Memory.Spike1Block.state₀ request := by decide
+Tests/Platform/Win32WriteFile.lean	6eba746eec2a	260	Grass.Tests.Spike1.access stackProvenance ⟨16, 4⟩
+Tests/Platform/Win32WriteFile.lean	6eba746eec2a	274	{ Grass.Tests.Spike1Policy.policy with
+Tests/Platform/Win32WriteFileConsolePublication.lean	2eaf1f7cbe29	30	caller := Grass.Tests.Spike1.mainThread
+Tests/Platform/Win32WriteFileConsolePublication.lean	2eaf1f7cbe29	31	provider := Grass.Tests.Spike1.apiAgent
+Tests/Platform/Win32WriteFileConsolePublication.lean	2eaf1f7cbe29	52	{ environment with caller := Grass.Tests.Spike1.apiAgent }
+Tests/Platform/Win32WriteFileConsolePublication.lean	2eaf1f7cbe29	58	{ environment with provider := Grass.Tests.Spike1.mainThread }
+Tests/Platform/Win32WriteFileReturn.lean	ce482d0fa69e	12	open Grass.Tests.Spike1
+Tests/Platform/Win32WriteFileService.lean	ae8396b33a2d	9	open Grass.Tests.Spike1
+Tests/Process/BlendFixtures.lean	87c5739850c3	144	"weave.FromLeft (.inl (.write ""hello"")) := ⟨.write ""hello"", rfl⟩"
+Tests/Process/BlendFixtures.lean	87c5739850c3	154	"(∃ own : LogDemand, weave.leftIn.demand own = (.inl (.write ""hello"") : BothDemands) ∧"
+Tests/Process/BlendFixtures.lean	87c5739850c3	155	"∀ other, weave.leftIn.demand other = (.inl (.write ""hello"") : BothDemands) →"
+Tests/Process/BlendFixtures.lean	87c5739850c3	157	"¬ weave.FromRight (.inl (.write ""hello"")) :="
+Tests/Process/BlendFixtures.lean	87c5739850c3	163	"weave.rightIn.demand other = weave.leftIn.demand (.write ""hello"") :="
+Tests/Process/SequentialEffectFixtures.lean	0a488c1907e8	83	"| .awaitingName => .effect (.write ""hello\n"") (fun written => .wrote written)"
+Tests/Specification/TextLine.lean	b2b15f254a67	9	"def message : TextLine := ""Hello, World!"""
+Tests/Specification/TextLine.lean	b2b15f254a67	11	"example : message.text = ""Hello, World!"" := rfl"
+Tests/Specification/TextLine.lean	b2b15f254a67	15	"Text.utf8 ""Hello, World!\r\n"" := rfl"
+Tests/Specification/TextLine.lean	b2b15f254a67	20	"Text.utf8 ""Hello, World!\n"" := rfl"
+Tests/Std/ConsoleWrite.lean	30148280d2cf	6	progress. They do not certify a platform projection or a complete Hello run.
+Tests/Std/PartialWrite.lean	093a96103bdd	9	"- Spike 1, `write_all_loop(payload)` — ""standard partial-write induction over"
+Tests/Std/PartialWrite.lean	093a96103bdd	44	`Spikes/1_Hello_World/Program.lean`'s loop carries `cursor` in `r13` and
+Tests/Std/PartialWrite.lean	093a96103bdd	96	`r14d` holds in `Spikes/1_Hello_World/Program.lean`. -/
+Tests/Std/PartialWrite.lean	093a96103bdd	144	This is the loop variant. `Spikes/1_Hello_World/Program.lean` has a separate
+Tests/Std/Text.lean	783b18c1c0bc	34	/-- `Spikes/1_Hello_World/Spec.lean`'s message, whose exact bytes are the
+Tests/Std/Text.lean	783b18c1c0bc	36	"example : (Text.utf8 ""Hello, World!"").length = 13 := rfl"
+Tests/Std/VecRepresentation.lean	397e9c5f296b	60	re-run `emitterBench` on the machine they care about. `docs/HELLO_WORLD.md`
+Tests/Std/VecRepresentation.lean	397e9c5f296b	65	`docs/HELLO_WORLD.md` forbids `native_decide`, so the kernel evaluates any equality
+Tests/Std/VecRepresentation.lean	397e9c5f296b	184	`docs/HELLO_WORLD.md` forbids `native_decide`, so the kernel evaluates any
+Tools/DisasmHello.lean	55af332f9345	4	/-! Export a structural fixture from the Hello assembly projection and explicit
+Tools/DisasmHello.lean	55af332f9345	7	namespace DisasmHello
+Tools/DisasmHello.lean	55af332f9345	22	"let body ← require ""extractHelloSourceChars"" (SourceInput.extractHelloSourceChars source).toOption"
+Tools/DisasmHello.lean	55af332f9345	34	end DisasmHello
+Tools/DisasmHello.lean	55af332f9345	41	match DisasmHello.produce source.toList (Grass.Std.Logical.Vec.ofHostBytes payload) with
+Tools/DisasmHello.lean	55af332f9345	43	"(← IO.getStderr).putStrLn s!""structural Hello export failed: {error}"""
+Tools/DisasmHello.lean	55af332f9345	51	"(← IO.getStderr).putStrLn ""usage: grass-disasm-hello SOURCE_ASSEMBLY_FILE PAYLOAD_BIN OUTPUT_PE"""
+Tools/EmitGrassHello.lean	2ecbc6cb8101	3	/-! Thin validation exporter. The executable body is the unchanged Grass Hello
+Tools/EmitGrassHello.lean	2ecbc6cb8101	9	"| throw (IO.userError ""usage: EmitGrassHello <exe-path> <expected-stdout-path> <source-snapshot-path>"")"
+Tools/EmitGrassHello.lean	2ecbc6cb8101	10	"let sourceBytes ← IO.FS.readBinFile ""Spikes/1_Hello_World/Program.lean"""
+Tools/EmitGrassHello.lean	2ecbc6cb8101	13	let some plan := Grass.Tests.Win32LoaderEntry.helloPlanFrom? source.toList
+Tools/EmitGrassHello.lean	2ecbc6cb8101	14	"| throw (IO.userError ""Grass source linking refused Hello World"")"
+Tools/disasm/README.md	28675a090709	20	lake build grass-disasm grass-disasm-hello Tests.Disasm.Linear
+Tools/disasm/README.md	28675a090709	21	lake exe grass-disasm-hello Spikes/1_Hello_World/Program.lean payload.bin .lake/hello.exe
+Tools/disasm/README.md	28675a090709	22	lake exe grass-disasm pe .lake/hello.exe
+Tools/disasm/README.md	28675a090709	27	The Hello fixture exporter uses `SourceLinkedImage.buildExcept` and `writeImage`
+Tools/disasm/README.md	28675a090709	31	supplies the Hello CRLF payload explicitly. This exercises the production
+Tools/disasm/check.py	1e60e78b87b6	4	Run after lake build grass-disasm grass-disasm-hello Tests.Disasm.Linear.
+Tools/disasm/check.py	1e60e78b87b6	17	"EXPORT = BIN / (""grass-disasm-hello"" + SUFFIX)"
+Tools/disasm/check.py	1e60e78b87b6	61	"image = work / ""hello.exe"""
+Tools/disasm/check.py	1e60e78b87b6	63	"payload.write_bytes(b""Hello, World!\r\n"")"
+Tools/disasm/check.py	1e60e78b87b6	65	"[str(EXPORT), str(ROOT / ""Spikes/1_Hello_World/Program.lean""), str(payload), str(image)],"
+Tools/disasm/check.py	1e60e78b87b6	92	# silently replace them with a hardcoded Hello string.
+Tools/disasm/check.py	1e60e78b87b6	95	"subprocess.run([str(EXPORT), str(ROOT / ""Spikes/1_Hello_World/Program.lean""),"
+Tools/disasm/check.py	1e60e78b87b6	101	"source = (ROOT / ""Spikes/1_Hello_World/Program.lean"").read_text(encoding=""utf-8"")"
+Tools/disasm/check.py	1e60e78b87b6	211	"print(f""Disasm CLI checks passed; actual structural Hello decoded {decoded} instructions."")"
+Tools/x86-native/README.md	f687a17b8c7f	54	* Four cases use Hello's exact operand selections: TEST EAX,EAX; CMP EAX,R14D;
+Tools/x86-native/VALIDATION.md	eb96267465aa	103	value-boundary cases and four Hello operand selections. The 953 full-status
+Tools/x86-native/run.py	865d04fb185b	120	or label == 'hello-test-eax-eax' else FLAGS_MASK)
+Tools/x86-native/run.py	865d04fb185b	174	# 450 MOV + 420 immediate arithmetic + 120 register boundaries + 4 Hello operations.
+Tools/x86-native/run.py	865d04fb185b	205	hello_operation_cases=4, modeled_register_cases=994,
+check-spike-sources.sh	feaecdbd4652	9	"*) echo ""usage: $0 [--spike 1..5 ...]"" >&2; exit 2 ;;"
+check-spike-sources.sh	feaecdbd4652	15	my %dirs=(1=>'1_Hello_World',2=>'2_Sort',3=>'3_Gzip',4=>'4_Web_Server',5=>'5_Spinning_Cube'); my $failed=0;
+docs/AMD_SOURCE_MIGRATION.md	992597f5e13f	71	Hello emission therefore does not need this unresolved behavior. Extending the
+docs/DECISIONS.md	1134f15637f2	832	progress property is demanded. The existing Hello liveness demand remains
+docs/DECISIONS.md	1134f15637f2	874	138. Hello's status-bearing console contract distinguishes logical result
+docs/DECISIONS.md	1134f15637f2	885	obligations. This interprets the existing Hello terminal-status requirement,
+docs/DECISIONS.md	1134f15637f2	887	program. [HELLO_FACADE_BOUNDARY.md](HELLO_FACADE_BOUNDARY.md) records the
+docs/DISASM.md	17bd530adf88	17	tuple is the actual Windows x86-64 PE32+ Hello output accepted by `spikes`.
+docs/DISASM.md	17bd530adf88	152	[HELLO_UNWIND_BOUNDARY.md](HELLO_UNWIND_BOUNDARY.md).
+docs/DISASM.md	17bd530adf88	265	a structural Hello assembly projection and actual compiled safe/OOB C pairs.
+docs/DISASM_CORPUS.md	f368bebba2e3	12	Start with the accepted Windows x86-64 PE32+ Hello artifact. If its final byte
+docs/DISASM_CORPUS.md	f368bebba2e3	61	Follow spike order as their artifacts become available: Hello, sort, gzip,
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	15	[Hello Program.lean](../Spikes/1_Hello_World/Program.lean) ends in
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	16	`helloVerified : VerifiedProgram spec` and `bytes := emitProgram helloVerified`.
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	18	Read the paired [annotated spike](SPIKE_1.md) and
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	19	[facade boundary](HELLO_FACADE_BOUNDARY.md) for the required connection.
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	26	theorem is not a concrete `helloVerified` construction. The target contract is
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	28	[HELLO_FACADE_BOUNDARY.md](HELLO_FACADE_BOUNDARY.md) describes the required root
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	46	| Fetched instructions and frame memory | [Execution](../Grass/ISA/X86/Execution/), [LoadedCodeRoot.lean](../Grass/Assembly/LoadedCodeRoot.lean), [loader fixture](../Tests/Platform/Win32LoaderEntry.lean) | Start with [exact Hello coverage](X86_HELLO_COVERAGE.md), [x86 execution](X86_EXECUTION.md), and [frame memory execution](FRAME_MEMORY_EXECUTION.md). Normal receipts have premises; they do not exclude every fault or establish a whole loop | x86, memory-model, lowering |
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	53	[SPIKE1_BOUNDARY_REVIEW.md](SPIKE1_BOUNDARY_REVIEW.md). For unwind requirements,
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	54	use [HELLO_UNWIND_BOUNDARY.md](HELLO_UNWIND_BOUNDARY.md). These documents retain
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	60	The retained **24-edge loader-rooted Hello prefix reaches the first WriteFile
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	62	checked finite execution, not whole-Hello or public-emission acceptance.
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	69	| Hello entry prefix | Certificate `Tests/Frontend/WriteFilePrefix.lean.in`: `Result machineSource stdout`, `inspected`; `Tests/Frontend/check.sh` injects the unchanged authored source and retains the actual `ExecutionPrefix` through GetStdHandle entry/return to first WriteFile entry or the selected sentinel's terminal path | Provider registers are observed inputs and the graph is empty; this fixture does not establish native/causal correspondence, all runs or the certificate suffix |
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	101	`helloVerified`/`emitProgram` endpoint remain open. No spike is complete.
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	155	`git show 2ae59a56:docs/HELLO_ENDPOINT_MODEL.md`. Its earlier fixed-environment
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	158	without claiming the public verified-emission gate or the Hello endpoint has migrated.
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	162	Spikes reported a loaded-Hello prologue fixture on main `87fa3e5b`, explicitly
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	163	short of full Hello, and relative certificate/loop work on
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	209	unchanged Hello has no authored RET, and native correspondence remains open.
+docs/ENDPOINT_INDEX.md	4b0eeb8d153b	312	rg -n 'helloVerified|emitProgram' Spikes Grass Tests
+docs/HELLO_ENDPOINT_MODEL.md	01e932e48ba7	16	experiment is historical context, not a dependency or a Hello proof.
+docs/HELLO_ENDPOINT_MODEL.md	01e932e48ba7	49	The hello loop's executed branches establish the selected cause: equal public
+docs/HELLO_ENDPOINT_MODEL.md	01e932e48ba7	107	The selected Hello profile treats provider service, API return observations and
+docs/HELLO_FACADE_BOUNDARY.md	7ee5d79cfa92	1	# Unchanged Hello facade and sole-root boundary
+docs/HELLO_FACADE_BOUNDARY.md	7ee5d79cfa92	14	Keep the authored [Hello specification](../Spikes/1_Hello_World/Spec.lean) and
+docs/HELLO_FACADE_BOUNDARY.md	7ee5d79cfa92	15	[program](../Spikes/1_Hello_World/Program.lean) unchanged. Facades must expose
+docs/HELLO_FACADE_BOUNDARY.md	7ee5d79cfa92	69	without `[DecidableEq Outcome]`: `HelloOutcome` has no such derived instance.
+docs/HELLO_FACADE_BOUNDARY.md	7ee5d79cfa92	133	[Hello outcome type](../Spikes/1_Hello_World/Spec.lean) has no `DecidableEq`
+docs/HELLO_FACADE_BOUNDARY.md	7ee5d79cfa92	134	instance. Its [authored policy and payload](../Spikes/1_Hello_World/Program.lean)
+docs/HELLO_FACADE_BOUNDARY.md	7ee5d79cfa92	154	Do not define generic `MachineSource` as the specialized Hello
+docs/HELLO_FACADE_BOUNDARY.md	7ee5d79cfa92	155	`SourceWitness.Result`: that witness also requires the Hello loop and guards.
+docs/HELLO_FACADE_BOUNDARY.md	7ee5d79cfa92	163	the neutral boundary and linked-image modules above, and the unchanged Hello
+docs/HELLO_FACADE_BOUNDARY.md	7ee5d79cfa92	203	The owned Hello requirement includes terminal status, and the standard
+docs/HELLO_FACADE_BOUNDARY.md	7ee5d79cfa92	239	Hello already promises it. The reusable wrapper must not add an unrequested
+docs/HELLO_UNWIND_BOUNDARY.md	821e4a937f14	1	# Hello World unwind and PE binding
+docs/HELLO_UNWIND_BOUNDARY.md	821e4a937f14	5	This applies existing [Hello acceptance](HELLO_WORLD.md),
+docs/HELLO_UNWIND_BOUNDARY.md	821e4a937f14	6	[Spike 1 section 6](SPIKE_1.md), [ABI requirements](PLATFORM_ABI.md) and
+docs/HELLO_UNWIND_BOUNDARY.md	821e4a937f14	11	The unchanged Hello image requires generated `.pdata` and `.xdata` for its one
+docs/HELLO_UNWIND_BOUNDARY.md	821e4a937f14	16	how to undo the prologue. Hello does all three. Its ordinary exit path therefore
+docs/HELLO_UNWIND_BOUNDARY.md	821e4a937f14	20	The selected Hello profile has no language-specific exception handler, frame
+docs/HELLO_UNWIND_BOUNDARY.md	821e4a937f14	35	| Unwind info | `UnwindInfo` built from that result's layout, no frame pointer and `.noHandler`; no independently maintained Hello byte literal |
+docs/HELLO_UNWIND_BOUNDARY.md	821e4a937f14	188	checkpoint can proceed with these remaining obligations explicit; final Hello
+docs/HELLO_WORLD.md	ff186fef033e	1	# Milestone 1: verified Win32 x64 Hello World
+docs/HELLO_WORLD.md	ff186fef033e	3	The complete annotated proof proposal is [SPIKE_1.md](SPIKE_1.md). This file is
+docs/HELLO_WORLD.md	ff186fef033e	36	containment and disjointness laws; the Spike 1 memory fixtures consume those
+docs/HELLO_WORLD.md	ff186fef033e	54	`Grass/Assembly/SourceInput.lean` reads the existing `helloSource` assembly body
+docs/HELLO_WORLD.md	ff186fef033e	137	and checks the newly computed branch positions. The actual Hello World fixture
+docs/HELLO_WORLD.md	ff186fef033e	145	The reviewed [facade and terminal-observation boundary](HELLO_FACADE_BOUNDARY.md)
+docs/HELLO_WORLD.md	ff186fef033e	203	The reviewed [Hello unwind and PE binding interpretation](HELLO_UNWIND_BOUNDARY.md)
+docs/HELLO_WORLD.md	ff186fef033e	258	The milestone is accepted only when `emitProgram helloVerified` yields bytes
+docs/IMPLEMENTATION_RATCHET.md	06e30750f705	170	### Spike 1: Hello World
+docs/IMPLEMENTATION_RATCHET.md	06e30750f705	181	| `hello.payload.byte` | alter one projected static byte | text-projection/static-object adjacency |
+docs/IMPLEMENTATION_RATCHET.md	06e30750f705	182	| `hello.payload.count` | pass a count different from derived object length | typed write slice |
+docs/IMPLEMENTATION_RATCHET.md	06e30750f705	183	| `hello.partial.zero` | treat successful zero-byte write as progress | progress/partial-write model |
+docs/IMPLEMENTATION_RATCHET.md	06e30750f705	184	| `hello.stack.shadow` | remove required Win64 shadow space | ABI call-site certificate |
+docs/IMPLEMENTATION_RATCHET.md	06e30750f705	185	| `hello.relocation` | replace symbolic IAT reference with an invalid fixed address | relocation/source closure |
+docs/INSTRUCTIONS.md	d6f3f120e1f8	169	policy, but invoking it selects and displays concrete instructions. Spike 1
+docs/INSTRUCTIONS.md	d6f3f120e1f8	245	[`RegisterLaws`](../Grass/ISA/X86/RegisterLaws.lean) gives Hello-facing predicate
+docs/INSTRUCTIONS.md	d6f3f120e1f8	258	is Hello's TEST/CMP/ADD/SUB loop; PUSH/stack allocation, LEA, loads/stores and
+docs/MEMORY_MODEL.md	c04cda4baeb9	364	but Win32 Hello World does not carry proof obligations for unimplemented GPUs,
+docs/MODULES.md	ab0f9ead8e40	58	HelloWin64/
+docs/MODULES.md	ab0f9ead8e40	74	1_Hello_World/     Spec Program
+docs/PLATFORM_ABI.md	6656a92e9fb3	83	name of the violation. For Spike 1, `.excessWriteCount` may retain ordinary
+docs/PROCESS.md	01841138926f	2730	- Hello World is authored as a serial relational write and normalized to the
+docs/PROOF_FEASIBILITY.md	4ed1cb9a7cc3	137	constructor packages the direct program and proof in a registry entry.  Hello,
+docs/PROOF_FEASIBILITY.md	4ed1cb9a7cc3	154	Hello, sort, and fixed-gzip must use the same closed standard-realizer registry,
+docs/RAW_PHASE_PRESERVATION.md	3bd253c128fd	38	These clauses do not prove enabledness or Hello deadlock freedom. The certificate
+docs/README.md	394df881c96c	13	- [Endpoint index](ENDPOINT_INDEX.md): start at authored `helloVerified` and
+docs/README.md	394df881c96c	81	- [HELLO_WORLD.md](HELLO_WORLD.md) defines the first acceptance milestone.
+docs/README.md	394df881c96c	82	- [HELLO_UNWIND_BOUNDARY.md](HELLO_UNWIND_BOUNDARY.md) records the reviewed
+docs/README.md	394df881c96c	83	Hello unwind/PE binding interpretation of the existing ABI, artifact and
+docs/README.md	394df881c96c	85	- [SPIKE1_BOUNDARY_REVIEW.md](SPIKE1_BOUNDARY_REVIEW.md) records the console
+docs/README.md	394df881c96c	88	- [HELLO_FACADE_BOUNDARY.md](HELLO_FACADE_BOUNDARY.md) records the required
+docs/README.md	394df881c96c	91	- [SPIKE_1.md](SPIKE_1.md) is its annotated proof from portable specification to
+docs/README.md	394df881c96c	133	| Bounded instruction and memory execution | [x86 execution](X86_EXECUTION.md), [Hello instruction coverage](X86_HELLO_COVERAGE.md), [source-derived frame memory](FRAME_MEMORY_EXECUTION.md) |
+docs/REVIEW.md	bc84c5a96485	29	7. Walk the Hello World acceptance chain end to end.
+docs/REVIEW.md	bc84c5a96485	409	Hello World readiness:  approve | reject
+docs/SEMANTICS.md	96831657037a	623	Hello profile, provider service microsteps, API return observations and completed
+docs/SPIKE1_BOUNDARY_REVIEW.md	c4cc816cf080	1	# Spike 1 console boundary review
+docs/SPIKE1_BOUNDARY_REVIEW.md	c4cc816cf080	5	contract or certify completion of Hello World. Decisions 134, 136 and 137 and
+docs/SPIKE1_BOUNDARY_REVIEW.md	c4cc816cf080	26	Hello-specific assumptions in shared foundations. Future implementations need
+docs/SPIKE1_BOUNDARY_REVIEW.md	c4cc816cf080	66	audit campaign or a claim of Spike 1 acceptance.
+docs/SPIKE1_BOUNDARY_REVIEW.md	c4cc816cf080	72	| AUD-004: independent x86 encoding/boundary validation | Revisited at generic receipt `b1a9639c`, then scheduled by spikes at fetched normal SUB checkpoint `d4fbb3c7` | Run the bounded generated-Hello and adversarial-control campaign with separate capacity so instruction adapters continue. x86 owns the specimen contract; available private assistance or the auditor executes the independent oracle checks. Retained replay and mutation evidence plus independent review remain required for closure |
+docs/SPIKE_1.md	c3279d7365d6	1	# Spike 1: annotated proof from portable Hello World to Win32 PE
+docs/SPIKE_1.md	c3279d7365d6	19	Spike 1 first-failure fixtures; none is claimed as present here.
+docs/SPIKE_1.md	c3279d7365d6	29	flow specification; it does not change this portable Hello specification.
+docs/SPIKE_1.md	c3279d7365d6	47	while literal register choices belong to authored `helloSource`. None are independent
+docs/SPIKE_1.md	c3279d7365d6	53	The portable program requests the logical text line `Hello, World!`. The Win10
+docs/SPIKE_1.md	c3279d7365d6	54	projection represents it as the 15 UTF-8 bytes `Hello, World!\r\n`. Successful completion
+docs/SPIKE_1.md	c3279d7365d6	66	<!-- grass-block: proof-sketch id=spike1-block-01 -->
+docs/SPIKE_1.md	c3279d7365d6	68	namespace Grass.Spike1
+docs/SPIKE_1.md	c3279d7365d6	91	`HelloOutcome` carries only portable product data. Prefix facts are laws of
+docs/SPIKE_1.md	c3279d7365d6	95	inductive HelloOutcome
+docs/SPIKE_1.md	c3279d7365d6	99	def outcomePolicy : ConsoleWriteOutcomePolicy HelloOutcome where
+docs/SPIKE_1.md	c3279d7365d6	125	"def message : TextLine := ""Hello, World!"""
+docs/SPIKE_1.md	c3279d7365d6	130	def helloContract {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+docs/SPIKE_1.md	c3279d7365d6	134	def helloSpec {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+docs/SPIKE_1.md	c3279d7365d6	136	SpecProcess.ofRelational (helloContract resources)
+docs/SPIKE_1.md	c3279d7365d6	139	theorem helloSpecCorrect {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+docs/SPIKE_1.md	c3279d7365d6	140	(resources : R) : MeetsAllSpecificationTheorems (helloSpec resources) :=
+docs/SPIKE_1.md	c3279d7365d6	143	def spec : SpecProcess resources := helloSpec resources
+docs/SPIKE_1.md	c3279d7365d6	145	def policy : TargetOutcomeProjection HelloOutcome UInt32 :=
+docs/SPIKE_1.md	c3279d7365d6	147	(success := HelloOutcome.success)
+docs/SPIKE_1.md	c3279d7365d6	158	Spike 1 uses the unique standard sequential realizer registered by
+docs/SPIKE_1.md	c3279d7365d6	170	sequential_process proof`; standard Hello needs no names for either witness.
+docs/SPIKE_1.md	c3279d7365d6	219	Spike 1 takes the authored route. `helloSource` carries the instructions,
+docs/SPIKE_1.md	c3279d7365d6	239	def helloVerified : VerifiedProgram spec := by
+docs/SPIKE_1.md	c3279d7365d6	242	with helloSource
+docs/SPIKE_1.md	c3279d7365d6	256	`helloVerified.linkedArtifact`; the emitter cannot choose a lookalike artifact.
+docs/SPIKE_1.md	c3279d7365d6	258	def bytes : ByteArray := emitProgram helloVerified
+docs/SPIKE_1.md	c3279d7365d6	260	end Grass.Spike1
+docs/SPIKE_1.md	c3279d7365d6	264	`helloVerified.sound`; application authors do not write a wrapper which merely
+docs/SPIKE_1.md	c3279d7365d6	274	<!-- grass-block: interface id=spike1-block-02 -->
+docs/SPIKE_1.md	c3279d7365d6	281	structure HelloObservation (wanted : ByteArray) where
+docs/SPIKE_1.md	c3279d7365d6	283	outcome : HelloOutcome
+docs/SPIKE_1.md	c3279d7365d6	286	def HelloObservation.Accepts
+docs/SPIKE_1.md	c3279d7365d6	287	(wanted : ByteArray) (o : HelloObservation wanted) : Prop :=
+docs/SPIKE_1.md	c3279d7365d6	295	binary `HelloOutcome` with a total status function; it does not hide a default
+docs/SPIKE_1.md	c3279d7365d6	306	physical terminal protocol, not `HelloObservation`.
+docs/SPIKE_1.md	c3279d7365d6	316	<!-- grass-block: interface id=spike1-block-03 -->
+docs/SPIKE_1.md	c3279d7365d6	361	<!-- grass-block: proof-sketch id=spike1-block-04 -->
+docs/SPIKE_1.md	c3279d7365d6	380	<!-- grass-block: proof-sketch id=spike1-block-05 -->
+docs/SPIKE_1.md	c3279d7365d6	411	<!-- grass-block: proof-sketch id=spike1-block-06 -->
+docs/SPIKE_1.md	c3279d7365d6	444	<!-- grass-block: proof-sketch id=spike1-block-07 -->
+docs/SPIKE_1.md	c3279d7365d6	486	for generated clients. `helloSource` instead satisfies the same extensional
+docs/SPIKE_1.md	c3279d7365d6	500	<!-- grass-block: proof-sketch id=spike1-block-08 -->
+docs/SPIKE_1.md	c3279d7365d6	502	Console.WriteStdoutInvariant message policy helloVerified.driver
+docs/SPIKE_1.md	c3279d7365d6	559	The generated full control/event graph is derived from `helloSource`; it is not
+docs/SPIKE_1.md	c3279d7365d6	563	<!-- grass-block: proof-sketch id=spike1-block-09 -->
+docs/SPIKE_1.md	c3279d7365d6	604	to `helloSource`.
+docs/SPIKE_1.md	c3279d7365d6	608	<!-- grass-block: proof-sketch id=spike1-block-10 -->
+docs/SPIKE_1.md	c3279d7365d6	627	<!-- grass-block: proof-sketch id=spike1-block-11 -->
+docs/SPIKE_1.md	c3279d7365d6	649	<!-- grass-block: proof-sketch id=spike1-block-12 -->
+docs/SPIKE_1.md	c3279d7365d6	673	not a `helloSource` declaration. An indefinitely pending call has a
+docs/SPIKE_1.md	c3279d7365d6	678	<!-- grass-block: proof-sketch id=spike1-block-13 -->
+docs/SPIKE_1.md	c3279d7365d6	697	<!-- grass-block: proof-sketch id=spike1-block-14 -->
+docs/SPIKE_1.md	c3279d7365d6	731	The listing below is the review rendering of the first-class `helloSource`
+docs/SPIKE_1.md	c3279d7365d6	777	<!-- grass-block: proof-sketch id=spike1-block-15 -->
+docs/SPIKE_1.md	c3279d7365d6	783	def helloCertificate : ImplementsSubCFG commonX86Win64 helloInterface helloGraph :=
+docs/SPIKE_1.md	c3279d7365d6	809	`helloSource`; the exact authored text is in the source snapshot. It is not a
+docs/SPIKE_1.md	c3279d7365d6	821	<!-- grass-block: proof-sketch id=hello-source-rendering -->
+docs/SPIKE_1.md	c3279d7365d6	823	def helloSource :=
+docs/SPIKE_1.md	c3279d7365d6	929	<!-- grass-block: proof-sketch id=spike1-block-17 -->
+docs/SPIKE_1.md	c3279d7365d6	931	theorem hello_erasure :
+docs/SPIKE_1.md	c3279d7365d6	933	helloVerified.ghostProgram helloVerified.rawProgram :=
+docs/SPIKE_1.md	c3279d7365d6	934	helloVerified.erasureCorrectness
+docs/SPIKE_1.md	c3279d7365d6	939	observations. A derived `hello_erasure_violation_prefix` corollary matches only
+docs/SPIKE_1.md	c3279d7365d6	971	<!-- grass-block: proof-sketch id=spike1-block-18 -->
+docs/SPIKE_1.md	c3279d7365d6	987	<!-- grass-block: proof-sketch id=spike1-block-19 -->
+docs/SPIKE_1.md	c3279d7365d6	990	PE.parse (PE.write helloVerified.linkedArtifact) =
+docs/SPIKE_1.md	c3279d7365d6	991	.ok helloVerified.linkedArtifact
+docs/SPIKE_1.md	c3279d7365d6	997	emitProgram helloVerified = PE.write helloVerified.linkedArtifact
+docs/SPIKE_1.md	c3279d7365d6	999	theorem hello_artifact_connection :
+docs/SPIKE_1.md	c3279d7365d6	1001	helloVerified.rawProgram helloVerified.linkedArtifact :=
+docs/SPIKE_1.md	c3279d7365d6	1002	helloVerified.artifactCorrectness
+docs/SPIKE_1.md	c3279d7365d6	1005	(context : AdmissibleExecutionContext helloVerified.realization)
+docs/SPIKE_1.md	c3279d7365d6	1006	(base : AdmissibleLoadBase helloVerified.linkedArtifact)
+docs/SPIKE_1.md	c3279d7365d6	1008	helloVerified.realization helloVerified.linkedArtifact)
+docs/SPIKE_1.md	c3279d7365d6	1010	(load : WindowsLoader.Loads helloVerified.realization
+docs/SPIKE_1.md	c3279d7365d6	1011	(emitProgram helloVerified) context base imports machine) :
+docs/SPIKE_1.md	c3279d7365d6	1013	RawInitialState helloVerified.rawProgram rawInitial ∧
+docs/SPIKE_1.md	c3279d7365d6	1019	RawExecution helloVerified.rawProgram rawInitial rawChoices rawTrace ∧
+docs/SPIKE_1.md	c3279d7365d6	1023	(context : AdmissibleExecutionContext helloVerified.realization)
+docs/SPIKE_1.md	c3279d7365d6	1024	(base : AdmissibleLoadBase helloVerified.linkedArtifact)
+docs/SPIKE_1.md	c3279d7365d6	1026	helloVerified.realization helloVerified.linkedArtifact)
+docs/SPIKE_1.md	c3279d7365d6	1028	(load : WindowsLoader.Loads helloVerified.realization
+docs/SPIKE_1.md	c3279d7365d6	1029	(emitProgram helloVerified) context base imports machine) :
+docs/SPIKE_1.md	c3279d7365d6	1030	ValidInitialState helloVerified.realization context
+docs/SPIKE_1.md	c3279d7365d6	1031	helloVerified.linkedArtifact machine ∧
+docs/SPIKE_1.md	c3279d7365d6	1032	SatisfiesEntryContract helloVerified.rawProgram.entry machine
+docs/SPIKE_1.md	c3279d7365d6	1035	(context : AdmissibleExecutionContext helloVerified.realization)
+docs/SPIKE_1.md	c3279d7365d6	1036	(base : AdmissibleLoadBase helloVerified.linkedArtifact)
+docs/SPIKE_1.md	c3279d7365d6	1038	helloVerified.realization helloVerified.linkedArtifact) :
+docs/SPIKE_1.md	c3279d7365d6	1040	WindowsLoader.Loads helloVerified.realization
+docs/SPIKE_1.md	c3279d7365d6	1041	(emitProgram helloVerified) context base imports machine ∧
+docs/SPIKE_1.md	c3279d7365d6	1042	ValidInitialState helloVerified.realization context
+docs/SPIKE_1.md	c3279d7365d6	1043	helloVerified.linkedArtifact machine ∧
+docs/SPIKE_1.md	c3279d7365d6	1044	SatisfiesEntryContract helloVerified.rawProgram.entry machine
+docs/SPIKE_1.md	c3279d7365d6	1047	(context : AdmissibleExecutionContext helloVerified.realization)
+docs/SPIKE_1.md	c3279d7365d6	1048	(base : AdmissibleLoadBase helloVerified.linkedArtifact)
+docs/SPIKE_1.md	c3279d7365d6	1050	helloVerified.realization helloVerified.linkedArtifact)
+docs/SPIKE_1.md	c3279d7365d6	1052	(load : WindowsLoader.Loads helloVerified.realization
+docs/SPIKE_1.md	c3279d7365d6	1053	(emitProgram helloVerified) context base imports machine)
+docs/SPIKE_1.md	c3279d7365d6	1057	LoadedTailEntryRelated helloVerified.linkedArtifact
+docs/SPIKE_1.md	c3279d7365d6	1061	helloVerified.artifactContainment.excessWriteCount load step
+docs/SPIKE_1.md	c3279d7365d6	1071	`hello_artifact_connection` is the owned semantic relation composed by
+docs/SPIKE_1.md	c3279d7365d6	1117	For Spike 1 the result specializes to:
+docs/SPIKE_1.md	c3279d7365d6	1119	<!-- grass-block: interface id=spike1-block-20 -->
+docs/SPIKE_1.md	c3279d7365d6	1121	theorem spike1_emitted_sound
+docs/SPIKE_1.md	c3279d7365d6	1122	(context : AdmissibleExecutionContext helloVerified.realization)
+docs/SPIKE_1.md	c3279d7365d6	1123	(base : AdmissibleLoadBase helloVerified.linkedArtifact)
+docs/SPIKE_1.md	c3279d7365d6	1125	helloVerified.realization helloVerified.linkedArtifact) :
+docs/SPIKE_1.md	c3279d7365d6	1127	Loads helloVerified.realization (emitProgram helloVerified)
+docs/SPIKE_1.md	c3279d7365d6	1130	(load : Loads helloVerified.realization (emitProgram helloVerified)
+docs/SPIKE_1.md	c3279d7365d6	1132	ValidInitialState helloVerified.realization context
+docs/SPIKE_1.md	c3279d7365d6	1133	helloVerified.linkedArtifact machine ∧
+docs/SPIKE_1.md	c3279d7365d6	1134	SatisfiesEntryContract helloVerified.rawProgram.entry machine ∧
+docs/SPIKE_1.md	c3279d7365d6	1137	AssuranceResult helloVerified context base imports machine load trace exec
+docs/SPIKE_1.md	c3279d7365d6	1143	result additionally contains an accepted `HelloObservation`; an infinite pending
+docs/SPIKE_1.md	c3279d7365d6	1177	the one precious semantic source for this program. `plan` and `helloSource` are
+docs/SPIKE_1.md	c3279d7365d6	1215	Spike 1 interfaces have failed even when the final theorem still compiles.
+docs/SPIKE_1.md	c3279d7365d6	1218	`plan`, the displayed `helloSource`, and the one `verify_assembly` closure. The
+docs/SPIKE_1.md	c3279d7365d6	1242	After the libraries exist, Spike 1 additionally requires transitive axiom
+docs/SPIKE_1.md	c3279d7365d6	1266	`Spikes/1_Hello_World/`. Run `./check-spike-sources.sh --spike 1` to check the
+docs/SPIKE_1.md	c3279d7365d6	1276	import Spikes.«1_Hello_World».Spec
+docs/SPIKE_1.md	c3279d7365d6	1278	namespace Grass.Spikes.HelloWorld
+docs/SPIKE_1.md	c3279d7365d6	1280	def policy : TargetOutcomeProjection HelloOutcome UInt32 :=
+docs/SPIKE_1.md	c3279d7365d6	1282	(success := HelloOutcome.success)
+docs/SPIKE_1.md	c3279d7365d6	1297	def helloStatics : StaticObjectTable := static_objects {
+docs/SPIKE_1.md	c3279d7365d6	1301	def helloSource : MachineSource plan :=
+docs/SPIKE_1.md	c3279d7365d6	1303	withCallFrame WriteFile asm_source (statics := helloStatics) {
+docs/SPIKE_1.md	c3279d7365d6	1364	def helloVerified : VerifiedProgram spec := by
+docs/SPIKE_1.md	c3279d7365d6	1367	with helloSource
+docs/SPIKE_1.md	c3279d7365d6	1369	def bytes : ByteArray := emitProgram helloVerified
+docs/SPIKE_1.md	c3279d7365d6	1371	end Grass.Spikes.HelloWorld
+docs/SPIKE_1.md	c3279d7365d6	1381	namespace Grass.Spikes.HelloWorld
+docs/SPIKE_1.md	c3279d7365d6	1386	"def message : TextLine := ""Hello, World!"""
+docs/SPIKE_1.md	c3279d7365d6	1388	inductive HelloOutcome
+docs/SPIKE_1.md	c3279d7365d6	1392	def outcomePolicy : ConsoleWriteOutcomePolicy HelloOutcome where
+docs/SPIKE_1.md	c3279d7365d6	1398	def helloContract {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+docs/SPIKE_1.md	c3279d7365d6	1402	def helloSpec {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+docs/SPIKE_1.md	c3279d7365d6	1404	SpecProcess.ofRelational (helloContract resources)
+docs/SPIKE_1.md	c3279d7365d6	1407	theorem helloSpecCorrect {R : Type} [ResourceModel R] [ConsoleWriteResources R]
+docs/SPIKE_1.md	c3279d7365d6	1408	(resources : R) : MeetsAllSpecificationTheorems (helloSpec resources) :=
+docs/SPIKE_1.md	c3279d7365d6	1411	def spec : SpecProcess resources := helloSpec resources
+docs/SPIKE_1.md	c3279d7365d6	1413	end Grass.Spikes.HelloWorld
+docs/SPIKE_2.md	4dedf941ac78	1434	In addition to Spike 1's x86, Win64 ABI, PE, loader, `GetStdHandle`, `WriteFile`,
+docs/SPIKE_AUTHORING.md	8223f722f257	75	<!-- grass-block: generated id=expanded-x86 derives=Program.lean:helloSource -->
+docs/SPIKE_AUTHORING.md	8223f722f257	294	Hello World uses two authored files: `Spec.lean` and `Program.lean`. Sort and
+docs/SPIKE_PROOF_BURDEN.md	6713d9d3c160	41	## 2. Spike 1
+docs/SPIKE_PROOF_BURDEN.md	6713d9d3c160	46	| `helloVerified` closing obligations | S, generated-structural plus authored boundary theorem | Source closure, Win32 provider selection, PE construction, and standard certificate composition are derived; exact-message observation is precious. |
+docs/SPIKE_PROOF_BURDEN.md	6713d9d3c160	48	No application-specific algorithmic invariant is hidden in Spike 1.
+docs/STDLIB.md	7052839652a4	344	controlled without forcing Hello's minimal public specification to preserve a
+docs/VALIDATION.md	9da7db2115e2	130	[REFINEMENT.md](REFINEMENT.md). Each change-matrix row in Spike 1 and later
+docs/VISION.md	c57bfdda5dda	44	ISAs and platform APIs. Hello World is the first microscope slide, not the
+docs/VISION.md	c57bfdda5dda	62	make Hello's internal proof object look smaller.
+docs/VISION.md	c57bfdda5dda	370	- Hello validates the entire source-to-Win32-PE theorem chain. Its synchronous-
+docs/WINDOWS_LOADER_INITIALIZATION.md	91f1c6e4f2ae	73	from the unchanged authored Grass Hello World through `SourceLinkedImage`.
+docs/WINDOWS_LOADER_INITIALIZATION.md	91f1c6e4f2ae	76	[`run-grass-hello.sh`](../probes/windows/run-grass-hello.sh) launches the same
+docs/WINDOWS_PE.md	add1ddbc423f	91	additionally requires the same table location and size. Hello must retain its
+docs/WINDOWS_WRITEFILE.md	73a80f6e694f	6	transition relation, or the Hello certificate. For the whole-program connection,
+docs/WINDOWS_WRITEFILE.md	73a80f6e694f	7	start at [the facade boundary](HELLO_FACADE_BOUNDARY.md) and
+docs/WINDOWS_WRITEFILE.md	73a80f6e694f	70	pending-prefix evidence layer for the synchronous Hello World provider. It does
+docs/WINDOWS_WRITEFILE.md	73a80f6e694f	172	return is not a physical RET through provider bytes; unchanged Hello contains no
+docs/WINDOWS_WRITEFILE.md	73a80f6e694f	185	they do not establish native dispatch, provider progress or full Hello execution.
+docs/WINDOWS_WRITEFILE.md	73a80f6e694f	188	Probe programs are to be authored in Grass and emitted through Hello World's
+docs/X86_EXECUTION.md	90d1244e0b92	7	[The agreed execution boundary](HELLO_UNWIND_BOUNDARY.md) defines the remaining
+docs/X86_EXECUTION.md	90d1244e0b92	159	does not yet execute the full Hello program or settle fault applicability.
+docs/X86_EXECUTION.md	90d1244e0b92	171	the first Hello instruction family to the constructive path.
+docs/X86_EXECUTION.md	90d1244e0b92	226	Hello outputs; recognition of UD2 still supplies no invalid-opcode transfer.
+docs/X86_EXECUTION.md	90d1244e0b92	249	The [exact Hello coverage plan](X86_HELLO_COVERAGE.md) assigns the other emitted
+docs/X86_HELLO_COVERAGE.md	373100435f9c	1	# Exact Hello instruction coverage
+docs/X86_HELLO_COVERAGE.md	373100435f9c	3	This bounded plan follows the unchanged [Hello source](../Spikes/1_Hello_World/Program.lean).
+docs/X86_HELLO_COVERAGE.md	373100435f9c	12	characters, `SourceInput.extractHelloSourceChars`, `SourceFrame.derive?`,
+docs/X86_HELLO_COVERAGE.md	373100435f9c	51	Hello has no authored RET or epilogue after ExitProcess. Unexpected return reaches
+docs/X86_HELLO_COVERAGE.md	373100435f9c	57	The current implementation priority is the unchanged Hello proof and checked
+lakefile.toml	16e91b0568b8	29	# vocabulary change that breaks the Spike 1 reference cases fails the build
+lakefile.toml	16e91b0568b8	30	# rather than being noticed later. See docs/HELLO_WORLD.md and Tests/Memory/Spike1Reference.lean.
+lakefile.toml	16e91b0568b8	40	"name = ""grass-disasm-hello"""
+lakefile.toml	16e91b0568b8	41	"root = ""Tools.DisasmHello"""
+probes/windows/README.md	36d0aedfa75e	3	Run the Grass-authored Hello World sample from the repository root on Windows:
+probes/windows/README.md	36d0aedfa75e	6	./probes/windows/run-grass-hello.sh
+probes/windows/run-grass-hello.sh	462cb9f667d1	34	"""$lake_exe"" env lean --run Tools/EmitGrassHello.lean \"
+probes/windows/run-grass-hello.sh	462cb9f667d1	35	"""$probe_directory/hello.exe"" ""$probe_directory/expected-stdout.bin"" ""$probe_directory/source.lean"""
+probes/windows/run-grass-hello.sh	462cb9f667d1	48	"""$pwsh_exe"" -NoLogo -NoProfile -File probes/windows/capture-grass-hello.ps1 \"
+probes/windows/run-grass-hello.sh	462cb9f667d1	49	"-ImagePath ""$probe_directory/hello.exe"" \"
+tools/grass-tools/src/bin/docstring_audit.rs	14b0f8b9c79a	1290	"assert!(parse_decl_records(""hello\nZ\t0\n"").is_err());"
+Grass/Assembly/SourceWitness.lean	6c3ae45a64fa	25	bodyExact : (SourceInput.extractHelloSourceChars authored).toOption = some body
+Grass/Assembly/SourceWitness.lean	6c3ae45a64fa	45	match bodyExact : (SourceInput.extractHelloSourceChars authored).toOption with
+Grass/Console/TargetProjection.lean	bb5c8974eea5	60	/-- The representation selected by authored Windows Hello; no message or policy
+Grass/Frontend/AssemblySyntax.lean	7bdd3d228df7	7	This module captures the current Hello declaration losslessly and elaborates
+Grass/Frontend/AssemblySyntax.lean	7bdd3d228df7	15	/-- Consume the current assembly body as one lossless atom.  Spike 1's body
+Grass/Frontend/AssemblySyntax.lean	7bdd3d228df7	42	(Grass.MachineSource.ofHello? $plan $chars $statics).get
+Grass/Frontend/AssemblySyntax.lean	7bdd3d228df7	52	@[command_parser] def helloAssemblyDefinition : Parser := leading_parser
+Grass/Frontend/AssemblySyntax.lean	7bdd3d228df7	74	@[command_elab Grass.Frontend.AssemblySyntax.helloAssemblyDefinition]
+Grass/Frontend/AssemblySyntax.lean	7bdd3d228df7	75	def elabHelloAssemblyDefinition : CommandElab := fun stx => do
+Grass/Frontend/Source.lean	3d3ea32956b2	69	/-- The initial ingress is the exact supported Hello declaration. Additional
+Grass/Frontend/Source.lean	3d3ea32956b2	72	| hello (extracted :
+Grass/Frontend/Source.lean	3d3ea32956b2	73	(Assembly.SourceInput.extractHelloSourceChars authored).toOption = some body)
+Grass/Frontend/Source.lean	3d3ea32956b2	76	The current ingress parser is explicitly Hello-specific, while construction
+Grass/Frontend/Source.lean	3d3ea32956b2	77	evidence contains no Hello loop/guard or execution certificate. -/
+Grass/Frontend/Source.lean	3d3ea32956b2	90	def ofHello? (plan : PlatformPlan requirements) (authored : List Char)
+Grass/Frontend/Source.lean	3d3ea32956b2	92	match bodyExact : (Assembly.SourceInput.extractHelloSourceChars authored).toOption with
+Grass/Frontend/Source.lean	3d3ea32956b2	97	| some construction => some ⟨authored, table, body, .hello bodyExact, construction⟩
+Grass/Frontend/Source.lean	3d3ea32956b2	99	theorem ofHello?_inputs {plan : PlatformPlan requirements} {authored : List Char}
+Grass/Frontend/Source.lean	3d3ea32956b2	101	(produced : ofHello? plan authored table = some source) :
+Grass/Frontend/Source.lean	3d3ea32956b2	103	unfold ofHello? at produced
+Tests/Assembly/SourceWitness.lean	053868a990cf	13	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Assembly/SourceWitness.lean	053868a990cf	26	/-- Reusable dependent witness for the checked-in Spike 1 source.  Consumers
+Tests/Console/Contract.lean	ee7e79655c9b	14	"private def contract := Console.writeLineContract resources ""Hello, World!"" policy"
+Tests/Console/Contract.lean	ee7e79655c9b	19	"Console.writeLineContractCorrect resources ""Hello, World!"" policy"
+Tests/Console/Contract.lean	ee7e79655c9b	27	"let request : LineRequest Result := ⟨""Hello, World!"", policy⟩"
+Tests/Console/ObservedFrontier.lean	c4d4a6ed2c46	5	/-! The exact generic contract binding used by Hello's authored specification. -/
+Tests/Console/ObservedFrontier.lean	c4d4a6ed2c46	17	/-- The write-line contract used by Hello denotes exactly the observed model. -/
+Tests/Console/ObservedFrontier.lean	c4d4a6ed2c46	34	/-- The same statement at the `SpecProcess` constructor used by `helloSpec`.
+Tests/Console/WriteAllGuards.lean	24b85ed6f1dc	13	let body ← (SourceInput.extractHelloSourceChars text).toOption
+Tests/Console/WriteAllHead.lean	48c3d73441df	15	let body ← (SourceInput.extractHelloSourceChars text).toOption
+Tests/Console/WriteFileCountAddress.lean	4d8e7933d7ab	14	let body ← (SourceInput.extractHelloSourceChars chars).toOption
+Tests/Console/WriteFileCountEntry.lean	408a5d5688ee	17	let body ← (SourceInput.extractHelloSourceChars text).toOption
+Tests/Frontend/Source.lean	bfc7f7135865	25	"def authored : List Char := include_source_chars ""../../Spikes/1_Hello_World/Program.lean"""
+Tests/Frontend/Source.lean	bfc7f7135865	27	theorem source_present : (MachineSource.ofHello? plan authored statics).isSome = true := by
+Tests/Frontend/Source.lean	bfc7f7135865	30	def source : MachineSource plan := (MachineSource.ofHello? plan authored statics).get source_present
+Tests/Frontend/Source.lean	bfc7f7135865	33	exact (MachineSource.ofHello?_inputs (Option.some_get source_present).symm).2
+Tests/Frontend/Source.lean	bfc7f7135865	36	exact (MachineSource.ofHello?_inputs (Option.some_get source_present).symm).1
+Tests/Frontend/Source.lean	bfc7f7135865	39	example : (MachineSource.ofHello? plan [] statics).isSome = false := by decide
+Tests/Frontend/Target.lean	dc0e7f7cba1d	10	"def message : Specification.TextLine := ""Hello, World!"""
+Tests/Frontend/WriteFilePrefix.lean.in	5e206595b35a	8	-- INCLUDE_AUTHORED_HELLO
+Tests/Frontend/WriteFilePrefix.lean.in	5e206595b35a	22	open Grass.Refinement.Console Grass.Spikes.HelloWorld
+Tests/Frontend/WriteFilePrefix.lean.in	5e206595b35a	211	let setup : Grass.Tests.Win32HelloCall.ActualSetup :=
+Tests/Frontend/WriteFilePrefix.lean.in	5e206595b35a	229	let some found := Grass.Tests.Win32HelloCall.handoffFrom? setup execution.val.state.down
+Tests/Frontend/WriteFilePrefix.lean.in	5e206595b35a	382	#eval run helloSource payload 55
+Tests/Frontend/WriteFilePrefix.lean.in	5e206595b35a	383	#eval run helloSource payload 0
+Tests/Frontend/WriteFilePrefix.lean.in	5e206595b35a	384	#eval run helloSource payload GetStdHandleResult.invalidHandleValue
+Tests/Frontend/check.sh	75e50829c021	10	mkdir -p .lake/build/lib/lean/Spikes/1_Hello_World
+Tests/Frontend/check.sh	75e50829c021	11	lake env lean Spikes/1_Hello_World/Spec.lean -o .lake/build/lib/lean/Spikes/1_Hello_World/Spec.olean
+Tests/Frontend/check.sh	75e50829c021	13	fixture=$(mktemp .lake/frontend-hello-XXXXXX.lean)
+Tests/Frontend/check.sh	75e50829c021	20	# Preserve all authored declarations through helloSource verbatim. Only the
+Tests/Frontend/check.sh	75e50829c021	24	"my $cut = index($source, ""def helloVerified"");"
+Tests/Frontend/check.sh	75e50829c021	29	"print ""\nexample : helloSource.table = helloStatics := (MachineSource.ofHello?_inputs (Option.some_get _).symm).2\n"";"
+Tests/Frontend/check.sh	75e50829c021	30	"print ""end Grass.Spikes.HelloWorld\n"";"
+Tests/Frontend/check.sh	75e50829c021	31	"' Spikes/1_Hello_World/Program.lean > ""$fixture"""
+Tests/Frontend/check.sh	75e50829c021	43	my $markers = () = $template =~ /^-- INCLUDE_AUTHORED_HELLO\r?$/mg;
+Tests/Frontend/check.sh	75e50829c021	45	$template =~ s/^-- INCLUDE_AUTHORED_HELLO\r?$/$prefix/m;
+Tests/Frontend/check.sh	75e50829c021	86	"printf ""Unchanged Hello frontend, loader-rooted WriteFile entry prefix, and stdout-unavailable terminal prefixes pass; unsupported source rejected. Native/causal correspondence, deadlock freedom, certificate suffix and full repository trust gates remain outside this check.\n"""
+Tests/ISA/X86/LedgerAudit.lean	d31e0588e17c	1018	-- Fixtures: Spike 1's prologue and a frame-pointer example, which are
+Tests/ISA/X86/LedgerAudit.lean	d31e0588e17c	1020	`Grass.ABI.Win64.spike1Prologue, `Grass.ABI.Win64.spike1Layout,
+Tests/ISA/X86/LedgerAudit.lean	d31e0588e17c	1021	`Grass.ABI.Win64.spike1SavedRegisters,
+Tests/ISA/X86/LedgerAudit.lean	d31e0588e17c	1022	`Grass.ABI.Win64.spike1FrameLayout,
+Tests/ISA/X86/LedgerAudit.lean	d31e0588e17c	1023	`Grass.ABI.Win64.spike1CallAllocationBytes,
+Tests/ISA/X86/LedgerAudit.lean	d31e0588e17c	1024	`Grass.ABI.Win64.spike1UnwindInfo, `Grass.ABI.Win64.framePointerLayout,
+Tests/Platform/Win32HelloCall.lean	9e4712246338	10	# Actual source-linked Hello prefix through GetStdHandle handoff
+Tests/Platform/Win32HelloCall.lean	9e4712246338	21	namespace Grass.Tests.Win32HelloCall
+Tests/Platform/Win32HelloCall.lean	9e4712246338	85	let body ← (Grass.Assembly.SourceInput.extractHelloSourceChars
+Tests/Platform/Win32HelloCall.lean	9e4712246338	89	let plan ← Grass.Tests.Win32LoaderEntry.helloPlan?
+Tests/Platform/Win32HelloCall.lean	9e4712246338	265	"unless passed do throw (IO.userError ""actual Hello GetStdHandle CALL prefix refused"")"
+Tests/Platform/Win32HelloCall.lean	9e4712246338	270	end Grass.Tests.Win32HelloCall
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	15	[Hello Program.lean](../Spikes/1_Hello_World/Program.lean) ends in
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	16	`helloVerified : VerifiedProgram spec` and `bytes := emitProgram helloVerified`.
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	18	Read the paired [annotated spike](SPIKE_1.md) and
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	19	[facade boundary](HELLO_FACADE_BOUNDARY.md) for the required connection.
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	26	theorem is not a concrete `helloVerified` construction. The target contract is
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	28	[HELLO_FACADE_BOUNDARY.md](HELLO_FACADE_BOUNDARY.md) describes the required root
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	46	| Fetched instructions and frame memory | [Execution](../Grass/ISA/X86/Execution/), [LoadedCodeRoot.lean](../Grass/Assembly/LoadedCodeRoot.lean), [loader fixture](../Tests/Platform/Win32LoaderEntry.lean) | Start with [exact Hello coverage](X86_HELLO_COVERAGE.md), [x86 execution](X86_EXECUTION.md), and [frame memory execution](FRAME_MEMORY_EXECUTION.md). Normal receipts have premises; they do not exclude every fault or establish a whole loop | x86, memory-model, lowering |
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	53	[SPIKE1_BOUNDARY_REVIEW.md](SPIKE1_BOUNDARY_REVIEW.md). For unwind requirements,
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	54	use [HELLO_UNWIND_BOUNDARY.md](HELLO_UNWIND_BOUNDARY.md). These documents retain
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	60	The retained **24-edge loader-rooted Hello prefix reaches the first WriteFile
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	62	checked finite execution, not whole-Hello or public-emission acceptance.
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	66	| Hello entry prefix | Certificate `Tests/Frontend/WriteFilePrefix.lean.in`: `Result machineSource`, `inspected`; `Tests/Frontend/check.sh` injects the unchanged authored source and retains the actual `ExecutionPrefix` through GetStdHandle entry/return and first WriteFile entry | Provider registers are observed inputs and the graph is empty; this fixture does not establish native/causal correspondence, all runs or the certificate suffix |
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	93	`helloVerified`/`emitProgram` endpoint remain open. No spike is complete.
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	147	`git show 2ae59a56:docs/HELLO_ENDPOINT_MODEL.md`. Its earlier fixed-environment
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	150	without claiming the public verified-emission gate or the Hello endpoint has migrated.
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	154	Spikes reported a loaded-Hello prologue fixture on main `87fa3e5b`, explicitly
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	155	short of full Hello, and relative certificate/loop work on
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	201	unchanged Hello has no authored RET, and native correspondence remains open.
+docs/ENDPOINT_INDEX.md	dcf42cba2e80	304	rg -n 'helloVerified|emitProgram' Spikes Grass Tests
+docs/HELLO_ENDPOINT_MODEL.md	50c8e24c591a	16	experiment is historical context, not a dependency or a Hello proof.
+docs/HELLO_ENDPOINT_MODEL.md	50c8e24c591a	49	The hello loop's executed branches establish the selected cause: equal public
+docs/HELLO_ENDPOINT_MODEL.md	50c8e24c591a	148	`helloSpec`; the proof consumes no responsiveness assumption or complete-run
+docs/HELLO_ENDPOINT_MODEL.md	50c8e24c591a	151	Raw Hello still needs the actual reachable phase invariant, provider return and
+docs/RAW_PHASE_PRESERVATION.md	9c3385acdc4a	35	These clauses do not prove enabledness or Hello deadlock freedom. The certificate
+Tests/Frontend/WriteFilePrefix.lean.in	db5a3d530e29	9	-- INCLUDE_AUTHORED_HELLO
+Tests/Frontend/WriteFilePrefix.lean.in	db5a3d530e29	23	open Grass.Refinement.Console Grass.Spikes.HelloWorld
+Tests/Frontend/WriteFilePrefix.lean.in	db5a3d530e29	183	let setup : Grass.Tests.Win32HelloCall.ActualSetup :=
+Tests/Frontend/WriteFilePrefix.lean.in	db5a3d530e29	201	let some found := Grass.Tests.Win32HelloCall.handoffFrom? setup execution.val.state.down
+Tests/Frontend/WriteFilePrefix.lean.in	db5a3d530e29	325	#eval run helloSource payload 55
+Tests/Frontend/WriteFilePrefix.lean.in	db5a3d530e29	326	#eval run helloSource payload 0
+Tests/Frontend/WriteFilePrefix.lean.in	db5a3d530e29	327	#eval run helloSource payload GetStdHandleResult.invalidHandleValue
+Tests/Frontend/check.sh	e88f1e589871	10	mkdir -p .lake/build/lib/lean/Spikes/1_Hello_World
+Tests/Frontend/check.sh	e88f1e589871	11	lake env lean Spikes/1_Hello_World/Spec.lean -o .lake/build/lib/lean/Spikes/1_Hello_World/Spec.olean
+Tests/Frontend/check.sh	e88f1e589871	13	fixture=$(mktemp .lake/frontend-hello-XXXXXX.lean)
+Tests/Frontend/check.sh	e88f1e589871	20	# Preserve all authored declarations through helloSource verbatim. Only the
+Tests/Frontend/check.sh	e88f1e589871	24	"my $cut = index($source, ""def helloVerified"");"
+Tests/Frontend/check.sh	e88f1e589871	29	"print ""\nexample : helloSource.table = helloStatics := (MachineSource.ofHello?_inputs (Option.some_get _).symm).2\n"";"
+Tests/Frontend/check.sh	e88f1e589871	30	"print ""end Grass.Spikes.HelloWorld\n"";"
+Tests/Frontend/check.sh	e88f1e589871	31	"' Spikes/1_Hello_World/Program.lean > ""$fixture"""
+Tests/Frontend/check.sh	e88f1e589871	43	my $markers = () = $template =~ /^-- INCLUDE_AUTHORED_HELLO\r?$/mg;
+Tests/Frontend/check.sh	e88f1e589871	45	$template =~ s/^-- INCLUDE_AUTHORED_HELLO\r?$/$prefix/m;
+Tests/Frontend/check.sh	e88f1e589871	86	"printf ""Unchanged Hello frontend, loader-rooted WriteFile entry prefix, and stdout-unavailable terminal prefixes pass; unsupported source rejected. Native/causal correspondence, deadlock freedom, certificate suffix and full repository trust gates remain outside this check.\n"""
+Tests/ISA/X86/LedgerAudit.lean	394152154b1d	1020	-- Fixtures: Spike 1's prologue and a frame-pointer example, which are
+Tests/ISA/X86/LedgerAudit.lean	394152154b1d	1022	`Grass.ABI.Win64.spike1Prologue, `Grass.ABI.Win64.spike1Layout,
+Tests/ISA/X86/LedgerAudit.lean	394152154b1d	1023	`Grass.ABI.Win64.spike1SavedRegisters,
+Tests/ISA/X86/LedgerAudit.lean	394152154b1d	1024	`Grass.ABI.Win64.spike1FrameLayout,
+Tests/ISA/X86/LedgerAudit.lean	394152154b1d	1025	`Grass.ABI.Win64.spike1CallAllocationBytes,
+Tests/ISA/X86/LedgerAudit.lean	394152154b1d	1026	`Grass.ABI.Win64.spike1UnwindInfo, `Grass.ABI.Win64.framePointerLayout,
+Tests/Platform/Win32WriteFileProviderModel.lean	44f3a31c6a69	4	The Hello consumer selects these exact action/endpoints once for its whole raw
+docs/RAW_PHASE_PRESERVATION.md	c722338feae2	35	These clauses do not prove enabledness or Hello deadlock freedom. The certificate
+Tests/ISA/X86/LedgerAudit.lean	033244dd9abc	1022	-- Fixtures: Spike 1's prologue and a frame-pointer example, which are
+Tests/ISA/X86/LedgerAudit.lean	033244dd9abc	1024	`Grass.ABI.Win64.spike1Prologue, `Grass.ABI.Win64.spike1Layout,
+Tests/ISA/X86/LedgerAudit.lean	033244dd9abc	1025	`Grass.ABI.Win64.spike1SavedRegisters,
+Tests/ISA/X86/LedgerAudit.lean	033244dd9abc	1026	`Grass.ABI.Win64.spike1FrameLayout,
+Tests/ISA/X86/LedgerAudit.lean	033244dd9abc	1027	`Grass.ABI.Win64.spike1CallAllocationBytes,
+Tests/ISA/X86/LedgerAudit.lean	033244dd9abc	1028	`Grass.ABI.Win64.spike1UnwindInfo, `Grass.ABI.Win64.framePointerLayout,
+CONTRIBUTING.md	c0313a5c0e97	114	`Program → helloVerified → emitProgram` chain remains the priority.
+CONTRIBUTING.md	c0313a5c0e97	115	Major milestones trigger the existing [cleanup audits](docs/SPIKE1_BOUNDARY_REVIEW.md#responsibility):
+CONTRIBUTING.md	c0313a5c0e97	187	Complete Hello World, sort, gzip, HTTP/2 server, then spinning cube, in order.
+README.md	53589db4c4d1	43	The first end-to-end target is a Win32 x64 PE32+ Hello World using
+README.md	53589db4c4d1	61	Development proceeds one spike at a time, beginning with the existing Hello
+Tests/ISA/X86/LedgerAudit.lean	6bbb1dcc1106	983	-- Fixtures: Spike 1's prologue and a frame-pointer example, which are
+Tests/ISA/X86/LedgerAudit.lean	6bbb1dcc1106	985	`Grass.ABI.Win64.spike1Prologue, `Grass.ABI.Win64.spike1Layout,
+Tests/ISA/X86/LedgerAudit.lean	6bbb1dcc1106	986	`Grass.ABI.Win64.spike1SavedRegisters,
+Tests/ISA/X86/LedgerAudit.lean	6bbb1dcc1106	987	`Grass.ABI.Win64.spike1FrameLayout,
+Tests/ISA/X86/LedgerAudit.lean	6bbb1dcc1106	988	`Grass.ABI.Win64.spike1CallAllocationBytes,
+Tests/ISA/X86/LedgerAudit.lean	6bbb1dcc1106	989	`Grass.ABI.Win64.spike1UnwindInfo, `Grass.ABI.Win64.framePointerLayout,
+docs/DISASM_CORPUS.md	ed434483ac3f	12	Start with the accepted Windows x86-64 PE32+ Hello artifact. If its final byte
+docs/DISASM_CORPUS.md	ed434483ac3f	61	Follow spike order as their artifacts become available: Hello, sort, gzip,
+docs/ENDPOINT_INDEX.md	e402a351e23e	15	[Hello Program.lean](../Spikes/1_Hello_World/Program.lean) ends in
+docs/ENDPOINT_INDEX.md	e402a351e23e	16	`helloVerified : VerifiedProgram spec` and `bytes := emitProgram helloVerified`.
+docs/ENDPOINT_INDEX.md	e402a351e23e	18	Read the paired [annotated spike](SPIKE_1.md) and
+docs/ENDPOINT_INDEX.md	e402a351e23e	19	[facade boundary](HELLO_FACADE_BOUNDARY.md) for the required connection.
+docs/ENDPOINT_INDEX.md	e402a351e23e	26	theorem is not a concrete `helloVerified` construction. The target contract is
+docs/ENDPOINT_INDEX.md	e402a351e23e	28	[HELLO_FACADE_BOUNDARY.md](HELLO_FACADE_BOUNDARY.md) describes the required root
+docs/ENDPOINT_INDEX.md	e402a351e23e	46	| Fetched instructions and frame memory | [Execution](../Grass/ISA/X86/Execution/), [LoadedCodeRoot.lean](../Grass/Assembly/LoadedCodeRoot.lean), [loader fixture](../Tests/Platform/Win32LoaderEntry.lean) | Start with [exact Hello coverage](X86_HELLO_COVERAGE.md), [x86 execution](X86_EXECUTION.md), and [frame memory execution](FRAME_MEMORY_EXECUTION.md). Normal receipts have premises; they do not exclude every fault or establish a whole loop | x86, memory-model, lowering |
+docs/ENDPOINT_INDEX.md	e402a351e23e	53	[SPIKE1_BOUNDARY_REVIEW.md](SPIKE1_BOUNDARY_REVIEW.md). For unwind requirements,
+docs/ENDPOINT_INDEX.md	e402a351e23e	54	use [HELLO_UNWIND_BOUNDARY.md](HELLO_UNWIND_BOUNDARY.md). These documents retain
+docs/ENDPOINT_INDEX.md	e402a351e23e	133	construct the source-LEA-to-pre-CALL setup ancestry or whole Hello; the other
+docs/ENDPOINT_INDEX.md	e402a351e23e	138	The structured Hello fixture at the inspected `31ad186e` had a trust-gate
+docs/ENDPOINT_INDEX.md	e402a351e23e	143	establish whole Hello.
+docs/ENDPOINT_INDEX.md	e402a351e23e	189	`git show 2ae59a56:docs/HELLO_ENDPOINT_MODEL.md`. Its earlier fixed-environment
+docs/ENDPOINT_INDEX.md	e402a351e23e	192	without claiming the public verified-emission gate or the Hello endpoint has migrated.
+docs/ENDPOINT_INDEX.md	e402a351e23e	196	Spikes reported a loaded-Hello prologue fixture on main `87fa3e5b`, explicitly
+docs/ENDPOINT_INDEX.md	e402a351e23e	197	short of full Hello, and relative certificate/loop work on
+docs/ENDPOINT_INDEX.md	e402a351e23e	243	unchanged Hello has no authored RET, and native correspondence remains open.
+docs/ENDPOINT_INDEX.md	e402a351e23e	346	rg -n 'helloVerified|emitProgram' Spikes Grass Tests
+docs/HELLO_ENDPOINT_MODEL.md	224edb6ac354	16	experiment is historical context, not a dependency or a Hello proof.
+docs/HELLO_ENDPOINT_MODEL.md	224edb6ac354	49	The hello loop's executed branches establish the selected cause: equal public
+docs/PLATFORM_ABI.md	f37fbe897a50	83	name of the violation. For Spike 1, `.excessWriteCount` may retain ordinary
+docs/README.md	3ebb335bf01d	13	- [Endpoint index](ENDPOINT_INDEX.md): start at authored `helloVerified` and
+docs/README.md	3ebb335bf01d	81	- [HELLO_WORLD.md](HELLO_WORLD.md) defines the first acceptance milestone.
+docs/README.md	3ebb335bf01d	82	- [HELLO_UNWIND_BOUNDARY.md](HELLO_UNWIND_BOUNDARY.md) records the reviewed
+docs/README.md	3ebb335bf01d	83	Hello unwind/PE binding interpretation of the existing ABI, artifact and
+docs/README.md	3ebb335bf01d	85	- [SPIKE1_BOUNDARY_REVIEW.md](SPIKE1_BOUNDARY_REVIEW.md) records the console
+docs/README.md	3ebb335bf01d	88	- [HELLO_FACADE_BOUNDARY.md](HELLO_FACADE_BOUNDARY.md) records the required
+docs/README.md	3ebb335bf01d	91	- [SPIKE_1.md](SPIKE_1.md) is its annotated proof from portable specification to
+docs/README.md	3ebb335bf01d	131	| Bounded instruction and memory execution | [x86 execution](X86_EXECUTION.md), [Hello instruction coverage](X86_HELLO_COVERAGE.md), [source-derived frame memory](FRAME_MEMORY_EXECUTION.md) |
+docs/REVIEW.md	0eabaab4a37a	23	7. Walk the Hello World acceptance chain end to end.
+docs/REVIEW.md	0eabaab4a37a	403	Hello World readiness:  approve | reject
+docs/VALIDATION.md	4dd131146cfe	130	[REFINEMENT.md](REFINEMENT.md). Each change-matrix row in Spike 1 and later
+Grass/Memory/State.lean	f205a460468f	4380	say anything. It said anything: every Spike 1 fixture's address contradicted the
+Grass/Platform/Win32/RawAgencyProfile.lean	32a52ac2c4b6	3	/-! Selected caller-relative agency for the fixed Win32 Hello profile.
+Grass/Platform/Win32/RawAgencyProfile.lean	32a52ac2c4b6	15	/-- The selected Hello profile's external-agency interpretation. This definition
+Grass/Platform/Win32/RawAgencyProfile.lean	32a52ac2c4b6	17	def helloExternalChoice (environment : ConsoleEnvironment) : Choice → Prop
+Grass/Platform/Win32/RawAgencyProfile.lean	32a52ac2c4b6	31	helloExternalChoice environment choice := by
+Grass/Platform/Win32/RawAgencyProfile.lean	32a52ac2c4b6	61	¬ helloExternalChoice environment (.cpu choice) := id
+Tests/Frontend/WriteFilePrefix.lean.in	96a1c48864f1	7	-- INCLUDE_AUTHORED_HELLO
+Tests/Frontend/WriteFilePrefix.lean.in	96a1c48864f1	20	open Grass.Refinement.Console Grass.Spikes.HelloWorld
+Tests/Frontend/WriteFilePrefix.lean.in	96a1c48864f1	110	let setup : Grass.Tests.Win32HelloCall.ActualSetup :=
+Tests/Frontend/WriteFilePrefix.lean.in	96a1c48864f1	128	let some found := Grass.Tests.Win32HelloCall.handoffFrom? setup execution.val.state.down
+Tests/Frontend/WriteFilePrefix.lean.in	96a1c48864f1	265	#eval run helloSource payload
+Tests/Frontend/check.sh	60e45adefef7	10	mkdir -p .lake/build/lib/lean/Spikes/1_Hello_World
+Tests/Frontend/check.sh	60e45adefef7	11	lake env lean Spikes/1_Hello_World/Spec.lean -o .lake/build/lib/lean/Spikes/1_Hello_World/Spec.olean
+Tests/Frontend/check.sh	60e45adefef7	13	fixture=$(mktemp .lake/frontend-hello-XXXXXX.lean)
+Tests/Frontend/check.sh	60e45adefef7	20	# Preserve all authored declarations through helloSource verbatim. Only the
+Tests/Frontend/check.sh	60e45adefef7	24	"my $cut = index($source, ""def helloVerified"");"
+Tests/Frontend/check.sh	60e45adefef7	29	"print ""\nexample : helloSource.table = helloStatics := (MachineSource.ofHello?_inputs (Option.some_get _).symm).2\n"";"
+Tests/Frontend/check.sh	60e45adefef7	30	"print ""end Grass.Spikes.HelloWorld\n"";"
+Tests/Frontend/check.sh	60e45adefef7	31	"' Spikes/1_Hello_World/Program.lean > ""$fixture"""
+Tests/Frontend/check.sh	60e45adefef7	43	my $markers = () = $template =~ /^-- INCLUDE_AUTHORED_HELLO\r?$/mg;
+Tests/Frontend/check.sh	60e45adefef7	45	$template =~ s/^-- INCLUDE_AUTHORED_HELLO\r?$/$prefix/m;
+Tests/Frontend/check.sh	60e45adefef7	86	"printf ""Unchanged Hello frontend and loader-rooted finite WriteFile entry prefix pass; unsupported source rejected. Native/causal correspondence, deadlock freedom, certificate suffix and full repository trust gates remain outside this check.\n"""
+Tests/ISA/X86/LedgerAudit.lean	6b12693ec1cc	1017	-- Fixtures: Spike 1's prologue and a frame-pointer example, which are
+Tests/ISA/X86/LedgerAudit.lean	6b12693ec1cc	1019	`Grass.ABI.Win64.spike1Prologue, `Grass.ABI.Win64.spike1Layout,
+Tests/ISA/X86/LedgerAudit.lean	6b12693ec1cc	1020	`Grass.ABI.Win64.spike1SavedRegisters,
+Tests/ISA/X86/LedgerAudit.lean	6b12693ec1cc	1021	`Grass.ABI.Win64.spike1FrameLayout,
+Tests/ISA/X86/LedgerAudit.lean	6b12693ec1cc	1022	`Grass.ABI.Win64.spike1CallAllocationBytes,
+Tests/ISA/X86/LedgerAudit.lean	6b12693ec1cc	1023	`Grass.ABI.Win64.spike1UnwindInfo, `Grass.ABI.Win64.framePointerLayout,
+Tests/ISA/X86/LedgerAudit.lean	6b12693ec1cc	1072	-- Fixed Hello environment ownership is selected profile applicability, not native proof.
+Tests/ISA/X86/LedgerAudit.lean	6b12693ec1cc	1073	`Grass.Platform.Win32.Raw.helloExternalChoice,
+Tests/Memory/Spike1Block.lean	8138f3739f18	2	import Tests.Memory.Spike1Reference
+Tests/Memory/Spike1Block.lean	8138f3739f18	5	# The Spike 1 straight-line block
+Tests/Memory/Spike1Block.lean	8138f3739f18	8	Spike 1 block. `Tests/Memory/StraightLineBlock.lean` proves the discharge is
+Tests/Memory/Spike1Block.lean	8138f3739f18	11	descriptors `Tests/Memory/Spike1Reference.lean` declares for
+Tests/Memory/Spike1Block.lean	8138f3739f18	12	`Spikes/1_Hello_World/Program.lean`.
+Tests/Memory/Spike1Block.lean	8138f3739f18	16	`Spike1Reference.lean` wraps these same descriptors in `SubstepSequence`s for
+Tests/Memory/Spike1Block.lean	8138f3739f18	54	namespace Tests.Memory.Spike1Block
+Tests/Memory/Spike1Block.lean	8138f3739f18	56	open Grass.Core Grass.Memory Grass.Std.Logical Grass.Tests.Spike1
+Tests/Memory/Spike1Block.lean	8138f3739f18	100	Rebuilt through `Grass.Tests.Spike1.access` from the same provenances the
+Tests/Memory/Spike1Block.lean	8138f3739f18	140	`mov transferred, 0` left. In `Spikes/1_Hello_World/Program.lean` the reload reads
+Tests/Memory/Spike1Block.lean	8138f3739f18	145	"exit criterion ""a straight-line Spike 1 block discharges"" was met about a block that"
+Tests/Memory/Spike1Block.lean	8138f3739f18	146	is not Spike 1's. Review found it.
+Tests/Memory/Spike1Block.lean	8138f3739f18	262	This is Spike 1's data flow, and the fixture asserted the opposite for as long as it
+Tests/Memory/Spike1Block.lean	8138f3739f18	298	program.** `Spike1Reference.lean`'s `movEaxTransferred` says its
+Tests/Memory/Spike1Block.lean	8138f3739f18	317	end Tests.Memory.Spike1Block
+Tests/Memory/Spike1Policy.lean	6130404da83a	2	import Tests.Memory.Spike1Block
+Tests/Memory/Spike1Policy.lean	6130404da83a	5	# The Spike 1 reference set, stepped
+Tests/Memory/Spike1Policy.lean	6130404da83a	9	did. `Tests/Memory/Spike1Block.lean` runs `runBlock`, the `applyAccess`-level
+Tests/Memory/Spike1Policy.lean	6130404da83a	25	**Spike 1's point does not step.** `WriteFile` is a second execution context, and
+Tests/Memory/Spike1Policy.lean	6130404da83a	40	namespace Grass.Tests.Spike1Policy
+Tests/Memory/Spike1Policy.lean	6130404da83a	42	open Grass.Core Grass.Memory Grass.Op Grass.Std.Logical Grass.Tests.Spike1
+Tests/Memory/Spike1Policy.lean	6130404da83a	43	open Tests.Memory.Spike1Block
+Tests/Memory/Spike1Policy.lean	6130404da83a	47	/-- The vocabulary Spike 1's instructions actually use.
+Tests/Memory/Spike1Policy.lean	6130404da83a	54	Spike 1: it declares no profile-specific ordering, cites no initialization rule, and
+Tests/Memory/Spike1Policy.lean	6130404da83a	69	-- §6's call lends the frame slot it passes, so `loan` is Spike 1's; `frame` is
+Tests/Memory/Spike1Policy.lean	6130404da83a	72	-- Spike 1 declares no obligation protocols, because its reference set creates no
+Tests/Memory/Spike1Policy.lean	6130404da83a	80	"{ id := ⟨""spike1.win64""⟩, vocabularyVersion := 1, vocabulary := vocabulary"
+Tests/Memory/Spike1Policy.lean	6130404da83a	116	`Tests/Memory/Spike1Reference.lean` — the point is that the *reference* set steps,
+Tests/Memory/Spike1Policy.lean	6130404da83a	119	/-- Spike 1's memory-touching instruction forms. -/
+Tests/Memory/Spike1Policy.lean	6130404da83a	185	{ memoryEffects := some (.single Tests.Memory.Spike1Block.agentWrite)
+Tests/Memory/Spike1Policy.lean	6130404da83a	194	"Grass.Op.step policy state (SomeOperation.of op) mainThread .thread ⟨⟨""spike1""⟩⟩"
+Tests/Memory/Spike1Policy.lean	6130404da83a	198	The one reference case that had no theorem. `Spike1Reference.ud2Containment`'s own
+Tests/Memory/Spike1Policy.lean	6130404da83a	211	".thread ⟨⟨""spike1""⟩⟩ (faultAt := fun seq =>"
+Tests/Memory/Spike1Policy.lean	6130404da83a	265	would refuse Spike 1's central case.
+Tests/Memory/Spike1Policy.lean	6130404da83a	458	end Grass.Tests.Spike1Policy
+Tests/Platform/Win32WriteFile.lean	fa1b38eef902	8	open Grass.Tests.Spike1
+Tests/Platform/Win32WriteFile.lean	fa1b38eef902	20	{ Tests.Memory.Spike1Block.stackRecord with
+Tests/Platform/Win32WriteFile.lean	fa1b38eef902	144	policy := Grass.Tests.Spike1Policy.policy
+Tests/Platform/Win32WriteFile.lean	fa1b38eef902	145	operation := SomeOperation.of Grass.Tests.Spike1Policy.Op.leaPayload
+Tests/Platform/Win32WriteFile.lean	fa1b38eef902	224	¬ InputMatches Tests.Memory.Spike1Block.state₀ request := by decide
+Tests/Platform/Win32WriteFile.lean	fa1b38eef902	261	Grass.Tests.Spike1.access stackProvenance ⟨16, 4⟩
+Tests/Platform/Win32WriteFile.lean	fa1b38eef902	275	{ Grass.Tests.Spike1Policy.policy with
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	15	[Hello Program.lean](../Spikes/1_Hello_World/Program.lean) ends in
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	16	`helloVerified : VerifiedProgram spec` and `bytes := emitProgram helloVerified`.
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	18	Read the paired [annotated spike](SPIKE_1.md) and
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	19	[facade boundary](HELLO_FACADE_BOUNDARY.md) for the required connection.
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	26	theorem is not a concrete `helloVerified` construction. The target contract is
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	28	[HELLO_FACADE_BOUNDARY.md](HELLO_FACADE_BOUNDARY.md) describes the required root
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	46	| Fetched instructions and frame memory | [Execution](../Grass/ISA/X86/Execution/), [LoadedCodeRoot.lean](../Grass/Assembly/LoadedCodeRoot.lean), [loader fixture](../Tests/Platform/Win32LoaderEntry.lean) | Start with [exact Hello coverage](X86_HELLO_COVERAGE.md), [x86 execution](X86_EXECUTION.md), and [frame memory execution](FRAME_MEMORY_EXECUTION.md). Normal receipts have premises; they do not exclude every fault or establish a whole loop | x86, memory-model, lowering |
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	53	[SPIKE1_BOUNDARY_REVIEW.md](SPIKE1_BOUNDARY_REVIEW.md). For unwind requirements,
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	54	use [HELLO_UNWIND_BOUNDARY.md](HELLO_UNWIND_BOUNDARY.md). These documents retain
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	163	The structured Hello fixture at the inspected `31ad186e` had a trust-gate
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	168	establish whole Hello.
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	220	`git show 2ae59a56:docs/HELLO_ENDPOINT_MODEL.md`. Its earlier fixed-environment
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	223	without claiming the public verified-emission gate or the Hello endpoint has migrated.
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	227	Spikes reported a loaded-Hello prologue fixture on main `87fa3e5b`, explicitly
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	228	short of full Hello, and relative certificate/loop work on
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	274	unchanged Hello has no authored RET, and native correspondence remains open.
+docs/ENDPOINT_INDEX.md	0503bbc0cdd8	377	rg -n 'helloVerified|emitProgram' Spikes Grass Tests
+docs/RAW_PHASE_PRESERVATION.md	f4888bdbab14	35	These clauses do not prove enabledness or Hello deadlock freedom. Frontend must
+docs/RAW_PHASE_PRESERVATION.md	f4888bdbab14	74	implements the selected Hello ownership interpretation and proves that every
+docs/WAIT_AGENCY_REFINEMENT.md	e28ccb6593a8	73	## Selected Win32 Hello profile

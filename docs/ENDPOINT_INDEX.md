@@ -83,14 +83,12 @@ See [raw phase preservation](RAW_PHASE_PRESERVATION.md) for the exact local clau
 and their limits. In particular, a retained initial prefix does not by itself
 supply every subsequent segment's original handoff or prove enabledness.
 
-The current concrete positive-trace blocker is in
-[Op.Step](../Grass/Op/Step.lean), `ConflictsWithHistory`: conflicting plain accesses
-from different contexts are rejected without consuming evidence that they are
-ordered by happens-before. See
-[the WriteFile regression](../Tests/Platform/Win32WriteFile.lean),
-`provider_denial_is_the_ordering_blocker`. Adding a causal graph after execution
-does not make that evidence part of the access check. Memory-model is the sole
-implementation owner for this correction; Windows and frontend consume it.
+The canonical synchronization state now participates in
+[Op.Step](../Grass/Op/Step.lean)'s conflict check. Actual call handoff and return
+propagate the corresponding context frontiers. This fixes the previously
+identified ordering omission; it does not complete the program proof.
+Hello-specific integration is being removed under the approved
+[specialization removal plan](HELLO_SPECIALIZATION_REMOVAL.md).
 
 The next connection is the original-entry service segment and enclosing provider
 history, followed by the remaining source/body and certificate composition.

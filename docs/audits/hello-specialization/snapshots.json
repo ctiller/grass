@@ -1,0 +1,44 @@
+[
+  {
+    "label": "main",
+    "path": "C:\\Users\\craig\\.codex\\worktrees\\8896\\grass",
+    "head": "1c3da22c68916843ff96e422870d19a260fa54bd",
+    "status": "?? census-search.txt\n",
+    "text_files_scanned": 762
+  },
+  {
+    "label": "certificate",
+    "path": "C:\\Users\\craig\\.codex\\worktrees\\grass-certificate-root",
+    "head": "8cc30369b197166b9d56f6834b9d2cc062d50fe8",
+    "status": "",
+    "text_files_scanned": 841
+  },
+  {
+    "label": "frontend",
+    "path": "C:\\Users\\craig\\.codex\\worktrees\\8509\\grass",
+    "head": "ecd12f873ad32b1bda29336ec8e49dd58bda3af1",
+    "status": "",
+    "text_files_scanned": 844
+  },
+  {
+    "label": "lowering",
+    "path": "C:\\Users\\craig\\.codex\\worktrees\\0a71\\grass",
+    "head": "adf6da3af54d328ecac2b534f6046b0fbcccc90b",
+    "status": "",
+    "text_files_scanned": 842
+  },
+  {
+    "label": "windows",
+    "path": "C:\\Users\\craig\\.codex\\worktrees\\a25b\\grass",
+    "head": "a5d947c2049ba23a4672611105e88e9b8414d62f",
+    "status": " M Tests/Platform/Win32WriteFileCausalSchedule.lean\n M Tests/Platform/Win32WriteFileProviderOperation.lean\n?? Grass/Op/PairCompletion.lean\n?? Grass/Platform/Win32/WriteFileCountWrite.lean\n?? Grass/Platform/Win32/WriteFilePreparedPreservation.lean\n?? Tests/Platform/Win32WriteFileCallSchedule.lean\n?? Tests/Platform/Win32WriteFileFullReceipt.lean\n?? Tests/Platform/Win32WriteFileProviderCompletion.lean\n",
+    "text_files_scanned": 752
+  },
+  {
+    "label": "process",
+    "path": "C:\\Users\\craig\\.codex\\worktrees\\grass-execution-steps",
+    "head": "875e3f228f1809567c29a38f80594c12654da884",
+    "status": "",
+    "text_files_scanned": 840
+  }
+]
