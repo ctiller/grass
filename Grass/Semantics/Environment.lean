@@ -38,7 +38,8 @@ structure EnvironmentStrategy where
 
 namespace EnvironmentStrategy
 
-/-- The strategy which requires every pending occurrence eventually to answer. -/
+/-- This timing strategy excludes stationary permanent waits. Proving actual
+responsiveness additionally requires replies on its retained infinite runs. -/
 def responding : model.EnvironmentStrategy where
   permitsNonresponseAt := fun _ _ => False
 
@@ -64,15 +65,19 @@ def Generated (strategy : model.EnvironmentStrategy) (history : model.History) :
 
 end EnvironmentStrategy
 
-/-- Settlement at a reached pending occurrence means a positive terminal
-suffix or an actual first transition of an infinite continuation. A permanent
-wait at the same history is unsettled. -/
-def Settles {history : model.History} (_occurrence : model.boundary.Occurrence)
-    (_pending : model.boundary.Pending history _occurrence) :
+/-- Settlement means that an actual allowed reply for this occurrence appears
+in the retained finite path or infinite choice stream. -/
+def Settles {history : model.History} (occurrence : model.boundary.Occurrence)
+    (_pending : model.boundary.Pending history occurrence) :
     model.MaximalContinuation history → Prop
-  | .terminal path _ => 0 < path.length
-  | .infinite _ => True
-  | .waiting path _ => 0 < path.length
+  | .terminal path _ | .waiting path _ =>
+      ∃ response choice,
+        model.protocol.Allowed (model.boundary.request occurrence) response ∧
+        model.boundary.Reply occurrence response choice ∧ choice ∈ path.choices
+  | .infinite continuation =>
+      ∃ index response,
+        model.protocol.Allowed (model.boundary.request occurrence) response ∧
+        model.boundary.Reply occurrence response (continuation.choiceAt index)
 
 /-- Fixed standard responsiveness: every generated maximal continuation from
 every reached pending occurrence settles that exact occurrence. -/
@@ -96,6 +101,17 @@ structure RespondingContinuationAdequate : Prop where
       | .terminal _ _ => True
       | .infinite _ => True
       | .waiting _ _ => False
+
+/-- Infinite settlement is an explicit eventual-reply law. Pointwise external
+agency alone supplies no fairness or eventual response. -/
+def InfiniteEventuallyReplies : Prop :=
+  ∀ (history : model.History) occurrence,
+    model.boundary.Pending history occurrence →
+    ∀ continuation : model.system.InfiniteContinuation history.state history.graph
+      history.path.events,
+      ∃ index response,
+        model.protocol.Allowed (model.boundary.request occurrence) response ∧
+        model.boundary.Reply occurrence response (continuation.choiceAt index)
 
 /-- `StrategyAdequate` requires a root and generated continuation at every history. -/
 structure StrategyAdequate (strategy : model.EnvironmentStrategy) : Prop where
@@ -147,27 +163,26 @@ theorem allowedResponseHistory (_strategy : model.EnvironmentStrategy)
     (pending : model.boundary.Pending history occurrence)
     (response : model.protocol.Response (model.boundary.request occurrence))
     (allowed : model.protocol.Allowed (model.boundary.request occurrence) response) :
-    ∃ choice event next nextGraph,
-      model.boundary.Reply occurrence response choice ∧
-      ∃ _transition : model.system.Step history.graph history.state choice event next nextGraph,
-        (history.append (.snoc .nil choice event next nextGraph _transition)).state = next := by
-  obtain ⟨choice, event, next, nextGraph, reply, transition⟩ :=
-    model.boundary.reply_step history occurrence pending response allowed
-  exact ⟨choice, event, next, nextGraph, reply, transition,
-    rfl⟩
+    ∃ state graph, ∃ beforeReply : model.system.Path history.state history.graph state graph,
+      (∀ choice ∈ beforeReply.choices, ∀ earlier,
+        ¬ model.boundary.Reply occurrence earlier choice) ∧
+      model.boundary.Pending (history.append beforeReply) occurrence ∧
+      ∃ choice event next nextGraph,
+        model.boundary.Reply occurrence response choice ∧
+        model.system.Step graph state choice event next nextGraph :=
+  model.boundary.reply_path history occurrence pending response allowed
 
-/-- The first transition of an infinite continuation from a pending frontier is
-an allowed response settling that exact occurrence. -/
-theorem infinite_first_reply {history : model.History}
+/-- The first transition of an infinite continuation from a pending frontier
+uses the selected external agency. It need not complete the reply. -/
+theorem infinite_first_external {history : model.History}
     (occurrence : model.boundary.Occurrence)
     (pending : model.boundary.Pending history occurrence)
     (continuation : model.system.InfiniteContinuation history.state history.graph
       history.path.events) :
-    ∃ response, model.protocol.Allowed (model.boundary.request occurrence) response ∧
-      model.boundary.Reply occurrence response (continuation.choiceAt 0) := by
+    model.boundary.External occurrence (continuation.choiceAt 0) := by
   have step := continuation.step 0
   rw [continuation.graphZero, continuation.stateZero] at step
-  exact model.boundary.step_reply history occurrence pending _ _ _ _ step
+  exact model.boundary.step_external history occurrence pending _ _ _ _ step
 
 private theorem Path.first_of_positive {Event : Type uSystem}
     {system : RelationalSystem Event}
@@ -192,22 +207,21 @@ private theorem Path.first_of_positive {Event : Type uSystem}
           exact ⟨firstChoice, firstEvent, firstNext, firstGraph, firstStep,
             .snoc rest choice event next nextGraph transition, by rw [equal]; rfl⟩
 
-/-- A positive finite settlement from a pending occurrence begins with an
-actual allowed response at that exact occurrence. -/
-theorem finite_first_reply {history : model.History}
+/-- A positive finite path from a pending occurrence begins with a choice using
+the selected external agency. That first choice need not complete the reply. -/
+theorem finite_first_external {history : model.History}
     (occurrence : model.boundary.Occurrence)
     (pending : model.boundary.Pending history occurrence)
     {state graph} (path : model.system.Path history.state history.graph state graph)
     (positive : 0 < path.length) :
-    ∃ response choice event next nextGraph,
-      model.protocol.Allowed (model.boundary.request occurrence) response ∧
-      model.boundary.Reply occurrence response choice ∧
+    ∃ choice event next nextGraph,
+      model.boundary.External occurrence choice ∧
       model.system.Step history.graph history.state choice event next nextGraph := by
   obtain ⟨choice, event, next, nextGraph, first, rest, equal⟩ :=
     Path.first_of_positive path positive
-  obtain ⟨response, allowed, reply⟩ :=
-    model.boundary.step_reply history occurrence pending choice event next nextGraph first
-  exact ⟨response, choice, event, next, nextGraph, allowed, reply, first⟩
+  exact ⟨choice, event, next, nextGraph,
+    model.boundary.step_external history occurrence pending choice event next nextGraph first,
+    first⟩
 
 @[simp] theorem history_append_nil (history : model.History) :
     history.append (.nil) = history := by
@@ -234,8 +248,8 @@ theorem responsive_no_wait (strategy : model.EnvironmentStrategy)
       let generated : EnvironmentStrategy.Generated model strategy history :=
         ⟨.waiting empty laterWait, compatible⟩
       have settled := responsive history laterWait.occurrence laterWait.pending generated
-      change 0 < empty.length at settled
-      simp [empty, RelationalSystem.Path.length] at settled
+      obtain ⟨response, choice, allowed, reply, member⟩ := settled
+      simp [empty, RelationalSystem.Path.choices] at member
 
 /-- If the model independently rules out infinite transition sequences, fixed
 responsiveness makes every generated maximal continuation terminal. -/
@@ -254,23 +268,18 @@ theorem generated_terminal_of_responsive_no_infinite
       exact False.elim
         (model.responsive_no_wait strategy responsive (history.append path) wait compatible)
 
-/-- The responding strategy is responsive without assuming termination:
-terminal continuations must leave a pending state, infinite continuations reply
-at their first step, and its generated carrier contains no waiting case. -/
-theorem responding_responsive :
+/-- The responding strategy is responsive when infinite continuations are
+independently known eventually to contain an actual reply. -/
+theorem responding_responsive (eventual : model.InfiniteEventuallyReplies) :
     EnvironmentResponsive model (EnvironmentStrategy.responding model) := by
   intro history occurrence pending generated
   rcases generated with ⟨continuation, compatible⟩
   cases continuation with
   | terminal path finished =>
-      cases path with
-      | nil => exact False.elim (model.boundary.nonterminal history occurrence pending finished)
-      | snoc prior choice event next nextGraph transition => simp [Settles, RelationalSystem.Path.length]
-  | infinite continuation => trivial
+      exact model.boundary.terminal_has_reply history occurrence pending path finished
+  | infinite continuation => exact eventual history occurrence pending continuation
   | waiting path wait =>
-      by_cases positive : 0 < path.length
-      · exact positive
-      · exact False.elim compatible
+      exact False.elim compatible
 
 /-- A model with a maximal continuation from every history has an adequate
 responding strategy, without selecting one favorable result branch. -/
@@ -287,11 +296,12 @@ theorem responding_adequate (adequate : model.RespondingContinuationAdequate) :
 
 /-- Package the exact responding strategy with the same adequacy proof used to
 show its generated tree is nonempty at every history. -/
-def respondingWitness (adequate : model.RespondingContinuationAdequate) :
+def respondingWitness (adequate : model.RespondingContinuationAdequate)
+    (eventual : model.InfiniteEventuallyReplies) :
     model.ResponsiveStrategyWitness where
   strategy := EnvironmentStrategy.responding model
   adequate := model.responding_adequate adequate
-  responsive := model.responding_responsive
+  responsive := model.responding_responsive eventual
 
 end BehaviorModel
 end Grass

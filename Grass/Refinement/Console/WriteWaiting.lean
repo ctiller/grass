@@ -32,6 +32,7 @@ def boundary {payload : Vec Byte} (mayWait : Demand payload → Prop) :
   Occurrence := (machine payload).Occurrence
   request := fun occurrence => occurrence.demand
   Pending := fun history occurrence => (machine payload).held history.state = {occurrence}
+  External := fun occurrence choice => ∃ response, choice = .result occurrence response
   Reply := fun occurrence response choice => choice = .result occurrence response
   reply_unique := by
     intro occurrence first second choice left right
@@ -45,7 +46,7 @@ def boundary {payload : Vec Byte} (mayWait : Demand payload → Prop) :
     rw [held] at empty
     have cards := congrArg Bag.card empty
     simp [Bag.singleton_eq] at cards
-  step_reply := by
+  step_external := by
     intro history occurrence held choice event next nextGraph step
     obtain ⟨_, _, drives⟩ := step
     cases choice with
@@ -61,9 +62,49 @@ def boundary {payload : Vec Byte} (mayWait : Demand payload → Prop) :
             rw [← bags]; simp
           simpa using mem
         subst actual
+        exact ⟨response, rfl⟩
+  step_pending_or_reply := by
+    intro history occurrence held choice event next nextGraph step
+    right
+    obtain ⟨_, _, drives⟩ := step
+    cases choice with
+    | internal =>
+        have empty := SequentialMachine.held_of_internal drives
+        rw [held] at empty
+        have cards := congrArg Bag.card empty
+        simp [Bag.singleton_eq] at cards
+    | result actual response =>
+        have same : actual = occurrence := by
+          have bags := drives.1.symm.trans held
+          have mem : actual ∈ ({occurrence} : Bag (machine payload).Occurrence) := by
+            rw [← bags]; simp
+          simpa using mem
+        subst actual
         exact ⟨response, trivial, rfl⟩
-  reply_step := by
+  reply_allowed := by
+    intro _ _ _ _ _ _ _ _ _ _
+    trivial
+  reply_ends := by
+    intro history occurrence held response choice event next nextGraph step reply afterHeld
+    cases reply
+    have beforeMember : occurrence ∈ (machine payload).held history.state := by
+      rw [held]
+      simp
+    have beforePoint : occurrence.point = history.state :=
+      SequentialMachine.held_point beforeMember
+    simp only [History.append] at afterHeld
+    have afterMember : occurrence ∈ (machine payload).held next := by
+      rw [afterHeld]
+      simp
+    have afterPoint : occurrence.point = next :=
+      SequentialMachine.held_point afterMember
+    obtain ⟨increment, _, drives⟩ := step
+    have sameAge : history.state.age = next.age :=
+      congrArg (fun point => point.age) (beforePoint.symm.trans afterPoint)
+    omega
+  reply_path := by
     intro history occurrence held response _
+    refine ⟨history.state, history.graph, .nil, by simp [Path.choices], held, ?_⟩
     refine ⟨.result occurrence response, [],
       ⟨history.state.age + 1, occurrence.resume response⟩, (), rfl, ?_⟩
     exact ⟨rfl, rfl, held, rfl, rfl⟩
@@ -96,18 +137,16 @@ theorem wait_prefix {payload : Vec Byte} {mayWait : Demand payload → Prop}
       historyBytes history.path.events = payload.take count :=
   run_prefix history.erase
 
-/-- `boundary.step_reply` and its concrete reply interpretation exclude an
+/-- `boundary.step_external` and its concrete external interpretation exclude an
 internal step at any held external occurrence. -/
 theorem wait_no_internal_step {payload : Vec Byte} {mayWait : Demand payload → Prop}
     {history : (system payload).History} (waiting : PermanentWait (boundary mayWait) history)
     (events : List (Vec Byte)) (next : (system payload).State) (graph : Unit) :
     ¬ (system payload).Step history.graph history.state .internal events next graph := by
   intro step
-  obtain ⟨response, _, reply⟩ :=
-    (boundary mayWait).step_reply history waiting.occurrence waiting.pending
-      .internal events next graph step
-  change (DirectEvent.internal : (machine payload).Event) =
-    DirectEvent.result waiting.occurrence response at reply
+  have external := (boundary mayWait).step_external history waiting.occurrence waiting.pending
+    .internal events next graph step
+  rcases external with ⟨response, reply⟩
   cases reply
 
 /-- Initial acquisition of stdout, with no prior choices or events. -/

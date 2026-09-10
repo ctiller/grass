@@ -44,16 +44,23 @@ structure InfiniteAlignment (R : lower.History → upper.History → Prop)
     (left.append (leftRun.prefixPath (leftIndex index)))
     (right.append (rightRun.prefixPath (rightIndex index)))
 
-/-- An actual boundary reply followed by its retained finite continuation. -/
+/-- An actual finite service path, its first reply for this occurrence, and a
+retained finite continuation after that reply. -/
 structure ReplyExtension (model : BehaviorModel Outcome) (history : model.History)
     (waiting : PermanentWait model.boundary history)
     (answer : model.protocol.Response (model.boundary.request waiting.occurrence)) where
+  beforeState : model.system.State
+  beforeGraph : model.system.Graph
+  beforeReply : model.system.Path history.state history.graph beforeState beforeGraph
+  noEarlierReplies : ∀ choice ∈ beforeReply.choices, ∀ earlier,
+    ¬ model.boundary.Reply waiting.occurrence earlier choice
+  pendingBeforeReply : model.boundary.Pending (history.append beforeReply) waiting.occurrence
   choice : model.system.Choice
   event : model.Event
   nextState : model.system.State
   nextGraph : model.system.Graph
   reply : model.boundary.Reply waiting.occurrence answer choice
-  first : model.system.Step history.graph history.state choice event nextState nextGraph
+  replyStep : model.system.Step beforeGraph beforeState choice event nextState nextGraph
   finalState : model.system.State
   finalGraph : model.system.Graph
   tail : model.system.Path nextState nextGraph finalState finalGraph
@@ -64,8 +71,9 @@ def history {model : BehaviorModel Outcome} {before : model.History}
     {waiting : PermanentWait model.boundary before}
     {answer : model.protocol.Response (model.boundary.request waiting.occurrence)}
     (extension : ReplyExtension model before waiting answer) : model.History :=
-  before.append ((Path.snoc .nil extension.choice extension.event extension.nextState
-    extension.nextGraph extension.first).append extension.tail)
+  before.append (extension.beforeReply.append
+    ((Path.snoc .nil extension.choice extension.event extension.nextState
+      extension.nextGraph extension.replyStep).append extension.tail))
 
 theorem history_extends {model : BehaviorModel Outcome} {before : model.History}
     {waiting : PermanentWait model.boundary before}
@@ -77,8 +85,9 @@ theorem history_length {model : BehaviorModel Outcome} {before : model.History}
     {waiting : PermanentWait model.boundary before}
     {answer : model.protocol.Response (model.boundary.request waiting.occurrence)}
     (extension : ReplyExtension model before waiting answer) :
-    extension.history.path.length = before.path.length + (1 + extension.tail.length) := by
-  simp [history, History.append, Path.length_append, Path.length]
+    extension.history.path.length = before.path.length +
+      (extension.beforeReply.length + 1 + extension.tail.length) := by
+  simp [history, History.append, Path.length_append, Path.length, Nat.add_assoc]
 
 end ReplyExtension
 

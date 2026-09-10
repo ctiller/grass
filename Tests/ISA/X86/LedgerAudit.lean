@@ -80,6 +80,7 @@ import Grass.Platform.Win32.RawPrefixSteps
 import Grass.Platform.Win32.RawTerminal
 import Grass.Platform.Win32.RawGetStdHandlePending
 import Grass.Platform.Win32.RawPendingInfinite
+import Grass.Platform.Win32.RawAgencyProfile
 import Grass.Platform.Win32.RawServiceMetadata
 import Grass.Platform.Win32.RawServiceContinuation
 import Grass.Platform.Win32.RawServicePrefix
@@ -272,6 +273,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawTerminal,
    `Grass.Platform.Win32.RawGetStdHandlePending,
    `Grass.Platform.Win32.RawPendingInfinite,
+   `Grass.Platform.Win32.RawAgencyProfile,
    `Grass.Platform.Win32.RawServiceMetadata,
    `Grass.Platform.Win32.RawServiceContinuation,
    `Grass.Platform.Win32.RawServicePrefix,
@@ -377,7 +379,7 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Static selector/route/result policy and observed-register API acceptance.
 -- External process applicability and formal source anchors remain owed.
 -- The bounded live writable/synchronous publication attribution policy.
-def owedBaseline : Nat := 349
+def owedBaseline : Nat := 350
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -1067,6 +1069,8 @@ constituent declarations is citation work nobody has done.
 -/
 def owed : List Name :=
   [
+    -- Fixed Hello environment ownership is selected profile applicability, not native proof.
+    `Grass.Platform.Win32.Raw.helloExternalChoice,
     -- Fixed console table/sentinel policy and observed API/ABI acceptance.
     `Grass.Platform.Win32.ConsoleEnvironment.standardHandle?,
     `Grass.Platform.Win32.ConsoleEnvironment.routeOf?,

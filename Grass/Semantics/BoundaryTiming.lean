@@ -27,7 +27,8 @@ structure BoundaryTimingStrategy (boundary : system.WaitBoundary protocol) where
 
 namespace BoundaryTimingStrategy
 
-/-- A strategy under which every pending external interaction must answer. -/
+/-- A timing strategy excluding stationary permanent nonresponse. Actual
+infinite service remains admitted; API responsiveness is a separate model law. -/
 def responding (boundary : system.WaitBoundary protocol) : BoundaryTimingStrategy boundary where
   permitsNonresponse := fun _ _ => False
 
@@ -64,7 +65,8 @@ def infiniteCompatible (strategy : BoundaryTimingStrategy boundary)
 end BoundaryTimingStrategy
 
 /-- Fixed responsiveness for this isolated boundary: no permanent nonresponse
-selected by the timing strategy. Infinite sequences of actual replies remain allowed. -/
+selected by the timing strategy. Infinite service remains allowed; this timing-only condition does not establish
+that such activity contains completed replies. -/
 def BoundaryResponsive (strategy : BoundaryTimingStrategy boundary) : Prop :=
   ∀ _history wait, ¬ strategy.permitsNonresponse _history wait
 
@@ -87,13 +89,14 @@ theorem allowedReplyHistory (history : system.History) (occurrence : boundary.Oc
     (pending : boundary.Pending history occurrence)
     (response : protocol.Response (boundary.request occurrence))
     (allowed : protocol.Allowed (boundary.request occurrence) response) :
-    ∃ choice event next nextGraph,
-      boundary.Reply occurrence response choice ∧
-      ∃ transition : system.Step history.graph history.state choice event next nextGraph,
-        (history.append (.snoc .nil choice event next nextGraph transition)).state = next := by
-  obtain ⟨choice, event, next, nextGraph, reply, transition⟩ :=
-    boundary.reply_step history occurrence pending response allowed
-  exact ⟨choice, event, next, nextGraph, reply, transition, rfl⟩
+    ∃ state graph, ∃ beforeReply : system.Path history.state history.graph state graph,
+      (∀ choice ∈ beforeReply.choices, ∀ earlier,
+        ¬ boundary.Reply occurrence earlier choice) ∧
+      boundary.Pending (history.append beforeReply) occurrence ∧
+      ∃ choice event next nextGraph,
+        boundary.Reply occurrence response choice ∧
+        system.Step graph state choice event next nextGraph :=
+  boundary.reply_path history occurrence pending response allowed
 
 @[simp] theorem responding_responsive (boundary : system.WaitBoundary protocol) :
     BoundaryResponsive (BoundaryTimingStrategy.responding boundary) := by

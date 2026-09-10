@@ -147,6 +147,7 @@ def boundary (payload : Vec Byte) : (system payload).WaitBoundary (protocol payl
   Occurrence := OutputCut payload
   request := id
   Pending := fun history cut => history.state = .pending cut
+  External := fun cut choice => ∃ response, choice = .reply cut response
   Reply := fun cut response choice => choice = .reply cut response
   reply_unique := by
     intro _ first second choice left right
@@ -157,8 +158,23 @@ def boundary (payload : Vec Byte) : (system payload).WaitBoundary (protocol payl
     intro history cut located ⟨terminalCut, cause, equal, allowed⟩
     rw [located] at equal
     cases equal
-  step_reply := by
+  step_external := by
     intro history cut located choice event next nextGraph step
+    rcases choice with ⟨choiceCut, response⟩
+    cases response with
+    | advance after strict =>
+      rcases (step_iff.mp step) with ⟨origin, _, _⟩
+      have same : State.pending cut = State.pending choiceCut := located.symm.trans origin
+      cases same
+      exact ⟨.advance after strict, rfl⟩
+    | finish cause =>
+      rcases (step_iff.mp step) with ⟨origin, allowed, _, _⟩
+      have same : State.pending cut = State.pending choiceCut := located.symm.trans origin
+      cases same
+      exact ⟨.finish cause, rfl⟩
+  step_pending_or_reply := by
+    intro history cut located choice event next nextGraph step
+    right
     rcases choice with ⟨choiceCut, response⟩
     cases response with
     | advance after strict =>
@@ -171,18 +187,58 @@ def boundary (payload : Vec Byte) : (system payload).WaitBoundary (protocol payl
       have same : State.pending cut = State.pending choiceCut := located.symm.trans origin
       cases same
       exact ⟨.finish cause, allowed, rfl⟩
-  reply_step := by
-    intro history cut located response allowed
+  reply_allowed := by
+    intro history cut located response choice event next nextGraph step reply
+    cases response with
+    | advance after strict => exact strict
+    | finish cause =>
+      rcases choice with ⟨choiceCut, choiceResponse⟩
+      cases choiceResponse with
+      | advance after strict => cases reply
+      | finish choiceCause =>
+        cases reply
+        exact (step_iff.mp step).2.1
+  reply_ends := by
+    intro history cut located response choice event next nextGraph step reply pending
     cases response with
     | advance after strict =>
-      refine ⟨.reply cut (.advance after strict), .emitted (cut.between after), .pending after,
-        (), rfl, ?_⟩
-      rw [located]
-      simp [system]
+      rcases choice with ⟨choiceCut, choiceResponse⟩
+      cases choiceResponse with
+      | advance after strict' =>
+        cases reply
+        rcases (step_iff.mp step) with ⟨origin, _, nextEq⟩
+        rw [located] at origin
+        cases origin
+        subst next
+        simp only [History.append] at pending
+        change State.pending after = State.pending cut at pending
+        cases pending
+        exact Nat.ne_of_lt strict rfl
+      | finish cause => cases reply
     | finish cause =>
-      refine ⟨.reply cut (.finish cause), .terminal cause, .finished cut cause, (), rfl, ?_⟩
-      rw [located]
-      exact ⟨rfl, allowed, rfl, rfl⟩
+      rcases choice with ⟨choiceCut, choiceResponse⟩
+      cases choiceResponse with
+      | advance after strict => cases reply
+      | finish cause' =>
+        cases reply
+        rcases (step_iff.mp step) with ⟨origin, allowed, _, nextEq⟩
+        rw [located] at origin
+        cases origin
+        subst next
+        simp only [History.append] at pending
+        change State.finished cut cause = State.pending cut at pending
+        cases pending
+  reply_path := by
+    intro history cut located response allowed
+    refine ⟨history.state, history.graph, .nil, ?_, located, ?_⟩
+    · simp [Path.choices]
+    cases response with
+    | advance after strict =>
+      exact ⟨.reply cut (.advance after strict), .emitted (cut.between after), .pending after,
+        (), rfl, by rw [located]; simp [system]⟩
+    | finish cause =>
+      exact ⟨.reply cut (.finish cause), .terminal cause, .finished cut cause,
+        (), rfl, by rw [located]; exact ⟨rfl, allowed, rfl, rfl⟩⟩
 
 /-- Every reachable pending cut has a permanent-wait witness and retains all its
 allowed replies. -/

@@ -39,6 +39,7 @@ abbrev noWaitBoundary : terminalSystem.WaitBoundary noRequests where
   Occurrence := Empty
   request := fun occurrence => nomatch occurrence
   Pending := fun _ occurrence => nomatch occurrence
+  External := fun occurrence => nomatch occurrence
   Reply := fun occurrence => nomatch occurrence
   reply_unique := by
     intro occurrence
@@ -46,12 +47,11 @@ abbrev noWaitBoundary : terminalSystem.WaitBoundary noRequests where
   nonterminal := by
     intro history occurrence
     exact nomatch occurrence
-  step_reply := by
-    intro history occurrence
-    exact nomatch occurrence
-  reply_step := by
-    intro history occurrence
-    exact nomatch occurrence
+  step_external := by intro history occurrence; exact nomatch occurrence
+  step_pending_or_reply := by intro history occurrence; exact nomatch occurrence
+  reply_allowed := by intro history occurrence; exact nomatch occurrence
+  reply_ends := by intro history occurrence; exact nomatch occurrence
+  reply_path := by intro history occurrence; exact nomatch occurrence
 
 /-- `true` denotes success and `false` denotes error. -/
 abbrev successOnly : BehaviorModel Bool where
@@ -141,6 +141,7 @@ def successConformance : Grass.ImplementationConformance successOnly successOrEr
     cases complete with
     | terminal history finished =>
       refine ⟨.terminal successOrErrorInitial trivial, History.Extension.refl _, ?_⟩
+      apply Grass.ImplementationConformance.CompleteMatch.strict
       apply BehaviorMatching.CompleteMatch.terminal
       · exact rfl
       · rfl
@@ -166,11 +167,13 @@ theorem terminal_counterpart_required {Outcome : Type} {lower upper : BehaviorMo
   obtain ⟨other, otherStarts, matched⟩ := conformance.completeForth related
     (.terminal lowerHistory finished) starts
   cases matched with
-  | terminal leftMatched rightMatched leftDone rightDone relatedMatched outcomes =>
-    exact ⟨rightMatched, rightDone, otherStarts, outcomes⟩
+  | strict matched =>
+    cases matched with
+    | terminal leftMatched rightMatched leftDone rightDone relatedMatched outcomes =>
+      exact ⟨rightMatched, rightDone, otherStarts, outcomes⟩
 
-/-- A divergent lower completion cannot be erased: its counterpart has an
-actual upper infinite continuation. -/
+/-- `infinite_counterpart_required` retains strict infinite matching when no
+suffix can be entirely owned by the selected external agency. -/
 theorem infinite_counterpart_required {Outcome : Type} {lower upper : BehaviorModel Outcome}
     {observe : lower.Observation → upper.Observation}
     {waits : DirectedWaitTranslation lower upper}
@@ -178,14 +181,21 @@ theorem infinite_counterpart_required {Outcome : Type} {lower upper : BehaviorMo
     {left : lower.History} {right : upper.History} {lowerHistory : lower.History}
     (related : conformance.finite.Rel left right)
     (run : lower.system.InfiniteContinuation lowerHistory.state lowerHistory.graph lowerHistory.path.events)
-    (starts : BehaviorModel.Complete.StartsAfter left (.infinite lowerHistory run)) :
+    (starts : BehaviorModel.Complete.StartsAfter left (.infinite lowerHistory run))
+    (programOwned : ∀ cut occurrence, ∃ index,
+      ¬ lower.boundary.External occurrence (run.choiceAt (cut + index))) :
     ∃ upperHistory run,
       BehaviorModel.Complete.StartsAfter right (.infinite upperHistory run) := by
   obtain ⟨other, otherStarts, matched⟩ := conformance.completeForth related
     (.infinite lowerHistory run) starts
   cases matched with
-  | infinite leftMatched rightMatched leftRun rightRun alignment =>
-    exact ⟨rightMatched, rightRun, otherStarts⟩
+  | strict matched =>
+    cases matched with
+    | infinite leftMatched rightMatched leftRun rightRun alignment =>
+      exact ⟨rightMatched, rightRun, otherStarts⟩
+  | externalNonresponse _ _ _ _ evidence =>
+    obtain ⟨index, denied⟩ := programOwned evidence.cut evidence.leftWait.occurrence
+    exact False.elim (denied (evidence.external index))
 
 /-- A permitted lower permanent wait cannot be erased: its counterpart retains
 an actual upper permanent-wait witness. -/
@@ -202,8 +212,10 @@ theorem waiting_counterpart_required {Outcome : Type} {lower upper : BehaviorMod
   obtain ⟨other, otherStarts, matched⟩ := conformance.completeForth related
     (.waiting lowerHistory waiting) starts
   cases matched with
-  | waiting leftMatched rightMatched leftWait rightWait matchedWait =>
-    exact ⟨rightMatched, rightWait, otherStarts⟩
+  | strict matched =>
+    cases matched with
+    | waiting leftMatched rightMatched leftWait rightWait matchedWait =>
+      exact ⟨rightMatched, rightWait, otherStarts⟩
 
 /-- A lower actual error cannot conform to a success-only upper model: terminal
 matching requires equality of the two outcomes. -/
@@ -238,6 +250,7 @@ abbrev loopingNoWaitBoundary : loopingSystem.WaitBoundary noRequests where
   Occurrence := Empty
   request := fun occurrence => nomatch occurrence
   Pending := fun _ occurrence => nomatch occurrence
+  External := fun occurrence => nomatch occurrence
   Reply := fun occurrence => nomatch occurrence
   reply_unique := by
     intro occurrence
@@ -245,12 +258,11 @@ abbrev loopingNoWaitBoundary : loopingSystem.WaitBoundary noRequests where
   nonterminal := by
     intro history occurrence
     exact nomatch occurrence
-  step_reply := by
-    intro history occurrence
-    exact nomatch occurrence
-  reply_step := by
-    intro history occurrence
-    exact nomatch occurrence
+  step_external := by intro history occurrence; exact nomatch occurrence
+  step_pending_or_reply := by intro history occurrence; exact nomatch occurrence
+  reply_allowed := by intro history occurrence; exact nomatch occurrence
+  reply_ends := by intro history occurrence; exact nomatch occurrence
+  reply_path := by intro history occurrence; exact nomatch occurrence
 
 abbrev looping : BehaviorModel Bool where
   Event := Unit
@@ -296,6 +308,7 @@ theorem divergence_cannot_be_omitted
   obtain ⟨right, empty, related⟩ := conformance.finite.initialForth loopingInitial rfl
   obtain ⟨upperHistory, upperRun, upperStarts⟩ := infinite_counterpart_required conformance
     related (loopingRun loopingInitial) (History.Extension.refl _)
+    (by intro cut occurrence; exact nomatch occurrence)
   exact no_infinite_success_only upperRun
 
 abbrev waitProtocol : WaitProtocol Unit where
@@ -324,6 +337,7 @@ abbrev lowerWaitBoundary : waitingSystem.WaitBoundary waitProtocol where
   Occurrence := Unit
   request := fun _ => ()
   Pending := fun _ _ => True
+  External := fun _ _ => False
   Reply := fun occurrence response => nomatch response
   reply_unique := by
     intro occurrence first second choice firstReply secondReply
@@ -331,17 +345,17 @@ abbrev lowerWaitBoundary : waitingSystem.WaitBoundary waitProtocol where
   nonterminal := by
     intro history occurrence pending terminal
     exact False.elim terminal
-  step_reply := by
-    intro history occurrence pending choice event next nextGraph step
-    exact False.elim step
-  reply_step := by
-    intro history occurrence pending response allowed
-    exact nomatch response
+  step_external := by intros; contradiction
+  step_pending_or_reply := by intros; contradiction
+  reply_allowed := by intro history occurrence pending response; exact nomatch response
+  reply_ends := by intro history occurrence pending response; exact nomatch response
+  reply_path := by intro history occurrence pending response; exact nomatch response
 
 abbrev upperWaitBoundary : terminalSystem.WaitBoundary waitProtocol where
   Occurrence := Unit
   request := fun _ => ()
   Pending := fun _ _ => False
+  External := fun _ _ => False
   Reply := fun occurrence response => nomatch response
   reply_unique := by
     intro occurrence first second choice firstReply secondReply
@@ -349,12 +363,11 @@ abbrev upperWaitBoundary : terminalSystem.WaitBoundary waitProtocol where
   nonterminal := by
     intro history occurrence pending
     exact False.elim pending
-  step_reply := by
-    intro history occurrence pending
-    exact False.elim pending
-  reply_step := by
-    intro history occurrence pending
-    exact False.elim pending
+  step_external := by intro history occurrence pending; exact False.elim pending
+  step_pending_or_reply := by intro history occurrence pending; exact False.elim pending
+  reply_allowed := by intro history occurrence pending; exact False.elim pending
+  reply_ends := by intro history occurrence pending; exact False.elim pending
+  reply_path := by intro history occurrence pending; exact False.elim pending
 
 abbrev waitingLower : BehaviorModel Bool where
   Event := Unit

@@ -96,6 +96,9 @@ def boundary (request : LineRequest Outcome) (rendering : LineRendering) :
   Pending := fun history occurrence => match occurrence with
     | .output cut => history.state = .writing cut
     | .observation selection => history.state = .reporting selection
+  External := fun occurrence choice => match occurrence with
+    | .output cut => ∃ response, choice = .output cut response
+    | .observation selection => ∃ response, choice = .observe selection response
   Reply := fun occurrence response choice => match occurrence with
     | .output cut => choice = .output cut response
     | .observation selection => choice = .observe selection response
@@ -111,8 +114,49 @@ def boundary (request : LineRequest Outcome) (rendering : LineRendering) :
     intro history occurrence pending terminal
     rcases terminal with ⟨selection, terminal⟩
     cases occurrence <;> simp_all
-  step_reply := by
+  step_external := by
     intro history occurrence pending choice event next nextGraph step
+    cases occurrence with
+    | output cut =>
+      cases choice with
+      | output choiceCut response =>
+        cases response with
+        | advance after strict =>
+          simp only [system] at step
+          rcases step with ⟨origin, _, _⟩
+          cases pending.symm.trans origin
+          exact ⟨.advance after strict, rfl⟩
+        | finish cause =>
+          simp only [system] at step
+          rcases step with ⟨allowed, origin, _, _⟩
+          cases pending.symm.trans origin
+          exact ⟨.finish cause, rfl⟩
+      | observe selection reply =>
+        change history.state = .writing cut at pending
+        rcases step with ⟨origin, _, _⟩
+        rw [pending] at origin
+        cases origin
+    | observation selection =>
+      cases choice with
+      | output cut response =>
+        change history.state = .reporting selection at pending
+        cases response with
+        | advance after strict =>
+          rcases step with ⟨origin, _, _⟩
+          rw [pending] at origin
+          cases origin
+        | finish cause =>
+          rcases step with ⟨allowed, origin, _, _⟩
+          rw [pending] at origin
+          cases origin
+      | observe choiceSelection reply =>
+        simp only [system] at step
+        rcases step with ⟨origin, _, _⟩
+        cases pending.symm.trans origin
+        exact ⟨reply, rfl⟩
+  step_pending_or_reply := by
+    intro history occurrence pending choice event next nextGraph step
+    right
     cases occurrence with
     | output cut =>
       cases choice with
@@ -151,8 +195,47 @@ def boundary (request : LineRequest Outcome) (rendering : LineRendering) :
         rcases step with ⟨origin, _, _⟩
         cases pending.symm.trans origin
         exact ⟨reply, trivial, rfl⟩
-  reply_step := by
+  reply_allowed := by
+    intro history occurrence pending response choice event next nextGraph step reply
+    cases occurrence with
+    | output cut =>
+      cases response with
+      | advance after strict => exact strict
+      | finish cause =>
+        cases reply
+        exact step.1
+    | observation selection => trivial
+  reply_ends := by
+    intro history occurrence pending response choice event next nextGraph step reply afterPending
+    cases occurrence with
+    | output cut =>
+      cases response with
+      | advance after strict =>
+        cases reply
+        rcases step with ⟨origin, _, nextEq⟩
+        subst next
+        simp only [History.append] at afterPending
+        change State.writing after = State.writing cut at afterPending
+        cases afterPending
+        exact Nat.ne_of_lt strict rfl
+      | finish cause =>
+        cases reply
+        rcases step with ⟨allowed, origin, _, nextEq⟩
+        subst next
+        simp only [History.append] at afterPending
+        change State.reporting ⟨cut, cause, allowed⟩ = State.writing cut at afterPending
+        cases afterPending
+    | observation selection =>
+      cases response
+      cases reply
+      rcases step with ⟨origin, _, nextEq⟩
+      subst next
+      simp only [History.append] at afterPending
+      change State.observed selection = State.reporting selection at afterPending
+      cases afterPending
+  reply_path := by
     intro history occurrence pending response allowed
+    refine ⟨history.state, history.graph, .nil, by simp [Path.choices], pending, ?_⟩
     cases occurrence with
     | output cut =>
       cases response with

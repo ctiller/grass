@@ -30,7 +30,8 @@ for every attempted boundary interpretation, not just one with empty Pending. -/
 theorem ordinary_deadlock_rejected (boundary : stuck.WaitBoundary permitsWait)
     (history : stuck.History) : ¬ Nonempty (PermanentWait boundary history) := by
   rintro ⟨waiting⟩
-  obtain ⟨_, _, _, _, _, impossible⟩ := waiting.reply_possible () trivial
+  obtain ⟨state, graph, path, quiet, pending, choice, event, next, nextGraph, reply, impossible⟩ :=
+    waiting.reply_possible () trivial
   exact impossible
 
 /-- Constructor distinctions do not depend on the finite observation view. -/
