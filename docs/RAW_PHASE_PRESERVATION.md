@@ -30,3 +30,16 @@ insufficient. WriteFile requires the same enclosing history and publication
 connection through the lowering adapter. Exit needs an actual terminal edge
 with retained status. Neither refusal nor outside-profile execution counts as
 successful termination or permitted external waiting.
+
+[RawPrefixSteps](../Grass/Platform/Win32/RawPrefixSteps.lean) decomposes an
+existing prefix propositionally into finite state, graph and choice witnesses,
+with exactly its recorded events and endpoints. It reuses the generic
+[Steps theorem](../Grass/Semantics/ExecutionSteps.lean); the witnesses are not
+unique or a canonical choice sequence. No second history carrier is introduced.
+
+[RawPendingService](../Grass/Platform/Win32/RawPendingService.lean) proves that
+an actual pending-to-pending edge is service for the same call, caller and
+provider, exposing its receipt, action, publication and graph facts. To use the
+service-history fold, establish those pending phases for the contiguous segment
+being decomposed and retain its original entry witness. Neither arbitrary
+prefixes nor equal endpoints supply that entry ancestry.
