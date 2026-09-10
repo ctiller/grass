@@ -102,6 +102,29 @@ handoff was written.
 
 ## Owner routing
 
+### Late supplier updates after the integration checkpoint
+
+- Frontend published `8e889256`, the reviewed direct-frontier conformance
+  change. Process published `a761caba`, reviewed fixed raw waiting laws and
+  explicit optional generic reply availability, depending on state/observer
+  `24ddb183` and the corrected provider leaf already noted above. These are
+  supplier checkpoints, not integrated public certificates.
+- **Unresolved provider-domain blocker:** arbitrary `ReturnInterpretation`
+  includes `False`. Do not assume whole-program `Raw.WaitLaws` as admission:
+  that could exclude malformed caller handoffs instead of rejecting them.
+  Frontend, process and architecture must agree on a selected provider domain
+  independent of program correctness. Mandatory raw waiting laws remain a
+  gate conclusion. Architecture recorded the availability distinction in
+  `fd9a4c32`, following `0663456b`.
+- Linux published reviewed `ae638bf0` (core `0726d0e8`), covering ELF program
+  headers, checked load plans and shared memory installation. Its owner reports
+  full local build/trust checks passing; remote CI was pending. Inspect the
+  coherent branch and ledger unions before integration.
+- Shader published reviewed `0c8150e4`, binding captured source through parsing
+  and compilation to canonical words and typed interfaces. Its owner reports
+  local gates and `spirv-val` passing; Corpus CI passed and Library CI was still
+  running. This does not establish full GPU validity. It is not yet on main.
+
 Use existing tasks, not new standing specialists. Frontend:
 `01a0885f-ee7d-77a2-99bd-9b143a7a13ca`; process:
 `01a086f1-a780-74e0-9aa4-0a9658d848b0`; architecture:
