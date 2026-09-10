@@ -6,7 +6,7 @@ lake() { "$lake_exe" "$@"; }
 
 # This is the current construction gate, not a completed VerifiedProgram gate.
 lake build Grass.Assembly.X86 Grass.Platform.Win32 Grass.Spec.Console Grass.Spec.Resource Tests.Frontend.Source
-lake build Grass.Refinement.Console.WriteFileStaticEntry Grass.Platform.Win32.RawPrefix Grass.Platform.Win32.RawEntryEvent Tests.Platform.Win32LoaderEntry Tests.Console.WriteFileCountEntry Tests.Platform.Win32GetStdHandleRawReturn Grass.Platform.Win32.ExitProcessRawCompletion
+lake build Grass.Refinement.Console.WriteFileStaticEntry Grass.Platform.Win32.RawPrefix Grass.Platform.Win32.RawEntryEvent Grass.Platform.Win32.CheckedCallEntry Tests.Platform.Win32LoaderEntry Tests.Console.WriteFileCountEntry Tests.Platform.Win32GetStdHandleRawReturn Grass.Platform.Win32.ExitProcessRawCompletion
 mkdir -p .lake/build/lib/lean/Spikes/1_Hello_World
 lake env lean Spikes/1_Hello_World/Spec.lean -o .lake/build/lib/lean/Spikes/1_Hello_World/Spec.olean
 
