@@ -1,4 +1,4 @@
-import Grass.Semantics.BehaviorModel
+import Grass.Semantics.FiniteProgress
 
 /-! Classification regression, not a new deadlock semantics. An initialized
 nonterminal system with no step and no external occurrence has no current
@@ -65,5 +65,14 @@ theorem no_current_completion : ¬ Nonempty model.Complete := by
   | terminal history done => exact done
   | infinite history run => exact run.step 0
   | waiting history waiting => exact nomatch waiting.occurrence
+
+/-- Existing step-safety vacuity does not discharge the finite-stop obligation. -/
+theorem no_finite_progress : ¬ model.FiniteProgress := by
+  apply BehaviorModel.not_finiteProgress_of_stuck initial
+  · exact id
+  · rintro ⟨choice, event, next, graph, step⟩
+    exact step
+  · rintro ⟨waiting⟩
+    exact nomatch waiting.occurrence
 
 end Grass.Tests.Refinement.UnclassifiedDeadlock

@@ -1,4 +1,7 @@
 import Lean
+import Grass.Platform.Win32.RawSafety
+import Grass.Platform.Win32.RawObservation
+import Grass.Semantics.FiniteProgress
 import Grass.Platform.Win32.RawPhasePreservation
 import Grass.Platform.Win32.RawPendingService
 import Grass.Platform.Win32.RawPrefixSteps
