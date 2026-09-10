@@ -1,6 +1,4 @@
-import Grass.Semantics.BehaviorModel
-import Grass.Refinement.FiniteHistoryRelation
-import Grass.Semantics.InfiniteHistory
+import Grass.Refinement.BehaviorMatching
 
 /-! Complete correspondence keeps finite choices, divergent execution, terminal
 outcomes and permitted external nonresponse distinct. Concrete target profiles
@@ -8,23 +6,6 @@ must fix the observation and protocol interpretations used here. -/
 
 namespace Grass
 open RelationalSystem
-
-namespace BehaviorModel
-variable {Outcome : Type}
-
-def observe (model : BehaviorModel Outcome) (history : model.History) :
-    List model.Observation := model.observationProjection.project history.path.events
-
-def Complete.frontier {model : BehaviorModel Outcome} : model.Complete → model.History
-  | .terminal history _ => history
-  | .infinite history _ => history
-  | .waiting history _ => history
-
-def Complete.StartsAfter {model : BehaviorModel Outcome}
-    (history : model.History) (complete : model.Complete) : Prop :=
-  History.Extension history complete.frontier
-
-end BehaviorModel
 
 /-- A selected request interpretation preserves permitted nonresponse and
 matches every allowed response in both directions. -/
@@ -48,58 +29,47 @@ abbrev Finite (observe : lower.Observation → upper.Observation) :=
 
 /-- Exact prefixes of both actual continuations meet at unbounded indices.
 Finite stuttering is permitted; collapsing an infinite run to a finite one is not. -/
-structure InfiniteAlignment {observe : lower.Observation → upper.Observation}
+abbrev InfiniteAlignment {observe : lower.Observation → upper.Observation}
     (finite : Finite observe) (left : lower.History) (right : upper.History)
     (leftRun : lower.system.InfiniteContinuation left.state left.graph left.path.events)
-    (rightRun : upper.system.InfiniteContinuation right.state right.graph right.path.events) where
-  baseRelated : finite.Rel left right
-  leftIndex : Nat → Nat
-  rightIndex : Nat → Nat
-  leftMonotone : ∀ i j, i ≤ j → leftIndex i ≤ leftIndex j
-  rightMonotone : ∀ i j, i ≤ j → rightIndex i ≤ rightIndex j
-  leftUnbounded : ∀ bound, ∃ index, bound ≤ leftIndex index
-  rightUnbounded : ∀ bound, ∃ index, bound ≤ rightIndex index
-  related : ∀ index, finite.Rel
-    (left.append (leftRun.prefixPath (leftIndex index)))
-    (right.append (rightRun.prefixPath (rightIndex index)))
+    (rightRun : upper.system.InfiniteContinuation right.state right.graph right.path.events) :=
+  BehaviorMatching.InfiniteAlignment finite.Rel left right leftRun rightRun
+
+namespace InfiniteAlignment
+export BehaviorMatching.InfiniteAlignment (mk)
+end InfiniteAlignment
 
 /-- An actual boundary reply followed by its retained finite continuation.
 The first transition is mandatory; a reply cannot disappear into nil stutter. -/
-structure ReplyExtension (model : BehaviorModel Outcome) (history : model.History)
+abbrev ReplyExtension (model : BehaviorModel Outcome) (history : model.History)
     (waiting : PermanentWait model.boundary history)
-    (answer : model.protocol.Response (model.boundary.request waiting.occurrence)) where
-  choice : model.system.Choice
-  event : model.Event
-  nextState : model.system.State
-  nextGraph : model.system.Graph
-  reply : model.boundary.Reply waiting.occurrence answer choice
-  first : model.system.Step history.graph history.state choice event nextState nextGraph
-  finalState : model.system.State
-  finalGraph : model.system.Graph
-  tail : model.system.Path nextState nextGraph finalState finalGraph
+    (answer : model.protocol.Response (model.boundary.request waiting.occurrence)) :=
+  BehaviorMatching.ReplyExtension model history waiting answer
 
 namespace ReplyExtension
+
+export BehaviorMatching.ReplyExtension (mk)
 
 def history {model : BehaviorModel Outcome} {before : model.History}
     {waiting : PermanentWait model.boundary before}
     {answer : model.protocol.Response (model.boundary.request waiting.occurrence)}
     (extension : ReplyExtension model before waiting answer) : model.History :=
-  before.append ((Path.snoc .nil extension.choice extension.event extension.nextState
-    extension.nextGraph extension.first).append extension.tail)
+  BehaviorMatching.ReplyExtension.history extension
 
 theorem history_extends {model : BehaviorModel Outcome} {before : model.History}
     {waiting : PermanentWait model.boundary before}
     {answer : model.protocol.Response (model.boundary.request waiting.occurrence)}
     (extension : ReplyExtension model before waiting answer) :
-    History.Extension before extension.history := ⟨_, _, _, rfl⟩
+    History.Extension before extension.history :=
+  BehaviorMatching.ReplyExtension.history_extends extension
 
 /-- The actual reply contributes one transition before the retained tail. -/
 theorem history_length {model : BehaviorModel Outcome} {before : model.History}
     {waiting : PermanentWait model.boundary before}
     {answer : model.protocol.Response (model.boundary.request waiting.occurrence)}
     (extension : ReplyExtension model before waiting answer) :
-    extension.history.path.length = before.path.length + (1 + extension.tail.length) := by
-  simp [history, History.append, Path.length_append, Path.length]
+    extension.history.path.length = before.path.length + (1 + extension.tail.length) :=
+  BehaviorMatching.ReplyExtension.history_length extension
 
 end ReplyExtension
 
@@ -128,25 +98,13 @@ structure WaitMatch {observe : lower.Observation → upper.Observation}
         finite.Rel other.history extension.history
 /-- Each constructor matches only its own completion form. Infinite alignment
 retains the supplied runs; waiting uses the exact pending occurrences. -/
-inductive CompleteMatch {observe : lower.Observation → upper.Observation}
-    (finite : Finite observe) (waits : WaitTranslation lower upper) :
-    lower.Complete → upper.Complete → Prop where
-  | terminal (left : lower.History) (right : upper.History)
-      (leftDone : lower.system.Terminal left.state left.graph)
-      (rightDone : upper.system.Terminal right.state right.graph)
-      (related : finite.Rel left right)
-      (outcomes : lower.result left.state left.graph = upper.result right.state right.graph) :
-      CompleteMatch finite waits (.terminal left leftDone) (.terminal right rightDone)
-  | infinite (left : lower.History) (right : upper.History)
-      (leftRun : lower.system.InfiniteContinuation left.state left.graph left.path.events)
-      (rightRun : upper.system.InfiniteContinuation right.state right.graph right.path.events)
-      (alignment : InfiniteAlignment finite left right leftRun rightRun) :
-      CompleteMatch finite waits (.infinite left leftRun) (.infinite right rightRun)
-  | waiting (left : lower.History) (right : upper.History)
-      (leftWait : PermanentWait lower.boundary left)
-      (rightWait : PermanentWait upper.boundary right)
-      (matched : WaitMatch finite waits left right leftWait rightWait) :
-      CompleteMatch finite waits (.waiting left leftWait) (.waiting right rightWait)
+abbrev CompleteMatch {observe : lower.Observation → upper.Observation}
+    (finite : Finite observe) (waits : WaitTranslation lower upper) :=
+  BehaviorMatching.CompleteMatch finite.Rel (WaitMatch finite waits)
+
+namespace CompleteMatch
+export BehaviorMatching.CompleteMatch (terminal infinite waiting)
+end CompleteMatch
 
 end BehaviorCorrespondence
 
