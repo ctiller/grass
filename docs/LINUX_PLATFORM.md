@@ -197,6 +197,22 @@ read/execute flags and alignment `0x1000`. SHA-256:
 `350bdb04b40eb83749f12a9fd695b9b087ecbe2dd98e53b23219ecbf8c550ebd`.
 This checks the serialized format independently; the fixture was not executed.
 
+After merging the repaired main baseline `34265675`, the full build passed
+671 jobs. The final source-input check rebuilt the test closure (646 jobs) and
+re-elaborated its source-embedding module. The whole-library axiom audit passed
+34,295 declarations across 413 modules. The full trust audit passed its 4
+foundation roots/42,088 project declarations, 75 selected declaration checks,
+8 executable test modules and negative controls. These are repository trust
+checks, not a Linux whole-program producer claim.
+
+Independent merge review found and required enrollment of the AArch64
+control/source/routing cohort in the unified citation ledger. The corrected
+fresh census passes: 845 modeled declarations, 6 cited, 409 explicit citation
+debts and 430 mechanical definitions. Existing ISA source records do not erase
+that debt. Docstring, observation-coverage, source-mirror, relative-link and
+diff checks also pass. Reviewed owner comment fixes for AArch64, Wasm and WGSL
+were incorporated without semantic changes.
+
 ## Historical initial checkpoint evidence
 
 Semantic review separated the syscall decoder, ELF parser and native observer.

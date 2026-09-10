@@ -3,6 +3,9 @@ import Grass.Platform.BareMetal.BootMemory
 import Grass.Platform.BareMetal.BootFetch
 import Grass.Platform.BareMetal.X86BootFetch
 import Grass.Platform.BareMetal.AArch64BootFetch
+import Grass.ISA.AArch64.Control
+import Grass.ISA.AArch64.Source
+import Grass.ISA.AArch64.SvcRouting
 import Grass.ISA.X86.Bytes
 import Grass.ISA.X86.BasicInstructions
 import Grass.ISA.X86.Rel32
@@ -225,6 +228,8 @@ The citation machinery itself is not modeled behaviour and is not audited: a
 def auditedModules : List Name :=
   [`Grass.Platform.BareMetal.BootMemory, `Grass.Platform.BareMetal.BootFetch,
    `Grass.Platform.BareMetal.X86BootFetch, `Grass.Platform.BareMetal.AArch64BootFetch,
+   `Grass.ISA.AArch64.Control, `Grass.ISA.AArch64.Source,
+   `Grass.ISA.AArch64.SvcRouting,
    `Grass.ISA.X86.Register, `Grass.ISA.X86.Encoding,
    `Grass.ISA.X86.Addressing, `Grass.ISA.X86.Bytes, `Grass.ISA.X86.BasicInstructions,
    `Grass.ISA.X86.Rel32,
@@ -410,7 +415,9 @@ Raising this is a reviewed edit, which is the visibility the ratchet is for.
 -- Source comments and fixture success do not constitute ledger attachment.
 -- Fifteen bare-metal admission/profile and ISA-consumption commitments remain
 -- explicit debt. Checked model execution does not cite native applicability.
-def owedBaseline : Nat := 394
+-- AArch64 opcode/register/body and SVC routing semantics remain explicit debt;
+-- importing their source records does not attach ledger subjects automatically.
+def owedBaseline : Nat := 409
 
 /--
 The number of entries `notBehaviour` was last reviewed at.
@@ -480,7 +487,8 @@ acquiring a citation.
 -- Shared access extraction replaces one obsolete instance entry with three aliases.
 -- Thirteen bare-metal nominal, carrier-arithmetic, projection and forwarding
 -- helpers add no hardware fact; their selected profile remains separately owed.
-def notBehaviourBaseline : Nat := 422
+-- Eight AArch64 wrappers package already selected source or routing evidence.
+def notBehaviourBaseline : Nat := 430
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -791,6 +799,15 @@ def notBehaviour : List Name :=
     `Grass.Platform.Linux.Loader.load?,
     `Grass.Platform.Linux.Loader.LoadedImage.machine,
     `Grass.Platform.Linux.Loader.LoadedImage.context,
+    -- Source/body and routing-plan wrappers preserve separately modeled facts.
+    `Grass.ISA.AArch64.CompareZero.sourceStep,
+    `Grass.ISA.AArch64.SupervisorCall.request?,
+    `Grass.ISA.AArch64.SupervisorCall.sourceStep,
+    `Grass.ISA.AArch64.emitWord,
+    `Grass.ISA.AArch64.readSource,
+    `Grass.ISA.AArch64.SupervisorCall.Routing.Plan.route,
+    `Grass.ISA.AArch64.SupervisorCall.Routing.Plan.preferredReturn,
+    `Grass.ISA.AArch64.SupervisorCall.Routing.assess,
     `Grass.Platform.Win32.Loader.installRegions?,
     `Grass.Platform.Win32.Loader.RegionsPresent,
     `Grass.Platform.Win32.Loader.CpuPlacementValid,
@@ -1532,6 +1549,23 @@ def owed : List Name :=
     `Grass.Platform.Linux.Syscall.X86.decodeResult,
     `Grass.Platform.Linux.Syscall.AArch64.captureRequest,
     `Grass.Platform.Linux.Syscall.AArch64.decode?,
+    -- AArch64 instruction/register behavior and the selected SVC routing profile.
+    -- Existing source records are not yet connected as ledger subjects.
+    `Grass.ISA.AArch64.BodyStep.supervisorRequest,
+    `Grass.ISA.AArch64.CompareZero.decode,
+    `Grass.ISA.AArch64.CompareZero.encode,
+    `Grass.ISA.AArch64.CompareZero.execute,
+    `Grass.ISA.AArch64.CompareZero.isZero,
+    `Grass.ISA.AArch64.CompareZero.nextPc,
+    `Grass.ISA.AArch64.CompareZero.offset,
+    `Grass.ISA.AArch64.Cpu.readZero,
+    `Grass.ISA.AArch64.Gpr,
+    `Grass.ISA.AArch64.SupervisorCall.Request.register,
+    `Grass.ISA.AArch64.SupervisorCall.decode,
+    `Grass.ISA.AArch64.SupervisorCall.encode,
+    `Grass.ISA.AArch64.SupervisorCall.Routing.Route.preferredReturn,
+    `Grass.ISA.AArch64.SupervisorCall.Routing.check,
+    `Grass.ISA.AArch64.SupervisorCall.Routing.select,
     -- ELF64 field encodings, canonical profile, load-segment selection,
     -- permissions, bounds, zero-fill construction and selected load plan.
     -- Recorded specifications are provenance; formal subjects remain owed.

@@ -14,8 +14,7 @@ open Grass.Core Grass.Memory Grass.Memory.ImageInstall Grass.Std.Logical
 open Grass.Artifact.ELF Grass.ISA.AArch64
 
 /-- Explicit supplied machine/context/registers and fresh identity choices.
-ISA feature and exception configuration is separately supplied to the ISA
-consumer; this loader cannot manufacture it from an ELF machine tag. -/
+ISA feature and exception configuration remains a separate consumer obligation. -/
 structure Inputs where
   environment : MachineState
   context : ContextId

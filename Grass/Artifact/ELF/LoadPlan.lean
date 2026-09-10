@@ -76,8 +76,8 @@ def SegmentValid (profile : LoadProfile) (bytes : Std.Logical.ByteArray) (s : Pr
 instance (profile : LoadProfile) (bytes : Std.Logical.ByteArray) (s : ProgramHeader64) :
     Decidable (SegmentValid profile bytes s) := by unfold SegmentValid; infer_instance
 
-/-- File bytes followed by the defined zero-filled tail. The checked extent
-prevents a short file slice from silently becoming a valid initialized segment. -/
+/-- File bytes followed by the defined zero-filled tail. `SegmentValid` checks
+the file extent; `segmentBytes_length` requires that bound for exact length. -/
 def segmentBytes (bytes : Std.Logical.ByteArray) (s : ProgramHeader64) : Std.Logical.ByteArray :=
   (bytes.drop s.offset.toNat).take s.fileSize.toNat ++
     Vec.replicate (s.memorySize.toNat - s.fileSize.toNat) 0
