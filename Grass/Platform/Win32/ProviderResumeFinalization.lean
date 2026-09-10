@@ -11,6 +11,12 @@ open Grass.ISA.X86 Grass.ISA.X86.Execution
 open Grass.Platform.Win32
 open Grass.Platform.Win32.Loader Grass.Platform.Win32.ExecutionState
 
+/-- Retain the exact provider endpoint and replace only its observed GPRs and
+RFLAGS. API-specific checks constrain this observation before resume. -/
+def observeRegisters (before : RawState) (gpr : Gpr → BitVec 64)
+    (rflags : BitVec 64) : RawState :=
+  { before with machine := { before.machine with gpr := gpr, rflags := rflags } }
+
 /-- Install the exact protocol return's bookkeeping data before reading the
 returned slot. `afterReturn` preserves actual CPU registers and raw control/runtime;
 it does not itself assert a raw transition or a physical provider return. -/
