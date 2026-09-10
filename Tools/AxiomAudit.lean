@@ -106,8 +106,6 @@ import Grass.Platform.Win32.WriteFileNonresponse
 import Grass.Platform.Win32.WriteFileStabilization
 import Grass.Platform.Win32.WriteFileServiceContinuation
 import Grass.Refinement.Console.WriteFileHistory
-import Grass.Refinement.Console.WriteFileStaticArgument
-import Grass.Refinement.Console.WriteFileStaticEntry
 import Grass.Refinement.Console.WriteFileConsoleHistory
 import Grass.Platform.Win32.WriteFileConsolePublication
 import Grass.Refinement.Console.WriteFileNonresponse
@@ -170,18 +168,7 @@ import Grass.Artifact.PE.ExceptionBinding
 import Grass.ISA.X86.EndianBridge
 import Grass.Assembly.SourceRuntimeFunction
 import Grass.Refinement.Console.WriteFileObserved
-import Grass.Refinement.Console.WriteAllX86
-import Grass.Refinement.Console.WriteAllHead
-import Grass.Refinement.Console.WriteAllFactory
-import Grass.Refinement.Console.WriteAllBody
-import Grass.Refinement.Console.WriteFileCountAddress
-import Grass.Refinement.Console.WriteFileCountArgument
-import Grass.Refinement.Console.WriteFileCountEntry
-import Grass.Refinement.Console.WriteFileResume
-import Grass.Refinement.Console.WriteFileFinalize
 import Grass.Refinement.Console.WriteFileSourceEntry
-import Grass.Refinement.Console.WriteAllGuards
-import Grass.Refinement.Console.WriteFileLoad
 import Grass.Assembly.SourceInput
 import Grass.Assembly.X86Source
 import Grass.Assembly.X86ControlFlow
@@ -216,7 +203,6 @@ import Grass.Assembly.LoadedStaticArgument
 import Grass.Assembly.SourceImportBindings
 import Grass.Assembly.SourceImportRequests
 import Grass.Assembly.SourceLinkedImage
-import Grass.Assembly.SourceWitness
 import Grass.Assembly.FrameAllocationExecution
 import Grass.Assembly.SourceFetched
 import Grass.Assembly.SourceLoadedImage
