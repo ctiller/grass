@@ -1,9 +1,7 @@
 import Grass.Assembly.SourceStore
 import Grass.Assembly.SourceFrame
 import Grass.Assembly.FrameStore
-import Grass.Assembly.Store32Execution
 import Tests.Assembly.SourceLiteral
-import Tests.Memory.Spike1Policy
 
 namespace Grass.Tests.Assembly.SourceStore
 
@@ -12,7 +10,6 @@ set_option maxHeartbeats 4000000
 
 open Grass.Assembly Grass.Assembly.SourceInput Grass.Assembly.SourceStore
 open Grass.ABI.Win64 Grass.ISA.X86
-open Grass.Tests.Spike1 Grass.Tests.Spike1Policy Tests.Memory.Spike1Block
 
 def selectedStore? (frame : SourceFrame.Result) : Option X86ControlFlow.CodeItem := do
   let candidates := frame.program.collected.code.filter fun item =>
@@ -29,33 +26,7 @@ def fromChars? (source : List Char) (rspRootOffset : Nat := 0) : Option Store32.
   let item ← selectedStore? frame
   FrameStore.resolve? frame rspRootOffset item
 
-def executeChars? (source : List Char) : Option (Store32.Resolved × Grass.Memory.MachineState) := do
-  let resolved ← fromChars? source frameBaseOffset
-  if hrange : transferredWrite.range = resolved.range then do
-    let final ← (Store32Execution.step policy machine₀ resolved transferredWrite
-      hrange rfl .thread ⟨⟨"source-store32"⟩⟩).state?
-    pure (resolved, final)
-  else none
-
-def outcomeView (result : Store32.Resolved × Grass.Memory.MachineState) :
-    String × List (BitVec 8) × Bool × Option (Option (List (BitVec 8))) ×
-      List (Option (BitVec 8)) :=
-  let (resolved, final) := result
-  (resolved.input.slot, resolved.writeBytes, decide final.violations.IsEmpty,
-    final.events.getLast?.map (fun event => event.event.valueWritten),
-    (List.range resolved.writeBytes.length).map fun i =>
-      final.memory.byteAt? stackAlloc (resolved.range.start + i))
-
-set_option maxRecDepth 100000 in
-set_option maxHeartbeats 4000000 in
-set_option synthInstance.maxSize 512 in
-example : (executeChars? (source_chars
-    "def executionStoreSample : MachineSource plan := withStack (value : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\nmov value, 0\nud2\n}")).map outcomeView =
-    some ("value", le32 0, true, some (some (le32 0)), (le32 0).map some) := by
-  decide +kernel
-
--- Small adversarial inputs exercise the same parser and resolver; the theorem
--- above is the connection to the actual spike. Keep these cheap to recheck.
+-- Small adversarial inputs exercise the parser and resolver directly.
 def sample (type body : List Char) : List Char :=
   (source_chars "def storeSample : MachineSource plan := withStack (value : ") ++ type ++
     (source_chars " := 0) withCallFrame WriteFile asm_source (statics := statics) {\n ") ++

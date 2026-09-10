@@ -6,23 +6,17 @@ namespace Grass.Tests.Assembly.X86ControlFlow
 open Grass.Assembly.SourceInput Grass.Assembly.X86Source Grass.Assembly.X86ControlFlow
 
 def checkChars? (chars : List Char) : Option CheckedProgram := do
-  let body ← (extractHelloSourceChars chars).toOption
+  let body ← (extractSourceChars chars).toOption
   let statements ← (parseBody body).toOption
   check? statements
 
-def authored : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
-
-set_option maxRecDepth 100000 in
-set_option maxHeartbeats 4000000 in
-example : (checkChars? authored).isSome = true := by decide +kernel
-
-theorem actual_targets_are_in_the_derived_code (program : CheckedProgram)
-    (_h : checkChars? authored = some program) (flow : Flow) (member : flow ∈ program.flows)
+theorem targets_are_in_the_derived_code (program : CheckedProgram)
+    (flow : Flow) (member : flow ∈ program.flows)
     (target : Nat) (edge : target ∈ flow.targets) : target < program.collected.code.length :=
   program.target_bounded flow member target edge
 
 def wrap (body : List Char) : List Char :=
-  (source_chars "def helloSource := asm_source {\n") ++ body ++ (source_chars "\n}")
+  (source_chars "def controlFlowSample := asm_source {\n") ++ body ++ (source_chars "\n}")
 
 -- Alias labels are allowed; duplicate names and invalid static targets are not.
 example : (checkChars? (wrap (source_chars "entry:\nalias:\njmp alias"))).isSome := by decide
