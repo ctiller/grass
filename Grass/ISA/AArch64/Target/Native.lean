@@ -30,6 +30,15 @@ filled slot (a Win32 IAT entry, an ELF GOT entry) the platform recognizes. -/
 inductive CallTarget where
   | supervisor (imm : UInt16)
   | importSlot (slotAddress : Nat)
+  /-- A load of `size` bytes from `address`, where `address` lies in one of
+  the device windows the platform declared in `InitialContext.devices`. The
+  platform answers with the loaded value in `NativeReturn.x0`; the ISA lands
+  it in the destination register. -/
+  | mmioLoad (address : Nat) (size : Nat)
+  /-- A store of `bytes` to `address` inside a declared device window. The
+  ISA does not know what the device does with them; the platform's answer is
+  ignored by the store's `resume` beyond advancing `pc`. -/
+  | mmioStore (address : Nat) (bytes : List UInt8)
   deriving Repr, DecidableEq
 
 /-- The register/stack/memory view of a native call site, handed to the
@@ -93,5 +102,12 @@ structure InitialContext where
   registers : Reg → BitVec 64
   sp : BitVec 64
   staged : List (Nat × List UInt8)
+  /-- Device windows as `(base, size)` byte ranges: a load or store whose
+  address falls inside one is reported to the platform as an `.external`
+  native call (`CallTarget.mmioLoad`/`CallTarget.mmioStore`) instead of
+  touching memory. Hosted platforms leave this empty; a bare-metal platform
+  names its memory-mapped device registers here. The ISA never interprets
+  which device a window is. -/
+  devices : List (Nat × Nat) := []
 
 end Grass.ISA.AArch64

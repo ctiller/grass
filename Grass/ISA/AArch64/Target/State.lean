@@ -46,6 +46,13 @@ structure State where
   nzcv : BitVec 4
   mem : Nat → Option UInt8
   regions : List Region
+  /-- Device windows (`InitialContext.devices`), carried so `step` can route
+  a load or store inside one to the platform as a native call. -/
+  devices : List (Nat × Nat)
+
+/-- Whether `address` lies inside a declared device window. -/
+def State.deviceAt (s : State) (address : Nat) : Bool :=
+  s.devices.any (fun d => decide (d.1 ≤ address ∧ address < d.1 + d.2))
 
 /-- Read GPR `r`; operand encoding 31 is XZR, the zero register (reads as
 `0`, per Arm DDI 0602 ID032025's zero-register operand convention — never a
@@ -141,6 +148,7 @@ def initial (program : Grass.Target.Sectioned) (context : InitialContext) : Stat
     pc := BitVec.ofNat 64 program.entry
     nzcv := 0
     regions := sectionRegions ++ [stackRegion]
+    devices := context.devices
     mem := fun addr =>
       match sectionByte addr with
       | some b => some b
