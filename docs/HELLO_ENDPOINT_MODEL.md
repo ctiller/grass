@@ -67,6 +67,34 @@ preserved registers, computed resume and caller-control restoration. Keep only
 the result/payload and route meaning API-specific. Do not use ProviderResume's
 data-only Link as evidence of the original CALL occurrence.
 
+### Settlement reuse: existing laws, distinct endpoint evidence
+
+Current CallProtocol already supplies `return?_matches_occurrence`,
+`return?_effects`, `return?_removes_pending`, `return?_loans_removed` and
+`return?_replay_rejected`. GetStdHandle must use these directly from its actual
+return equation; it must not copy their proofs into a second settlement library.
+Existing WriteFile.MatchedReturn.effects/consumed show the intended thin adapter.
+Keep its publication-prefix conclusion WriteFile-specific.
+
+If a checked endpoint return builder is needed, it executes CallProtocol.return?
+on the actual reached protocol state, call and whole pending record's IDs, then
+retains the exact returned record and next state. It derives the common effects
+once using the existing laws. Its success does not provide a result interpretation
+or prove where the original CALL occurred. Those come from the original entry,
+actual history, fixed endpoint relation and runtime-preservation evidence.
+
+Likewise, CallResumeBinding's shared PolicyBinding.ofCallEntry and
+Link.ofReachedPlan provide the initial resume inputs for both APIs. They are
+already thin projections from actual entry and runtime insertion. Reuse their
+result through actual provider history; do not recompute a plausible frame at
+return time or infer historical identity from a matching lookup alone.
+
+Keep the ordering of result production, loan settlement, current return-slot
+access and caller-control restoration explicit in the raw endpoint relation.
+The permission state used by each access must be the actual stage state. A
+generic convenience wrapper must not move the slot read across settlement or
+discard a refusal merely to satisfy its desired result type.
+
 ## ExitProcess: invocation is not terminal observation
 
 The actual ExitProcess entry retains the selected request's low DWORD status and
@@ -88,6 +116,70 @@ A progress theorem must consume an explicit recorded termination/responsiveness
 assumption for the selected environment, while unconditional correspondence
 retains the pending behavior. Do not filter it away using the desired outcome or
 treat a trap/UD2 after an unexpected return as successful termination.
+
+## Selected minimal implementation interface
+
+Spikes approved the model/correspondence boundary and selected stable standard
+handle table plus route lifetime for the first synchronous profile. Stability
+and teardown-output disposition are explicit admissibility conditions, not
+inferences from the program text. The following is the implementation handoff;
+type names are proposed, and signatures describe the required indices.
+
+Windows owns ConsoleEnvironment and the fixed relations in a module beside
+Console.lean. Use ordinary data for process identity, environment epoch, the
+three standard-table bit values, and a finite handle-to-route/resource table.
+Include the selected stdout route and its synchronous mode/rights/lifetime data.
+A missing route represents an unresolved/unusable handle; do not force a route
+for every non-sentinel value. Admissibility binds any resolved standard-output
+entry to the selected stdout route and keeps those identities stable. Reuse an
+existing resource identity type if available; do not duplicate memory grants.
+
+For the existing supported-selector slice, the minimal result relation is:
+
+```text
+GetStdAllowed env selector rawResult :=
+  exists device, selector = StdHandleId.value device and
+    (rawResult = INVALID_HANDLE_VALUE or rawResult = env.standardValue device)
+```
+
+The table retains raw values, including zero or stale/non-sentinel values.
+Admitting failure independently is a conservative over-approximation. This
+definition is for the three documented selectors; the fixed Hello entry proves
+the output selector. Do not silently claim coverage of arbitrary DWORD selectors.
+The relation classifies permitted raw results; a separate checked table lookup
+`routeOf? env handle` supplies route evidence. Successful lookup alone supplies
+neither write success nor provider execution. Both relations are definitions
+over fixed environment data, not arbitrary predicate fields of the environment.
+
+Windows endpoint code constructs `GetStdReturned env entered before after result`
+from the original entry occurrence, actual reached history, exact CP return
+equation, GetStdAllowed for that entry's selector, actual result RAX, and checked
+resume on the correct stage state. Index it by the entire entry and states,
+not just selector/handle numbers. The generic return builder supplies settlement
+effects; the fixed Windows relation supplies result meaning. Lowering consumes
+its RAX equation and route lookup through the authored TEST/CMP/data-flow path.
+
+Represent observed exit as data retaining process, completion marker and status.
+The fixed `ExitTerminal env entered observation` requires that exact process,
+the original ExitProcess occurrence, completed termination and equality to its
+recorded request status. The observation history or adapter witness connects
+the occurrence; the host observation need not physically contain a CallId.
+Keep `ExitPending` separately in complete behavior. No return constructor is
+introduced, and neither relation implies the responsiveness assumption needed
+by author progress.
+
+Root owns fixed-profile composition: select one environment and the fixed
+relations above, instantiate WriteFile realization with the same route table,
+and expose named external/model correspondence plus stability/output-scope
+assumptions in the profile's recorded trust interface. The certificate cannot
+choose these relations independently. Process owns checking finite/complete
+observation and pending/progress composition; lowering owns actual path and
+loop correspondence. Windows owns result/terminal adapters after CP factoring.
+
+This division requires no new target-neutral runtime record, arbitrary provider
+callback or attribute syntax. It makes common entry/settlement/resume machinery
+available to both returning APIs while leaving only their actual result and
+effect meaning to the endpoint author.
 
 ## Direct whole-Hello closure sequence
 
