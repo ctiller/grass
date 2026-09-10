@@ -1,6 +1,6 @@
 import Grass.Platform.BareMetal.BootMemory
 import Grass.Op.AccessFactory
-import Grass.Op.ReadCompletion
+import Grass.Op.ReadObservation
 
 /-!
 # Physical boot-code observations
@@ -59,26 +59,24 @@ namespace Success
 
 variable {policy : Policy} {entry : Entry admission id range}
 
-/-- The exact byte sequence obtained from the resolved backing observation. -/
+/-- The byte sequence extracted from the actual completed read. -/
 def bytes (success : Success policy entry) : ByteSeq :=
-  observedBytes success.run.resolved (fun _ => 0)
+  AccessFactory.AccessRun.readBytes success.run rfl
 
 /-- `observed_exact` identifies the bytes actually returned by the committed read. -/
 theorem observed_exact (success : Success policy entry) :
-    success.run.complete.committed.observed = some success.bytes := by
-  have answer : (Oracle.ofMemory (fun _ _ => []) (fun _ _ _ => 0)).answerResolved
-      (admission.machine.noteContext success.run.context success.run.contextKind)
-      (descriptor policy entry) success.run.resolved = some success.run.complete := by
-    rw [← success.run.answerResolved]
-    rw [success.policy_exact]
-    rfl
-  exact Oracle.ofMemory_observed_of_answerResolved (fun _ _ => []) (fun _ _ _ => 0)
-    (admission.machine.noteContext success.run.context success.run.contextKind)
-    (descriptor policy entry) success.run.resolved success.run.complete answer rfl
+    success.run.complete.committed.observed = some success.bytes :=
+  AccessFactory.AccessRun.readBytes_exact success.run rfl
+
+/-- `observed_backing` derives the shared observation from this run's selected memory oracle. -/
+theorem observed_backing (success : Success policy entry) :
+    success.bytes = observedBytes success.run.resolved (fun _ => 0) :=
+  AccessFactory.AccessRun.readBytes_backing success.run (fun _ _ => []) (fun _ _ _ => 0)
+    (by rw [success.policy_exact]; rfl) rfl
 
 /-- `bytes_length` ties the actual observation to the selected entry extent. -/
-theorem bytes_length (success : Success policy entry) : success.bytes.length = range.size := by
-  simp [bytes, observedBytes, descriptor]
+theorem bytes_length (success : Success policy entry) : success.bytes.length = range.size :=
+  AccessFactory.AccessRun.readBytes_length success.run rfl
 
 /-- `storage_frame` derives preservation from the actual neutral execute read. -/
 theorem storage_frame (success : Success policy entry) :
