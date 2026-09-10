@@ -274,17 +274,26 @@ def svcCall (s : State) (imm : BitVec 16) : NativeCall :=
     read := fun addr size => s.readBytes addr size }
 
 /-- Apply a platform's answer: `x0` (and `x1`, if given) land in the return
-registers, `writes` are applied to memory (a write outside every writable
-region is silently dropped rather than propagated as a fault — `NativeReturn`
-has no failure mode, so a platform must only ever offer writes its own
-`Responds` relation already knows are in bounds), `clobbers`ed registers are
-left as this step found them (this machine is deterministic; a genuinely
-unspecified post-call value is the platform's choice to make, not this
-step's to fabricate), and `pc` advances past the call site. -/
+registers, `maps` are installed next (zero-filled, per `State.mapRegion` --
+a MAP_ANONYMOUS mapping reads as zero, `man 2 mmap`), then `writes` are
+applied to memory (a write outside every writable region is silently dropped
+rather than propagated as a fault — `NativeReturn` has no failure mode, so a
+platform must only ever offer writes its own `Responds` relation already
+knows are in bounds). Installing `maps` before `writes` means a write into a
+region this same return just mapped lands on an already-installed, already-
+zeroed region within one return, rather than having its bytes erased by a
+later zero-fill. `clobbers`ed registers are left as this step found them
+(this machine is deterministic; a genuinely unspecified post-call value is
+the platform's choice to make, not this step's to fabricate), and `pc`
+advances past the call site. -/
 def applySvcReturn (s : State) : NativeReturn → State := fun ret =>
   let s1 := s.writeGpr 0 ret.x0
   let s2 := match ret.x1 with | some v => s1.writeGpr 1 v | none => s1
-  let s3 := ret.writes.foldl (fun st (addr, bytes) => (st.writeBytes addr bytes).getD st) s2
+  let mapped := s2.mapRegions
+    (ret.maps.map fun m =>
+      { base := m.base, size := m.size, readable := m.readable, writable := m.writable,
+        executable := false })
+  let s3 := ret.writes.foldl (fun st (addr, bytes) => (st.writeBytes addr bytes).getD st) mapped
   s3.advancePc
 
 /-! ## Fetch and dispatch -/

@@ -195,10 +195,17 @@ def encodeReturn (call : NativeCall) : (request : domain.Request) → domain.Res
       -- `Console.Response (.exit _) = Empty`: no answer is ever delivered to
       -- a terminal request, so there is no value to encode.
       response.elim
-  | .inl (.inr (.allocate _bytes)), response =>
+  | .inl (.inr (.allocate bytes)), response =>
       match response with
       | some address =>
-          { rax := UInt64.ofNat address, rdx := none, writes := [], clobbers := [.rcx, .r11] }
+          -- `mmap`'s whole point is a region the process could not touch
+          -- before: `rax` alone (the address value) is not enough for the
+          -- machine to honor a later access there, so this answer also maps
+          -- `[address, address + bytes)` read/write, non-executable --
+          -- `PROT_READ|PROT_WRITE` is exactly what `decode`'s `mmap` match
+          -- above requires of the call that produced this request.
+          { rax := UInt64.ofNat address, rdx := none, writes := [], clobbers := [.rcx, .r11]
+            maps := [{ base := address, size := bytes, readable := true, writable := true }] }
       | none => { rax := negative ENOMEM, rdx := none, writes := [], clobbers := [.rcx, .r11] }
   | .inl (.inr (.reallocate _handle _bytes)), response =>
       -- `decode` never produces this request: `mremap` is not in this
@@ -208,6 +215,15 @@ def encodeReturn (call : NativeCall) : (request : domain.Request) → domain.Res
           { rax := UInt64.ofNat address, rdx := none, writes := [], clobbers := [.rcx, .r11] }
       | none => { rax := negative ENOSYS, rdx := none, writes := [], clobbers := [.rcx, .r11] }
   | .inl (.inr (.release _handle)), response =>
+      -- `munmap`'s converse effect -- narrowing what the process may access
+      -- -- has no counterpart in `NativeReturn`: only `maps` exists, adding
+      -- regions, never removing one. This profile therefore over-approximates
+      -- on the safe-for-the-program-but-unsound-for-the-kernel-model side: a
+      -- successful `release` still leaves the released region readable and
+      -- writable in `State.regions`, so an access after `munmap` that a real
+      -- kernel would fault (`SIGSEGV`) is admitted here instead of refused.
+      -- Closing this needs an `unmaps` effect (region removal by base
+      -- address) symmetric to `maps`; not added in this slice.
       match response with
       | true => { rax := 0, rdx := none, writes := [], clobbers := [.rcx, .r11] }
       | false => { rax := negative EINVAL, rdx := none, writes := [], clobbers := [.rcx, .r11] }

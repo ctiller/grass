@@ -57,6 +57,17 @@ structure Environment where
   nextHandle : Nat
   /-- The live allocations, as `(handle, size)` pairs. -/
   allocations : List (Nat × Nat)
+  /-- Address ranges outside the heap arena that are already spoken for,
+  fixed for the run: the loaded program image, its stack, and its
+  argument/environment block, as `(base, size)` pairs. Whoever assembles
+  this environment for a concrete run sets it from the loader's own
+  placement (a platform's `entry`, from the ISA's `Sectioned`/stack/
+  argument-block regions); `Responds` never changes it. `respondsHeap`
+  refuses to hand out a fresh address inside one of these ranges -- picking
+  a fresh address is the environment's job, and an environment that let a
+  heap allocation land on the program's own code would be lying about what
+  `mmap`/`HeapAlloc` actually promise. -/
+  reserved : List (Nat × Nat)
   /-- The total bytes the arena may have live at once. A platform with an
   effectively unbounded heap can still only admit environments with some
   large finite capacity: without a bound, allocation failure would never be

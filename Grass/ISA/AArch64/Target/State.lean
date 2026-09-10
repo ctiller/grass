@@ -110,6 +110,21 @@ def State.writeBytes (s : State) (address : Nat) (bytes : List UInt8) : Option S
         if address ≤ a ∧ a < address + bytes.length then bytes[a - address]? else s.mem a }
   else none
 
+/-- Install a freshly mapped region: append it to `regions` and zero-fill
+its bytes in `mem`, overwriting whatever `mem` already held there. A
+MAP_ANONYMOUS mapping reads as zero (`man 2 mmap`: "the contents ... are
+initialized to zero"), so a freshly mapped page must not silently inherit
+stale bytes `mem` happened to carry at an address no region has ever
+covered before. -/
+def State.mapRegion (s : State) (r : Region) : State :=
+  { s with
+    regions := s.regions ++ [r]
+    mem := fun a => if r.contains a then some 0 else s.mem a }
+
+/-- Install every region of `rs`, in order, via `State.mapRegion`. -/
+def State.mapRegions (s : State) (rs : List Region) : State :=
+  rs.foldl (fun st r => st.mapRegion r) s
+
 /-- Read a little-endian `BitVec 64` (byte count from `n`, `n ∈ {1, 4, 8}`
 is all this ISA uses) from `n` bytes, least-significant byte first. -/
 def bitsOfLE (bytes : List UInt8) : BitVec 64 :=

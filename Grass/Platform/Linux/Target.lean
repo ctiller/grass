@@ -12,16 +12,9 @@ Assembles `Grass.Platform.Linux.Target.X86`/`.AArch64`'s ABI-specific
 `Environment`/`Admits`/`Responds`/`domain` into `Grass.Target.Platform`
 instances for each ISA this platform hosts.
 
-`Grass.ISA.X86.isa` -- the whole-machine `Instr`/`encode`/`decode`/`State`/
-`step` record `Grass.Target.Platform` is indexed by -- does not exist in this
-worktree yet (only the `Native` call surface `Grass/ISA/X86/Target/
-Native.lean` exports does). `platformX86` below stays commented out for
-exactly that reason; every field it would need (`entry`, `decode`,
-`encodeReturn`, `Environment`, `Admits`, `Responds`) is already built and
-typechecked against the concrete `NativeCall`/`NativeReturn`/`InitialContext`
-types, so assembling the record is a one-line change once its `isa` argument
-exists. `Grass.ISA.AArch64.isa` now exists (`Grass/ISA/AArch64/Target.lean`),
-so `platformAArch64` below is wired up. See the report for a distinct,
+`Grass.ISA.X86.isa` and `Grass.ISA.AArch64.isa` (`Grass/ISA/X86/Target.lean`,
+`Grass/ISA/AArch64/Target.lean`) now both exist, so `platformX86` and
+`platformAArch64` below are both wired up. See the report for a distinct,
 structural seam gap this file's `encodeReturn` had to accommodate rather than
 fix (`Console.Request.exit`'s terminal/`Empty` shape, `Grass/Target/
 Machine.lean`'s `Step.terminal`).
@@ -31,29 +24,35 @@ Machine.lean`'s `Step.terminal`).
 `Service.Heap.allocate`'s response is `Option Nat`: an opaque handle. This
 platform's `decode`/`encodeReturn` for `mmap`/`munmap` treat that handle as
 the mapped region's address directly (the same `Nat` `mmap` returns in `rax`/
-`x0` is the `munmap` argument that later releases it) -- that much needs
-nothing beyond `NativeReturn.rax`/`NativeReturn.writes`, which is all this
-module produces.
+`x0` is the `munmap` argument that later releases it).
 
-What it cannot produce: `Grass.ISA.X86.Target.Native.NativeReturn` and
-`Grass.ISA.AArch64.Target.Native.NativeReturn` (`Grass/ISA/X86/Target/
-Native.lean`, `Grass/ISA/AArch64/Target/Native.lean`) carry only `rax`/`x0`,
-an optional `rdx`/`x1`, `writes : List (Nat × List UInt8)` (bytes at
-*already-mapped* addresses) and `clobbers`. Neither has a "map this address
-range as readable/writable, starting from nothing" effect. A real `mmap`
-does not write bytes into existing memory; it extends what addresses the
-process may access at all. So `encodeReturn`'s answer to `mmap` hands back an
-address the ISA's `State`/`step` have no documented way to actually back with
-fresh, accessible memory -- the address is correct as a *value* (what a
-real kernel would return, and what a real program's later loads/stores at
-that address are entitled to expect), but nothing in the current ISA seam
-lets the machine tier honor an access there. This is a genuine seam gap, not
-a bug in this file: the fix is a `mapRegion (address : Nat) (bytes : Nat)
-(permission : ...) : State → State`-shaped effect (or an equivalent addition
-to `NativeReturn`) in `Grass.Target.ISA`, which this worktree's rules forbid
-editing. `decode`/`encodeReturn` for `.allocate`/`.release` are implemented
-here anyway, exactly as asked, so that once that effect exists, wiring it in
-is the only remaining change.
+`Grass.Target.ISA.NativeReturn` is an ISA-defined type (`Grass/Target/
+ISA.lean`), not part of the seam's own fixed shape, so each ISA is free to
+extend its own `NativeReturn` without touching the seam. `Grass.ISA.X86.
+Target.Native.NativeReturn` and `Grass.ISA.AArch64.Target.Native.NativeReturn`
+(`Grass/ISA/X86/Target/Native.lean`, `Grass/ISA/AArch64/Target/Native.lean`)
+now additionally carry `maps : List MappedRegion` (default `[]`): regions the
+answer newly mapped, which `resume`/`applySvcReturn` install into
+`State.regions` and zero-fill in `State.mem` (a MAP_ANONYMOUS mapping reads
+as zero, `man 2 mmap`) before applying `writes`. This module's `.allocate`
+success case now sets `maps := [{ base := address, size := bytes,
+readable := true, writable := true }]`, so `mmap`'s answer both hands back
+the address value and actually backs it with fresh, accessible memory.
+
+What remains open: `.release`/`munmap` has no counterpart effect --
+`NativeReturn` can add regions but not remove one, so a released region stays
+accessible in `State.regions` after a successful `munmap`. This profile
+over-approximates in the safe-for-the-program direction (never refuses an
+access a real kernel would allow) but not in the kernel-fidelity direction
+(admits an access after `munmap` a real kernel would fault). See the
+`.release` case's own comment in `Grass.Platform.Linux.Target.X86`/`.AArch64`.
+
+Separately, `Grass.Platform.Hosted.Heap.respondsHeap` (`Grass/Platform/
+Hosted/Heap.lean`) now requires a successful `.allocate`'s address to be
+disjoint from every existing live allocation and from `Environment.reserved`
+(the program image, stack, and argument block) -- the environment's job, not
+this platform's: a platform only encodes whatever address the environment
+already chose not to hand out over the code.
 -/
 
 namespace Grass.Platform.Linux.Target

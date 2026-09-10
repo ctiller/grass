@@ -128,6 +128,21 @@ def writeBytes (s : State) (addr : Nat) : List UInt8 → State
   | [] => s
   | b :: rest => (s.writeByte addr b).writeBytes (addr + 1) rest
 
+/-- Install a freshly mapped region: append it to `regions` and zero-fill
+its bytes in `mem`, overwriting whatever `mem` already held there. A
+MAP_ANONYMOUS mapping reads as zero (`man 2 mmap`: "the contents ... are
+initialized to zero"), so a freshly mapped page must not silently inherit
+stale bytes `mem` happened to carry at an address no region has ever
+covered before. -/
+def mapRegion (s : State) (r : Region) : State :=
+  { s with
+    regions := s.regions ++ [r]
+    mem := fun a => if r.Contains a then some 0 else s.mem a }
+
+/-- Install every region of `rs`, in order, via `mapRegion`. -/
+def mapRegions (s : State) (rs : List Region) : State :=
+  rs.foldl (fun st r => st.mapRegion r) s
+
 /-- Greedily read as many consecutive executable, mapped bytes as available
 starting at `addr`, up to a bound. Stops at the first unreadable or
 unmapped byte rather than failing outright, so a short instruction near the

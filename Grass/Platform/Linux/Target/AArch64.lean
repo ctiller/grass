@@ -173,15 +173,25 @@ def encodeReturn (call : NativeCall) : (request : domain.Request) → domain.Res
   | .inl (.inl (.query _stream)), _response =>
       { x0 := (negative ENOSYS).toBitVec, x1 := none, writes := [], clobbers := [] }
   | .inl (.inl (.exit _status)), response => response.elim
-  | .inl (.inr (.allocate _bytes)), response =>
+  | .inl (.inr (.allocate bytes)), response =>
       match response with
-      | some address => { x0 := BitVec.ofNat 64 address, x1 := none, writes := [], clobbers := [] }
+      | some address =>
+          -- See `Grass.Platform.Linux.Target.X86.encodeReturn`'s `.allocate`
+          -- case: `mmap`'s point is a region the process could not touch
+          -- before, so this answer also maps `[address, address + bytes)`
+          -- read/write, non-executable, matching `PROT_READ|PROT_WRITE`.
+          { x0 := BitVec.ofNat 64 address, x1 := none, writes := [], clobbers := []
+            maps := [{ base := address, size := bytes, readable := true, writable := true }] }
       | none => { x0 := (negative ENOMEM).toBitVec, x1 := none, writes := [], clobbers := [] }
   | .inl (.inr (.reallocate _handle _bytes)), response =>
       match response with
       | some address => { x0 := BitVec.ofNat 64 address, x1 := none, writes := [], clobbers := [] }
       | none => { x0 := (negative ENOSYS).toBitVec, x1 := none, writes := [], clobbers := [] }
   | .inl (.inr (.release _handle)), response =>
+      -- Over-approximates on release: see
+      -- `Grass.Platform.Linux.Target.X86.encodeReturn`'s `.release` case.
+      -- `NativeReturn` has no region-removal effect, so a successful
+      -- `munmap` here still leaves the region readable/writable afterward.
       match response with
       | true => { x0 := 0, x1 := none, writes := [], clobbers := [] }
       | false => { x0 := (negative EINVAL).toBitVec, x1 := none, writes := [], clobbers := [] }

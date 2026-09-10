@@ -62,14 +62,37 @@ structure NativeCall where
   a return address. -/
   returnAddress : UInt64
 
+/-- A freshly mapped region of the address space: the ISA-level effect of a
+platform answer that gives the program access to memory nothing previously
+authorized (a successful `mmap`, a heap arena growing). Distinct from
+`Grass.ISA.X86.Target.Region` (`Grass/ISA/X86/Target/State.lean`), which is
+the *installed* state-level record with an `executable` bit; `MappedRegion`
+is the narrower thing a platform is allowed to hand back from a native call
+-- no constructor here can ever mark a mapping executable, so a platform
+cannot smuggle fresh executable memory in through this effect. `resume`
+(`Grass/ISA/X86/Target.lean`) is what turns one of these into a `Region`. -/
+structure MappedRegion where
+  /-- The lowest address the new mapping occupies. -/
+  base : Nat
+  /-- The mapping's size in bytes. -/
+  size : Nat
+  /-- Whether the mapped bytes may be read. -/
+  readable : Bool
+  /-- Whether the mapped bytes may be written. -/
+  writable : Bool
+deriving Repr, DecidableEq, Inhabited
+
 /-- The machine-level effect of a platform's answer to a `NativeCall`.
 
 Carries exactly what `step` needs to resume the machine: the integer result
 registers a call convention returns values in, any memory the platform's
-answer wrote (an output buffer, a written struct), and which registers the
-call convention documents as clobbered (their post-call value is not modeled
+answer wrote (an output buffer, a written struct), which registers the call
+convention documents as clobbered (their post-call value is not modeled
 beyond "some value", so a program depending on one being preserved is not
-proved safe by accident). -/
+proved safe by accident), and any regions the answer newly mapped (a
+successful `mmap`/heap allocation). `maps` defaults to `[]` so every native
+call that never maps memory (console I/O, the clock, `munmap`/`HeapFree`)
+is unaffected by this field's existence. -/
 structure NativeReturn where
   /-- The primary return value register (`rax` in the SysV and Win64
   conventions this profile targets). -/
@@ -84,6 +107,14 @@ structure NativeReturn where
   /-- Registers the call convention documents as clobbered by this call,
   beyond `rax`/`rdx`. -/
   clobbers : List Reg
+  /-- Regions this answer newly mapped, in order. `resume` installs these
+  into `State.regions` and zero-fills their bytes in `State.mem` before
+  applying `writes` (a `write` into a region this same return just mapped
+  must see it already installed and zeroed, not the other way around --
+  see `Grass.ISA.X86.Target.execInstr`'s `.syscall` arm). No unmapping
+  effect exists in this profile yet: releasing a handle (`munmap`,
+  `HeapFree`) never removes a region here. -/
+  maps : List MappedRegion := []
 deriving Inhabited
 
 /-- Why a step could not execute.

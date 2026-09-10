@@ -56,16 +56,43 @@ structure NativeCall where
   or unreadable. -/
   read : (address : Nat) → (size : Nat) → Option (List UInt8)
 
+/-- A freshly mapped region of the address space: the ISA-level effect of a
+platform answer that gives the program access to memory nothing previously
+authorized (a successful `mmap`, a heap arena growing). Distinct from
+`Grass.ISA.AArch64.Target.Region` (`Grass/ISA/AArch64/Target/State.lean`),
+which is the *installed* state-level record with an `executable` bit;
+`MappedRegion` is the narrower thing a platform is allowed to hand back from
+a native call -- no constructor here can ever mark a mapping executable, so
+a platform cannot smuggle fresh executable memory in through this effect.
+`applySvcReturn` (`Grass/ISA/AArch64/Target/Step.lean`) is what turns one of
+these into a `Region`. -/
+structure MappedRegion where
+  /-- The lowest address the new mapping occupies. -/
+  base : Nat
+  /-- The mapping's size in bytes. -/
+  size : Nat
+  /-- Whether the mapped bytes may be read. -/
+  readable : Bool
+  /-- Whether the mapped bytes may be written. -/
+  writable : Bool
+deriving Repr, DecidableEq, Inhabited
+
 /-- The machine-level effect of a platform's answer to a native call: result
-registers and any memory writes the platform's response performs (e.g. bytes
-a `read` service delivered into a caller buffer). `clobbers` lists registers
-the call convention destroys beyond `x0`/`x1` (nothing here claims which ABI
-that is; a platform fills it from its own convention). -/
+registers, any memory writes the platform's response performs (e.g. bytes
+a `read` service delivered into a caller buffer), and any regions the answer
+newly mapped (a successful `mmap`/heap allocation). `clobbers` lists
+registers the call convention destroys beyond `x0`/`x1` (nothing here claims
+which ABI that is; a platform fills it from its own convention). `maps`
+defaults to `[]` so every native call that never maps memory (console I/O,
+the clock, `munmap`/`HeapFree`) is unaffected by this field's existence. No
+unmapping effect exists in this profile yet: releasing a handle never
+removes a region here. -/
 structure NativeReturn where
   x0 : BitVec 64
   x1 : Option (BitVec 64) := none
   writes : List (Nat × List UInt8) := []
   clobbers : List Reg := []
+  maps : List MappedRegion := []
 
 /-- Why a step could not proceed. Every constructor here makes the machine
 stuck, which is the point: memory and control safety is the absence of a

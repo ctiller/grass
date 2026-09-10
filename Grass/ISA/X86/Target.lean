@@ -284,7 +284,17 @@ def execInstr (s : State) (instr : Instr) (len : Nat) :
           let withRax := next.setReg .rax ret.rax
           let withRdx := match ret.rdx with | some v => withRax.setReg .rdx v | none => withRax
           let clobbered := ret.clobbers.foldl (fun st r => st.setReg r 0) withRdx
-          ret.writes.foldl (fun st (aw : Nat × List UInt8) => st.writeBytes aw.1 aw.2) clobbered)
+          -- `maps` before `writes`: a freshly mapped anonymous region reads
+          -- as zero (`man 2 mmap`, MAP_ANONYMOUS), and `mapRegions` installs
+          -- that zero-fill unconditionally. Applying it after `writes` would
+          -- silently erase any bytes `writes` just placed in a region this
+          -- same return mapped; applying it first lets such a write land on
+          -- an already-installed, already-zeroed region within one return.
+          let mapped := clobbered.mapRegions
+            (ret.maps.map fun m =>
+              { base := m.base, size := m.size, readable := m.readable, writable := m.writable,
+                executable := false })
+          ret.writes.foldl (fun st (aw : Nat × List UInt8) => st.writeBytes aw.1 aw.2) mapped)
   | .ud2 => .fault .explicitUndefined
   | .hlt => .halted
   | .nop => .internal next

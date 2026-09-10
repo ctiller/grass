@@ -20,6 +20,10 @@ namespace Grass.Platform.Hosted
 
 open Grass.Service Grass.Service.Heap
 
+/-- Two half-open byte ranges `[base, base + size)` share no address. -/
+def RangesDisjoint (a b : Nat × Nat) : Prop :=
+  a.1 + a.2 ≤ b.1 ∨ b.1 + b.2 ≤ a.1
+
 /-- The environment's side of the heap domain. -/
 def respondsHeap (env : Environment) : (r : Request) → Response r → Environment → Prop
   -- Allocation failure is always a possible answer, whether or not the
@@ -28,6 +32,15 @@ def respondsHeap (env : Environment) : (r : Request) → Response r → Environm
   | .allocate _bytes, none, env' => env' = env
   | .allocate bytes, some handle, env' =>
       handle = env.nextHandle ∧ env.liveTotal + bytes ≤ env.heapCapacity ∧
+        -- A fresh allocation is fresh: it may not land on any byte already
+        -- live in this arena, nor on any byte the loader already claimed for
+        -- the program image, stack, or argument block. Picking such an
+        -- address is the environment's job (`docs/MEMORY_MODEL.md` §2: every
+        -- allocation has a fresh generative identity); a platform whose
+        -- `encodeReturn` later treats `handle` as a memory address (see
+        -- `Grass.Platform.Linux.Target.X86`) is only ever as sound as this.
+        (∀ existing ∈ env.allocations, RangesDisjoint (handle, bytes) existing) ∧
+        (∀ region ∈ env.reserved, RangesDisjoint (handle, bytes) region) ∧
         env' = env.pushAllocation handle bytes
   -- Reallocation failure is always possible, and is the only answer to a
   -- dead handle: there is nothing to grow or shrink. On success the arena
@@ -72,7 +85,7 @@ theorem heap_stdout_unaffected {env env' : Environment} {r : Request} {response 
   | allocate bytes =>
       cases response with
       | none => obtain rfl := h; rfl
-      | some handle => obtain ⟨-, -, rfl⟩ := h; rfl
+      | some handle => obtain ⟨-, -, -, -, rfl⟩ := h; rfl
   | reallocate handle bytes =>
       cases response with
       | none => obtain rfl := h; rfl
