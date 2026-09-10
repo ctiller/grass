@@ -2,9 +2,10 @@ import Grass.Refinement.ImplementationConformance
 import Grass.Refinement.BehaviorCorrespondenceLaws
 import Tests.Refinement.ImplementationConformance
 import Tests.Refinement.UnclassifiedDeadlock
+import Tests.Refinement.Realization
 import Lean
 
-/-! Scoped audit of directed conformance, exact compatibility and their test
+/-! Scoped audit of directed conformance, the relative gate, exact compatibility and their test
 fixtures. Uses the same project-name normalization, axiom allowlist and compiled
 override checks as Tools/AxiomAudit.lean. This does not claim whole-tree coverage
 or replace the public certificate/runtime audit. -/
