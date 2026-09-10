@@ -78,6 +78,7 @@ import Grass.Platform.Win32.CallResumeBinding
 import Grass.Platform.Win32.CallResumeHistory
 import Grass.Platform.Win32.RawStepSignature
 import Grass.Platform.Win32.RawStep
+import Grass.Platform.Win32.RawSourceBranch
 import Grass.Platform.Win32.RawPhasePreservation
 import Grass.Platform.Win32.RawPrefix
 import Grass.Platform.Win32.RawPendingService
@@ -274,6 +275,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.CallResumeHistory,
    `Grass.Platform.Win32.RawStepSignature,
    `Grass.Platform.Win32.RawStep,
+   `Grass.Platform.Win32.RawSourceBranch,
    `Grass.Platform.Win32.RawPhasePreservation,
    `Grass.Platform.Win32.RawPrefix,
    `Grass.Platform.Win32.RawPendingService,
