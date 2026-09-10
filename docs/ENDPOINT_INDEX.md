@@ -151,8 +151,17 @@ in 26 modules, including `Realization`. These are **relative certificate
 deliveries**, not whole-public-root or trust acceptance: the known legacy
 `Grass.Certificate` migration failure remains. Matching covers actual histories,
 replies and the existing classified terminal/infinite/wait completions; it adds
-no completion-existence field. Internal deadlock classification remains separate
-research, with no production policy adopted.
+no completion-existence field.
+
+The subsequent user-approved direction makes **internal deadlock freedom a
+baseline requirement**, alongside safety and specification matching. A closed,
+stuck internal subset is disallowed even while unrelated work continues.
+Permitted external waiting and intended idle remain valid; termination, starvation
+freedom and environment responsiveness are separate requirements. This supersedes
+the earlier research-only policy status. A composition theorem and lowering
+preservation, including introduced locks, channels and callbacks, are still owed.
+Neither this theorem nor its gate integration is implemented by the checkpoints
+above; the existing `Complete` classification does not establish this requirement.
 
 The decision record is available as
 `git show 2ae59a56:docs/HELLO_ENDPOINT_MODEL.md`. Its earlier fixed-environment

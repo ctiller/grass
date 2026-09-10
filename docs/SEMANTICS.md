@@ -638,8 +638,13 @@ alone is insufficient. An API implementing a concept is a recorded external
 correspondence claim, not a proof of Windows internals; actual diagnostic causes
 must remain visible. The generic relation and relative certificate gate now have
 reviewed delivery checkpoints; the public verified-emission root remains pending.
-Internal deadlock classification is separate pending work and does not
-silently add a mandatory completion or progress field. See the
+The subsequent user-approved baseline also requires internal deadlock freedom:
+no closed, stuck internal subset, even when unrelated work continues. Permitted
+external waiting and intended idle remain valid. This is distinct from termination,
+starvation freedom and environment responsiveness. The composition theorem and
+lowering preservation for introduced locks, channels and callbacks remain owed;
+the existing gate and `Complete` classification do not yet establish this
+requirement. See the
 [current migration status](ENDPOINT_INDEX.md#approved-semantic-correction-and-relative-gate).
 
 Optimization may change instruction traces, layout, timing, or internal API
