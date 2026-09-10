@@ -255,8 +255,7 @@ theorem universal_order_rejected (state : ProtocolState) :
   intro h
   exact h (.entry FreshSupply.initial.fresh.1) trivial
 
-/-- The actual current checker retains the cross-context denial despite loans.
-This fixture uses the same typed request and count-slot loan as the prefix. -/
+/-- The count-slot access used to check actual synchronous handoff ordering. -/
 def countWrite : AccessDescriptor :=
   Grass.Tests.Spike1.access stackProvenance ⟨16, 4⟩
     (addressOf stackBaseAddress 16) .write .readWrite 4 false true
@@ -282,22 +281,15 @@ def zeroed : ProtocolState :=
   CallProtocol.initial zeroedMachine FreshSupply.initial (by decide)
 def handedAfterZero := CallProtocol.handoff? zeroed mainThread apiAgent (.writeFile request) request.loans
 def afterZero := (handedAfterZero.get (by decide)).2
-def denied := CallProtocol.step? afterZero zeroPolicy (SomeOperation.of CountOp.provider)
+def providerAfterZero := CallProtocol.step? afterZero zeroPolicy (SomeOperation.of CountOp.provider)
   apiAgent .externalAgent ⟨⟨"writefile.zero"⟩⟩ (fun _ => .none)
 
 theorem caller_zero_clean : zeroedMachine.violations.IsEmpty := by decide
-theorem provider_step_some_but_denied : denied.isSome ∧
-    ¬ (denied.get (by decide)).machine.violations.IsEmpty := by
+theorem provider_step_clean_after_handoff : providerAfterZero.isSome ∧
+    (providerAfterZero.get (by decide)).machine.violations.IsEmpty := by
   exact ⟨by decide, by decide⟩
 
-theorem provider_denial_is_the_ordering_blocker :
-    (denied.get (by decide)).machine.violations.records?.map (fun item => item.class_) =
-      [.conflictingAccess] := by decide
-
-theorem denied_not_a_prefix (occurrence : CallProtocol.CallId)
-    (pendingRecord : CallProtocol.Pending Request) :
-    ¬ Nonempty (Prefix plan (denied.get (by decide)) occurrence pendingRecord) := by
-  rintro ⟨frontier⟩
-  exact provider_step_some_but_denied.2 frontier.clean
+theorem provider_step_retains_both_writes :
+    (providerAfterZero.get (by decide)).machine.events.length = 2 := by decide
 
 end Grass.Tests.Win32WriteFile
