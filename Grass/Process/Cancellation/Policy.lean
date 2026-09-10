@@ -330,7 +330,7 @@ theorem composePolicy_callDisposition_right {left right : CancellationPolicy}
     exact (List.nodup_append.mp distinct).2.2 call inLeft call declared rfl
   simp [composePolicy, notLeft]
 
-/-- Composition preserves the requirement that atomic-region dispositions
+/-- `composePolicy_regionsDeclared` preserves the requirement that atomic-region dispositions
 name a region declared by the composed policy. -/
 theorem composePolicy_regionsDeclared {left right : CancellationPolicy}
     (leftDeclared : left.RegionsDeclared) (rightDeclared : right.RegionsDeclared)
@@ -347,7 +347,7 @@ theorem composePolicy_regionsDeclared {left right : CancellationPolicy}
       rightDeclared call inRight region disposition
     exact ⟨bounded, List.mem_append_right _ inRegions, exactRegion⟩
 
-/-- Composition preserves the requirement that cancellable dispositions name
+/-- `composePolicy_pointsDeclared` preserves the requirement that cancellable dispositions name
 a point governed by the composed policy. -/
 theorem composePolicy_pointsDeclared {left right : CancellationPolicy}
     (leftDeclared : left.PointsDeclared) (rightDeclared : right.PointsDeclared)

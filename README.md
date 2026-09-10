@@ -1,5 +1,7 @@
 # Grass
 
+For current implementation work, start with the [driver handoff](docs/DRIVER_HANDOFF.md).
+
 Grass is a high-level, extensible assembler for building programs whose emitted
 machine code is proved safe and equivalent to a Lean specification.
 

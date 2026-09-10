@@ -35,7 +35,7 @@ theorem receiver_is_live (delivery : plan.Delivers before after edge session occ
   obtain ⟨incarnation, found, live, _⟩ := effects.from'
   exact ⟨incarnation, found, live, delivery.receiverRef incarnation found⟩
 
-/-- An outstanding message alone cannot be consumed by an absent receiver. -/
+/-- `impossible_without_receiver` rules out consuming an outstanding message without its receiver. -/
 theorem impossible_without_receiver
     (missing : before.instances (plan.topology.endpoints edge).2
       session.receiver.instanceId = none) :

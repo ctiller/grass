@@ -56,7 +56,7 @@ theorem receiveUpdate_resolution_other (ledger : EscrowLedger Occurrence Session
     (receiveUpdate ledger occurrence outstanding).resolution other = ledger.resolution other := by
   simp [receiveUpdate, different]
 
-/-- Receiving preserves prior creations, resolutions and cancellation requests. -/
+/-- `receiveUpdate_extends` preserves prior creations, resolutions and cancellation requests. -/
 theorem receiveUpdate_extends (ledger : EscrowLedger Occurrence Session)
     (occurrence : Occurrence) (outstanding : ledger.Outstanding occurrence) :
     LedgerExtends ledger (receiveUpdate ledger occurrence outstanding) where

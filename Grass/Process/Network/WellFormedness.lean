@@ -604,7 +604,7 @@ theorem escrowFragment_inj {edge edge' : plan.topology.ChannelKind}
   cases equal
   exact ⟨rfl, rfl⟩
 
-/-- The wider receive scope declares an escrow fragment only at the exact
+/-- `escrow_of_deliveryScope` restricts an escrow fragment to the exact
 delivery session; its receiver-local, pending, and region alternatives cannot
 be an escrow fragment. -/
 theorem escrow_of_deliveryScope {edge edge' : plan.topology.ChannelKind}

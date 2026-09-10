@@ -169,7 +169,7 @@ theorem decode_exitGroup {abi : Abi} {captured : Captured}
     decode? abi captured = some (.exitGroup (BitVec.setWidth 32 captured.arg0)) := by
   simp [decode?, selected]
 
-/-- A successful typed extraction retains the identity selected from the same
+/-- `decode?_id` shows a successful typed extraction retains the identity selected from the same
 captured number; it cannot relabel a syscall after argument decoding. -/
 theorem decode?_id {abi : Abi} {captured : Captured} {request : Request}
     (decoded : decode? abi captured = some request) :
