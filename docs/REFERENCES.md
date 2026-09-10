@@ -276,6 +276,15 @@ argument selection, and raw negative error results. Libc wrapper translation,
 restart handling, signal delivery, and instruction-level entry effects require
 their own sources and connection proofs.
 
+## Gzip checksum and trailer
+
+- [RFC 1952, sections 2.1 and 2.3.1](https://www.rfc-editor.org/rfc/rfc1952.html#section-2.3.1)
+  specifies little-endian multi-byte values, CRC32, and ISIZE modulo 2^32.
+- [RFC 1952, section 8](https://www.rfc-editor.org/rfc/rfc1952.html#section-8)
+  provides the reflected CRC sample recurrence and initial/final conditioning.
+  Its sample code is informative; equivalence of Grass's two recurrences is
+  proved in `Grass.Std.Zlib.CRC32`, rather than assumed from a test vector.
+
 ## Internal predecessor material
 
 These documents are design lineage, not external semantic authority. Citations

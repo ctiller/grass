@@ -1,4 +1,5 @@
 import Lean
+import Grass.Std.Zlib.Fixed32K.Checksum
 import Grass.Platform.Win32.RawPhasePreservation
 import Grass.Platform.Win32.RawPendingService
 import Grass.Platform.Win32.RawPrefixSteps
