@@ -248,6 +248,15 @@ for Grass instructions. Review must compare both the authored and expanded
 forms, verify that no helper hides effects or exits, and confirm that all target
 instructions and ABI metadata retain their own vendor anchors.
 
+## Gzip checksum and trailer
+
+- [RFC 1952, sections 2.1 and 2.3.1](https://www.rfc-editor.org/rfc/rfc1952.html#section-2.3.1)
+  specifies little-endian multi-byte values, CRC32, and ISIZE modulo 2^32.
+- [RFC 1952, section 8](https://www.rfc-editor.org/rfc/rfc1952.html#section-8)
+  provides the reflected CRC sample recurrence and initial/final conditioning.
+  Its sample code is informative; equivalence of Grass's two recurrences is
+  proved in `Grass.Std.Zlib.CRC32`, rather than assumed from a test vector.
+
 ## Internal predecessor material
 
 These documents are design lineage, not external semantic authority. Citations
