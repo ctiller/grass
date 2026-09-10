@@ -5,6 +5,11 @@ Hello certificate boundary after common CALL/ReturnHome/CP-entry construction.
 Names below are proposed roles unless explicitly identified as existing code.
 No DSL or new native execution campaign is required for this step.
 
+**Review status:** process review identified a blocking environment-quantifier
+issue below. The fixed-initial-environment signatures are provisional and must
+not be implemented as an accepted complete-correspondence solution until that
+issue is resolved. Shared entry/settlement/resume machinery is unaffected.
+
 ## Placement and trust
 
 Keep GetStdHandle and ExitProcess allowed behavior in Windows semantic modules
@@ -118,6 +123,36 @@ retains the pending behavior. Do not filter it away using the desired outcome or
 treat a trap/UD2 after an unexpected return as successful termination.
 
 ## Selected minimal implementation interface
+
+### Open quantifier decision
+
+BehaviorCorrespondence.completeBack requires every upper completion from the
+same related lower prefix. A lower initial state with fixed absent stdout cannot
+realize the successful full-output completion admitted by the captured console
+denotation. initialForth relates each lower initial history; taking a union over
+different fixed environments does not repair this per-prefix obligation. The
+same issue applies to WaitTranslation.responseCoverage/WaitMatch.replyBack at a
+specific occurrence. Native-to-model correspondence does not by itself prove
+model-to-authored back coverage.
+
+Root/process must choose and prove the correct quantification: leave model
+environment choices unresolved until the matched interaction and retain the
+selected bindings thereafter, or justify environment conditions in the actual
+upper interpretation. The first is under review, not yet established sufficient
+for subsequent write/exit choices. Do not weaken CompleteMatch, remove failure
+branches or substitute successful traces to resolve this. The signatures below
+record the pre-review proposal, not a ratified answer to this blocker.
+
+Exit additionally needs terminal disposition of the same pending occurrence and
+all live loans/linear obligations. Observed code/output alone proves no such
+safety. Any provider/DLL raw divergence classified as an observation wait must
+pass the upstream agency/coverage normalization retaining raw execution evidence;
+strict CompleteMatch itself retains infinite-to-infinite and waiting-to-waiting.
+Responsiveness assumptions must address the exact authored boundary.
+
+A non-sentinel unusable handle follows the actual non-sentinel branch and
+attempted WriteFile failure path. It must not be reclassified as a GetStdHandle
+null/invalid result merely because no usable route resolves.
 
 Spikes approved the model/correspondence boundary and selected stable standard
 handle table plus route lifetime for the first synchronous profile. Stability
