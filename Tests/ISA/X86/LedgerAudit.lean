@@ -57,6 +57,7 @@ import Grass.Platform.Win32.WriteFile
 import Grass.Platform.Win32.WriteFileNonresponse
 import Grass.Platform.Win32.WriteFileStabilization
 import Grass.Platform.Win32.WriteFileReturn
+import Grass.Platform.Win32.WriteFileReturnCompletion
 import Grass.Platform.Win32.LoaderEntry
 import Grass.Platform.Win32.LoadedAccess
 import Grass.Platform.Win32.LoadedDataAccess
@@ -235,6 +236,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.WriteFileNonresponse,
    `Grass.Platform.Win32.WriteFileStabilization,
    `Grass.Platform.Win32.WriteFileResult, `Grass.Platform.Win32.WriteFileReturn,
+   `Grass.Platform.Win32.WriteFileReturnCompletion,
    `Grass.Platform.Win32.LoaderImage, `Grass.Platform.Win32.LoaderRegion,
    `Grass.Platform.Win32.LoaderEntry,
    `Grass.Platform.Win32.LoadedAccess, `Grass.Platform.Win32.CpuVocabulary,
@@ -415,7 +417,8 @@ acquiring a citation.
 -- Comparison with the snapshot's selected stdout route adds no native authority.
 -- The actual checked completion projects its canonical raw event suffix.
 -- Shared observation staging installs supplied register data without native authority.
-def notBehaviourBaseline : Nat := 389
+-- Checked WriteFile resume construction and computed final carrier.
+def notBehaviourBaseline : Nat := 391
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -605,6 +608,8 @@ def notBehaviour : List Name :=
     -- reached platform state; it does not claim that an x86 RET was fetched.
     `Grass.Platform.Win32.ProviderResume.afterReturn,
     `Grass.Platform.Win32.ProviderResume.observeRegisters,
+    `Grass.Platform.Win32.WriteFile.Return.complete?,
+    `Grass.Platform.Win32.WriteFile.Return.Completion.final,
     `Grass.Platform.Win32.ProviderResume.returnFrame?,
     `Grass.Platform.Win32.ProviderResume.PreservesNonvolatile,
     `Grass.Platform.Win32.ProviderResume.WriteFileOutput,
