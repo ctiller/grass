@@ -71,31 +71,41 @@ structure ActualPreCall where
   checkedExact : before.checked? = some checked
   callerReady : checked.ControlConsistent
 
-private def actualBody := (Grass.Assembly.SourceInput.extractHelloSourceChars
-  Grass.Tests.Assembly.SourceResolve.authored).toOption.get (by native_decide)
-private def actualFrame := (Grass.Assembly.SourceFrame.derive? actualBody).get (by native_decide)
-private def actualSplice := (Grass.Assembly.SourceSplice.derive? actualFrame 0).get (by native_decide)
-private def actualPlan := Grass.Tests.Win32LoaderEntry.helloPlan?.get (by native_decide)
-private def actualImage : ImageInput :=
-  ⟨actualPlan, (PE.writeImage actualPlan).toHostBytes, rfl⟩
-private def actualInputs := Grass.Tests.Win32LoaderEntry.inputsFor actualPlan
-  (.fromList [.fromList [0x7ff01000, 0x7ff02000, 0x7ff03000]])
-private def actualLoaded : LoadedImage actualImage actualInputs :=
-  (initialize? actualImage actualInputs).get (by native_decide)
+/-- All dependent inputs for the concrete run are retained from one checked
+computation, without axiomatic witnesses that any intermediate option succeeds. -/
+structure ActualSetup where
+  body : Grass.Assembly.SourceInput.Body
+  frame : Grass.Assembly.SourceFrame.Result
+  splice : Grass.Assembly.SourceSplice.Result frame 0
+  image : ImageInput
+  inputs : EntryInputs
+  loaded : LoadedImage image inputs
+
+def actualSetup? : Option ActualSetup := do
+  let body ← (Grass.Assembly.SourceInput.extractHelloSourceChars
+    Grass.Tests.Assembly.SourceResolve.authored).toOption
+  let frame ← Grass.Assembly.SourceFrame.derive? body
+  let splice ← Grass.Assembly.SourceSplice.derive? frame 0
+  let plan ← Grass.Tests.Win32LoaderEntry.helloPlan?
+  let image : ImageInput := ⟨plan, (PE.writeImage plan).toHostBytes, rfl⟩
+  let inputs := Grass.Tests.Win32LoaderEntry.inputsFor plan
+    (.fromList [.fromList [0x7ff01000, 0x7ff02000, 0x7ff03000]])
+  let loaded ← initialize? image inputs
+  some { body, frame, splice, image, inputs, loaded }
 
 /-- Structured endpoint evidence retains the exact checked evaluator equation,
 CALL receipt, existing raw handoff, and its runtime-bearing result. -/
-structure ActualHandoff where
+structure ActualHandoff (setup : ActualSetup) where
   preCall : ActualPreCall
   policy : CpuAccessPolicy
-  selected : Cpu.policy? actualLoaded preCall.checked.machine = some policy
+  selected : Cpu.policy? setup.loaded preCall.checked.machine = some policy
   flags : RegisterSemantics.Flags Bool
   called : CallFactory.Success policy preCall.checked.machine
   evaluated : CheckedExecution.normal policy preCall.checked.machine flags =
     some (.ok (.call called))
-  entered : @GetStdHandle.RawCallHandoff actualImage actualInputs actualLoaded
+  entered : @GetStdHandle.RawCallHandoff setup.image setup.inputs setup.loaded
     preCall.before called.fetched.after called.afterRead called.afterStore called.displacement
-    actualInputs.independentContext
+    setup.inputs.independentContext
   receiptExact : HEq entered.receipt called.receipt
 
 private theorem transportedContinuation {left right : State} (same : left = right)
@@ -110,21 +120,21 @@ private theorem transportedRange {left right : State} (same : left = right)
     (plan : GetStdHandle.StackPlan left) :
     (same ▸ plan).returnSlot.range = plan.returnSlot.range := by cases same; rfl
 
-def actualHandoff? : Option ActualHandoff := do
-  if covered : CallProtocol.GrantSupplyCovers actualLoaded.initialState.machine.memory
+def actualHandoffFor? (setup : ActualSetup) : Option (ActualHandoff setup) := do
+  if covered : CallProtocol.GrantSupplyCovers setup.loaded.initialState.machine.memory
       (FreshSupply.initial : FreshSupply GrantTag) then
     let protocol : CallProtocol.State ApiRequest :=
-      CallProtocol.initial actualLoaded.initialState.machine .initial covered
-    let initial := ExecutionState.State.ofCallProtocol protocol actualLoaded.initialState rfl
-      (.caller actualInputs.thread)
-    match Grass.Assembly.PrologueFactory.execute actualLoaded actualSplice.prologue
-        actualLoaded.initialState with
+      CallProtocol.initial setup.loaded.initialState.machine .initial covered
+    let initial := ExecutionState.State.ofCallProtocol protocol setup.loaded.initialState rfl
+      (.caller setup.inputs.thread)
+    match Grass.Assembly.PrologueFactory.execute setup.loaded setup.splice.prologue
+        setup.loaded.initialState with
     | .error _ => none
     | .ok ⟨afterPrologue, _⟩ =>
-        match runInitializations actualLoaded actualSplice.initialization.entries afterPrologue with
+        match runInitializations setup.loaded setup.splice.initialization.entries afterPrologue with
         | none => none
         | some afterInitialization =>
-            match Cpu.policy? actualLoaded afterInitialization with
+            match Cpu.policy? setup.loaded afterInitialization with
             | none => none
             | some movePolicy =>
                 match ComputationFactory.move movePolicy afterInitialization with
@@ -137,7 +147,7 @@ def actualHandoff? : Option ActualHandoff := do
                         match callerReady? checked with
                         | none => none
                         | some callerReady =>
-                            match selected : Cpu.policy? actualLoaded checked.machine with
+                            match selected : Cpu.policy? setup.loaded checked.machine with
                             | none => none
                             | some policy =>
                                 let flags := checked.machine.statusFlags
@@ -156,12 +166,12 @@ def actualHandoff? : Option ActualHandoff := do
                                             let abi : GetStdHandle.StackPlan reached.machine :=
                                               reachedMachine.symm ▸ stack
                                             match GetStdHandle.entryHandoff? reached abi
-                                                actualInputs.independentContext with
+                                                setup.inputs.independentContext with
                                             | none => none
                                             | some handoff =>
-                                                if caller : handoff.caller = actualInputs.thread then
-                                                  let entered : GetStdHandle.CallHandoff actualLoaded checked
-                                                      called.receipt actualInputs.independentContext :=
+                                                if caller : handoff.caller = setup.inputs.thread then
+                                                  let entered : GetStdHandle.CallHandoff setup.loaded checked
+                                                      called.receipt setup.inputs.independentContext :=
                                                     { policy := binding
                                                       callerReady := callerReady.property
                                                       reached, reachedExact, abi
@@ -178,10 +188,10 @@ def actualHandoff? : Option ActualHandoff := do
                                                           reachedMachine.symm stack).trans
                                                           (ReturnHome.StackPlanFactory.return_range_exact planned)
                                                       handoff, caller }
-                                                  let raw : @GetStdHandle.RawCallHandoff actualImage actualInputs actualLoaded
+                                                  let raw : @GetStdHandle.RawCallHandoff setup.image setup.inputs setup.loaded
                                                       before called.fetched.after called.afterRead
                                                       called.afterStore called.displacement
-                                                      actualInputs.independentContext :=
+                                                      setup.inputs.independentContext :=
                                                     { checked, checkedExact, receipt := called.receipt,
                                                       entered }
                                                   have rawReceipt : raw.receipt = called.receipt := rfl
@@ -197,15 +207,27 @@ def actualHandoff? : Option ActualHandoff := do
                                 | _ => none
   else none
 
-theorem ActualHandoff.runtime_exact (result : ActualHandoff) :
+structure ActualResult where
+  setup : ActualSetup
+  handoff : ActualHandoff setup
+
+def actualHandoff? : Option ActualResult :=
+  match actualSetup? with
+  | none => none
+  | some setup =>
+      match actualHandoffFor? setup with
+      | none => none
+      | some handoff => some { setup, handoff }
+
+theorem ActualHandoff.runtime_exact {setup : ActualSetup} (result : ActualHandoff setup) :
     result.entered.after.calls.lookup result.entered.entered.handoff.call =
       some (.getStdHandle result.entered.entered.frame) :=
   result.entered.after_call
 
 /-- The actual entered CALL supplies both initial resume premises from its
 fixed policy binding and computed runtime insertion. -/
-theorem ActualHandoff.resume_inputs (result : ActualHandoff) :
-    ProviderResume.PolicyBinding actualLoaded result.entered.receipt ∧
+theorem ActualHandoff.resume_inputs {setup : ActualSetup} (result : ActualHandoff setup) :
+    ProviderResume.PolicyBinding setup.loaded result.entered.receipt ∧
       ProviderResume.Link result.entered.after result.entered.entered.handoff.call
         (.getStdHandle result.entered.entered.frame) result.entered.entered.frame
         result.entered.receipt :=
@@ -215,10 +237,12 @@ theorem ActualHandoff.resume_inputs (result : ActualHandoff) :
 values are obtained from the retained receipts and ABI definitions rather than
 handwritten instruction bytes or stack offsets. -/
 def actualPrefix? : Option Bool := actualHandoff?.map fun result =>
+  let setup := result.setup
+  let result := result.handoff
   let entered := result.entered.entered
   let abi := entered.abi
   let handoff := entered.handoff
-  actualSplice.initialization.entries.length == 1 &&
+  setup.splice.initialization.entries.length == 1 &&
     BitVec.setWidth 32 (result.preCall.checked.machine.gpr .rcx) ==
       StdHandleId.output.value &&
     abi.continuation == result.called.receipt.fetch.site.fallthroughRip &&
@@ -227,9 +251,9 @@ def actualPrefix? : Option Bool := actualHandoff?.map fun result =>
     abi.returnSlot.range.size == WriteFile.Abi.returnAddressBytes &&
     abi.homeSlot.provenance == abi.returnSlot.provenance &&
     abi.homeSlot.range.size == Grass.ABI.Win64.shadowSpaceBytes &&
-    handoff.caller == actualInputs.thread &&
-    handoff.after.control == .pending handoff.call actualInputs.thread
-      actualInputs.independentContext
+    handoff.caller == setup.inputs.thread &&
+    handoff.after.control == .pending handoff.call setup.inputs.thread
+      setup.inputs.independentContext
 
 private def check (passed : Bool) : IO Unit :=
   unless passed do throw (IO.userError "actual Hello GetStdHandle CALL prefix refused")
