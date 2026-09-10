@@ -78,6 +78,7 @@ import Grass.Platform.Win32.RawPrefix
 import Grass.Platform.Win32.RawPendingService
 import Grass.Platform.Win32.RawPrefixSteps
 import Grass.Platform.Win32.RawTerminal
+import Grass.Platform.Win32.RawGetStdHandlePending
 import Grass.Platform.Win32.RawServiceMetadata
 import Grass.Platform.Win32.RawServiceContinuation
 import Grass.Platform.Win32.RawServicePrefix
@@ -268,6 +269,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawPendingService,
    `Grass.Platform.Win32.RawPrefixSteps,
    `Grass.Platform.Win32.RawTerminal,
+   `Grass.Platform.Win32.RawGetStdHandlePending,
    `Grass.Platform.Win32.RawServiceMetadata,
    `Grass.Platform.Win32.RawServiceContinuation,
    `Grass.Platform.Win32.RawServicePrefix,
