@@ -74,7 +74,8 @@ supplied `Link`.
 
 The separately inspected lowering delivery `4141cb7f` connects **same-issued-CALL
 finite history → matched settlement → computed slot read → raw BOOL guard →
-source body**, conditionally. Inspect it with
+source body**, conditionally. This historical LEA-specific wrapper is superseded
+by the incoming-state count-entry delivery below. Inspect it with
 `git show 4141cb7f:Grass/Refinement/Console/WriteFileResume.lean`, theorem
 `returned_body`. It transports the original pre-CALL cursor, derives the original
 frame, preserves R12/RSP and settled memory, and connects the source load's exact
@@ -114,32 +115,50 @@ supplied inputs. The inspected fixture at
 stack plan → protocol entry, retaining the canonical count slot in the pending
 record; Windows reports review and validation passed.
 
-This closes the missing checked preparation step. The source LEA's argument and
-R9 transport to the CALL, and the source suffix buffer, still need their lowering
-connection. Provider BOOL, settlement/resume and physical correspondence retain
+This closes the missing checked preparation step. The source suffix buffer and
+outer source-to-loaded-image correspondence still need their lowering connection.
+Provider BOOL, settlement/resume and physical correspondence retain
 their separate obligations above. Existing
 [WriteFileStackPlan.lean](../Grass/Platform/Win32/WriteFileStackPlan.lean)
 `Abi.StackPlanFactory.deriveLoaded?` consumes an already supplied `Entry` and
 derives the shared ReturnHome plan plus WriteFile extensions, including the later
 fifth-slot separation checks.
 
-Source-entry delivery `4a172bd4`, integrated on the certificate branch as
-`3c572e90`, adds `Grass/Refinement/Console/WriteFileSourceEntry.lean`.
-Its inspected `prepareCall?` composes reached CALL, preparation, stack plan and
-protocol entry with the exact receipt and original metadata. `prepareSourceCall?`
-uses the canonical `SourceLea.argument` with an explicit checked-evaluator witness.
-The specialized `returned_body` requires the successful producer equation and
-removes the generic `requestSlot` premise by construction. It still does not
-construct the source-LEA-to-pre-CALL setup ancestry or whole Hello; the other
-return/body premises remain. Spikes reports independent Sol review and a combined
-304-job focused build passed. Shared finalization extraction remains unpublished
-at this checkpoint; no GetStdHandle production adoption is claimed.
+Count-entry rewrite `8f213c0c`, integrated on the certificate branch as `a3375cee`,
+uses `Grass/Refinement/Console/WriteFileCountArgument.lean` to compute the static
+source-local count argument from the selected frame and fixed loaded stack.
+`Grass/Refinement/Console/WriteFileCountEntry.lean` provides `prepareCountCall?`
+and `returned_body`, using the existing incoming-state checker without an executed
+LEA or separate `requestSlot` premise. The generic `WriteFileSourceEntry.prepareCall?`
+still composes reached CALL, preparation, stack plan and protocol entry, retaining
+the exact receipt and original metadata. Unused `prepareSourceCall?` and old
+LEA-specific return/body wrappers were deleted; `WriteFileResume.returned_body_bound`
+is the shared descriptor-bound composition. Actual LEA remains an optional producer.
+
+Spikes reports the combined 299-job build passed. The fixture accepts preexisting
+correct R9 with no LEA and rejects wrong-local, shifted-frame, width and space
+mismatches. It combines a separate source selection with an actual-CALL image;
+outer source-to-loaded-image correspondence remains owed, along with the other
+return/body premises. This is not public-gate or main Console migration.
+
+Shared finalization now has **both real production consumers** at certificate
+checkpoint `c6ded4d2`. Main `95675923` delivers
+[GetStdHandleReturn.lean](../Grass/Platform/Win32/GetStdHandleReturn.lean):
+observed-result, same-call `complete?` uses `ProviderResume.finalized_*` for
+fields, other-call preservation, protocol consumption/replay rejection and logs.
+The inspected `Grass/Refinement/Console/WriteFileFinalize.lean` at `c6ded4d2`
+delegates to those same laws in
+[ProviderResumeFinalization.lean](../Grass/Platform/Win32/ProviderResumeFinalization.lean).
+This closes the specific dual-adoption obligation. Spikes reports boundary review
+accepted, root/certificate focused builds (249/296 jobs), root audit (31,112
+declarations/360 modules), certificate ledger and supplier build/trust checks
+passed. These do not establish broader cleanup, native applicability, physical
+return or the public `VerifiedProgram` endpoint.
 
 The [incoming-state contract rule](PLATFORM_ABI.md#incoming-state-contract)
-separates the checked call state from its setup recipe. The source-LEA premise
-above describes that delivered helper, not a mandatory WriteFile contract:
-lowering is to remove that restriction while preserving canonical argument and
-actual CALL binding. No completed replacement is claimed here.
+separates the checked call state from its setup recipe. The count-entry rewrite
+implements that distinction while retaining canonical arguments and actual CALL
+binding; it does not prove the remaining outer execution connection.
 
 The structured Hello fixture at the inspected `31ad186e` had a trust-gate
 setup-extraction defect, so that checkpoint is not acceptance evidence.
