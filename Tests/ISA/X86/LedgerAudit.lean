@@ -78,6 +78,7 @@ import Grass.Platform.Win32.RawEntryEvent
 import Grass.Platform.Win32.RawServicePreservation
 import Grass.Platform.Win32.ExitProcessRuntime
 import Grass.Platform.Win32.ExitProcessCompletion
+import Grass.Platform.Win32.ExitProcessRawCompletion
 import Grass.Platform.Win32.ConsoleEnvironment
 import Grass.Platform.Win32.WriteFileConsolePublication
 import Grass.Platform.Win32.GetStdHandleReturn
@@ -259,6 +260,7 @@ def auditedModules : List Name :=
    `Grass.Platform.Win32.RawServicePreservation,
    `Grass.Platform.Win32.ExitProcessRuntime,
    `Grass.Platform.Win32.ExitProcessCompletion,
+   `Grass.Platform.Win32.ExitProcessRawCompletion,
    `Grass.Platform.Win32.ConsoleEnvironment,
    `Grass.Platform.Win32.WriteFileConsolePublication,
    `Grass.Platform.Win32.GetStdHandleReturn,
@@ -422,7 +424,7 @@ acquiring a citation.
 -- The actual checked completion projects its canonical raw event suffix.
 -- Shared observation staging installs supplied register data without native authority.
 -- Checked WriteFile resume construction and computed final carrier.
-def notBehaviourBaseline : Nat := 392
+def notBehaviourBaseline : Nat := 393
 
 /--
 Classes whose instances say how a type is decided, printed or defaulted, rather
@@ -575,6 +577,7 @@ def notBehaviour : List Name :=
     `Grass.Platform.Win32.GetStdHandle.Return.Completion.final,
     `Grass.Platform.Win32.WriteFile.Return.Completion.event,
     `Grass.Platform.Win32.GetStdHandle.Return.Completion.event,
+    `Grass.Platform.Win32.ExitProcess.Completion.event,
     `Grass.Platform.Win32.WriteFile.ConsolePublication.onStdout,
     -- Bind the fixed policy to an existing successful CALL factory receipt.
     `Grass.Platform.Win32.CallEntry.CallPolicy.ofFactory,

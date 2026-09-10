@@ -6,6 +6,7 @@ import Grass.Platform.Win32.WriteFileRuntime
 import Grass.Platform.Win32.WriteFileService
 import Grass.Platform.Win32.GetStdHandleRuntime
 import Grass.Platform.Win32.ExitProcessRuntime
+import Grass.Platform.Win32.ExitProcessCompletion
 import Grass.Platform.Win32.ApiDispatch
 
 /-!
@@ -16,7 +17,7 @@ one loaded image, console environment, provider realization and return interpret
 for an entire derivation. It is
 not a complete Windows execution model or a public realization profile. In
 particular, native export adequacy, failed/refused provider actions,
-physical provider transfer and terminal observation are not classified here. No totality,
+physical provider transfer and native termination are not classified here. No totality,
 safety, or endpoint certification follows from this partial case relation.
 
 Entry cases combine the actual CALL and protocol handoff from the exact raw
@@ -32,6 +33,9 @@ matched return under the fixed interpretation. The supplied provider history is
 indexed to the original handoff; linking it to the same enclosing raw execution
 remains an outer adapter obligation. Return log/graph agreement does not establish
 full cross-log causal correspondence.
+The completed ExitProcess case checks the exact observed process/call/status and
+changes only terminal control. The archived state establishes no OS cleanup or
+obligation discharge; `terminal_no_step` prevents further raw transitions.
 -/
 
 namespace Grass.Platform.Win32.Raw
@@ -159,6 +163,17 @@ inductive RawStep {image : ImageInput} {inputs : EntryInputs}
       RawStep loaded realization environment interpretation graph (before.raw calls)
         (.apiEntry (.exitProcess (ExitProcess.status entered.reached.machine)) agent)
         event (entered.handoff.initRaw calls) nextGraph
+  | completedExit {graph nextGraph : Graph} {before : RawState}
+      {observed : ExitProcess.Observation}
+      (completion : ExitProcess.Completion environment before observed)
+      (completed : ExitProcess.complete? environment before observed = some completion)
+      (agreement : EdgeAgreement graph before
+        (Event.between before completion.after
+          (.endpoint (.processExited observed.call observed.status))) completion.after nextGraph) :
+      RawStep loaded realization environment interpretation graph before
+        (.exitObservation observed.call observed.status)
+        (Event.between before completion.after
+          (.endpoint (.processExited observed.call observed.status))) completion.after nextGraph
   | service {graph nextGraph : Graph} {before : RawState} {event : Event}
       {call : CallProtocol.CallId} {record : CallProtocol.Pending WriteFile.Request}
       {action : WriteFile.Action} {output : Vec Byte}
@@ -225,6 +240,55 @@ variable {image : ImageInput} {inputs : EntryInputs}
 theorem agreement (step : RawStep loaded realization environment interpretation graph before choice event after nextGraph) :
     EdgeAgreement graph before event after nextGraph := by
   cases step <;> assumption
+
+/-- `terminal_no_step` exhausts the installed cases: archived runtime and
+pending records cannot enable an edge after any terminal call/status. -/
+theorem terminal_no_step {call : CallProtocol.CallId} {status : BitVec 32}
+    (terminal : before.control = .terminal call status) :
+    ¬ RawStep loaded realization environment interpretation graph before choice event after nextGraph := by
+  intro step
+  cases step with
+  | writeFileEntry entered evaluated dispatch selected requestMatches agreement kind =>
+      have ready := (WriteFile.reachedCall?_fields entered.reachedExact).2.2.symm.trans
+        entered.handoff.control
+      exact Control.noConfusion (ready.symm.trans terminal)
+  | getStdHandleEntry entered evaluated dispatch selected requestMatches agreement kind =>
+      have ready := (WriteFile.reachedCall?_fields entered.reachedExact).2.2.symm.trans
+        entered.handoff.control
+      exact Control.noConfusion (ready.symm.trans terminal)
+  | exitProcessEntry entered evaluated dispatch selected requestMatches agreement kind =>
+      have ready := (WriteFile.reachedCall?_fields entered.reachedExact).2.2.symm.trans
+        entered.handoff.control
+      exact Control.noConfusion (ready.symm.trans terminal)
+  | writeFileReturn evaluated observed returned completion completed caller providerContext agreement =>
+      exact Control.noConfusion (observed.control.symm.trans terminal)
+  | getStdHandleReturn observed completion completed agreement => cases terminal
+  | completedExit completion completed agreement =>
+      exact Control.noConfusion (completion.controlExact.symm.trans terminal)
+  | service receipt agreement kind priorCausal nextCausal =>
+      exact Control.noConfusion (receipt.control.symm.trans terminal)
+  | cpuCompleted control selected evaluated completed agreement kind =>
+      exact Control.noConfusion (control.symm.trans terminal)
+  | cpuFailure control selected evaluated mapped agreement kind =>
+      exact Control.noConfusion (control.symm.trans terminal)
+  | cpuUncovered control selected nonNormal evaluated agreement kind =>
+      exact Control.noConfusion (control.symm.trans terminal)
+
+/-- `exit_result` retains the exact terminal payload and archived state. The
+pending Exit request remains recorded; no protocol return or cleanup is asserted. -/
+theorem exit_result {call : CallProtocol.CallId} {status : BitVec 32}
+    (step : RawStep loaded realization environment interpretation graph before
+      (.exitObservation call status) event after nextGraph) :
+    after.control = .terminal call status ∧
+      after.machine = before.machine ∧ after.metadata = before.metadata ∧
+      after.calls = before.calls ∧
+      event.kind = .endpoint (.processExited call status) ∧
+      ∃ pending, after.metadata.pending.lookup call = some pending ∧
+        pending.request = .exitProcess status := by
+  cases step with
+  | completedExit completion completed agreement =>
+      exact ⟨completion.control, completion.machine, completion.metadata, completion.calls,
+        rfl, completion.pending, completion.pending_archived, completion.requestExact⟩
 
 /-- `stdout_result` proves that each installed GetStdHandle result preserves
 its supplied raw RAX and settles the same runtime occurrence into checked caller control. -/
