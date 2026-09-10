@@ -126,6 +126,23 @@ treat a trap/UD2 after an unexpected return as successful termination.
 
 ### Open quantifier decision
 
+The standalone [EnvironmentChoice experiment](../Tests/Architecture/EnvironmentChoice.lean)
+kernel-checks a minimal negative and positive pattern: covering all outcomes by
+a union of fixed plans does not cover both outcomes at one fixed prefix;
+committing on both sides with exact matching reporting states does. It proves
+one-step matching and outcome coverage for every related toy state. It imports
+no Grass semantics and is not a BehaviorCorrespondence or Hello proof.
+
+Process review narrows the proposed deferred-choice experiment to two necessary
+residual cases. After choosing a valid route at cut zero, the upper writing
+frontier still permits stdoutUnavailable. After a final successful return at
+the full cut, that upper writing frontier still permits writeFailed. Actual
+commitments must align with justified reporting transitions or retain the entire
+residual choice set. Relabeling WriteFile failure as stdoutUnavailable needs an
+actual semantic interpretation, not a proof convenience. If these cases cannot
+be realized, root must decide an explicit authored-frontier or contract change;
+larger unions and hidden history cannot fix the mismatch.
+
 BehaviorCorrespondence.completeBack requires every upper completion from the
 same related lower prefix. A lower initial state with fixed absent stdout cannot
 realize the successful full-output completion admitted by the captured console
