@@ -10,8 +10,9 @@ explicit decision record and renewed review of affected documents.
 
 ## Find code and current evidence
 
-- [Endpoint index](ENDPOINT_INDEX.md): start at authored `helloVerified` and
-  `bytes`, then find implemented components, remaining connections and authors.
+- [Implementation matrix](ENDPOINT_INDEX.md#cross-stack-implementation-matrix):
+  checked evidence and gaps across all five spikes, platforms and targets.
+  The endpoint index also retains bounded component and author navigation.
 - [Validation command map](CHECKS.md): choose a check by the claim it supports,
   including fresh source and ledger audits.
 - [Module structure](MODULES.md): intended dependency direction; proposed paths
@@ -57,7 +58,7 @@ No document may override a narrower owner by restating it differently.
 | [STDLIB.md](STDLIB.md) | fundamental data structures and reusable proof laws |
 | [PROTOCOL_STDLIB.md](PROTOCOL_STDLIB.md) | candidate protocol-package shape, staged obligations, and HTTP/2/gRPC composition |
 
-Development follows the spike-first rebuild workflow in
+Development follows the parallel cross-stack implementation workflow in
 [CONTRIBUTING.md](../CONTRIBUTING.md). Former coordination documents and
 implementation plans are retired; references to their sections in older code
 comments are historical provenance available in Git, not active instructions.
