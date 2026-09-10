@@ -78,13 +78,6 @@ theorem read_needMore_iff (input : Logical.ByteArray) (hint : Option Nat) :
   · obtain ⟨trailer, rest, parsed⟩ := read_enough (Nat.le_of_not_gt short)
     simp [parsed, short]
 
-/-- `littleEndian_done` reconstructs every accepted integer prefix from the
-shared parser realization, without unfolding the byte-reader algorithm. -/
-private theorem littleEndian_done {input rest : Logical.ByteArray} {value : BitVec 32}
-    (parsed : takeLittleEndian 4 input = .done value rest) :
-    input = writeLittleEndian (count := 4) value ++ rest :=
-  (takeLittleEndian_realizes 4).consumes input value rest parsed
-
 /-- `read_done` reconstructs every successful trailer and its exact suffix. -/
 theorem read_done {input rest : Logical.ByteArray} {trailer : Trailer}
     (parsed : read input = .done trailer rest) : input = write trailer ++ rest := by
@@ -96,7 +89,7 @@ theorem read_done {input rest : Logical.ByteArray} {trailer : Trailer}
       split at parsed
       next size suffix second =>
         cases parsed
-        rw [littleEndian_done first, littleEndian_done second]
+        rw [takeLittleEndian_done first, takeLittleEndian_done second]
         simp [write, Vec.append_assoc]
       all_goals contradiction
     all_goals contradiction
