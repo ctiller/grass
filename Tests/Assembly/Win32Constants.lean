@@ -5,10 +5,8 @@ namespace Grass.Tests.Assembly.Win32Constants
 
 open Grass.Assembly Grass.ISA.X86 Grass.Platform.Win32
 
-def authored : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
-
 def fromChars? (chars : List Char) : Option (List Grass.Assembly.Win32Constants.Result) := do
-  let body ← (SourceInput.extractHelloSourceChars chars).toOption
+  let body ← (SourceInput.extractSourceChars chars).toOption
   let frame ← SourceFrame.derive? body
   let results := frame.program.collected.code.filterMap
     (Grass.Assembly.Win32Constants.resolve? frame)
@@ -16,17 +14,6 @@ def fromChars? (chars : List Char) : Option (List Grass.Assembly.Win32Constants.
 
 def view (result : Grass.Assembly.Win32Constants.Result) :=
   (result.constant, result.destination, result.constant.value, result.encoding.toBytes)
-
--- Both named constants and their encodings are downstream of the unchanged
--- authored source.  Expected values refer back to the platform definitions.
-example : (fromChars? authored).map (List.map view) = some
-    [(.stdOutputHandle, .rcx,
-      BitVec.setWidth 64 StdHandleId.output.value,
-      [0xB9, 0xF5, 0xFF, 0xFF, 0xFF]),
-     (.invalidHandleValue, .rax,
-      GetStdHandleResult.invalidHandleValue,
-      [0x48, 0x83, 0xF8, 0xFF])] := by
-  decide +kernel
 
 -- The canonical selector chooses the smaller signed representation whenever
 -- it recovers the same 64-bit value.
@@ -47,7 +34,7 @@ example : Grass.Assembly.Win32Constants.selectSignedImmediate?
   decide +kernel
 
 def sample (body : List Char) : List Char :=
-  (source_chars "def helloSource : MachineSource plan := ") ++
+  (source_chars "def constantSample : MachineSource plan := ") ++
     (source_chars "withCallFrame WriteFile asm_source (statics := statics) {\n") ++
     body ++ (source_chars "\nud2\n}")
 

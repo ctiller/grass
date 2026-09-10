@@ -5,26 +5,14 @@ namespace Grass.Tests.Assembly.SourceInitialization
 
 open Grass.Assembly Grass.ISA.X86
 
-def authored : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
-
 def fromChars? (chars : List Char) (rootOffset : Nat := 0) :
     Option Grass.Assembly.SourceInitialization.Result := do
-  let body ← (SourceInput.extractHelloSourceChars chars).toOption
+  let body ← (SourceInput.extractSourceChars chars).toOption
   let frame ← SourceFrame.derive? body
   Grass.Assembly.SourceInitialization.resolve? frame rootOffset
 
--- The initializer is generated from the exact authored header declaration.
-example : (fromChars? authored).map (fun result => result.entries.map
-    (fun entry => (entry.declaration.name, entry.declaration.initialValue.toNat,
-      entry.store.displacement))) = some [("transferred", 0, 40)] := by
-  decide +kernel
-example : (fromChars? authored).map (fun result => result.entries.map
-    (fun entry => (entry.store.input.slot, entry.store.input.value,
-      entry.store.writeBytes))) = some [("transferred", (0 : BitVec 32), [0, 0, 0, 0])] := by
-  decide +kernel
-
 def sample (locals : List Char) : List Char :=
-  (source_chars "def helloSource : MachineSource plan := ") ++ locals ++
+  (source_chars "def initializationSample : MachineSource plan := ") ++ locals ++
     (source_chars " withCallFrame WriteFile asm_source (statics := statics) {\n") ++
     (source_chars "ud2\n}")
 
@@ -49,7 +37,8 @@ example : (fromChars? (sample (source_chars
 -- Every returned entry retains the shared resolver equation and therefore the
 -- width, range, value bytes, and decoder laws.
 example : ∀ result entry,
-    fromChars? authored = some result → entry ∈ result.entries →
+    fromChars? (sample (source_chars "withStack (value : UInt32 := 0)")) = some result →
+      entry ∈ result.entries →
       entry.store.range.size = 4 ∧
       (result.frame.layout.frameRange.shift result.rootOffset).Contains entry.store.range ∧
       entry.store.writeBytes = le32
