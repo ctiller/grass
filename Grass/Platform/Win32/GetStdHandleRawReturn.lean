@@ -15,7 +15,7 @@ open Grass.ISA.X86 Grass.ISA.X86.Execution
 open Grass.Platform.Win32.ExecutionState Grass.Platform.Win32.Loader
 
 variable {image : ImageInput} {inputs : EntryInputs} {loaded : LoadedImage image inputs}
-  {environment : ConsoleEnvironment} {before : ExecutionState.State ApiRequest}
+  {environment : ConsoleEnvironment} {interpretation : WriteFile.ReturnInterpretation} {before : ExecutionState.State ApiRequest}
   {afterFetch afterRead afterStore : MachineState} {displacement : BitVec 32}
   {call : CallNormal before.machine afterFetch afterRead afterStore displacement}
   {agent : ContextId} {entered : GetStdHandle.CallHandoff loaded before call agent}
@@ -47,8 +47,9 @@ theorem event_exact (completion : Completion loaded observed) :
     (entered.afterRaw prior).machine.machine.events ++ [readEvent] at memory
   change completion.final.metadata.boundaries =
     (entered.afterRaw prior).metadata.boundaries ++ _ at boundaries
-  exact ⟨readEvent, by simp [event, Raw.Event.between, memory],
-    by simp [event, Raw.Event.between, boundaries], value⟩
+  have suffixes := Raw.Event.between_suffixes (kind :=
+    .endpoint (.stdoutAcquired entered.handoff.call (gpr .rax))) memory boundaries
+  exact ⟨readEvent, suffixes.1, suffixes.2, value⟩
 
 theorem rflags_unchanged (completion : Completion loaded observed) :
     completion.final.machine.rflags = rflags := completion.resumed.rflags_exact
@@ -61,7 +62,7 @@ theorem rawStep (completion : Completion loaded observed)
     (priorGraph : graph.WellFormed (entered.afterRaw prior))
     (nextWellFormed : nextGraph.WellFormed completion.final)
     (extendsGraph : graph.Extends nextGraph) :
-    Raw.RawStep loaded realization environment graph (entered.afterRaw prior)
+    Raw.RawStep loaded realization environment interpretation graph (entered.afterRaw prior)
       (.stdoutResult entered.handoff.call gpr rflags) completion.event completion.final nextGraph :=
   Raw.RawStep.getStdHandleReturn observed completion completed
     ⟨completion.event_appends, priorGraph, nextWellFormed, extendsGraph⟩
