@@ -1,5 +1,4 @@
 import Grass.Platform.Linux.Target.X86
-import Grass.Platform.Linux.Target.AArch64
 import Grass.Target.Platform
 
 /-!
