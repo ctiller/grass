@@ -186,6 +186,11 @@ def condHolds (s : State) : Cond → Bool
   | .le => (s.sf != s.ofFlag) || s.zf
   | .g => (s.sf == s.ofFlag) && !s.zf
 
+/-- An imm32 as the 64-bit value the SDM's "sign-extended to operand size"
+rule delivers. -/
+def immSx (imm : BitVec 32) : UInt64 :=
+  UInt64.ofNat (imm.signExtend 64).toNat
+
 /-- Sign-extend the low `bits` of `v` to 64 bits (used by `movsx`). -/
 def signExtendFrom (bits : Nat) (v : UInt64) : UInt64 :=
   let signBit : UInt64 := 1 <<< (UInt64.ofNat (bits - 1))
@@ -219,13 +224,17 @@ def execInstr (s : State) (instr : Instr) (len : Nat) :
       let (r, (cf, zf, sf, ofFlag)) := aluApply op sz (regRead s sz dst) (regRead s sz src)
       .internal ((regWrite next sz dst r).setFlags cf zf sf ofFlag)
   | .aluRI op sz dst imm =>
-      let (r, (cf, zf, sf, ofFlag)) := aluApply op sz (regRead s sz dst) (UInt64.ofNat imm.toNat)
+      -- `81 /digit id` sign-extends imm32 to the operand size (SDM Vol. 2A,
+      -- ADD/SUB/CMP/AND/OR/XOR "r/m64, imm32"); at `w32` the mask inside
+      -- `aluApply` drops the extension again, so one rule serves both widths.
+      let (r, (cf, zf, sf, ofFlag)) := aluApply op sz (regRead s sz dst) (immSx imm)
       .internal ((regWrite next sz dst r).setFlags cf zf sf ofFlag)
   | .testRR sz a b =>
       let (_, (cf, zf, sf, ofFlag)) := aluApply .and_ sz (regRead s sz a) (regRead s sz b)
       .internal (next.setFlags cf zf sf ofFlag)
   | .testRI sz a imm =>
-      let (_, (cf, zf, sf, ofFlag)) := aluApply .and_ sz (regRead s sz a) (UInt64.ofNat imm.toNat)
+      -- `F7 /0 id` likewise sign-extends its imm32 (SDM Vol. 2B, TEST).
+      let (_, (cf, zf, sf, ofFlag)) := aluApply .and_ sz (regRead s sz a) (immSx imm)
       .internal (next.setFlags cf zf sf ofFlag)
   | .shiftImm op sz dst imm =>
       let count := imm.toNat % 64
