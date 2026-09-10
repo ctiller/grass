@@ -70,10 +70,6 @@ theorem source_encoded_decodes {frame : SourceFrame.Result} {rootOffset : Nat}
       simp only [SourceTemplates.Output.template, SourceTemplates.Template.encoded.injEq] at encoded
       subst encoding
       exact resolved.encoding_decodes rest
-  | constant origin resolved exact =>
-      simp only [SourceTemplates.Output.template, SourceTemplates.Template.encoded.injEq] at encoded
-      subst encoding
-      exact resolved.encoding_decodes rest
   | branch => cases encoded
   | ripAddress => cases encoded
   | ripCall => cases encoded

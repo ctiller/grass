@@ -133,11 +133,11 @@ initialized read immediately after the PUSH store; it is not a POP or unwind.
 
 `ObservedFetch` and `Dispatch` select only from actual fetched bytes. Decode,
 trailing-byte and unsupported-instruction failures retain the reached fetch
-state. `InstructionDispatch` embeds the authored source directly and computes
-the production pipeline inventory, including the four memory MOV occurrences.
-All 44 authored outputs are classified. Classification alone supplies no
-execution or event-delivery theorem; CALL execution uses `CallFactory.call`,
-while UD2 delivery remains unmodeled.
+state. `InstructionDispatch` exercises successful PUSH selection and the
+truncated, unsupported and trailing-byte refusal paths against explicit fetched
+bytes. Dispatch classification alone supplies no execution or event-delivery
+theorem; CALL execution uses `CallFactory.call`, while UD2 delivery remains
+unmodeled.
 
 `CpuAccessPolicy` and `AddressPlan.descriptor` compute access ranges from current
 allocation placement and fixed code/stack provenance. `RunFactory` constructs

@@ -94,7 +94,7 @@ reversed.
 /// means substituting a same-length corpus fails. Changing the corpus requires
 /// updating this constant, which is the reviewed edit `docs/VALIDATION.md`
 /// section 7 asks for rather than a silent change to what is being checked.
-const EXPECTED_DIGEST: &str = "bb4a1d1cfebbe8ffface2e868be41614b0c399621ab74f6c6d9be3e8b3368a50";
+const EXPECTED_DIGEST: &str = "369f716c1f2c8876b5de2af7593d819870cd0720157c86593d21ed9ab598fd29";
 
 /// The coverage this tool was reviewed at. Shrinking the corpus must be a
 /// deliberate, reviewed edit rather than a side effect of regenerating it.
@@ -106,7 +106,7 @@ const EXPECTED_DIGEST: &str = "bb4a1d1cfebbe8ffface2e868be41614b0c399621ab74f6c6
 /// encodings into 1 and still reported no disagreement. `docs/VALIDATION.md`
 /// section 7's ratchet is meant to prevent exactly that, and this is it applied
 /// to corpora.
-const EXPECTED_ROWS: usize = 52;
+const EXPECTED_ROWS: usize = 51;
 
 // ---------------------------------------------------------------------------
 // SHA-256

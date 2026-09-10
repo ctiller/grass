@@ -268,6 +268,16 @@ for Grass instructions. Review must compare both the authored and expanded
 forms, verify that no helper hides effects or exits, and confirm that all target
 instructions and ABI metadata retain their own vendor anchors.
 
+## WebAssembly integer and invocation family
+
+- W3C, [WebAssembly Core Specification 2.0](https://www.w3.org/TR/wasm-core-2/):
+  Syntax/Values and Types; Binary Format/Values (signed and unsigned LEB128),
+  Instructions and Modules; Execution/Runtime Structure, Numeric Instructions,
+  Variable Instructions and Control Instructions (call/host invocation).
+  The [Wasm ISA boundary](WASM_ISA.md) identifies the implemented subset and
+  explicitly outstanding validation, grammar and runtime adequacy obligations.
+  The Core version is selected independently of the WASI provider version.
+
 ## Internal predecessor material
 
 These documents are design lineage, not external semantic authority. Citations

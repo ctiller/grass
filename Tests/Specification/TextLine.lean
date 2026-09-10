@@ -6,18 +6,18 @@ open Grass.Std.Logical
 open Grass.Specification
 
 /-- The intended authored literal surface elaborates without extra syntax. -/
-def message : TextLine := "Hello, World!"
+def message : TextLine := "Sample"
 
-example : message.text = "Hello, World!" := rfl
+example : message.text = "Sample" := rfl
 
 example :
     ({ encoding := TextEncoding.utf8, newline := crlf } : LineRendering).bytes message =
-      Text.utf8 "Hello, World!\r\n" := rfl
+      Text.utf8 "Sample\r\n" := rfl
 
 /-- Line-ending policy is selected explicitly for the same logical message. -/
 example :
     ({ encoding := TextEncoding.utf8, newline := lf } : LineRendering).bytes message =
-      Text.utf8 "Hello, World!\n" := rfl
+      Text.utf8 "Sample\n" := rfl
 
 example :
     ({ encoding := TextEncoding.utf8, newline := lf } : LineRendering).bytes message ≠
@@ -26,7 +26,6 @@ example :
 
 example :
     (({ encoding := TextEncoding.utf8, newline := crlf } : LineRendering).bytes message).toList =
-      [0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x2c, 0x20, 0x57, 0x6f, 0x72, 0x6c,
-        0x64, 0x21, 0x0d, 0x0a] := rfl
+      [0x53, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x0d, 0x0a] := rfl
 
 end Grass.Tests.Specification.TextLine

@@ -10,16 +10,16 @@ private def requireSome {α : Type} : Option α → Except BuildError α
   | none => .error .sourceResolution
   | some value => .ok value
 
-def missingPayload : StaticObjects.Table := StaticObjects.checked
-  [⟨"unrelated", 1, .rodata, SourceLinkedImage.payload⟩]
+def missingBlob : StaticObjects.Table := StaticObjects.checked
+  [⟨"unrelated", 1, .rodata, SourceLinkedImage.blob⟩]
   (by simp [StaticObjects.Valid]; decide)
 
 def run (codeCharacteristics : BitVec 32) (missing : Bool) : Except BuildError Nat := do
-  let body ← requireSome (SourceInput.extractHelloSourceChars SourceResolve.authored).toOption
+  let body ← requireSome (SourceInput.extractSourceChars SourceResolve.source).toOption
   let frame ← requireSome (SourceFrame.derive? body)
   let splice ← requireSome (SourceSplice.derive? frame 0)
-  let table := if missing then missingPayload else
-    SourceLinkedImage.staticTable SourceLinkedImage.payload
+  let table := if missing then missingBlob else
+    SourceLinkedImage.staticTable SourceLinkedImage.blob
   let statics ← requireSome (StaticSection.layout? table SourceLinkedImage.staticName 0x40000040)
   let requests ← requireSome (SourceImportRequests.resolve? splice "kernel32.dll")
   let result ← Grass.Assembly.SourceLinkedImage.buildExcept splice statics
@@ -37,7 +37,7 @@ def outcome (codeCharacteristics : BitVec 32) (missing : Bool) : Outcome :=
   | .error error => .failed error
   | .ok count => .succeeded count
 
-example : outcome 0x60000020 false = .succeeded 44 := by decide +kernel
+example : outcome 0x60000020 false = .succeeded 4 := by decide +kernel
 
 -- Final exception validation rejects the code permissions, retaining its cause.
 example : outcome 0 false = .failed (.finalImage

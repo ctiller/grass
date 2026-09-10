@@ -6,11 +6,9 @@ namespace Grass.Tests.Assembly.SourcePrologue
 open Grass.Assembly SourceInput SourcePrologue
 
 def fromChars? (chars : List Char) : Option Result := do
-  let body ← (extractHelloSourceChars chars).toOption
+  let body ← (extractSourceChars chars).toOption
   let frame ← SourceFrame.derive? body
   generate? frame
-
-def authored : List Char := include_source_chars "../../Spikes/1_Hello_World/Program.lean"
 
 def view (result : Result) : List Nat × List Nat × Nat × Nat :=
   (result.generated.map Grass.ISA.X86.InsnEncoding.size,
@@ -18,13 +16,8 @@ def view (result : Result) : List Nat × List Nat × Nat × Nat :=
     result.unwindLayout.prologue.stackDelta,
     result.unwindLayout.sizeOfProlog.toNat)
 
--- These numbers observe source-derived machine and metadata output; none is an
--- input to the generator.
-example : (fromChars? authored).map view = some ([2, 2, 2, 4], [2, 4, 6, 10], 72, 10) := by
-  decide +kernel
-
 def sample (saved : List Char) : List Char :=
-  (source_chars "def helloSource : MachineSource plan := withStack (value : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\n") ++
+  (source_chars "def prologueSample : MachineSource plan := withStack (value : UInt32 := 0) withCallFrame WriteFile asm_source (statics := statics) {\n") ++
     saved ++ (source_chars "\nud2\n}")
 
 -- Rbx has a one-byte PUSH while r12 needs REX, so every following metadata

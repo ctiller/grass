@@ -3,7 +3,7 @@
 These files are the expected Lean source authored by agents for the programs in
 `docs/SPIKE_1.md` through `docs/SPIKE_5.md`. They are design fixtures, not a compiled Grass
 implementation: supporting libraries are incomplete and these files are not yet
-in the build. Complete them in spike order under
+in the build. Implement all five in parallel across the selected platforms and targets under
 [CONTRIBUTING.md](../CONTRIBUTING.md), preserving their authored surface except
 for demonstrated defects or an unreasonable realization.
 

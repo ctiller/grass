@@ -58,8 +58,8 @@ is a useful intermediate deliverable but does not pass the proof gate.
 
 ### C. Growth through the spike family
 
-Follow spike order as their artifacts become available: Hello, sort, gzip,
-web server, spinning cube. Use their actual accepted behavior to expose new
+Consume artifacts from all five spikes as they become available in parallel:
+Hello, sort, gzip, web server and spinning cube. Use their actual accepted behavior to expose new
 proof demands rather than predicting instruction lists in advance. Grow
 coverage for loops, allocation/lifetimes, buffers, asynchronous operations,
 and concurrency as demanded. Native CPU analysis does not establish safety of

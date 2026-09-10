@@ -1,5 +1,6 @@
 import Grass.Platform.Win32.WriteFileStackPlan
 import Grass.Platform.Win32.GetStdHandleStackPlan
+import Grass.Std.Logical.Text
 import Tests.Platform.Win32LoaderEntry
 import Tests.Artifact.PE.ImageWriter
 

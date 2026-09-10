@@ -619,8 +619,10 @@ discharges the demand.
 
 ### Selected agency and directed waiting
 
-Approved direction; implementation is not yet delivered. In the selected Win32
-Hello profile, provider service microsteps, API return observations and completed
+Generic waiting and directed nonresponse support is delivered on the certificate
+branch at `07e176f7`; the selected raw agency implementation remains missing.
+The Hello-specific raw profile was removed. The approved direction for Win32
+Hello is that provider service microsteps, API return observations and completed
 Exit observations are environment-owned; compiled caller CPU steps are
 program-owned. This is an explicit profile choice, not a consequence of an
 `externalAgent` label or a universal rule for composed program-owned providers.

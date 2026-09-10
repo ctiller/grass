@@ -31,10 +31,6 @@ example : (Text.utf8 "Hi").toList = [0x48, 0x69] := rfl
 example : (Text.utf8 "Hi").length = 2 := rfl
 example : (Text.utf8 "").length = 0 := rfl
 
-/-- `Spikes/1_Hello_World/Spec.lean`'s message, whose exact bytes are the
-observable the whole spike is specified against. -/
-example : (Text.utf8 "Hello, World!").length = 13 := rfl
-
 /-- Indexing reduces too, so a consumer can name a byte rather than the whole. -/
 example : (Text.utf8 "Hi").get? 1 = some 0x69 := rfl
 
