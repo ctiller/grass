@@ -17,5 +17,11 @@ for (const a of [0, 1, -1, 7, 2147483647, -2147483648]) {
   }
 }
 assert.equal(load('constant').run(), -1n);
-assert.throws(() => load('trap').run(), WebAssembly.RuntimeError);
+let trap;
+assert.doesNotThrow(() => { trap = load('trap'); },
+  'trap: module instantiation must succeed before testing invocation');
+const trapRun = trap.run;
+assert.equal(typeof trapRun, 'function', 'trap: run must be a function export');
+assert.throws(() => trapRun(), WebAssembly.RuntimeError,
+  'trap: run must trap during invocation');
 console.log('Wasm probe passed: 4 emitted modules, host arguments/results, 36 local subtraction cases, signed i64 constant, architectural trap.');

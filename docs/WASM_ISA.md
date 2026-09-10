@@ -88,7 +88,13 @@ actual bytes with Node's WebAssembly engine. Run:
 lake build Tests.ISA.Wasm.Binding
 lake env lean --run Tools/WasmProbe.lean
 node Tools/wasm-probe.cjs
+node Tools/wasm-probe-test.cjs
 ```
+
+The phase regression runs the full harness against the emitted invocation trap,
+a valid module that traps during instantiation, and an otherwise identical
+module whose exported function returns normally. Only the invocation trap may
+pass; the two failures must identify their respective phases (AUD-009).
 
 Native engine observations validate the model and emitter. They provide no Lean
 proof, module-validity certificate, provider certificate or spike completion.
