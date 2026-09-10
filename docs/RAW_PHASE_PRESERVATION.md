@@ -42,4 +42,7 @@ an actual pending-to-pending edge is service for the same call, caller and
 provider, exposing its receipt, action, publication and graph facts. To use the
 service-history fold, establish those pending phases for the contiguous segment
 being decomposed and retain its original entry witness. Neither arbitrary
-prefixes nor equal endpoints supply that entry ancestry.
+prefixes nor equal endpoints supply that entry ancestry. Its `pending_segment`
+theorem derives the intermediate controls from the actual entry's pending
+control and the indexed slice's internal/publication events. Return and exit
+observations are excluded by the slice condition, not reclassified as service.
