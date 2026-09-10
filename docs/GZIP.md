@@ -3,6 +3,32 @@
 The complete annotated proof proposal is [SPIKE_3.md](SPIKE_3.md). This file is
 the concise acceptance checklist.
 
+## Current implementation boundary
+
+The requirements below describe the target. The first reusable checksum slice
+is [CRC32](../Grass/Std/Zlib/CRC32.lean), which proves the reflected conditional
+and branchless recurrences agree for every polynomial/state/input, including
+arbitrary chunking. [ChecksumState](../Grass/Std/Zlib/Fixed32K/Checksum.lean)
+uses that result to relate running CRC/ISIZE fields to a consumed input prefix
+and the [trailer writer/reader](../Grass/Std/Zlib/Gzip/Trailer.lean). The trailer
+reader starts at a known DEFLATE boundary; it does not establish that boundary
+or validate the fields against a decompressed payload.
+
+This is a pure/model-level prerequisite, not an implemented `Fixed32K.correct`
+or a checked connection to the authored assembly. The displayed
+`codecAlgorithmScope` covers `process_block`; CRC accounting and trailer emission
+lie outside that scope, and its representation does not name `crc` or
+`totalInput`. The full streaming realization must separately connect those
+operations. DEFLATE/LZ77, full member parsing, failure-prefix behavior, machine
+refinement, and the portable specification connection remain open.
+
+The inspected predecessor is `gasm@3116ee85b4b17a45bbacc7f27c62b65ad35813a7`.
+Its `Stdlib/Zlib/FixedBlockBridge.lean` connects a whole-buffer, single-block
+compressor using 128 search probes; the container writer selects XFL=2/OS=3.
+Those choices differ from this spike, so its complete compressor/container
+theorems are not imported. The structural conditional/mask proof approach in
+`Stdlib/Zlib/CRC32Equivalence.lean` is reused over Grass's logical byte type.
+
 ## Product and specification
 
 - The precious program is a binary filter: read arbitrary bytes from stdin and
