@@ -66,6 +66,25 @@ structure Env where
   slot : String → Option Nat
   /-- Bytes the frame occupies. -/
   frameBytes : Nat
+  /-- Declared local byte width, distinct from allocation stride; absent if unresolved. -/
+  localSize : String → Option Nat := fun _ => none
+
+/-- Byte widths for the unsigned scalar type spellings in authored locals. -/
+def localTypeSize : String → Option Nat
+  | "UInt8" => some 1
+  | "UInt16" => some 2
+  | "UInt32" => some 4
+  | "UInt64" => some 8
+  | _ => none
+
+/-- First-binding local width, refused when unknown or larger than its allocated slot. -/
+def localSizeLookup (slotBytes : Nat) : List Local → String → Option Nat
+  | [], _ => none
+  | item :: rest, name =>
+      if item.name = name then do
+        let width ← localTypeSize item.type
+        if width ≤ slotBytes then some width else none
+      else localSizeLookup slotBytes rest name
 
 /-- Frame slots for `locals`, `slotBytes` apart, in declaration order. -/
 def slotTable (slotBytes : Nat) : Nat → List Local → List (String × Nat)
@@ -79,6 +98,7 @@ def Env.ofLocals (slotBytes : Nat) (locals : List Local)
   sizeOf := sizeOf
   slot := lookup (slotTable slotBytes 0 locals)
   frameBytes := slotBytes * locals.length
+  localSize := localSizeLookup slotBytes locals
 
 /-- What one ISA contributes to the assembler. -/
 structure Lowering (isa : Grass.Target.ISA) where
