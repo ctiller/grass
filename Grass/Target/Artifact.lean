@@ -36,7 +36,7 @@ structure Format (Raw : Type) where
   read_write : ∀ artifact, read (write artifact) = some artifact
   /-- The program a container carries. -/
   rawOf : Artifact → Raw
-  /-- Assembling preserves the program exactly. -/
+  /-- `Format.rawOf_assemble` recovers the input program from the artifact after a successful `assemble`. -/
   rawOf_assemble : ∀ raw artifact, assemble raw = some artifact → rawOf artifact = raw
 
 /-- Lean's packed byte array from a list. -/
