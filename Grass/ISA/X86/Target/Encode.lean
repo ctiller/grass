@@ -189,6 +189,17 @@ inductive Instr where
   | cmovcc (sz : Sz) (cc : Cond) (dst src : Gpr)
   /-- `XCHG r/m, r` (`87 /r`). -/
   | xchgRR (sz : Sz) (a b : Gpr)
+  /-- `MOV r, [base+disp32]` (`8B /r`).  The base form is always encoded
+  with a SIB byte and a disp32, so it has one canonical representation. -/
+  | movRM (sz : Sz) (dst base : Gpr) (disp : BitVec 32)
+  /-- `MOV [base+disp32], imm32` (`C7 /0 id`). -/
+  | movMI32 (sz : Sz) (base : Gpr) (disp imm : BitVec 32)
+  /-- `LEA r64, [base+disp32]` (`REX.W 8D /r`). -/
+  | leaRM (dst base : Gpr) (disp : BitVec 32)
+  /-- `LEA r64, [rip+disp32]` (`REX.W 8D /r`). -/
+  | leaRip (dst : Gpr) (disp : BitVec 32)
+  /-- `CALL qword ptr [rip+disp32]` (`FF /2`). -/
+  | callRip (disp : BitVec 32)
 deriving DecidableEq, Repr, Inhabited
 
 /-! ## Shared byte-level machinery
@@ -213,6 +224,11 @@ cases, closed by `decide`; reused by every family that reconstructs a
 register from ModR/M or SIB bits. -/
 theorem regOfBits_self (r : Gpr) : regOfBits r.isExtended r.encodingBits = r := by
   cases r <;> decide
+
+/-- The `rexB` bit stored by `rmBase` agrees with the base register's
+extension predicate. -/
+theorem rexBitV_eq_one (r : Gpr) : (r.rexBitV == (1 : BitVec 1)) = r.isExtended := by
+  cases r <;> rfl
 
 /-- The `[base+disp32]` addressing form's encoded fields.
 
@@ -398,7 +414,10 @@ def readMemBaseTail (bs : ByteSeq) : Option (BitVec 3 × BitVec 3 × BitVec 32 �
   | mByte :: sByte :: v0 :: v1 :: v2 :: v3 :: rest =>
       let m := ModRm.ofByte mByte
       let s := Sib.ofByte sByte
-      some (m.reg, s.base, v3 ++ v2 ++ v1 ++ v0, rest)
+      if m.mod = ModRm.modDisp32 ∧ m.rm = ModRm.rmSelectsSib ∧
+          s.scale = 0 ∧ s.index = Sib.indexNone then
+        some (m.reg, s.base, v3 ++ v2 ++ v1 ++ v0, rest)
+      else none
   | _ => none
 
 /-- `readMemBaseTail` inverts exactly the bytes `rmBase` and a `reg` field
@@ -409,14 +428,9 @@ theorem readMemBaseTail_bytes (b : Gpr) (d : BitVec 32) (regBits : BitVec 3) (re
     readMemBaseTail (((rmBase b d).modrm regBits).toByte ::
         (Sib.toByte ⟨0, Sib.indexNone, b.encodingBits⟩ :: (le32 d ++ rest)))
       = some (regBits, b.encodingBits, d, rest) := by
-  show some (
-      (ModRm.ofByte ((rmBase b d).modrm regBits).toByte).reg,
-      (Sib.ofByte (Sib.mk 0 Sib.indexNone b.encodingBits).toByte).base,
-      BitVec.extractLsb' 24 8 d ++ BitVec.extractLsb' 16 8 d ++ BitVec.extractLsb' 8 8 d ++
-        BitVec.extractLsb' 0 8 d,
-      rest) = some (regBits, b.encodingBits, d, rest)
-  rw [ModRm.ofByte_toByte, Sib.ofByte_toByte, split32]
-  rfl
+  unfold readMemBaseTail
+  simp [rmBase, RmEncoding.modrm, le32,
+    ModRm.ofByte_toByte, Sib.ofByte_toByte, split32]
 
 /-- Read a `rmRip`-shaped tail: ModR/M with no SIB byte and a mandatory
 disp32, the only shape `rmRip` ever produces. -/
@@ -424,19 +438,16 @@ def readMemRipTail (bs : ByteSeq) : Option (BitVec 3 × BitVec 32 × ByteSeq) :=
   match bs with
   | mByte :: v0 :: v1 :: v2 :: v3 :: rest =>
       let m := ModRm.ofByte mByte
-      some (m.reg, v3 ++ v2 ++ v1 ++ v0, rest)
+      if m.mod = ModRm.modNoDisplacement ∧ m.rm = ModRm.rmSelectsRipRelative then
+        some (m.reg, v3 ++ v2 ++ v1 ++ v0, rest)
+      else none
   | _ => none
 
 theorem readMemRipTail_bytes (d : BitVec 32) (regBits : BitVec 3) (rest : ByteSeq) :
     readMemRipTail (((rmRip d).modrm regBits).toByte :: (le32 d ++ rest))
       = some (regBits, d, rest) := by
-  show some (
-      (ModRm.ofByte ((rmRip d).modrm regBits).toByte).reg,
-      BitVec.extractLsb' 24 8 d ++ BitVec.extractLsb' 16 8 d ++ BitVec.extractLsb' 8 8 d ++
-        BitVec.extractLsb' 0 8 d,
-      rest) = some (regBits, d, rest)
-  rw [ModRm.ofByte_toByte, split32]
-  rfl
+  unfold readMemRipTail
+  simp [rmRip, RmEncoding.modrm, le32, ModRm.ofByte_toByte, split32]
 
 /-! ## `encode` -/
 
@@ -516,6 +527,15 @@ def encodeCore : Instr → ByteSeq
   | .xchgRR sz a b =>
       maybeRex sz.isW64 b.isExtended false a.isExtended ++ [0x87] ++
         [regByte b.encodingBits a.encodingBits]
+  | .movRM sz dst base disp =>
+      bytesMem [] 0x8B sz.isW64 dst.encodingBits dst.isExtended (rmBase base disp) []
+  | .movMI32 sz base disp imm =>
+      bytesMem [] 0xC7 sz.isW64 0 false (rmBase base disp) (le32 imm)
+  | .leaRM dst base disp =>
+      bytesMem [] 0x8D true dst.encodingBits dst.isExtended (rmBase base disp) []
+  | .leaRip dst disp =>
+      bytesMem [] 0x8D true dst.encodingBits dst.isExtended (rmRip disp) []
+  | .callRip disp => bytesMem [] 0xFF false 2 false (rmRip disp) []
 
 /-! ## `decode` -/
 
@@ -525,6 +545,10 @@ def prefW (rex : Option Rex) : Bool := match rex with | some r => r.promotesTo64
 def prefR (rex : Option Rex) : Bool := match rex with | some r => r.extendsReg | none => false
 /-- `REX.B`, from an optional prefix. -/
 def prefB (rex : Option Rex) : Bool := match rex with | some r => r.extendsBase | none => false
+
+/-- The optional REX prefix that is canonical for the three named bits. -/
+def canonicalRex (w r b : Bool) : Option Rex :=
+  if w || r || b then some (Rex.of w r false b) else none
 
 /-- The register a ModR/M/SIB/opcode 3-bit field names, extended by `REX.R`. -/
 def regR (rex : Option Rex) (bits : BitVec 3) : Gpr := regOfBits (prefR rex) bits
@@ -545,6 +569,11 @@ theorem regB_cond (w a x c : Bool) (bits : BitVec 3) :
     regB (if w || a || x || c then some (Rex.of w a x c) else none) bits = regOfBits c bits := by
   cases w <;> cases a <;> cases x <;> cases c <;> rfl
 
+/-- `prefW` on a prefix produced by `maybeRex` recovers the requested bit. -/
+theorem prefW_cond (w a x c : Bool) :
+    prefW (if w || a || x || c then some (Rex.of w a x c) else none) = w := by
+  cases w <;> cases a <;> cases x <;> cases c <;> rfl
+
 /-- Try the `[base+disp32]`/`[rip+disp32]` shapes against a ModR/M-first byte
 stream, returning the `reg` field, whether the RIP-relative form matched, the
 base-register bits (meaningless when RIP-relative), the displacement, and the
@@ -556,12 +585,52 @@ def readMemFormTail (bs : ByteSeq) : Option (BitVec 3 × Bool × BitVec 3 × Bit
       let m := ModRm.ofByte mByte
       if m.mod = ModRm.modNoDisplacement ∧ m.rm = ModRm.rmSelectsRipRelative then
         match readMemRipTail bs with
-        | some (regBits, disp, rest) => some (regBits, true, 0, disp, rest)
+        | some (regBits, disp, rest) => some (regBits, true, (0 : BitVec 3), disp, rest)
         | none => none
       else
         match readMemBaseTail bs with
         | some (regBits, baseBits, disp, rest) => some (regBits, false, baseBits, disp, rest)
         | none => none
+
+theorem readMemFormTail_base (b : Gpr) (d : BitVec 32) (regBits : BitVec 3) (rest : ByteSeq) :
+    readMemFormTail (((rmBase b d).modrm regBits).toByte ::
+        (Sib.toByte ⟨0, Sib.indexNone, b.encodingBits⟩ :: (le32 d ++ rest))) =
+      some (regBits, false, b.encodingBits, d, rest) := by
+  have hmod : (ModRm.ofByte ((rmBase b d).modrm regBits).toByte).mod = ModRm.modDisp32 := by
+    rw [ModRm.ofByte_toByte]
+    rfl
+  show (if (ModRm.ofByte ((rmBase b d).modrm regBits).toByte).mod = ModRm.modNoDisplacement ∧
+        (ModRm.ofByte ((rmBase b d).modrm regBits).toByte).rm = ModRm.rmSelectsRipRelative then
+      (match readMemRipTail (((rmBase b d).modrm regBits).toByte ::
+          (Sib.toByte ⟨0, Sib.indexNone, b.encodingBits⟩ :: (le32 d ++ rest))) with
+        | some (regBits', disp, rest') => some (regBits', true, (0 : BitVec 3), disp, rest')
+        | none => none)
+      else
+      (match readMemBaseTail (((rmBase b d).modrm regBits).toByte ::
+          (Sib.toByte ⟨0, Sib.indexNone, b.encodingBits⟩ :: (le32 d ++ rest))) with
+        | some (regBits', baseBits, disp, rest') => some (regBits', false, baseBits, disp, rest')
+        | none => none)) = some (regBits, false, b.encodingBits, d, rest)
+  rw [if_neg (fun h => absurd h.1 (by rw [hmod]; decide)), readMemBaseTail_bytes]
+
+theorem readMemFormTail_rip (d : BitVec 32) (regBits : BitVec 3) (rest : ByteSeq) :
+    readMemFormTail (((rmRip d).modrm regBits).toByte :: (le32 d ++ rest)) =
+      some (regBits, true, 0, d, rest) := by
+  have hmod : (ModRm.ofByte ((rmRip d).modrm regBits).toByte).mod = ModRm.modNoDisplacement := by
+    rw [ModRm.ofByte_toByte]
+    rfl
+  have hrm : (ModRm.ofByte ((rmRip d).modrm regBits).toByte).rm = ModRm.rmSelectsRipRelative := by
+    rw [ModRm.ofByte_toByte]
+    rfl
+  show (if (ModRm.ofByte ((rmRip d).modrm regBits).toByte).mod = ModRm.modNoDisplacement ∧
+        (ModRm.ofByte ((rmRip d).modrm regBits).toByte).rm = ModRm.rmSelectsRipRelative then
+      (match readMemRipTail (((rmRip d).modrm regBits).toByte :: (le32 d ++ rest)) with
+        | some (regBits', disp, rest') => some (regBits', true, (0 : BitVec 3), disp, rest')
+        | none => none)
+      else
+      (match readMemBaseTail (((rmRip d).modrm regBits).toByte :: (le32 d ++ rest)) with
+        | some (regBits', baseBits, disp, rest') => some (regBits', false, baseBits, disp, rest')
+        | none => none)) = some (regBits, true, 0, d, rest)
+  rw [if_pos (And.intro hmod hrm), readMemRipTail_bytes]
 
 /-- `<op> r/m, r` (register-direct). -/
 def aluRRDecode (op : AluOp) (sz : Sz) (p : Prefix) : Option (Instr × ByteSeq) :=
@@ -668,7 +737,11 @@ def decodeFromPrefix (p : Prefix) : Option (Instr × ByteSeq) :=
           if digitBits = (0 : BitVec 3) then some (.inc sz (regB p.rex rmBits), rest)
           else if digitBits = (1 : BitVec 3) then some (.dec sz (regB p.rex rmBits), rest)
           else none
-      | none => none
+      | none =>
+          match readMemRipTail p.rest with
+          | some (digitBits, disp, rest) =>
+              if digitBits = (2 : BitVec 3) ∧ p.rex = none then some (.callRip disp, rest) else none
+          | none => none
     else if p.opcode = (0x99 : Byte) then
       if prefW p.rex then some (.cqo, p.rest) else some (.cdq, p.rest)
     else if p.opcode = (0xC3 : Byte) then some (.ret, p.rest)
@@ -704,6 +777,40 @@ def decodeFromPrefix (p : Prefix) : Option (Instr × ByteSeq) :=
       | some (rel, rest) =>
           some (.jccRel8 (Cond.ofCode (BitVec.ofNat 4 (p.opcode.toNat - 0x70))) rel, rest)
       | none => none
+    else if p.opcode = (0x8B : Byte) then
+      match readMemBaseTail p.rest with
+      | some (regBits, baseBits, disp, rest) =>
+          let dst := regR p.rex regBits
+          let base := regB p.rex baseBits
+          if p.rex = canonicalRex (prefW p.rex) dst.isExtended base.isExtended then
+            some (.movRM sz dst base disp, rest)
+          else none
+      | none => none
+    else if p.opcode = (0x8D : Byte) then
+      match readMemFormTail p.rest with
+      | some (regBits, true, _, disp, rest) =>
+          let dst := regR p.rex regBits
+          if p.rex = canonicalRex true dst.isExtended false then some (.leaRip dst disp, rest) else none
+      | some (regBits, false, baseBits, disp, rest) =>
+          let dst := regR p.rex regBits
+          let base := regB p.rex baseBits
+          if p.rex = canonicalRex true dst.isExtended base.isExtended then
+            some (.leaRM dst base disp, rest)
+          else none
+      | none => none
+    else if p.opcode = (0xC7 : Byte) then
+      match readMemBaseTail p.rest with
+      | some (digitBits, baseBits, disp, rest) =>
+          if digitBits = (0 : BitVec 3) then
+            match takeImm32 rest with
+            | some (imm, rest2) =>
+                let base := regB p.rex baseBits
+                if p.rex = canonicalRex (prefW p.rex) false base.isExtended then
+                  some (.movMI32 sz base disp imm, rest2)
+                else none
+            | none => none
+          else none
+      | none => none
     else none
 
 /-- Decode one instruction, returning it and the remaining bytes. -/
@@ -736,6 +843,13 @@ theorem decodeInstr_prefix (w a b c escFlag : Bool) {opcode : Byte}
           opcode, tail⟩ := by
   unfold decodeInstr
   rw [readPrefix_bytes w a b c escFlag hopc hesc tail]
+
+theorem decodeInstr_prefix_noescape (w a b c : Bool) {opcode : Byte}
+    (hopc : Rex.isRexByte opcode = false) (hesc : opcode ≠ (0x0F : Byte)) (tail : ByteSeq) :
+    decodeInstr (maybeRex w a b c ++ [opcode] ++ tail) =
+      decodeFromPrefix ⟨if w || a || b || c then some (Rex.of w a b c) else none, false, opcode, tail⟩ := by
+  simpa only [Bool.false_eq_true, if_false, List.nil_append, List.append_assoc] using
+    decodeInstr_prefix w a b c false hopc hesc tail
 
 private theorem ret_correct (rest : ByteSeq) :
     decodeInstr (encodeCore .ret ++ rest) = some (Instr.ret, rest) := by
@@ -947,6 +1061,156 @@ private theorem aluRI_correct (op : AluOp) (sz : Sz) (dst : Gpr) (imm : BitVec 3
     decodeInstr (encodeCore (.aluRI op sz dst imm) ++ rest) = some (Instr.aluRI op sz dst imm, rest) := by
   rw [aluRI_dispatch, takeImm32_le32]; rfl
 
+/-! ## Canonical memory-operand round trips -/
+
+theorem Sz.ite_isW64 (sz : Sz) : (if sz.isW64 then Sz.w64 else Sz.w32) = sz := by
+  cases sz <;> rfl
+
+theorem decModRM_rmBase_none (b : Gpr) (d : BitVec 32) (regBits : BitVec 3) (rest : ByteSeq) :
+    decModRM (((rmBase b d).modrm regBits).toByte ::
+        (Sib.toByte ⟨0, Sib.indexNone, b.encodingBits⟩ :: (le32 d ++ rest))) = none := by
+  unfold decModRM
+  simp [rmBase, RmEncoding.modrm, ModRm.ofByte_toByte, ModRm.modDisp32, ModRm.modRegisterDirect]
+
+theorem decModRM_rmRip_none (d : BitVec 32) (regBits : BitVec 3) (rest : ByteSeq) :
+    decModRM (((rmRip d).modrm regBits).toByte :: (le32 d ++ rest)) = none := by
+  unfold decModRM
+  simp [rmRip, RmEncoding.modrm, ModRm.ofByte_toByte, ModRm.modNoDisplacement, ModRm.modRegisterDirect]
+
+theorem decodeFromPrefix_8B (rex : Option Rex) (tail : ByteSeq) :
+    decodeFromPrefix ⟨rex, false, (0x8B : Byte), tail⟩ =
+      match readMemBaseTail tail with
+      | some (regBits, baseBits, disp, rest) =>
+          let dst := regR rex regBits
+          let base := regB rex baseBits
+          if rex = canonicalRex (prefW rex) dst.isExtended base.isExtended then
+            some (.movRM (if prefW rex then .w64 else .w32) dst base disp, rest)
+          else none
+      | none => none := rfl
+
+theorem decodeFromPrefix_8D (rex : Option Rex) (tail : ByteSeq) :
+    decodeFromPrefix ⟨rex, false, (0x8D : Byte), tail⟩ =
+      match readMemFormTail tail with
+      | some (regBits, true, _, disp, rest) =>
+          let dst := regR rex regBits
+          if rex = canonicalRex true dst.isExtended false then some (.leaRip dst disp, rest) else none
+      | some (regBits, false, baseBits, disp, rest) =>
+          let dst := regR rex regBits
+          let base := regB rex baseBits
+          if rex = canonicalRex true dst.isExtended base.isExtended then some (.leaRM dst base disp, rest)
+          else none
+      | none => none := rfl
+
+theorem decodeFromPrefix_C7 (rex : Option Rex) (tail : ByteSeq) :
+    decodeFromPrefix ⟨rex, false, (0xC7 : Byte), tail⟩ =
+      match readMemBaseTail tail with
+      | some (digitBits, baseBits, disp, rest) =>
+          if digitBits = (0 : BitVec 3) then
+            match takeImm32 rest with
+            | some (imm, rest2) =>
+                let base := regB rex baseBits
+                if rex = canonicalRex (prefW rex) false base.isExtended then
+                  some (.movMI32 (if prefW rex then .w64 else .w32) base disp imm, rest2)
+                else none
+            | none => none
+          else none
+      | none => none := rfl
+
+theorem decodeFromPrefix_FF (rex : Option Rex) (tail : ByteSeq) :
+    decodeFromPrefix ⟨rex, false, (0xFF : Byte), tail⟩ =
+      match decModRM tail with
+      | some (digitBits, rmBits, rest) =>
+          if digitBits = (0 : BitVec 3) then
+            some (.inc (if prefW rex then .w64 else .w32) (regB rex rmBits), rest)
+          else if digitBits = (1 : BitVec 3) then
+            some (.dec (if prefW rex then .w64 else .w32) (regB rex rmBits), rest)
+          else none
+      | none =>
+          match readMemRipTail tail with
+          | some (digitBits, disp, rest) =>
+              if digitBits = (2 : BitVec 3) ∧ rex = none then some (.callRip disp, rest) else none
+          | none => none := rfl
+
+private theorem movRM_correct (sz : Sz) (dst base : Gpr) (disp : BitVec 32) (rest : ByteSeq) :
+    decodeInstr (encodeCore (.movRM sz dst base disp) ++ rest) =
+      some (Instr.movRM sz dst base disp, rest) := by
+  simp only [encodeCore, bytesMem, rmBase, RmEncoding.modrm, Displacement.toBytes,
+    List.nil_append, List.append_assoc]
+  rw [← List.append_assoc]
+  rw [decodeInstr_prefix_noescape sz.isW64 dst.isExtended (0 == (1 : BitVec 1))
+    (base.rexBitV == (1 : BitVec 1))
+    (by decide) (by decide), decodeFromPrefix_8B]
+  simp only [List.cons_append, List.nil_append]
+  have h := readMemBaseTail_bytes base disp dst.encodingBits rest
+  simp only [rmBase, RmEncoding.modrm] at h
+  rw [h]
+  rw [rexBitV_eq_one base]
+  simp only [regR_cond, regB_cond, prefW_cond]
+  simp [regOfBits_self, Sz.ite_isW64, canonicalRex]
+
+private theorem movMI32_correct (sz : Sz) (base : Gpr) (disp imm : BitVec 32) (rest : ByteSeq) :
+    decodeInstr (encodeCore (.movMI32 sz base disp imm) ++ rest) =
+      some (Instr.movMI32 sz base disp imm, rest) := by
+  simp only [encodeCore, bytesMem, rmBase, RmEncoding.modrm, Displacement.toBytes,
+    List.nil_append, List.append_assoc]
+  rw [← List.append_assoc]
+  rw [decodeInstr_prefix_noescape sz.isW64 false (0 == (1 : BitVec 1))
+    (base.rexBitV == (1 : BitVec 1))
+    (by decide) (by decide), decodeFromPrefix_C7]
+  simp only [List.cons_append, List.nil_append]
+  have h := readMemBaseTail_bytes base disp 0 (le32 imm ++ rest)
+  simp only [rmBase, RmEncoding.modrm] at h
+  rw [h]
+  simp only
+  rw [takeImm32_le32]
+  rw [rexBitV_eq_one base]
+  simp only [regB_cond, prefW_cond]
+  simp [regOfBits_self, Sz.ite_isW64, canonicalRex]
+
+private theorem leaRM_correct (dst base : Gpr) (disp : BitVec 32) (rest : ByteSeq) :
+    decodeInstr (encodeCore (.leaRM dst base disp) ++ rest) = some (Instr.leaRM dst base disp, rest) := by
+  simp only [encodeCore, bytesMem, rmBase, RmEncoding.modrm, Displacement.toBytes,
+    List.nil_append, List.append_assoc]
+  rw [← List.append_assoc]
+  rw [decodeInstr_prefix_noescape true dst.isExtended (0 == (1 : BitVec 1))
+    (base.rexBitV == (1 : BitVec 1))
+    (by decide) (by decide), decodeFromPrefix_8D]
+  simp only [List.cons_append, List.nil_append]
+  have h := readMemFormTail_base base disp dst.encodingBits rest
+  simp only [rmBase, RmEncoding.modrm] at h
+  rw [h]
+  rw [rexBitV_eq_one base]
+  simp only [regR_cond, regB_cond]
+  simp [regOfBits_self, canonicalRex]
+
+private theorem leaRip_correct (dst : Gpr) (disp : BitVec 32) (rest : ByteSeq) :
+    decodeInstr (encodeCore (.leaRip dst disp) ++ rest) = some (Instr.leaRip dst disp, rest) := by
+  simp only [encodeCore, bytesMem, rmRip, RmEncoding.modrm, Displacement.toBytes,
+    List.nil_append, List.append_assoc]
+  rw [← List.append_assoc]
+  rw [decodeInstr_prefix_noescape true dst.isExtended (0 == (1 : BitVec 1)) (0 == (1 : BitVec 1))
+    (by decide) (by decide), decodeFromPrefix_8D]
+  simp only [List.cons_append, List.nil_append]
+  have h := readMemFormTail_rip disp dst.encodingBits rest
+  simp only [rmRip, RmEncoding.modrm] at h
+  rw [h]
+  simp only [regR_cond]
+  simp [regOfBits_self, canonicalRex]
+
+private theorem callRip_correct (disp : BitVec 32) (rest : ByteSeq) :
+    decodeInstr (encodeCore (.callRip disp) ++ rest) = some (Instr.callRip disp, rest) := by
+  simp only [encodeCore, bytesMem, rmRip, RmEncoding.modrm, Displacement.toBytes,
+    List.nil_append, List.append_assoc]
+  rw [← List.append_assoc]
+  rw [decodeInstr_prefix_noescape false false (0 == (1 : BitVec 1)) (0 == (1 : BitVec 1))
+    (by decide) (by decide), decodeFromPrefix_FF]
+  simp only [List.cons_append, List.nil_append]
+  have hNone := decModRM_rmRip_none disp 2 rest
+  have hRip := readMemRipTail_bytes disp 2 rest
+  simp only [rmRip, RmEncoding.modrm] at hNone hRip
+  rw [hNone, hRip]
+  rfl
+
 /-- Decoding a canonical encoding recovers the instruction exactly and stops
 at its end, whatever follows. One case per family: adding a new instruction
 family means adding one more `_correct` lemma above and one more arm here,
@@ -987,6 +1251,11 @@ theorem decodeInstr_encodeCore (instr : Instr) (rest : ByteSeq) :
   | setcc cc dst => exact setcc_correct cc dst rest
   | cmovcc sz cc dst src => exact cmovcc_correct sz cc dst src rest
   | xchgRR sz a b => exact xchgRR_correct sz a b rest
+  | movRM sz dst base disp => exact movRM_correct sz dst base disp rest
+  | movMI32 sz base disp imm => exact movMI32_correct sz base disp imm rest
+  | leaRM dst base disp => exact leaRM_correct dst base disp rest
+  | leaRip dst disp => exact leaRip_correct dst disp rest
+  | callRip disp => exact callRip_correct disp rest
 
 theorem decodeCore_encodeCore (instr : Instr) (rest : ByteSeq) :
     decodeCore (encodeCore instr ++ rest) = some (instr, (encodeCore instr).length) := by
@@ -1007,7 +1276,7 @@ theorem decode_encode (instr : Instr) (rest : List UInt8) :
 
 theorem encode_pos (instr : Instr) : 0 < (encode instr).length := by
   cases instr <;>
-    simp [encode, encodeCore, maybeRex] <;>
+    simp [encode, encodeCore, maybeRex, bytesMem, rmBase, rmRip, Displacement.size] <;>
     split <;> simp
 
 end Grass.ISA.X86.Target

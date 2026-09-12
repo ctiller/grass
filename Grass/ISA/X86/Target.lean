@@ -17,6 +17,14 @@ proof rests on, so its fault behaviour is deliberate: a memory access outside
 a mapped, correctly-permissioned region is a `fault`, not a saturating or
 wrapping "best effort" read, because a `fault` is what makes the machine
 tier's reachability obligation say something.
+
+The disp32 memory producers use the same flat region model. `callRip` loads
+the target before its return-address write and transfers internally to that
+loaded target. Native import recognition is a separate loaded-target binding
+obligation; a slot's address alone does not identify its contents. These cases
+do not add canonical-address, paging, CET, or exception-delivery semantics.
+Instruction entries: Intel SDM 092 CALL 3-121–3-130, LEA 3-547–3-548,
+MOV 4-28–4-30; formal dual-vendor enrollment remains in `SeamLedgerAudit`.
 -/
 
 namespace Grass.ISA.X86.Target
@@ -81,11 +89,10 @@ def signBitFor : Sz → UInt64
   | .w32 => 0x80000000
   | .w64 => 0x8000000000000000
 
-/-- A `[base+disp32]`/`[rip+disp32]` effective address: the base plus the
-displacement, sign-extended. Not bounds-checked here — `readableAt` et al.
-are what turn an out-of-range result into a fault. -/
+/-- A 64-bit effective address: add the sign-extended displacement modulo
+2^64. Region permission checks are separate from this arithmetic. -/
 def effAddr (base : Nat) (disp : BitVec 32) : Nat :=
-  ((Int.ofNat base) + disp.toInt).toNat
+  (UInt64.ofNat base + UInt64.ofNat (disp.signExtend 64).toNat).toNat
 
 /-- Little-endian bytes as a `UInt64`, low byte first. -/
 def leToUInt64 (bs : List UInt8) : UInt64 :=
@@ -213,6 +220,20 @@ def execInstr (s : State) (instr : Instr) (len : Nat) :
   | .movRR sz dst src => .internal (regWrite next sz dst (regRead next sz src))
   | .movRI32 dst imm => .internal (regWrite next .w32 dst (UInt64.ofNat imm.toNat))
   | .movRI64 dst imm => .internal (regWrite next .w64 dst (UInt64.ofNat imm.toNat))
+  | .movRM sz dst base disp =>
+      let address := effAddr (s.reg base).toNat disp
+      match readMem s sz address with
+      | some value => .internal (regWrite next sz dst value)
+      | none => .fault (.readOutsideImage address)
+  | .movMI32 sz base disp imm =>
+      let address := effAddr (s.reg base).toNat disp
+      if s.writableRange address (byteCount sz) then
+        .internal (writeMem next sz address (immSx imm))
+      else .fault (.writeOutsideImage address)
+  | .leaRM dst base disp =>
+      .internal (regWrite next .w64 dst (UInt64.ofNat (effAddr (s.reg base).toNat disp)))
+  | .leaRip dst disp =>
+      .internal (regWrite next .w64 dst (UInt64.ofNat (effAddr next.rip disp)))
   | .movzxRR dstSz dst src srcIs16 =>
       let bits := if srcIs16 then 16 else 8
       let mask : UInt64 := (1 <<< (UInt64.ofNat bits)) - 1
@@ -269,7 +290,17 @@ def execInstr (s : State) (instr : Instr) (len : Nat) :
       if s.writableRange retAddr.toNat 8 then
         .internal { (writeMem next .w64 retAddr.toNat next.rip.toUInt64).setReg .rsp retAddr with
           rip := target }
-      else .fault (.writeOutsideImage retAddr.toNat)
+        else .fault (.writeOutsideImage retAddr.toNat)
+  | .callRip disp =>
+      let address := effAddr next.rip disp
+      match readMem s .w64 address with
+      | none => .fault (.readOutsideImage address)
+      | some target =>
+          let retAddr := s.reg .rsp - 8
+          if s.writableRange retAddr.toNat 8 then
+            .internal { (writeMem next .w64 retAddr.toNat next.rip.toUInt64).setReg .rsp retAddr with
+              rip := target.toNat }
+          else .fault (.writeOutsideImage retAddr.toNat)
   | .ret =>
       match popValue s with
       | some (retAddr, s') => .internal { s' with rip := retAddr.toNat }

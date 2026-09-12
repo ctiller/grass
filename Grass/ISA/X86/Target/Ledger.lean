@@ -15,7 +15,7 @@ for the legacy decoder's subjects (`Grass/ISA/X86/Profile.lean`'s
 `commonProfileLedger`). Neither that ledger nor its deleted audit ever named
 anything in `Grass/ISA/X86/Target/Encode.lean` (`Instr`, `encode`, `decode`) or
 `Grass/ISA/X86/Target.lean` (`execInstr`, `step`, `initial`): the seam is a
-separate, later-written instruction set with its own 33-constructor `Instr`
+separate, later-written instruction set with its own 38-constructor `Instr`
 and its own execution semantics, and it was never entered in any ledger. This
 module is that ledger, in the shape `Grass/ISA/X86/Ledger.lean` already
 defines and enforces -- `CommonRule`, `DualCitation`, `Citation` are reused
@@ -30,7 +30,7 @@ that ledger/ratchet split; this file is the citation half.
 
 ## What is actually cited here, and why most of it is not
 
-Of `Instr`'s 33 constructors, eight have a citation below: `movRR`, `movRI32`,
+Of `Instr`'s 38 constructors, eight have a citation below: `movRR`, `movRI32`,
 `movRI64` (MOV) and `testRR`, `testRI` (TEST), whose Intel/AMD printed-page
 anchors are already recorded in `docs/REFERENCES.md`'s "Register semantics
 anchors", plus `syscall`, `ud2`, `hlt`, whose defining behaviour is a single
@@ -45,10 +45,11 @@ at every `execInstr` case) and the SYSCALL-specific register clobber set
 (`execInstr.syscallClobbers`, since `execInstr` delegates the actual clobber
 list to a platform's `NativeReturn.clobbers` and never states rcx/r11 itself).
 
-The remaining 25 `Instr` constructors (`movzxRR`, `movsxRR`, `aluRR`, `aluRI`,
+The remaining 30 `Instr` constructors (`movzxRR`, `movsxRR`, `aluRR`, `aluRI`,
 `shiftImm`, `imul2`, `inc`, `dec`, `push`, `pop`, `callRel32`, `ret`,
 `jmpRel32`, `jmpRel8`, `jccRel32`, `jccRel8`, `nop`, `cdq`, `cqo`, `div`,
-`idiv`, `mul`, `setcc`, `cmovcc`, `xchgRR`) and several of `Target.lean`'s own
+`idiv`, `mul`, `setcc`, `cmovcc`, `xchgRR`, `movRM`, `movMI32`, `leaRM`,
+`leaRip`, `callRip`) and several of `Target.lean`'s own
 declarations genuinely model external behaviour and have no citation yet.
 That debt is not hidden here: `Tests/ISA/X86/SeamLedgerAudit.lean` lists it
 explicitly as `owed`, per declaration, with the reason no anchor was used.
@@ -82,16 +83,13 @@ profile to.
 `Grass/ISA/X86/Target/Encode.lean` and `Grass/ISA/X86/Target.lean` are being
 extended concurrently with memory-operand constructors -- `movRM`, `movMR`,
 `movMI32`, `movzxRM8`, `movMR8`, `leaRM`, `leaRip`, `movRMrip`, `callRip`,
-`cmpMI32`, `aluRM` -- that do not exist yet. A `CommonRule`/`DualCitation` for
-one of them cannot be built honestly: `DualCitation.intelCovers`/`amdCovers`
-would have to name a subject that resolves to no real declaration, which
-`Tests/ISA/X86/SeamLedgerAudit.lean`'s Gate A (subject-resolution check, mirrored
-from the deleted `LedgerAudit.lean`) exists precisely to reject. `PendingRow`
-below is therefore a plain, unaudited worklist -- not part of `Ledger` and not
-consulted by `Covers`/`Accounts` -- naming each future constructor and where
-its citation should come from once it lands, so the integrator has the
-research done and only needs to move it into `seamCommon` and give it a real
-`Subject.*` name matching the landed constructor.
+`cmpMI32`, `aluRM` -- in stages. Five forms (`movRM`, `movMI32`, `leaRM`,
+`leaRip`, `callRip`) now exist and are explicitly owed by the coverage gate.
+The other six still have no real constructor subject. `PendingRow` below
+remains an unaudited citation worklist, not part of `Ledger` or consulted by
+`Covers`/`Accounts`. Entries for existing constructors need formal source
+enrollment; entries for absent constructors also need a real declaration
+before Gate A can accept a corresponding ledger subject.
 -/
 
 namespace Grass.ISA.X86.Target
@@ -437,8 +435,8 @@ owed -- comes from the Lean environment in
 
 See this module's header. Deliberately **not** a `List CommonRule`: a
 `DualCitation` demands `covers subject = true` on a real `Citation.subjects`
-list naming a real declaration, and none of these eleven names resolves to one
-yet. `PendingRow` is unaudited prose -- `Tests/ISA/X86/SeamLedgerAudit.lean`
+list naming a real declaration. The worklist itself does not establish that a
+name resolves to one. `PendingRow` is unaudited prose -- `Tests/ISA/X86/SeamLedgerAudit.lean`
 does not read this list, so adding or removing an entry here changes no gate.
 It exists so the integrator adding these constructors has the citation
 research already done. -/
@@ -490,8 +488,8 @@ def pendingMemoryOperandFamily : List PendingRow :=
     { subject := ⟨"Grass.ISA.X86.Target.Instr.leaRM"⟩
       describes := "LEA r, [base+disp32] -- load effective address, no memory access."
       intendedCitation :=
-        "LEA has no citation anywhere in this corpus yet; needs its own " ++
-        "Intel/AMD LEA page, not located in docs/REFERENCES.md." },
+        "Intel LEA 3-547-3-548 inspected in docs/REFERENCES.md; still needs " ++
+        "formal Intel/AMD subject enrollment." },
     { subject := ⟨"Grass.ISA.X86.Target.Instr.leaRip"⟩
       describes := "LEA r, [rip+disp32]."
       intendedCitation :=
@@ -505,8 +503,8 @@ def pendingMemoryOperandFamily : List PendingRow :=
     { subject := ⟨"Grass.ISA.X86.Target.Instr.callRip"⟩
       describes := "CALL [rip+disp32] -- indirect call through a RIP-relative operand."
       intendedCitation :=
-        "CALL has no citation anywhere in this corpus yet; needs its own " ++
-        "Intel/AMD CALL page (not located in docs/REFERENCES.md), plus " ++
+        "Intel CALL 3-121-3-130 inspected in docs/REFERENCES.md; still needs " ++
+        "formal Intel/AMD CALL subject enrollment, plus " ++
         "Subject.ripRelativeNextInstruction for the addressing half." },
     { subject := ⟨"Grass.ISA.X86.Target.Instr.cmpMI32"⟩
       describes := "CMP r/m32, imm32."
