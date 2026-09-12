@@ -107,6 +107,14 @@ theorem encode_length_pop (r : Gpr) :
 theorem encode_length_callRel32 (rel : BitVec 32) : (encode (.callRel32 rel)).length = 5 := by
   simp [encode_length_eq, encodeCore]
 
+theorem encode_length_leaRip (dst : Gpr) (disp : BitVec 32) :
+    (encode (.leaRip dst disp)).length = 7 := by
+  simp [encode_length_eq, encodeCore, bytesMem, rmRip, Displacement.toBytes]
+
+theorem encode_length_callRip (disp : BitVec 32) :
+    (encode (.callRip disp)).length = 6 := by
+  simp [encode_length_eq, encodeCore, bytesMem, rmRip, Displacement.toBytes]
+
 theorem encode_length_ret : (encode .ret).length = 1 := by simp [encode_length_eq, encodeCore]
 
 theorem encode_length_jmpRel32 (rel : BitVec 32) : (encode (.jmpRel32 rel)).length = 5 := by

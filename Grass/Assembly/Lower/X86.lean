@@ -41,34 +41,27 @@ is exactly the byte count that choice commits to.
 | `call`, `call_local` | `label` | `callRel32` |
 | `ret`, `ud2`, `hlt`, `nop`, `syscall`, `cdq`, `cqo` | (none) | themselves |
 
-`call_local` is not an x86 mnemonic; it is accepted as a synonym for `call`
-because `Spikes/3_Gzip/Assembly.lean` writes it for calls to in-source
-labels. Every mnemonic/operand shape not in this table, and every register
+`call_local` is accepted as a synonym for direct `call`. Every mnemonic/operand
+shape outside this table and the memory forms below, and every register
 spelling narrower than 32 bits outside the specific slots above (`setcc`'s
 and `movzx`/`movsx`'s 8/16-bit source), is refused with a message naming the
 line: this profile's `Instr` has no `Sz` narrower than 32 bits, so a general
 register operand is only ever 32- or 64-bit.
 
-## Byte-size table for the memory-operand forms
+## Memory operands
 
-See `/-! ## Memory operands -/` below. Every one of these lines is refused
-today (`Encode.lean` has no `Instr` constructor for a memory operand yet),
-but `size` already returns the length the documented canonical encoding
-will occupy, computed from the REX/opcode/ModR/M/SIB/disp32/imm32 layout, so
-pass-1 layout is stable across integration:
+`movRM`, `movMI32`, `leaRM`, `leaRip`, and `callRip` lower through the
+canonical ISA constructors. Base forms use a mandatory SIB and signed
+disp32; their size comes directly from `encode`. RIP forms resolve symbols
+relative to the instruction end, with lengths proved in `X86Lengths`.
+`lea` accepts 64-bit destinations. Memory MOV checks explicit or declared
+local widths; an immediate store requires a known dword or qword width.
+Unknown constants, locals, widths, unsupported addressing modes, and
+out-of-range displacements are refused.
 
-| form | REX | opcode | ModR/M | SIB | disp32 | imm32 | total |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `movRM`/`aluRM`/`leaRM` (`r64`, non-`rsp`/`r12` base) | 1 | 1 | 1 | 0 | 4 | 0 | 7 |
-| same, `rsp`/`r12` base | 1 | 1 | 1 | 1 | 4 | 0 | 8 |
-| `movRMrip`/`leaRip` (`r64`) | 1 | 1 | 1 | 0 | 4 | 0 | 7 |
-| `callRip` | 0 | 1 | 1 | 0 | 4 | 0 | 6 |
-| `movzxRM8` (`r64`, non-`rsp`/`r12` base) | 1 | 2 | 1 | 0 | 4 | 0 | 8 |
-| `movMI32`/`cmpMI32` (`rsp` base, dword) | 0 | 1 | 1 | 1 | 4 | 4 | 11 |
-
-Every entry is `memBaseLen`/`memRipLen` applied to the flags the operand
-shape determines; the two rows above are the ones `Grass/Assembly/Lower/X86Lengths.lean`'s
-caller (this file) can check against the task's own worked examples.
+The remaining memory families still return `Resolved.pending` with a
+provisional length and always fail emission. Those estimates are not an
+encoding or a promise about a future constructor's canonical layout.
 -/
 
 namespace Grass.Assembly.Lower.X86
@@ -264,8 +257,8 @@ def orRefuse {α : Type} (value : Option α) (message : String) : Except String 
 
 `resolve` classifies a `(mnemonic, operands)` pair using only `Env`
 (no label addresses, matching `Lowering.size`'s signature): a fully
-resolved `Instr`, one of the three branch/call families (whose *length* is
-fixed, but whose final `rel32` needs the label table and this line's own
+resolved `Instr`, a branch/call or RIP-relative family (whose *length* is
+fixed, but whose final displacement needs the symbol table and this line's
 address — supplied later, in `finish`), or a recognized-but-not-yet-
 encodable memory-operand shape (`pending`, carrying the length the
 eventual encoding will occupy and a message naming which constructor it
@@ -276,6 +269,8 @@ inductive Resolved where
   | jmp (target : String)
   | jcc (cc : Cond) (target : String)
   | call (target : String)
+  | leaRip (dst : Gpr) (target : String)
+  | callRip (target : String)
   | pending (length : Nat) (detail : String)
 
 /-- The byte length `Resolved.instr`'s case reads off the real encoder;
@@ -286,6 +281,8 @@ def Resolved.length : Resolved → Nat
   | .jmp _ => 5
   | .jcc _ _ => 6
   | .call _ => 5
+  | .leaRip _ _ => 7
+  | .callRip _ => 6
   | .pending length _ => length
 
 /-! ## `mov` -/
@@ -309,27 +306,20 @@ def lowerMovImm (szD : Sz) (dst : Gpr) (imm : Int) (note : String) : Except Stri
         | some imm64 => .ok (.instr (.movRI64 dst imm64))
         | none => .error ("immediate does not fit 64 bits: " ++ note)
 
-/-! ## Memory operands (enabled when Encode.lean carries the constructors)
+/-! ## Memory operands
 
-Every case below recognizes a shape one of the eleven named pending
-constructors will cover, and returns `.pending length detail`: `lower`
-always turns this into a `.error`, so none of it is exercised by
-`lower_size`'s proof obligation (the hypothesis `lower ... = .ok _` is
-never true for a `pending` line, closed the same way an outright refusal
-is). `length` is computed here so pass-1 layout does not have to change
-once the constructor lands — only `lower`'s `.pending` arm needs to grow a
-real case. -/
+Enabled base forms resolve their displacement in `Env` and become
+`Resolved.instr`. RIP forms retain the symbol until `finish`. Unsupported
+families remain `Resolved.pending` and cannot satisfy a successful lowering.
+-/
 
 /-- Whether a `[base+disp32]` addressing form needs a SIB byte: real x86-64
 cannot select `rsp` or `r12` as a ModR/M-direct base (Intel SDM Vol. 2A
 Table 2-2), so those two — and only those two — force one. -/
 def needsSib (base : Gpr) : Bool := base = Gpr.rsp || base = Gpr.r12
 
-/-- `[base+disp32]` length: optional REX, `opcodeBytes` opcode bytes,
-ModR/M, an optional SIB byte, a mandatory disp32 (this profile always
-emits the full 32-bit displacement, never a shorter disp8, matching the
-"canonical: never the short form" choice `jmpRel32`/`jccRel32` already
-make). -/
+/-- Provisional length for refused base-memory families. Enabled base
+forms use the real encoder's mandatory-SIB length instead. -/
 def memBaseLen (opcodeBytes : Nat) (wide regExtended : Bool) (base : Gpr) : Nat :=
   (if wide || regExtended || base.isExtended then 1 else 0) + opcodeBytes + 1 +
     (if needsSib base then 1 else 0) + 4
@@ -340,23 +330,60 @@ ModR/M, a mandatory disp32; a RIP-relative operand never uses a SIB byte
 def memRipLen (opcodeBytes : Nat) (wide regExtended : Bool) : Nat :=
   (if wide || regExtended then 1 else 0) + opcodeBytes + 1 + 4
 
-/-- A memory operand's addressing shape, once a base name (if any) has been
-checked against the 64-bit register table: `[rip+name]`, or `[base+disp]`
-with `base` resolved to a `Gpr` — a declared frame local is exactly this
-second shape with an implicit `rsp` base (`docs/ASSEMBLY_CONSTRUCTION.md`
-§4: frame locals are `[rsp+slot]`). An indexed operand (`[base+index*scale]`)
-matches neither arm and is refused elsewhere: none of the eleven named
-pending constructors take an index register. -/
+/-- Address-shape classification for supported offset syntax. Indexed and
+writeback operands are refused. Values and widths are checked separately
+before an enabled constructor is emitted. -/
 inductive MemShape where
   | rip (name : String)
   | based (base : Gpr)
 
 def memShapeOf : Operand → Option MemShape
-  | .mem _ none none (.ripRelative name) _ => some (.rip name)
-  | .mem _ (some base) none _ _ => (lookupGpr gpr64Names base).map .based
+  | .mem _ none none (.ripRelative name) .offset => some (.rip name)
+  | .mem _ (some base) none (.int _) .offset => (lookupGpr gpr64Names base).map .based
+  | .mem _ (some base) none (.symbol _) .offset => (lookupGpr gpr64Names base).map .based
   | .local _ => some (.based Gpr.rsp)
   | .localAddress _ => some (.based Gpr.rsp)
   | _ => none
+
+/-- Signed displacement fields are checked before conversion to their bit pattern. -/
+def signed32 (value : Int) : Option (BitVec 32) :=
+  if -(2 ^ 31 : Int) ≤ value ∧ value < (2 ^ 31 : Int) then
+    some (BitVec.ofInt 32 value)
+  else none
+
+/-- Resolve a base displacement from literals, constants, or a declared frame slot. -/
+def baseDisplacement (env : Env) (operand : Operand) : Except String (BitVec 32) := do
+  let value ← match operand with
+    | .mem _ (some _) none (.int value) .offset => .ok value
+    | .mem _ (some _) none (.symbol name) .offset =>
+        orRefuse (env.constant name) ("unknown displacement constant: " ++ name)
+    | .local name | .localAddress name =>
+        orRefuse ((env.slot name).map Int.ofNat) ("unknown frame local: " ++ name)
+    | _ => .error "unsupported base displacement"
+  orRefuse (signed32 value) "base displacement is outside signed disp32 range"
+
+def memSizeBytes : MemSize → Nat
+  | .byte => 1
+  | .word => 2
+  | .dword => 4
+  | .qword => 8
+
+/-- Absent bracket widths may be inferred; locals require declared width metadata. -/
+def memoryWidth (env : Env) : Operand → Except String (Option Nat)
+  | .mem width _ _ _ .offset => .ok (width.map memSizeBytes)
+  | .local name => do
+      let width ← orRefuse (env.localSize name) ("unknown frame-local width: " ++ name)
+      let offset ← orRefuse (env.slot name) ("unknown frame local: " ++ name)
+      if offset + width ≤ env.frameBytes then .ok (some width)
+      else .error ("local access exceeds the allocated frame: " ++ name)
+  | _ => .error "expected a memory value operand"
+
+def checkMemoryWidth (env : Env) (operand : Operand) (bytes : Nat) : Except String Unit := do
+  let width ← memoryWidth env operand
+  match width with
+  | none => .ok ()
+  | some actual =>
+      if actual = bytes then .ok () else .error "memory and register widths disagree"
 
 def lowerMovRegDest (szD : Sz) (dst : Gpr) (src : Operand) (env : Env) (note : String) :
     Except String Resolved :=
@@ -372,11 +399,14 @@ def lowerMovRegDest (szD : Sz) (dst : Gpr) (src : Operand) (env : Env) (note : S
           | some (.rip _) =>
               .ok (.pending (memRipLen 1 szD.isW64 dst.isExtended) (note ++ " — movRMrip"))
           | some (.based base) =>
-              .ok (.pending (memBaseLen 1 szD.isW64 dst.isExtended base) (note ++ " — movRM"))
+              do
+                checkMemoryWidth env src (if szD.isW64 then 8 else 4)
+                let disp ← baseDisplacement env src
+                .ok (.instr (.movRM szD dst base disp))
           | none =>
               .error ("mov source is not a register, immediate, or memory operand: " ++ note)
 
-def lowerMovMemDest (shape : MemShape) (src : Operand) (env : Env) (note : String) :
+def lowerMovMemDest (shape : MemShape) (dest src : Operand) (env : Env) (note : String) :
     Except String Resolved :=
   match shape with
   | .rip _ => .error ("mov to a RIP-relative destination has no encoding: " ++ note)
@@ -390,10 +420,16 @@ def lowerMovMemDest (shape : MemShape) (src : Operand) (env : Env) (note : Strin
           | none =>
               match immediate env src with
               | some imm =>
-                  match toField 32 imm with
-                  | some _ =>
-                      .ok (.pending (memBaseLen 1 false false base + 4) (note ++ " — movMI32"))
-                  | none => .error ("immediate does not fit 32 bits: " ++ note)
+                  do
+                    let width ← memoryWidth env dest
+                    let sz ← match width with
+                      | some 4 => .ok Sz.w32
+                      | some 8 => .ok Sz.w64
+                      | _ => .error ("memory immediate store needs a dword or qword width: " ++ note)
+                    let disp ← baseDisplacement env dest
+                    let field ← orRefuse (if sz.isW64 then signed32 imm else toField 32 imm)
+                      ("immediate is not representable by the memory store: " ++ note)
+                    .ok (.instr (.movMI32 sz base disp field))
               | none => .error ("mov destination/source shape has no encoding: " ++ note)
 
 def lowerMov (dest src : Operand) (env : Env) (note : String) : Except String Resolved :=
@@ -401,7 +437,7 @@ def lowerMov (dest src : Operand) (env : Env) (note : String) : Except String Re
   | some (szD, dst) => lowerMovRegDest szD dst src env note
   | none =>
       match memShapeOf dest with
-      | some shape => lowerMovMemDest shape src env note
+      | some shape => lowerMovMemDest shape dest src env note
       | none => .error ("mov destination is not a register or memory operand: " ++ note)
 
 /-! ## `movzx` / `movsx` -/
@@ -435,12 +471,14 @@ def lowerMovsx (dest src : Operand) (note : String) : Except String Resolved := 
 
 /-! ## `lea` -/
 
-def lowerLea (dest src : Operand) (note : String) : Except String Resolved := do
-  let (szD, dst) ← orRefuse (registerSized dest) ("destination is not a register: " ++ note)
+def lowerLea (dest src : Operand) (env : Env) (note : String) : Except String Resolved := do
+  let dst ← orRefuse (register64 dest) ("lea destination must be a 64-bit register: " ++ note)
   match memShapeOf src with
-  | some (.rip _) => .ok (.pending (memRipLen 1 szD.isW64 dst.isExtended) (note ++ " — leaRip"))
+  | some (.rip name) => .ok (.leaRip dst name)
   | some (.based base) =>
-      .ok (.pending (memBaseLen 1 szD.isW64 dst.isExtended base) (note ++ " — leaRM"))
+      do
+        let disp ← baseDisplacement env src
+        .ok (.instr (.leaRM dst base disp))
   | none => .error ("lea source is not a memory operand: " ++ note)
 
 /-! ## ALU (`add sub and or xor cmp`) and `test` -/
@@ -552,7 +590,10 @@ def lowerCall (operand : Operand) (note : String) : Except String Resolved :=
   | .symbol name => .ok (.call name)
   | _ =>
       match memShapeOf operand with
-      | some (.rip _) => .ok (.pending (memRipLen 1 false false) (note ++ " — callRip"))
+      | some (.rip name) =>
+          match operand with
+          | .mem (some .qword) _ _ _ _ | .mem none _ _ _ _ => .ok (.callRip name)
+          | _ => .error ("indirect call requires a qword operand: " ++ note)
       | some (.based _) =>
           .error
             ("an indirect call through a base-relative memory operand has no encoding yet: "
@@ -568,7 +609,7 @@ def resolve (mnemonic : String) (operands : List Operand) (env : Env) : Except S
   | "mov", [dest, src] => lowerMov dest src env note
   | "movzx", [dest, src] => lowerMovzx dest src note
   | "movsx", [dest, src] => lowerMovsx dest src note
-  | "lea", [dest, src] => lowerLea dest src note
+  | "lea", [dest, src] => lowerLea dest src env note
   | "test", [a, b] => lowerTest a b env note
   | "shl", [dst, imm] => lowerShift .shl dst imm env note
   | "shr", [dst, imm] => lowerShift .shr dst imm env note
@@ -656,6 +697,20 @@ def finish (resolved : Resolved) (labels : String → Option Nat) (pc : Nat) :
           match toField 32 (Int.ofNat addr - (Int.ofNat pc + 5)) with
           | none => .error ("branch target is out of range: " ++ target)
           | some rel => .ok [.callRel32 rel]
+  | .leaRip dst target =>
+      match labels target with
+      | none => .error ("unknown RIP-relative symbol: " ++ target)
+      | some addr =>
+          match signed32 (Int.ofNat addr - (Int.ofNat pc + 7)) with
+          | none => .error ("RIP-relative target is out of range: " ++ target)
+          | some rel => .ok [.leaRip dst rel]
+  | .callRip target =>
+      match labels target with
+      | none => .error ("unknown RIP-relative symbol: " ++ target)
+      | some addr =>
+          match signed32 (Int.ofNat addr - (Int.ofNat pc + 6)) with
+          | none => .error ("RIP-relative target is out of range: " ++ target)
+          | some rel => .ok [.callRip rel]
   | .pending _ detail => .error ("memory operand: pending integration (" ++ detail ++ ")")
 
 def lower : Line → Env → (labels : String → Option Nat) → (pc : Nat) →
@@ -704,6 +759,24 @@ theorem finish_length (resolved : Resolved) (labels : String → Option Nat) (pc
           exact encode_length_callRel32 rel
   | pending length detail =>
       simp [finish] at fin
+  | leaRip dst target =>
+      simp only [finish] at fin
+      split at fin
+      · simp at fin
+      · split at fin
+        · simp at fin
+        · rename_i rel _
+          cases fin
+          exact encode_length_leaRip dst rel
+  | callRip target =>
+      simp only [finish] at fin
+      split at fin
+      · simp at fin
+      · split at fin
+        · simp at fin
+        · rename_i rel _
+          cases fin
+          exact encode_length_callRip rel
 
 theorem lower_size (line : Line) (env : Env) (labels : String → Option Nat) (pc : Nat)
     (instrs : List Grass.ISA.X86.isa.Instr) (lowered : lower line env labels pc = .ok instrs) :
@@ -733,158 +806,5 @@ def lowering : Lowering Grass.ISA.X86.isa where
   size := size
   lower := lower
   lower_size := lower_size
-
-/-! ## Self-check: `Spikes/1_Hello_World/Program.lean`
-
-`asm_source { ... }` is a term-level macro (`Grass/Assembly/Syntax/Parser.lean`):
-there is no separate "parse this string" entry point, so the check below
-re-authors the exact same body through the identical front end the spike
-uses, rather than importing the spike itself (whose surrounding
-`StaticObjectTable`/`PlatformPlan`/win32 machinery is unrelated to lowering
-and is not this module's concern). The `asm_source (statics := ...)`
-argument and the `withCallFrame WriteFile` clause are syntax the front end
-never elaborates (`Parser.lean`'s own docstring: "captured only so the
-grammar accepts it"), so omitting the former and keeping the latter changes
-nothing semantically; both are dropped/kept purely to match the spike's own
-text as closely as possible without needing its imports. -/
-
-open Grass.Assembly.Syntax in
-/-- The exact `Spikes/1_Hello_World/Program.lean` `asm_source` body. -/
-def helloWorldSource : Source :=
-  withStack (transferred : UInt32 := 0)
-  asm_source {
-entry:
-    push r12
-    push r13
-    push r14
-    mov ecx, STD_OUTPUT_HANDLE
-    call qword ptr [rip + __imp_GetStdHandle]
-    test rax, rax
-    jz exit_unavailable
-    cmp rax, INVALID_HANDLE_VALUE
-    je exit_unavailable
-    mov r12, rax
-    lea r13, [rip + payload]
-    mov r14d, sizeof(payload)
-
-write_head: @placement [handle := r12, cursor := r13, remaining := r14d]
-            @invariant write_all_loop(payload)
-    test r14d, r14d
-    je exit_success
-    arg WriteFile.overlapped, 0
-    mov transferred, 0
-    mov rcx, r12
-    mov rdx, r13
-    mov r8d, r14d
-    lea r9, transferred.addr
-    call qword ptr [rip + __imp_WriteFile]
-    test eax, eax
-    jz exit_write_failed
-    mov eax, transferred
-    test eax, eax
-    jz exit_no_progress
-    cmp eax, r14d
-    ja provider_violation @violation_edge(.excessWriteCount)
-    add r13, rax
-    sub r14d, eax
-    jmp write_head
-
-exit_success: @terminal(.success)
-    xor ecx, ecx
-    jmp exit
-
-exit_unavailable: @terminal(.failure) @audit(.stdoutUnavailable)
-    mov ecx, 1
-    jmp exit
-
-exit_write_failed: @terminal(.failure) @audit(.writeFailed)
-    mov ecx, 1
-    jmp exit
-
-exit_no_progress: @terminal(.failure) @audit(.noProgress)
-    mov ecx, 1
-    jmp exit
-
-exit:
-    call qword ptr [rip + __imp_ExitProcess]
-    ud2 @containment_tail(.terminalUnexpectedReturn)
-
-provider_violation:
-    ud2 @containment_tail(.excessWriteCount)
-}
-
-/-- `Env` for the check: the two platform constants and the one `sizeof`
-`helloWorldSource` reads, plus 8-byte-slotted frame locals (matching the
-`withStack (transferred : UInt32 := 0)` header). -/
-def helloEnv : Env :=
-  Env.ofLocals 8 helloWorldSource.locals
-    (fun name =>
-      if name = "STD_OUTPUT_HANDLE" then some (-11)
-      else if name = "INVALID_HANDLE_VALUE" then some (-1)
-      else none)
-    (fun name => if name = "payload" then some 128 else none)
-
-def helloLines : List Line := helloWorldSource.lines
-
-/-- Whether an `Except` succeeds. -/
-def isOk {α : Type} (result : Except String α) : Bool :=
-  match result with
-  | .ok _ => true
-  | .error _ => false
-
-/-! Pass 1 (`size`) never has to refuse a memory-operand line — that is the
-whole point of computing its length up front — so it succeeds over *every*
-line of the Hello World body, memory operands included. Reported rather
-than `decide`d: this profile's mnemonic/register dispatch is String-keyed,
-and the kernel's `String` reduction is too slow (and, for some primitives,
-not reliably total) to serve as a `decide` proof term here — the same
-reason `native_decide` is banned applies to leaning on raw kernel
-reduction over `String` as a substitute; `#eval` (compiled evaluation, not
-a proof) is the right tool for a report. -/
-#eval isOk (lowering.sizes helloEnv helloLines)
-
-/-- Pass 1's label table, at an arbitrary code base. -/
-def helloLabels : String → Option Nat :=
-  match Grass.Assembly.Lower.labelAddresses lowering helloWorldSource helloEnv 0x1000 with
-  | .ok f => f
-  | .error _ => fun _ => none
-
-/-- Every line paired with the address pass 1 would place it at. -/
-def withPcs : List Line → Nat → List (Line × Nat)
-  | [], _ => []
-  | line :: rest, pc =>
-      let width := match lowering.size line helloEnv with
-        | .ok n => n
-        | .error _ => 0
-      (line, pc) :: withPcs rest (pc + width)
-
-def helloLinesWithPc : List (Line × Nat) := withPcs helloLines 0x1000
-
-/-- Every line that pass 2 (`lower`, needing the label table and this line's
-own address) refuses, paired with the refusal message: exactly the seven
-memory-operand lines (three `call qword ptr [rip+...]`,
-`lea r13, [rip+payload]`, `lea r9, transferred.addr`, and the two accesses to
-the frame local `transferred` by value), and nothing else. -/
-def helloLowerRefusals : List (Line × String) :=
-  helloLinesWithPc.filterMap fun (line, pc) =>
-    match lowering.lower line helloEnv helloLabels pc with
-    | .error message => some (line, message)
-    | .ok _ => none
-
-#eval helloLowerRefusals.map (fun p => p.2)
-
-/-- The non-memory subset: every label, the one `arg` directive, and every
-register/immediate/branch instruction — everything pass 2 does *not*
-refuse. -/
-def helloNonMemoryLines : List Line :=
-  helloLinesWithPc.filterMap fun (line, pc) =>
-    if isOk (lowering.lower line helloEnv helloLabels pc) then some line else none
-
-/-! The non-memory subset sizes successfully as a whole under pass 1. -/
-#eval isOk (lowering.sizes helloEnv helloNonMemoryLines)
-
-/-! Exactly the seven memory-operand lines above are refused by pass 2;
-nothing else in the Hello World body is. -/
-#eval helloLowerRefusals.length
 
 end Grass.Assembly.Lower.X86
