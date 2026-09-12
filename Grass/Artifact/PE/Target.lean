@@ -75,10 +75,11 @@ write, read and prove rather than two.
 - Section names are ASCII and at most eight bytes: the section header's `Name`
   field is eight bytes and this format emits no string table, which the
   `/nnnnnnn` long-name form would need.
-- Section addresses must already be `SectionAlignment`-aligned, ordered
-  ascending and clear of the mapped headers. The writer places sections where
-  the program says, so it refuses a layout it cannot repair rather than moving
-  code the program has already resolved addresses against.
+- `Eligible` requires section addresses to satisfy `Placed` and `Ascending`:
+  page alignment, ascending non-overlapping order and clearance of the mapped headers.
+  `assemble` returns `none` when `Eligible` fails; `rawOf_assemble` proves
+  that successful assembly recovers the original program, including its
+  section addresses.
 - No TLS, no resources, no debug directory, no `CheckSum`: data directories
   other than import (1), exception (3) and base relocation (5) are zero.
   Exception directory 3 is populated only when the program supplies a
