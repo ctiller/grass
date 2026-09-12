@@ -161,14 +161,6 @@ def notBehaviour : List Name :=
     `Grass.ISA.X86.Target.maskFor,
     `Grass.ISA.X86.Target.signBitFor,
     `Grass.ISA.X86.Target.byteCount,
-    -- Effective-address arithmetic (base + sign-extended displacement). Its
-    -- only exercised use today is branch targets, already covered by
-    -- `Subject.ripRelativeNextInstruction`; its use for a general
-    -- `[base+disp32]` memory operand is unexercised until the pending
-    -- memory-operand family lands (`Grass/ISA/X86/Target/Ledger.lean`'s
-    -- `pendingMemoryOperandFamily`), at which point this classification is
-    -- reviewed again.
-    `Grass.ISA.X86.Target.effAddr,
     -- Compose already-classified facts (byte order is `owed` below; width is
     -- `notBehaviour` above) with `State`'s own `readBytes`/`writeBytes`; add
     -- no new fact of their own.
@@ -192,7 +184,7 @@ def notBehaviour : List Name :=
 separately from and more strongly than `owed`, for the reason the deleted
 `Tests/ISA/X86/LedgerAudit.lean` gives: reclassifying a declaration out of
 `owed` into this permanent-waiver list discharges debt without a citation. -/
-def notBehaviourBaseline : Nat := 13
+def notBehaviourBaseline : Nat := 12
 
 /--
 Declarations that genuinely model external behaviour and have no citation yet.
@@ -202,7 +194,17 @@ Debt, not a waiver. Printed on every run; may only shrink. See
 lacks a citation rather than being cited outright.
 -/
 def owed : List Name :=
-  [ -- Little-endian byte packing/unpacking for memory operands. x86-64's
+  [ -- The memory family now uses modulo-64 effective-address arithmetic.
+    -- This architectural rule is no longer classified as branch-only plumbing.
+    `Grass.ISA.X86.Target.effAddr,
+    -- Bounded disp32 memory forms. Primary instruction entries were inspected;
+    -- formal dual-vendor subject enrollment remains explicit debt.
+    `Grass.ISA.X86.Target.Instr.movRM,
+    `Grass.ISA.X86.Target.Instr.movMI32,
+    `Grass.ISA.X86.Target.Instr.leaRM,
+    `Grass.ISA.X86.Target.Instr.leaRip,
+    `Grass.ISA.X86.Target.Instr.callRip,
+    -- Little-endian byte packing/unpacking for memory operands. x86-64's
     -- byte order is a real architectural fact with no anchor recorded in
     -- docs/REFERENCES.md or docs/AMD_SOURCE_MIGRATION.md for this
     -- declaration; `Grass.ISA.X86.le32`/`le64` cite it for the *encoding*
@@ -256,7 +258,7 @@ def owed : List Name :=
 /-- The number of entries `owed` was last reviewed at. May only shrink; a
 genuinely new modeled declaration that owes a citation raises this in the same
 reviewed edit that adds it, per `docs/VALIDATION.md` §7's ratchet. -/
-def owedBaseline : Nat := 31
+def owedBaseline : Nat := 37
 
 /-- Every constructor of `Grass.ISA.X86.Target.Instr`. -/
 def instrConstructors : MetaM (Array Name) := do
