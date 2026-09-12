@@ -5,8 +5,8 @@ import Grass.Target.Machine
 
 The machine tier's `Adequate` obligation says every admitted input starts an
 execution and every reachable frontier completes: it either reaches `halted`
-or continues forever. This module reduces that obligation, once and for every
-target, to an inductive invariant that excludes stuck states:
+or continues forever. `adequate_of_invariant` derives that obligation from
+input coverage and an `Invariant` that excludes stuck states:
 
 - it holds in every initial state,
 - every step preserves it, and

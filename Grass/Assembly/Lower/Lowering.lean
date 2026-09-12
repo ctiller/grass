@@ -89,9 +89,9 @@ structure Lowering (isa : Grass.Target.ISA) where
   address of the line itself. -/
   lower : Line → Env → (labels : String → Option Nat) → (pc : Nat) →
     Except String (List isa.Instr)
-  /-- Whatever `lower` emits occupies exactly the bytes `size` promised. An
-  ISA with a variable-length form must therefore commit to one width in its
-  own instance; it cannot shrink a branch after pass 1. -/
+  /-- `Lowering.lower_size` requires each successful `lower` result to have
+  the total encoded byte length reported by `size` for that `line` and `env`,
+  even when `labels` or `pc` change. -/
   lower_size : ∀ (line : Line) (env : Env) (labels : String → Option Nat) (pc : Nat)
       (instrs : List isa.Instr),
     lower line env labels pc = .ok instrs →
