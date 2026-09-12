@@ -287,7 +287,7 @@ theorem sections_rawOf_assemble (sections : List Grass.Target.Section)
       simp only [List.map_cons, ih tailAnon, toFlatSection, toSection]
       rw [← nameEq]
 
-/-- Assembling preserves the program exactly. -/
+/-- `rawOf_assemble` recovers the input program from the artifact after a successful `assemble`. -/
 theorem rawOf_assemble (program : Sectioned) (artifact : Artifact) :
     assemble program = some artifact → rawOf artifact = program := by
   intro success
