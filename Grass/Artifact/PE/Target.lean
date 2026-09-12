@@ -639,7 +639,8 @@ theorem importsOf_libraries (base : Nat) (runs : List (String × List Grass.Targ
         (fun r member => slots r (List.mem_cons_of_mem _ member))
         (fun r member => placed r (List.mem_cons_of_mem _ member))]
 
-/-- Assembling preserves the program exactly. -/
+/-- `rawOf_assemble` recovers the input program from the artifact after a
+successful `assemble`. -/
 theorem rawOf_assemble (program : Sectioned) (artifact : Artifact) :
     assemble program = some artifact → rawOf artifact = program := by
   intro success
