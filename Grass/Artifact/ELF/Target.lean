@@ -112,12 +112,26 @@ theorem readFlagsWord_flagsWord (r w x : Bool) : readFlagsWord (flagsWord r w x)
   cases r <;> cases w <;> cases x <;> decide
 
 /-- The fixed-size ELF64 header, `e_machine` and `e_phnum` parameterized by
-the caller and the section count. -/
+the caller and the section count. `e_phoff` names the table immediately after
+the header, or is zero when absent (System V GABI, ELF Header, `e_phoff`:
+https://refspecs.linuxfoundation.org/elf/gabi4%2B/ch4.eheader.html). -/
 def writeHeader (machine : UInt16) (entry : UInt64) (phnum : UInt16) : List UInt8 :=
   IDENT ++ writeU16LE ET_EXEC ++ writeU16LE machine ++ writeU32LE 1 ++ writeU64LE entry ++
-    writeU64LE (UInt64.ofNat (EHDR_SIZE + PHDR_SIZE * phnum.toNat)) ++ writeU64LE 0 ++
+    writeU64LE (if phnum = 0 then 0 else UInt64.ofNat EHDR_SIZE) ++ writeU64LE 0 ++
     writeU32LE 0 ++ writeU16LE (UInt16.ofNat EHDR_SIZE) ++ writeU16LE (UInt16.ofNat PHDR_SIZE) ++
     writeU16LE phnum ++ writeU16LE 0 ++ writeU16LE 0 ++ writeU16LE 0
+
+@[simp] theorem writeHeader_length (machine : UInt16) (entry : UInt64) (phnum : UInt16) :
+    (writeHeader machine entry phnum).length = EHDR_SIZE := by
+  simp [writeHeader, writeU16LE, writeU32LE, writeU64LE, EHDR_SIZE]
+
+/-- `writeHeader_phoff_bytes` locates the actual eight-byte `e_phoff` field,
+independently of the artifact reader that discards this field. -/
+theorem writeHeader_phoff_bytes (machine : UInt16) (entry : UInt64) (phnum : UInt16)
+    (suffix : List UInt8) :
+    ((writeHeader machine entry phnum ++ suffix).drop 32).take 8 =
+      writeU64LE (if phnum = 0 then 0 else UInt64.ofNat EHDR_SIZE) := by
+  simp [writeHeader, IDENT, writeU16LE, writeU32LE, writeU64LE, natToLE]
 
 /-- One `PT_LOAD` program header. -/
 def writePhdr (sec : ElfSection) (offset : UInt64) : List UInt8 :=
@@ -145,6 +159,32 @@ def write (machine : UInt16) (artifact : Artifact) : List UInt8 :=
   let baseOffset := UInt64.ofNat (EHDR_SIZE + PHDR_SIZE * artifact.sections.length)
   writeHeader machine artifact.entry phnum ++
     writePhdrs baseOffset artifact.sections ++ writePayloads artifact.sections
+
+/-- `write_table_position` identifies the program table's actual start directly
+in emitted bytes; no reader or stored offset is used to locate it. -/
+theorem write_table_position (machine : UInt16) (artifact : Artifact) :
+    (write machine artifact).drop EHDR_SIZE =
+      writePhdrs (UInt64.ofNat (EHDR_SIZE + PHDR_SIZE * artifact.sections.length)) artifact.sections ++
+        writePayloads artifact.sections := by
+  simp only [write, List.append_assoc]
+  rw [← writeHeader_length machine artifact.entry (UInt16.ofNat artifact.sections.length),
+    List.drop_left]
+
+/-- `write_phoff_bytes` relates the emitted offset field to the actual artifact:
+zero for an absent table, otherwise the fixed 64-byte header boundary. -/
+theorem write_phoff_bytes (machine : UInt16) (artifact : Artifact) :
+    ((write machine artifact).drop 32).take 8 =
+      writeU64LE (if artifact.sections = [] then 0 else UInt64.ofNat EHDR_SIZE) := by
+  have count : (UInt16.ofNat artifact.sections.length).toNat = artifact.sections.length := by
+    rw [UInt16.toNat_ofNat']
+    exact Nat.mod_eq_of_lt artifact.phnumBound
+  have zero : (UInt16.ofNat artifact.sections.length = 0) ↔ artifact.sections = [] := by
+    rw [← UInt16.toNat_inj, count]
+    simp
+  simpa only [write, List.append_assoc, zero] using
+    writeHeader_phoff_bytes machine artifact.entry (UInt16.ofNat artifact.sections.length)
+      (writePhdrs (UInt64.ofNat (EHDR_SIZE + PHDR_SIZE * artifact.sections.length)) artifact.sections ++
+        writePayloads artifact.sections)
 
 /-- Read `count` program header records from the head of the list, keeping
 only what the reader recovers a section from: the address, the size, and the
@@ -326,7 +366,7 @@ theorem read_write (machine : UInt16) (artifact : Artifact) :
   have shape : write machine artifact =
       IDENT ++ (writeU16LE ET_EXEC ++ (writeU16LE machine ++ (writeU32LE 1 ++
         (writeU64LE artifact.entry ++ (writeU64LE
-          (UInt64.ofNat (EHDR_SIZE + PHDR_SIZE * (UInt16.ofNat artifact.sections.length).toNat)) ++
+          (if UInt16.ofNat artifact.sections.length = 0 then 0 else UInt64.ofNat EHDR_SIZE) ++
           (writeU64LE 0 ++ (writeU32LE 0 ++ (writeU16LE (UInt16.ofNat EHDR_SIZE) ++
             (writeU16LE (UInt16.ofNat PHDR_SIZE) ++ (writeU16LE (UInt16.ofNat artifact.sections.length) ++
               (writeU16LE 0 ++ (writeU16LE 0 ++ (writeU16LE 0 ++
