@@ -271,7 +271,8 @@ theorem data_rawOf_assemble (data : List Grass.ISA.Wasm.Target.Data)
         exact Nat.mod_eq_of_lt headBound
       simp only [List.map_cons, ih tailBound, offsetEq]
 
-/-- Assembling preserves the program exactly. -/
+/-- `rawOf_assemble` recovers the input program from the artifact after a
+successful `assemble`. -/
 theorem rawOf_assemble (program : Module) (artifact : Artifact) :
     assemble program = some artifact → rawOf artifact = program := by
   intro success

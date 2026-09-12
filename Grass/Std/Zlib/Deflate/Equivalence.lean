@@ -1061,7 +1061,9 @@ def tokensBitsFixed : List LZToken → List Bool
   | t :: ts => tokenBitsFixed t ++ tokensBitsFixed ts
 
 /- REF: docs/STDLIB_ZLIB.md#42-block-formats -/
-/-- Emitting one coded symbol appends its ghost path and preserves the writer invariant. -/
+/-- Under the stated code, width, value and writer bounds, `writerBits_emitHuffSymbol`
+    proves that emitting one coded symbol appends its ghost path and preserves the
+    writer's bit-count and buffer bounds. -/
 theorem writerBits_emitHuffSymbol (w : BitWriter) (t : HuffmanTable) (sym code len : Nat)
     (hc : t.codes[sym]! = some (code, len)) (hlen : len ≤ 24)
     (hval : reverseBits code len < 2 ^ len)
@@ -1091,8 +1093,9 @@ theorem writerBits_writeExtra (w : BitWriter) (v n : Nat)
     exact ⟨by simp [natBits], hcnt, hbuf⟩
 
 /- REF: docs/STDLIB_ZLIB.md#42-block-formats -/
-/-- Emitting one range-valid token under the fixed tables appends its ghost bits and
-    preserves the writer invariant. -/
+/-- Under the stated token-range and writer bounds, `writerBits_emitToken_fixed`
+    proves that emitting one token under the fixed tables appends its ghost bits and
+    preserves the writer's bit-count and buffer bounds. -/
 theorem writerBits_emitToken_fixed (w : BitWriter) (t : LZToken) (hok : tokenRangesOk t)
     (hbuf : w.bitBuf.toNat < 2 ^ w.bitCount) (hcnt : w.bitCount < 8) :
     writerBits (emitToken fixedLitLenTable fixedDistTable w t) =
