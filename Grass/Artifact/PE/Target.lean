@@ -6,7 +6,7 @@ import Grass.Target.Artifact
 # The PE32+ executable artifact format
 
 `Grass.Artifact.PE.format` instantiates `Grass.Target.Format Sectioned` with a
-PE32+ image a Windows loader accepts. The byte container, its field table and
+PE32+ image representation. The byte container, its field table and
 its citations are `Grass.Artifact.PE.Target.Image`; the import directory is
 `Grass.Artifact.PE.Target.Imports`. This module is the seam instance: which
 programs `assemble` accepts, how a `Sectioned` becomes an image, and how an
@@ -22,24 +22,27 @@ requested base*, but decision 17 requires ASLR: `Characteristics` clears
 
 ## Base relocations
 
-Grass programs address memory only through RIP-relative operands and the
-import slots `Sectioned.imports` names; `Sectioned` has no field that could
-express an absolute (base-relative) relocation, so there is never a
-relocation entry for `assemble` to emit — refusing a program that "needs" one
-is therefore vacuous by construction, not a missing check. What ASLR still
-needs is the *directory itself*: Microsoft, PE Format, "The .reloc Section
-(Image Only)", describes each block as a 4-byte page RVA and a 4-byte block
-size that includes the header, with the entries (if any) following; a block
-with zero following entries is a legal, if unusual, empty block. `assemble`
-always emits exactly one such empty block — naming the page containing the
-program's entry point, which is what keeps a well-formed, if inert, directory
-present for a `DYNAMIC_BASE` loader — rather than reserving a whole `.reloc`
-section for content that names zero relocations: the block is appended after
-the import directory's own content, inside the same `.idata` section, and
-`Grass.Artifact.PE.Target.Image.Artifact.relocDirRva`/`relocDirSize` (data
-directory 5) point at it directly. A future `Sectioned` extension that could
-express an absolute relocation would need this format's cooperation to emit a
-non-empty block; today's `Sectioned` cannot ask for one.
+`Sectioned` carries arbitrary section bytes and no base-relocation metadata.
+Missing metadata does not imply that those bytes contain no image-relative
+absolute pointers. `Eligible` checks placement, bounds, names and imports;
+it does not check position independence or the absence of required fixups.
+
+`relocBlock` emits an eight-byte block with no fixup entries, naming the page
+containing the entry point. `assemble` appends it after the import content
+inside `.idata`; `Grass.Artifact.PE.Target.Image.Artifact.relocDirRva` and
+`relocDirSize` locate it in data directory 5. This emitted representation is
+not evidence that rebasing arbitrary accepted section bytes is correct.
+
+For example, accepted code can contain `mov rax, 0x140002000` pointing into
+its data section at that address. If the image base moves from `0x140000000`
+to `0x180000000`, that section moves to `0x180002000`, while an empty fixup
+block leaves the immediate unchanged. This is a model counterexample to
+the former no-fixups claim, not an observation of Windows loader behavior.
+
+Relocation support or a checked restriction establishing that no fixups are
+required remains an open design obligation. `rawOf_assemble` proves recovery
+of the original program from the artifact representation; it does not prove
+execution equivalence at a different load base or external loader acceptance.
 
 ## Exception directory
 
@@ -87,8 +90,8 @@ write, read and prove rather than two.
   one cannot unwind through its own frames, which matters for a program that
   raises a structured exception, not for loading. Base relocation directory 5
   is always populated, but only with a single empty block (see "Base
-  relocations" above): Grass programs have no absolute relocation for
-  `Sectioned` to carry, so ASLR is honest without one.
+  relocations" above). Correct rebasing of accepted programs remains an
+  open obligation; setting ASLR flags does not discharge it.
 -/
 
 namespace Grass.Artifact.PE.Target
