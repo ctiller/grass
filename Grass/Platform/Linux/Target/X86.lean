@@ -35,7 +35,7 @@ consumed by the matching `sysret`). Numbers below are from
 | `clock_gettime(CLOCK_MONOTONIC,ts)` | `Clock.now` | `rax := 0`, 16-byte `timespec` written at `ts` | (never fails: `Clock.Response` is total) |
 | `brk(addr)` | unsupported: `none` (this platform grows the heap only through `mmap`/`Heap.allocate`) | — | — |
 | anything else, or `mmap`/`munmap`/`read`/`write` with an unrecognized fd/flag combination | unsupported: `none` | — | — |
-| an `importSlot` call | not a Linux syscall: `none` | — | — |
+| an `indirect` call | not a Linux syscall: `none` | — | — |
 
 `read`, `write` and `clock_gettime`'s buffer/`fd`/`clockid` are re-read from
 the original `NativeCall` inside `encodeReturn`, not carried in the portable
@@ -107,7 +107,7 @@ def decode (call : NativeCall) : Option domain.Request :=
   match call.target with
   -- Linux resolves every syscall through the `syscall` instruction; an
   -- import-table call is a Win32/PE convention this platform never uses.
-  | .importSlot _ => none
+  | .indirect _ _ => none
   | .syscall =>
     let number := call.reg .rax
     if number = sysWrite then

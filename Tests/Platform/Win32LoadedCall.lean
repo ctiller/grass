@@ -45,10 +45,12 @@ def callState (instr : Instr) (registers : Gpr → UInt64)
     (externalTargets : List UInt64) (extra : List Region)
     (writes : List (Nat × List UInt8)) : State :=
   let code := encode instr
-  writes.foldl (fun s w => s.writeBytes w.1 w.2)
-    ({ reg := registers, rip := codeBase, mem := fun _ => none,
-       regions := region codeBase code.length true false true :: extra,
-       externalTargets := externalTargets, pendingFault := none }).writeBytes codeBase code
+  let blank : State :=
+    { reg := registers, rip := codeBase, mem := fun _ => none,
+      regions := region codeBase code.length true false true :: extra,
+      externalTargets := externalTargets, pendingFault := none }
+  let loaded := blank.writeBytes codeBase code
+  writes.foldl (fun (s : State) w => s.writeBytes w.1 w.2) loaded
 
 def getStdBinding : ResolvedImport :=
   { importSymbol :=
@@ -60,8 +62,15 @@ def writeFileBinding : ResolvedImport :=
       { library := "KERNEL32.dll", symbol := "WriteFile", slotAddress := iatSlot }
     targetAddress := writeFileTarget }
 
-def getStdRequest : domain.Request := consoleRequest (.query .stdout)
 def writeRequest : domain.Request := consoleRequest (.write .stdout [0x41, 0x42, 0x43])
+
+def isStdoutQuery : Option domain.Request → Bool
+  | some (.inl (.inl (.inl (.query .stdout)))) => true
+  | _ => false
+
+def isExpectedWrite : Option domain.Request → Bool
+  | some (.inl (.inl (.inl (.write .stdout bytes)))) => bytes == [0x41, 0x42, 0x43]
+  | _ => false
 
 /-- The platform's explicit entry pointer reaches the CPU without changing
 the top of the reserved stack mapping. -/
@@ -91,7 +100,7 @@ def getStdAfterPushDecodes : Bool :=
       call.rsp == UInt64.ofNat returnSlot &&
       call.returnAddress == UInt64.ofNat (codeBase + (encode instr).length) &&
       call.read returnSlot 8 == some (toLE .w64 (UInt64.ofNat (codeBase + (encode instr).length))) &&
-      decode [getStdBinding] call == some getStdRequest
+      isStdoutQuery (decode [getStdBinding] call)
   | _ => false
 
 /-- Replacing the IAT contents with a target outside the selected loaded
@@ -123,8 +132,8 @@ def aliasedSlotRetainsPrePushTarget : Bool :=
       call.target == .indirect returnSlot getStdTarget &&
       call.read returnSlot 8 == some
         (toLE .w64 (UInt64.ofNat (codeBase + (encode instr).length))) &&
-      decode [{ getStdBinding with importSymbol :=
-        { getStdBinding.importSymbol with slotAddress := returnSlot } }] call == some getStdRequest
+      isStdoutQuery (decode [{ getStdBinding with importSymbol :=
+        { getStdBinding.importSymbol with slotAddress := returnSlot } }] call)
   | _ => false
 
 /-- A WriteFile count slot can alias the saved return cell.  `encodeReturn`
@@ -142,7 +151,7 @@ def writeFileCountAliasChangesResumeRip : Bool :=
   | .external call resume =>
       let after := resume (encodeReturn call writeRequest (.accepted 3))
       call.target == .indirect iatSlot writeFileTarget &&
-      decode [writeFileBinding] call == some writeRequest &&
+      isExpectedWrite (decode [writeFileBinding] call) &&
       after.reg .rax == 1 && after.reg .rsp == stackTop && after.rip == 3
   | _ => false
 

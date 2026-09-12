@@ -19,8 +19,9 @@ wrapping "best effort" read, because a `fault` is what makes the machine
 tier's reachability obligation say something.
 
 The disp32 memory producers use the same flat region model. `callRip` loads
-the target before its return-address write and transfers internally to that
-loaded target. Native import recognition is a separate loaded-target binding
+the target before its return-address write and transfers to that loaded target.
+Configured external targets expose the post-push state to a platform; all
+other targets transfer internally. Native recognition is a loaded-target binding
 obligation; a slot's address alone does not identify its contents. These cases
 do not add canonical-address, paging, CET, or exception-delivery semantics.
 Instruction entries: Intel SDM 092 CALL 3-121–3-130, LEA 3-547–3-548,
@@ -57,8 +58,8 @@ def initial (program : Sectioned) (ctx : InitialContext) : State :=
   let unwritten : State :=
     { reg := ctx.reg, rip := program.entry, cf := false, zf := false, sf := false,
       ofFlag := false, mem := sectionByte program, regions := sectionRegions program ++
-        [stackRegion, argRegion] }
-  (unwritten.setReg .rsp (UInt64.ofNat ctx.stackTop)).writeBytes
+        [stackRegion, argRegion], externalTargets := ctx.externalTargets }
+  (unwritten.setReg .rsp (ctx.initialStackPointer.getD (UInt64.ofNat ctx.stackTop))).writeBytes
     ctx.argumentBlockAddress ctx.argumentBlock
 
 /-! ## `step` -/
@@ -210,6 +211,33 @@ def popValue (s : State) : Option (UInt64 × State) :=
   (readMem s .w64 (s.reg .rsp).toNat).map fun v =>
     (v, s.setReg .rsp (s.reg .rsp + 8))
 
+/-- Apply one platform reply, shared by SYSCALL and indirect CALL. Explicit
+results override unspecified register clobbers. Install and zero-fill maps
+before writes, then unmap last so released storage remains inaccessible.
+The platform's reply contract authorizes these effects; this function does
+not infer authorization from the call target or a cached pre-call read. -/
+def applyNativeReturn (s : State) (ret : NativeReturn) : State :=
+  let clobbered := ret.clobbers.foldl (fun st r => st.setReg r 0) s
+  let withRax := clobbered.setReg .rax ret.rax
+  let withRdx := match ret.rdx with | some v => withRax.setReg .rdx v | none => withRax
+  let mapped := withRdx.mapRegions
+    (ret.maps.map fun m =>
+      { base := m.base, size := m.size, readable := m.readable, writable := m.writable,
+        executable := false })
+  let written := ret.writes.foldl
+    (fun st (aw : Nat × List UInt8) => st.writeBytes aw.1 aw.2) mapped
+  { written.unmapRegions ret.unmaps with pendingFault := none }
+
+/-- Resume an external indirect call by reading the actual return slot after
+all native effects. Neither the original RSP nor the original fallthrough is
+a substitute for this read. On failure retain the reached effects and queue
+the precise read fault for `step`, whose continuation surface returns State. -/
+def resumeIndirect (callee : State) (ret : NativeReturn) : State :=
+  let after := applyNativeReturn callee ret
+  match popValue after with
+  | some (address, popped) => { popped with rip := address.toNat }
+  | none => { after with pendingFault := some (.readOutsideImage (after.reg .rsp).toNat) }
+
 /-- One instruction's effect, given the decoded instruction and its encoded
 length. Memory faults, `ud2`, and control transfer to the platform
 (`call`/`syscall`) are the only ways this is not `.internal`. -/
@@ -298,8 +326,17 @@ def execInstr (s : State) (instr : Instr) (len : Nat) :
       | some target =>
           let retAddr := s.reg .rsp - 8
           if s.writableRange retAddr.toNat 8 then
-            .internal { (writeMem next .w64 retAddr.toNat next.rip.toUInt64).setReg .rsp retAddr with
-              rip := target.toNat }
+            let callee :=
+              { (writeMem next .w64 retAddr.toNat next.rip.toUInt64).setReg .rsp retAddr with
+                rip := target.toNat, pendingFault := none }
+            if s.externalTargets.contains target then
+              .external
+                { target := .indirect address target
+                  reg := callee.reg, rsp := callee.reg .rsp
+                  returnAddress := next.rip.toUInt64
+                  read := fun addr count => callee.readBytes addr count }
+                (resumeIndirect callee)
+            else .internal callee
           else .fault (.writeOutsideImage retAddr.toNat)
   | .ret =>
       match popValue s with
@@ -320,28 +357,7 @@ def execInstr (s : State) (instr : Instr) (len : Nat) :
           rsp := s.reg .rsp
           returnAddress := UInt64.ofNat next.rip
           read := fun addr count => s.readBytes addr count }
-        (fun ret =>
-          let withRax := next.setReg .rax ret.rax
-          let withRdx := match ret.rdx with | some v => withRax.setReg .rdx v | none => withRax
-          let clobbered := ret.clobbers.foldl (fun st r => st.setReg r 0) withRdx
-          -- `maps` before `writes`: a freshly mapped anonymous region reads
-          -- as zero (`man 2 mmap`, MAP_ANONYMOUS), and `mapRegions` installs
-          -- that zero-fill unconditionally. Applying it after `writes` would
-          -- silently erase any bytes `writes` just placed in a region this
-          -- same return mapped; applying it first lets such a write land on
-          -- an already-installed, already-zeroed region within one return.
-          let mapped := clobbered.mapRegions
-            (ret.maps.map fun m =>
-              { base := m.base, size := m.size, readable := m.readable, writable := m.writable,
-                executable := false })
-          let written :=
-            ret.writes.foldl (fun st (aw : Nat × List UInt8) => st.writeBytes aw.1 aw.2) mapped
-          -- `unmaps` after `writes`: a same-return write into a region being
-          -- released here is meaningless (nothing after this return can ever
-          -- observe it), and applying the unmap last means no later step of
-          -- this same return can undo it by writing into the now-released
-          -- range.
-          written.unmapRegions ret.unmaps)
+        (applyNativeReturn next)
   | .ud2 => .fault .explicitUndefined
   | .hlt => .halted
   | .nop => .internal next
@@ -374,15 +390,24 @@ def execInstr (s : State) (instr : Instr) (len : Nat) :
       let vb := regRead s sz b
       .internal (regWrite (regWrite next sz a vb) sz b va)
 
-/-- Fetch, decode and execute one instruction. `rip` not executable and an
-undecodable window are the only decode-time faults; every other fault comes
-from `execInstr`'s own memory checks. -/
+/-- Report a pending native-return fault before fetching anything; otherwise
+fetch, decode and execute one instruction. A non-executable RIP and an
+undecodable window are decode-time faults; instruction memory checks happen
+in `execInstr`. -/
 def step (s : State) : StepOutcome State NativeCall NativeReturn Fault :=
-  if !s.executableAt s.rip then .fault (.executeNonExecutable s.rip)
-  else
-    match decode (s.fetchWindow s.rip State.maxInstrBytes) with
-    | some (instr, len) => execInstr s instr len
-    | none => .fault .undecodable
+  match s.pendingFault with
+  | some fault => .fault fault
+  | none =>
+    if !s.executableAt s.rip then .fault (.executeNonExecutable s.rip)
+    else
+      match decode (s.fetchWindow s.rip State.maxInstrBytes) with
+      | some (instr, len) => execInstr s instr len
+      | none => .fault .undecodable
+
+/-- A failed native return cannot fetch or perform another native effect. -/
+theorem step_pendingFault (s : State) (fault : Fault) (h : s.pendingFault = some fault) :
+    step s = .fault fault := by
+  simp only [step, h]
 
 end Grass.ISA.X86.Target
 

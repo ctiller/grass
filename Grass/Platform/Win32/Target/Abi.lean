@@ -8,10 +8,11 @@ import Grass.ISA.X86.Target.Native
 Integer/pointer arguments 0-3 are in `RCX`, `RDX`, `R8`, `R9`
 (`Grass.ABI.Win64.argumentRegister`, reused rather than restated); arguments
 4 and up are on the stack, starting at `[rsp + 0x28]` — the 8-byte return
-address plus the 32-byte shadow space every Win64 call site reserves
-(`Grass.ABI.Win64.shadowSpaceBytes`), both already below `call.rsp` since a
+address starts at `call.rsp`, followed at `call.rsp + 8` by the 32-byte shadow
+space every Win64 call site reserves (`Grass.ABI.Win64.shadowSpaceBytes`).
 `Grass.ISA.X86.Target.NativeCall` is captured at the callee's first
-instruction, before any prologue runs.
+instruction, before any prologue runs; `stackArgumentOffset` includes both
+areas when locating stack-passed arguments.
 
 Source: Microsoft Learn, "x64 calling convention",
 https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention (register

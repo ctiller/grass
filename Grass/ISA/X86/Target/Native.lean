@@ -27,12 +27,13 @@ abbrev Reg := Grass.ISA.X86.Gpr
 The ISA decides *which encoded form* (`call qword ptr [rip+disp32]` vs.
 `syscall`) produced the call; it does not decide what the call means. A
 platform's `decode : NativeCall → Option Request` matches on this to tell an
-import-table call (resolved by the loader to a fixed slot address) from a
+indirect call (capturing both the operand slot and its loaded target) from a
 system call (numbered in a register by convention). -/
 inductive CallTarget where
-  /-- `call qword ptr [rip+disp32]` (or any other resolved indirect call
-  through memory) where the loaded address is an import table / GOT slot. -/
-  | importSlot (slotAddress : Nat)
+  /-- An indirect memory call. The target is captured before the return-address
+  push, which may overwrite the operand slot. Platform recognition must check
+  the loaded target as well as the slot against its resolved bindings. -/
+  | indirect (slotAddress : Nat) (targetAddress : UInt64)
   /-- The `syscall` instruction. The syscall number lives in the register
   snapshot at the ABI's conventional register; the ISA does not interpret it. -/
   | syscall
@@ -48,18 +49,18 @@ reader for arguments passed in memory, and where control returns.
 structure NativeCall where
   /-- What this call resolves to. -/
   target : CallTarget
-  /-- The register file at the call site. -/
+  /-- The callee-entry register file for indirect CALL (after its push), or
+  the instruction-entry registers for SYSCALL. -/
   reg : Reg → UInt64
   /-- Read `count` bytes starting at `address`, or `none` if any byte of the
   range is outside the loaded image or unreadable. A platform uses this to
   fetch by-reference arguments (a buffer pointer and length, a C string). -/
   read : (address : Nat) → (count : Nat) → Option (List UInt8)
-  /-- The stack pointer at the call site. -/
+  /-- The stack pointer in the same snapshot as `reg`. -/
   rsp : UInt64
-  /-- The address execution resumes at once the call returns. For
-  `call [rip+disp32]` this is the address of the following instruction; for
-  `syscall` it is likewise the next instruction, since `syscall` does not push
-  a return address. -/
+  /-- The instruction's fallthrough address. Indirect CALL saves it on the
+  stack, but return reads the actual post-effect saved bytes; this field is
+  not authority to bypass that read. SYSCALL does not push a return address. -/
   returnAddress : UInt64
 
 /-- A freshly mapped region of the address space: the ISA-level effect of a
@@ -111,11 +112,11 @@ structure NativeReturn where
   into `State.regions` and zero-fills their bytes in `State.mem` before
   applying `writes` (a `write` into a region this same return just mapped
   must see it already installed and zeroed, not the other way around --
-  see `Grass.ISA.X86.Target.execInstr`'s `.syscall` arm). -/
+  see `Grass.ISA.X86.Target.applyNativeReturn`). -/
   maps : List MappedRegion := []
   /-- Base addresses of regions this answer releases (a successful `munmap`,
-  `HeapFree`), applied after `writes` -- see `execInstr`'s `.syscall` arm for
-  why. Defaults to `[]` so every native call that never unmaps memory is
+  `HeapFree`), applied after `writes` by `applyNativeReturn`. Defaults to `[]`
+  so every native call that never unmaps memory is
   unaffected by this field's existence. -/
   unmaps : List Nat := []
 deriving Inhabited
@@ -159,8 +160,8 @@ structure InitialContext where
   /-- The initial value of every general-purpose register, before the
   platform's stack and argument-block placement is applied via `rsp`. -/
   reg : Reg → UInt64
-  /-- The address of the top of the reserved stack region (the highest
-  address the stack occupies; `rsp` starts here, growing down). -/
+  /-- The address just past the reserved stack region. By default `rsp`
+  starts here, growing down. -/
   stackTop : Nat
   /-- The stack region's size in bytes, reserved below `stackTop`. -/
   stackBytes : Nat
@@ -171,6 +172,13 @@ structure InitialContext where
   /-- The argument block's bytes, written into memory at
   `argumentBlockAddress` before entry. -/
   argumentBlock : List UInt8
+  /-- Optional entry RSP independent of the reserved region's top. The
+  platform supplies any required entry bias; bounds remain its obligation. -/
+  initialStackPointer : Option UInt64 := none
+  /-- Targets treated as external calls. Platforms derive these addresses
+  from the same resolved bindings used to decode the captured call. This is
+  a loader correspondence assumption, not permission to read memory. -/
+  externalTargets : List UInt64 := []
 deriving Inhabited
 
 end Grass.ISA.X86.Target

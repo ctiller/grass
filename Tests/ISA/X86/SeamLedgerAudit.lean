@@ -194,7 +194,11 @@ Debt, not a waiver. Printed on every run; may only shrink. See
 lacks a citation rather than being cited outright.
 -/
 def owed : List Name :=
-  [ -- The memory family now uses modulo-64 effective-address arithmetic.
+  [ -- Native reply ordering and the post-effect indirect return are explicit
+    -- hosted execution obligations, not citation-free state plumbing.
+    `Grass.ISA.X86.Target.applyNativeReturn,
+    `Grass.ISA.X86.Target.resumeIndirect,
+    -- The memory family now uses modulo-64 effective-address arithmetic.
     -- This architectural rule is no longer classified as branch-only plumbing.
     `Grass.ISA.X86.Target.effAddr,
     -- Bounded disp32 memory forms. Primary instruction entries were inspected;
@@ -258,7 +262,7 @@ def owed : List Name :=
 /-- The number of entries `owed` was last reviewed at. May only shrink; a
 genuinely new modeled declaration that owes a citation raises this in the same
 reviewed edit that adds it, per `docs/VALIDATION.md` §7's ratchet. -/
-def owedBaseline : Nat := 37
+def owedBaseline : Nat := 39
 
 /-- Every constructor of `Grass.ISA.X86.Target.Instr`. -/
 def instrConstructors : MetaM (Array Name) := do

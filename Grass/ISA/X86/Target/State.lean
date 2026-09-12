@@ -205,6 +205,13 @@ structure State where
   mem : Nat → Option UInt8
   /-- The mapped regions of the address space. -/
   regions : List Region
+  /-- Loaded target addresses eligible for an external indirect-call handoff.
+  Actual memory reads and return-slot writes still check current permissions. -/
+  externalTargets : List UInt64 := []
+  /-- A native return can fail while popping its post-effect return slot.
+  Retain the reached state and emit this exact fault before another fetch.
+  This is transition bookkeeping, not an architectural register. -/
+  pendingFault : Option Fault := none
 deriving Inhabited
 
 namespace State
