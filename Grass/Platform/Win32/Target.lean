@@ -21,6 +21,13 @@ values (`Grass/Platform/Win32/Target/Handles.lean`), `decode`
 (`Grass/Platform/Win32/Target/Entry.lean`). `Admits` and `Responds` below
 reuse `Grass.Platform.Hosted` (`Grass/Platform/Hosted/*.lean`) in full.
 
+`platform` takes explicit `ResolvedImport` bindings from the selected loader
+and provider. `entry_externalTargets` derives CPU target recognition from
+that same list; `resolvedApiOf_binding` requires the decoder's slot and actual
+loaded target to match a unique binding. This does not install IAT bytes or
+prove that the supplied address names a real host export. Loaded-image and
+provider correspondence remain obligations for the chosen execution context.
+
 None of the 70 legacy `Grass/Platform/Win32/*.lean` files (`ApiDispatch.lean`,
 `WriteFile*.lean`, `RawStep.lean`, ...) are imported or modified here: they
 model a program-shaped `WriteFile` machine tier `docs/TARGET_SEAMS.md` retires,
@@ -146,14 +153,16 @@ pure wiring, as anticipated. `StackConfig` stays parameterized —
 `Grass.Platform.Hosted.Environment` carries no stack-placement fields, a
 per-run loader decision rather than a portable "world outside the program"
 fact — so `entry`'s stack configuration is supplied by whoever assembles
-`platform` for a concrete run, not baked into `Environment` itself. -/
-def platform (imports : List Grass.Target.ImportSymbol)
+`platform` for a concrete run, not baked into `Environment` itself.
+The same `bindings` value supplies `entry` and `decode`; a separate target
+recognition list cannot be supplied through this constructor. -/
+def platform (bindings : List ResolvedImport)
     (config : StackConfig Grass.Platform.Hosted.Environment) :
     Grass.Target.Platform Grass.ISA.X86.isa domain :=
   { Environment := Grass.Platform.Hosted.Environment
     Admits := Admits
-    entry := entry config
-    decode := decode imports
+    entry := entry config bindings
+    decode := decode bindings
     Responds := Responds
     encodeReturn := encodeReturn }
 

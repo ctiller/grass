@@ -1,5 +1,6 @@
 import Grass.ABI.Win64.Convention
 import Grass.ISA.X86.Target.Native
+import Grass.Platform.Win32.Target.ImportTable
 
 /-!
 # The Win32 entry context
@@ -62,14 +63,33 @@ The argument block is empty: `GetCommandLineW`, the only way a Win32 program
 reaches its command line, is out of scope for this profile (see
 `Grass/Platform/Win32/Target.lean`, "Unsupported"), so there is nothing to
 place there. -/
-def entry {Environment : Type} (config : StackConfig Environment) (env : Environment) :
+def entry {Environment : Type} (config : StackConfig Environment)
+    (bindings : List ResolvedImport) (env : Environment) :
     InitialContext :=
   { reg := fun r => if r = .rsp then
         UInt64.ofNat (config.stackTop env - Grass.ABI.Win64.entryMisalignment)
       else 0
     stackTop := config.stackTop env
     stackBytes := config.stackBytes env
+    initialStackPointer := some
+      (UInt64.ofNat (config.stackTop env - Grass.ABI.Win64.entryMisalignment))
+    externalTargets := bindings.map (·.targetAddress)
     argumentBlockAddress := 0
     argumentBlock := [] }
+
+/-- `entry_externalTargets` ties target recognition to the same resolved
+bindings supplied to the platform decoder. It does not establish that a host
+loader installed those addresses in the IAT or that they identify the stated
+exports; that correspondence remains a loader/provider obligation. -/
+theorem entry_externalTargets {Environment : Type} (config : StackConfig Environment)
+    (bindings : List ResolvedImport) (env : Environment) :
+    (entry config bindings env).externalTargets = bindings.map (·.targetAddress) := rfl
+
+/-- `entry_initialStackPointer` supplies the Win64 entry offset explicitly;
+the reservation boundary remains `StackConfig.stackTop`. -/
+theorem entry_initialStackPointer {Environment : Type} (config : StackConfig Environment)
+    (bindings : List ResolvedImport) (env : Environment) :
+    (entry config bindings env).initialStackPointer = some
+      (UInt64.ofNat (config.stackTop env - Grass.ABI.Win64.entryMisalignment)) := rfl
 
 end Grass.Platform.Win32.Target

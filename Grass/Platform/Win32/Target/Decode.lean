@@ -8,7 +8,7 @@ import Grass.Platform.Hosted.Responds
 # Decoding a Win32 native call into a portable service request
 
 The service vocabulary this platform profile realizes, and `decode`, which
-turns a call through a recognized import slot into a request in that
+turns a call through an import slot with a matching loaded target into a request in that
 vocabulary. Every case below cites the Win32 API it decodes; see
 `Grass/Platform/Win32/Target/Return.lean` for the matching `encodeReturn`
 and the module docstring of `Grass/Platform/Win32/Target.lean` for the full
@@ -61,7 +61,8 @@ def stdOutputHandle : UInt32 := 0xFFFFFFF5
 def stdErrorHandle : UInt32 := 0xFFFFFFF4
 
 /-- Decode a Win32 native call into a portable service request, given the
-program's own import table.
+selected loader/provider's resolved import bindings. `resolvedApiOf` requires
+a unique slot binding and exact agreement with the target loaded by the CPU.
 
 `none` — leaving the machine stuck, per `Platform.decode`'s contract — for:
 a call target this platform never realizes (an unrecognized import, or a
@@ -73,10 +74,10 @@ never issued (`Handles.streamOf`); an overlapped `WriteFile`/`ReadFile`
 `Grass/Platform/Win32/Target.lean`, "Unsupported"); or a buffer argument that
 cannot be read from memory (an out-of-image pointer, a program bug, not a
 platform gap). -/
-def decode (imports : List Grass.Target.ImportSymbol) (call : NativeCall) :
+def decode (bindings : List ResolvedImport) (call : NativeCall) :
     Option domain.Request := do
-  let .importSlot slotAddress := call.target | none
-  let api ← apiOf imports slotAddress
+  let .indirect slotAddress loadedTarget := call.target | none
+  let api ← resolvedApiOf bindings slotAddress loadedTarget
   match api with
   | .getStdHandle =>
       -- BOOL/HANDLE GetStdHandle(DWORD nStdHandle); nStdHandle in RCX.

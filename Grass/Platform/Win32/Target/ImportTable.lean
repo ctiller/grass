@@ -3,15 +3,10 @@ import Grass.Target.Raw
 /-!
 # Win32 import-table knowledge
 
-Which `KERNEL32.dll` import slot means which Win32 API, recovered from the
-loaded program's own `Sectioned.imports` (`Grass/Target/Raw.lean`). Nothing
-here resolves an address to a slot — that is the artifact loader's job, fixed
-by the PE import directory before this platform ever runs. This module only
-says what a *named* slot means, so it is parameterized by the program's own
-import list rather than assuming any fixed layout: a different program with
-a different import order, or one that imports only a subset of this API
-surface, still decodes correctly as long as its `ImportSymbol.symbol`
-strings match a name below.
+Which uniquely resolved import slot and loaded target mean which Win32 API.
+Both the named slot occurrence and its nonzero resolved address are supplied
+by the artifact loader/provider. A different program may use any import order
+or subset of this API surface.
 -/
 
 namespace Grass.Platform.Win32.Target
@@ -21,7 +16,7 @@ is one `KERNEL32.dll` export this platform's `decode`/`encodeReturn`
 (`Grass/Platform/Win32/Target/Decode.lean`,
 `Grass/Platform/Win32/Target/Return.lean`) know how to interpret. An import
 this profile does not recognize is not a constructor here at all, so
-`apiOf` answers `none` for it, which leaves the machine stuck — correct,
+`resolvedApiOf` answers `none` for it, which leaves the machine stuck — correct,
 since an unrealized platform call is a program bug or a profile gap, never
 silent progress (`Grass.Target.Machine.stuck_of_undecoded`). -/
 inductive Api where
@@ -57,20 +52,52 @@ def Api.all : List Api :=
   [.getStdHandle, .writeFile, .readFile, .exitProcess, .getProcessHeap,
     .heapAlloc, .heapReAlloc, .heapFree, .queryPerformanceCounter]
 
-/-- Which API, if any, a call through `slotAddress` reaches, given the
-program's own import table.
+/-- One loader-supplied resolution of a named import slot. The symbol retains
+the program's import-table identity; `targetAddress` is the loader/provider's
+resolved address for that occurrence. -/
+structure ResolvedImport where
+  /-- Exact named slot occurrence supplied by the artifact loader. -/
+  importSymbol : Grass.Target.ImportSymbol
+  /-- Address supplied for that occurrence by the loader/provider.
+  `resolvedApiOf` rejects zero rather than this field enforcing nonzeroness. -/
+  targetAddress : UInt64
+deriving DecidableEq, Repr
 
-`none` when no import occupies the slot, or the occupying import's
-`(library, symbol)` is not one this profile realizes. The *first* import
-found at the slot is used; `Sectioned.WellFormed` does not itself guarantee a
-unique occupant per slot, and a table with two conflicting entries at one
-address is a loader well-formedness failure this platform does not
-adjudicate — it is not this seam's job to detect a malformed import table,
-only to decode a call through a slot the way one named entry says to. -/
-def apiOf (imports : List Grass.Target.ImportSymbol) (slotAddress : Nat) : Option Api :=
-  match imports.find? (fun entry => entry.slotAddress == slotAddress) with
-  | none => none
-  | some entry =>
-      Api.all.find? (fun api => api.library == entry.library && api.symbol == entry.symbol)
+/-- Resolve a loaded call target through one exact, unique import-slot binding.
+
+The supplied bindings are loader/provider identity inputs. This lookup checks
+their internal agreement with the observed target; it does not establish OS
+provider correspondence or that loaded memory remained immutable. -/
+def resolvedApiOf (bindings : List ResolvedImport) (slotAddress : Nat)
+    (loadedTarget : UInt64) : Option Api :=
+  match bindings.filter (fun binding => binding.importSymbol.slotAddress == slotAddress) with
+  | [binding] =>
+      if binding.targetAddress == 0 then none
+      else if binding.targetAddress == loadedTarget then
+        Api.all.find? (fun api =>
+          api.library == binding.importSymbol.library &&
+          api.symbol == binding.importSymbol.symbol)
+      else none
+  | _ => none
+
+/-- `resolvedApiOf_binding` proves every successful lookup comes from the unique binding at the requested
+slot and retains its exact nonzero loaded target. -/
+theorem resolvedApiOf_binding {bindings : List ResolvedImport} {slotAddress : Nat}
+    {loadedTarget : UInt64} {api : Api}
+    (found : resolvedApiOf bindings slotAddress loadedTarget = some api) :
+    ∃ binding,
+      bindings.filter (fun candidate => candidate.importSymbol.slotAddress == slotAddress) =
+        [binding] ∧
+      binding.targetAddress = loadedTarget ∧ binding.targetAddress ≠ 0 := by
+  unfold resolvedApiOf at found
+  split at found <;> try contradiction
+  next filtered binding slotExact =>
+    split at found <;> try contradiction
+    next nonzero =>
+      split at found <;> try contradiction
+      next targetExact =>
+        refine ⟨binding, slotExact, ?_, ?_⟩
+        · simpa using targetExact
+        · simpa using nonzero
 
 end Grass.Platform.Win32.Target
