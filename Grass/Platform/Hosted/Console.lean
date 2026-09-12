@@ -41,7 +41,7 @@ open Grass.Service Grass.Service.Console
 
 /-- The bounds a `write` acceptance count must satisfy: positive and no more
 than what was offered, capped by the environment's chunking policy if it has
-one. `accepted 0` is legal only when nothing was offered, matching the
+one. `validAccept` permits `accepted 0` only when nothing was offered, matching the
 `bytes = []` case explicitly. -/
 def validAccept (bytes : List UInt8) (n : Nat) (chunking : Option Nat) : Prop :=
   (0 < n ∧ n ≤ bytes.length ∧ ∀ cap, chunking = some cap → n ≤ cap) ∨ (n = 0 ∧ bytes = [])

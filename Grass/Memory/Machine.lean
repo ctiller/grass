@@ -782,9 +782,11 @@ published as operations plus the laws below, not as a `MachineMemory.Laws`
 instance, because a `Laws` value cannot be honest until all of them close.
 -/
 
-/-- One installed view: a machine address range and the provenance that
-authorizes it. The range's length is the provenance's own extent, so a view
-cannot claim more bytes than the allocation designates. -/
+/-- A machine-address base paired with the provenance presented by accesses.
+`MappedRegion.covers` uses `provenance.extent.size` as the view's length.
+The record alone carries no allocation-validity proof; `Mapped.readBytes` and
+`Mapped.writeBytes` check the provenance and requested range through
+`MemoryState.resolveAccess?` before accessing the backing. -/
 structure MappedRegion where
   /-- The lowest machine address the view occupies. -/
   base : Nat
