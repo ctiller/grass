@@ -62,6 +62,14 @@ The separate [AMD source migration](AMD_SOURCE_MIGRATION.md) repairs the active
 profile's dead locator. It does not attach these additional instruction laws
 to the ledger or settle the remaining misplaced-REX claim.
 
+Memory-producer instruction entries inspected on 2026-09-12 in Intel SDM 092
+[Volumes 2A–2D](https://cdrdv2-public.intel.com/922478/325383-092-sdm-vol-2abcd.pdf):
+CALL 3-121–3-130 (near indirect target load and return-address push),
+LEA 3-547–3-548 (effective address without a data read), and MOV 4-28–4-30
+(memory load and sign-extended immediate store). The five new target constructors
+and modulo-64 effective-address helper remain explicit dual-citation debt in
+`SeamLedgerAudit`; this inspection does not discharge that enrollment.
+
 ### ELF64
 
 - Xinuos, *System V generic ABI, ELF Object File Format*,
